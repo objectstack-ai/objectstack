@@ -141,10 +141,10 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { delimiter, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { requireDefaultExport } from './import-prerequisite.mjs';
+import { EXIT_PREREQUISITE_NOT_MET, requireDefaultExport } from './import-prerequisite.mjs';
 const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url);
 
 import { isEntrypoint } from './invoked-as.mjs';
@@ -175,7 +175,7 @@ import { parseSourceFile } from './ts-parse.mjs';
 // self-test runs once per process, and it is what lets the existing sink route
 // through `registerCase()` with no case rewritten and no assertion changed.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'the positive control: the REAL pre-#10375 revision': 1,
+  'the positive control: the REAL pre-#10375 revision': 2,
   'the negative control from the same file, as REPAIRED': 1,
   'the delegating alias, both directions': 3,
   'every roster name reds': 4,
@@ -334,6 +334,10 @@ export const DELIBERATELY_EXCLUDED = {
  * landed the #9371 fix -- `async stop()`, no `destroy()`. The revision is the
  * squash merge's first parent, so the fixture is pinned to a commit rather than
  * to a copy of a file that could be edited into passing.
+ *
+ * A checkout that cannot reach this rev refuses with `EXIT_PREREQUISITE_NOT_MET`,
+ * not the finding code 1: could-not-run is a different fact from ran-and-was-wrong
+ * (#18217).
  */
 const POSITIVE_CONTROL = {
   rev: '621a487607881c66b2899b7e3477115229a156b4',
@@ -702,7 +706,7 @@ export function selfTest() {
         + '\n    git fetch --unshallow origin main',
       );
       rmSync(dir, { recursive: true, force: true });
-      return 1;
+      return EXIT_PREREQUISITE_NOT_MET;
     }
     const preFix = tree('positive', { [POSITIVE_CONTROL.path.slice(POPULATION_ROOT.length + 1)]: show.stdout });
     const preFixResult = audit(preFix);
@@ -713,6 +717,28 @@ export function selfTest() {
         && preFixResult.findings[0].cls === POSITIVE_CONTROL.cls
         && preFixResult.findings[0].alias === POSITIVE_CONTROL.alias,
       JSON.stringify(preFixResult.findings),
+    );
+
+    // ...and the other side of the same branch, OUT OF PROCESS: a checkout that
+    // cannot resolve the pinned rev. The shallow clone that produced #18217 is
+    // reproduced here by shadowing `git` with one that resolves nothing -- the
+    // branch taken is the one above, `show.status !== 0`, and what is pinned is
+    // that it refuses with the PREREQUISITE code while still naming the remedy.
+    // Pinned out of process because the code is only observable at the dispatch:
+    // an in-process call would read a number the entry point could still flatten.
+    const noRevBin = join(dir, 'no-such-rev-bin');
+    mkdirSync(noRevBin, { recursive: true });
+    writeFileSync(join(noRevBin, 'git'), '#!/bin/sh\nexit 128\n', { mode: 0o755 });
+    const unreachable = spawnSync(process.execPath, [SELF, '--self-test'], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${noRevBin}${delimiter}${process.env.PATH ?? ''}` },
+    });
+    t(
+      'an UNREACHABLE positive control refuses as PREREQUISITE NOT MET, naming the remedy -- not as a finding',
+      unreachable.status === EXIT_PREREQUISITE_NOT_MET
+        && unreachable.status !== 1
+        && /git fetch --unshallow origin main/.test(`${unreachable.stderr ?? ''}`),
+      JSON.stringify({ status: unreachable.status, err: (unreachable.stderr || '').slice(0, 240) }),
     );
 
     // -- the negative control from the same file, as REPAIRED ----------------
@@ -920,7 +946,12 @@ if (isEntrypoint(import.meta.url)) {
                     + 'so no success line was printed. Exiting 0 here would report a self-test\n'
                     + 'that never finished as a self-test that passed.\n',
             );
-            process.exit(1);
+            // 1 is still the default for every early return, INCLUDING one that returns
+            // nothing at all (an injected bare `return` arrives here as `undefined`, and
+            // `process.exit(undefined)` is exit 0 -- the hole this handshake exists to
+            // close). The single exception is the code the self-test chose deliberately:
+            // a refusal because a prerequisite was not met is NOT MEASURED, not a finding.
+            process.exit(selfTestCode === EXIT_PREREQUISITE_NOT_MET ? EXIT_PREREQUISITE_NOT_MET : 1);
         }
         process.exit(selfTestCode);
   }

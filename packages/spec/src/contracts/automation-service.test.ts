@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { describe, it, expect } from 'vitest';
-import type { IAutomationService, AutomationResult } from './automation-service';
+import type { IAutomationService, AutomationResult, FlowRuntimeState } from './automation-service';
 import type { FlowParsed } from '../automation/flow.zod';
 import { FlowSchema } from '../automation/flow.zod';
 import type { ExecutionLog } from '../automation/execution.zod';
@@ -30,6 +30,24 @@ export type RestoreTakesRunIdAndOptions = Assert<
 /** The narrower structural result (route (i)): restored, the id echoed, the refusal code, the one-sentence reason. */
 export type RestoreAnswersTheNarrowResult = Assert<
   Eq<Awaited<ReturnType<RestoreConsumedSuspension>>, { restored: boolean; runId: string; refusal?: string; reason: string }>
+>;
+
+/**
+ * [#18235, #17396 ruled item 6] The status door's WHY. Pinned as an identity so
+ * neither half can move quietly: `string | undefined` fails if the key is
+ * dropped or renamed (⇒ Studio loses the third surface again), and equally if
+ * it is ever narrowed to a closed union — the two surfaces that already carry
+ * this reason answer a free-form sentence, and the objectui card that renders
+ * it accepts a string precisely because the platform ships one.
+ */
+export type FlowRuntimeStateCarriesAnOptionalReason = Assert<Eq<FlowRuntimeState['reason'], string | undefined>>;
+/**
+ * LIT CONTROL for the five members that were there before: `reason` is
+ * ADDITIVE. A producer that writes only the three required members still
+ * satisfies the contract, so no existing producer is broken by this key.
+ */
+export type FlowRuntimeStateReasonIsOptional = Assert<
+  { name: string; enabled: boolean; bound: boolean } extends FlowRuntimeState ? true : false
 >;
 
 describe('Automation Service Contract', () => {
@@ -392,5 +410,51 @@ describe('Automation Service Contract', () => {
       expect(restore).toContain('SuspensionRestoreResult');
       expect(restore).toMatch(/route \(i\)/);
     });
+  });
+});
+
+/**
+ * [#18235] `FlowRuntimeState.reason` — the platform half of ruled item 6's
+ * third surface. The contract is the whole of this card: `GET /automation/_status`
+ * passes these rows to Studio verbatim, so a shape with no reason field made a
+ * policy-disabled flow indistinguishable from a broken binding on the wire.
+ */
+describe('FlowRuntimeState — the unbound reason (#18235)', () => {
+  it('a row that explains itself and one that does not both satisfy the contract', () => {
+    // PROBE: the reason-carrying row, in the shape the engine emits for a flow
+    // the deployment switch refused.
+    const policyDisabled: FlowRuntimeState = {
+      name: 'daily_digest',
+      enabled: true,
+      bound: false,
+      status: 'active',
+      triggerType: 'schedule',
+      reason: 'disabled by deployment policy — package-authored scheduled work is off on this deployment',
+    };
+    // LIT CONTROL: the five pre-existing members, untouched. A minimal row
+    // still type-checks, which is what makes the new key additive rather than
+    // a break for every producer.
+    const minimal: FlowRuntimeState = { name: 'manual_only', enabled: true, bound: false };
+
+    expect(policyDisabled.reason).toBeDefined();
+    expect(policyDisabled.reason).not.toMatch(/binding failed/);
+    // ⭐ DARK: absent, not `undefined`-valued — a consumer that styles on the
+    // key's presence must see nothing here.
+    expect(Object.keys(minimal)).not.toContain('reason');
+    expect(minimal.reason).toBeUndefined();
+  });
+
+  it('the contract documents where the sentence comes from, so a second vocabulary is not invented', () => {
+    const source = readFileSync(fileURLToPath(new URL('./automation-service.ts', import.meta.url)), 'utf8');
+    const block = source.slice(source.indexOf('export interface FlowRuntimeState'));
+    const doc = block.slice(0, block.indexOf('\n}'));
+    // The ruling's distinction, stated on the field a consumer reads.
+    expect(doc).toContain('SCHEDULED_WORK_DISABLED_REASON');
+    // `[\s*]+` for the docblock's own line wrapping, the form the pins above use.
+    expect(doc).toMatch(/never reads as "binding[\s*]+failed"/);
+    // Where the sentence is read FROM — the recorded refusal, never a live
+    // environment read (the defect the producing round already caught once).
+    expect(doc).toContain('RECORDED refusal');
+    expect(doc).toContain('getTriggerBindingAudit()');
   });
 });

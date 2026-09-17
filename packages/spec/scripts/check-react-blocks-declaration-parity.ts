@@ -67,15 +67,42 @@
 //
 // So the accepted set per block is  node-level keys ∪ per-block props ∪ overlay.
 //
-// WHERE THE MANIFEST COMES FROM — AND WHY NOTHING HERE CAN PRODUCE ONE (#4690).
+// WHERE THE MANIFEST COMES FROM — TWO PRODUCERS, TWO REGISTRIES (#4690, #17735).
 //
 // The right-hand side is objectui's registry-inputs manifest (sdui.manifest.json).
-// Its only producer is objectui's `scripts/dump-public-manifest.mjs`, which drives a
-// real browser (Playwright chromium) at the built console's `dev/manifest-dump.html`
-// and reads `window.__MANIFEST`: the registry is a browser app (plugin-map / charts
-// pull browser-only deps), so nothing enumerates it from Node. `pnpm sdui:manifest`
-// (scripts/gen-sdui-manifest.sh) is the wrapper that builds objectui at
-// `.objectui-sha`, dumps the manifest, and then runs THIS gate against it.
+// It has TWO producers, and they do not read the same registry — which is the whole
+// of #17735, so do not reason from either one alone:
+//
+//   browser  objectui's `scripts/dump-public-manifest.mjs` drives a real browser
+//            (Playwright chromium) at `dev/manifest-dump.html` and reads
+//            `window.__MANIFEST`. `pnpm sdui:manifest`
+//            (scripts/gen-sdui-manifest.sh) is the wrapper — and it does NOT
+//            build objectui. It REQUIRES a checkout already vendored at
+//            `.cache/objectui-<sha>` by `pnpm objectui:build`, and exits 1
+//            telling you to run that first (gen-sdui-manifest.sh 507-516). It
+//            then serves THAT tree with a vite dev server, dumps, and runs THIS
+//            gate on the result — so what it reads is the pinned SOURCE.
+//   node     `scripts/gen-sdui-manifest-node.mjs` writes the TRACKED repo-root
+//            artefact under plain Node — no browser, no objectui build. It
+//            enumerates the PUBLISHED `@object-ui/*` packages at the version named
+//            in `scripts/sdui-manifest.record.json`.
+//
+// ⚠️ "The registry is a browser app so nothing enumerates it from Node" was true
+// when this header was written and is now FALSE — measured 2026-08-29,
+// re-measured 2026-08-30 against published `@object-ui/*` 17.6.0, and reproduced
+// byte-identically in review of #18608; the node producer's header carries the
+// readings. ⛔ Do not put an issue number back on this line: the objectui
+// citation this used to carry resolves to nothing — 404 for both the issue and
+// the PR at that number, with three neighbouring objectui numbers answering 200
+// as controls — and the readings above stand without one.
+//
+// ⚠️ The two producers disagree TODAY, and the reason is the input, not the code:
+// objectui bumps its `version` only at release, so the version read off the pinned
+// commit's `packages/core/package.json` names the PREVIOUS release's tarball. The
+// node route therefore describes the registry of the last PUBLISHED release, while
+// the browser route describes the PINNED SOURCE — and `check-sdui-manifest.mjs`
+// cannot see the gap, because it verifies the record's sha and pin, never that the
+// version installed corresponds to the pinned commit (#17735).
 //
 // NOTHING HERE PRODUCES one — but since #13446 one is CHECKED IN. The production
 // half is unchanged and still measured: `packages/console/dist/` is gitignored (the

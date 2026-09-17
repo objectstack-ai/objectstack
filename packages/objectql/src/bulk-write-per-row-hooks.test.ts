@@ -566,8 +566,12 @@ describe('[#5574 / D2] the per-row before context is the SINGLE-RECORD shape', (
   });
 
   it('a `previous`-reading GUARD can now refuse a bulk write per row', async () => {
-    // What per-row `previous` is FOR (D3 says so in as many words): so a guard
-    // can REFUSE, not so a rewrite can be aimed at one row.
+    // ONE of the two things per-row `previous` is FOR (D3 says so in as many
+    // words): so a guard can REFUSE. The other, ruled on #16074, is a
+    // ROW-INVARIANT-IN-EFFECT rewrite — the same written key set on every
+    // matched row, assigned in place — which
+    // `multi-update-hook-key-divergence.test.ts` covers. What stays outside
+    // the contract is a rewrite AIMED at one row.
     const { engine } = await boot([hook('guard', 'beforeUpdate', (ctx) => {
       if ((ctx.previous as any)?.status === 'locked') throw new Error('row is locked');
     })]);

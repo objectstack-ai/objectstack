@@ -302,6 +302,61 @@
 //              variable -- which is what distinguishes this limb from a leg
 //              that reds on directory walks in general.
 //
+// ── The limb's OWN blind spot: the WORKING TREE (#18348) ─────────────────
+//
+// The limb above asks its question of a directory, and it asked it of the
+// WORKING TREE: a candidate root was admitted when `statSync` said it was a
+// directory RIGHT NOW. A build output directory is a directory right now and is
+// no part of the source, so the verdict moved with build state. Measured on this
+// tree, diff held constant, nothing else varied:
+//
+//   no spec build output          EXIT 0
+//   the same directory, EMPTY     EXIT 1   <- one `mkdir` is the whole trigger
+//   removed again                 EXIT 0   <- `git status` reads 0 lines throughout
+//
+// ⇒ a BUILT worktree reds and a fresh checkout greens on the same commit, and CI
+// greens only because the gate step runs in a job that builds nothing: this
+// limb's CI verdict was a function of job ordering. Six independent seats paid
+// the diagnosis, four of them editing documentation and none of them near this
+// gate's subject.
+//
+// THE CRITERION, and it is a CONTRACT rather than a heuristic. This limb offers
+// two remedies -- narrow the walk, or declare the root -- and declaring routes a
+// glob into turbo.json's `inputs`, where turbo hashes what git knows about. A
+// path git does not track hashes NOTHING, so a glob declared for it closes
+// nothing, and the walk it is supposed to re-run does not exist. Both remedies
+// void ⇒ the question is void. So the root admission asks the SOURCE tree:
+//
+//   A walk root is a directory git TRACKS content under. The repo root always
+//   is; every other name is judged from the INDEX, never from `statSync`.
+//
+// TRACKED, not "not ignored", and that difference is the card's own point: the
+// index is what CI checks out, so the local verdict and the CI verdict became
+// the same function of the same commit. The `git check-ignore` spelling was
+// measured and refused on its own evidence -- it answers NOT IGNORED for a
+// directory named without a trailing separator, because the pattern that ignores
+// it ends in one and so matches directories only. That is an on-disk-shaped
+// answer to the very question being taken off disk.
+//
+// MEASURED, because the card asked how many same-shaped artefact directories can
+// trigger this and recorded that it had NOT enumerated them. Every candidate root
+// the scan produces repo-wide was enumerated ahead of the admission filter: 24
+// candidates, 23 of them tracked paths whose verdict does not move, and exactly
+// ONE an artefact -- the spec package's build output directory, proposed as a
+// root at all only because a path handed to `JSON.stringify` inside a template
+// literal is read as a descent entry. That misread is left standing and filed
+// separately: it now costs a candidate the admission filter refuses, and
+// narrowing the descent detector is another card's subject on this same file.
+//
+// The OTHER filesystem read in this limb -- `uncoveredWalkRadius` -- is measured
+// rather than assumed, and deliberately left alone. Of the 13 walked roots judged
+// on this tree, 10 are answered by the `**` shortcut without touching the
+// filesystem at all, and the 3 that do descend are exactly the three
+// `ACCEPTED_WALK_RADII` rows, whose radius is already non-empty by dozens of
+// directories: an untracked directory appearing under one of them can only
+// lengthen a list that is already accepted, never flip a verdict. It also skips
+// `SKIP_DIRS` and dot-directories, which is where build output lands.
+//
 // Usage:
 //   node scripts/check-cross-package-test-inputs.mjs --verify
 //   node scripts/check-cross-package-test-inputs.mjs --union-into <turbo-ls.json> --changed <file>
@@ -357,11 +412,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the SPLIT test:repo task (#16466)': 16,
   'the node_modules REACH rule (#16555)': 18,
   'the TREE-SCOPED WALK (#15565)': 24,
+  'the WORKING-TREE blind spot (#18348)': 10,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 9;
+const SELF_TEST_BATTERY_FLOOR = 10;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1319,6 +1375,71 @@ function packageNameOf(pkgRoot) {
   return name;
 }
 
+/** Memoised per root: one `git ls-files` per process, however many roots are judged. */
+const trackedDirectoryCache = new Map();
+
+/**
+ * The repo-relative directories git TRACKS content under — the source tree as CI
+ * checks it out, rather than the working tree as a build left it.
+ *
+ * A name is in the set when the INDEX holds at least one file below it, so a
+ * build output directory is absent however real it is on disk, and a brand-new
+ * directory enters the moment it is staged — the same moment CI could see it.
+ * The repo root (the empty name) is always in the set. A tracked FILE is not: the
+ * caller is asking which DIRECTORIES exist, and that half is unchanged.
+ *
+ * ⛔ Deliberately not `git check-ignore`: measured on this tree, it answers NOT
+ * IGNORED for a directory named without a trailing separator, because the pattern
+ * that ignores it ends in one and therefore matches directories only. The verdict
+ * would have depended on the spelling — the shape this is removing.
+ *
+ * @param {string} rootDir
+ * @returns {Set<string>} repo-relative names, `/`-joined; throws if git cannot be asked
+ */
+export function trackedDirectories(rootDir = REPO_ROOT) {
+  const cached = trackedDirectoryCache.get(rootDir);
+  if (cached) return cached;
+  const res = spawnSync('git', ['ls-files', '-z', '--cached'], { cwd: rootDir, maxBuffer: 1 << 28 });
+  if (res.error) throw new Error(`git ls-files could not be run in ${rootDir}: ${res.error.message}`);
+  if (res.status !== 0)
+    throw new Error(`git ls-files exited ${res.status} in ${rootDir}: ${String(res.stderr ?? '').trim()}`);
+  const dirs = new Set(['']);
+  for (const file of String(res.stdout).split('\0')) {
+    if (file === '') continue;
+    const segs = file.split(SEGMENT_JOIN);
+    segs.pop();
+    let acc = '';
+    for (const seg of segs) {
+      acc = acc === '' ? seg : `${acc}${SEGMENT_JOIN}${seg}`;
+      dirs.add(acc);
+    }
+  }
+  trackedDirectoryCache.set(rootDir, dirs);
+  return dirs;
+}
+
+/**
+ * `trackedDirectories()`, or a FAIL naming why git could not be asked.
+ *
+ * ⛔ No fallback to `statSync`: falling back restores the build-state verdict
+ * silently, in exactly the environment nobody is watching. A limb that cannot ask
+ * its question says so and reds.
+ *
+ * @returns {Set<string>}
+ */
+function trackedWalkRootDirectories() {
+  try {
+    return trackedDirectories();
+  } catch (e) {
+    console.error(
+      `FAIL: this gate judges walk roots against the SOURCE tree, and git could not be asked.\n` +
+        `    ${e.message}\n` +
+        `    Run it from inside a git checkout of this repository.`,
+    );
+    process.exit(1);
+  }
+}
+
 /** Every package with at least one test that reads outside its own directory. */
 export function findEscapingPackages() {
   const found = new Map();
@@ -1369,11 +1490,12 @@ export function findEscapingPackages() {
       // keeps a synthetic fixture path off the roster.
       for (const root of scan.walkRoots) {
         if (root === own || root.startsWith(`${own}/`)) continue;
-        try {
-          if (!statSync(join(REPO_ROOT, root)).isDirectory()) continue;
-        } catch {
-          continue;
-        }
+        // Judged against the INDEX, never against the working tree (#18348): a
+        // build output directory is a directory on disk and no part of the
+        // source, and a glob declared for one would hash nothing, so the limb's
+        // question has no answer there. See the header section on the working
+        // tree for the criterion and the census behind it.
+        if (!trackedWalkRootDirectories().has(root)) continue;
         if (!entry.walkRoots.has(root)) entry.walkRoots.set(root, rel);
       }
       // Two rosters, one filter. The flat literals are what an author WROTE in
@@ -3351,6 +3473,85 @@ function selfTest() {
       'LIVE POSITIVE CONTROL: and every one of them is reached by a declared glob',
       PIN_ROOTS.every((r) => uncoveredWalkRadius(r, liveGlobs).length === 0),
     );
+  }
+
+  // ── the WORKING-TREE blind spot (#18348) ──────────────────────────
+  //
+  // The three legs the card demands, driven on a REAL git tree rather than
+  // argued: an artefact directory absent ⇒ not a root; the same directory
+  // present and EMPTY ⇒ still not a root; a tracked tree ⇒ still a root, so the
+  // #15565 red survives. Each leg carries its own control, because a predicate
+  // answering "not a root" to everything would satisfy the first two alone.
+  //
+  // ⛔ And the criterion is pinned as a CRITERION, not as a name pattern: the
+  // same directory NAME, with a file git tracks inside it, IS a judgeable root.
+  // A regex on the name would pass every leg above and fail that one.
+  battery('the WORKING-TREE blind spot (#18348)');
+  {
+    const P = (...segments) => segments.join('/');
+    const ARTEFACT = P('packages', 'spec', 'dist');
+    const TRACKED_SAME_NAME = P('packages', 'other', 'dist');
+    const TRACKED_TREE = 'docs';
+    const TRACKED_FILE = P('docs', 'adr', 'y.md');
+
+    const tree = mkdtempSync(join(tmpdir(), 'xpkg-tracked-'));
+    try {
+      const git = (...args) => spawnSync('git', args, { cwd: tree, encoding: 'utf8' });
+      git('init', '-q');
+      mkdirSync(join(tree, 'docs', 'adr'), { recursive: true });
+      mkdirSync(join(tree, 'packages', 'other', 'dist'), { recursive: true });
+      writeFileSync(join(tree, TRACKED_FILE), '');
+      writeFileSync(join(tree, P(TRACKED_SAME_NAME, 'kept.json')), '{}');
+      const added = git('add', '-A');
+      ok('CONTROL: the fixture tree really is a git checkout with an index', added.status === 0);
+
+      // LEG 1 -- the artefact directory is not on disk at all.
+      ok(
+        'LEG 1: an artefact directory that does not exist is not a walk root',
+        !trackedDirectories(tree).has(ARTEFACT),
+      );
+
+      // LEG 2 -- the same name, now a real EMPTY directory on disk. That `mkdir`,
+      // and nothing else, is the whole regression.
+      mkdirSync(join(tree, ARTEFACT), { recursive: true });
+      trackedDirectoryCache.delete(tree);
+      ok(
+        'CONTROL: and the on-disk predicate this replaced WOULD have admitted it',
+        statSync(join(tree, ARTEFACT)).isDirectory(),
+      );
+      ok(
+        'LEG 2: an EMPTY untracked directory on disk is still not a walk root',
+        !trackedDirectories(tree).has(ARTEFACT),
+      );
+
+      // LEG 3 -- the thing that must keep working: a tracked tree is a root, so
+      // an undeclared descent into one still reds through `uncoveredWalkRadius`.
+      ok('LEG 3: a tracked tree IS a walk root', trackedDirectories(tree).has(TRACKED_TREE));
+      ok(
+        'LEG 3: and its radius is still reported when no declared glob reaches it',
+        uncoveredWalkRadius(TRACKED_TREE, [P('packages', '**', '*.ts')], tree).join(',') === TRACKED_TREE,
+      );
+
+      // The criterion, not a name pattern.
+      ok(
+        'the SAME directory name, with tracked content inside it, IS a walk root',
+        trackedDirectories(tree).has(TRACKED_SAME_NAME),
+      );
+      // The repo root is always judgeable, and a tracked FILE never is.
+      ok('the repo root is always a walk root', trackedDirectories(tree).has(''));
+      ok('a tracked FILE is not a directory and not a walk root', !trackedDirectories(tree).has(TRACKED_FILE));
+    } finally {
+      trackedDirectoryCache.delete(tree);
+      rmSync(tree, { recursive: true, force: true });
+    }
+
+    // LIVE controls, on this repository rather than on a fixture.
+    const live = trackedDirectories();
+    ok(
+      'LIVE: every root this scan judges on this tree is a tracked directory',
+      [...findEscapingPackages().values()].every((info) => [...info.walkRoots.keys()].every((r) => live.has(r))),
+    );
+    ok('LIVE: and the artefact directory the regression fired on is not one of them', !live.has(ARTEFACT));
   }
 
   // ── the node_modules REACH rule (#16555) ─────────────────────────────────

@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { EpochMs } from '../shared/epoch.zod';
 
 /**
  * Identity & User Model Specification
@@ -108,7 +109,7 @@ export const AccountSchema = lazySchema(() => z.object({
   /**
    * Token expiry timestamp
    */
-  expiresAt: z.number().optional().describe('Token expiry timestamp (Unix)'),
+  expiresAt: EpochMs.optional().describe('Token expiry timestamp (Unix milliseconds)'),
   
   /**
    * OAuth token type

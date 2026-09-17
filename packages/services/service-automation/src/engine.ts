@@ -4083,6 +4083,12 @@ export class AutomationEngine implements IAutomationService {
      * registered trigger. `triggerType`/`object` expose the flow's declared
      * binding so hosts (CLI startup summary, kernel:bootstrapped audit) can say
      * WHY an unbound flow is unbound; `status` is the persisted deployment status.
+     *
+     * [#18235, ruling G item 6] `reason` carries that WHY on the row itself, for
+     * the one host that cannot ask a second question: Studio's only status door
+     * is `GET /automation/_status`, which passes these rows through verbatim and
+     * has no access to {@link getTriggerBindingAudit}. Same sentence, same
+     * eligibility, one computation — see {@link describeUnboundReason}.
      */
     getFlowRuntimeStates(): Array<{
         name: string;
@@ -4091,6 +4097,7 @@ export class AutomationEngine implements IAutomationService {
         status?: string;
         triggerType?: string;
         object?: string;
+        reason?: string;
         armedFrom?: FlowContender;
         shadowed?: FlowContender[];
     }> {
@@ -4100,6 +4107,7 @@ export class AutomationEngine implements IAutomationService {
             // reads. This map holds ONE entry per bare name, so without these
             // two fields a displaced contender leaves no trace on this surface.
             const shadowing = this.flowShadowing.get(name);
+            const reason = this.describeUnboundReason(name, resolved);
             return {
                 name,
                 enabled: this.isFlowEnabled(name),
@@ -4107,11 +4115,56 @@ export class AutomationEngine implements IAutomationService {
                 status: (this.flows.get(name) as { status?: string } | undefined)?.status,
                 triggerType: resolved?.triggerType,
                 object: resolved?.binding.object,
+                // Absent, not `undefined`-valued: a row that is bound, disabled
+                // or trigger-less has no reason to carry, and `reason: null` on
+                // the wire would read as "we looked and found nothing".
+                ...(reason === undefined ? {} : { reason }),
                 ...(shadowing
                     ? { armedFrom: shadowing.armed, shadowed: shadowing.shadowed }
                     : {}),
             };
         });
+    }
+
+    /**
+     * [#17396 ruled item 6, #18235] The ONE place that decides why a registered
+     * flow is not armed — both the status door ({@link getFlowRuntimeStates})
+     * and the boot-time audit ({@link getTriggerBindingAudit}) read it, so the
+     * sentence an operator sees in Studio and the one the CLI prints cannot
+     * drift apart. `undefined` means this flow has no unbound reason to report:
+     * it is bound, it is disabled, or it declares no trigger at all.
+     *
+     * The POLICY branch outranks both binding branches, and deliberately so.
+     * When package-authored scheduled work is off, neither of the other two
+     * reasons is true in any useful sense: the trigger was never called, so
+     * nothing "failed", and registering the missing trigger would change
+     * nothing, so "add requires: ['triggers']" is a remedy that does not work.
+     * ⛔ Never reported as "binding failed" — a binding failure is a defect with
+     * an engineering remedy, while this is a deployment policy with an operator
+     * remedy, and the two send the reader to different places.
+     *
+     * ⛔ Read from the RECORD, never re-derived from the environment here.
+     * Re-deriving was the first spelling and it was measured wrong: both
+     * callers run long after the bind, so an environment that moved in
+     * between — an operator setting the switch, a test restoring it — makes
+     * this report *binding failed* for a flow whose trigger was never called.
+     * The record says what HAPPENED; `activateFlowTrigger` clears it the moment
+     * the flow gets past the gate.
+     *
+     * @param resolved the caller's already-resolved binding, so neither door
+     *   pays for a second {@link resolveTriggerBinding} on the same row.
+     */
+    private describeUnboundReason(
+        name: string,
+        resolved: { triggerType: string } | undefined,
+    ): string | undefined {
+        if (!resolved) return undefined; // manual / screen flow — nothing to bind
+        if (!this.isFlowEnabled(name)) return undefined;
+        if (this.boundFlowTriggers.has(name)) return undefined;
+        if (this.policyDisabledFlows.has(name)) return SCHEDULED_WORK_DISABLED_REASON;
+        return this.triggers.has(resolved.triggerType)
+            ? `trigger '${resolved.triggerType}' is registered but binding failed — see earlier warnings`
+            : `no '${resolved.triggerType}' trigger is registered — add requires: ['triggers'] (record_change/schedule/time_relative/api ship in @objectstack/trigger-*)`;
     }
 
     /**
@@ -4126,33 +4179,13 @@ export class AutomationEngine implements IAutomationService {
     getTriggerBindingAudit(): Array<{ flowName: string; triggerType: string; reason: string }> {
         const audit: Array<{ flowName: string; triggerType: string; reason: string }> = [];
         for (const name of this.flows.keys()) {
-            if (!this.isFlowEnabled(name)) continue;
-            if (this.boundFlowTriggers.has(name)) continue;
             const resolved = this.resolveTriggerBinding(name);
-            if (!resolved) continue; // manual / screen flow — nothing to bind
-            // [#17396] The POLICY branch outranks both binding branches, and
-            // deliberately so. When package-authored scheduled work is off,
-            // neither of the other two reasons is true in any useful sense: the
-            // trigger was never called, so nothing "failed", and registering
-            // the missing trigger would change nothing, so "add
-            // requires: ['triggers']" is a remedy that does not work. ⛔ Never
-            // reported as "binding failed" — a binding failure is a defect with
-            // an engineering remedy, while this is a deployment policy with an
-            // operator remedy, and the two send the reader to different places.
-            //
-            // ⛔ Read from the RECORD, never re-derived from the environment
-            // here. Re-deriving was the first spelling and it was measured
-            // wrong: the audit is read long after the bind, so an environment
-            // that moved in between — an operator setting the switch, a test
-            // restoring it — makes this method report *binding failed* for a
-            // flow whose trigger was never called. The record says what
-            // HAPPENED; `activateFlowTrigger` clears it the moment the flow
-            // gets past the gate.
-            const reason = this.policyDisabledFlows.has(name)
-                ? SCHEDULED_WORK_DISABLED_REASON
-                : this.triggers.has(resolved.triggerType)
-                    ? `trigger '${resolved.triggerType}' is registered but binding failed — see earlier warnings`
-                    : `no '${resolved.triggerType}' trigger is registered — add requires: ['triggers'] (record_change/schedule/time_relative/api ship in @objectstack/trigger-*)`;
+            // [#18235] The eligibility rules (enabled, unbound, declares a
+            // trigger) and the three-branch vocabulary both live in
+            // `describeUnboundReason` now, so this audit and the status door
+            // report the SAME sentence for the same flow by construction.
+            const reason = this.describeUnboundReason(name, resolved);
+            if (reason === undefined || !resolved) continue;
             audit.push({ flowName: name, triggerType: resolved.triggerType, reason });
         }
         return audit;

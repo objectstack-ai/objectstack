@@ -1471,10 +1471,22 @@ const SET_AUTH_TOKEN_HEADER = 'set-auth-token';
  *
  * ```
  * GET  /api/v1/auth/get-session   (signed in) -> 200 {"user":{…},"session":{…,"token":"…"}}
- * GET  /api/v1/auth/get-session   (anonymous) -> 200 null
  * POST /api/v1/auth/sign-up/email             -> 200 {"token":"…","user":{…}}
  * POST /api/v1/auth/sign-in/email             -> 200 {"redirect":false,"token":"…","user":{…}}
  * ```
+ *
+ * ⚠️ The ANONYMOUS `/get-session` answer is not a fourth body this helper is
+ * handed, and has not been since #17881 (`374d9d3afa`). `plugin-auth`'s
+ * `refuseAnonymousSession` converts better-auth's `200` + literal `null` into
+ * the declared ADR-0112 refusal on the way out (#17238):
+ *
+ * ```
+ * GET  /api/v1/auth/get-session   (anonymous) -> 401 {"success":false,"error":{"code":"UNAUTHENTICATED",…}}
+ * ```
+ *
+ * The SDK's shared `fetch` wrapper throws on any non-2xx, so that answer
+ * reaches a caller as a REJECTION carrying `code: 'UNAUTHENTICATED'` and
+ * `httpStatus: 401` and never arrives at this lift at all.
  *
  * The two families carry DISJOINT payload members — `/get-session` has the
  * session and no top-level token, the two credential routes have the token and
@@ -1518,11 +1530,14 @@ const SET_AUTH_TOKEN_HEADER = 'set-auth-token';
  * body's own `token` already carried, not a second credential, and
  * `data.token` is still never synthesized FROM a session.
  *
- * The `!body` guard is what carries the anonymous answer: `null` is falsy and
- * is returned untouched rather than wrapped into a signed-in-looking envelope
- * that no session backs. That answer stays outside `SessionResponse`, and
- * closing it needs the published return annotation to widen, which is a
- * different card.
+ * The `!body` guard no longer carries the anonymous answer — since #17881 that
+ * answer is a rejection and never reaches this lift. The guard stays as the
+ * defensive branch it always was: a 2xx body that is `null`, or not an object,
+ * is handed back untouched rather than wrapped into a signed-in-looking
+ * envelope that no session backs. The anonymous case is closed at the
+ * PRODUCER, which is what #17238 ruled — `SessionResponseSchema` and every
+ * published return annotation in this family are UNTOUCHED, rather than
+ * widened to grow an arm meaning "nobody is signed in".
  */
 const normalizeSessionResponse = (raw: unknown): SessionResponse => {
   const body = raw as
@@ -3672,19 +3687,57 @@ export class ObjectStackClient {
      * ```
      *
      * The default is `'member'` because {@link ObjectStackClient.organizations}
-     * `.invitations.resend` already substitutes exactly that over the same
-     * vendor endpoint: one family, one behaviour. It is also the least
-     * privileged name in the closed membership vocabulary (ADR-0108 D1 —
-     * `orgRoleGrade` floors at `member` and raises only for `owner`/`admin`),
-     * so the implicit choice cannot confer more reach than the caller asked
-     * for. Declaring `role` required instead would narrow a published request
-     * type to restate the vendor's requirement, and buy nothing.
+     * `.invitations.resend` has always substituted exactly that over the same
+     * vendor endpoint: one family, one behaviour. Since [#17274] `resend`
+     * takes the default FROM HERE instead of spelling a second copy of it, so
+     * the two cannot drift. It is also the least privileged name in the closed
+     * membership vocabulary (ADR-0108 D1 — `orgRoleGrade` floors at `member`
+     * and raises only for `owner`/`admin`), so the implicit choice cannot
+     * confer more reach than the caller asked for. Declaring `role` required
+     * instead would narrow a published request type to restate the vendor's
+     * requirement, and buy nothing.
+     *
+     * ## `teamId` — declared here, and DELIVERED [#17274]
+     *
+     * better-auth's `invite-member` body schema carries `teamId`, and the
+     * handler validates it against the organisation's own teams before
+     * storing the placement on the invitation row. Measured against a real
+     * `AuthManager` (better-auth 1.7.3, organization plugin,
+     * `teams: { enabled: true }` — the posture `auth-manager.ts` hard-wires)
+     * over a real `SqliteWasmDriver`:
+     *
+     * ```
+     * { …, teamId: 'team_abc' }   -> 200  invitation.teamId === 'team_abc'
+     * { …, teamId: 'nope' }       -> 400  Team not found            (TEAM_NOT_FOUND)
+     * { …, teamId: null }         -> 400  [body.teamId] Invalid input (VALIDATION_ERROR)
+     * { … }            (omitted)  -> 200  invitation.teamId === null
+     * ```
+     *
+     * The last two rows are why this member is NOT forwarded verbatim. `null`
+     * is the SDK's own spelling of "no team" — `invitations.list` answers
+     * `teamId: string | null` and a caller round-trips that object straight
+     * back into `resend` — while the vendor's spelling of the same fact is
+     * ABSENCE. So a `null` (or an omitted member) sends no `teamId` at all,
+     * and a string is forwarded unchanged. ⛔ Nothing else is normalised: an
+     * unknown id must keep reaching the vendor, because `TEAM_NOT_FOUND` is
+     * the loud refusal that replaces the silent drop this member used to be.
      */
-    invite: async (req: { email: string; role?: string; organizationId?: string }): Promise<OrganizationInvitationWire<'pending'>> => {
+    invite: async (
+      req: { email: string; role?: string; organizationId?: string; teamId?: string | null },
+    ): Promise<OrganizationInvitationWire<'pending'>> => {
       const route = this.getRoute('auth');
+      // `teamId` is lifted out of the spread so the two spellings of "no team"
+      // — `null` and absent — collapse to the ONE the vendor accepts. Every
+      // other member keeps its position, which is what the byte pins in
+      // `organization-invite-role-default.test.ts` assert.
+      const { teamId, ...rest } = req;
       const res = await this.fetch(`${this.baseUrl}${route}/organization/invite-member`, {
         method: 'POST',
-        body: JSON.stringify({ ...req, role: req.role ?? 'member' }),
+        body: JSON.stringify({
+          ...rest,
+          role: req.role ?? 'member',
+          ...(teamId == null ? {} : { teamId }),
+        }),
       });
       return res.json();
     },
@@ -3963,6 +4016,21 @@ export class ObjectStackClient {
        *
        * If `cancel()` fails (e.g. invite already accepted) the error is
        * re-thrown without re-inviting.
+       *
+       * ## [#17274] `teamId` reaches the wire
+       *
+       * This member has been declared since the family's first commit and was
+       * never forwarded: the re-invite carried `email`, `role` and
+       * `organizationId` only, so resending a TEAM invitation quietly landed
+       * it with no team — nothing refused, nothing warned, and the placement
+       * was simply gone. It is forwarded now. `null` and an omitted member
+       * both mean "no team" and both send no `teamId`; see
+       * {@link ObjectStackClient.organizations}`.invite` for the measured
+       * vendor behaviour that fixes those spellings.
+       *
+       * The `role` default is likewise {@link ObjectStackClient.organizations}
+       * `.invite`'s, not a second copy spelled here: an undeclared `role`
+       * reaches the wire as `'member'` exactly as before, from one place.
        */
       resend: async (
         invitation: { id?: string; email: string; role?: string; organizationId: string; teamId?: string | null },
@@ -3977,8 +4045,9 @@ export class ObjectStackClient {
         }
         return this.organizations.invite({
           email: invitation.email,
-          role: invitation.role ?? 'member',
+          role: invitation.role,
           organizationId: invitation.organizationId,
+          teamId: invitation.teamId,
         });
       },
     },
@@ -4437,9 +4506,14 @@ export class ObjectStackClient {
      * `.user` / `.session` keys are kept alongside for callers written against
      * the wire while the declared shape was unreachable.
      *
-     * ⚠️ Anonymous is the one answer still outside the declared type: the route
-     * serves the literal `null` at 200 and it is returned as-is, because there
-     * is no `SessionResponse` value that means "nobody is signed in".
+     * ⚠️ Anonymous REJECTS — it does not resolve. There is no `SessionResponse`
+     * value that means "nobody is signed in", so since #17881 (`374d9d3afa`)
+     * the route answers an anonymous caller the declared ADR-0112 envelope at
+     * `401` instead of the literal `null` at 200, and the shared `fetch`
+     * wrapper turns that into a thrown error carrying `code: 'UNAUTHENTICATED'`
+     * and `httpStatus: 401`. Every value this method RESOLVES with is inside
+     * its declared type; a logged-out caller is a `catch`, not a `null` check
+     * (#17238).
      */
     me: async (): Promise<SessionResponse> => {
         const route = this.getRoute('auth');

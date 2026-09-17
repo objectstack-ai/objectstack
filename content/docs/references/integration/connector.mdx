@@ -204,7 +204,7 @@ Circuit breaker configuration
 | **scopes** | `string[]` | optional | Requested OAuth2 scopes |
 | **redirectUri** | `string` | optional | OAuth2 redirect URI |
 | **refreshToken** | `string` | optional | Refresh token for token renewal |
-| **tokenExpiry** | `number` | optional | Token expiry timestamp |
+| **tokenExpiry** | `integer` | optional | Token expiry timestamp (Unix milliseconds) |
 
 ### Nested Shape: `Connector.authentication[type='api-key']`
 
@@ -688,7 +688,7 @@ Connector type
 | **scopes** | `string[]` | optional | Requested OAuth2 scopes |
 | **redirectUri** | `string` | optional | OAuth2 redirect URI |
 | **refreshToken** | `string` | optional | Refresh token for token renewal |
-| **tokenExpiry** | `number` | optional | Token expiry timestamp |
+| **tokenExpiry** | `integer` | optional | Token expiry timestamp (Unix milliseconds) |
 
 ### Nested Shape: `DeclarativeConnectorEntry.authentication[type='api-key']`
 

@@ -3445,10 +3445,15 @@ export class ObjectQL implements IObjectQLEngine {
    * its dispatch — that write-back is what makes "accumulate in dispatch order"
    * true for both spellings rather than only the first.
    *
-   * A rewrite CONDITIONED on the row (`ctx.previous`, `ctx.input.id`) is
-   * outside the contract: it does not scope itself to the row it was decided
-   * on, it widens to every matched row. Per-row `previous` is supplied so a
-   * guard can REFUSE the write (throw), not so a rewrite can be aimed.
+   * A rewrite CONDITIONED on the row (`ctx.previous`, `ctx.input.id`) cannot
+   * scope itself to the row it was decided on: it widens to every matched row.
+   * Per-row `previous` is supplied so a guard can REFUSE the write (throw),
+   * and — ruled on #16074 — so a hook can make a ROW-INVARIANT-IN-EFFECT
+   * rewrite: one whose written KEY SET is the same on every matched row AND is
+   * assigned IN PLACE (`ctx.input.data.x = 1`, never `ctx.input.data = {…}`,
+   * which the recording below cannot attribute). A rewrite AIMED at one row
+   * stays outside the contract, and what makes the admitted shape safe is that
+   * enforcement rather than the hook's good faith.
    *
    * ## D3, ENFORCED — divergent key sets refuse the batch [#14099]
    *

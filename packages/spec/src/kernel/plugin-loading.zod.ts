@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { EpochMs } from '../shared/epoch.zod';
 
 /**
  * # Plugin Loading Protocol
@@ -96,7 +97,7 @@ export const PluginLoadingEventSchema = lazySchema(() => z.object({
   /**
    * Timestamp
    */
-  timestamp: z.number().int().min(0),
+  timestamp: EpochMs.min(0).describe('Event timestamp — Unix milliseconds'),
 
   /**
    * Duration in milliseconds
@@ -151,12 +152,12 @@ export const PluginLoadingStateSchema = lazySchema(() => z.object({
   /**
    * Loading start time
    */
-  startedAt: z.number().int().min(0).optional(),
+  startedAt: EpochMs.min(0).optional().describe('Loading start time — Unix milliseconds'),
 
   /**
    * Loading completion time
    */
-  completedAt: z.number().int().min(0).optional(),
+  completedAt: EpochMs.min(0).optional().describe('Loading completion time — Unix milliseconds'),
 
   /**
    * Last error

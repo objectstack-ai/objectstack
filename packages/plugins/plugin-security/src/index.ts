@@ -85,6 +85,32 @@ export {
   reportCapabilityNameCollisions,
 } from './capability-name-collision.js';
 export type { CapabilityNameCollisionDiagnostic } from './capability-name-collision.js';
+// [#18091] The seeders' remaining refusals. EXPORTED on the criterion the two
+// blocks above state and no wider: a refusal an AUTHOR can cause has a second
+// door by construction — the author-time one (`@objectstack/lint`, `os build` /
+// `os validate`) — and a door that re-spells the token or re-derives the
+// wording is the drift these modules exist to prevent. A package declaring a
+// CURATED platform capability name, and a declaration carrying no owning
+// package, are both decidable from the declaration alone with no database.
+// ⛔ The two unreadable-rows summaries are deliberately NOT here: an unreadable
+// database is a runtime condition no compile-time door can raise, so they stay
+// package-private for the reason `position_name_fold_grant` does.
+export {
+  CAPABILITY_DECLARATION_UNOWNED,
+  CAPABILITY_PLATFORM_NAME_REFUSED,
+  PERMISSION_SET_DECLARATION_UNOWNED,
+  capabilityDeclarationUnownedDiagnostic,
+  capabilityPlatformNameRefusedDiagnostic,
+  permissionSetDeclarationUnownedDiagnostic,
+  reportCapabilityDeclarationUnowned,
+  reportCapabilityPlatformNameRefused,
+  reportPermissionSetDeclarationUnowned,
+} from './seed-refusal-diagnostics.js';
+export type {
+  CapabilityDeclarationUnownedDiagnostic,
+  CapabilityPlatformNameRefusedDiagnostic,
+  PermissionSetDeclarationUnownedDiagnostic,
+} from './seed-refusal-diagnostics.js';
 // [ADR-0094] sys_permission_set pure-projection machinery.
 export {
   permissionSetRowFields,
