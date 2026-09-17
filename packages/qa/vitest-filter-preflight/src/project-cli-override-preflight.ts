@@ -53,31 +53,57 @@
  * the failure direction AGENTS.md ranks BELOW having no verifier at all (Route &
  * surface ownership §3: a verifier that silently degrades reports success).
  *
- * ## Why this REFUSES rather than forwarding the value into the projects
+ * ## The three routes, and why this one
  *
- * Forwarding — reading argv here and writing `hookTimeout` into each project's
- * own `test` block — was the other candidate. It works; it was rejected:
+ * ### ⛔ Route 1 — stop relying on the flag, rewrite the witness
  *
- *   - it makes this repo the author of a PRECEDENCE RULE that belongs to
- *     vitest. For an allowlisted name vitest applies the CLI value AFTER the
- *     project's own config, so the CLI wins; a forwarded name would arrive AS
- *     the project config, so a project that legitimately sets its own timeout
- *     would be overridden by a rule written here, in the opposite direction from
- *     the one vitest documents;
- *   - it fixes exactly the names it enumerates. `environment`, `maxConcurrency`,
- *     `slowTestThreshold`, `typecheck.*` and `chaiConfig.*` are dropped by the
- *     same allowlist, so a forward would leave the package handing out false
- *     greens for every name it did not think of — the same defect, one name
- *     narrower, and now hidden behind a fix;
- *   - it is a lenient consumer-side accommodation for an upstream contract,
+ * Available, and MEASURED to work: in `packages/cli` a 500ms `beforeAll` is
+ * reddened by `beforeAll(fn, 1)` and by a root `test.hookTimeout: 1`, both exit
+ * 1 with `Hook timed out in 1ms.` (rows 5 and 6 of the table above). What it
+ * cannot do is stop the NEXT reader reaching for the flag — this repo's own
+ * prior art reaches for it, and a dispatching seat handed it over as a
+ * suggestion on the round that filed this card. A remedy that is a habit is not
+ * a remedy. ⭐ So route 1 is not discarded: it is what the refusal text NAMES,
+ * which is the one way a convention gets enforced rather than recommended.
+ *
+ * ### ⛔ Route 2 — forward the value into the projects
+ *
+ * The cheapest spelling is not even per-project: every one of these configs
+ * declares `extends: true`, so writing the parsed value into the ROOT `test`
+ * block reaches all of them (row 6 measures exactly that, by hand). It works.
+ * It was rejected on three counts:
+ *
+ *   - **it invents a precedence rule vitest does not have, and then hides the
+ *     day vitest acquires one.** For an ALLOWLISTED name vitest spreads the CLI
+ *     value last — `test: { ...options.test, ...cliOverrides }` in
+ *     `resolveProjects` — so the CLI wins over the project's own block. For a
+ *     name vitest never carries there is no rule at all, so a forward has to
+ *     pick one, for eight packages, on this repo's authority. ⭐ And the pick
+ *     goes stale silently: the day a vitest bump adds `hookTimeout` to
+ *     `cliOverrides`, vitest's own override and the forward are BOTH live, and
+ *     nothing reddens. The refusal has the opposite failure mode — its
+ *     transcription pin equals-checks the installed array, so that same bump
+ *     turns it RED and a human reads the diff;
+ *   - **it fixes exactly the names it enumerates.** The allowlist is twenty
+ *     names long and vitest's CLI surface is not; every other option reaches the
+ *     root config and stops. A forward built for three names leaves the rest
+ *     handing out the same false greens — the identical defect, narrower, and
+ *     now behind something called a fix. ⛔ Widening the forward to "every CLI
+ *     option" is a second transcription of vitest's option table, which is the
+ *     multiplication this package exists to stop;
+ *   - **it is a lenient consumer-side accommodation for an upstream contract**,
  *     which Prime Directive #12 refuses in the form it usually takes (a `??`
  *     alias) for the reason that applies here unchanged: one strict contract
- *     beats N dialects, and the dialect would drift silently green on the next
- *     vitest bump.
+ *     beats N dialects, and the dialect drifts silently green on the next bump.
  *
- * Refusing costs nothing that was working: the flag measures nothing today, so
- * no run loses a capability. What it buys is that the false clearance becomes
- * impossible to read.
+ * ### ⭐ Route 3 — refuse the run, and name the spellings that do bite
+ *
+ * Chosen. Refusing costs nothing that was working: the flag measures nothing
+ * today, so no run loses a capability, and a run that names no such flag is
+ * byte-identical to the run it is today. What it buys is that the false
+ * clearance becomes impossible to READ — and, because the notice carries route
+ * 1's two measured spellings, the reader leaves with the instrument they came
+ * for rather than a bare refusal.
  *
  * ## ⛔ Why the judged family is CLOSED, and why it is not a set invented here
  *
@@ -108,6 +134,20 @@
  * vitest `projects`, every one of them has this defect, and eight copies of a
  * reading of vitest's internals drift from vitest and from each other with every
  * drift failing SILENTLY GREEN — the same direction as the defect.
+ *
+ * ⭐ THE POPULATION IS EIGHT, SO ALL EIGHT ARE WIRED. The card was filed against
+ * `packages/cli`, and `packages/cli` is where the cold-boot cost lives — but the
+ * defect is a property of declaring `projects`, not of that package, and it was
+ * measured in a second one to prove it: in `@objectstack/types` a 500ms
+ * `beforeAll` passes under `--hookTimeout=1` (exit 0) and reddens under
+ * `beforeAll(fn, 1)` (exit 1, `Hook timed out in 1ms.`) — the same two-legged
+ * reading as `packages/cli`. Wiring one and leaving seven would ship this file's
+ * own sentence above as a documented, unfixed defect in seven places, and
+ * `test/config-wiring-sweep.test.ts` — which DERIVES its population rather than
+ * listing it — would then have had to carry a maintained exemption list for
+ * them, which is the artefact #17978 removed. So the sweep requires this call in
+ * every config that declares `projects`, and spawns a real vitest child per
+ * package to prove the refusal is a behaviour and not a spelling.
  *
  * ⭐ Unlike the first transcription, this one is PINNED AGAINST ITS SOURCE:
  * `test/project-cli-override-preflight.test.ts` extracts the real array out of

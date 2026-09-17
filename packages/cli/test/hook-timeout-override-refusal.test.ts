@@ -54,6 +54,28 @@
  * only globs, and the two refusing legs abort at config load before that.
  * Importing `node:child_process` to ask vitest a question is not spawning the
  * CLI — the same classification `vitest-tiers-partition.test.ts` carries.
+ *
+ * ## ⚠️ The DECLARED overlap with the population sweep
+ *
+ * `packages/qa/vitest-filter-preflight/test/config-wiring-sweep.test.ts` asks
+ * two of these four questions of EVERY package that declares `projects`, this
+ * one included: that `--hookTimeout` is really refused, and that a run naming no
+ * override really is not. That sweep owns the POPULATION — it derives it, so a
+ * ninth package is caught on the PR that adds it — and it is where those two
+ * legs are maintained.
+ *
+ * ⭐ What is NOT duplicated, and why this file is the one that owns it: the
+ * DISCRIMINATOR. `--testTimeout` is on vitest's allowlist and does reach the
+ * projects here — measured in this package, 500ms in a test body exits 1 with
+ * `Test timed out in 1ms.` — so a detector that refused it would be breaking a
+ * working instrument, and `--teardownTimeout` is the second knob the same
+ * allowlist drops. Both readings are about THIS package's measured table, which
+ * is the card's subject, so they are asked here rather than eight times.
+ * ⛔ The two overlapping legs are kept rather than deleted because this file
+ * must stand on its own as `packages/cli`'s record of the defect: a reader who
+ * finds a refusal here needs the control that says it is not unconditional, in
+ * the same file, or the record is exactly the kind of one-sided reading this
+ * card is about.
  */
 
 import { execFileSync } from 'node:child_process';
