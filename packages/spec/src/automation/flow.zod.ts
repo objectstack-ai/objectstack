@@ -329,16 +329,23 @@ export const FlowNodeSchema = lazySchema(() => flowNodeObject().transform(
  * parses each region slot with `safeParse` and, on a refusal, leaves that region
  * RAW and continues (its own comment says so: a refused region is left for
  * `validateControlFlow` to name). That policy predates this change and is not
- * specific to `waitEventConfig`, and the consequence is measurable:
- * `FlowSchema.safeParse` of a flow whose `loop` body holds a block-less `wait`
- * answers `success: true`. What refuses the nested node is the REGION contract —
+ * specific to `waitEventConfig`. What refuses the nested node is the REGION contract —
  * `LoopConfigSchema` / `ParallelConfigSchema` / `TryCatchConfigSchema` — at
  * `body.nodes[i].waitEventConfig`, which is the same contract the container
  * node's executor parses its config through at execute time, so the nested shape
  * still cannot RUN; it is refused one door later and by node id. Both halves are
- * pinned in `flow.test.ts` ("nested in a region: the flow parse leaves it raw,
- * and the REGION contract refuses it by path"), and the ADR-0087 entry's
- * `acceptanceCriteria` states the same thing for whoever migrates a stack.
+ * pinned in `flow.test.ts` ("nested in a region: the flow parse refuses the
+ * `wait` node itself, and the REGION contract still refuses the missing block by
+ * path"), and the ADR-0087 entry's `acceptanceCriteria` states the same thing
+ * for whoever migrates a stack.
+ *
+ * ⚠️ Since #15646 a `wait` nested in a region body meets an EARLIER refusal than
+ * either of those, and it is not about this block: a region body cannot durably
+ * pause, so {@link FLOW_PAUSE_CAPABLE_NODE_TYPES} may not appear in one at all
+ * and the flow parse says so on the node's `type`. ⛔ Do not read the paragraph
+ * above as "a nested block-less `wait` parses" — it no longer does, for a
+ * different reason. The two-door reading it describes still governs every node
+ * type the region rule leaves alone.
  *
  * ⚠️ `boundary_event` gets the contract half ONLY: the platform registers no
  * executor for that type at all (`NO_EXECUTOR` plus a startup `warn`, measured
