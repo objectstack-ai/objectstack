@@ -13,9 +13,10 @@
 // no `skipLibCheck` — so two third-party declarations inside `node_modules`
 // were type-checked, and the per-package `TEST_DEBT` entry that recorded them
 // could not graduate by fixing any code in this repository. The director ruling
-// of 2026-09-16 (maintainer verbatim: 「同意」) settled that as a CONFIG-POLICY
-// question: the build config takes one `extends` line onto the repo root, the
-// way 73 of 79 packages already do, and this file then follows the family
+// of 2026-09-07 (decision batch #66, maintainer verbatim: 「同意」) settled that
+// as a CONFIG-POLICY question: the build config takes one `extends` line onto
+// the repo root, the way 73 of 79 packages already do, and this file then
+// follows the family
 // unchanged. ⛔ No per-package dialect, ⛔ no ratchet keyed on `.pnpm`
 // content-hash paths, ⛔ no residual left behind in `TEST_DEBT`.
 //

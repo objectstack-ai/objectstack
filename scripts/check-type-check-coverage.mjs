@@ -1270,9 +1270,10 @@ const TEST_DEBT = {
 // that also declared no `skipLibCheck` — the sole reason its two third-party
 // declarations were checked at all. The note left the choice to the card
 // because it is a judgement about this repo's CONFIG POLICY and not about this
-// package. The director ruling of 2026-09-16 (maintainer verbatim: 「同意」) made
-// it: the build config takes one `extends` line onto the repo root, the way 73
-// of 79 packages already do, and the sibling then follows unchanged. ⛔ No
+// package. The director ruling of 2026-09-07 (decision batch #66, maintainer
+// verbatim: 「同意」) made it: the build config takes one `extends` line onto the
+// repo root, the way 73 of 79 packages already do, and the sibling then follows
+// unchanged. ⛔ No
 // per-package dialect, ⛔ no ratchet keyed on `.pnpm` content-hash paths that
 // move on an unrelated dependency bump, ⛔ no residual entry here.
 //

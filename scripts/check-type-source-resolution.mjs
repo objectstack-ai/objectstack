@@ -322,9 +322,10 @@ const REPO_ROOT = resolve(HERE, '..');
  * not take the #5286 sibling route when the other seven did: its
  * `tsconfig.json` extended nothing and declared no `skipLibCheck`, so the
  * question was a config-policy one and was left to a ruling. The ruling of
- * 2026-09-16 (maintainer verbatim: 「同意」) aligned that build config to the
- * repo root, after which the sibling goes in unchanged — so this is the same
- * onboarding case as the six above, arriving late rather than a new shape.
+ * 2026-09-07 (decision batch #66, maintainer verbatim: 「同意」) aligned that
+ * build config to the repo root, after which the sibling goes in unchanged — so
+ * this is the same onboarding case as the six above, arriving late rather than
+ * a new shape.
  *
  * Condition 1 is read off the instrument, not asserted: all six deps admitted
  * here are annotated `via tsconfig.test.json` in this gate's own provenance
