@@ -440,7 +440,7 @@
  * `legacy: retiredKey('gone').or(z.string()),` and the same line with
  * `.catch(undefined)` — and each of those leaves a key an author may still
  * write. Both fired on the reading this file shipped before them, both went
- * silent on the first version of `declaresRetiredKeyTombstone`, and both fire
+ * silent on the first version of `declaresUnwritableKey`, and both fire
  * again now: the predicate requires the value to BE the call and nothing after
  * it, and the battery carries them as controls.
  *
@@ -557,6 +557,101 @@
  * finding rather than repaired here: reporting it is a change to the budget for
  * every key, not to this class. The battery carries it as an asserted quiet
  * direction, which is the case that reds the day it is repaired.
+ *
+ * ## The eighth accidental variable #18560 removed — a DECLARING FORM the
+ * vocabulary never learned
+ *
+ * T1 reads a property's VALUE to decide the line declares a schema member, and
+ * until this round the vocabulary it read them with was five alternatives
+ * inside one 130-character regex literal that nobody could enumerate. A form
+ * missing from it is NOT a line judged leniently — it is a line that is not a
+ * key line at all: `memberTellKind` answers `null`, so the row neither fires,
+ * nor spends the #16943 budget, nor earns it on the removed side, and nothing
+ * in the output says a thing. The silence is indistinguishable from a correct
+ * `no`, which is the one failure shape this whole chain is written against.
+ *
+ * ⭐ The counterfactual, RE-DERIVED here rather than inherited from the card
+ * that filed it (objectui#9647 comment 5707064702, a reviewer's reading): this
+ * CLI with `PM_SWEEP_REPO=objectstack-ai/objectui`, over PR objectui#9647's own
+ * diff with the declaration flipped to `no`, at 6dfa3ea77 — exit 0, nine files,
+ * one judged against a declared surface, ZERO tells. The added line is
+ * `onNodeClick: handlerKeyRefusal('onNodeClick', 'runtime-slot', …)` on
+ * `packages/types/src/zod/data-display.zod.ts`.
+ *
+ * ⚠️ And the re-derivation CORRECTS the card on WHICH form carries a widening,
+ * which changes the repair rather than decorating it. The two helpers the card
+ * names are objectui's REFUSAL family (`packages/types/src/zod/tombstone.zod.ts`):
+ * `retirementTombstone()` is `z.never({ error }).optional().describe()` — the
+ * same primitive as this repo's `retiredKey()`, read off the source — and
+ * `handlerKeyRefusal()` is `z.custom<never>(() => false).optional()`, whose own
+ * docblock records that "The predicate refuses EVERYTHING, a live function
+ * included". A key declared through either is a key an author may no LONGER
+ * write. Making those two fire would re-mint on 290 objectui key lines the
+ * exact false positive #17955 removed on 255 objectstack ones — and a false
+ * tell does not cost a word in a comment, it costs the false `yes` the header
+ * above refuses to ask an author for.
+ *
+ * ⭐ The form that DOES carry a widening, and that no seat had named:
+ * `stripImportedDefaults()` (`packages/types/src/zod/imported-defaults.ts`),
+ * whose contract is stated in its own docblock as "the same TypeScript type,
+ * the same keys, the same checks, the same registry metadata and the same
+ * accept set". It returns a LIVE schema, it is spelled at 45 key positions on
+ * the judged objectui surface (measured at objectui 15f01223d), and a key added
+ * through it passed a `Clause-②: no` in silence exactly the way the card
+ * describes — that is the red this round turns.
+ *
+ * ⇒ the repair is the VOCABULARY, as {@link SCHEMA_PROPERTY_FORMS}: a named,
+ * enumerable list the regex is BUILT from, carrying two registers that answer
+ * two different questions and must never be collapsed into one — `pattern`
+ * (what makes the line a KEY LINE) and `writable` (whether the key it declares
+ * is one an author may write). The `writable: false` arm is #17955's decline,
+ * generalised from one helper name to the family, on the SAME positive,
+ * line-local evidence: the value must BE the call and nothing after it, so
+ * `onNodeClick: handlerKeyRefusal(…).or(z.function())` fires and the plain form
+ * does not.
+ *
+ * ⛔ The `no` criterion is not loosened anywhere, and the direction is provable
+ * rather than argued: an unrecognised line reports NOTHING, so no row that
+ * fires today can stop firing when the list grows. Measured against the literal
+ * this replaced, over the legacy forms and the four added ones: every legacy
+ * verdict is byte-identical, and the only cells that move are the four added
+ * forms moving from "not a key line" to "a key line" — one direction, zero
+ * losses. The 342 cases standing before this round still stand.
+ *
+ * ⭐ What the list buys that a longer regex would not: the counterfactual pin.
+ * A frozen fixture roster is asserted EQUAL to the form set, so a form added to
+ * the list without a fixture reds, and a form silently dropped from the list
+ * reds — which is the failure mode that produced this card. Each fixture is
+ * then driven through `tellsInFile` and asserted against its own register: a
+ * `writable` form must FIRE, an unwritable one must be RECOGNISED and DECLINE,
+ * and every unwritable form carries the chained-arm control that fires.
+ *
+ * ⚠️ The CENSUS the card asked for — has the silence already been relied on?
+ * Report-only, and the horizon is stated because a partial is not a zero.
+ * Window: objectui's full history (not shallow, 10,282 commits) up to
+ * `15f01223d` (2026-09-16), of which the judgeable part starts 2026-09-10, when
+ * #17278 first let this CLI be told which board it judges. 46 commits add a key
+ * through one of the four added forms on `packages/types/src/zod/**`; 18 of
+ * them land inside that window. Read: 11 of the 18 carry a declaration in the
+ * PR body — 10 `Clause-②: yes`, 1 (objectui#9443) a "Clause-② carriers" section
+ * attaching `needs:contract-review` with no `yes`/`no` token. NOT ATTEMPTED: 7
+ * carry no declaration in the PR body, whose remaining carrier is the card's
+ * claim comment. ⇒ `Clause-②: no` landings through these forms found: ZERO over
+ * the 11 rows read, with 7 rows unread and named. ⛔ No re-grade follows from
+ * it; the census is a reading about the instrument's exposure, not about a
+ * card.
+ *
+ * ⚠️ The quiet direction this does NOT close, measured on both boards so the
+ * next reader meets it here instead of rediscovering it: a FILE-LOCAL declaring
+ * factory. Both trees mint them — `placeholderFree(` (23 key lines),
+ * `strictIdent(` (12), `emptyProps(` (9) at objectstack 6dfa3ea77;
+ * `chatbotRequestBodyArm(` (2), `retiredDeclarativeKanbanKey(` (1) at objectui
+ * 15f01223d — and a list of shared, exported helpers cannot name a factory
+ * private to one file. ⭐ The OVERTURN CONDITION, written down so it needs no
+ * second discussion: a name-shaped heuristic (`*Refusal(` / `*Arm(` / `*Key(`)
+ * is ⛔ refused, because it would recognise lines on evidence they do not carry;
+ * what closes the class is a reading that resolves the factory's own value, and
+ * the FIRST landed widening through a file-local factory is its card.
  *
  * ## The remedy with no reader — #17848, and a pin the shape never had
  *
@@ -835,6 +930,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the declared registry rows still exist in this tree': 4,
   '#17112 — the count is split: examined is not examinable': 23,
   '#17217 — the CLI can be told which board it judges': 22,
+  '#18560 — the declaring vocabulary is a NAMED list, every form pinned by a counterfactual fixture': 30,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1300,13 +1396,151 @@ export function splitUnifiedDiff(text) {
 const COMMENT_LINE = /^[ \t]*(?:\/\/|\/\*|\*|#)/;
 
 /**
+ * The KEY half of a property line, as regex SOURCE — the one spelling of "a
+ * property name at the head of a line" that every vocabulary below is built
+ * from, so two vocabularies can never disagree about a quoted or
+ * optional-marked name.
+ */
+const KEY_HEAD_SOURCE =
+  "^[ \\t]*(?:'[^']+'|\"[^\"]+\"|\\[[^\\]]+\\]|[A-Za-z_$][\\w$]*)[ \\t]*\\??[ \\t]*:[ \\t]*";
+
+/**
+ * The DECLARING FORMS — the vocabulary `SCHEMA_PROPERTY` is BUILT from, named
+ * and enumerable rather than five alternatives inside one regex literal
+ * (#18560).
+ *
+ * A form missing from here is not a line judged leniently, it is a line that is
+ * not a KEY LINE at all: `memberTellKind` answers `null`, so the row neither
+ * fires, nor spends the #16943 budget, nor earns it on the removed side — and
+ * nothing anywhere says so.
+ *
+ * Two fields carry the two questions, and they are deliberately not one:
+ *
+ *   `pattern` — what the property's VALUE must open with for the line to be
+ *   RECOGNISED as a key line. This is the whole of `SCHEMA_PROPERTY`.
+ *
+ *   `writable` — whether the key that form declares is one an author MAY write.
+ *   A `false` here puts the form in `UNWRITABLE_FORMS` below, where the tell
+ *   DECLINES on the positive, line-local evidence #17955 established. ⛔ It is
+ *   not an exclusion from the vocabulary: the row stays recognised, both sides
+ *   of the budget keep reading one question, and a live arm CHAINED onto the
+ *   helper still fires.
+ *
+ * ⛔ Adding a form here is ADDITIVE by construction — an unrecognised line
+ * reports nothing, so no row that fires today can stop firing when the list
+ * grows. That is why "teach it the form" is the repair and "relax the tell" is
+ * not; the `no` criterion is untouched by every row below.
+ *
+ * ⚠️ `measured` is a count PLUS the tree it was taken against, per this repo's
+ * own rule, and it is a key-POSITION count: `lazySchema(` reads 0 here while
+ * being live at DECLARATION positions (`export const X = lazySchema(…)`), which
+ * is a reason to keep the row and not a reason to drop it — dropping a form is
+ * the failure this list exists to make loud.
+ *
+ * ⚠️ The quiet direction the list does NOT close, measured on both boards so
+ * the next reader meets it here: a FILE-LOCAL declaring factory. Both trees
+ * mint them — `placeholderFree(` (23 key lines), `strictIdent(` (12),
+ * `emptyProps(` (9) at objectstack 6dfa3ea77; `chatbotRequestBodyArm(` (2),
+ * `retiredDeclarativeKanbanKey(` (1) at objectui 15f01223d — and a list of
+ * shared, exported helpers cannot name a factory private to one file. They stay
+ * unrecognised, exactly as before this round; the class is filed as its own
+ * finding rather than guessed at with a name-shaped heuristic here.
+ */
+export const SCHEMA_PROPERTY_FORMS = Object.freeze([
+  Object.freeze({
+    form: 'z.',
+    pattern: 'z\\.',
+    writable: true,
+    where: "zod's own namespace, both boards",
+    measured: '7,784 key lines at objectstack 6dfa3ea77 · 1,482 at objectui 15f01223d',
+  }),
+  Object.freeze({
+    form: 'lazySchema(',
+    pattern: 'lazySchema\\(',
+    writable: true,
+    where: '`packages/spec/src/shared/lazy-schema.ts` — a Proxy over a deferred `z.object`',
+    measured: '0 key lines at objectstack 6dfa3ea77 (live at DECLARATION positions)',
+  }),
+  Object.freeze({
+    form: 'strictObject(',
+    pattern: 'strictObject\\(',
+    writable: true,
+    where: '`packages/spec/src/shared/strict-object.ts`',
+    measured: '47 key lines at objectstack 6dfa3ea77',
+  }),
+  Object.freeze({
+    form: '*Schema',
+    pattern: '[A-Za-z_$][\\w$]*Schema\\b',
+    writable: true,
+    where: 'a schema binding referenced by name, both boards',
+    measured: '995 key lines at objectstack 6dfa3ea77 · 56 at objectui 15f01223d',
+  }),
+  Object.freeze({
+    form: 'stripImportedDefaults(',
+    pattern: 'stripImportedDefaults\\(',
+    writable: true,
+    where: '`packages/types/src/zod/imported-defaults.ts` (objectui) — its docblock: "the same TypeScript type, the same keys, the same checks, the same registry metadata and the same accept set"',
+    measured: '45 key lines at objectui 15f01223d',
+  }),
+  Object.freeze({
+    form: 'retiredKey(',
+    pattern: 'retiredKey\\(',
+    writable: false,
+    where: '`packages/spec/src/shared/retired-key.ts` — `z.never(…).optional()`',
+    measured: '255 key lines at objectstack 6dfa3ea77',
+  }),
+  Object.freeze({
+    form: 'retirementTombstone(',
+    pattern: 'retirementTombstone\\(',
+    writable: false,
+    where: '`packages/types/src/zod/tombstone.zod.ts` (objectui) — `z.never({ error }).optional().describe()`, the same primitive as `retiredKey`',
+    measured: '187 key lines at objectui 15f01223d',
+  }),
+  Object.freeze({
+    form: 'handlerKeyRefusal(',
+    pattern: 'handlerKeyRefusal\\(',
+    writable: false,
+    where: '`packages/types/src/zod/tombstone.zod.ts` (objectui) — `z.custom<never>(() => false)`, whose docblock reads "The predicate refuses EVERYTHING, a live function included"',
+    measured: '90 key lines at objectui 15f01223d',
+  }),
+  Object.freeze({
+    form: 'aliasKeyRefusal(',
+    pattern: 'aliasKeyRefusal\\(',
+    writable: false,
+    where: '`packages/types/src/zod/tombstone.zod.ts` (objectui) — `z.never({ error })` naming the canonical spelling',
+    measured: '13 key lines at objectui 15f01223d',
+  }),
+]);
+
+/**
+ * The forms whose value declares a key UNWRITABLE — recognised, then declined.
+ *
+ * ⛔ Every pattern here must END at the helper's open paren, because
+ * {@link declaresUnwritableKey} reads the match's own length to find that paren
+ * and hand it to `matchingCloser`. A form that ended anywhere else would make
+ * the "is the value the call and NOTHING after it" reading answer about the
+ * wrong character — silently, and in the direction that declines a live arm. So
+ * it is refused at module load rather than pinned only in the self-test: a
+ * malformed vocabulary must not be a gate that runs.
+ */
+function closingAtItsOwnParen(f) {
+  if (f.pattern.endsWith('\\(')) return f;
+  throw new Error(
+    `check-widening-tells: unwritable declaring form "${f.form}" has a pattern that does not end at its open paren ` +
+      `(${f.pattern}) — \`declaresUnwritableKey\` locates the call's paren by the match length, so this form would ` +
+      `decline or fire on the wrong character. Give it a \`helper\\(\`-shaped pattern, or make it \`writable\`.`,
+  );
+}
+const UNWRITABLE_FORMS = Object.freeze(
+  SCHEMA_PROPERTY_FORMS.filter((f) => !f.writable).map(closingAtItsOwnParen),
+);
+
+/**
  * T1 — a property whose value is a SCHEMA.
  *
- * Calibrated against the real tree rather than guessed (measured 2026-09-07 over
- * `packages/spec/src/**`): 8,102 property lines take a `z.` value, and the
- * whole non-`z.` schema vocabulary beneath them is `retiredKey(` (235),
- * `I18nLabelSchema` and its `*Schema` siblings (≈300), `strictObject(` (46) and
- * `lazySchema(`. Requiring a schema-shaped VALUE is what keeps the tell off the
+ * Calibrated against the real tree rather than guessed — the calibration now
+ * lives per row in {@link SCHEMA_PROPERTY_FORMS}, which this regex is BUILT
+ * from. Requiring a schema-shaped VALUE is what keeps the tell off the
  * 1,655 `x: true` / 1,170 `x: string` lines that are object literals and type
  * annotations, not accept-set members.
  *
@@ -1321,7 +1555,9 @@ const COMMENT_LINE = /^[ \t]*(?:\/\/|\/\*|\*|#)/;
  * declines. Absence of that evidence leaves the match firing, so the regex
  * above is still the whole tell wherever the hunk says nothing.
  */
-const SCHEMA_PROPERTY = /^[ \t]*(?:'[^']+'|"[^"]+"|\[[^\]]+\]|[A-Za-z_$][\w$]*)[ \t]*\??[ \t]*:[ \t]*(?:z\.|lazySchema\(|strictObject\(|retiredKey\(|[A-Za-z_$][\w$]*Schema\b)/;
+const SCHEMA_PROPERTY = new RegExp(
+  `${KEY_HEAD_SOURCE}(?:${SCHEMA_PROPERTY_FORMS.map((f) => f.pattern).join('|')})`,
+);
 
 /** T2 — a closed set DECLARED or re-written on one line. */
 const CLOSED_SET_OPENER = /z\.(?:enum|union|discriminatedUnion|literal)\(/;
@@ -1801,8 +2037,9 @@ export function replacesUniversalAcceptorKey(text, removedTexts) {
  * not the diff's head and resolving anything against it answers about the wrong
  * commit — in the direction that keeps the false positive.
  */
-const RETIRED_KEY_TOMBSTONE =
-  /^[ \t]*(?:'[^']+'|"[^"]+"|\[[^\]]+\]|[A-Za-z_$][\w$]*)[ \t]*\??[ \t]*:[ \t]*retiredKey\(/;
+const UNWRITABLE_KEY_DECLARATION = new RegExp(
+  `${KEY_HEAD_SOURCE}(?:${UNWRITABLE_FORMS.map((f) => f.pattern).join('|')})`,
+);
 
 /** What may follow the balancing paren when the call closes on the key line. */
 const TOMBSTONE_TAIL = /^[ \t]*,?[ \t]*$/;
@@ -1831,13 +2068,23 @@ function withoutComments(text) {
 }
 
 /**
+ * #18560 — the reading is the FAMILY's, not one helper's. The helper name is
+ * now read from {@link UNWRITABLE_FORMS} rather than spelled here, so the
+ * vocabulary and the decline can never name different sets: a form declared
+ * `writable: false` is recognised by `SCHEMA_PROPERTY` and declined by this
+ * predicate in the same edit, and a form added to one register and not the
+ * other fails the counterfactual battery. objectui's three refusal helpers
+ * (`retirementTombstone`, `handlerKeyRefusal`, `aliasKeyRefusal`) join
+ * `retiredKey` here on the measured ground that each one's value refuses every
+ * input — ⛔ not on their names, and ⛔ not on the file they live in.
+ *
  * @param {string} text — one patch line's text, with its `+` / `-` already stripped
- * @returns {boolean} true when the line declares a `retiredKey()` tombstone
+ * @returns {boolean} true when the line declares a key UNWRITABLE
  */
-export function declaresRetiredKeyTombstone(text) {
+export function declaresUnwritableKey(text) {
   const s = String(text ?? '');
   if (COMMENT_LINE.test(s)) return false;
-  const opening = RETIRED_KEY_TOMBSTONE.exec(s);
+  const opening = UNWRITABLE_KEY_DECLARATION.exec(s);
   if (opening === null) return false;
   const open = opening[0].length - 1;
   const close = matchingCloser(s, open);
@@ -2082,7 +2329,7 @@ export function tellsInFile(file, { repo = THIS_REPO, licensed = null } = {}) {
       // and letting the tombstone pay for it would trade this file's loud
       // failure for a silent one on the only diff shape that re-opens an accept
       // set the tree had already closed.
-      if (kind === 'T1' && declaresRetiredKeyTombstone(r.text)) continue;
+      if (kind === 'T1' && declaresUnwritableKey(r.text)) continue;
       if (kind !== null) budget.set(kind, (budget.get(kind) ?? 0) + 1);
     }
     for (const i of block) {
@@ -2123,7 +2370,7 @@ export function tellsInFile(file, { repo = THIS_REPO, licensed = null } = {}) {
     // genuine member. A tombstone carries its own evidence on its own line and
     // takes nothing from the block, so a genuine key beside it still has the
     // full budget to pay with — and fires when it cannot.
-    if (kind === 'T1' && declaresRetiredKeyTombstone(text)) continue;
+    if (kind === 'T1' && declaresUnwritableKey(text)) continue;
     // #16943 — a member or key this block REPLACED is not a net addition.
     //
     // ⛔ A line that DECLARES a closed set is never spent against the budget,
@@ -3090,23 +3337,23 @@ export function selfTest() {
   t('⛔ …but a THIRD genuine key in that block still has nothing to pay with, and fires', tells({ filename: TOMBSTONE_FILE, status: 'modified', patch: "@@ -30,1 +30,3 @@\n-  schemaCacheTTL: z.number(),\n+  schemaCacheTtlSeconds: z.number(),\n+  schemaCacheTTL: retiredKey('x'),\n+  brandNew: z.string()," })[0]?.text === 'brandNew: z.string(),');
 
   // -- the reader itself -----------------------------------------------------
-  t('`declaresRetiredKeyTombstone` reads a key whose value opens the helper', declaresRetiredKeyTombstone("  legacy: retiredKey('gone'),") === true);
-  t('…in every key spelling `SCHEMA_PROPERTY` admits — quoted, and optional-marked', declaresRetiredKeyTombstone("  'a.b': retiredKey(") === true && declaresRetiredKeyTombstone('  legacy?: retiredKey(') === true);
-  t('⛔ …and declines a value that is not the helper', declaresRetiredKeyTombstone('  legacy: z.string(),') === false);
-  t('⛔ …a bare call that names no key — a tombstone is a PROPERTY, not an expression', declaresRetiredKeyTombstone("  retiredKey('gone'),") === false);
-  t('⛔ …and the same text in a COMMENT', declaresRetiredKeyTombstone("  // legacy: retiredKey('gone'),") === false);
-  t('⛔ …and a value that OPENS the call but chains onto its result — the value must BE the call and nothing after it', declaresRetiredKeyTombstone("  legacy: retiredKey('gone').or(z.string()),") === false && declaresRetiredKeyTombstone("  legacy: retiredKey('gone').catch(undefined),") === false);
-  t('⭐ …while BOTH spellings this tree actually uses still read as tombstones — 76 close the call on the key line, 178 do not', declaresRetiredKeyTombstone("  legacy: retiredKey('gone'),") === true && declaresRetiredKeyTombstone('  legacy: retiredKey(') === true);
-  t('…a trailing comment is not a chained arm, on either spelling', declaresRetiredKeyTombstone("  legacy: retiredKey('gone'), // ADR-0087") === true && declaresRetiredKeyTombstone('  legacy: retiredKey( // the prescription is below') === true);
-  t('…and a prescription that closes its OWN parens on the key line is still the call and nothing after it', declaresRetiredKeyTombstone("  legacy: retiredKey(useInstead('x')),") === true && declaresRetiredKeyTombstone('  legacy: retiredKey(LEGACY_PRESCRIPTION),') === true);
-  t('⛔ …but a paren inside the prescription STRING cannot close the call early and let a chain through', declaresRetiredKeyTombstone("  legacy: retiredKey('call foo(bar) instead'),") === true && declaresRetiredKeyTombstone("  legacy: retiredKey('call foo(bar) instead').or(z.string()),") === false);
+  t('`declaresUnwritableKey` reads a key whose value opens the helper', declaresUnwritableKey("  legacy: retiredKey('gone'),") === true);
+  t('…in every key spelling `SCHEMA_PROPERTY` admits — quoted, and optional-marked', declaresUnwritableKey("  'a.b': retiredKey(") === true && declaresUnwritableKey('  legacy?: retiredKey(') === true);
+  t('⛔ …and declines a value that is not the helper', declaresUnwritableKey('  legacy: z.string(),') === false);
+  t('⛔ …a bare call that names no key — a tombstone is a PROPERTY, not an expression', declaresUnwritableKey("  retiredKey('gone'),") === false);
+  t('⛔ …and the same text in a COMMENT', declaresUnwritableKey("  // legacy: retiredKey('gone'),") === false);
+  t('⛔ …and a value that OPENS the call but chains onto its result — the value must BE the call and nothing after it', declaresUnwritableKey("  legacy: retiredKey('gone').or(z.string()),") === false && declaresUnwritableKey("  legacy: retiredKey('gone').catch(undefined),") === false);
+  t('⭐ …while BOTH spellings this tree actually uses still read as tombstones — 76 close the call on the key line, 178 do not', declaresUnwritableKey("  legacy: retiredKey('gone'),") === true && declaresUnwritableKey('  legacy: retiredKey(') === true);
+  t('…a trailing comment is not a chained arm, on either spelling', declaresUnwritableKey("  legacy: retiredKey('gone'), // ADR-0087") === true && declaresUnwritableKey('  legacy: retiredKey( // the prescription is below') === true);
+  t('…and a prescription that closes its OWN parens on the key line is still the call and nothing after it', declaresUnwritableKey("  legacy: retiredKey(useInstead('x')),") === true && declaresUnwritableKey('  legacy: retiredKey(LEGACY_PRESCRIPTION),') === true);
+  t('⛔ …but a paren inside the prescription STRING cannot close the call early and let a chain through', declaresUnwritableKey("  legacy: retiredKey('call foo(bar) instead'),") === true && declaresUnwritableKey("  legacy: retiredKey('call foo(bar) instead').or(z.string()),") === false);
   // ⭐ The landed shape a literal reading of "nothing may follow `retiredKey(`"
   // re-breaks: the prescription helper's own ARGUMENTS continue on the next
   // line, so the key line ends INSIDE the argument list rather than at the open
   // paren. 30 of this tree's 254 judged tombstones are spelled this way, all in
   // `packages/spec/src/data/driver.zod.ts`, and each one fires T1 again — the
   // very false positive this reading exists to remove — if this case weakens.
-  t('⭐ a prescription helper whose ARGUMENTS continue on the next line is still a tombstone — 30 landed lines take this shape', declaresRetiredKeyTombstone("  create: retiredKey(capRemoved('create',") === true);
+  t('⭐ a prescription helper whose ARGUMENTS continue on the next line is still a tombstone — 30 landed lines take this shape', declaresUnwritableKey("  create: retiredKey(capRemoved('create',") === true);
   t('⭐ the vocabulary is INTACT — `memberTellKind` still classifies a tombstone as a key of kind T1, so both sides of the budget read one question', memberTellKind("  legacy: retiredKey('gone'),", { onContractSource: true }) === 'T1');
 
   // ⚠️ The residual QUIET direction, asserted rather than described so the next
@@ -3515,6 +3762,133 @@ export function selfTest() {
   t('⛔ the objectui row is STILL inert for a THIS_REPO run — the scoping is unchanged', !surfaceCovers(CONTRACT_SOURCE_SURFACES, MIRROR, THIS_REPO) && surfaceCovers(CONTRACT_SOURCE_SURFACES, MIRROR, OBJECTUI));
   t('…and the census reports that as "covered, for another repo", never as uncovered', fileCoverage({ filename: MIRROR, status: 'modified' }).state === 'other-repo');
   t('…naming which repo, so the reader knows what to re-run', fileCoverage({ filename: MIRROR, status: 'modified' }).repos.join(',') === OBJECTUI);
+
+  // -- #18560 ----------------------------------------------------------------
+  //
+  // The counterfactual pin. Its unit is the FORM, not the assertion: a frozen
+  // fixture roster is asserted EQUAL to the form set, so a form added to the
+  // list without a fixture reds and a form silently dropped from the list reds.
+  // ⛔ The fixtures are NOT generated from the list — a generated fixture would
+  // make every future form pass by construction, which is the shape this card
+  // exists because of.
+  battery('#18560 — the declaring vocabulary is a NAMED list, every form pinned by a counterfactual fixture');
+  const OS_SURFACE = 'packages/spec/src/kernel/manifest.zod.ts';
+  const UI_SURFACE = 'packages/types/src/zod/data-display.zod.ts';
+  const UI_BOARD = 'objectstack-ai/objectui';
+  const FORM_FIXTURES = Object.freeze({
+    'z.': { line: '+  cursor: z.string().optional(),', file: OS_SURFACE, repo: THIS_REPO },
+    'lazySchema(': { line: '+  retry: lazySchema(() => RetryPolicySchema),', file: OS_SURFACE, repo: THIS_REPO },
+    'strictObject(': { line: '+  window: strictObject({ from: z.string() }),', file: OS_SURFACE, repo: THIS_REPO },
+    '*Schema': { line: '+  retry: RetryPolicySchema.optional(),', file: OS_SURFACE, repo: THIS_REPO },
+    'stripImportedDefaults(': {
+      line: "+  id: stripImportedDefaults(SpecNavigationAreaSchema).shape.id.describe('Unique identifier'),",
+      file: UI_SURFACE,
+      repo: UI_BOARD,
+    },
+    'retiredKey(': { line: "+  legacy: retiredKey('gone'),", file: OS_SURFACE, repo: THIS_REPO },
+    'retirementTombstone(': {
+      line: "+  body: retirementTombstone('body is RETIRED (ADR-0049) — author content instead.'),",
+      file: UI_SURFACE,
+      repo: UI_BOARD,
+    },
+    'handlerKeyRefusal(': {
+      line: "+  onNodeClick: handlerKeyRefusal('onNodeClick', 'runtime-slot', 'Node click handler'),",
+      file: UI_SURFACE,
+      repo: UI_BOARD,
+    },
+    'aliasKeyRefusal(': {
+      line: "+  chartType: aliasKeyRefusal('chartType', 'type', 'this chart series', 'Write type.'),",
+      file: UI_SURFACE,
+      repo: UI_BOARD,
+    },
+  });
+  const fixtureRows = (fx) => tellsInFile({ filename: fx.file, status: 'modified', patch: patchOf(30, fx.line) }, { repo: fx.repo });
+  const formNames = SCHEMA_PROPERTY_FORMS.map((f) => f.form);
+  const fixtureNames = Object.keys(FORM_FIXTURES);
+  const missingFixture = formNames.filter((n) => !fixtureNames.includes(n));
+  const orphanFixture = fixtureNames.filter((n) => !formNames.includes(n));
+  t(
+    `⭐ every form in the list has a counterfactual fixture — a new form with no fixture reds HERE${missingFixture.length ? ` (missing: ${missingFixture.join(', ')})` : ''}`,
+    missingFixture.length === 0,
+  );
+  t(
+    `⭐ …and every fixture names a form still IN the list — a form silently dropped reds HERE${orphanFixture.length ? ` (orphaned: ${orphanFixture.join(', ')})` : ''}`,
+    orphanFixture.length === 0,
+  );
+  t('…the list is not empty, and carries BOTH registers — a one-register list is a vocabulary that forgot the decline', SCHEMA_PROPERTY_FORMS.some((f) => f.writable) && SCHEMA_PROPERTY_FORMS.some((f) => !f.writable));
+  t('⛔ every unwritable form ENDS at its open paren, the character `declaresUnwritableKey` hands to `matchingCloser`', SCHEMA_PROPERTY_FORMS.filter((f) => !f.writable).every((f) => f.pattern.endsWith('\\(')));
+  t('…and every row carries its own measurement WITH the tree it was taken against — a count with no tree is not a reading', SCHEMA_PROPERTY_FORMS.every((f) => typeof f.measured === 'string' && /\b(?:objectstack|objectui) [0-9a-f]{7,}/.test(f.measured)));
+
+  // RECOGNITION is the first half and it is asserted for EVERY form, writable
+  // or not: an unrecognised line is invisible to both sides of the #16943
+  // budget, which is the defect itself rather than a consequence of it.
+  for (const [form, fx] of Object.entries(FORM_FIXTURES)) {
+    t(`\`${form}\` is RECOGNISED as a key line — \`memberTellKind\` answers T1`, memberTellKind(fx.line.slice(1), { onContractSource: true }) === 'T1');
+  }
+  // The VERDICT is the second half, and each form is asserted against its own
+  // register rather than against one expectation for all nine.
+  for (const f of SCHEMA_PROPERTY_FORMS) {
+    const fx = FORM_FIXTURES[f.form];
+    const rows = fx ? fixtureRows(fx) : [];
+    if (f.writable) {
+      t(`⭐ \`${f.form}\` declares a WRITABLE key, so a \`Clause-②: no\` diff carrying it FIRES — with its own file:line`, rows.length === 1 && rows[0]?.tell === 'T1' && rows[0]?.line === 30);
+    } else {
+      t(`⭐ \`${f.form}\` declares a key UNWRITABLE, so it is recognised and DECLINES — a stated silence, never an unseen line`, rows.length === 0 && declaresUnwritableKey(fx.line.slice(1)) === true);
+    }
+  }
+  // ⛔ The decline is bound to the evidence the line carries, never to the
+  // helper's name: chain a live arm onto the refusal and the key is writable
+  // again, so the same fixture FIRES. #17955 established this for `retiredKey`
+  // and it is asserted here for every member of the family.
+  for (const f of SCHEMA_PROPERTY_FORMS.filter((x) => !x.writable)) {
+    const fx = FORM_FIXTURES[f.form];
+    const chained = { ...fx, line: `${fx.line.replace(/,$/, '')}.or(z.string()),` };
+    t(`⛔ …and a live arm CHAINED onto \`${f.form}\` leaves the key writable, so it FIRES`, fixtureRows(chained)[0]?.tell === 'T1');
+  }
+
+  // -- the objectui#9647 shape, and the red this round turns ------------------
+  const NINE647_LINE = "+  onNodeClick: handlerKeyRefusal('onNodeClick', 'runtime-slot', 'Node click handler'),";
+  const nine647 = { filename: UI_SURFACE, status: 'modified', patch: patchOf(551, NINE647_LINE) };
+  t('⭐ the objectui#9647 line is now SEEN — before this round `memberTellKind` answered `null` on it', memberTellKind(NINE647_LINE.slice(1), { onContractSource: true }) === 'T1');
+  t('…and it DECLINES, because a refusal arm takes a spelling away rather than adding one', tellsInFile(nine647, { repo: UI_BOARD }).length === 0 && declaresUnwritableKey(NINE647_LINE.slice(1)) === true);
+  t('…so a correct `Clause-②: no` on that PR still reads CLEAN end to end', wideningRefusal({ declaration: 'no', files: [nine647], repo: UI_BOARD }).state === 'clean');
+  // ⭐ THE COUNTERFACTUAL: the same objectui arm, widened through the LIVE
+  // declaring helper the card had not named. This is the row that was silent at
+  // 6dfa3ea77 and is refused now.
+  const widened = {
+    filename: UI_SURFACE,
+    status: 'modified',
+    patch: patchOf(551, "+  density: stripImportedDefaults(SpecTreeViewSchema).shape.density.describe('Row density'),"),
+  };
+  t('⭐ THE FINDING: a key added to the objectui mirror through `stripImportedDefaults(` is a widening, and it FIRES', tellsInFile(widened, { repo: UI_BOARD })[0]?.tell === 'T1');
+  t('…at the line the author can open', tellsInFile(widened, { repo: UI_BOARD })[0]?.line === 551);
+  t('…and the whole verdict is a REFUSAL, not a clean reading', wideningRefusal({ declaration: 'no', files: [widened], repo: UI_BOARD }).state === 'refused');
+  t('⛔ CONTROL — the identical diff with `Clause-②: yes` is not refused: this file never blocks the honest declaration', wideningRefusal({ declaration: 'yes', files: [widened], repo: UI_BOARD }).state !== 'refused');
+  t('⛔ CONTROL — the same widening on the DEFAULT board is not judged, so the board resolution is still what decides it', wideningRefusal({ declaration: 'no', files: [widened] }).state !== 'refused');
+
+  // -- the vocabulary only ever GREW ------------------------------------------
+  //
+  // ⭐ The literal this round replaced, kept HERE as the reference rather than
+  // described in prose: every legacy verdict must be byte-identical, and the
+  // only cells allowed to move are the four added forms moving from "not a key
+  // line" to "a key line". One direction, zero losses — which is what makes
+  // this a strengthening and not a change to the `no` criterion.
+  const LEGACY_SCHEMA_PROPERTY =
+    /^[ \t]*(?:'[^']+'|"[^"]+"|\[[^\]]+\]|[A-Za-z_$][\w$]*)[ \t]*\??[ \t]*:[ \t]*(?:z\.|lazySchema\(|strictObject\(|retiredKey\(|[A-Za-z_$][\w$]*Schema\b)/;
+  const ADDED_FORMS = ['stripImportedDefaults(', 'retirementTombstone(', 'handlerKeyRefusal(', 'aliasKeyRefusal('];
+  const legacyProbes = [
+    ...Object.entries(FORM_FIXTURES).map(([form, fx]) => ({ text: fx.line.slice(1), added: ADDED_FORMS.includes(form) })),
+    { text: '  enabled: true,', added: false },
+    { text: '  name: string;', added: false },
+    { text: '  // cursor: z.string(),', added: false },
+    { text: '  ctx: z.RefinementCtx,', added: false },
+  ];
+  const grew = legacyProbes.filter((p) => !LEGACY_SCHEMA_PROPERTY.test(p.text) && SCHEMA_PROPERTY.test(p.text));
+  const lost = legacyProbes.filter((p) => LEGACY_SCHEMA_PROPERTY.test(p.text) && !SCHEMA_PROPERTY.test(p.text));
+  t('⭐ ⛔ NOTHING the legacy literal recognised is unrecognised now — a vocabulary that SHRANK is the failure this list is against', lost.length === 0);
+  t('…and every cell that moved is one of the four forms this round added, never a line that merely looks new', grew.length === ADDED_FORMS.length && grew.every((p) => p.added));
+  t('⛔ …a comment is still not a key line, whichever vocabulary reads it', memberTellKind('  // cursor: z.string(),', { onContractSource: true }) === null);
+  t('⛔ …and #17618’s parameter decline is untouched by the wider vocabulary', tellsInFile({ filename: OS_SURFACE, status: 'modified', patch: '@@ -30,0 +30,3 @@\n+export const refine = (\n+  ctx: z.RefinementCtx,\n+) => ctx;' }).length === 0);
 
   // -- the floor -------------------------------------------------------------
   const floorFailures = [];

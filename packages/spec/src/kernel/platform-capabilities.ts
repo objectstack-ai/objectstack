@@ -47,7 +47,15 @@ export const PLATFORM_CAPABILITY_TOKENS: readonly string[] = Object.freeze([
   'triggers',
   'realtime',
   'mcp',
+  // `marketplace` and `package-registry` are two capabilities, not one token
+  // spelled twice (#17676 ruling A' item 1). A package is a first-class
+  // persistent entity whether or not the deployment has a store, so the
+  // PERSISTENCE half — the `sys_packages` container and the boot hydration
+  // that replays it — is a core capability named for what it is and mounted
+  // always (see {@link PLATFORM_ALWAYS_ON_CAPABILITIES}); `marketplace` is
+  // left naming only the optional catalogue / browsing half.
   'marketplace',
+  'package-registry',
   'email',
   'sms',
   'sharing',
@@ -155,6 +163,20 @@ export const PLATFORM_CAPABILITY_PROVIDERS: Readonly<Record<string, PlatformCapa
     realtime: { package: '@objectstack/service-realtime', edition: 'open' },
     mcp: { package: '@objectstack/mcp', edition: 'open' },
     marketplace: { package: '@objectstack/service-package', edition: 'open' },
+    // ⚠️ The SAME package as `marketplace` above, and that is a measured fact
+    // about the distribution rather than a duplicate row: today
+    // `@objectstack/service-package` ships exactly one plugin
+    // (`PackageServicePlugin`), and everything it does is the persistence half
+    // this token names — it creates `sys_packages`, replays it at `start()`,
+    // and serves publish/get/list/delete over it. The catalogue / browsing
+    // surface `marketplace` is left naming ships elsewhere entirely
+    // (`MarketplaceProxyPlugin` / `MarketplaceInstallLocalPlugin` in
+    // `@objectstack/cloud-connection`, mounted off a resolved marketplace URL,
+    // ADR-0008). So the two rows agreeing on a package is what the carve-out
+    // INHERITED, not what it decided: repointing `marketplace` at the browse
+    // surface moves the runtime's own resolver with it and is #17676's
+    // engine-lane half, which this row deliberately does not pre-empt.
+    'package-registry': { package: '@objectstack/service-package', edition: 'open' },
     email: { package: '@objectstack/plugin-email', edition: 'open' },
     sms: { package: '@objectstack/service-sms', edition: 'open' },
     sharing: { package: '@objectstack/plugin-sharing', edition: 'open' },
@@ -313,6 +335,24 @@ export const PLATFORM_ALWAYS_ON_CAPABILITIES: readonly string[] = Object.freeze(
   // authored/previewed inline (Studio) and compiled on the fly. Without it the
   // dataset preview + dashboard/report analytics widgets silently no-op.
   'analytics',
+  // `package-registry` is foundational per #17676 ruling A' (decision batch
+  // #125 item 2): a package is a first-class persistent entity whether or not
+  // the deployment has a marketplace, so `sys_packages` and its boot
+  // hydration must exist on a stock boot. Without it `protocol.installPackage`
+  // / `updatePackage` fall back to their in-memory branches and an
+  // admin-created package does not survive a restart. It binds into nothing on
+  // this slate (its only hard requirement is the ObjectQL engine, which is not
+  // a capability token), so it joins the TAIL like any other reader.
+  //
+  // ⚠️ SCOPE, measured on `serve`'s capability resolver at c17ff70f3f: a slate
+  // entry is force-appended to every app's `requires`, and the CLI then mounts
+  // it only if `Serve.CAPABILITY_PROVIDERS` keys the token. That registry keys
+  // `marketplace`, not this token, so under `objectstack serve` this entry is
+  // inert until the runtime half of the same ruling lands (#17676 items 2/3/5,
+  // the engine lane). The declaration is deliberately first: it is the single
+  // list both runtimes read, and the thing the runtime half is written
+  // against.
+  'package-registry',
 ]);
 
 /**

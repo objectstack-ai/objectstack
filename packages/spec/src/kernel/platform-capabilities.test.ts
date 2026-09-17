@@ -269,7 +269,7 @@ describe('PLATFORM_ALWAYS_ON_CAPABILITIES', () => {
         [...PLATFORM_ALWAYS_ON_CAPABILITIES, 'secrets'],
         [...BIND_TARGETS, 'secrets'],
       ),
-    ).toEqual(['email', 'storage', 'sms', 'sharing', 'messaging', 'analytics']);
+    ).toEqual(['email', 'storage', 'sms', 'sharing', 'messaging', 'analytics', 'package-registry']);
   });
 
   it('every member is a real platform capability token', () => {
@@ -297,5 +297,66 @@ describe('PLATFORM_ALWAYS_ON_CAPABILITIES', () => {
       (c) => PLATFORM_CAPABILITY_PROVIDERS[c]?.edition !== 'open',
     );
     expect(gated).toEqual([]);
+  });
+});
+
+/**
+ * #17676 ruling A' item 1 (decision batch #125 item 2, maintainer verbatim
+ * 「同意」): the package-registry PERSISTENCE — the `sys_packages` container and
+ * the boot hydration that replays it — is carved out of `marketplace` into an
+ * always-on core capability named for what it is; `marketplace` is left naming
+ * only the optional catalogue / browsing half.
+ *
+ * BOTH halves are asserted here, because only the pair states the ruling. A
+ * case that checked the new token alone would stay green on a slate that
+ * force-mounted `marketplace` as well — which is the outcome the ruling refused
+ * ("a token advertising a store that is not there"), and the reason the split
+ * exists rather than a rename.
+ */
+describe("package-registry carve-out (#17676 ruling A')", () => {
+  it('is its own vocabulary token — the persistence is named, not spelled `marketplace`', () => {
+    expect(PLATFORM_CAPABILITY_TOKENS).toContain('package-registry');
+    expect(isKnownPlatformCapability('package-registry')).toBe(true);
+    // The catalogue half keeps its token: this is a SPLIT, so the vocabulary
+    // must carry two tokens afterwards, not one renamed one.
+    expect(PLATFORM_CAPABILITY_TOKENS).toContain('marketplace');
+  });
+
+  it('has exactly ONE spelling — no second dialect for the same capability', () => {
+    // The single-list rule this file already enforces against the removed
+    // camelCase aliases, applied to the new token while its spelling is still
+    // young: the near-misses a later author could reach for must stay unknown,
+    // or `requires` grows two ways to ask for one service and the runtimes are
+    // free to resolve different ones.
+    for (const nearMiss of ['packages', 'package', 'sys-packages', 'package-store', 'packageRegistry']) {
+      expect(PLATFORM_CAPABILITY_TOKENS, `'${nearMiss}' must not be a second spelling`).not.toContain(
+        nearMiss,
+      );
+      expect(isKnownPlatformCapability(nearMiss)).toBe(false);
+    }
+  });
+
+  it('is mounted ALWAYS, and the catalogue half is NOT — the ruling, both ways round', () => {
+    expect(PLATFORM_ALWAYS_ON_CAPABILITIES).toContain('package-registry');
+    // Browsing stays optional: an app that wants a store still declares it.
+    expect(PLATFORM_ALWAYS_ON_CAPABILITIES).not.toContain('marketplace');
+  });
+
+  it('resolves through an open-edition provider — a floor entry must mount without a licence', () => {
+    const provider = PLATFORM_CAPABILITY_PROVIDERS['package-registry'];
+    expect(provider, 'the carved-out token needs its own provider row').toBeTruthy();
+    expect(provider.edition).toBe('open');
+    expect(provider.package).toBe('@objectstack/service-package');
+  });
+
+  it('classifies like any other open-edition service — never as a typo', () => {
+    // The authoring-time half: `defineStack` rejects a token the vocabulary
+    // does not carry, and the preflight reads the classifier. A carve-out that
+    // added the slate entry without the provider row would surface HERE, as an
+    // `unknown` on a token every app now force-declares.
+    expect(classifyRequiredCapability('package-registry', () => true).status).toBe('ok');
+    const absent = classifyRequiredCapability('package-registry', () => false);
+    expect(absent.status).toBe('installable');
+    expect(absent.provider?.package).toBe('@objectstack/service-package');
   });
 });

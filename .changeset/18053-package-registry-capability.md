@@ -1,0 +1,12 @@
+---
+"@objectstack/spec": minor
+---
+
+`package-registry` is a platform capability of its own, and an always-on one: the `sys_packages` container and the boot hydration that replays it no longer hide behind the `marketplace` token, which is left naming only the optional catalogue / browsing half (#18053, director ruling A′ on #17676).
+
+A package is a first-class persistent entity whether or not a deployment has a store — an admin-created package does not depend on the marketplace existing. Until now the only way to get the persistence was `requires: ['marketplace']`, so a stock boot had no `sys_packages` at all and `protocol.installPackage` / `updatePackage` fell back to their in-memory branches: an admin-created package did not survive a restart, under a token advertising a store that was not there.
+
+- **`PLATFORM_CAPABILITY_TOKENS` gains `package-registry`** — one new token, none removed, so `marketplace` keeps working exactly as before for anyone who declares it. The vocabulary is a closed set validated by `defineStack`, so this widens what an app may write, and nothing it already writes stops parsing.
+- **`PLATFORM_ALWAYS_ON_CAPABILITIES` gains `package-registry` at the tail.** The slate's ordering contract is a role, not a count: the entry binds into nothing on the slate (its one hard requirement is the ObjectQL engine, which is not a capability token), so it joins after every bind target like any other reader. `--preset minimal` still opts out of the whole slate.
+- **`PLATFORM_CAPABILITY_PROVIDERS` gains a row naming `@objectstack/service-package`, `open` edition** — the same package `marketplace` names today, because that package ships exactly one plugin and everything it does is the persistence half. The catalogue surface `marketplace` is left naming ships in `@objectstack/cloud-connection` and is mounted off a resolved marketplace URL, never through the token; repointing the `marketplace` row at it moves the runtime's own resolver with it and is the engine-lane half of the same ruling (#17676 items 2/3/5).
+- ⚠️ **Declaration first, runtime second — measured, not assumed.** `objectstack serve` mounts a slate entry only when `Serve.CAPABILITY_PROVIDERS` keys the token, and that registry keys `marketplace`. Until the engine-lane half lands, appending `package-registry` mounts nothing under the standalone CLI: a stock boot is exactly as capable as before, no more and no less. This package is the single list both the CLI and cloud's per-tenant runtime read, which is why the declaration is the half that goes first.
