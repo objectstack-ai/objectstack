@@ -152,14 +152,35 @@ describe('[#5532] an unreadable metadata store reaches the client as a retryable
 });
 
 describe('[#5532 / fix C] a real miss reaches the client as a coded 404', () => {
-    it('404 + RESOURCE_NOT_FOUND, with the caller-facing message intact', async () => {
+    it('404 + RESOURCE_NOT_FOUND, answered by the route`s ONE absence emitter', async () => {
         const { rest } = setup({ getMetaItem: vi.fn().mockRejectedValue(itemNotFound()) });
 
         const res = await callMetaItem(rest, { type: 'object', name: 'acct' });
 
+        // What #5532 bought, unchanged: the miss is a CODED 404 and not the
+        // unattributable 500 the un-coded throw used to become (§ the last case
+        // in this block still measures that).
         expect(res.statusCode).toBe(404);
-        expect(res.body.code).toBe('RESOURCE_NOT_FOUND');
-        expect(res.body.error).toBe('Metadata item object/acct not found');
+
+        // [#18402] The ENVELOPE moved, and only the envelope. This assertion
+        // read `res.body.code` / `res.body.error === 'Metadata item object/acct
+        // not found'` — the flat dialect `resolveErrorResponse` renders — while
+        // the SAME route's item-less arm answered ADR-0112's nested
+        // `{ error: { code, message } }` two screens away. Which one a caller
+        // got was decided by `metadata.enableCache` and by which protocol was
+        // mounted, neither of which is visible to it. Both arms now reach
+        // `sendMetaItemAbsent`, so `body.error.code` — the accessor #8013
+        // settled on — is defined on every absence this route answers.
+        expect(res.body.error.code).toBe('RESOURCE_NOT_FOUND');
+        expect(res.body.code).toBeUndefined();
+
+        // ⚠️ The producer's sentence is deliberately NOT relayed any more. It
+        // named the type and the name; the emitter says one fixed sentence,
+        // because an unpublished app answers that same sentence and ADR-0045
+        // §3 makes the two indistinguishable. The operator's copy is unaffected
+        // — the producer still threw it, and nothing here withholds a log.
+        expect(res.body.error.message).toBe('Metadata item not found or access denied.');
+        expect(JSON.stringify(res.body)).not.toContain('object/acct');
     }, 60_000);
 
     it('and is NOT logged as an unhandled fault — a miss is a normal outcome', async () => {

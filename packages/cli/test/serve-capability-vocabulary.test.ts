@@ -42,6 +42,34 @@ describe('serve capability registries vs spec vocabulary (#3265)', () => {
       expect(PLATFORM_CAPABILITY_TOKENS).toContain(token);
     }
   });
+
+  /**
+   * #17676 ruling A' item 1, read through the array `serve` actually appends.
+   *
+   * `Serve.ALWAYS_ON_CAPABILITIES` is a re-export of the spec slate, so this is
+   * a SURFACE pin rather than a second copy of the spec-side one: it asserts
+   * the split survives the hop the CLI takes, and that hop is what decides
+   * which tokens land in an app's `requires`.
+   *
+   * ⚠️ Measured on `serve`'s resolver at c17ff70f3f and deliberately NOT
+   * asserted: `Serve.CAPABILITY_PROVIDERS` keys `marketplace` and does not yet
+   * key `package-registry`, so appending this token mounts nothing under
+   * `objectstack serve` until the runtime half of the same ruling lands
+   * (#17676 items 2/3/5, the engine lane). Pinning that ABSENCE here would
+   * turn the engine lane's own fix red for doing the ruled thing, so the gap
+   * is recorded in words and the pin states only what must hold either side of
+   * it.
+   */
+  it("appends the package-registry persistence to every app, never the catalogue half (#17676 A')", () => {
+    expect(Serve.ALWAYS_ON_CAPABILITIES).toContain('package-registry');
+    // The other half of the ruling: browsing stays optional, so an app that
+    // wants a store still declares it.
+    expect(Serve.ALWAYS_ON_CAPABILITIES).not.toContain('marketplace');
+    // …and the split ADDED a token rather than moving one out — both halves
+    // stay resolvable spellings for `requires`.
+    expect(PLATFORM_CAPABILITY_TOKENS).toContain('package-registry');
+    expect(PLATFORM_CAPABILITY_TOKENS).toContain('marketplace');
+  });
 });
 
 // framework#3366 — the installable-provider registry must classify EVERY

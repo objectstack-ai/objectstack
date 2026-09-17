@@ -892,13 +892,17 @@ export const RowHeightSchema = lazySchema(() => z.enum([
 const GROUPING_FIELD_RULING = 'ruled 2026-09-10';
 
 /**
- * A name with no leading and no trailing whitespace.
+ * A field-reference name with no leading and no trailing whitespace.
+ *
+ * Shared by the two axes that carry this rule: `grouping.fields[].field`
+ * (#17360) and the three `groupByField` keys (#17499). One spelling for one
+ * rule — a second regex saying the same thing is a second thing to drift.
  *
  * Deliberately **not** the snake_case machine-name grammar
  * (`/^[a-z_][a-z0-9_]*$/`) this package spells inline for object, field and
- * tool NAMES: a grouping level is authored as a field REFERENCE, and a dotted
+ * tool NAMES: these keys are authored as a field REFERENCE, and a dotted
  * relationship path (`owner.name`) is an in-tree spelling of one, so the
- * machine-name grammar is the wrong vocabulary for this key. The ruling asks
+ * machine-name grammar is the wrong vocabulary for them. The ruling asks
  * for a non-padded pattern, and that is exactly what this is — nothing wider,
  * nothing narrower.
  *
@@ -906,7 +910,7 @@ const GROUPING_FIELD_RULING = 'ruled 2026-09-10';
  * refused LOUDLY one layer down (`compileListViewGroupQuery`'s
  * `grouping_field_blank`), and this narrowing exists for the SILENT case only.
  */
-const GROUPING_FIELD_NON_PADDED_PATTERN = /^(?:\S|\S[\s\S]*\S)?$/;
+const NON_PADDED_FIELD_NAME_PATTERN = /^(?:\S|\S[\s\S]*\S)?$/;
 
 /**
  * Validate one `grouping.fields[].field` name against the ruling. Returns the
@@ -918,7 +922,7 @@ const GROUPING_FIELD_NON_PADDED_PATTERN = /^(?:\S|\S[\s\S]*\S)?$/;
  * dialect the producer should quietly accept and normalise away.
  */
 function checkGroupingFieldName(raw: string): string | undefined {
-  if (GROUPING_FIELD_NON_PADDED_PATTERN.test(raw)) return undefined;
+  if (NON_PADDED_FIELD_NAME_PATTERN.test(raw)) return undefined;
 
   const trimmed = raw.trim();
   const remedy = trimmed === ''
@@ -933,6 +937,87 @@ function checkGroupingFieldName(raw: string): string | undefined {
     + 'a single `Uncategorized` lane holding every record — a wrong answer that reads as a true '
     + `statement about the data. ${remedy} (${GROUPING_FIELD_RULING}.)`;
 }
+
+/*
+ * ---------------------------------------------------------------------------
+ * `groupByField` — the same non-padded name rule, three more schemas (#17499)
+ * ---------------------------------------------------------------------------
+ *
+ * `KanbanConfigSchema`, `GanttConfigSchema` and `TimelineConfigSchema` each
+ * declare a `groupByField`, and all three were bare `z.string()`. This is the
+ * sibling axis #17360 named and scoped OUT by name ("symmetric and is
+ * explicitly not this card"), so the shape is the one that card already landed
+ * — a refusal, not a `.trim()` — and the only thing re-derived here is what
+ * the padded spelling DOES per view type, because that is the sentence an
+ * author reads.
+ *
+ * Three differences from the precedent, all deliberate:
+ *
+ *   1. `KanbanConfigSchema.groupByField` is REQUIRED. A padded spelling there
+ *      cannot be dropped by omitting the key, which is why the whole axis is
+ *      worth its own card rather than a footnote on #17360.
+ *   2. The refusal is addressed per view type (`kanban.groupByField`,
+ *      `gantt.groupByField`, `timeline.groupByField`) rather than to one path,
+ *      because these are three keys on three schemas, not one key reached
+ *      through an array index.
+ *   3. It carries no ruling citation. #17360's ruling C (objectui#7347) is
+ *      about `grouping.fields[].field` and explicitly not about this axis, so
+ *      quoting its date here would attribute a decision that was never made.
+ *
+ * What the name is used for, measured in the consumer (objectui `dda8f3815`):
+ * the kanban board resolves its lane as
+ * `laneField = groupByField || groupField || detectStatusField(objectDef)`
+ * and buckets cards by `card[laneField]`; `ObjectGantt`'s `groupByAccessor`
+ * splits the name on `.` and walks the backing record
+ * (`resolvePath(task.data, field)`); the timeline groups its rows the same
+ * way. Every one of those is a lookup BY THAT NAME on data the server answers
+ * under the unpadded name, so a padded spelling reads `undefined` on every row.
+ */
+
+/** Per-view-type tail of the refusal: what the padded spelling actually does. */
+const GROUP_BY_FIELD_CONSEQUENCE = {
+  kanban: 'every card falls into one `Uncategorized` lane instead of the column it belongs to',
+  gantt: 'every leaf task falls into one ungrouped bucket instead of the summary row it belongs to',
+  timeline: 'every row falls into one ungrouped band instead of the band it belongs to',
+} as const;
+
+/** The three schemas that declare a `groupByField`. */
+type GroupByFieldView = keyof typeof GROUP_BY_FIELD_CONSEQUENCE;
+
+/**
+ * Validate one `groupByField` name. Returns the author-facing refusal, or
+ * `undefined` when the value conforms.
+ *
+ * ⛔ Not a `.trim()`, for the reason {@link checkGroupingFieldName} carries: a
+ * trimming schema makes `'  a  '` and `'a'` silently equivalent, which is the
+ * consumer-tolerance direction AGENTS.md #0.1 refuses. The padded spelling is
+ * a mistake the author should be told about, not a dialect the producer
+ * quietly normalises away — and on the kanban key, which is required, the
+ * author has no way to withdraw the value instead.
+ */
+function checkGroupByFieldName(raw: string, view: GroupByFieldView): string | undefined {
+  if (NON_PADDED_FIELD_NAME_PATTERN.test(raw)) return undefined;
+
+  const trimmed = raw.trim();
+  const remedy = trimmed === ''
+    ? 'Name the field to group by — this value is nothing but whitespace.'
+    : `Write ${JSON.stringify(trimmed)}.`;
+
+  return `\`${view}.groupByField\` names the field exactly as it is stored, with no leading or `
+    + `trailing whitespace — received ${JSON.stringify(raw)}. The renderer reads that name off `
+    + 'every row verbatim while the server answers under the unpadded name, so every per-row '
+    + `lookup misses and ${GROUP_BY_FIELD_CONSEQUENCE[view]} — a wrong answer that reads as a `
+    + `true statement about the data. ${remedy}`;
+}
+
+/**
+ * The `superRefine` body for one view type's `groupByField`, so each of the
+ * three declaration sites keeps its own inline `z.string()….describe()` shape.
+ */
+const groupByFieldCheck = (view: GroupByFieldView) => (raw: string, ctx: z.RefinementCtx): void => {
+  const refusal = checkGroupByFieldName(raw, view);
+  if (refusal) ctx.addIssue({ code: 'custom', message: refusal });
+};
 
 /**
  * Grouping Field Configuration
@@ -1069,7 +1154,13 @@ export const TimelineConfigSchema = lazySchema(() => strictObject({
   startDateField: z.string().describe('Field for timeline item start date'),
   endDateField: z.string().optional().describe('Field for timeline item end date'),
   titleField: z.string().describe('Field to display as timeline item title'),
-  groupByField: z.string().optional().describe('Field to group timeline rows'),
+  groupByField: z.string()
+    .superRefine(groupByFieldCheck('timeline'))
+    .optional()
+    .describe(
+      'Field to group timeline rows. NO leading or trailing whitespace: the renderer reads this '
+      + 'name off every row verbatim, so a padded spelling drops every row into one ungrouped band.',
+    ),
   colorField: z.string().optional().describe('Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color'),
   scale: z.enum(['hour', 'day', 'week', 'month', 'quarter', 'year']).default('week').describe('Default timeline scale'),
 }).describe('Timeline view configuration'));
@@ -1347,7 +1438,13 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
   surface: 'this kanban configuration',
   history: VIEW_HISTORY,
 }, {
-  groupByField: z.string().describe('Field to group columns by (usually status/select)'),
+  groupByField: z.string()
+    .superRefine(groupByFieldCheck('kanban'))
+    .describe(
+      'Field to group columns by (usually status/select). NO leading or trailing whitespace: the '
+      + 'board reads this name off every card verbatim, so a padded spelling collapses the whole '
+      + 'board into one `Uncategorized` lane.',
+    ),
   summarizeField: z.string().optional().describe('Field to sum at top of column (e.g. amount)'),
   /**
    * [#16894] The one item-titled view config of the family that omitted this
@@ -1517,7 +1614,14 @@ export const GanttConfigSchema = lazySchema(() => strictObject({
   baselineStartField: z.string().optional().describe('Baseline (planned) start field'),
   baselineEndField: z.string().optional().describe('Baseline (planned) end field'),
   // Dynamic grouping: bucket leaf tasks under one synthesized summary per value.
-  groupByField: z.string().optional().describe('Field to group leaf tasks by (synthesized summary rows)'),
+  groupByField: z.string()
+    .superRefine(groupByFieldCheck('gantt'))
+    .optional()
+    .describe(
+      'Field to group leaf tasks by (synthesized summary rows). NO leading or trailing whitespace: '
+      + 'the group accessor reads this name off every task verbatim, so a padded spelling drops '
+      + 'every task into one ungrouped bucket.',
+    ),
   // Resource / workload view.
   resourceView: z.boolean().optional().describe('Render a per-resource workload histogram instead of the timeline'),
   assigneeField: z.string().optional().describe('Resource field to bucket load by (resource view)'),
