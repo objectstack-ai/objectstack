@@ -1168,6 +1168,237 @@ export const CLAIM_COMMENT_MARKER = /^\s*>?\s*Claim(?:ed)?\s*:/mi;
  */
 export const RELEASE_COMMENT_MARKER = /^\s*>?\s*Release\s*:/mi;
 
+// ---------------------------------------------------------------------------
+// Reading the two ownership markers — ONE place, decoration included (#18680).
+//
+// The two constants above describe the BARE directive and still do: they are
+// exported, a sibling gate imports the claim one (`check-clause2-carriers.mjs`)
+// and several cases here assert on them directly, so their semantics are held
+// still on purpose. What was missing is the READING — how a line written by a
+// seat is offered to them.
+//
+// ## The defect, measured
+//
+// A seat that BOLDS the directive writes `**Release:** session …`. The line
+// then begins with `*`, the marker anchors the word at line start, and the
+// record reads as ABSENT — silently, in the one direction nothing goes red:
+// a lawfully released card looks un-released to every row that reads ownership
+// (H2, H47, H66, H67). The live specimen is objectstack#16529 comment
+// `5691473966` (2026-09-16T03:11:44Z), a real return-to-`pm:queue` record whose
+// `**Release:** …` line no marker in this file could see, while the same line
+// in the bare spelling matches.
+//
+// ## Why undecorate-then-match, and ⛔ not `\*\*` bolted onto the regexes
+//
+// #10102 already made this judgement for the OTHER directive family
+// (`Blocked-by:` / `Restart-when:`): authors format these lines, and a
+// decorated one means what the bare one means, so the anchors are matched
+// against `undecorateProseLine(line)`. Decoration is an OPEN set — bold,
+// italics, a backticked directive, all of them nestable — so admitting one
+// spelling in the pattern buys exactly that spelling and replays this card on
+// the next one. The reading below borrows the SAME stripper, so the two
+// directive families cannot drift on what "decorated" means, and there is ⛔ no
+// second stripper to keep in step.
+//
+// ## Strictly a SUPERSET, provably
+//
+// The bare test is tried FIRST and short-circuits, so no body that matches
+// today can stop matching: the reading only ever ADDS. That is what makes this
+// safe to drop under rows whose populations are live on a shared board — the
+// delta is one-directional by construction, not by inspection.
+//
+// ## The one thing it refuses to undecorate through: a LIST ITEM
+//
+// `undecorateProseLine` strips every `*` and backtick on the line, so a
+// markdown bullet `* Claim: …` would become ` Claim: …` and read as a claim.
+// This file already rules on that shape from the other side — H20's case
+// 「a bulleted `Claim:` is still not a claim comment」 pins `- Claim:` as NOT a
+// claim, and `CLAIM_NEAR_MISS_MARKER`'s docblock names the bullet hazard by
+// name — so undecorating a `*` bullet would accept through decoration exactly
+// what the `-` bullet is refused for. A bullet is a LIST, not a decoration:
+// the marker for one is followed by whitespace, the decoration for the other
+// is not, and that is the whole discriminator.
+//
+// A line that STILL does not read after all of this does not vanish either:
+// `OWNERSHIP_MARKER_NEAR_MISS_FORMS` below is the vocabulary that makes it
+// audible, because a widening alone would simply wait for the next decoration.
+// ---------------------------------------------------------------------------
+
+/**
+ * A markdown LIST ITEM's opening — a bullet or an ordered marker — and the one
+ * prefix `markerMatches` refuses to undecorate through.
+ *
+ * `[ \t]`, ⛔ never `\s`, on both sides: `\s` matches a NEWLINE, which is the
+ * defect `CLAIM_NEAR_MISS_MARKER`'s docblock measured the hard way — a hyphen
+ * is the commonest line-opening character in this repo's comment bodies, so a
+ * class that can span lines reads an ordinary list as a directive.
+ *
+ * The REQUIRED whitespace after the marker character is the discriminator, and
+ * it is markdown's own: `* Claim:` is a list item, `**Claim:**` is bold, and
+ * nothing else separates them.
+ */
+const MARKER_LIST_ITEM_PREFIX = /^[ \t]*>?[ \t]*(?:[-+*]|\d+[.)])[ \t]+/u;
+
+/**
+ * Does `marker` read `text` — the ownership markers' ONE reading (#18680).
+ *
+ * Every site in this file that asks whether a comment (or one line of one) IS
+ * a `Claim:` or a `Release:` goes through here, so the reading is the FAMILY's
+ * rather than per-row. A row that tested a marker directly would be the one
+ * reader that still cannot see a bolded record, and it would look identical to
+ * the rows that can.
+ *
+ * ⚠️ ⛔ Do NOT use this to ask about the two constants THEMSELVES. A case
+ * pinning what the bare directive is (`CLAIM_COMMENT_MARKER.test('- Claim: …')`
+ * is false, `RELEASE_COMMENT_MARKER.test('Released: …')` is false) asserts on
+ * the constant on purpose — the constants are the protocol's spelling and this
+ * is how a written line is offered to them.
+ *
+ * @param {RegExp} marker — `CLAIM_COMMENT_MARKER` or `RELEASE_COMMENT_MARKER`.
+ *   Both are `g`-less, so neither `.test` below carries a `lastIndex`.
+ * @param {string} text — one comment body, or one line of one.
+ */
+export function markerMatches(marker, text) {
+  const raw = String(text ?? '');
+  // The bare reading FIRST: it is the semantics, and trying it first is what
+  // makes the undecorated leg provably additive.
+  if (marker.test(raw)) return true;
+  const undecorated = raw
+    .split(/\r?\n/)
+    .map((line) => (MARKER_LIST_ITEM_PREFIX.test(line) ? line : undecorateProseLine(line)))
+    .join('\n');
+  return marker.test(undecorated);
+}
+
+/**
+ * The spellings a line opens with that LOOK like an ownership marker and are
+ * still refused — a NAMED, enumerable vocabulary rather than a guess.
+ *
+ * ## Why a list and not a wider reading
+ *
+ * Widening the reader alone leaves the same silence one decoration further
+ * out: the next spelling nobody anticipated is read as ABSENT, with nothing
+ * anywhere saying a line was passed over. So the reading above is paired with
+ * this vocabulary, whose whole job is to make the refusal AUDIBLE. A future
+ * decoration is ADDED here — where a fixture and a case come with it — ⛔ never
+ * discovered again from a silent row.
+ *
+ * The register is `SCHEMA_PROPERTY_FORMS`' (`scripts/pm/check-widening-tells.mjs`,
+ * #18560): a frozen roster the detector is BUILT from, each member carrying its
+ * own `example`, so a form added without a fixture and a form silently dropped
+ * both go red instead of quietly changing what the instrument sees.
+ *
+ * ## What a member is, and what it is NOT
+ *
+ * A member describes a line that BEGINS with the marker word — the same anchor
+ * the markers themselves hold, so prose 「we will release: tomorrow」 is not a
+ * member and never was. What varies is the PREFIX or the SEPARATOR around the
+ * word, which is exactly where every measured miss lives.
+ *
+ * ⚠️ Deliberate overlaps, stated rather than hidden:
+ *   · `separator` overlaps H34 on the CLAIM side (`nearMissClaimSeparators`).
+ *     H34 is a ROW with a remedy, gated to cards H2 is already reporting; this
+ *     is a census over every thread the sweep already holds. Two readers of one
+ *     shape answering two different questions, ⛔ not a second vocabulary for
+ *     the claim separator: H34 keeps naming the codepoint and prescribing the
+ *     rewrite.
+ *   · `list-item` is the shape `markerMatches` refuses to undecorate through,
+ *     named here so that refusal is a reading rather than a silence.
+ *
+ * Ordered MOST SPECIFIC FIRST: the form a line is named by is the first that
+ * matches it, so `## __Release:__` is a heading rather than an emphasis.
+ *
+ * `re` matches the OFFENDING OPENING only and never the remainder, so the
+ * matched text IS the prefix a row prints and a seat greps for. No `g` flag,
+ * for `CLAIM_COMMENT_MARKER`'s reason.
+ */
+export const OWNERSHIP_MARKER_NEAR_MISS_FORMS = Object.freeze([
+  Object.freeze({
+    id: 'heading',
+    what: 'the directive written as a markdown HEADING',
+    example: '## Release: session `session_x` — 去向 `pm:queue`',
+    re: /^[ \t]*#{1,6}[ \t]*[_*`]{0,3}(?:Claim(?:ed)?|Release)[_*`]{0,3}[ \t]*[:：]/iu,
+  }),
+  Object.freeze({
+    id: 'list-item',
+    what: 'the directive written as a markdown LIST ITEM',
+    example: '- Release: session `session_x` — 去向 `pm:queue`',
+    re: /^[ \t]*>?[ \t]*(?:[-+*]|\d+[.)])[ \t]+[_*`]{0,3}(?:Claim(?:ed)?|Release)[_*`]{0,3}[ \t]*[:：]/iu,
+  }),
+  Object.freeze({
+    id: 'underscore-emphasis',
+    what: 'the directive emphasised with UNDERSCORES, which the shared stripper does not remove',
+    example: '__Release:__ session `session_x` — 去向 `pm:queue`',
+    re: /^[ \t]*>?[ \t]*_{1,3}(?:Claim(?:ed)?|Release)_{0,3}[ \t]*[:：]/iu,
+  }),
+  Object.freeze({
+    id: 'inflected-word',
+    what: 'a spelling of the word the marker\'s vocabulary does not carry',
+    example: 'Released: session `session_x` — 去向 `pm:queue`',
+    re: /^[ \t]*>?[ \t]*[_*`]{0,3}(?:Released|Releasing|Claiming)[_*`]{0,3}[ \t]*[:：]/iu,
+  }),
+  Object.freeze({
+    id: 'separator',
+    what: 'the canonical word with a separator that is not the canonical colon',
+    example: 'Release — session `session_x` — 去向 `pm:queue`',
+    re: /^[ \t]*>?[ \t]*[_*`]{0,3}(?:Claim(?:ed)?|Release)[_*`]{0,3}[ \t]*[：–—-]/iu,
+  }),
+]);
+
+/** How many near misses one summary clause NAMES before it stops. */
+export const OWNERSHIP_MARKER_NEAR_MISS_NAME_CAP = 5;
+
+/**
+ * Every near miss on one thread — the card-level reading the census consumes.
+ *
+ * Pure over REST rows so the self-test drives it offline, and it BUYS NOTHING:
+ * the caller hands it the thread another row already paid for.
+ *
+ * A line that `markerMatches` DOES read is never a near miss — the two are
+ * complements by construction, so a widening of the reading shrinks this census
+ * automatically and can never leave a line counted twice.
+ *
+ * A form whose remainder is empty is skipped: 「Release:」 alone carries no
+ * record, and reporting it would fill the clause with headings. That is the
+ * conservative half, `looksLikeClaimContent`'s judgement at H34 applied one
+ * notch looser — this is a census, and a threshold as strict as H34's would
+ * recreate the silence it exists to end.
+ *
+ * @param {{ id?: number, body?: string }[]} commentRows — REST rows, NOT bodies:
+ *   the row names the COMMENT, and an id is what a seat opens.
+ * @returns {{ commentId: string|null, form: string, what: string, prefix: string }[]}
+ */
+export function ownershipMarkerNearMisses(commentRows) {
+  const rows = Array.isArray(commentRows) ? commentRows : [];
+  const out = [];
+  for (const row of rows) {
+    const body = String(row?.body ?? '');
+    const seen = new Set();
+    for (const line of body.split(/\r?\n/)) {
+      if (markerMatches(CLAIM_COMMENT_MARKER, line)) continue;
+      if (markerMatches(RELEASE_COMMENT_MARKER, line)) continue;
+      for (const form of OWNERSHIP_MARKER_NEAR_MISS_FORMS) {
+        const hit = form.re.exec(line);
+        if (!hit) continue;
+        if (line.slice(hit[0].length).trim() === '') break;
+        const prefix = hit[0].trim();
+        const key = `${form.id}\u0001${prefix}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          out.push({
+            commentId: commentIdText(row?.id),
+            form: form.id,
+            what: form.what,
+            prefix,
+          });
+        }
+        break;
+      }
+    }
+  }
+  return out;
+}
+
 /**
  * The release ACT, quoted from `.claude/skills/pm-dispatch/SKILL.md` VERBATIM
  * and kept UNBROKEN on one line so it stays greppable against its source:
@@ -1201,7 +1432,7 @@ export function h2AssigneeNoClaimComment(issue, commentBodies) {
   const labels = labelNames(issue);
   const pmTracked = labels.some((l) => l === 'pm:queue' || l === 'pm:dispatched');
   if (!pmTracked || (issue.assignees ?? []).length === 0) return false;
-  return !commentBodies.some((b) => CLAIM_COMMENT_MARKER.test(b ?? ''));
+  return !commentBodies.some((b) => markerMatches(CLAIM_COMMENT_MARKER, b ?? ''));
 }
 
 export function h3QueueAndDispatched(issue) {
@@ -4972,7 +5203,7 @@ export function claimGovernance(commentRows) {
   let newest = null;
   rows.forEach((row, index) => {
     const body = String(row?.body ?? '');
-    if (!CLAIM_COMMENT_MARKER.test(body)) return;
+    if (!markerMatches(CLAIM_COMMENT_MARKER, body)) return;
     const branches = claimedBranches(body);
     const parsed = Date.parse(row?.created_at ?? '');
     const stamp = Number.isFinite(parsed) ? parsed : null;
@@ -7428,7 +7659,7 @@ export function latestClaimComment(commentRows) {
   const rows = Array.isArray(commentRows) ? commentRows : [];
   let best = null;
   rows.forEach((row, index) => {
-    if (!CLAIM_COMMENT_MARKER.test(String(row?.body ?? ''))) return;
+    if (!markerMatches(CLAIM_COMMENT_MARKER, String(row?.body ?? ''))) return;
     const parsed = Date.parse(row?.created_at ?? '');
     const stamp = Number.isFinite(parsed) ? parsed : null;
     const candidate = { createdAt: row?.created_at ?? null, stamp, index };
@@ -7715,7 +7946,7 @@ export function h34ClaimShapedNonCanonicalSeparator(issue, commentBodies) {
   if (!pmTracked || (issue?.assignees ?? []).length === 0) return null;
   if (!Array.isArray(commentBodies)) return null;
   // A card with a readable claim is machine-visible; the row has no remedy for it.
-  if (commentBodies.some((b) => CLAIM_COMMENT_MARKER.test(String(b ?? '')))) return null;
+  if (commentBodies.some((b) => markerMatches(CLAIM_COMMENT_MARKER, String(b ?? '')))) return null;
 
   const separators = [];
   let lines = 0;
@@ -10125,7 +10356,7 @@ export function h44IsRoundOpenMarker(body) {
 
 export function h44ArtefactShape(body, onSeatPost = false) {
   const text = String(body ?? '');
-  if (CLAIM_COMMENT_MARKER.test(text)) return 'a claim';
+  if (markerMatches(CLAIM_COMMENT_MARKER, text)) return 'a claim';
   if (h44IsRoundOpenMarker(text)) return ROUND_OPEN_ARTEFACT_KIND;
   if (H44_VERDICT_MARKER.test(text)) return 'an ACCEPT/REJECT/REWORK verdict';
   if (onSeatPost) return 'a seat-post section';
@@ -10488,7 +10719,7 @@ export function h46ClaimNamesBranch(commentBodies, branch) {
   const ref = String(branch ?? '');
   if (!ref) return false;
   return (Array.isArray(commentBodies) ? commentBodies : []).some(
-    (body) => CLAIM_COMMENT_MARKER.test(String(body ?? '')) && claimedBranches(body).includes(ref),
+    (body) => markerMatches(CLAIM_COMMENT_MARKER, String(body ?? '')) && claimedBranches(body).includes(ref),
   );
 }
 
@@ -10624,7 +10855,7 @@ export function latestMarkedComment(commentRows, marker) {
   const rows = Array.isArray(commentRows) ? commentRows : [];
   let best = null;
   rows.forEach((row, index) => {
-    if (!marker.test(String(row?.body ?? ''))) return;
+    if (!markerMatches(marker, String(row?.body ?? ''))) return;
     const parsed = Date.parse(row?.created_at ?? '');
     const stamp = Number.isFinite(parsed) ? parsed : null;
     const candidate = { createdAt: row?.created_at ?? null, stamp, index };
@@ -15049,7 +15280,7 @@ export const SEAT_SIGNATURE_FORMS = Object.freeze([
   Object.freeze({
     kind: 'claim',
     what: 'a `Claim:` block',
-    test: (text) => CLAIM_COMMENT_MARKER.test(text),
+    test: (text) => markerMatches(CLAIM_COMMENT_MARKER, text),
   }),
   Object.freeze({
     kind: 'report',
@@ -16064,8 +16295,8 @@ export function releaseAnnouncementHeadings(text) {
  */
 export function h66ReleaseVerdict(body) {
   const text = String(body ?? '');
-  const line = RELEASE_COMMENT_MARKER.test(text)
-    ? (text.split(/\r?\n/).find((l) => RELEASE_COMMENT_MARKER.test(l)) ?? null)
+  const line = markerMatches(RELEASE_COMMENT_MARKER, text)
+    ? (text.split(/\r?\n/).find((l) => markerMatches(RELEASE_COMMENT_MARKER, l)) ?? null)
     : null;
   if (line !== null) {
     const bare = undecorateProseLine(line).trim();
@@ -16878,10 +17109,12 @@ export function h67QueuedCardWithMergedDelivery(issue, timeline, repo) {
     'the thread\'s residual readings out into a NEW card first: they are other seats\' ' +
     'after-the-fact measurements, and closing buries them — 「a second card would be ' +
     '**invisible** to whoever fixes this one」 (#15815; the two closures that followed this rule ' +
-    'filed #18343 and #18364 first). ⚠️ LOWER BOUND, three ways: a delivery that left NO ' +
-    'cross-reference on the timeline is invisible to this instrument; a DECORATED ownership line ' +
-    `(\`**Release:** …\`) is invisible to \`RELEASE_COMMENT_MARKER\`; and the cap of ` +
-    `${H67_TIMELINE_READ_CAP} page(s) leaves the rest of the queue NOT ATTEMPTED. Report-only ` +
+    'filed #18343 and #18364 first). ⚠️ LOWER BOUND, two ways: a delivery that left NO ' +
+    'cross-reference on the timeline is invisible to this instrument; and the cap of ' +
+    `${H67_TIMELINE_READ_CAP} page(s) leaves the rest of the queue NOT ATTEMPTED. A DECORATED ` +
+    'ownership line (`**Release:** …`) WAS a third way and is no longer: `markerMatches` reads ' +
+    'it, and a spelling that reading still refuses is named as a NEAR MISS on the summary line ' +
+    'rather than dropped. Report-only ' +
     'patrol INPUT: ⛔ nothing is closed, ⛔ no label is written, ⛔ no state is proposed, and this ' +
     `row judges NONE of the ${repo ? `${repo} ` : ''}A-bucket cards for anybody — it says where to look.`
   );
@@ -17296,6 +17529,18 @@ export const SWEEP_COUNT_KEYS = [
   'queueDeliveryDeferred',
   'queueDeliveryUnjudged',
   'queueDeliveryRows',
+  // The ownership-marker NEAR-MISS census (#18680). `markerNearMissJudged` is
+  // the DENOMINATOR — how many threads the census actually read — and it is the
+  // member that keeps a census which read nothing separable from a board with
+  // no near miss on it: this pass buys no fetch, so a card no other row needed a
+  // thread for is simply not judged. `markerNearMissNamed` is an ARRAY of
+  // strings rather than a counter, riding the same contract for
+  // `awaitingLegacyOldest`'s reason — a count alone tells a seat there is
+  // something to find and ⛔ not where.
+  'markerNearMissLines',
+  'markerNearMissCards',
+  'markerNearMissJudged',
+  'markerNearMissNamed',
   'refBeyond',
 ];
 
@@ -17418,6 +17663,15 @@ export function summaryLine(counts, findingCount) {
   const refDangling = counts.refDangling ?? 0;
   const refUnjudged = counts.refUnjudged ?? 0;
   const refDeferred = counts.refDeferred ?? 0;
+  // The near-miss census (#18680). Every member defaults, for the reason every
+  // count here does: the bare `summaryLine({}, 0)` is a pinned shape and must
+  // ⛔ never render `undefined`. `markerNearMissNamed` defaults to an ARRAY
+  // rather than a string — the clause joins it, and a caller that gathered no
+  // names must render a sentence, not throw.
+  const nearMissLines = counts.markerNearMissLines ?? 0;
+  const nearMissCards = counts.markerNearMissCards ?? 0;
+  const nearMissJudged = counts.markerNearMissJudged ?? 0;
+  const nearMissNamed = Array.isArray(counts.markerNearMissNamed) ? counts.markerNearMissNamed : [];
   const refBeyond = counts.refBeyond ?? 0;
   return (
     `check-half-states: swept ${counts.issues} open pm-/p0-labeled issue(s), ${counts.unscoped} open ` +
@@ -17856,11 +18110,33 @@ export function summaryLine(counts, findingCount) {
     'NEXT are the ones that must have been read; the plan models the priority and age legs of ' +
     '取卡全序 only, ⛔ not `target:` board membership and ⛔ not the 「先 `Bug`」 tiebreak. ' +
     '⚠️ Rows are a LOWER BOUND: a delivery that left NO cross-reference is invisible to this ' +
-    'instrument (the filer\'s own declared blind spot), and a DECORATED `**Release:**` line is ' +
-    'invisible to the ownership marker this row shares with H2/H47/H66. ⛔ A LISTING, never a ' +
+    'instrument (the filer\'s own declared blind spot). A DECORATED `**Release:**` line WAS a ' +
+    'second way and is no longer — the ownership marker this row shares with H2/H47/H66 reads it ' +
+    'through `markerMatches`, and what that reading still refuses is named by the near-miss ' +
+    'clause below rather than lost. ⛔ A LISTING, never a ' +
     'verdict, and 「有已合 PR」 is ⛔ not a closing criterion: the remedy on every row is a hand ' +
     'read, with the thread\'s residual readings carried out into a new card BEFORE anything is ' +
     'closed. ' +
+    // The ownership-marker NEAR-MISS census (#18680). UNCONDITIONAL, like
+    // every other window's clause, and for a reason this one owns: the whole
+    // point of the vocabulary is that a line the reader passed over must make a
+    // SOUND. A clause that rendered only when it had something to say would be
+    // indistinguishable from the silence it replaces — the census that read
+    // nothing and the census that found nothing would print identically.
+    `Ownership-marker near misses: ${nearMissLines} line(s) on ${nearMissCards} of ` +
+    `${nearMissJudged} thread(s) already in hand OPEN with \`Claim:\`/\`Release:\` in a spelling ` +
+    `the marker refuses even after decoration is removed, against ` +
+    `${OWNERSHIP_MARKER_NEAR_MISS_FORMS.length} NAMED form(s) ` +
+    `(${OWNERSHIP_MARKER_NEAR_MISS_FORMS.map((f) => f.id).join(', ')})` +
+    `${nearMissNamed.length > 0 ? ` — ${nearMissNamed.join('; ')}` : ''}` +
+    `${nearMissLines > nearMissNamed.length ? `, ${nearMissLines - nearMissNamed.length} further line(s) NOT NAMED at the ${OWNERSHIP_MARKER_NEAR_MISS_NAME_CAP}-entry cap` : ''}. ` +
+    'The reading itself is `markerMatches` — ONE place, sharing the `Blocked-by:` ' +
+    'family\'s stripper — so a DECORATED `**Release:**` line IS read and this census is what is ' +
+    'left over. ⛔ Report-only and ⛔ NEVER a half-state verdict by itself: a near miss is a line ' +
+    'no ownership row (H2/H47/H66/H67) counted, named with its card, its comment id and the ' +
+    'offending prefix so the next decoration is ADDED to the vocabulary instead of replaying this ' +
+    'silently. ⚠️ A LOWER BOUND twice over: it reads only the threads other rows already bought, ' +
+    'and only the forms the vocabulary names. ' +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -17927,6 +18203,7 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h65RoundTier', 'Triage round tiers (H65): '],
   ['h66QueueRelease', 'Released queue cards (H66): '],
   ['h67QueueDelivery', 'Queued cards with a merged delivery (H67): '],
+  ['markerNearMiss', 'Ownership-marker near misses: '],
   ['reportOnly', 'Report-only: '],
 ];
 
@@ -20084,6 +20361,14 @@ async function sweep(options = {}) {
     awaitingLegacy: 0,
     awaitingLegacyOldest: null,
     awaitingUndated: 0,
+    // The ownership-marker near-miss census (#18680). Initialised here for the
+    // reason every counter above is: a sweep that throws before the per-card
+    // loop must still render numbers rather than the string `undefined`, and
+    // the clause is unconditional.
+    markerNearMissLines: 0,
+    markerNearMissCards: 0,
+    markerNearMissJudged: 0,
+    markerNearMissNamed: [],
     maintainerActionCandidates: 0,
     maintainerActionProbed: 0,
     // H56's census (#17314) — how many of the comments H44 already read carry
@@ -22282,6 +22567,40 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
       const releaseDesync = h47ReleaseRecordDesync(issue, releaseRows);
       if (releaseDesync) findings.push([issue, 'H47', releaseDesync]);
     }
+    // The ownership-marker NEAR-MISS census (#18680) — the sound a line makes
+    // when it LOOKS like a `Claim:`/`Release:` and the reading still refuses it.
+    //
+    // At the foot of this iteration for H47's reason and no other: it reads the
+    // thread out of `commentCache`, which every gate above this line fills, so
+    // asked at the top the cache would be empty on every iteration and the
+    // census would report a spotless board forever while looking healthy — the
+    // #4690 shape, self-inflicted by placement.
+    //
+    // ⛔ It buys NOTHING: `commentCache.get` never fetches, so a card no other
+    // row needed a thread for is simply NOT JUDGED, and `markerNearMissJudged`
+    // is the denominator that says so. ⛔ It files no finding and proposes no
+    // state either — a near miss is a line nobody read, never a half-state.
+    //
+    // ⛔ Gated on NOTHING else: every population gate in this file exists to
+    // avoid buying a fetch, and this pass buys none. A near miss on a card no
+    // row speaks about is exactly the reading that would otherwise be lost.
+    {
+      const nearMissRows = commentCache.get(issue.number);
+      if (nearMissRows !== undefined) {
+        stats.markerNearMissJudged = (stats.markerNearMissJudged ?? 0) + 1;
+        const misses = ownershipMarkerNearMisses(nearMissRows);
+        if (misses.length > 0) {
+          stats.markerNearMissLines = (stats.markerNearMissLines ?? 0) + misses.length;
+          stats.markerNearMissCards = (stats.markerNearMissCards ?? 0) + 1;
+          for (const miss of misses) {
+            if (stats.markerNearMissNamed.length >= OWNERSHIP_MARKER_NEAR_MISS_NAME_CAP) break;
+            stats.markerNearMissNamed.push(
+              `#${issue.number} comment ${miss.commentId ?? 'id UNREADABLE'} 「${miss.prefix}」 (${miss.form})`,
+            );
+          }
+        }
+      }
+    }
     // H58 (#17417) — the queued card whose own text says it is not queue work.
     // At the FOOT of this iteration for H47's reason and no other: it reads the
     // thread out of `commentCache`, which every gate above this line fills, so
@@ -23896,10 +24215,22 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // being asserted would still print rows, and every one of them would read as
   // 「close this」, which is the one thing the card forbids.
   'H67 queued merged-delivery reading': 142,
+  // Registered with the decorated ownership-marker reading (#18680); the pin
+  // sits just under the count on its neighbours' grounds. What this battery
+  // floors is a WIDENING of the two markers' READING, so the FIRING CONTROLS
+  // live inside it: the live #16529 specimen in both spellings, the bare
+  // roster that must keep matching, the prose and fullwidth controls that must
+  // NOT, and the two bullet shapes the reading refuses to undecorate through.
+  // Beside them the NEAR-MISS vocabulary is driven member by member against its
+  // own fixtures, with the counterfactual pin that reds on a form added without
+  // one or silently dropped. A widening whose controls can drift out of the
+  // suite is how a repair becomes a silencer, and a vocabulary nobody asserts
+  // on is how the next decoration replays this card.
+  'H2/H47/H66 decorated ownership marker': 94,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
-export const SELF_TEST_BATTERY_FLOOR = 4;
+export const SELF_TEST_BATTERY_FLOOR = 5;
 
 async function selfTest() {
   const cases = [];
@@ -34250,13 +34581,17 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY67, 'H67 recency: a marker whose stamp does not parse LISTS rather than clears', typeof h67(UNPLACEABLE67, { number: 16529 }), 'string');
   b(BATTERY67, 'H67 recency: …and the row says the record could not be PLACED against the merge', h67row(UNPLACEABLE67, { number: 16529 }).includes('cannot be PLACED against the merge'), true);
   b(BATTERY67, 'H67 recency: …citing the reason a listing lists rather than clears', h67row(UNPLACEABLE67, { number: 16529 }).includes('exactly what a human should look at'), true);
-  // ⚠️ THE DECLARED LOSS, pinned as a control rather than hidden: a DECORATED
-  // release line is invisible to `RELEASE_COMMENT_MARKER`, measured live on
-  // objectstack#16529 `5697022358`. The row FIRES and DECLARES the loss; ⛔
-  // widening the marker is H2/H47/H66's surface and a different card.
-  b(BATTERY67, 'H67 ⚠️ loss: a DECORATED `**Release:**` line does not stand the row down', typeof h67([...I16529, comment67('**Release:** session `session_x` — 去向 `pm:queue`', '2026-09-16T03:11:44Z')], { number: 16529 }), 'string');
-  b(BATTERY67, 'H67 ⚠️ loss: …and the row DECLARES that blind spot rather than hiding it', h67row(I16529, { number: 16529 }).includes('a DECORATED ownership line'), true);
-  b(BATTERY67, 'H67 ⚠️ loss: …the marker really does refuse the decorated spelling, so the control is live', RELEASE_COMMENT_MARKER.test('**Release:** session `session_x`'), false);
+  // ⚠️ THE DECLARED LOSS — CLOSED by #18680, and these cases are EDITED rather
+  // than deleted so the pair keeps reading as one history. The loss was real
+  // (a DECORATED release line was invisible to `RELEASE_COMMENT_MARKER`, live
+  // on objectstack#16529 `5691473966`); this row DECLARED it instead of
+  // widening, because widening the marker was H2/H47/H66's surface and a
+  // different card. That card landed: the reading is `markerMatches`, the
+  // marker CONSTANT is untouched, and the two control cases below still assert
+  // on the constant for exactly that reason.
+  b(BATTERY67, 'H67 ⚠️ loss CLOSED: a DECORATED `**Release:**` line now STANDS THE ROW DOWN, as the bare one always did', h67([...I16529, comment67('**Release:** session `session_x` — 去向 `pm:queue`', '2026-09-16T03:11:44Z')], { number: 16529 }), null);
+  b(BATTERY67, 'H67 ⚠️ loss CLOSED: …and the row no longer DECLARES a blind spot it no longer has', h67row(I16529, { number: 16529 }).includes('is invisible to `RELEASE_COMMENT_MARKER`'), false);
+  b(BATTERY67, 'H67 ⚠️ loss: …the marker CONSTANT still refuses the decorated spelling — the bare directive is untouched', RELEASE_COMMENT_MARKER.test('**Release:** session `session_x`'), false);
   b(BATTERY67, 'H67 ⚠️ loss: …while the bare spelling still matches, so the reader is not simply broken', RELEASE_COMMENT_MARKER.test('Release: session `session_x`'), true);
 
   // THE THREE PAGE STATES, never two (#4690) — H59's contract verbatim.
@@ -34403,9 +34738,171 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // THE ROSTER — a floor that cannot be satisfied by a zero.
   b(BATTERY67, 'H67 floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY67), true);
   b(BATTERY67, 'H67 floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY67] > 0, true);
-  b(BATTERY67, 'H67 floor: the roster now declares FOUR batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 4);
+  b(BATTERY67, 'H67 floor: the roster grew again with #18680\'s battery, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 5);
   b(BATTERY67, 'H67 floor: …including the two batteries this row landed BESIDE, so neither side of the base merge silently dropped one', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, 'H65 tier declaration spelling') && Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, 'H19 judged-set founding'), true);
   b(BATTERY67, 'H67 floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
+
+  // -- The DECORATED ownership marker (#18680) ------------------------------
+  //
+  // The card: a seat that BOLDS the directive writes `**Release:** …`, the two
+  // markers anchor the bare word at line start, and the record reads as ABSENT
+  // to every row that reads ownership — H2, H47, H66 and H67 at once. Nothing
+  // goes red; the rows simply read a different history than the thread carries.
+  //
+  // What this battery floors is a WIDENING, so the FIRING CONTROLS live inside
+  // it: the bare spellings that matched before still match, the prose control
+  // that must never match still does not, and the two bullet shapes stay
+  // refused. A widening whose controls can drift out of the suite is how a
+  // repair becomes a silencer — the failure this whole file exists to report.
+  //
+  // It also floors the second half the grading comment ruled on (5716952460):
+  // 「一个写入者与一个读取者对「同一件事该长什么样」意见不同,而分歧是静默的」
+  // — so a line that LOOKS like a marker and is still refused must make a
+  // sound. Every member of `OWNERSHIP_MARKER_NEAR_MISS_FORMS` is driven here
+  // against its own `example`, and the roster is asserted EQUAL to a frozen
+  // list of ids: a form added without a fixture reds, a form silently dropped
+  // reds. ⛔ The vocabulary is what a future decoration is ADDED to; ⛔ it is
+  // never rediscovered from a silent row.
+  const BATTERY68 = 'H2/H47/H66 decorated ownership marker';
+  // The card's LIVE specimen — objectstack#16529 comment `5691473966`
+  // (os-try-charles, 2026-09-16T03:11:44Z), a real return-to-`pm:queue` record.
+  // FETCHED through the REST proxy and pasted, ⛔ never retyped from the card's
+  // prose. ⚠️ It is the 45th line of that comment and ⛔ not its first (the
+  // card's body says "first line"): both markers are `m`-flagged and scan every
+  // line, so line POSITION was never what hid this record — the `**` prefix was.
+  const SPECIMEN_16529 =
+    '**Release:** session `session_017ef78bLdybu3AffehKkhfk` · 因:第 1 段(limit 2)已落地 `9ddaa067f`,PR 带 `Part of` 故 GitHub 不关卡 · 去向:回 `pm:queue`,余项为上列第 2、3 段,第 2 段需维护者背书后方可派。';
+  // The SAME line in the bare spelling, DERIVED from the specimen rather than
+  // typed beside it: a control written by hand can drift from the thing it
+  // controls, and then the pair proves nothing about one line in two spellings.
+  const SPECIMEN_16529_BARE = SPECIMEN_16529.replace('**Release:**', 'Release:');
+  const rows68 = (body, id = 5691473966) => [{ id, body, created_at: '2026-09-16T03:11:44Z' }];
+  // Row-wrapper, the file's own convention: `h66ReleaseVerdict` is three-valued
+  // and returns `null` for a comment that carries no release at all, so a bare
+  // `…(…).leg` THROWS while evaluating `t()`'s arguments — before `t()` runs,
+  // which ABORTS the suite and makes every later case vanish. That is exactly
+  // what an ABLATION of this reading produces, so the wrapper is what lets the
+  // ablation report red cases instead of one TypeError.
+  const rel68 = (body) => h66ReleaseVerdict(body) ?? {};
+  const miss68 = (body, id) => ownershipMarkerNearMisses(rows68(body, id))[0] ?? {};
+
+  // ⭐ THE CARD, both readings on one line.
+  b(BATTERY68, '#16529 ⭐ the LIVE specimen is refused by the bare marker — the defect, pinned', RELEASE_COMMENT_MARKER.test(SPECIMEN_16529), false);
+  b(BATTERY68, '#16529 ⭐ …and IS read through `markerMatches`, which is the whole card', markerMatches(RELEASE_COMMENT_MARKER, SPECIMEN_16529), true);
+  b(BATTERY68, '#16529 control: the bare spelling of the SAME line still matches the bare marker', RELEASE_COMMENT_MARKER.test(SPECIMEN_16529_BARE), true);
+  b(BATTERY68, '#16529 control: …and reads identically through the reading, so nothing was traded away', markerMatches(RELEASE_COMMENT_MARKER, SPECIMEN_16529_BARE), true);
+  b(BATTERY68, '#16529 control: the derived bare line really differs from the decorated one', SPECIMEN_16529 === SPECIMEN_16529_BARE, false);
+  b(BATTERY68, '#16529: a release line is ⛔ still not a claim, decorated or not', markerMatches(CLAIM_COMMENT_MARKER, SPECIMEN_16529), false);
+  b(BATTERY68, '#16529: the record is read from ANY line of the body, ⛔ not only the first', markerMatches(RELEASE_COMMENT_MARKER, ['## ✅ 第 1 段已落地', '', SPECIMEN_16529].join('\n')), true);
+  b(BATTERY68, '#16529: …and the whole comment body reads as a release, which is what the rows ask', markerMatches(RELEASE_COMMENT_MARKER, `heading\n\n${SPECIMEN_16529}\n\n### 状态\n`), true);
+
+  // THE ROWS THE CARD NAMES — H2, H47, H66, H67, each on a decorated record.
+  b(BATTERY68, 'H2: a DECORATED claim is a claim, so the row goes clean', h2AssigneeNoClaimComment(issue(['pm:dispatched'], ['os-help']), ['**Claim:** PM loop round 3\nSession: `session_x`']), false);
+  b(BATTERY68, 'H2 control: the same card with no claim at all still fires', h2AssigneeNoClaimComment(issue(['pm:dispatched'], ['os-help']), ['**Note:** looks good']), true);
+  b(BATTERY68, 'H47: a DECORATED `Release:` is located as the newest ownership record', latestMarkedComment(rows68(SPECIMEN_16529), RELEASE_COMMENT_MARKER)?.index, 0);
+  b(BATTERY68, 'H47 control: …and a thread with neither marker still yields null', latestMarkedComment(rows68('**Note:** nothing here'), RELEASE_COMMENT_MARKER), null);
+  b(BATTERY68, 'H66: a DECORATED release to `pm:queue` reads on the canonical leg, ⛔ not the announcement one', rel68(SPECIMEN_16529).leg, 'release-line');
+  b(BATTERY68, 'H66: …with the destination the protocol names', rel68(SPECIMEN_16529).destination, '`pm:queue`');
+  b(BATTERY68, 'H66: …and the quoted line comes back UNDECORATED, as the row prints it', String(rel68(SPECIMEN_16529).line ?? '').startsWith('Release: session session_017ef78bLdybu3AffehKkhfk'), true);
+  b(BATTERY68, 'H66 control: the bare spelling of the same line reads identically', String(rel68(SPECIMEN_16529_BARE).line ?? 'BARE-UNREAD'), String(rel68(SPECIMEN_16529).line ?? 'DECORATED-UNREAD'));
+
+  // WHAT THE SHARED STRIPPER ACTUALLY REMOVES — measured, ⛔ not assumed. The
+  // reading borrows `undecorateProseLine`, the #10102 function, so its reach IS
+  // the reach of this repair: backticks and asterisks, and nothing else.
+  b(BATTERY68, 'stripper: asterisks and backticks come off, which is why `**Release:**` reads', undecorateProseLine('**a`b`c**'), 'abc');
+  b(BATTERY68, 'stripper: ⛔ UNDERSCORES do NOT come off — measured, and the reason `__Release:__` is a near miss', undecorateProseLine('__a__'), '__a__');
+  b(BATTERY68, 'stripper: ⛔ nor a heading hash', undecorateProseLine('## a'), '## a');
+  b(BATTERY68, 'decoration: a BACKTICKED directive reads', markerMatches(RELEASE_COMMENT_MARKER, '`Release:` session `session_x`'), true);
+  b(BATTERY68, 'decoration: bold-italic reads', markerMatches(RELEASE_COMMENT_MARKER, '***Release:*** session `session_x`'), true);
+  b(BATTERY68, 'decoration: a decorated `**Claim:**` reads too — one reading, both markers', markerMatches(CLAIM_COMMENT_MARKER, '**Claim:** PM loop round 3'), true);
+  b(BATTERY68, 'decoration: …and `**Claimed:**`, the spelling the claim marker already carried', markerMatches(CLAIM_COMMENT_MARKER, '**Claimed:** PM loop round 3'), true);
+  b(BATTERY68, 'decoration: a decorated BLOCKQUOTED record reads, as the bare blockquote always did', markerMatches(RELEASE_COMMENT_MARKER, '> **Release:** session `session_x`'), true);
+  b(BATTERY68, 'decoration: ⛔ `__Release:__` does NOT read, because the stripper does not reach it', markerMatches(RELEASE_COMMENT_MARKER, '__Release:__ session `session_x`'), false);
+
+  // ⭐ STRICTLY ADDITIVE, and provable rather than argued: the bare test runs
+  // FIRST and short-circuits, so no body that read before can stop reading.
+  // ⚠️ These are the FIRING CONTROLS of a widening — ⛔ do not remove one.
+  const BARE68 = ['Release: x', '> Release: x', 'Release : x', 'Claim: x', 'Claimed: x', '> Claim: x', '   > Claimed: x'];
+  b(BATTERY68, '⭐ superset: every spelling the bare markers read is still read', BARE68.every((line) => (RELEASE_COMMENT_MARKER.test(line) || CLAIM_COMMENT_MARKER.test(line)) === (markerMatches(RELEASE_COMMENT_MARKER, line) || markerMatches(CLAIM_COMMENT_MARKER, line))), true);
+  b(BATTERY68, '⭐ superset: …and the control roster is not vacuous', BARE68.every((line) => RELEASE_COMMENT_MARKER.test(line) || CLAIM_COMMENT_MARKER.test(line)), true);
+  b(BATTERY68, 'control: prose containing the word is ⛔ still not a record (#7488 strictness kept)', markerMatches(RELEASE_COMMENT_MARKER, 'We will release: tomorrow'), false);
+  b(BATTERY68, 'control: …and the blockquoted prose control too', markerMatches(CLAIM_COMMENT_MARKER, '> the next seat should claim: only after the ruling lands'), false);
+  b(BATTERY68, 'control: ⛔ `Released:` is still a MALFORMED release, ⛔ not a dialect', markerMatches(RELEASE_COMMENT_MARKER, 'Released: session `session_x`'), false);
+  b(BATTERY68, 'control: ⛔ the FULLWIDTH colon still does not read — the 2026-08-11 ruling is untouched', markerMatches(RELEASE_COMMENT_MARKER, 'Release：session `session_x`'), false);
+  b(BATTERY68, 'control: ⛔ nor a dash-written claim, which is H34\'s row and ⛔ not a widening', markerMatches(CLAIM_COMMENT_MARKER, 'Claim — skills seat, session 019x'), false);
+
+  // THE LIST-ITEM GUARD — `undecorateProseLine` strips EVERY `*`, so a `*`
+  // bullet would become a directive. H20 pins `- Claim:` as NOT a claim; a `*`
+  // bullet is the same shape and is refused the same way. The discriminator is
+  // markdown's own: a list marker is followed by whitespace, a decoration is not.
+  b(BATTERY68, 'bullet: ⛔ a `*` bullet is a LIST, ⛔ not decoration — refused exactly as H20\'s `-` bullet is', markerMatches(CLAIM_COMMENT_MARKER, '* Claim: seat, session_x'), false);
+  b(BATTERY68, 'bullet: ⛔ …and the `-` bullet H20 pins is unchanged', markerMatches(CLAIM_COMMENT_MARKER, '- Claim: seat.'), false);
+  b(BATTERY68, 'bullet: ⛔ …an ORDERED list marker too', markerMatches(RELEASE_COMMENT_MARKER, '1. Release: session `session_x`'), false);
+  b(BATTERY68, 'bullet: ⛔ …and a blockquoted bullet', markerMatches(RELEASE_COMMENT_MARKER, '> - Release: session `session_x`'), false);
+  b(BATTERY68, 'bullet: ⭐ the discriminator is the WHITESPACE — `**Claim:**` reads while `* Claim:` does not', [markerMatches(CLAIM_COMMENT_MARKER, '**Claim:** x'), markerMatches(CLAIM_COMMENT_MARKER, '* Claim: x')].join(','), 'true,false');
+  b(BATTERY68, 'bullet: a bullet elsewhere in the body ⛔ never suppresses a real record on another line', markerMatches(RELEASE_COMMENT_MARKER, `- a list item\n${SPECIMEN_16529}`), true);
+
+  // THE NEAR-MISS VOCABULARY — every member driven by name against its own
+  // fixture. ⭐ The counterfactual pin: the roster is asserted EQUAL to a frozen
+  // list of ids, so a form added without a fixture reds and a form silently
+  // dropped reds. That is the failure mode that produced this card.
+  b(BATTERY68, 'vocabulary ⭐ the roster is EXACTLY the declared forms — an addition without a fixture reds, a silent drop reds', OWNERSHIP_MARKER_NEAR_MISS_FORMS.map((f) => f.id).join(','), 'heading,list-item,underscore-emphasis,inflected-word,separator');
+  b(BATTERY68, 'vocabulary: the roster is FROZEN', Object.isFrozen(OWNERSHIP_MARKER_NEAR_MISS_FORMS), true);
+  b(BATTERY68, 'vocabulary: …and so is every member', OWNERSHIP_MARKER_NEAR_MISS_FORMS.every((f) => Object.isFrozen(f)), true);
+  b(BATTERY68, 'vocabulary: every member carries an id, a printable name, a fixture and a pattern', OWNERSHIP_MARKER_NEAR_MISS_FORMS.every((f) => typeof f.id === 'string' && typeof f.what === 'string' && typeof f.example === 'string' && f.re instanceof RegExp), true);
+  b(BATTERY68, 'vocabulary: the ids are DISTINCT, so a row names one form and not two', new Set(OWNERSHIP_MARKER_NEAR_MISS_FORMS.map((f) => f.id)).size, OWNERSHIP_MARKER_NEAR_MISS_FORMS.length);
+  b(BATTERY68, 'vocabulary: ⛔ no `g` flag anywhere — a shared regex carrying `lastIndex` is the state bug the markers refuse', OWNERSHIP_MARKER_NEAR_MISS_FORMS.every((f) => f.re.global === false), true);
+  b(BATTERY68, 'vocabulary: ⛔ nor `m` — the reader runs these per SPLIT LINE, so a body-wide `.test` must ⛔ not claim a reading this vocabulary did not take', OWNERSHIP_MARKER_NEAR_MISS_FORMS.every((f) => f.re.multiline === false), true);
+  for (const form of OWNERSHIP_MARKER_NEAR_MISS_FORMS) {
+    const found = ownershipMarkerNearMisses(rows68(form.example));
+    b(BATTERY68, `vocabulary ${form.id}: ⛔ the fixture is NOT read by either marker — the silence is real`, markerMatches(CLAIM_COMMENT_MARKER, form.example) || markerMatches(RELEASE_COMMENT_MARKER, form.example), false);
+    b(BATTERY68, `vocabulary ${form.id}: …and it REPORTS, naming its own form`, found.map((m) => m.form).join(','), form.id);
+    b(BATTERY68, `vocabulary ${form.id}: …with the comment id a seat opens`, miss68(form.example).commentId, '5691473966');
+    b(BATTERY68, `vocabulary ${form.id}: …and the OFFENDING PREFIX, ⛔ not the whole line`, String(miss68(form.example).prefix ?? '').length > 0 && form.example.startsWith(String(miss68(form.example).prefix ?? '\u0000')) && String(miss68(form.example).prefix ?? '').length < form.example.length, true);
+  }
+
+  // THE READER — complements by construction, and the conservative half.
+  b(BATTERY68, 'near miss ⭐ a line the reading DOES read is ⛔ NEVER a near miss — the two are complements', ownershipMarkerNearMisses(rows68(SPECIMEN_16529)).length, 0);
+  b(BATTERY68, 'near miss: …nor is the bare spelling', ownershipMarkerNearMisses(rows68(SPECIMEN_16529_BARE)).length, 0);
+  b(BATTERY68, 'near miss: a directive with NO record after it is silent — a census, ⛔ not a heading count', ownershipMarkerNearMisses(rows68('## Release:')).length, 0);
+  b(BATTERY68, 'near miss: ordinary prose is silent', ownershipMarkerNearMisses(rows68('We will release: tomorrow\n- a list item\nnothing here')).length, 0);
+  b(BATTERY68, 'near miss: the SAME offending line twice in one comment is reported ONCE', ownershipMarkerNearMisses(rows68('__Release:__ x\n__Release:__ x')).length, 1);
+  b(BATTERY68, 'near miss: two DIFFERENT forms in one comment are both reported', ownershipMarkerNearMisses(rows68('__Release:__ x\n## Claim: y')).map((m) => m.form).join(','), 'underscore-emphasis,heading');
+  b(BATTERY68, 'near miss: a comment id that does not read comes back null, ⛔ never a fabricated one', (ownershipMarkerNearMisses([{ id: 'not-an-id', body: '__Release:__ x' }])[0] ?? { commentId: 'ABSENT' }).commentId, null);
+  b(BATTERY68, 'near miss: a non-array input is a real reading, ⛔ not a crash', ownershipMarkerNearMisses(undefined).length, 0);
+  b(BATTERY68, 'near miss: an empty thread too', ownershipMarkerNearMisses([]).length, 0);
+  b(BATTERY68, 'near miss: a row with no body at all is skipped rather than throwing', ownershipMarkerNearMisses([{ id: 1 }]).length, 0);
+  b(BATTERY68, 'near miss ⭐ the LIVE specimen would have been a near miss BEFORE the reading landed, and is not one after', [RELEASE_COMMENT_MARKER.test(SPECIMEN_16529), ownershipMarkerNearMisses(rows68(SPECIMEN_16529)).length].join(','), 'false,0');
+
+  // THE SUMMARY CLAUSE — the channel the census speaks on. UNCONDITIONAL, so a
+  // run that found nothing and a run that READ nothing cannot print alike.
+  const NEAR_MISS_COUNTS = { repo: 'o/r', issues: 1, unscoped: 0, prs: 0, merged: 0, markerNearMissLines: 3, markerNearMissCards: 2, markerNearMissJudged: 40, markerNearMissNamed: ['#16529 comment 5691473966 「__Release:__」 (underscore-emphasis)'] };
+  b(BATTERY68, 'summary: the clause states how many lines, on how many cards, out of how many threads READ', saidBy('markerNearMiss', summaryLine(NEAR_MISS_COUNTS, 0)).includes('3 line(s) on 2 of 40 thread(s)'), true);
+  b(BATTERY68, 'summary: …and names the card, the comment and the offending prefix', saidBy('markerNearMiss', summaryLine(NEAR_MISS_COUNTS, 0)).includes('#16529 comment 5691473966 「__Release:__」 (underscore-emphasis)'), true);
+  b(BATTERY68, 'summary: …and says how many further lines the naming cap held back', saidBy('markerNearMiss', summaryLine(NEAR_MISS_COUNTS, 0)).includes(`2 further line(s) NOT NAMED at the ${OWNERSHIP_MARKER_NEAR_MISS_NAME_CAP}-entry cap`), true);
+  b(BATTERY68, 'summary: …naming every declared form, so the vocabulary is visible from the report alone', OWNERSHIP_MARKER_NEAR_MISS_FORMS.every((f) => saidBy('markerNearMiss', summaryLine(NEAR_MISS_COUNTS, 0)).includes(f.id)), true);
+  b(BATTERY68, 'summary ⭐ the clause renders on EVERY run — a census that read nothing must not print as a clean board', saidBy('markerNearMiss', summaryLine({ repo: 'o/r', issues: 1, unscoped: 0, prs: 0, merged: 0 }, 0)).includes('0 line(s) on 0 of 0 thread(s)'), true);
+  b(BATTERY68, 'summary: …and an absent census renders NO cap clause, since nothing was held back', saidBy('markerNearMiss', summaryLine({ repo: 'o/r', issues: 1, unscoped: 0, prs: 0, merged: 0 }, 0)).includes('NOT NAMED'), false);
+  b(BATTERY68, 'summary: ⛔ report-only, and ⛔ never a half-state verdict by itself, in as many words', saidBy('markerNearMiss', summaryLine(NEAR_MISS_COUNTS, 0)).includes('⛔ NEVER a half-state verdict by itself'), true);
+  b(BATTERY68, 'summary: it names the ONE place decoration is handled, so the next reader finds it', saidBy('markerNearMiss', summaryLine(NEAR_MISS_COUNTS, 0)).includes('`markerMatches`'), true);
+  b(BATTERY68, 'summary: the clause is declared in RENDER order, before the report-only tail', SUMMARY_CLAUSE_ANCHORS.findIndex(([k]) => k === 'markerNearMiss') < SUMMARY_CLAUSE_ANCHORS.findIndex(([k]) => k === 'reportOnly'), true);
+  b(BATTERY68, 'summary: …and AFTER H67, whose declared loss it replaces', SUMMARY_CLAUSE_ANCHORS.findIndex(([k]) => k === 'markerNearMiss') > SUMMARY_CLAUSE_ANCHORS.findIndex(([k]) => k === 'h67QueueDelivery'), true);
+  b(BATTERY68, 'summary: every count key rides the enumerated forwarding contract', ['markerNearMissLines', 'markerNearMissCards', 'markerNearMissJudged', 'markerNearMissNamed'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  b(BATTERY68, 'summary: a non-array `markerNearMissNamed` renders a sentence rather than throwing', saidBy('markerNearMiss', summaryLine({ repo: 'o/r', issues: 1, unscoped: 0, prs: 0, merged: 0, markerNearMissNamed: null }, 0)).includes('0 line(s)'), true);
+  b(BATTERY68, 'summary: ⛔ the clause renders numbers, ⛔ never the string `undefined`', saidBy('markerNearMiss', summaryLine({}, 0)).includes('undefined'), false);
+
+  // H67's DECLARED LOSS is gone, and the row says so rather than going quiet.
+  b(BATTERY68, 'H67: the row no longer declares the decorated line as a blind spot', h67row(I16529, { number: 16529 }).includes('is invisible to `RELEASE_COMMENT_MARKER`'), false);
+  b(BATTERY68, 'H67: …it says the blind spot CLOSED, and names what replaced it', h67row(I16529, { number: 16529 }).includes('WAS a third way and is no longer'), true);
+  b(BATTERY68, 'H67: …and the remaining two lower bounds are still declared', h67row(I16529, { number: 16529 }).includes('LOWER BOUND, two ways'), true);
+  b(BATTERY68, 'H67 summary: the clause declares the closure too, ⛔ rather than keeping a stale loss', saidBy('h67QueueDelivery', summaryLine(NEAR_MISS_COUNTS, 0)).includes('WAS a second way and is no longer'), true);
+
+  // FLOOR — this battery is declared, pinned, and the roster grew with it.
+  b(BATTERY68, 'floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY68), true);
+  b(BATTERY68, 'floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY68] > 0, true);
+  b(BATTERY68, 'floor: the roster now declares FIVE batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 5);
+  b(BATTERY68, 'floor: …including the four this battery landed BESIDE, so neither side of the base merge silently dropped one', ['H66 released queue card', 'H19 judged-set founding', 'H65 tier declaration spelling', 'H67 queued merged-delivery reading'].every((name) => Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, name)), true);
+  b(BATTERY68, 'floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.
