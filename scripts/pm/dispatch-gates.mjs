@@ -8381,6 +8381,136 @@ export function anchoredReadTargets(rel, source, isTracked, { calls = SOURCE_REA
 }
 
 /**
+ * ── GOVERNED SURFACES, and the census of the scripts that READ them (#18673) ─
+ *
+ * The rule-layer files of this repository: `AGENTS.md`, `CLAUDE.md`, and
+ * everything under `.claude/` and `skills/`. They are the surfaces Prime
+ * Directive #14 reserves to the maintainer, and — the property this scan is
+ * about — they are surfaces a CARD edits, while a gate somewhere else asserts
+ * something structural about them.
+ *
+ * ⛔ This is not a second copy of the governance register. `check-governed-
+ * merges.mjs` owns WHO may land a diff touching one; this predicate answers a
+ * different question — "is a read of this path a population claim a derivation
+ * has to carry?" — and the two would not stay in step if either tried to be the
+ * other. What they share is the shape of the surface, and that is spelled here
+ * for this question only.
+ */
+export const GOVERNED_SURFACE_PREFIXES = Object.freeze(['.claude/', 'skills/']);
+export const GOVERNED_SURFACE_FILES = Object.freeze(['AGENTS.md', 'CLAUDE.md']);
+
+export function isGovernedSurfacePath(path) {
+  const p = String(path ?? '');
+  return GOVERNED_SURFACE_FILES.includes(p) || GOVERNED_SURFACE_PREFIXES.some((dir) => p.startsWith(dir));
+}
+
+/** The cheap prefilter, derived from the two rosters so it cannot drift from them. */
+const GOVERNED_SURFACE_MENTION = new RegExp(
+  [...GOVERNED_SURFACE_PREFIXES, ...GOVERNED_SURFACE_FILES]
+    .map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|'),
+);
+
+/**
+ * Every (script, governed file) pair in the tree where a script under
+ * `scripts/` opens a governed surface at an anchored path, and whether the
+ * script DECLARES that read.
+ *
+ * ## Why the census exists, and why it is not just this card's gate
+ *
+ * The defect this card was filed for is one instance of a class: a gate whose
+ * self-test asserts something about a governed file is not derived for a change
+ * to that file, so a dev who runs the prescribed derivation and reconciles
+ * `--ran` is handed a complete-looking list that CI contradicts. Fixing the one
+ * instance leaves the class, and the class is invisible — nothing anywhere
+ * counts these reads. So the reads are counted here, on every run, and the
+ * self-test holds the count to a pinned roster: a NEW governed read arrives
+ * either declared or red, never silent.
+ *
+ * ## The eyes are deliberately WIDER than the derivation's edge
+ *
+ * Scanned with `GOVERNED_READ_CALL`, a strict superset of the vocabulary the
+ * population follow uses. A governed file opened in a spelling the follow
+ * cannot carry is a real claim that the derivation will miss, and the census
+ * exists to SAY so. Seeing it and refusing it names the remedy — widen the
+ * follow — where not seeing it names nothing and reads as a clean tree.
+ *
+ * @param {{ files?: Set<string>|null, read?: ((rel: string) => string)|null }} [options]
+ * @returns {{ script: string, file: string, declared: boolean }[]} sorted by script, then file
+ */
+export function governedReadCensus({ files = null, read = null } = {}) {
+  const tracked = files ?? new Set(trackedFiles());
+  const readSource = read ?? ((rel) => readFileSync(nodePath.join(ROOT, rel), 'utf8'));
+  const isTracked = (t) => tracked.has(t);
+  const rows = [];
+  for (const rel of [...tracked].sort()) {
+    if (!rel.startsWith('scripts/')) continue;
+    if (!SCANNED_SOURCE_EXTENSIONS.test(rel)) continue;
+    let source;
+    try {
+      source = readSource(rel);
+    } catch {
+      continue;
+    }
+    if (!GOVERNED_SURFACE_MENTION.test(source)) continue;
+    const governed = anchoredReadTargets(rel, source, isTracked, { calls: GOVERNED_READ_CALL })
+      .filter(isGovernedSurfacePath);
+    if (governed.length === 0) continue;
+    // Graded against the DEFAULT vocabulary, exactly as `discoverFamilies`
+    // grades it: a declaration is only ever as good as the read the follow can
+    // carry, and one naming a path only the wider scan reaches throws here
+    // rather than passing as coverage the derivation does not have.
+    const declared = new Set(
+      declaredSelfTestReads(source, anchoredReadTargets(rel, source, isTracked))?.population ?? [],
+    );
+    for (const file of [...governed].sort()) rows.push({ script: rel, file, declared: declared.has(file) });
+  }
+  return rows;
+}
+
+/**
+ * The governed reads this tree carries, pinned — a FLOOR the next card lowers,
+ * never a list this derivation reads (#18673).
+ *
+ * Three rows at the landing of this card, measured by `governedReadCensus`:
+ *
+ *   scripts/check-commit-card-trailers.mjs   .claude/agents/os-dev.md      undeclared
+ *   scripts/pm/check-expected-skips.mjs      .claude/skills/pm-dispatch/SKILL.md   DECLARED
+ *   scripts/pm/check-settings-deny-roster.mjs  .claude/settings.json       undeclared
+ *
+ * ## Why the two undeclared rows are not declared HERE
+ *
+ * Both are already MATCHED for the file they read, through a key this card did
+ * not add: each spells its governed path in its MODULE BODY as well as in its
+ * self-test, so `extractWatchHints` sees it and the derivation names the family
+ * for a card touching it — measured, both ways, at this landing. They cost
+ * nothing today, and declaring them would widen this PR onto two gates it was
+ * not dispatched to. They are listed so the next reader inherits the
+ * measurement rather than re-deriving it.
+ *
+ * ## What each column makes fail
+ *
+ * A row whose READ disappears reds (the census no longer finds it) — which is
+ * what makes the pin on this class unsatisfiable by deleting the read. A NEW
+ * governed read reds until it is classified here. A row whose `declared` flag
+ * changes reds, in both directions: a declaration added is a floor to lower,
+ * a declaration deleted is this card's defect coming back.
+ */
+export const GOVERNED_READ_FLOOR = Object.freeze([
+  Object.freeze({ script: 'scripts/check-commit-card-trailers.mjs', file: '.claude/agents/os-dev.md', declared: false }),
+  Object.freeze({
+    script: 'scripts/pm/check-expected-skips.mjs',
+    file: '.claude/skills/pm-dispatch/SKILL.md',
+    declared: true,
+  }),
+  Object.freeze({
+    script: 'scripts/pm/check-settings-deny-roster.mjs',
+    file: '.claude/settings.json',
+    declared: false,
+  }),
+]);
+
+/**
  * ── The PROGRAM a gate RUNS: the third spelling of the same fact (#13511) ───
  *
  * `readProgramTargetsInSource` above draws the line this one is on the other
@@ -21620,6 +21750,186 @@ function selfTest() {
       ` (${declaredDataReads.join(' · ') || 'none'})`,
     declaredDataReads.length > 0 && declaredDataReads.every((d) => readEdges.some(([c, r]) => `${c} <- ${r}` === d)),
   );
+
+  // ── A SELF-TEST that reads a GOVERNED file (#18673) ───────────────────────
+  //
+  // The declaration's grammar first, over fixtures, then the census over the
+  // live tree, then this card's own specimen by name. The three answer
+  // different questions and none of them substitutes for another: a grammar
+  // that parses proves nothing about the tree, a census that matches its roster
+  // proves nothing about the derivation, and a specimen that is matched proves
+  // nothing about the class.
+  const selfTestReadFixture = [
+    '#!/usr/bin/env node',
+    "// dispatch-gates: self-test-reads .claude/skills/pm-dispatch/SKILL.md -- the structural case reads the enqueue bar",
+    "import { readFileSync } from 'node:fs';",
+    'function selfTest() {',
+    "  return readFileSync(join(ROOT, '.claude/skills/pm-dispatch/SKILL.md'), 'utf8');",
+    '}',
+  ].join('\n');
+  const PINNED_SKILL = '.claude/skills/pm-dispatch/SKILL.md';
+  const parsedSelfTestReads = declaredSelfTestReads(selfTestReadFixture, [PINNED_SKILL]);
+  t(
+    'a self-test-reads declaration parses its path list and its reason',
+    parsedSelfTestReads?.population.join(' ') === PINNED_SKILL
+      && parsedSelfTestReads?.reason === 'the structural case reads the enqueue bar',
+    JSON.stringify(parsedSelfTestReads),
+  );
+  t(
+    'the `#` comment form declares too, so a shell gate can carry one',
+    declaredSelfTestReads(
+      `#!/usr/bin/env bash\n# dispatch-gates: self-test-reads AGENTS.md -- a shell gate reason\n`,
+      ['AGENTS.md'],
+    )?.population.join(' ') === 'AGENTS.md',
+  );
+  t(
+    'a marker carrying no path list does not parse as a declaration — the safe direction, since a blanket opt-in is what this marker must never be',
+    declaredSelfTestReads('// dispatch-gates: self-test-reads -- a reason and nothing else\n', ['AGENTS.md']) === null,
+  );
+  t(
+    'nor does one carrying no reason',
+    declaredSelfTestReads('// dispatch-gates: self-test-reads AGENTS.md\n', ['AGENTS.md']) === null,
+  );
+  t(
+    'a marker named inside prose is not a declaration',
+    declaredSelfTestReads(
+      '// see the dispatch-gates: self-test-reads AGENTS.md -- marker for how to declare one\n',
+      ['AGENTS.md'],
+    ) === null,
+  );
+  // ⭐ The refusal that makes the pin below unsatisfiable by DELETING the read:
+  // a declaration is graded against the reads the source really performs, so a
+  // path the file no longer opens is not "one fewer lead", it is RED.
+  {
+    let refused = null;
+    try {
+      declaredSelfTestReads(selfTestReadFixture, []);
+    } catch (error) {
+      refused = String(error.message);
+    }
+    t(
+      'a declared path the source does NOT open refuses, naming it — deleting the read breaks the declaration rather than satisfying it',
+      refused !== null && refused.includes(PINNED_SKILL) && refused.includes('never invent one'),
+      refused,
+    );
+  }
+  {
+    let refused = null;
+    try {
+      declaredSelfTestReads(selfTestReadFixture, undefined);
+    } catch (error) {
+      refused = String(error.message);
+    }
+    t(
+      'and a caller supplying NO read set refuses too — a declaration nothing can refuse is the one shape this marker must not have',
+      refused !== null && refused.includes('must supply them'),
+      refused,
+    );
+  }
+  t(
+    'a path-list marker key this file does not name refuses, rather than building a fourth copy of the pattern',
+    (() => {
+      try {
+        pathListMarkerPattern('invented-population');
+        return false;
+      } catch (error) {
+        return String(error.message).includes('unknown path-list marker key');
+      }
+    })(),
+  );
+  // The grammar is ONE spelling for both path-list markers, so a comment form
+  // widened for one is widened for both. Pinned by identity of the head, not by
+  // a retyped copy of it.
+  t(
+    "both path-list markers are built from one head, so their comment-form alternation cannot drift apart",
+    pathListMarkerPattern('inherited-population').source.replace('inherited-population', '<key>')
+      === pathListMarkerPattern('self-test-reads').source.replace('self-test-reads', '<key>'),
+  );
+
+  // The CENSUS, live over the tree, against `GOVERNED_READ_FLOOR`.
+  {
+    const census = governedReadCensus({ files: liveTree.files, read: liveSource });
+    const key = (row) => `${row.script}::${row.file}`;
+    const liveKeys = new Map(census.map((row) => [key(row), row]));
+    const pinnedKeys = new Map(GOVERNED_READ_FLOOR.map((row) => [key(row), row]));
+    const unpinned = [...liveKeys.keys()].filter((k) => !pinnedKeys.has(k)).sort();
+    const gone = [...pinnedKeys.keys()].filter((k) => !liveKeys.has(k)).sort();
+    t(
+      'every structural read of a GOVERNED file under scripts/ is classified in GOVERNED_READ_FLOOR'
+        + (unpinned.length ? ` — unpinned: ${unpinned.join(', ')}` : '')
+        + (gone.length ? ` — pinned but gone: ${gone.join(', ')}` : ''),
+      unpinned.length === 0 && gone.length === 0,
+    );
+    const flagDrift = [...pinnedKeys.entries()]
+      .filter(([k, row]) => liveKeys.has(k) && liveKeys.get(k).declared !== row.declared)
+      .map(([k, row]) => `${k}: pinned declared=${row.declared}, live declared=${liveKeys.get(k).declared}`);
+    t(
+      `each pinned row's DECLARED flag still reads off the file (${flagDrift.join(' | ') || 'no drift'})`,
+      flagDrift.length === 0,
+    );
+    t(
+      'the census is not vacuous — it finds the declared row AND undeclared ones, so neither half of the roster is empty',
+      census.some((row) => row.declared) && census.some((row) => !row.declared),
+      census.map((row) => `${key(row)}${row.declared ? ' [declared]' : ''}`).join(' · '),
+    );
+    // ⭐ The deliverable, stated over the whole class rather than over this
+    // card's one gate: every governed file a script structurally reads is
+    // DERIVED for the family that runs that script. However it is spelled —
+    // a module-body literal, a CI trigger, or the declaration this card adds —
+    // the derivation names the family for a card touching that file.
+    const underived = [];
+    for (const row of census) {
+      for (const [check, entry] of liveDiscovery.byCheck) {
+        if (!(entry.files ?? []).includes(row.script)) continue;
+        const placed = placeFamily(entry, [row.file]);
+        if (placed.verdict !== 'matched') underived.push(`${check} <- ${row.file} (${placed.verdict})`);
+      }
+    }
+    t(
+      `every governed read in the census is DERIVED for the file it reads (${underived.join(' | ') || 'none underived'})`,
+      census.length > 0 && underived.length === 0,
+    );
+  }
+
+  // This card's own specimen, end to end and BY NAME. ⛔ Not "some family
+  // matches": the miss was THIS family scoring `silent` for THIS path, while a
+  // dev's `--ran` reconciliation reported 0 NOT-MEASURED over a list without it.
+  {
+    const skipsEntry = liveDiscovery.byCheck.get('check:pm-expected-skips');
+    const covering = skipsEntry ? coveringKey(skipsEntry, PINNED_SKILL) : null;
+    t(
+      `check:pm-expected-skips is derived for the SKILL.md its self-test reads (${covering?.via ?? 'no key'})`,
+      covering?.key === PINNED_SKILL
+        && covering?.via === 'declared self-test read by scripts/pm/check-expected-skips.mjs',
+    );
+    // …and green for the RIGHT reason. Nothing else that family declares covers
+    // that path — which is exactly why the card was filed — so this case cannot
+    // be passing on a key it is not testing.
+    t(
+      'and no hint, file or CI trigger of that family covers it, which is why the declaration was needed',
+      Boolean(skipsEntry)
+        && !(skipsEntry.hints ?? []).some((h) => hintCovers(h, PINNED_SKILL))
+        && !(skipsEntry.files ?? []).some((f) => hintCovers(f, PINNED_SKILL))
+        && !coveringTrigger(skipsEntry, PINNED_SKILL)
+        && !coveringJobFilter(skipsEntry, PINNED_SKILL),
+    );
+    // The command really reaches a dev's list — a matched family that never
+    // renders is the same miss one step later.
+    const skipsCommands = commandsFor({
+      matchedRows: [
+        {
+          check: 'check:pm-expected-skips',
+          command: runnableInvocation(skipsEntry ?? {}),
+          ciOnly: skipsEntry?.ciOnly ?? null,
+          notRunnable: skipsEntry?.notRunnable ?? null,
+        },
+      ],
+    });
+    t(
+      `…and it renders as a runnable command, not as a roster or checker-health row (${skipsCommands.join(' · ') || 'none'})`,
+      skipsCommands.includes('pnpm check:pm-expected-skips'),
+    );
+  }
 
   // ── The PROGRAM a gate RUNS (#13511) ──────────────────────────────────────
   //
