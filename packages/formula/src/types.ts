@@ -20,6 +20,17 @@ import type { Expression } from '@objectstack/spec';
  * Every field is optional — call sites populate only what they have. The CEL
  * engine binds `record`, `previous`, `input`, `os` directly as top-level
  * variables when present.
+ *
+ * **It carries data, never a query API.** `buildScope()` binds exactly the
+ * fields declared here, so an expression reads only what its call site already
+ * passed in — reaching a row this context does not carry is outside the
+ * contract. A kernel API (`os.exists` / `os.count` / `os.lookup`) was declared
+ * here and never bound by `buildScope()`, and it is removed rather than
+ * implemented because the harm came from the declaration existing, not from
+ * the implementation missing: a predicate written to it faulted at runtime
+ * (`found no matching overload for 'dyn.lookup(string, dyn)'`), and an
+ * unevaluable predicate refuses the write it guards — so a validation rule
+ * authored against the declaration locked every write on its object.
  */
 export interface EvalContext {
   /** Logical "now" snapshot — pinned per evaluation run for determinism. */
@@ -63,15 +74,6 @@ export interface EvalContext {
   previous?: Record<string, unknown>;
   /** Action / flow input payload. */
   input?: Record<string, unknown>;
-  /**
-   * Optional kernel API for `os.exists / os.count / os.lookup`.
-   * Implemented opportunistically by call sites that have a query engine.
-   */
-  api?: {
-    exists?: (object: string, predicate: Expression) => boolean;
-    count?: (object: string, predicate: Expression) => number;
-    lookup?: (object: string, id: string) => Record<string, unknown> | null;
-  };
   /** Free-form bag for niche call sites; merged onto the variable scope. */
   extra?: Record<string, unknown>;
 }
