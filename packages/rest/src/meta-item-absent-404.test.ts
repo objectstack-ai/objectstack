@@ -298,6 +298,17 @@ describe('[#18066] §2 — the #8013 partition survives, in both directions', ()
         const unpublished = await getItem(setup(GATED, { perms: ['manage_users'] }).rest, 'app', 'production_management');
         const absent = await getItem(setup(GATED, { perms: ['manage_users'] }).rest, 'app', 'no_such_app_xyz');
 
+        // [#18402] BYTE-for-byte, on the SERIALIZED body — the wire is what
+        // ADR-0045 §3 is about, and `toEqual` below is a statement about two
+        // in-process objects. They can agree while the bytes do not: a member
+        // holding `undefined` is equal to an absent one here and disappears at
+        // `JSON.stringify` (§4 measures exactly that trap on the 200 this
+        // route used to send), and key ORDER is invisible to `toEqual` while
+        // being the first thing a response diff shows. Asserted first, so a
+        // future change that keeps the objects equal and moves the bytes fails
+        // on the line that names the property rather than on a weaker one.
+        expect(JSON.stringify(unpublished.body)).toBe(JSON.stringify(absent.body));
+
         expect(unpublished.statusCode).toBe(absent.statusCode);
         expect(unpublished.body).toEqual(absent.body);
         expect(unpublished.statusCode).toBe(404);
@@ -333,19 +344,22 @@ describe('[#18066] §3 — the two arms of this route now answer absence alike',
         );
         expect(viaUncached.statusCode).toBe(viaCache.statusCode);
 
-        // ⚠️ Status and CODE agree; the envelope DIALECT still differs and that
-        // is deliberately not touched here. The thrown arm is rendered by
-        // `resolveErrorResponse`'s declared-status passthrough, whose body is
-        // the flat `{ error: '<message>', code }` pinned in
-        // `rest-meta-outage-vs-miss.test.ts`; the in-route arm emits ADR-0112's
-        // nested `{ error: { code, message } }`, which is what its own sibling
-        // refusals on this handler emit and what objectui#4252 reads. Matching
-        // the flat one HERE would have broken the §2 byte-identity, which is a
-        // security property; converging the two dialects is a separate change
-        // on the thrown side. Asserted rather than left implicit, so a future
-        // convergence is a deliberate edit to this line.
-        expect(viaCache.body?.code).toBe('RESOURCE_NOT_FOUND');
+        // [#18402] THE LINE #18066 SAID A CONVERGENCE WOULD HAVE TO EDIT, and
+        // this is that edit. It used to read `viaCache.body?.code` against
+        // `viaUncached.body?.error?.code` — one status, one code, TWO
+        // envelopes, chosen by `metadata.enableCache`. Both arms now answer
+        // ADR-0112's nested `{ error: { code, message } }` through the single
+        // emitter, which is the accessor objectui#4252 reads and the shape the
+        // sibling refusals on this handler already emitted.
+        //
+        // ⚠️ The direction matters and is NOT symmetric: the flat arm was
+        // pulled back to the nested one. Matching the FLAT shape here is what
+        // #18066 fenced off — it would have moved the emitter, and with it the
+        // §2 byte-identity, which is a security property rather than a style
+        // preference.
+        expect(viaCache.body?.error?.code).toBe('RESOURCE_NOT_FOUND');
         expect(viaUncached.body?.error?.code).toBe('RESOURCE_NOT_FOUND');
+        expect(viaCache.body?.code).toBeUndefined();
     });
 
     it('an unreadable metadata STORE is still a 503, never this 404', async () => {
@@ -406,5 +420,172 @@ describe('[#18066] §4 — against `packages/spec`, not against a restatement of
             expect(res.statusCode).toBe(200);
             expect(GetMetaItemResponseSchema.safeParse(res.body).success).toBe(true);
         }
+    });
+});
+
+describe('[#18402] §5 — ONE absence body on this route, whichever arm produced it', () => {
+    /**
+     * Every way `GET /meta/:type/:name` can arrive at "you get nothing",
+     * driven side by side. The card that filed this measured THREE refusal
+     * dialects from this one handler and named the severe half: which dialect
+     * a caller must parse *for absence* was decided by `metadata.enableCache`
+     * — a server-side setting the caller cannot see (the #7035 class).
+     *
+     * @returns the serialized wire body, because that is the artefact ADR-0045
+     *   §3 is a statement about. An in-process `toEqual` is satisfied by two
+     *   objects that `JSON.stringify` differently (§4 measures that exact trap
+     *   on the 200 this route used to send), so the arms are compared as bytes.
+     */
+    const wire = (res: any) => `${res.statusCode} ${JSON.stringify(res.body)}`;
+
+    const UNPUBLISHED = { name: 'production_management', label: 'PM', _unpublished: true, navigation: [] };
+
+    async function thrownMiss(err: unknown, opts: { perms?: string[]; config?: any; cached?: any } = {}) {
+        const { rest, protocol } = setup({}, opts);
+        protocol.getMetaItem = vi.fn().mockRejectedValue(err);
+        return getItem(rest, 'view', 'no_such_view');
+    }
+
+    it('⭐ all four arms are byte-identical — the three-dialect table collapses to one', async () => {
+        // ① the uncached arm's item-less RETURN (the #18066 condition).
+        const returned = await getItem(
+            setup({}, { config: { api: { requireAuth: false }, metadata: { enableCache: false } } }).rest,
+            'view', 'no_such_view',
+        );
+        // ② the CACHED arm's throw — `getMetaItemCached` raises
+        //    `metadataItemNotFoundError` on a falsy `item`. This arm is the
+        //    DEFAULT (`enableCache` defaults to true).
+        const cached = await getItem(
+            setup({}, {
+                cached: vi.fn().mockRejectedValue(Object.assign(
+                    new Error('Metadata item view/no_such_view not found'),
+                    { code: 'RESOURCE_NOT_FOUND', status: 404 },
+                )),
+            }).rest,
+            'view', 'no_such_view',
+        );
+        // ③ a protocol whose UNCACHED `getMetaItem` throws the miss instead of
+        //    resolving item-less. Not hypothetical: it is the shape
+        //    `rest-meta-outage-vs-miss.test.ts` drives.
+        const thrown = await thrownMiss(
+            Object.assign(new Error('Metadata item view/no_such_view not found'), {
+                code: 'RESOURCE_NOT_FOUND', status: 404,
+            }),
+            { config: { api: { requireAuth: false }, metadata: { enableCache: false } } },
+        );
+        // ④ a producer that declares the 404 and NO code at all. The door
+        //    derives `RESOURCE_NOT_FOUND` from the status, so this is the same
+        //    answer arriving by a different road.
+        const uncoded = await thrownMiss(
+            Object.assign(new Error('nothing there'), { status: 404 }),
+            { config: { api: { requireAuth: false }, metadata: { enableCache: false } } },
+        );
+
+        const arms = { returned, cached, thrown, uncoded };
+        for (const [name, res] of Object.entries(arms)) {
+            expect(`${name}: ${wire(res)}`).toBe(`${name}: ${wire(returned)}`);
+        }
+        expect(wire(returned)).toBe('404 {"error":{"code":"RESOURCE_NOT_FOUND","message":"Metadata item not found or access denied."}}');
+    });
+
+    it('the producer`s own prose stops reaching the wire — one fixed sentence, no type/name echo', async () => {
+        // Not tidiness. The thrown arms shipped `Metadata item <type>/<name>
+        // not found`; the emitter says one sentence that names nothing. An
+        // unpublished app answers the emitter's sentence, so an absence that
+        // echoed the producer told the two apart in prose even once the
+        // envelope matched.
+        const res = await thrownMiss(
+            Object.assign(new Error('Metadata item view/secret_thing not found'), {
+                code: 'RESOURCE_NOT_FOUND', status: 404,
+            }),
+            { config: { api: { requireAuth: false }, metadata: { enableCache: false } } },
+        );
+        expect(JSON.stringify(res.body)).not.toContain('secret_thing');
+        expect(res.body?.error?.message).toBe('Metadata item not found or access denied.');
+        expect(res.body?.declaredCode).toBeUndefined();
+        expect(res.body?.error?.declaredCode).toBeUndefined();
+    });
+
+    it('…and the UNPUBLISHED app matches the thrown arm byte for byte, across the cache fork', async () => {
+        // §2 proved absent == unpublished while both took the returning arm.
+        // This is the same property across the fork that used to decide the
+        // dialect: the unpublished app (uncached by construction — `app`
+        // bypasses the cache) against an absence rendered by the throwing one.
+        const unpublished = await getItem(setup({ 'app/production_management': UNPUBLISHED }, { perms: ['manage_users'] }).rest, 'app', 'production_management');
+        const thrown = await thrownMiss(
+            Object.assign(new Error('Metadata item app/production_management not found'), {
+                code: 'RESOURCE_NOT_FOUND', status: 404,
+            }),
+            { config: { api: { requireAuth: false }, metadata: { enableCache: false } } },
+        );
+        expect(wire(thrown)).toBe(wire(unpublished));
+    });
+
+    it('⛔ NOT every 404 — a producer-NAMED 404 keeps its own refusal, envelope and all', async () => {
+        // The narrowing that the first draft of this change did not have, and
+        // the reason it is measured rather than reasoned. `404` on this route
+        // is not a synonym for absence.
+        //
+        //  - `NO_DRAFT` is the Studio designer's `?state=draft` probe. It says
+        //    the ITEM is there and its DRAFT is not. Folding it into
+        //    `RESOURCE_NOT_FOUND` would tell a designer the object does not
+        //    exist — #5532's flattening, reintroduced by the repair for a
+        //    sibling of it. Its wire answer is pinned byte-for-byte in
+        //    `rest-expected-error-logging.test.ts` and
+        //    `rest-4xx-message-truncation.test.ts`; those pins must keep
+        //    passing, and this states here WHY they are not collateral.
+        //  - a code the ADR-0112 ledger does not know is DEMOTED to
+        //    `declaredCode`, the open author-authored channel the ADR declares.
+        //    Converting would delete the one field it exists to carry.
+        const noDraft = await thrownMiss(
+            Object.assign(new Error('[no_draft] No pending draft exists for view/no_such_view.'), {
+                code: 'NO_DRAFT', status: 404,
+            }),
+            { config: { api: { requireAuth: false }, metadata: { enableCache: false } } },
+        );
+        expect(noDraft.statusCode).toBe(404);
+        expect(noDraft.body).toEqual({
+            error: '[no_draft] No pending draft exists for view/no_such_view.',
+            code: 'NO_DRAFT',
+        });
+
+        const bespoke = await thrownMiss(
+            Object.assign(new Error('gone'), { code: 'MY_OWN_MISS', status: 404 }),
+            { config: { api: { requireAuth: false }, metadata: { enableCache: false } } },
+        );
+        expect(bespoke.statusCode).toBe(404);
+        expect(bespoke.body?.declaredCode).toBe('MY_OWN_MISS');
+    });
+
+    it('⛔ 503, 403 and 401 are untouched — the three other boundaries', async () => {
+        // The three boundaries this must not flatten, each one a refusal that
+        // means something else.
+        //
+        //  - 503: #5532's outage. "We could not look" is not "it is not there",
+        //    and a converted 503 would tell a caller the item does not exist
+        //    during a metadata-plane outage.
+        //  - 403 PERMISSION_DENIED on an app that EXISTS: #8013's partition.
+        //  - 401/403 on an audience-gated book: ADR-0046 §6.7. Still the FLAT
+        //    dialect, deliberately — that position belongs to ratchet #9559,
+        //    and converting it here would leave `/meta/book/:name/tree` and
+        //    this route answering the same refusal two ways.
+        const outage = await thrownMiss(
+            Object.assign(new Error('The metadata store could not be read.'), {
+                code: 'SERVICE_UNAVAILABLE', status: 503,
+            }),
+            { config: { api: { requireAuth: false }, metadata: { enableCache: false } } },
+        );
+        expect(outage.statusCode).toBe(503);
+        expect(JSON.stringify(outage.body ?? {})).not.toContain('RESOURCE_NOT_FOUND');
+
+        const FINANCE = { name: 'finance', label: 'Finance', requiredPermissions: ['finance.access'], navigation: [] };
+        const denied = await getItem(setup({ 'app/finance': FINANCE }, { perms: ['manage_users'] }).rest, 'app', 'finance');
+        expect(denied.statusCode).toBe(403);
+        expect(denied.body?.error?.code).toBe('PERMISSION_DENIED');
+
+        const GATED_BOOK = { name: 'admin_guide', label: 'Admin Guide', audience: { permissionSet: 'crm_admin' }, groups: [] };
+        const gated = await getItem(setup({ 'book/admin_guide': GATED_BOOK }).rest, 'book', 'admin_guide');
+        expect(gated.statusCode).toBe(403);
+        expect(gated.body?.code).toBe('PERMISSION_DENIED');
     });
 });

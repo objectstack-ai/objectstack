@@ -2631,7 +2631,9 @@ export function logUnexpectedRouteError(error: any, resolved: { status: number; 
 }
 
 /**
- * [#18402] Would the classification door answer this caught value `404`?
+ * [#18402] Would the classification door answer this caught value with a
+ * BARE `404 RESOURCE_NOT_FOUND` — no code the producer chose, nothing else
+ * riding along?
  *
  * ## Why a predicate rather than a second reading of the error
  *
@@ -2653,20 +2655,38 @@ export function logUnexpectedRouteError(error: any, resolved: { status: number; 
  * {@link resolveErrorResponse} already makes for its own `mapDataError`
  * re-entry.
  *
- * ⛔ Deliberately the STATUS alone, not `status` plus a `code` test. The
- * `code` a 404 carries is derived by this door from the status whenever the
- * producer named none, so testing both narrows nothing while adding a second
- * place for the vocabulary to be restated. A caller that needs "absent, and
- * the producer named it so" is asking a different question and should not use
- * this.
+ * ## ⛔ Why it is NOT "the status is 404"
+ *
+ * MEASURED, and the measurement is the reason this function has three
+ * conditions instead of one. `404` on a metadata route is not a synonym for
+ * "you get nothing": `metadata-protocol` throws `{ code: 'NO_DRAFT', status:
+ * 404 }` from the Studio designer's draft probe — pinned byte-for-byte in
+ * `rest-expected-error-logging.test.ts` and `rest-4xx-message-truncation.test.ts`
+ * — and that refusal says the ITEM is there and its DRAFT is not. Folding it
+ * into an absence would tell a designer the object does not exist while it
+ * plainly does: the #5532 flattening, one pair over, minted by the repair for
+ * a sibling of it.
+ *
+ * So the question is asked about the ANSWER, not the status:
+ *
+ *  - `status` is 404, and
+ *  - `code` is `RESOURCE_NOT_FOUND` — which this door derives from the status
+ *    when the producer named none, and otherwise is the producer agreeing, and
+ *  - no `declaredCode` sits beside it. Presence MEANS demotion (see
+ *    `ApiErrorSchema`): the producer spelled a code the ledger does not know,
+ *    and ADR-0112 keeps that spelling as the open, author-authored channel.
+ *    Converting such an answer would delete the one field it exists to carry.
  *
  * ⚠️ This predicate does NOT decide what a route answers — it only recognises
  * an answer. The 503 an unreadable metadata store throws (#5532) resolves to
  * 503 and is false here, which is the distinction that must never be
  * flattened.
  */
-export function thrownAnswerIsNotFound(error: any, object?: string): boolean {
-    return resolveErrorResponse(error, object).status === 404;
+export function thrownAnswerIsBareNotFound(error: any, object?: string): boolean {
+    const resolved = resolveErrorResponse(error, object);
+    return resolved.status === 404
+        && resolved.body?.code === 'RESOURCE_NOT_FOUND'
+        && resolved.body?.declaredCode === undefined;
 }
 
 /**

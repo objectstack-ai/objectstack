@@ -335,7 +335,7 @@ import {
     sendDeclaredFault,
     sendFieldVisibilityFault,
     handleRouteError,
-    thrownAnswerIsNotFound,
+    thrownAnswerIsBareNotFound,
     logUnexpectedRouteError,
     isExpectedRouteError,
     applyDroppedFieldsHeader,
@@ -7215,16 +7215,24 @@ export class RestServer {
                         //    miss instead reached the same flat door
                         //    (pinned in `rest-meta-outage-vs-miss.test.ts`).
                         //
-                        // Recognised by the STATUS this repo's own
-                        // classification door would have answered — see
-                        // {@link thrownAnswerIsNotFound}, which asks that door
-                        // rather than re-reading the error, so this fork and
-                        // the `handleRouteError` it forks away from cannot
-                        // drift. Every 404 out of this handler is absence:
-                        // ordering and arity refusals are 400, the audience
-                        // gate 401/403, the app gate 403, field visibility 503,
-                        // an unreadable store 503 (#5532 — false here, and that
-                        // distinction is the one this must never flatten).
+                        // Recognised by the ANSWER this repo's own
+                        // classification door would have given — see
+                        // {@link thrownAnswerIsBareNotFound}, which asks that
+                        // door rather than re-reading the error, so this fork
+                        // and the `handleRouteError` it forks away from cannot
+                        // drift apart about what a caught value means.
+                        //
+                        // ⛔ NOT "the status is 404", and that narrowing was
+                        // measured rather than assumed. `NO_DRAFT` is a 404 on
+                        // THIS route — the Studio designer's `?state=draft`
+                        // probe, pinned byte-for-byte two files over — and it
+                        // says the item IS there and its draft is not.
+                        // Answering it as absence would tell a designer the
+                        // object does not exist, which is #5532's flattening
+                        // reintroduced by the repair for a sibling of it. Same
+                        // reasoning excludes a producer-declared code the
+                        // ledger does not know: ADR-0112 keeps that spelling in
+                        // `declaredCode`, and converting would delete it.
                         //
                         // ⭐ It STRENGTHENS the ADR-0045 §3 property rather
                         // than merely preserving it. The unpublished app and
@@ -7245,7 +7253,7 @@ export class RestServer {
                         // converting two of its four emissions here would mint
                         // a new divergence — the same refusal answering two
                         // shapes depending on which ROUTE served it.
-                        if (thrownAnswerIsNotFound(error)) {
+                        if (thrownAnswerIsBareNotFound(error)) {
                             sendMetaItemAbsent(res);
                             return;
                         }
