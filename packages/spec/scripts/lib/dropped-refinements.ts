@@ -302,26 +302,50 @@ function readablePath(raw: string): string {
 }
 
 /**
+ * The identity two references to the SAME schema share in both schema-evaluation
+ * modes — the node's zod `def` object, falling back to the instance when a node
+ * has none.
+ *
+ * ⛔ Not the instance itself, which is not mode-invariant. `lazySchema()`
+ * (`src/shared/lazy-schema.ts`) returns the real schema under
+ * `OS_EAGER_SCHEMAS=1` — how `gen:schema` and `check:authorable-surface` run —
+ * and a Proxy over it otherwise. Keyed on the instance, a sub-schema reached
+ * once directly and once through a `lazySchema()` edge is ONE node to the eager
+ * walk and TWO to the lazy one, so the census — and therefore the ledger it is
+ * compared against — differs between two runs of the same generator over the
+ * same tree. Measured on `ui/View`, whose `list`/`listViews.valueType` and
+ * `form`/`formViews.valueType` pairs each reach one schema by both routes: 11
+ * dropped sites eager, 13 lazy.
+ *
+ * The `def` survives the Proxy because its `_zod` facade prototype-delegates
+ * every read it does not wrap, so `proxy._zod.def` IS `real._zod.def` — the
+ * same object, not a copy.
+ */
+function identityOf(schema: z.ZodType): unknown {
+  return defOf(schema) ?? schema;
+}
+
+/**
  * Walk one published schema and classify every refinement under it.
  *
- * The visited set is per export and holds schema INSTANCES, so a shared
+ * The visited set is per export and holds node IDENTITIES, so a shared
  * sub-schema is reported once per published file that reaches it — which is the
  * census question ("which published files does the gap land on"), not "how many
- * distinct nodes exist".
+ * distinct nodes exist", and not "by how many routes".
  */
 export function collectDroppedRefinements(defKey: string, root: z.ZodType): RefinementCensusEntry {
   const dropped: RefinementSite[] = [];
   const projected: RefinementSite[] = [];
   const undecidable: RefinementSite[] = [];
-  const visited = new Set<z.ZodType>();
+  const visited = new Set<unknown>();
 
   const queue: Array<{ schema: z.ZodType; path: string; depth: number }> = [
     { schema: root, path: '', depth: 0 },
   ];
   while (queue.length > 0) {
     const { schema, path, depth } = queue.shift()!;
-    if (visited.has(schema)) continue;
-    visited.add(schema);
+    if (visited.has(identityOf(schema))) continue;
+    visited.add(identityOf(schema));
 
     const customs = customChecksOf(schema);
     if (customs.length > 0) {
@@ -339,7 +363,7 @@ export function collectDroppedRefinements(defKey: string, root: z.ZodType): Refi
 
     if (depth >= MAX_DEPTH) continue;
     for (const child of labelledChildren(schema)) {
-      if (visited.has(child.schema)) continue;
+      if (visited.has(identityOf(child.schema))) continue;
       queue.push({
         schema: child.schema,
         path: path ? `${path}.${child.label}` : child.label,

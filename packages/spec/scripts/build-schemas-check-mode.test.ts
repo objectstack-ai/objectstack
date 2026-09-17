@@ -100,6 +100,7 @@ import {
   type UnemittedBaseline,
   type UnemittedEntry,
 } from './lib/unemitted-schemas';
+import { DROPPED_REFINEMENTS_BASELINE_FILE } from './lib/dropped-refinements';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG = path.resolve(HERE, '..');
@@ -385,18 +386,34 @@ function mountSandbox(dir: string): void {
 }
 
 /**
- * Copy the committed never-published ledger (#16431) into a fixture tree.
+ * The committed, package-root ledgers `build-schemas.ts` READS — every one of
+ * them, mounted into a fixture tree as a set.
  *
- * `build-schemas.ts` resolves it from its own `__dirname/..`, so any tree that
- * copies `scripts/` without it fails the #16431 gate on a MISSING ledger,
- * before reaching whatever that fixture is about — which is how all four
- * sandbox builders in this file came to need one line each. Copied rather than
- * symlinked so a fixture may mutate it without writing to the real file; `src/`
- * is the fixture's own, so the population a run observes is the repo's and the
- * copied ledger is green without any seeding.
+ * A list rather than one constant because this is a population that grows: the
+ * generator resolves each of these from its own `__dirname/..`, so a tree that
+ * copies `scripts/` without one of them fails that ledger's gate on a MISSING
+ * artifact, before reaching whatever the fixture is about. That is not a
+ * hypothetical — it is how the never-published ledger (#16431) came to need one
+ * line in each of the five sandbox builders below, and how the
+ * dropped-refinement ledger (#18670) reddened 36 of them at once: every fixture
+ * that expects `status` 0 got a 1 that had nothing to do with its subject.
+ *
+ * ⇒ A new package-root ledger is ONE entry here, not a fifth mount call
+ * somebody has to remember at each builder.
  */
-function mountUnemittedLedger(dir: string): void {
-  fs.cpSync(path.join(PKG, UNEMITTED_BASELINE_FILE), path.join(dir, UNEMITTED_BASELINE_FILE));
+const COMMITTED_LEDGERS = [UNEMITTED_BASELINE_FILE, DROPPED_REFINEMENTS_BASELINE_FILE] as const;
+
+/**
+ * Copy every committed ledger into a fixture tree.
+ *
+ * Copied rather than symlinked so a fixture may mutate one without writing to
+ * the real file; `src/` is the fixture's own, so the population a run observes
+ * is the repo's and the copied ledgers are green without any seeding.
+ */
+function mountCommittedLedgers(dir: string): void {
+  for (const ledger of COMMITTED_LEDGERS) {
+    fs.cpSync(path.join(PKG, ledger), path.join(dir, ledger));
+  }
 }
 
 /**
@@ -458,7 +475,7 @@ function createSandbox(prefix: string): string {
   for (const entry of ['src', 'node_modules', 'package.json']) {
     fs.symlinkSync(path.join(PKG, entry), path.join(dir, entry));
   }
-  mountUnemittedLedger(dir);
+  mountCommittedLedgers(dir);
   mountSandbox(dir);
   // The authorable-surface ratchet runs after the manifest one; give it the
   // committed snapshot so a check that gets that far judges the same contract.
@@ -3356,7 +3373,7 @@ describe('build-schemas.ts — check (b) matches the exact retired key, not its 
     for (const entry of ['node_modules', 'package.json']) {
       fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
     }
-    mountUnemittedLedger(box);
+    mountCommittedLedgers(box);
     writeManifestShards(path.join(box, SCHEMA_MANIFEST_DIR_NAME), pristine);
     boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
     writeSurfaceShards(boxSurfaceDir, pristineSurface);
@@ -3655,7 +3672,7 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
     for (const entry of ['node_modules', 'package.json']) {
       fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
     }
-    mountUnemittedLedger(box);
+    mountCommittedLedgers(box);
     boxScript = path.join(box, 'scripts', 'build-schemas.ts');
     boxManifestDir = path.join(box, SCHEMA_MANIFEST_DIR_NAME);
     boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
@@ -4021,7 +4038,7 @@ describe('build-schemas.ts — check (c) dates a tombstone by its exact key (#58
     for (const entry of ['node_modules', 'package.json']) {
       fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
     }
-    mountUnemittedLedger(box);
+    mountCommittedLedgers(box);
     writeManifestShards(path.join(box, SCHEMA_MANIFEST_DIR_NAME), pristine);
     boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
     writeSurfaceShards(boxSurfaceDir, pristineSurface);
@@ -4285,7 +4302,7 @@ describe('build-schemas.ts — a nested retirement row is judged, not ignored (#
     for (const entry of ['node_modules', 'package.json']) {
       fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
     }
-    mountUnemittedLedger(box);
+    mountCommittedLedgers(box);
     writeManifestShards(path.join(box, SCHEMA_MANIFEST_DIR_NAME), pristine);
     writeSurfaceShards(path.join(box, AUTHORABLE_SURFACE_DIR_NAME), pristineSurface);
     // The #4666 default ratchet runs on every invocation, so every box needs its
