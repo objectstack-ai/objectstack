@@ -113,7 +113,10 @@ const SCHEMA = {
 const USER_SCHEMA = { name: 'sys_user', nameField: 'name', fields: { name: { name: 'name', type: 'text' } } };
 
 function makeProtocol() {
-    const find = vi.fn(async () => [] as unknown[]);
+    // Typed with the parameters the engine is really called with, so the
+    // option-bag read below is `calls[0][1]` rather than an out-of-range index
+    // on a zero-arity tuple.
+    const find = vi.fn(async (_object?: string, _options?: unknown) => [] as unknown[]);
     const count = vi.fn(async () => 0);
     const engine = {
         registry: {

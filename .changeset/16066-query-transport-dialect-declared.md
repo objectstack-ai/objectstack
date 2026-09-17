@@ -9,11 +9,11 @@ The query TRANSPORT dialect is declared, and the `findData` fold now derives fro
 
 **New in `@objectstack/spec/data`** (8 exports, 0 removed):
 
-- `QueryTransportParamsSchema` / `QueryTransportParams` — the transport parameters, each carrying the value of the canonical slot it folds onto.
+- `QueryTransportParamsSchema` / `QueryTransportParams` / `QueryTransportParamsParsed` — the transport parameters, each carrying the value of the canonical slot it folds onto.
 - `QUERY_TRANSPORT_ALIAS_SLOTS` — `RPC_QUERY_ALIAS_SLOTS` extended with the transport-only spellings (`filters` / `$filter` onto `where`, `$expand` onto `expand`).
 - `QUERY_TRANSPORT_DOLLAR_ALIASES` — the `$`-to-bare pairs that fold in two hops (`$top` onto `top` onto `limit`).
 - `QUERY_TRANSPORT_DOLLAR_PARAMS` — the `$` spellings a boundary quotes when it refuses an undeclared one.
-- `QueryWithTransportSchema` / `QueryWithTransport` / `QueryWithTransportInput` — the query slot whose declared input is the AST or its transport spelling and whose declared output is the AST.
+- `QueryWithTransportSchema` / `QueryWithTransport` / `QueryWithTransportParsed` — the query slot whose declared input is the AST or its transport spelling and whose declared output is the AST.
 
 **`FindDataRequestSchema.query` is that slot now.** Its `z.input` admits the canonical AST, the transport spelling, or a bag carrying both; its `z.output` is still the AST, reached by a transform driven by the two tables. The transport form is declared as the FLATTENED SPELLING of the canonical AST with a 1:1 alias table — never as a second semantics — so `QuerySchema` itself is untouched and still drops a `$` key as unknown.
 

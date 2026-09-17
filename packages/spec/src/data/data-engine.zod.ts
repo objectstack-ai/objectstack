@@ -833,8 +833,15 @@ function foldQueryTransportBag(
   return bag;
 }
 
-/** The transport query parameters, as an input shape. */
+/** The transport query parameters, as an author writes them (ADR-0122). */
 export type QueryTransportParams = z.input<typeof QueryTransportParamsSchema>;
+
+/**
+ * The transport query parameters after a parse (ADR-0122). Not identical to
+ * {@link QueryTransportParams}: `$expand`'s record arm carries nested
+ * `QuerySchema` values, whose author and parsed states differ.
+ */
+export type QueryTransportParamsParsed = z.infer<typeof QueryTransportParamsSchema>;
 
 /**
  * What a query slot that serves a transport boundary DECLARES as its input:
@@ -847,7 +854,7 @@ export type QueryTransportParams = z.input<typeof QueryTransportParamsSchema>;
  * re-created this card's own defect one size down: a shape the door accepts
  * that the declaration denies.
  */
-export type QueryWithTransportInput = QueryInput & Partial<QueryTransportParams>;
+export type QueryWithTransport = QueryInput & Partial<QueryTransportParams>;
 
 /**
  * A query slot whose declared INPUT is the canonical AST or its transport
@@ -860,7 +867,7 @@ export type QueryWithTransportInput = QueryInput & Partial<QueryTransportParams>
  * widening provably unable to narrow anything: every input that parsed before
  * still parses, by the same schema, with the same issues.
  */
-export const QueryWithTransportSchema: z.ZodType<QueryAST, QueryWithTransportInput> = lazySchema(() =>
+export const QueryWithTransportSchema: z.ZodType<QueryAST, QueryWithTransport> = lazySchema(() =>
   z.union([
     z.record(z.string(), z.unknown())
       .transform((bag, ctx) => foldQueryTransportBag(
@@ -869,15 +876,15 @@ export const QueryWithTransportSchema: z.ZodType<QueryAST, QueryWithTransportInp
       ))
       .pipe(QuerySchema as unknown as z.ZodType<QueryAST, Record<string, unknown>>),
     QuerySchema,
-  ]) as unknown as z.ZodType<QueryAST, QueryWithTransportInput>,
+  ]) as unknown as z.ZodType<QueryAST, QueryWithTransport>,
 );
 
 /**
  * What a transport-aware query slot PARSES TO — the canonical QueryAST, in
- * every spelling. The declared output is deliberately the AST alone: a
- * consumer reading a parsed query never sees a transport key.
+ * every spelling (ADR-0122). The declared output is deliberately the AST
+ * alone: a consumer reading a parsed query never sees a transport key.
  */
-export type QueryWithTransport = z.infer<typeof QueryWithTransportSchema>;
+export type QueryWithTransportParsed = z.infer<typeof QueryWithTransportSchema>;
 
 
 export const DataEngineFindRequestSchema = lazySchema(() => z.object({
