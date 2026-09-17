@@ -624,7 +624,7 @@ export interface ToolExecutionContext {
      * Text of the latest user message (neutral context, like currentObjectName).
      * Forwarded so a tool can detect intent — e.g. an explicit confirm/approval —
      * without re-deriving it from the transcript. Consumers own any semantics.
-     * Populated by whichever layer owns the agent route (cloud, post-ADR-0025).
+     * Populated by whichever layer owns the agent route (cloud, post-cloud ADR-0025).
      */
     userMessageText?: string;
     /**
