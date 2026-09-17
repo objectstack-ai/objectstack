@@ -192,10 +192,100 @@
  * so the BARE-stamp scan underneath it is reading prose and not the inside of a
  * token nobody could parse.
  *
- * ⛔ And the scan opens no escape hatch. There has never been one — no
- * backslash form, no entity form — and a token inside backticks is still
- * substituted, because a fence is a rendering instruction and the substitution
- * runs on bytes. A body that must SHOW a token spells it some other way.
+ * ⛔ And the scan opens no escape hatch OUTSIDE a quoted span — no backslash
+ * form, no entity form, no flag. What it does open is the next section, which
+ * is not a spelling of the token contract at all.
+ *
+ * ## The contract is QUOTABLE: inside Markdown code, this tool renders text (#18543)
+ *
+ * The substitution used to run on bytes, so a passage QUOTING the token was
+ * rewritten like any other. Measured three times inside one hour, by two
+ * seats, on live artefacts:
+ *
+ *   ① #14251 carried a verbatim quote of this tool's OWN status line, in an
+ *      inline code span inside a blockquote. The token inside the quotation was
+ *      substituted and a sentence this tool never printed was published as a
+ *      quotation of it. The only signal was `substitutions: 2` where the author
+ *      meant 1 — a count, not a warning, and nothing compared it to intent.
+ *   ② The seat filing ① hit it again in the sentence DESCRIBING ①, and a third
+ *      time in the comment reporting ②. Care is not a remedy: every one of the
+ *      three was written by an author who was thinking about this exact defect.
+ *   ③ The dispatch claim for this card spelled both token forms inside
+ *      backticks and was REFUSED `[quoted-not-a-stamp]` — the quoted route read
+ *      its own documentation placeholder as a declaration. So the contract
+ *      could not be quoted through this tool, nor explained through it.
+ *
+ * ⛔ The remedy is NOT a third spelling, and ⛔ NOT a flag. Markdown already
+ * has one construct that means "this is text, not instructions", and it has it
+ * in two forms — a fenced code block and a backtick code span. So:
+ *
+ *   INSIDE A QUOTED SPAN THIS TOOL RENDERS TEXT, NOT TOKENS.
+ *
+ * A reader of the stored artefact sees the rule without knowing the tool
+ * exists: the backticks are right there, on the page, in the spelling every
+ * other quotation on the board already uses. Nothing was added to the token
+ * contract — it still has exactly two spellings — and no caller has to
+ * remember a magic word it would itself have to quote to document.
+ *
+ * What a quoted span suppresses is exactly the three rules that READ a token:
+ * substitution, the opener scan, and the quoted-stamp validation. An opener
+ * inside one is not refused, a `{{WAS:…}}` inside one is not judged against
+ * the calendar or the clock, and both are written out exactly as the author
+ * typed them.
+ *
+ * ⛔ And it suppresses NOTHING that judges a stamp a human typed. This is the
+ * load-bearing asymmetry, and it is the whole reason the rule is safe: quoting
+ * changes what is RENDERED, never what was AUTHORED. A stamp inside a fence is
+ * still digits on the board.
+ *
+ *   POSITIONAL  reads every line, code included. A bare stamp in a code span on
+ *               the opening line is refused exactly as in prose.
+ *   MIXED       triggers on the act-clock token appearing ANYWHERE in the body,
+ *               quoted or not. An author who spells the token knows it exists,
+ *               and a bare stamp elsewhere is ambiguous to a reader whatever
+ *               backticks sit around the other one. ⛔ Deliberately NOT made
+ *               quote-aware: that is the one direction this change could have
+ *               weakened a refusal, and it does not take it.
+ *   MASKING     `maskQuotedStamps` blanks a `{{WAS:…}}` only where it is a
+ *               TOKEN. Inside a quoted span it is text, so the digits it
+ *               carries stay visible to the bare-stamp scan — otherwise a
+ *               stamp could hide from the contract behind backticks, which is
+ *               the accident this rule must never buy.
+ *
+ * So the refusal surface is unchanged or STRICTER everywhere except the three
+ * token rules inside a quoted span, which is the deliverable. One body changes
+ * direction: `` `{{WAS:<a real stamp>}}` `` beside the act-clock token used to
+ * be accepted and rendered as bare digits — that acceptance WAS defect ① — and
+ * is now MIXED-refused, with the refusal saying that the stamp sits inside a
+ * quotation so neither spelling will render there.
+ *
+ * ⛔ The count is no longer the only signal. The status line reports how many
+ * openers were left VERBATIM inside quoted spans beside how many were
+ * substituted, so an author who meant to quote one and stamp one reads both
+ * numbers and can compare them to intent — which is what ① had no way to do.
+ *
+ * What a quoted span IS, exactly (`quotedSpans`), and what it deliberately is
+ * not:
+ *
+ *   FENCED      a line opening with three or more backticks or tildes (up to
+ *               three leading spaces), through its closing fence — or the end
+ *               of the body, the way CommonMark ends an unclosed one. Tracked
+ *               through blockquote markers, since a seat quoting a tool's
+ *               output inside a quote is the shape ① was written in.
+ *   CODE SPAN   a backtick run closed by a run of the SAME length, ⛔ searched
+ *               within one line only. CommonMark lets a span cross lines; this
+ *               does not, on purpose — under-detecting leaves today's
+ *               behaviour, and today's behaviour is what every existing caller
+ *               already has.
+ *   ⛔ NOT      a four-space indented block. Indentation is load-bearing in
+ *               lists and continuations, so reading it as a quotation would
+ *               make the rule fire where no reader sees a quotation.
+ *
+ * The two failure directions are not symmetric, which is why that scanner is
+ * conservative: under-detecting substitutes a token the author wanted verbatim
+ * — the state before this rule — while over-detecting leaves an artefact
+ * UNSTAMPED. The status line's verbatim count is what makes the second one
+ * visible in the same breath.
  *
  * ## ⚖️ Why this ACTS by default, where `sweep-closed-cards.mjs` dry-runs
  *
@@ -476,6 +566,175 @@ const TOKEN_CLOSER = '}}';
 /** How much of an offending span a refusal prints. */
 export const SPAN_BYTES = 60;
 
+// ---------------------------------------------------------------------------
+// The quoting spelling — Markdown's own "this is text, not instructions".
+// The header's quotable-contract section is the authority on why this is a
+// STRUCTURAL rule and not a third token.
+// ---------------------------------------------------------------------------
+
+/** The two constructs a quoted span can be, in the words a reader would use. */
+export const QUOTED_SPAN_KINDS = Object.freeze({
+  fenced: 'a fenced code block',
+  'code-span': 'a backtick code span',
+});
+
+/**
+ * A blockquote prefix, as CommonMark reads one: any number of `>` markers, each
+ * allowed up to three leading spaces and one trailing space. Returned as the
+ * DEPTH and the line that is left, because a fenced block inside a quote ends
+ * when the quote does — and a seat quoting a tool's output inside a blockquote
+ * is the exact shape the filed instance was written in.
+ */
+function blockquotePrefix(line) {
+  let i = 0;
+  let depth = 0;
+  for (;;) {
+    let j = i;
+    let spaces = 0;
+    while (j < line.length && line[j] === ' ' && spaces < 3) {
+      j += 1;
+      spaces += 1;
+    }
+    if (line[j] !== '>') break;
+    j += 1;
+    if (line[j] === ' ') j += 1;
+    depth += 1;
+    i = j;
+  }
+  return { depth, rest: line.slice(i) };
+}
+
+/**
+ * The fence this line opens, or null. A backtick fence's info string may not
+ * carry a backtick (CommonMark's rule, and the one that keeps `` `a` `` on a
+ * line of prose from reading as a fence); a tilde fence's may.
+ */
+function fenceOpenedBy(line) {
+  const m = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line);
+  if (!m) return null;
+  if (m[1][0] === '`' && m[2].includes('`')) return null;
+  return { char: m[1][0], length: m[1].length };
+}
+
+/** Whether this line is a closing fence for `open` — same character, at least as long, nothing else on it. */
+function fenceClosedBy(line, open) {
+  const m = /^ {0,3}(`{3,}|~{3,})[ \t]*$/u.exec(line);
+  return m !== null && m[1][0] === open.char && m[1].length >= open.length;
+}
+
+/**
+ * Every backtick code span on one line, as offsets into the whole body.
+ *
+ * A run of N backticks opens; the span ends at the next run of EXACTLY N. A run
+ * of a different length is content and is stepped over, and a run with no
+ * matching closer is literal backticks — so `` don't use `foo `` is prose, not
+ * an unterminated quotation swallowing the rest of the artefact.
+ */
+function codeSpansOnLine(line, base) {
+  const out = [];
+  let i = 0;
+  while (i < line.length) {
+    if (line[i] !== '`') {
+      i += 1;
+      continue;
+    }
+    let n = 0;
+    while (i + n < line.length && line[i + n] === '`') n += 1;
+    let j = i + n;
+    let found = -1;
+    while (j < line.length) {
+      if (line[j] !== '`') {
+        j += 1;
+        continue;
+      }
+      let m = 0;
+      while (j + m < line.length && line[j + m] === '`') m += 1;
+      if (m === n) {
+        found = j;
+        break;
+      }
+      j += m;
+    }
+    if (found === -1) {
+      i += n;
+      continue;
+    }
+    out.push({ from: base + i, to: base + found + n, kind: 'code-span' });
+    i = found + n;
+  }
+  return out;
+}
+
+/**
+ * Every quoted span in this body, in order and non-overlapping: the ranges
+ * inside which this tool renders text and reads no token at all.
+ *
+ * Fenced blocks are resolved first, at the line level, because Markdown parses
+ * block structure before inline structure — so a backtick run inside a fence is
+ * fence CONTENT and never opens a span of its own.
+ */
+export function quotedSpans(text) {
+  const raw = String(text ?? '');
+  const lines = raw.split('\n');
+  const fenced = [];
+  const fencedLines = new Set();
+  let open = null;
+  let offset = 0;
+
+  for (let n = 0; n < lines.length; n += 1) {
+    const line = lines[n];
+    const lineFrom = offset;
+    const lineTo = offset + line.length;
+    offset = lineTo + 1;
+    const { depth, rest } = blockquotePrefix(line);
+
+    if (open) {
+      if (depth < open.depth) {
+        // The blockquote holding the fence ended, so the block ended with it.
+        fenced.push({ from: open.from, to: lineFrom, kind: 'fenced' });
+        open = null;
+      } else {
+        fencedLines.add(n);
+        if (fenceClosedBy(rest, open)) {
+          fenced.push({ from: open.from, to: lineTo, kind: 'fenced' });
+          open = null;
+        }
+        continue;
+      }
+    }
+
+    const opened = fenceOpenedBy(rest);
+    if (opened) {
+      open = { ...opened, depth, from: lineFrom };
+      fencedLines.add(n);
+    }
+  }
+  if (open) fenced.push({ from: open.from, to: raw.length, kind: 'fenced' });
+
+  const spans = [...fenced];
+  offset = 0;
+  for (let n = 0; n < lines.length; n += 1) {
+    const line = lines[n];
+    const lineFrom = offset;
+    offset = lineFrom + line.length + 1;
+    if (fencedLines.has(n)) continue;
+    spans.push(...codeSpansOnLine(line, lineFrom));
+  }
+  return spans.sort((a, b) => a.from - b.from);
+}
+
+/**
+ * Whether the character at `at` is inside one of `spans`.
+ *
+ * An opener is judged by WHERE IT STARTS — a `{{` that begins inside a
+ * quotation is quoted, whatever happens to fall after it. One position, one
+ * answer, so the scan, the mask and the substitution cannot come to disagree
+ * about the same brace.
+ */
+export function insideQuotedSpan(spans, at) {
+  return (spans ?? []).some((s) => at >= s.from && at < s.to);
+}
+
 /**
  * The C0 controls that have a spelling everybody reads; the rest get `\xNN`.
  * ⛔ Written as escapes rather than as the bytes themselves — a raw control
@@ -529,8 +788,13 @@ export const OPENER_REASONS = Object.freeze({
  * those same regexes would walk straight past it again. What the regexes are
  * still used for is recognition at a known position — anchored, so the one
  * definition of "a quoted token" serves both the scan and the substitution.
+ *
+ * An opener inside a QUOTED SPAN is skipped: there it is text the author is
+ * showing, and refusing it is how the contract became unquotable. It is still
+ * counted — `substituteTokens` reports it as verbatim — so a skip is never
+ * silent.
  */
-export function unrecognisedOpeners(text) {
+export function unrecognisedOpeners(text, spans = quotedSpans(text)) {
   const raw = String(text ?? '');
   const quotedHere = anchoredOf(QUOTED_TOKEN_RE);
   const anyHere = anchoredOf(ANY_TOKEN_RE);
@@ -540,6 +804,11 @@ export function unrecognisedOpeners(text) {
     const at = raw.indexOf(TOKEN_OPENER, i);
     if (at === -1) return out;
     const rest = raw.slice(at);
+
+    if (insideQuotedSpan(spans, at)) {
+      i = at + TOKEN_OPENER.length;
+      continue;
+    }
 
     if (rest.startsWith(STAMP_TOKEN)) {
       i = at + STAMP_TOKEN.length;
@@ -603,17 +872,31 @@ export function stampNow(ms = Date.now()) {
  * The text with every declared quoted stamp blanked to spaces of equal length,
  * so a scan for BARE stamps sees only the ones nobody declared — and so line
  * numbers, columns and the opening line are all still where they were.
+ *
+ * ⛔ A `{{WAS:…}}` inside a QUOTED SPAN is NOT blanked: there it is not a
+ * declaration, it is text showing what a declaration looks like, and the digits
+ * it carries are digits on the board like any others. Blanking them would let a
+ * hand-typed stamp hide from the bare-stamp scan behind a pair of backticks —
+ * the one accident this rule may never buy.
  */
-export function maskQuotedStamps(text) {
-  return String(text ?? '').replace(globalOf(QUOTED_TOKEN_RE), (m) => ' '.repeat(m.length));
+export function maskQuotedStamps(text, spans = quotedSpans(text)) {
+  return String(text ?? '').replace(globalOf(QUOTED_TOKEN_RE), (m, _inner, at) =>
+    insideQuotedSpan(spans, at) ? m : ' '.repeat(m.length),
+  );
 }
 
-/** The values inside every `{{WAS:…}}` in this text. */
-export function quotedStampValues(text) {
+/**
+ * The values inside every `{{WAS:…}}` in this text that is a TOKEN — so the
+ * ones inside a quoted span are left out, because the calendar and direction
+ * rules judge a declaration and there is none there.
+ */
+export function quotedStampValues(text, spans = quotedSpans(text)) {
   const re = globalOf(QUOTED_TOKEN_RE);
   const out = [];
   let m;
-  while ((m = re.exec(String(text ?? '')))) out.push(m[1]);
+  while ((m = re.exec(String(text ?? '')))) {
+    if (!insideQuotedSpan(spans, m.index)) out.push(m[1]);
+  }
   return out;
 }
 
@@ -689,6 +972,31 @@ function quotedRouteClosed(stamp, nowMs) {
 }
 
 /**
+ * The clause a remedy appends when EVERY occurrence of the offending stamp sits
+ * inside a quoted span — empty when at least one of them does not.
+ *
+ * Without it the two remedies prescribe a route that cannot work there: inside
+ * a quotation neither spelling is substituted, so a seat that follows the text
+ * literally gets the token printed where it wanted a time and reads the same
+ * refusal again. A refusal text prescribing a refused remedy is a tool arguing
+ * with itself — the rule the `{{WAS:…}}` direction check already states, taken
+ * one step further now that a quotation can hold a stamp.
+ */
+function quotedSpanClause(raw, spans, stamp) {
+  const text = String(raw ?? '');
+  const hits = [];
+  for (let at = text.indexOf(stamp); at !== -1; at = text.indexOf(stamp, at + 1)) hits.push(at);
+  if (hits.length === 0 || !hits.every((at) => insideQuotedSpan(spans, at))) return '';
+  return (
+    ' ⚠️ Every occurrence of this stamp sits inside a QUOTED SPAN, where this tool renders text and ' +
+    'substitutes nothing — so writing either spelling there prints the token itself, not a time. Move ' +
+    'the stamp out of the quotation to declare it, or, if the quotation is an EXAMPLE, quote the ' +
+    'placeholder form (`YYYY-MM-DDThh:mmZ`) instead of digits: quoting changes what is rendered, never ' +
+    'what was typed onto the board.'
+  );
+}
+
+/**
  * Every reason this body may not be posted, in the order a reader should fix
  * them. An empty array is a body that may be written.
  *
@@ -696,13 +1004,13 @@ function quotedRouteClosed(stamp, nowMs) {
  * substitutes, passed through so the direction check judges against the instant
  * this body is being written at, never a second read taken later.
  */
-export function stampRefusals(text, nowMs = Date.now()) {
+export function stampRefusals(text, nowMs = Date.now(), spans = quotedSpans(text)) {
   const raw = String(text ?? '');
-  const masked = maskQuotedStamps(raw);
+  const masked = maskQuotedStamps(raw, spans);
   const refusals = [];
   const now = stampNow(nowMs);
 
-  for (const value of quotedStampValues(raw)) {
+  for (const value of quotedStampValues(raw, spans)) {
     if (protocolStamps(value).length !== 1 || protocolStamps(value)[0] !== value.trim()) {
       refusals.push({
         kind: 'quoted-not-a-stamp',
@@ -752,10 +1060,11 @@ export function stampRefusals(text, nowMs = Date.now()) {
     const closed = quotedRouteClosed(hit.stamp, nowMs);
     refusals.push({
       kind: 'positional',
-      detail: closed
-        ? `${opener}Write \`${STAMP_TOKEN}\` there. The quoted route is NOT open to this one: ${closed}.`
-        : `${opener}Write \`${STAMP_TOKEN}\` there, or \`{{WAS:${hit.stamp}}}\` if it ` +
-          'is genuinely a reading of something else.',
+      detail:
+        (closed
+          ? `${opener}Write \`${STAMP_TOKEN}\` there. The quoted route is NOT open to this one: ${closed}.`
+          : `${opener}Write \`${STAMP_TOKEN}\` there, or \`{{WAS:${hit.stamp}}}\` if it ` +
+            'is genuinely a reading of something else.') + quotedSpanClause(raw, spans, hit.stamp),
     });
   }
 
@@ -770,12 +1079,13 @@ export function stampRefusals(text, nowMs = Date.now()) {
       const closed = quotedRouteClosed(stamp, nowMs);
       refusals.push({
         kind: 'mixed',
-        detail: closed
-          ? `${opener}Make it \`${STAMP_TOKEN}\` if it is this act's own. The quoted route is NOT open to ` +
-            `it: ${closed}.`
-          : `${opener}Declare ` +
-            `it with \`{{WAS:${stamp}}}\` if it is a quoted reading, or make it \`${STAMP_TOKEN}\` if it ` +
-            'is this act\'s own.',
+        detail:
+          (closed
+            ? `${opener}Make it \`${STAMP_TOKEN}\` if it is this act's own. The quoted route is NOT open to ` +
+              `it: ${closed}.`
+            : `${opener}Declare ` +
+              `it with \`{{WAS:${stamp}}}\` if it is a quoted reading, or make it \`${STAMP_TOKEN}\` if it ` +
+              'is this act\'s own.') + quotedSpanClause(raw, spans, stamp),
       });
     }
   }
@@ -797,6 +1107,67 @@ export function refusalText(refusals) {
 }
 
 /**
+ * The body as it goes to the platform, and the three counts a reader compares
+ * to intent: tokens SUBSTITUTED with this act's clock, quoted stamps RENDERED
+ * from their declaration, and openers left VERBATIM because they sit inside a
+ * quoted span.
+ *
+ * One left-to-right walk rather than two regex sweeps, so every brace in the
+ * body is judged against the same span map that `unrecognisedOpeners` and
+ * `maskQuotedStamps` were given — three passes disagreeing about which `{{` is
+ * quoted would be three spellings of one decision.
+ */
+export function substituteTokens(raw, stamp, spans = quotedSpans(raw)) {
+  const text = String(raw ?? '');
+  const quotedHere = anchoredOf(QUOTED_TOKEN_RE);
+  let out = '';
+  let i = 0;
+  let substituted = 0;
+  let quoted = 0;
+  let verbatim = 0;
+  for (;;) {
+    const at = text.indexOf(TOKEN_OPENER, i);
+    if (at === -1) {
+      out += text.slice(i);
+      break;
+    }
+    out += text.slice(i, at);
+    const rest = text.slice(at);
+    const isQuoted = insideQuotedSpan(spans, at);
+    if (rest.startsWith(STAMP_TOKEN)) {
+      if (isQuoted) {
+        verbatim += 1;
+        out += STAMP_TOKEN;
+      } else {
+        substituted += 1;
+        out += stamp;
+      }
+      i = at + STAMP_TOKEN.length;
+      continue;
+    }
+    const was = quotedHere.exec(rest);
+    if (was) {
+      if (isQuoted) {
+        verbatim += 1;
+        out += was[0];
+      } else {
+        quoted += 1;
+        out += was[1];
+      }
+      i = at + was[0].length;
+      continue;
+    }
+    // Not a token at all. Outside a quoted span `unrecognisedOpeners` has
+    // already refused the body, so this branch only ever runs inside one —
+    // where the braces are text and are counted as left-as-written.
+    if (isQuoted) verbatim += 1;
+    out += TOKEN_OPENER;
+    i = at + TOKEN_OPENER.length;
+  }
+  return { body: out, substituted, quoted, verbatim };
+}
+
+/**
  * The body as it will be written, or the refusal. Pure, so every branch that
  * decides whether a write happens at all is pinned offline.
  */
@@ -811,27 +1182,25 @@ export function renderBody(text, nowMs = Date.now()) {
         '  reader has to judge; supply a body with --file=PATH or on stdin.',
     };
   }
+  // ONE span map, read by the opener scan, the mask, the quoted-stamp
+  // validation and the substitution. Computed here rather than four times
+  // below so no two of them can come to disagree about which `{{` is quoted.
+  const spans = quotedSpans(raw);
+
   // ⛔ Ahead of `stampRefusals`, and not folded into it. Its bare-stamp scan
   // reads `maskQuotedStamps`, which is built out of the very regex an
   // unrecognised opener defeats — so until every opener is a token, what that
   // scan calls "a bare stamp in the opening line" may be the inside of a token
   // nobody could parse. One opener, one refusal: the shape first, alone.
-  const openers = unrecognisedOpeners(raw);
+  const openers = unrecognisedOpeners(raw, spans);
   if (openers.length > 0) {
     return { ok: false, kind: 'unknown-token', openers, error: unrecognisedOpenerText(openers) };
   }
 
-  const refusals = stampRefusals(raw, nowMs);
+  const refusals = stampRefusals(raw, nowMs, spans);
   if (refusals.length > 0) return { ok: false, kind: 'stamp-contract', refusals, error: refusalText(refusals) };
 
   const stamp = stampNow(nowMs);
-  let quoted = 0;
-  let body = raw.replace(globalOf(QUOTED_TOKEN_RE), (_m, inner) => {
-    quoted += 1;
-    return inner;
-  });
-  const substituted = body.split(STAMP_TOKEN).length - 1;
-  body = body.split(STAMP_TOKEN).join(stamp);
 
   // ⛔ No second leftover scan here. The one that used to sit at this line
   // matched `{{…}}` AFTER substitution, which is both too late and too narrow:
@@ -841,7 +1210,26 @@ export function renderBody(text, nowMs = Date.now()) {
   // instead, and the two stamps substituted here carry no braces — so a second
   // check at this line could never fire, and a check that cannot fire is a
   // check nobody maintains.
-  return { ok: true, body, stamp, substituted, quoted };
+  const { body, substituted, quoted, verbatim } = substituteTokens(raw, stamp, spans);
+  return { ok: true, body, stamp, substituted, quoted, verbatim };
+}
+
+/**
+ * The three counts, in one spelling, so the DRY RUN line, the status line and
+ * `--json` cannot come to describe the same render three ways.
+ *
+ * The VERBATIM count is the half this file was missing: before it, a body that
+ * quoted the token and one that used it were distinguishable only by a
+ * substitution count nothing compared to intent — which is exactly how a false
+ * quotation reached #14251 at exit 0. An author who meant "stamp one, quote
+ * one" now reads both numbers and sees at a glance which happened.
+ */
+export function substitutionSummary({ substituted = 0, quoted = 0, verbatim = 0 } = {}) {
+  return (
+    `${substituted} ${STAMP_TOKEN}, ${quoted} quoted` +
+    ` · verbatim: ${verbatim} opener(s) inside a quoted span, left exactly as written` +
+    (verbatim === 0 ? ' (none)' : '')
+  );
 }
 
 /**
@@ -1421,6 +1809,11 @@ const USAGE = [
   '  than the clock this run reads is REFUSED too — the future is not a thing anyone read — and so is',
   '  one whose digits name no instant the calendar has (month 13, 99:99, 31 April), whether it fails to',
   '  parse at all or rolls over silently to another date.',
+  '  To QUOTE the contract rather than use it, put it in Markdown code — a fenced block or a backtick',
+  '  span. Inside one this tool renders TEXT: nothing is substituted, no opener is refused, no quoted',
+  '  stamp is validated, and the status line reports how many openers were left verbatim beside how many',
+  '  were substituted. ⛔ A bare stamp is judged inside a quotation exactly as in prose — quoting changes',
+  '  what is rendered, never what was typed onto the board.',
   '  A body refresh is REFUSED while comments newer than the body\'s last write stamp exist and',
   '  --ack-through=ID does not name the newest of them — a refresh must not void an unread knock.',
   '  The attribution footer is the caller\'s: its form differs by channel and act, so this tool adds none.',
@@ -1468,8 +1861,8 @@ async function main(argv) {
 
   if (options.dryRun) {
     console.error(
-      `post-stamped: DRY RUN — nothing was written. ${rendered.substituted} token(s) substituted with ` +
-        `\`${rendered.stamp}\`, ${rendered.quoted} quoted stamp(s) rendered verbatim. Target would be ` +
+      `post-stamped: DRY RUN — nothing was written. Substituted with \`${rendered.stamp}\` — ` +
+        `${substitutionSummary(rendered)}. Target would be ` +
         `${repoRes.repo}#${options.number} (${options.mode}).` +
         (options.mode === 'body' ? ' The unread-comment check reads the card and runs only on a live write.' : ''),
     );
@@ -1524,6 +1917,7 @@ async function main(argv) {
           stamp: rendered.stamp,
           substituted: rendered.substituted,
           quoted: rendered.quoted,
+          verbatim: rendered.verbatim,
           written_at: written.writtenAt,
           drift_minutes: verdict.drift,
           body_mutated: verdict.mutated,
@@ -1555,7 +1949,7 @@ async function main(argv) {
         `  ${options.mode === 'comment' ? 'comment' : 'card'}: ${written.id} ${written.url ?? '(no url returned)'}`,
         ...verdict.lines,
         ...(unread ? [unreadPassText(unread)] : []),
-        `  substitutions: ${rendered.substituted} ${STAMP_TOKEN}, ${rendered.quoted} quoted`,
+        `  substitutions: ${substitutionSummary(rendered)}`,
       ].join('\n'),
     );
   }
@@ -1582,6 +1976,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the token contract: the two spellings, and nothing else': 9,
   'the refusals: every route that must not reach the board': 20,
   'the opener scan: every `{{` is a token this tool renders, or the body is refused': 35,
+  'the quoting spelling: Markdown code is a quotation, and a quotation is rendered as written': 51,
   'the calendar rule: a stamp shaped like an instant the calendar does not have': 34,
   'the direction check: a stamp no act can have read': 22,
   'the substitution: one clock, read once, written everywhere': 9,
@@ -1591,7 +1986,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the unread-knock check: a refresh cannot void what nobody read': 49,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
 });
-const SELF_TEST_BATTERY_FLOOR = 11;
+const SELF_TEST_BATTERY_FLOOR = 12;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 let selfTestReachedVerdict = false;
@@ -1691,7 +2086,7 @@ export function selfTest() {
   t('⛔ …and the seconds grain still clears it', unrecognisedOpeners('read {{WAS:2026-09-08T14:00:30Z}}').length === 0);
   t('⛔ …and a bare stamp in prose is no opener\'s business', unrecognisedOpeners('The 2026-09-08T14:00Z ruling stands.').length === 0);
   t('⛔ the scan opens NO escape hatch: the entity spelling is not an opener, so it is prose', unrecognisedOpeners('the token &#123;&#123;NOW&#125;&#125;').length === 0);
-  t('⛔ …and a token inside backticks is STILL substituted — a fence is not an escape', renderBody('Write `{{NOW}}` there.', NOW_MS).body === 'Write `2026-09-10T06:37Z` there.');
+  t('⭐ a token inside backticks is a QUOTATION and is left as written — the next battery owns this rule', renderBody('Write `{{NOW}}` there.', NOW_MS).body === 'Write `{{NOW}}` there.');
 
   t('the span renderer escapes a newline', offendingSpan('a\nb') === 'a\\nb');
   t('…a carriage return and a tab too', offendingSpan('a\r\tb') === 'a\\r\\tb');
@@ -1700,6 +2095,87 @@ export function selfTest() {
   t(`a longer one is clipped to ${SPAN_BYTES} bytes and says so`, offendingSpan('x'.repeat(100)) === `${'x'.repeat(SPAN_BYTES)}…`);
   t('⛔ …and never cuts a multi-byte character in half', offendingSpan(`${'x'.repeat(SPAN_BYTES - 1)}€€`) === `${'x'.repeat(SPAN_BYTES - 1)}…`);
   t('the budget is counted in BYTES, which is the unit a dump arrives in', SPAN_BYTES === 60 && Buffer.byteLength(offendingSpan('€'.repeat(40)), 'utf8') <= SPAN_BYTES + 3);
+
+  // The filed instance, in kind: a seat quoted this tool's OWN status line
+  // verbatim — an inline code span inside a blockquote — and the token inside
+  // the quotation was substituted, publishing a sentence the tool never
+  // printed. Three live hits in one hour, by two seats, plus a claim the tool
+  // refused for spelling its own documentation placeholder.
+  battery('the quoting spelling: Markdown code is a quotation, and a quotation is rendered as written');
+  const CARD_QUOTE =
+    'Addendum.\n\n' +
+    '> `post-stamped` reported it faithfully: 「*stamp: none substituted — this body carried no `{{NOW}}`, so there is no clock to check*」\n\n' +
+    '<sub>read {{NOW}}.</sub>\n';
+  const cardQuote = renderBody(CARD_QUOTE, NOW_MS);
+  t('⭐ THE FILED INSTANCE: the quoted token inside an inline span inside a blockquote is left as written', cardQuote.ok === true && cardQuote.body.includes('carried no `{{NOW}}`'));
+  t('⭐ …so the quotation is no longer falsified — the stamp does not appear inside it', cardQuote.body.includes('carried no `2026-09-10T06:37Z`') === false);
+  t('⭐ …and the act\'s OWN token, outside the quotation, still gets the clock', cardQuote.body.includes('<sub>read 2026-09-10T06:37Z.</sub>'));
+  t('⭐ …the counts now separate the two: 1 substituted, 1 verbatim, where the filed run could only say 2', cardQuote.substituted === 1 && cardQuote.verbatim === 1, `sub=${cardQuote.substituted} verb=${cardQuote.verbatim}`);
+  t('⭐ …and the status line SAYS both, so a reader can compare them to intent', substitutionSummary(cardQuote).includes('1 {{NOW}}') && substitutionSummary(cardQuote).includes('verbatim: 1 opener(s)'));
+  t('⛔ THE BEFORE-READING, kept as a control: the same body with the backticks removed IS substituted', renderBody(CARD_QUOTE.replace(/`\{\{NOW\}\}`/u, '{{NOW}}'), NOW_MS).substituted === 2);
+
+  const FENCED = 'Re-check:\n\n```\nprintf \'{{NOW}}\' | node scripts/pm/post-stamped.mjs --dry-run\n```\n\n<sub>read {{NOW}}.</sub>\n';
+  const fenced = renderBody(FENCED, NOW_MS);
+  t('⭐ THE UNESTABLISHED POINT, measured: a FENCED block is a quotation too', fenced.ok === true && fenced.body.includes("printf '{{NOW}}'"));
+  t('…with the token outside it still substituted, so fencing quotes one and not the other', fenced.substituted === 1 && fenced.verbatim === 1);
+  t('⛔ …and the before-reading it replaces: the tree substituted inside a fence exactly like prose', quotedSpans('```\n{{NOW}}\n```').length === 1);
+  t('a tilde fence is a fence', quotedSpans('~~~\n{{NOW}}\n~~~\n').length === 1);
+  t('an info string does not stop a fence opening', renderBody('```bash\necho {{NOW}}\n```\n\nread {{NOW}}\n', NOW_MS).verbatim === 1);
+  t('⛔ a backtick fence whose info string carries a backtick is NOT a fence — CommonMark\'s own rule', renderBody('```a`b\n{{NOW}}\n', NOW_MS).substituted === 1);
+  t('an UNCLOSED fence quotes to the end of the body, the way CommonMark ends one', renderBody('read {{NOW}}\n\n```\ntail {{NOW}}\n', NOW_MS).verbatim === 1);
+  t('⭐ a fence INSIDE a blockquote is tracked through the quote marker — the shape a seat quotes tool output in', renderBody('Tool said:\n\n> ```\n> substitutions: 2 {{NOW}}, 0 quoted\n> ```\n\nread {{NOW}}\n', NOW_MS).verbatim === 1);
+  t('…and the quote ending ends the block with it, so prose after it is prose again', renderBody('> ```\n> {{NOW}}\n\nread {{NOW}}\n', NOW_MS).substituted === 1);
+  t('⛔ a four-space indented block is NOT the quoting spelling — indentation is load-bearing in lists', renderBody('read {{NOW}}\n\n    {{NOW}}\n', NOW_MS).substituted === 2);
+
+  const ELLIPSIS = 'Claim: PM loop round 1.\n\nFile surface: the tool substitutes `{{NOW}}`, and `{{WAS:...}}` cannot be quoted either.\n\n<sub>read {{NOW}}.</sub>\n';
+  const ellipsis = renderBody(ELLIPSIS, NOW_MS);
+  t('⭐ THE CLAIM\'S OWN REFUSAL, retired: an ellipsis payload inside backticks is quoted VERBATIM, not refused', ellipsis.ok === true && ellipsis.body.includes('`{{WAS:...}}`'));
+  t('…because the quoted-stamp validation reads a DECLARATION, and inside a quotation there is none', quotedStampValues('`{{WAS:...}}`').length === 0);
+  t('⛔ …the before-reading it replaces: the same payload in PROSE is still refused as not-a-stamp', kinds('the form is {{WAS:...}}', NOW_MS).join() === 'quoted-not-a-stamp');
+  t('⭐ the documentation placeholder is quotable now — which is what this file\'s own refusal text spells', renderBody('The quoted route is `{{WAS:YYYY-MM-DDThh:mmZ}}`.\n\nread {{NOW}}\n', NOW_MS).ok === true);
+  t('⛔ …and in prose it is still refused, so the contract did not widen by one case', kinds('The quoted route is {{WAS:YYYY-MM-DDThh:mmZ}}.', NOW_MS).join() === 'quoted-not-a-stamp');
+  const QUOTED_WAS_DIGITS = 'Note on the contract.\n\nExample: `{{WAS:2026-09-08T14:00Z}}` is the form.\n';
+  t('a WAS token with REAL digits inside a quotation renders as the TOKEN, braces and all', renderBody(QUOTED_WAS_DIGITS, NOW_MS).body.includes('`{{WAS:2026-09-08T14:00Z}}`'));
+  t('…and is counted verbatim rather than as a quoted stamp — it declared nothing', renderBody(QUOTED_WAS_DIGITS, NOW_MS).quoted === 0 && renderBody(QUOTED_WAS_DIGITS, NOW_MS).verbatim === 1);
+  t('⛔ …and the same body in PROSE still renders the stamp from its declaration, unchanged', renderBody(QUOTED_WAS_DIGITS.replace(/`/gu, ''), NOW_MS).quoted === 1);
+  t('an unknown token NAME inside a quotation is text, not a refusal', renderBody('The typo `{{now}}` is refused.\n\nread {{NOW}}\n', NOW_MS).ok === true);
+  t('…and an UNCLOSED opener inside one is text too', renderBody('Quoting `{{WAS:2026` mid-edit.\n\nread {{NOW}}\n', NOW_MS).ok === true);
+  t('⛔ both are still refused in prose — the opener scan narrowed nowhere else', renderBody('The typo {{now}} is refused.', NOW_MS).ok === false && renderBody('Quoting {{WAS:2026 mid-edit.', NOW_MS).ok === false);
+
+  // ⛔ The asymmetry this rule stands on: a quotation suppresses what RENDERS a
+  // token, never what judges a stamp a human typed. Quoting changes what is
+  // rendered, never what was authored — so nothing can hide a stamp behind
+  // backticks.
+  t('⭐ A BARE STAMP INSIDE THE QUOTING SPELLING IS REFUSED, exactly as in prose — the opening line', kinds('Claim: seat `2026-09-10T06:37Z` — dispatched.', NOW_MS).join() === 'positional');
+  t('⭐ …and inside a FENCE beside the act-clock token, the MIXED refusal still fires', kinds('Verdict {{NOW}}.\n\n```\nread 2026-09-08T14:00Z\n```\n', NOW_MS).join() === 'mixed');
+  t('⭐ …because `maskQuotedStamps` blanks a WAS token only where it IS a token', maskQuotedStamps('`{{WAS:2026-09-08T14:00Z}}`').includes('2026-09-08T14:00Z') && maskQuotedStamps('{{WAS:2026-09-08T14:00Z}}').includes('2026-09-08T14:00Z') === false);
+  t('⭐ …so a stamp cannot hide from the contract behind backticks, which is the accident this may never buy', kinds('Verdict {{NOW}} — write `{{WAS:2026-09-08T14:00Z}}` for a quoted reading.', NOW_MS).length > 0);
+  t('⛔ …and the body that refusal replaces used to be ACCEPTED and rendered as bare digits — the defect, not a feature', unrecognisedOpeners('Verdict {{NOW}} — write `{{WAS:2026-09-08T14:00Z}}` for a quoted reading.').length === 0);
+  const QUOTED_TOKEN_PLUS_STAMP = 'Here is the token: `{{NOW}}`.\n\nThe board was read at 2026-09-08T14:00Z.\n';
+  t('⛔ the MIXED trigger is deliberately NOT quote-aware: spelling the token anywhere means the author knows it', kinds(QUOTED_TOKEN_PLUS_STAMP, NOW_MS).join() === 'mixed');
+  t('…so this change weakened no refusal — it is the one direction it could have', stampRefusals(QUOTED_TOKEN_PLUS_STAMP, NOW_MS).length === 1);
+  const QUOTED_REMEDY = stampRefusals('Verdict {{NOW}}.\n\n```\nread 2026-09-08T14:00Z\n```\n', NOW_MS)[0].detail;
+  t('⭐ the remedy SAYS the stamp sits inside a quotation, rather than prescribing a route that cannot work there', QUOTED_REMEDY.includes('sits inside a QUOTED SPAN'));
+  t('…and names the placeholder as the way to quote an example', QUOTED_REMEDY.includes('YYYY-MM-DDThh:mmZ'));
+  t('⛔ …and a stamp with even ONE unquoted occurrence gets the ordinary remedy, with no such clause', stampRefusals('Verdict {{NOW}}.\n\nread 2026-09-08T14:00Z and `2026-09-08T14:00Z`.\n', NOW_MS)[0].detail.includes('QUOTED SPAN') === false);
+
+  const UNMATCHED = 'Write `{{NOW}} there.';
+  t('⛔ an unmatched backtick opens NO span — the run needs a closer of the same length on the line', renderBody(UNMATCHED, NOW_MS).body === 'Write `2026-09-10T06:37Z there.');
+  t('a double-backtick run closes on a double-backtick run', quotedSpans('``{{NOW}}``').length === 1);
+  t('…and a single run inside a double one is content, not a closer', renderBody('``a `b` {{NOW}}`` read {{NOW}}', NOW_MS).substituted === 1);
+  t('⛔ a code span is searched within ONE line only — conservative on purpose, so under-detection is today\'s behaviour', renderBody('`{{NOW}}\n{{NOW}}`', NOW_MS).substituted === 2);
+  t('two spans on one line are two spans', quotedSpans('`a` and `b`').length === 2);
+  t('a backtick run inside a FENCE is fence content, never a span of its own', quotedSpans('```\n`a` `b`\n```').length === 1);
+  t('the span kinds are declared, so a reader and the code share one vocabulary', Object.keys(QUOTED_SPAN_KINDS).join() === 'fenced,code-span');
+  t('an opener is judged by where it STARTS — one position, one answer for every rule', insideQuotedSpan([{ from: 0, to: 5 }], 4) === true && insideQuotedSpan([{ from: 0, to: 5 }], 5) === false);
+
+  const PROSE_CONTROL = 'Verdict {{NOW}} — on the board read {{WAS:2026-09-08T14:00Z}}.';
+  t('⭐ THE CONTROL: prose substitution is byte-identical — the whole point of a structural rule', renderBody(PROSE_CONTROL, NOW_MS).body === 'Verdict 2026-09-10T06:37Z — on the board read 2026-09-08T14:00Z.');
+  t('…with no opener left verbatim, because no quotation is there', renderBody(PROSE_CONTROL, NOW_MS).verbatim === 0);
+  t('…and the summary says so in words rather than leaving a bare zero to read', substitutionSummary(renderBody(PROSE_CONTROL, NOW_MS)).endsWith('(none)'));
+  t('a body with no backtick at all has no span, so `quotedSpans` costs it nothing', quotedSpans('Claim: seat, {{NOW}} — dispatched.').length === 0);
+  t('⛔ NO THIRD SPELLING was added: the tokens are still exactly two', STAMP_TOKEN === '{{NOW}}' && QUOTED_TOKEN_RE.source === '\\{\\{WAS:([^{}]*)\\}\\}');
+  t('⛔ and NO flag turns substitution off — the quoting spelling lives in the body, where a reader sees it', KNOWN_FLAGS.includes('--no-substitute') === false && KNOWN_OPTIONS.includes('expect-now') === false);
 
   // The filed repro: the protocol's own digit shape, filled with an instant no
   // calendar has. `Date.parse` answers NaN, the span is null, and a null span

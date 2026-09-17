@@ -85,7 +85,7 @@ const result = InvitationSchema.parse(data);
 | **id** | `string` | ✅ | Unique organization identifier |
 | **name** | `string` | ✅ | Organization display name |
 | **slug** | `string` | ✅ | Unique URL-friendly slug (lowercase alphanumeric, hyphens, underscores) |
-| **logo** | `string` | optional | Organization logo URL |
+| **logo** | `string \| null` | optional | Organization logo URL |
 | **metadata** | `Record<string, any>` | optional | Custom metadata |
 | **createdAt** | `string` | ✅ | Organization creation timestamp |
 | **updatedAt** | `string` | ✅ | Last update timestamp |
