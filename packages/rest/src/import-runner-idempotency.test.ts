@@ -187,8 +187,15 @@ describe('runImport — idempotent retry with natural keys (framework#3149)', ()
     expectEveryProbeNarrowed(findData.mock.calls, appliedFilters);
     const probes = findData.mock.calls.map(([a]) => a.query!);
     expect(probes).toHaveLength(1);
-    expect(Object.keys(probes[0].where!)).toEqual(['id']);
-    expect([...(probes[0].where!.id as { $in: string[] }).$in].sort()).toEqual(store.map((r) => r.id).sort());
+    // The slot's declared INPUT also admits the `FilterArray` sugar the
+    // transport door serves; the runner builds only the object form, so the
+    // other arm is REFUSED here rather than cast past.
+    const probeWhere = probes[0].where;
+    if (probeWhere == null || Array.isArray(probeWhere)) {
+      throw new Error(`the recheck must send a canonical object \`where\`; got ${JSON.stringify(probeWhere)}`);
+    }
+    expect(Object.keys(probeWhere)).toEqual(['id']);
+    expect([...(probeWhere.id as { $in: string[] }).$in].sort()).toEqual(store.map((r) => r.id).sort());
     expect(probes[0].limit).toBe(store.length);
   });
 

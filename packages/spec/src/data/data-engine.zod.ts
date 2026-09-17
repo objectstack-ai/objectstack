@@ -1191,10 +1191,13 @@ export const QueryWithTransportSchema = lazySchema(
     .extend({
       ...(QueryTransportParamsSchema as unknown as z.ZodObject<z.ZodRawShape>).shape,
       expand: describedCanonicalExpand(),
+      // The lowering sink the sentence below names is the one maintainer
+      // ruling C on #5158 fixed. The id lives in this comment and not in the
+      // prose, which is printed AT the customer, where it resolves to nothing.
       where: TransportFilterValueSchema.optional().describe(
         'Filtering criteria (WHERE) — a filter condition, or the input-only `FilterArray` '
         + "sugar (`['status', '=', 'open']`), which is lowered through `parseFilterAST` "
-        + 'before the query is produced (#5158 ruling C).'
+        + 'before the query is produced.'
       ),
     })
     .transform((bag, ctx) => foldQueryTransportBag(bag as Record<string, unknown>, ctx)),

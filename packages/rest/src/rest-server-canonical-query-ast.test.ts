@@ -394,7 +394,7 @@ describe('[#16337] §2 the declared `FindDataRequest[\'query\']` contract', () =
         // the AST. So these three are assignments, not `@ts-expect-error`s.
         const dollarTop: Query = { object: 'x', $top: 5 };
         const dollarFilter: Query = { object: 'x', $filter: { id: '1' } };
-        const wireFilters: Query = { object: 'x', filters: '{"id":"1"}' };
+        const wireFilters: Query = { object: 'x', filters: { id: '1' } };
         // ⭐ …and a bag mixing the two spellings, which is what a boundary that
         // merges a caller's parameters with its own actually assembles.
         const mixed: Query = { object: 'x', where: { status: 'queued' }, $top: 5 };
@@ -417,7 +417,9 @@ describe('[#16337] §2 the declared `FindDataRequest[\'query\']` contract', () =
         const noObject: Query = { limit: 1 };
         // @ts-expect-error `$sort` is not a spelling the transport table names — declaring the dialect did not open `$*`
         const unnamedDollar: Query = { object: 'x', $sort: 'name' };
-        expect([dollarTop, dollarFilter, wireFilters, mixed, wireSelect, wireSort, recordSort, commaExpand, noObject, unnamedDollar]).toHaveLength(10);
+        // @ts-expect-error a JSON-ENCODED filter string is declared on NO filter spelling — lowering one means running a second parser beside the door's, which is the one thing the transport declaration refuses to do
+        const jsonEncodedFilter: Query = { object: 'x', filters: '{"id":"1"}' };
+        expect([dollarTop, dollarFilter, wireFilters, mixed, wireSelect, wireSort, recordSort, commaExpand, noObject, unnamedDollar, jsonEncodedFilter]).toHaveLength(11);
     });
 });
 
@@ -472,7 +474,11 @@ describe('[#16952] §2 the declared `ImportProtocolLike` parameter contract', ()
         // ⭐ The whole point: leave the parameter unannotated and the contract
         // types it. This is the shape `plugin-auth`'s hand-written implementor
         // could not have while the declaration said `any`.
-        const probes: Array<Record<string, unknown> | undefined> = [];
+        // Typed FROM the declaration, like every alias in this block — the slot
+        // admits the `FilterArray` sugar as well as the object form, and a
+        // hand-written `Record<string, unknown>` here would be a fourth
+        // restatement of the dialect, which is what this section exists to stop.
+        const probes: Array<Query['where']> = [];
         const p: ImportProtocolLike = {
             findData: async (args) => { probes.push(args.query?.where); return { records: [] }; },
             createData: async (args) => ({ id: String(args.data.name) }),
