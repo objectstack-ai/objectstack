@@ -18,6 +18,7 @@ import type { ASTNode } from '@marcbachmann/cel-js';
 import type { Expression } from '@objectstack/spec';
 
 import { buildScope, registerNumericCoercions, registerStdLib } from './stdlib';
+import type { PermissionBinding } from './stdlib';
 import type { DialectEngine, EvalContext, EvalResult } from './types';
 
 /**
@@ -57,10 +58,22 @@ export const CEL_ENV_OPTIONS = {
  *
  * Exported (package-internal; NOT in `index.ts`) so the stdlib drift pin reads
  * the authoritative environment through the same constructor the engine uses.
+ *
+ * `permissionBinding` is the acting subject plus its effective object
+ * permissions, pinned for this one evaluation (see `PermissionBinding`). Every
+ * caller that is not evaluating — `compile()`, the drift pin, the
+ * function-existence oracle — omits it, and that is exactly right: it changes
+ * what `can` ANSWERS, never whether `can` EXISTS, so the set of registered
+ * names is identical with and without it and a publish-time verdict can never
+ * disagree with the runtime about which names resolve.
  */
-export function buildEnv(now: () => Date, timezone = 'UTC'): Environment {
+export function buildEnv(
+  now: () => Date,
+  timezone = 'UTC',
+  permissionBinding?: PermissionBinding,
+): Environment {
   const env = new Environment(CEL_ENV_OPTIONS);
-  return registerNumericCoercions(registerStdLib(env, now, timezone));
+  return registerNumericCoercions(registerStdLib(env, now, timezone, permissionBinding));
 }
 
 /**
@@ -1727,8 +1740,16 @@ export const celEngine: DialectEngine = {
 
     const now = () => ctx.now ?? new Date();
     try {
-      const env = buildEnv(now, ctx.timezone ?? 'UTC');
+      // Scope FIRST: `can` is answered about the acting subject by IDENTITY, and
+      // the subject is the canonical `EvalUser` object `buildScope` mints. The
+      // environment therefore has to be built from the scope, not beside it —
+      // rebuilding a lookalike user here would give `current_user.can(…)` a
+      // receiver that is equal to the bound one and not the same as it.
       const scope = buildScope(ctx);
+      const env = buildEnv(now, ctx.timezone ?? 'UTC', {
+        subject: scope.current_user,
+        permissions: ctx.permissions,
+      });
       // #3183 — coerce a date-field operand compared with `==`/`!=` against a
       // temporal function (`date(record.d) == today()`), so a `Field.date` string
       // matches the Timestamp instead of silently never equalling it. No-op (and
