@@ -1674,6 +1674,36 @@ export const NavigationModeSchema = lazySchema(() => z.enum([
   'none'        // No navigation (read-only list)
 ]));
 
+// [#16885] `navigation.view` retirement prescription — director decision batch
+// #126 item 4 (maintainer ruling 2026-09-13, option B: retire). Declared with
+// `//` on purpose: build-docs takes a file's first JSDoc per exported symbol,
+// and this constant needs no doc page (the `LIST_VIEW_EXPORT_PDF_RETIRED`
+// placement note in this same file).
+//
+// The key promised "the form view to use for details" and nothing from spec to
+// console ever resolved a view BY NAME. Its one read in the shipped console put
+// the value in the second argument of `onNavigate` — the slot that otherwise
+// carries the navigation-MODE token — so an authored name did not select a
+// view, it SUBSTITUTED for the mode, and a consumer reading that argument
+// against its closed `edit`/`view` vocabulary matched neither branch. Declared,
+// consumed, and wrong: the one state that teaches an author something false.
+//
+// ⛔ No `os migrate meta` sentence: the house sentence is owed only where an
+// ADR-0087 conversion covers the surface (`shared/retired-key.ts` module
+// docblock). This retirement's ADR-0087 disposition is a D3 SEMANTIC entry
+// (`list-view-navigation-view-retired`) — an author who wrote the key wanted a
+// named detail layout, and stripping it mechanically would drop that intent
+// without telling anyone which list view lost it.
+const NAVIGATION_VIEW_RETIRED =
+  '`view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) '
+  + '— it named the form view to open for a record detail, and no layer resolved a view by that '
+  + 'name: the value was passed straight into the navigation-MODE argument of the console\'s '
+  + '`onNavigate`, where anything other than `edit` or `view` matched no branch, so the key '
+  + 'selected nothing and could silently deaden the row click. Delete the key; to choose what '
+  + 'opens for a record, assign a `record` page to the object and let `isDefault` pick the one '
+  + 'that opens — page assignment is the machinery that resolves a detail layout, and a list '
+  + 'view\'s navigation block only decides HOW the detail is surfaced (`mode`, `size`).';
+
 /**
  * Navigation Configuration Schema
  */
@@ -1682,10 +1712,15 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
   history: VIEW_HISTORY,
 }, {
   mode: NavigationModeSchema.default('page'),
-  
-  /** Target View Config */
-  view: z.string().optional().describe('Name of the form view to use for details (e.g. "summary_view", "edit_form")'),
-  
+
+  /**
+   * [#16885] RETIRED — see {@link NAVIGATION_VIEW_RETIRED} above the schema.
+   * The tombstone stays in the shape on purpose: `tsc` types the key `never`
+   * and a value reaching a parse raises the prescription instead of a bare
+   * unrecognized-key report.
+   */
+  view: retiredKey(NAVIGATION_VIEW_RETIRED),
+
   /** Interaction Triggers */
   preventNavigation: z.boolean().default(false).describe('Disable standard navigation entirely'),
   openNewTab: z.boolean().default(false).describe('Force open in new tab (applies to page mode)'),

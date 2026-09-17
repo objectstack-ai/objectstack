@@ -681,7 +681,7 @@
     "ui/NavigationConfig:openNewTab",
     "ui/NavigationConfig:preventNavigation",
     "ui/NavigationConfig:size",
-    "ui/NavigationConfig:view",
+    "ui/NavigationConfig:view [RETIRED]",
     "ui/NavigationConfig:width",
     "ui/NavigationContribution:app",
     "ui/NavigationContribution:group",
