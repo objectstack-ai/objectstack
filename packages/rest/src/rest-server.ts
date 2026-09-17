@@ -13373,7 +13373,64 @@ export class RestServer {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
                     const context = await this.resolveExecCtx(environmentId, req);
                     if (this.enforceAuth(req, res, context)) return;
-                    const ql = this.objectQLProvider ? await this.objectQLProvider(environmentId) : undefined;
+                    // [#18559] The engine seam, reached the way its two SIBLING
+                    // consumers of this same slot already reach it —
+                    // `wiredEngineOrLoud` — so "no engine is wired" and "the
+                    // engine WAS wired and could not be resolved" stay two facts
+                    // instead of being told apart only by accident. The retired
+                    // spelling this replaces was a plain read:
+                    //
+                    //     this.objectQLProvider ? await this.objectQLProvider(environmentId) : undefined
+                    //
+                    // ⚠️ It did NOT re-collapse them — that is why this is not a
+                    // regression and was not a blocker for #14251's decidable
+                    // test. A rejection escaped the plain read, missed the 501
+                    // arm below (which tests `!ql || typeof ql.transaction !==
+                    // 'function'`, and a rejection never reaches it), and was
+                    // caught by this handler's GENERIC outer catch
+                    // (`handleRouteError`). So the two facts did differ on the
+                    // wire — 500 INTERNAL_ERROR against 501 NOT_IMPLEMENTED —
+                    // but through a catch-all that knows nothing about this
+                    // seam, at a status this slot's other two consumers do not
+                    // use for the same fact.
+                    //
+                    // ⭐ What decided it, measured on a real `RestServer` over a
+                    // real `ObjectKernel` rather than argued: THIS DOOR ALREADY
+                    // ANSWERS 503 on the single-kernel wiring. There
+                    // `computeExecCtx` takes its PROVIDER branch, which is
+                    // `wiredEngineOrLoud`, and raises before this line runs. The
+                    // 500 was reachable only on the MULTI-KERNEL wiring, where
+                    // the gate's kernel branch absorbs by design (see
+                    // `wiredEngineOrLoud`'s RESIDUE note) and hands the engine
+                    // question down to this line:
+                    //
+                    // | wiring, engine wired and FAILING | before | after |
+                    // |:--|:--|:--|
+                    // | single-kernel (gate raises first)| 503    | 503 — unchanged |
+                    // | multi-kernel (gate absorbs)      | **500**| **503** |
+                    //
+                    // ⇒ the repair does not choose a new wire answer for this
+                    // door; it removes a WIRING-DEPENDENT divergence, leaving
+                    // the answer this door already gave on the composition the
+                    // open core boots.
+                    //
+                    // ⛔ NOT `seamOrUndefined`. That helper SWALLOWS, and its own
+                    // docblock forbids routing the data-engine seam back through
+                    // it "to make the seams uniform".
+                    //
+                    // The wiring fact is the provider's PRESENCE, asked once and
+                    // never inferred from what it returned, so both ABSENCE
+                    // shapes reach the 501 below byte-for-byte as before: no
+                    // provider wired at all, and a provider that RESOLVES
+                    // `undefined`, which is the seam contract declaring absence
+                    // rather than failing. `wiredEngineOrLoud` also invokes the
+                    // provider SYNCHRONOUSLY, so a host wiring a non-`async`
+                    // provider — which the seam's declared type cannot prevent —
+                    // reaches the same answer as one that rejects (#13280).
+                    const ql = await wiredEngineOrLoud(
+                        Boolean(this.objectQLProvider),
+                        () => this.objectQLProvider!(environmentId),
+                    );
                     if (!ql || typeof ql.transaction !== 'function') {
                         // Typed like every other 501 on this server (clone/search,
                         // #4067) so a client can key on the code, not the prose.
