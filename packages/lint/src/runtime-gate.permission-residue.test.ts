@@ -24,8 +24,8 @@
  * as `item: args.body`, and `buildRuntimeWriteSnapshots` puts that same object
  * into `candidate.permissions`. The end-to-end half of this is pinned at the
  * door itself (`@objectstack/metadata-protocol`'s
- * `protocol.permission-residue-advisory.test.ts`); what is pinned HERE is the
- * dispatch and the differential, at the layer that owns them.
+ * `protocol.runtime-authoring-gate.test.ts`, the #17936 block); what is pinned
+ * HERE is the dispatch and the differential, at the layer that owns them.
  *
  * `input: 'normalized'` stays load-bearing for the same reason it always was —
  * the snapshot the gate builds is an unparsed body, which is precisely the tier
@@ -69,7 +69,11 @@ const residueSet = () => ({
   name: 'sales_team',
   label: 'Sales Team',
   objects: {
-    crm_ticket: { allowRead: true, allowEdit: true, allowRestore: false },
+    // `readScope` authored on purpose: without it `validateSecurityPosture`
+    // adds a `security-private-no-readscope` info advisory to every one of
+    // these writes, and the DARK readings below would be "one advisory instead
+    // of two" rather than a true zero.
+    crm_ticket: { allowRead: true, allowEdit: true, readScope: 'own', allowRestore: false },
   },
 });
 
@@ -78,7 +82,7 @@ const cleanSet = () => ({
   name: 'sales_team',
   label: 'Sales Team',
   objects: {
-    crm_ticket: { allowRead: true, allowEdit: true },
+    crm_ticket: { allowRead: true, allowEdit: true, readScope: 'own' },
   },
 });
 
@@ -127,8 +131,11 @@ describe('#17936 — the door verdict on a permission write', () => {
     ).toEqual([]);
     expect(result.rulesRun).toContain(RULE_NAME);
 
+    expect(
+      result.advisories.map((f) => f.rule),
+      `advisories: ${JSON.stringify(result.advisories)}`,
+    ).toEqual([PERMISSION_RETIRED_LIFECYCLE_RESIDUE]);
     const advisory = result.advisories.find((f) => f.rule === PERMISSION_RETIRED_LIFECYCLE_RESIDUE);
-    expect(advisory, `advisories: ${JSON.stringify(result.advisories)}`).toBeDefined();
     expect(advisory!.severity).toBe('warning');
     // [#10064] The wire shape keys the collection entry by NAME, not by the
     // gate's private snapshot index — which here would read `permissions[0]`
@@ -145,7 +152,9 @@ describe('#17936 — the door verdict on a permission write', () => {
   it('⭐ LIT — `allowPurge` is the second arm, and both together advise twice', () => {
     const both = {
       name: 'sales_team',
-      objects: { crm_ticket: { allowRead: true, allowRestore: false, allowPurge: false } },
+      objects: {
+        crm_ticket: { allowRead: true, readScope: 'own', allowRestore: false, allowPurge: false },
+      },
     };
     const result = runRuntimeAuthoringRules({ type: 'permission', item: both });
     const paths = result.advisories
@@ -164,7 +173,7 @@ describe('#17936 — the door verdict on a permission write', () => {
     expect(result.rulesRun, 'the rule must have RUN — a silent rule is not a clean verdict')
       .toContain(RULE_NAME);
     expect(
-      result.advisories.filter((f) => f.rule === PERMISSION_RETIRED_LIFECYCLE_RESIDUE),
+      result.advisories,
       `clean write advised anyway: ${JSON.stringify(result.advisories)}`,
     ).toEqual([]);
     expect(result.errors).toEqual([]);
@@ -176,7 +185,10 @@ describe('#17936 — the door verdict on a permission write', () => {
     // thing one layer earlier and in different words.
     const result = runRuntimeAuthoringRules({
       type: 'permission',
-      item: { name: 'sales_team', objects: { crm_ticket: { allowRead: true, allowRestore: true } } },
+      item: {
+        name: 'sales_team',
+        objects: { crm_ticket: { allowRead: true, readScope: 'own', allowRestore: true } },
+      },
     });
     expect(result.advisories.filter((f) => f.rule === PERMISSION_RETIRED_LIFECYCLE_RESIDUE)).toEqual([]);
   });
@@ -187,7 +199,7 @@ describe('#17936 — the door verdict on a permission write', () => {
     // passes and cancels.
     const stored = {
       name: 'support_team',
-      objects: { crm_case: { allowRead: true, allowPurge: false } },
+      objects: { crm_case: { allowRead: true, readScope: 'own', allowPurge: false } },
     };
     const result = runRuntimeAuthoringRules({
       type: 'permission',

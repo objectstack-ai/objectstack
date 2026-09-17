@@ -809,7 +809,11 @@ describe('runtime authoring gate on PERMISSION writes — retired lifecycle resi
         name: 'sales_team',
         label: 'Sales Team',
         objects: {
-            leave_request: { allowRead: true, allowEdit: true, allowRestore: false },
+            // `readScope` is authored on purpose: without it `validateSecurityPosture`
+            // adds its own `security-private-no-readscope` info advisory to every
+            // one of these writes, and the DARK reading below would then be "one
+            // advisory instead of two" rather than a true zero.
+            leave_request: { allowRead: true, allowEdit: true, readScope: 'own', allowRestore: false },
         },
     });
 
@@ -818,7 +822,7 @@ describe('runtime authoring gate on PERMISSION writes — retired lifecycle resi
         name: 'sales_team',
         label: 'Sales Team',
         objects: {
-            leave_request: { allowRead: true, allowEdit: true },
+            leave_request: { allowRead: true, allowEdit: true, readScope: 'own' },
         },
     });
 
@@ -839,6 +843,9 @@ describe('runtime authoring gate on PERMISSION writes — retired lifecycle resi
             advisory,
             `advisories: ${JSON.stringify(result.advisories)} — this is the #17425 ruling D population's ONLY door`,
         ).toBeDefined();
+        // A true reading, not a filtered one: with `readScope` authored the
+        // residue advisory is the ONLY thing this write earns.
+        expect((result.advisories ?? []).map((a: any) => a.rule)).toEqual([RESIDUE_RULE]);
         expect(advisory.severity).toBe('warning');
         // The key, the site and the remedy — the three things the author needs
         // to act, in the same six-key shape Studio and MCP already render for
@@ -872,7 +879,9 @@ describe('runtime authoring gate on PERMISSION writes — retired lifecycle resi
         const { protocol } = makeProtocol();
         const result = await savePermission(protocol, {
             name: 'sales_team',
-            objects: { leave_request: { allowRead: true, allowRestore: false, allowPurge: false } },
+            objects: {
+                leave_request: { allowRead: true, readScope: 'own', allowRestore: false, allowPurge: false },
+            },
         });
 
         expect(result.success).toBe(true);
@@ -913,13 +922,25 @@ describe('runtime authoring gate on PERMISSION writes — retired lifecycle resi
         // The gate's own operator channel, unchanged by this crossing — kept
         // because the wire advisory is the AUTHOR's channel and the log is the
         // operator's, and Studio republishes the same body a lot.
+        //
+        // ⚠️ A NAME OF ITS OWN, and that is a correctness property of this case
+        // rather than tidiness: `_advisoryWarned` is a module-level Set keyed
+        // `type|name|rule|path` for the whole PROCESS, so reusing `sales_team`
+        // here would read 0 lines because an earlier case in this file already
+        // spent that key — a dedupe working exactly as designed, misread as a
+        // missing log.
         const { protocol } = makeProtocol();
-        await savePermission(protocol, residuePermissionSet());
+        await protocol.saveMetaItem({
+            type: 'permission',
+            name: 'audit_team',
+            item: { ...residuePermissionSet(), name: 'audit_team' },
+        });
 
         const lines = (warn.mock.calls as unknown[][])
             .map((c) => String(c[0]))
             .filter((m) => m.includes(RESIDUE_RULE));
-        expect(lines.length).toBeGreaterThanOrEqual(1);
-        expect(lines[0]).toContain('sales_team');
+        expect(lines.length).toBe(1);
+        expect(lines[0]).toContain('audit_team');
+        expect(lines[0]).toContain('allowRestore');
     });
 });
