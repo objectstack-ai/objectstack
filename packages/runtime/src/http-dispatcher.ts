@@ -2181,8 +2181,24 @@ export class HttpDispatcher {
     }
 
     /**
-     * Resolve the calling user id from the request session, if any.
-     * Returns `undefined` for anonymous calls or when auth is not wired up.
+     * Resolve `resolveActiveOrganizationId` — the ACTIVE ORGANIZATION id on the
+     * request's auth session, i.e. `session.activeOrganizationId`, normalising
+     * plain-object headers into a `Headers` instance first because the auth
+     * API's `getSession` requires one. Returns `undefined` for anonymous calls,
+     * when auth is not wired up, when the session names no active organization,
+     * and on any failure reaching the auth service — the caller cannot
+     * distinguish those four, by design.
+     *
+     * ⚠️ Until this was corrected the block here described `resolveCallerUserId`
+     * ("the calling user id from the request session"), a sibling deleted with
+     * the multi-tenant `/cloud` control plane. TSDoc binds a block by POSITION,
+     * so deleting the declaration under a docblock does not delete the docblock
+     * — it silently re-points it at the next declaration down, which then ships
+     * a description of a method that no longer exists. A rename sweep cannot
+     * catch that, because a sweep reads the docblock OF the method it is
+     * changing and this one read as if it already belonged there. Keep the
+     * first line naming the method it documents, so the next re-point is
+     * visible on sight rather than plausible.
      */
     private async resolveActiveOrganizationId(context: HttpProtocolContext): Promise<string | undefined> {
         try {
