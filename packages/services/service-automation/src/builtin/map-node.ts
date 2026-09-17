@@ -226,6 +226,49 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
             },
           };
         }
+        if (child.status === 'refused') {
+          // [#18555] This item's child REFUSED — an `end` inside it declared
+          // `outcome: 'refused'`, a successful evaluation that says NO. The
+          // identical hole #18110 describes for `subflow`, in this second file:
+          // until this arm existed a refusing item fell through the synchronous
+          // completion below, its output was pushed into `state.results`, the
+          // batch carried on to the NEXT item, and the parent recorded
+          // `completed` and fired its own `successMessage`. For a `map` that is
+          // the worked "approve each row" shape answering *no* on row 3 and
+          // approving rows 4..n anyway — fail-open, and finishing green.
+          //
+          // ⛔ Not the failure arm above: a refusal is not a failure (⛔ no
+          // retry budget, ⛔ no `fault` routing, ⛔ not counted in
+          // `nodes[].failures`), and ⛔ not `state.results`: this item did not
+          // produce a result, it declined. The engine throws the refusal signal
+          // only after this step and these `metrics` are already in the run
+          // log, so the batch's #4354 totals survive the refusal.
+          //
+          // The totals are the COMPLETION rule, ⛔ not the failure one: the
+          // items that already ran keep theirs, and the refusing item's own
+          // `selected` / `acted` / `unmeasured` / `failed` roll up too, because
+          // a child that refused did not fail — nothing counts its `failed`
+          // a second time through `nodes[].failures` the way a failed child's
+          // would be. A refusing child really can have written rows before it
+          // said no.
+          //
+          // ⛔ The progress state is not advanced and not deleted: the run is
+          // terminating, nothing resumes it, and `started` is the resume
+          // program counter — moving it would claim this item completed.
+          return {
+            success: true,
+            refuse: true,
+            refusalMessage: child.refusalMessage,
+            metrics: {
+              selected: selected + (child.summary?.selected ?? 0),
+              acted: acted + (child.summary?.acted ?? 0),
+              ...(unmeasured || child.summary?.unmeasured ? { unmeasuredEffect: true } : {}),
+              ...(child.summary?.failed !== undefined
+                ? { failures: failures + child.summary.failed }
+                : rolledFailures()),
+            },
+          };
+        }
         // Synchronous completion — record and advance.
         state.started = idx + 1;
         state.results.push(child.output ?? null);
