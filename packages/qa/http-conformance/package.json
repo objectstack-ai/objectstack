@@ -6,8 +6,10 @@
   "description": "HTTP transport-port conformance gate (ADR-0076 D11/OQ#10, #2462) — a zero-dependency node:http reference implementation of IHttpServer plus a cross-adapter suite that boots the dispatcher bridge and REST generator on it AND on plugin-hono-server, pinning that the port stays free of framework-isms. Not published; validation instrument, not a product server.",
   "type": "module",
   "scripts": {
+    "check:test-typecheck": "tsx ../../../scripts/check-test-typecheck.mts --self-test && tsx ../../../scripts/check-test-typecheck.mts --package packages/qa/http-conformance --project tsconfig.test.json",
+    "gen:test-typecheck-debt": "tsx ../../../scripts/check-test-typecheck.mts --update --package packages/qa/http-conformance --project tsconfig.test.json",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && pnpm check:test-typecheck"
   },
   "dependencies": {
     "@objectstack/core": "workspace:*"

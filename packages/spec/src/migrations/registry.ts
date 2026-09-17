@@ -6707,6 +6707,95 @@ const step18: MigrationStep = {
         + 'page or form rather than a refusal dialog.',
     },
     {
+      id: 'dashboard-widget-metric-family-multi-measure-refused',
+      surface: 'dashboard widget measure arity — `dashboard.widgets[].values` '
+        + '(`DashboardWidgetSchema.values`) on a widget whose `type` is one of the metric '
+        + 'FAMILY (`metric` / `kpi` / `gauge` / `solid-gauge` / `bullet`), INCLUDING a widget '
+        + 'that declares no `type` at all and so resolves to the `metric` default',
+      replacement: 'ONE measure per tile. Keep the measure the tile is actually for — in '
+        + 'practice `values[0]`, which is the only one that has ever rendered — and give each '
+        + 'of the others its OWN widget: a new `id`, the same `dataset`, that one measure in '
+        + '`values`, and its own `layout` if the dashboard pins grid positions. ⛔ The '
+        + 'migration does not do this for you and no conversion could: N tiles need N ids and '
+        + 'N boxes on a 12-column grid, which is a LAYOUT decision about a dashboard the '
+        + 'registry has never seen. If several numbers in ONE widget is what was meant, that '
+        + 'is a different visual and the arity rule is not in its way: `type: \'table\'` '
+        + 'renders a row of measures, and the chart families (`bar` / `line` / `area` / '
+        + '`combo`) render one mark per measure — all of them keep the unbounded `values` '
+        + 'they have always had.',
+      reason:
+        'objectui#8894 ruling D (decision batch #119 item 4, 2026-09-12 「同意」) on the '
+        + 'maintainer\'s standing rule 「协议不正确的应该先修改协议。」 — judge the protocol '
+        + 'wrong rather than invent display semantics for `values[1..]`. Measured on '
+        + 'objectui#7293 defect 1: `values` was `z.array(z.string()).min(1)` with NO upper '
+        + 'bound on every widget type, so a `metric` tile could declare three measures; the '
+        + 'dataset query selected and computed all three, and the tile rendered `values[0]`. '
+        + 'The other two were queried and dropped on the floor — the declared≠delivered shape '
+        + 'ADR-0049 exists to end, kept alive by a runtime warning rather than closed. '
+        + 'objectui PR #8887 (merged) added the sub-caption, and the seat\'s second half made '
+        + 'the tile SAY that the extra measures are not rendered: that makes the tile honest '
+        + 'about dropping them, it does not make the document legal. A metric tile answers ONE '
+        + 'number — that is what the family means on every mainstream dashboard product, and '
+        + '`ChartTypeSchema` groups these five under "Performance (single value)" in its own '
+        + 'words. Several numbers is a DIFFERENT visual, not a variant of this one, so the '
+        + 'repair is an accept-set narrowing and not a renderer feature. ⛔ NOT the other arm '
+        + '(`objectstack-ai/duly#109`\'s wish for several numbers on one tile): under this '
+        + 'ruling that is a request for a different widget type, and it stays reachable '
+        + 'through `table` / the chart families, which this narrowing does not touch. '
+        + 'Ships at once, no deprecation window: there is no window in which a queried-and-'
+        + 'discarded measure does anything. Widening later (a real gauge renderer that draws '
+        + 'a target band, say) costs an author nothing and needs no second migration — a '
+        + 'narrowing that is later relaxed is free, while leaving the key unbounded costs '
+        + 'them a tile that silently drops what they declared.',
+      acceptanceCriteria:
+        '⚠️ WHICH DOOR: this refusal is the PUBLISH door\'s, not the editor\'s. Every stored '
+        + 'dashboard carrying more than one measure on a metric-family widget is refused the '
+        + 'next time it is parsed THROUGH `@objectstack/spec` — `os build` / `os lint`, the '
+        + 'metadata publish path, and any server-side door that parses the spec schema — with '
+        + 'ONE `custom` issue at `widgets[N].values` naming the widget\'s `id`, the number of '
+        + 'measures it declared, and the authored `type`. It is NOT refused by objectui\'s '
+        + 'client-side authoring door: `@object-ui/types` builds its own '
+        + '`DashboardWidgetSchema` from `specFieldsExcept(SpecDashboardWidgetSchema.shape, '
+        + '…).extend({…}).strict()`, and a `.shape` spread carries the FIELDS while dropping '
+        + 'every object-level check, so until that package imports and chains '
+        + '`checkDashboardWidgetMetricMeasureArity` the dashboard EDITOR keeps accepting three '
+        + 'measures on a `metric` and the author meets the refusal later, at publish. ⇒ Do not '
+        + 'read a green editor as a clean dashboard; re-parse through the spec. '
+        + '⚠️ AND THE TODO CANNOT NAME YOUR MEASURES: a `SemanticMigration` is static prose '
+        + 'emitted once per hop — `applyMetaMigrations` maps `step.semantic` straight onto the '
+        + 'result with no per-document interpolation and no filtering by whether the stack '
+        + 'even carries the shape — so `os migrate meta` prints THIS paragraph, not a list of '
+        + 'your dropped measures. The refusal is what names them, per widget, on the re-parse. '
+        + 'Drive the fix off `os build`, not off the migrate output. '
+        + 'WHAT IS REFUSED, exactly: two or more `values` members on `metric`, `kpi`, `gauge`, '
+        + '`solid-gauge` or `bullet`, and on a widget that declares no `type` (it resolves to '
+        + '`metric`, and the message says so rather than claiming you wrote it). '
+        + 'WHAT IS NOT, so this is not read as complete: a single-measure tile of any of those '
+        + 'five types parses byte-identically to before; all fifteen OTHER members of '
+        + '`ChartTypeSchema` — `bar`, `horizontal-bar`, `column`, `line`, `area`, `pie`, '
+        + '`donut`, `funnel`, `scatter`, `treemap`, `sankey`, `combo`, `radar`, `table`, '
+        + '`pivot` — keep accepting three measures, unmoved; an EMPTY `values` keeps the '
+        + 'field\'s own `too_small` from `.min(1)` and gains no second issue ("exactly one" is '
+        + 'the conjunction of that lower bound and this upper one, so a mirror re-attaching '
+        + 'this export onto a shape without `.min(1)` gets the upper bound only); a widget '
+        + 'whose `type` is outside `ChartTypeSchema` reports the TYPE refusal ALONE (zod treats '
+        + 'that `invalid_value` as aborting and skips object-level checks), so the arity '
+        + 'refusal arrives on the next parse and the two are never seen together; and whether '
+        + 'the surviving measure EXISTS in the bound dataset is still unreachable from this '
+        + 'schema — a tile naming one measure nobody declared parses exactly as it did before. '
+        + 'Nothing new is broken for consumers that DERIVE this schema: '
+        + '`.omit()`/`.pick()`/`.partial()` already threw on it before this change, because it '
+        + 'already carried `checkDashboardWidgetStageOrder`; `.extend()` is unaffected — except '
+        + 'that zod 4.4.3 refuses an `.extend()` which OVERWRITES a key on a refined object '
+        + '("Cannot overwrite keys on object schemas containing refinements. Use `.safeExtend()` '
+        + 'instead"), which was already true here and is why a per-`type` union arm was not the '
+        + 'spelling chosen. VERIFY by re-parsing each dashboard and reading the widget count: '
+        + 'a dashboard that had one three-measure `metric` tile should end with three '
+        + 'single-measure tiles and the same three numbers on screen — check the rendered grid '
+        + 'afterwards, because the two new tiles are numbers the dashboard was ALREADY paying '
+        + 'to compute and had never shown.',
+    },
+    {
       id: 'dashboard-widget-stage-order-non-funnel-refused',
       surface: 'dashboard widget stage order — `dashboard.widgets[].options.stageOrder` '
         + '(`DashboardWidgetOptionsSchema.stageOrder`) on a widget whose `type` is anything '
@@ -11682,6 +11771,62 @@ const step18: MigrationStep = {
         + '(`record.features.x`). Stored form views are unaffected until their next '
         + 'authoring-path save (zero such documents were measured to exist); on refusal the '
         + 'author re-gates by record state or moves the gate to an app surface.',
+    },
+    // The sibling axis of `ui-list-view-grouping-field-padded-refused` (#17360),
+    // which scoped this one out by name. Same defect, same refusal, one difference
+    // that changes the author's options: `kanban.groupByField` is REQUIRED, so a
+    // padded value there cannot be withdrawn by omitting the key.
+    {
+      id: 'ui-list-view-groupbyfield-padded-refused',
+      surface: 'list-view group-by field names — `kanban.groupByField` (`KanbanConfigSchema`, '
+        + 'REQUIRED), `gantt.groupByField` and `timeline.groupByField` (`GanttConfigSchema` / '
+        + '`TimelineConfigSchema`, both optional) — values carrying leading or trailing whitespace',
+      replacement: 'the field name written with no leading and no trailing whitespace — the same '
+        + 'spelling the object declares and the server answers under. A padded value is RE-AUTHORED, '
+        + 'never trimmed on the author\'s behalf: `\' stage\'` becomes `\'stage\'`. The refusal names '
+        + 'the offending spelling verbatim, so the whitespace an author cannot see in an editor is '
+        + 'visible in the message, next to the name to write instead.',
+      reason:
+        '#17499. All three keys were a bare `z.string()`, so a padded group-by name was valid '
+        + 'authored metadata all the way to the renderers. The name is a LOOKUP KEY on every row, '
+        + 'measured in objectui at `dda8f3815`: the kanban board resolves its lane as '
+        + '`laneField = groupByField || groupField || detectStatusField(objectDef)` and buckets cards '
+        + 'by `card[laneField]`; `ObjectGantt`\'s `groupByAccessor` splits the name on `.` and walks '
+        + 'the backing record (`resolvePath(task.data, field)`); the timeline groups its rows the same '
+        + 'way. The server answers under the unpadded name, so every per-row lookup reads `undefined` '
+        + 'and the board collapses into one `Uncategorized` lane — the gantt and the timeline into one '
+        + 'ungrouped bucket — holding every record. That is a silent wrong answer that reads as a true '
+        + 'statement about the data: one giant bucket is indistinguishable from a dataset where the '
+        + 'field genuinely is empty, which is why nothing weaker than a parse refusal is honest here. '
+        + '`packages/lint`\'s `validate-list-view-field-refs` already grades this position `error` for '
+        + 'the same consequence, but it only runs where an app is validated against its object '
+        + 'definitions; the producer accepted the value regardless. ⛔ NOT a `.trim()`: a trimming '
+        + 'schema makes `\' stage\'` and `\'stage\'` silently equivalent, the consumer-tolerance '
+        + 'direction AGENTS.md #0.1 refuses — and on the REQUIRED kanban key the author cannot '
+        + 'withdraw the value by omitting the key, so a normalising producer would be their only '
+        + 'feedback channel and it would say nothing. The narrowing is non-padded ONLY and '
+        + 'deliberately not the snake_case machine-name grammar `/^[a-z_][a-z0-9_]*$/` this package '
+        + 'spells inline for object/field/tool NAMES: a `groupByField` is authored as a field '
+        + 'REFERENCE and a dotted relationship path (`owner.name`) is an in-tree spelling of one. '
+        + 'Ships at once, no deprecation window (2026-08-27 maintainer ruling 「短期不考虑渐进」).',
+      acceptanceCriteria:
+        'Measured against the shipped schemas, not restated from the card. Every stored view whose '
+        + '`kanban.groupByField`, `gantt.groupByField` or `timeline.groupByField` carries leading or '
+        + 'trailing whitespace is refused on its next authoring-path save, with a `custom` issue at '
+        + 'that key\'s own path (`groupByField`, or `kanban.groupByField` when the view is parsed '
+        + 'whole) naming the offending spelling verbatim and the trimmed name to write instead; a '
+        + 'value that is nothing but whitespace is refused with the remedy "Name the field to group '
+        + 'by" rather than a trimmed name, since there is none. Refused: leading, trailing and both; '
+        + 'a tab, a newline and a non-breaking space in those positions; whitespace-only. NOT refused, '
+        + 'on purpose: whitespace INSIDE the name (`\'Group by field\'` parses), and the EMPTY string '
+        + '(unchanged on all three keys, this narrowing covers the silent case only). Nothing is '
+        + 'normalised on the way through — an accepted name arrives byte-identical, `\'owner.name\'` '
+        + 'included — so a consumer proves the migration by re-saving each view and seeing either a '
+        + 'refusal naming the field or a value it can compare byte-for-byte with what it wrote. Every '
+        + '`groupByField` spelling in the repo at the time of the change parses unchanged: 14 distinct '
+        + 'literals harvested across every `.ts` / `.tsx` / `.mdx` / `.json` / `.mjs` outside '
+        + '`node_modules`, zero of them padded, so no fixture had to be rewritten to keep the tree '
+        + 'green.',
     },
     {
       id: 'ui-list-view-grouping-field-padded-refused',

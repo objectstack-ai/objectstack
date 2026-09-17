@@ -611,3 +611,95 @@ describe('[#9438] set_null on a multi-value reference removes the deleted member
     expect(stores.get('mv_acct')?.has('acc_a')).toBe(false);
   });
 });
+
+/**
+ * [#18408] WHICH relations are multi-valued is `isMultiValueField`, the one
+ * definition #17469 ruled — ⛔ not the raw `multiple` flag this probe read.
+ *
+ * `master_detail` is outside `MULTI_CAPABLE_TYPES`, so the flag on one buys a
+ * JSON array column from nobody: `driver-sql` (#17469) and `os generate
+ * migration` (#18199) both build it a SCALAR column. Reading the flag made the
+ * engine aim `$contains` — the membership spelling, lowered to `LIKE '%v%'` —
+ * at that scalar column, and then repair the superset it got back through a
+ * second narrowing pass. One relation, two definitions: the split the ruling
+ * closes.
+ *
+ * The fixture is registered through `registry.registerObject`, one of the doors
+ * that never runs `FieldSchema` — which is why the shape is still reachable
+ * after #17469 refused it at the authoring entrance (#18199's bounding
+ * argument), and the only way it can be exercised at all.
+ */
+describe('[#18408] the probe spelling follows the ONE multi-value definition, not the flag', () => {
+  /** `master_detail` + the flag: the one declaration where the two disagree. */
+  const mdMulti: ServiceObject = {
+    name: 'mv_md_multi',
+    label: 'Master-detail (flagged)',
+    fields: {
+      id: { name: 'id', label: 'ID', type: 'text' as const },
+      parent: {
+        name: 'parent', label: 'Parent', type: 'master_detail' as const,
+        reference: 'mv_acct', multiple: true, deleteBehavior: 'restrict' as const,
+      },
+    },
+  };
+
+  let engine: ObjectQL;
+  let stores: Map<string, Map<string, Record<string, unknown>>>;
+  let probes: Array<{ object: string; where: unknown }>;
+
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    const stub = makeJsonColumnDriver();
+    stores = stub.stores;
+    probes = stub.probes;
+    engine.registerDriver(stub.driver, true);
+    await engine.init();
+    // `mv_md_multi` is deliberately absent from `JSON_COLUMNS`: the double
+    // models the storage the one definition prescribes, so this relation's
+    // column is the scalar one every aligned storage side builds for it.
+    for (const o of [acct, zoo, mdMulti]) engine.registry.registerObject(o, OWNER_PACKAGE);
+  });
+
+  it('a flagged `master_detail` is probed with BARE EQUALITY — the flagged `lookup` beside it still gets `$contains`', async () => {
+    const a = await engine.insert('mv_acct', { id: 'acc_x', name: 'anything' });
+
+    await engine.delete('mv_acct', { where: { id: a.id } } as any);
+
+    // The site under test. Before #18408 this read
+    // `{ parent: { $contains: 'acc_x' } }`.
+    expect(probes.find((p) => p.object === 'mv_md_multi')?.where).toEqual({ parent: 'acc_x' });
+    // The control, in the same run and through the same seam: `lookup` IS
+    // multi-capable, so the flag is decisive there and the membership spelling
+    // is unchanged. A "fix" that simply stopped asking `$contains` reddens this
+    // line.
+    expect(probes.find((p) => p.object === 'mv_zoo')?.where)
+      .toEqual({ f_lookups: { $contains: 'acc_x' } });
+  });
+
+  it('the relation is still GUARDED — a live dependent refuses the parent delete through its full envelope', async () => {
+    const a = await engine.insert('mv_acct', { id: 'acc_x', name: 'referenced' });
+    // Stored the way the scalar column holds it: one id, not a set.
+    await engine.insert('mv_md_multi', { id: 'md1', parent: 'acc_x' });
+
+    const err: any = await engine.delete('mv_acct', { where: { id: a.id } } as any).catch((e) => e);
+    expect(err.code).toBe('DELETE_RESTRICTED');
+    expect(err.status).toBe(409);
+    expect(err.dependentObject).toBe('mv_md_multi');
+    expect(err.dependentCount).toBe(1);
+    expect(rows(stores, 'mv_acct')).toBe(1);
+  });
+
+  it('an id that is a PREFIX of another does not drag the other row into the refusal', async () => {
+    // What bare equality gives for free, and what the substring spelling had to
+    // be repaired into: `acc_1` must not be answered by the row holding
+    // `acc_10`.
+    await engine.insert('mv_acct', { id: 'acc_1', name: 'one' });
+    await engine.insert('mv_acct', { id: 'acc_10', name: 'ten' });
+    await engine.insert('mv_md_multi', { id: 'md10', parent: 'acc_10' });
+
+    await engine.delete('mv_acct', { where: { id: 'acc_1' } } as any);
+
+    expect(stores.get('mv_acct')?.has('acc_1')).toBe(false);
+    expect(stores.get('mv_md_multi')?.has('md10')).toBe(true);
+  });
+});

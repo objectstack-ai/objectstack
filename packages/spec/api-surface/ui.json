@@ -443,6 +443,7 @@
     "chartAggregateCategoryKey (function)",
     "chartAggregateResultKeys (function)",
     "chartAggregateValueKey (function)",
+    "checkDashboardWidgetMetricMeasureArity (function)",
     "checkDashboardWidgetStageOrder (function)",
     "checkGlobalFilterDateDefaultValue (function)",
     "checkListViewCalendarVisualization (function)",

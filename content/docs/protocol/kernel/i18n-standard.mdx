@@ -1024,9 +1024,16 @@ every bundle against the stack it ships with:
 | `dashboards.{dash}` / `.widgets.{id}` / `.actions.{actionUrl}` | the dashboard's `name` / a widget `id` / a header `actionUrl` |
 | `globalActions.{action}` | an action with **no** `objectName` |
 
-An unresolvable key is a **warning**, not an error: nothing crashes, the string
-simply renders in its source locale while every neighbouring label resolves — so
-the app looks translated and one field does not.
+An unresolvable key is an **error**, not a warning: `os validate`, `os lint` and
+`os compile` each report it as `translation-target-unknown` and exit non-zero, so
+a bundle key naming a surface the metadata no longer declares fails the run (it
+was a warning until #16310). Nothing *crashes* — the string simply renders in its
+source locale while every neighbouring label resolves, so the app looks translated
+and one field does not — but that is what earns the error rather than excusing it:
+the orphan key stays a confident-looking grep hit, in every locale, for a surface
+that was deleted. The mis-keyed **option** below is the deliberate exception and
+stays a warning (`translation-option-key-unknown`): it names something real, so
+its remedy is a rename rather than a deletion.
 
 The option case is worth spelling out. Option maps are keyed by the option's
 stored `value`, never by its display label:

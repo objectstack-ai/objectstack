@@ -492,16 +492,25 @@ describe('#8013 — by-name: a permission denial is REPORTED, absence still is n
         expect(absent.statusCode).toBe(404);
     });
 
-    it('criterion 3: …and the REJECTING producer shape reaches the same status and code', async () => {
+    it('criterion 3: …and the REJECTING producer shape reaches the same BODY, not merely the same code', async () => {
         // The other producer shape this door must survive: a protocol
         // implementation that REJECTS with a declared `RESOURCE_NOT_FOUND` /
         // `status: 404` (`rest-meta-outage-vs-miss.test.ts` pins the rendering).
-        // ⚠️ Its body is the FLAT `{ error: '<message>', code }` that
-        // `resolveErrorResponse`'s declared-status passthrough produces, not the
-        // nested ADR-0112 envelope the in-route refusals emit — so this case
-        // asserts `body.code`, and the case above asserts `body.error.code`, on
-        // purpose. Both reach this route, so the criterion is stated against
-        // both rather than against one stub's.
+        //
+        // [#18402] This case used to read `missing.body?.code` while criterion
+        // 2 above read `body.error.code` — "on purpose", said the note that
+        // stood here, because the rejecting shape rendered the FLAT
+        // `{ error: '<message>', code }` and the resolving shape the nested
+        // ADR-0112 envelope. ⚠️ That IS the finding: one door, one absence, two
+        // envelopes, and which one a caller got depended on the protocol
+        // implementation and on `metadata.enableCache` — neither visible to the
+        // caller. Both arms now reach this route's single absence emitter.
+        //
+        // ⭐ So the criterion is STRENGTHENED rather than translated: the
+        // rejecting shape is compared against the UNPUBLISHED app as a whole
+        // body, which is what ADR-0045 §3 actually asks. A status-and-code
+        // assertion could never have carried that — the flat and the nested
+        // body agreed on both while differing everywhere a client looks.
         const { rest, protocol } = setup([], GATED_APPS);
         protocol.getMetaItem = vi.fn().mockRejectedValue(Object.assign(
             new Error('Metadata item app/no_such_app not found'),
@@ -509,11 +518,18 @@ describe('#8013 — by-name: a permission denial is REPORTED, absence still is n
         ));
 
         const missing = await getItem(rest, 'no_such_app');
+        const unpublished = await getItem(setup(['manage_users'], GATED_APPS).rest, 'production_management');
 
         expect(missing.statusCode).toBe(404);
-        expect(missing.body?.code).toBe('RESOURCE_NOT_FOUND');
+        expect(missing.body?.error?.code).toBe('RESOURCE_NOT_FOUND');
+        expect(missing.body?.code).toBeUndefined();
         expect(missing.statusCode).not.toBe(403);
         expect(JSON.stringify(missing.body ?? {})).not.toContain('PERMISSION_DENIED');
+
+        // The producer's sentence named the type and the name; the emitter's
+        // names nothing, and the unpublished app answers the emitter's.
+        expect(JSON.stringify(missing.body)).toBe(JSON.stringify(unpublished.body));
+        expect(JSON.stringify(missing.body ?? {})).not.toContain('no_such_app');
     });
 
     it('criterion 4: the LIST route is untouched — the app is absent, not flagged', async () => {
