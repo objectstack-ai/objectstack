@@ -135,6 +135,8 @@
  * either, so the assertions stay visible in the fixture that owns them.
  */
 
+import { isMissingTableError } from '@objectstack/types';
+
 /** One channel's tally, keyed by the table the withheld line named. */
 export type WithheldByTable = ReadonlyMap<string, number>;
 
@@ -229,11 +231,32 @@ export function captureExpectedReadRefusals(
    * Matching the envelope alone would withhold a refusal whose cause is a
    * permission denial, a dropped connection or a syntax fault — every one of
    * which is a real signal on a table this fixture merely also happens to miss.
+   *
+   * ## [#18617] The reason half asks the SHARED predicate, not a literal
+   *
+   * `no such table:` is SQLite's phrasing and only SQLite's. PostgreSQL says
+   * `relation "sys_organization" does not exist`, MySQL says
+   * `Table 'db.t' doesn't exist` — so on any dialect but SQLite the reason half
+   * never matched, the refusal was never recognised, and this capture passed it
+   * through to `console` while `silentChannels()` reported the channel silent:
+   * the fixture's own pin going red for a probe that fired exactly as designed,
+   * and the noise it exists to withhold printed anyway. Measured on a live
+   * PostgreSQL 16.13 while pinning the multi-value cascade-delete path across
+   * the driver axis (#18617) — all eight cases of the live cell failed here,
+   * with the driver's `(42P01)` line sitting in the log immediately above the
+   * assertion that said it had never been emitted.
+   *
+   * {@link isMissingTableError} is this repo's ONE vocabulary for that question
+   * (`@objectstack/types`, the `MISSING_TABLE` signature) and it accepts a bare
+   * string. Handed the read's table it also refuses a phrase naming a DIFFERENT
+   * relation, so the "same table" half survives the widening: the envelope
+   * still pins the table positively, and the reason must be a missing-table
+   * phrase that is not about some other one. ⛔ A second per-dialect regex here
+   * is the shape AGENTS.md rejects — ask the shared predicate, never grow a
+   * parallel vocabulary.
    */
   const expectedRefusal = (line: string): string | undefined =>
-    tables.find(
-      (t) => line.includes(`refused a read on '${t}'`) && line.includes(`no such table: ${t}`),
-    );
+    tables.find((t) => line.includes(`refused a read on '${t}'`) && isMissingTableError(line, t));
 
   const sum = (m: Map<string, number>): number => {
     let n = 0;
