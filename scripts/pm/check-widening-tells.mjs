@@ -1523,16 +1523,17 @@ export const SCHEMA_PROPERTY_FORMS = Object.freeze([
  * it is refused at module load rather than pinned only in the self-test: a
  * malformed vocabulary must not be a gate that runs.
  */
-const UNWRITABLE_FORMS = Object.freeze(SCHEMA_PROPERTY_FORMS.filter((f) => !f.writable));
-for (const f of UNWRITABLE_FORMS) {
-  if (!f.pattern.endsWith('\\(')) {
-    throw new Error(
-      `check-widening-tells: unwritable declaring form "${f.form}" has a pattern that does not end at its open paren ` +
-        `(${f.pattern}) — \`declaresUnwritableKey\` locates the call's paren by the match length, so this form would ` +
-        `decline or fire on the wrong character. Give it a \`helper\\(\`-shaped pattern, or make it \`writable\`.`,
-    );
-  }
+function closingAtItsOwnParen(f) {
+  if (f.pattern.endsWith('\\(')) return f;
+  throw new Error(
+    `check-widening-tells: unwritable declaring form "${f.form}" has a pattern that does not end at its open paren ` +
+      `(${f.pattern}) — \`declaresUnwritableKey\` locates the call's paren by the match length, so this form would ` +
+      `decline or fire on the wrong character. Give it a \`helper\\(\`-shaped pattern, or make it \`writable\`.`,
+  );
 }
+const UNWRITABLE_FORMS = Object.freeze(
+  SCHEMA_PROPERTY_FORMS.filter((f) => !f.writable).map(closingAtItsOwnParen),
+);
 
 /**
  * T1 — a property whose value is a SCHEMA.
