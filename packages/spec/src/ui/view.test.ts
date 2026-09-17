@@ -182,6 +182,45 @@ describe('KanbanConfigSchema', () => {
 
     expect(() => KanbanConfigSchema.parse(config)).not.toThrow();
   });
+
+  // [#16894] Director seat, decision batch #87 (objectstack-ai/objectui#8367,
+  // maintainer 「批 #87 同意」): `titleField` joins this schema as optional
+  // `z.string()`. The legs below are the card's executable acceptance
+  // criterion — BOTH controls fire on the same call shape, so the PROBE's flip
+  // is evidence about the NAME and not about a parser that stopped refusing.
+  it('ACCEPTS `titleField` as a member, with both controls firing on the same shape', () => {
+    const canonical = {
+      groupByField: 'status',
+      columns: ['name', 'owner'],
+    };
+
+    // CONTROL-1 — the parser CAN refuse, on the named surface.
+    const control1 = KanbanConfigSchema.safeParse({ ...canonical, zzUnlikelyBogusKey__: true });
+    expect(control1.success).toBe(false);
+    const issues = JSON.stringify(control1.error?.issues);
+    expect(issues).toContain('unrecognized_keys');
+    expect(issues).toContain('zzUnlikelyBogusKey__');
+    expect(issues).toContain('this kanban configuration');
+
+    // CONTROL-2 — a refusal is about the name: the canonical block is accepted.
+    expect(KanbanConfigSchema.safeParse(canonical).success).toBe(true);
+
+    // PROBE — before this card: `ok=false unrecognized_keys=["titleField"]`.
+    const probe = KanbanConfigSchema.safeParse({ ...canonical, titleField: 'subject' });
+    expect(probe.success).toBe(true);
+    // Accepted as a MEMBER, not merely tolerated: the value survives the parse.
+    expect(KanbanConfigSchema.parse({ ...canonical, titleField: 'subject' }))
+      .toMatchObject({ titleField: 'subject' });
+  });
+
+  // ⛔ NOT required. `TimelineConfigSchema` and `GanttConfigSchema` spell
+  // `titleField` required and are the two siblings this declaration does not
+  // copy: absence resolves through the ADR-0079 record display-name chain, so
+  // requiring it would demand more than the renderer reads (#13748).
+  it('leaves `titleField` OPTIONAL — a board that omits it is a complete config', () => {
+    const parsed = KanbanConfigSchema.parse({ groupByField: 'status', columns: ['name'] });
+    expect('titleField' in parsed).toBe(false);
+  });
 });
 
 describe('CalendarConfigSchema', () => {

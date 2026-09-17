@@ -1349,6 +1349,25 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
 }, {
   groupByField: z.string().describe('Field to group columns by (usually status/select)'),
   summarizeField: z.string().optional().describe('Field to sum at top of column (e.g. amount)'),
+  /**
+   * [#16894] The one item-titled view config of the family that omitted this
+   * key. `GalleryConfigSchema`, `TimelineConfigSchema`, `CalendarConfigSchema`,
+   * `GanttConfigSchema` and `ListMapConfigSchema` all declare `titleField`
+   * under the same name and the same `z.string()`; this schema is a
+   * `strictObject`, so an author writing the key the board actually reads was
+   * refused BY NAME while the renderer honoured it. Declared here under the
+   * director seat's decision batch #87 (objectstack-ai/objectui#8367).
+   *
+   * OPTIONAL, deliberately — the shape `CalendarConfigSchema` already writes
+   * down for this exact key. Absence resolves through the ADR-0079 record
+   * display-name chain (`titleFormat` -> `displayNameField` -> type-aware
+   * derivation -> `'Untitled'`), so requiring it would demand more than the
+   * renderer reads, the exact shape the #13748 ruling forbids
+   * (「不要求超过渲染器真正需要的」). `TimelineConfigSchema` and
+   * `GanttConfigSchema` spell it required; they are the two siblings this
+   * declaration does NOT copy.
+   */
+  titleField: z.string().optional().describe('Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain)'),
   columns: z.array(z.string()).describe('Fields to show on cards'),
 }));
 
