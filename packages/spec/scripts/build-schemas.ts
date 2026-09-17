@@ -1436,8 +1436,13 @@ interface GuidanceRoutes {
  *
  * Everything else fails closed by construction: a def with no shape, an empty
  * shape, an ambiguous match, a probe that throws, a parse that SUCCEEDS with the
- * key in it, or a refusal whose message does not carry the declared text all read
- * as "no evidence", never as "proved".
+ * key in it, a union or pipe the probe cannot drive to a single door, or a refusal
+ * whose message does not carry the declared text — all read as "no evidence",
+ * never as "proved". ⛔ And the verdict for the second half says only THAT the
+ * prescription did not arrive, never WHY: on the shipped graph 7 of the 8 defs in
+ * that state are unions, where "the door is open" would be a guess this gate has
+ * not measured — the mistake this proof's first cut made about
+ * `additionalProperties` and must not repeat one layer down.
  *
  * Measured on the shipped graph at #18301 with THIS instrument — see the PR body
  * for the census run: `integration/DataSyncConfig` has NO route (its shape is not
@@ -2578,11 +2583,13 @@ let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
             // missing is the door it was written for.
             violations.push(
               `${key} — def ${how}; a \`strictObject\` declaration NAMES '${leaf}', but writing it\n` +
-                `       on this def raises NO such prescription — the value is dropped in silence (an\n` +
-                `       open door, or an error map that is not the one holding that table), so the\n` +
-                `       entry prescribes to nobody and the retirement is inaudible. Probed against\n` +
-                `       this build's own instance; the entry at ${baseRev} was LIVE (never\n` +
-                `       tombstoned) (#18301).`,
+                `       on this def does NOT raise that prescription — probed at this build's own\n` +
+                `       instance for the def. WHICH of the reasons applies is not established here\n` +
+                `       and this gate does not guess: the key may be dropped in silence (an open\n` +
+                `       door), answered by a different error map, or sit behind a union or pipe this\n` +
+                `       probe cannot drive. Either way the retirement is not audible THROUGH THIS\n` +
+                `       DEF, so proof 4 has nothing to waive on; the entry at ${baseRev} was LIVE\n` +
+                `       (never tombstoned) (#18301).`,
             );
             continue;
           }
