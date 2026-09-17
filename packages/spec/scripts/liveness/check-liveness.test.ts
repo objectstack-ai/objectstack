@@ -25,6 +25,12 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// The registry itself, so the denominator block at the bottom of this file can
+// hold the gate's output answerable to it rather than to a copied list (#18133).
+import {
+  listMetadataTypeSchemaTypes,
+  listUnregisteredKindSchemaTypes,
+} from '../../src/kernel/metadata-type-schemas';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SPEC = path.resolve(HERE, '../..');
@@ -1118,5 +1124,107 @@ describe('check:liveness — the drill recurses past one level (#17424)', () => 
     writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
     const { status, output } = runGate(root);
     expect(status, output).toBe(1);
+  });
+});
+
+// The DENOMINATOR the coverage ratchet divides by (#18133).
+//
+// Everything in the block above asks whether the gate judges what it walks
+// correctly. This asks the prior question — WHOM does it walk for? — and it is
+// the one question a gate cannot ask about itself, because the failure mode has
+// no output: a type in neither `GOVERNED` nor `PENDING_GOVERNANCE` produces no
+// row in any bucket, so `ungoverned: []` reads identically whether the gate
+// looked and found nothing or never looked at all.
+//
+// WHAT WAS WRONG. The denominator was `listMetadataTypeSchemaTypes()` under a
+// comment claiming it was "exactly the set of authorable metadata types". That
+// function deliberately does NOT enumerate `UNREGISTERED_KIND_SCHEMAS` (#6245 —
+// enrolling those entries there "would claim a status this change is careful
+// not to grant"), while the four kinds bound in that map are authored on every
+// boot through their stack collections and on every write through
+// `PUT /api/v1/meta/:type/:name`. So `connector`, `sharing_rule` and
+// `analytics_cube` were structurally unnameable by `report.ungoverned` — the
+// same sentence #17356 measured false for the reachability gate, one gate over.
+//
+// WHY THESE ASSERT AGAINST THE LIVE REGISTRY rather than against a literal list:
+// a hard-coded expectation would pass unchanged if the gate stopped reading the
+// registry at all, which is the regression class this whole block exists for.
+// The registry is imported here and the gate is spawned; the two have to agree.
+describe('check:liveness — the governance denominator is the AUTHORABLE set (#18133)', () => {
+  function jsonReport(extraArgs: readonly string[] = []): any {
+    const { output } = runGate(undefined, ['--json', ...extraArgs]);
+    const start = output.indexOf('{');
+    expect(start, output).toBeGreaterThanOrEqual(0);
+    return JSON.parse(output.slice(start));
+  }
+
+  // The control for every assertion below. Without it, "the denominator omits
+  // nothing" is also satisfied by a registry that enumerates nothing.
+  it('has a non-empty registry on BOTH sides of the union', () => {
+    expect(listMetadataTypeSchemaTypes().length).toBeGreaterThan(20);
+    expect(listUnregisteredKindSchemaTypes().length).toBeGreaterThan(0);
+    // The two sets are disjoint — that disjointness IS #6245, and it is why the
+    // union is not a no-op. If this ever fails, the fix below has become moot
+    // and this whole block needs re-reading, not re-pinning.
+    const registered = new Set(listMetadataTypeSchemaTypes());
+    expect(listUnregisteredKindSchemaTypes().filter((t) => registered.has(t))).toEqual([]);
+  });
+
+  it('counts every unregistered kind, which the registered set alone cannot', () => {
+    const report = jsonReport();
+    for (const kind of listUnregisteredKindSchemaTypes()) {
+      expect(report.authorable, `'${kind}' is authored through its stack collection and through `
+        + 'PUT /api/v1/meta/:type/:name, so a governance denominator that omits it cannot report '
+        + 'on it — which is exactly the state #18133 found').toContain(kind);
+    }
+    // …and the denominator is STRICTLY larger than the registered set, which is
+    // the assertion that goes red the moment somebody "simplifies" the union
+    // back into `listMetadataTypeSchemaTypes()`.
+    expect(report.authorable.length).toBeGreaterThan(listMetadataTypeSchemaTypes().length);
+    expect(report.authorable).toEqual(
+      [...new Set([...listMetadataTypeSchemaTypes(), ...listUnregisteredKindSchemaTypes()])].sort(),
+    );
+  });
+
+  it('accounts for every member of it — governed or explicitly pending, never silent', () => {
+    const report = jsonReport();
+    expect(report.ungoverned).toEqual([]);
+    // An empty `ungoverned` is only meaningful next to a denominator that could
+    // have populated it, so assert the population too — this is the pair the
+    // old output could not print.
+    expect(report.authorable.length).toBeGreaterThan(0);
+    // And no pending row claims a debt for a type the denominator does not hold:
+    // before the union landed, recording one of the unregistered kinds here would
+    // have been reported STALE rather than pending.
+    expect(report.stalePending).toEqual([]);
+  });
+
+  it('prints the denominator and its composition on EVERY run, green included', () => {
+    const { status, output } = runGate();
+    expect(status, output).toBe(0);
+    const line = output.split('\n').find((l) => l.startsWith('governance denominator:')) ?? '';
+    // The line used to print only when `PENDING_GOVERNANCE` was non-empty, so the
+    // one state worth reporting — "N types looked at, none unaccounted for" —
+    // rendered as nothing at all: the same silence an unseen type produces.
+    expect(line, output).not.toBe('');
+    expect(line).toMatch(/^governance denominator: \d+ authorable type\(s\) — \d+ registered kind\(s\) \+ \d+ unregistered-kind stack collection\(s\)/);
+    for (const kind of listUnregisteredKindSchemaTypes()) expect(line).toContain(kind);
+  });
+
+  // #6245's guarantee, asserted from the gate that had the motive to break it.
+  // The repair for #18133 belongs in this gate's own denominator; enrolling the
+  // unregistered kinds in the registry instead would have granted them a KIND
+  // status (`MetadataTypeSchema` enum membership, a `DEFAULT_METADATA_TYPE_REGISTRY`
+  // entry, a create seed, a place in the #4001 campaign count) that #6245 and
+  // #2657's still-open B/C decision deliberately withhold.
+  it('reads the unregistered kinds WITHOUT registering them', () => {
+    const registered = listMetadataTypeSchemaTypes();
+    for (const kind of listUnregisteredKindSchemaTypes()) {
+      expect(registered, `#6245: '${kind}' must not become a registered KIND just because a `
+        + 'check needs to enumerate it — listUnregisteredKindSchemaTypes() (#6931) exists so '
+        + 'that enumeration costs nothing').not.toContain(kind);
+    }
+    const src = readFileSync(GATE, 'utf8');
+    expect(src).toContain('listUnregisteredKindSchemaTypes');
   });
 });

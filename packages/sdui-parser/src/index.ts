@@ -78,7 +78,24 @@ export interface RegistryConfigLike {
     type: string | string[];
     required?: boolean;
     enum?: Array<string | { value: unknown; label?: string }>;
-    binding?: 'object' | 'field';
+    /**
+     * The binding marker — exactly `'object'`. This is the SERIALIZER'S INPUT
+     * BOUNDARY, the narrowest of the three faces the arm stood on, and the one
+     * objectui's ruling named: a config that feeds `manifestFromConfigs` a
+     * `binding: 'field'` input is a type error rather than a manifest entry
+     * the server would never resolve.
+     *
+     * Unlike {@link RegistryConfigLike.inputs}`[].type` above — typed loosely
+     * on purpose so an off-vocabulary value stays representable and is
+     * normalized on the way in — `binding` is NOT normalized anywhere:
+     * `manifestFromConfigs` copies it through verbatim. There is no
+     * canonicalizer to absorb a fourth spelling, so the boundary is where the
+     * vocabulary has to hold.
+     *
+     * The retirement, the answered counter-argument and the measurements are
+     * recorded once, on {@link ManifestInput.binding} in `types.ts`.
+     */
+    binding?: 'object';
     description?: string;
   }>;
 }

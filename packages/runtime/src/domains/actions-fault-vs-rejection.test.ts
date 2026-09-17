@@ -210,3 +210,107 @@ describe('an unexpected FAULT is a 500', () => {
         expect(response.body.error.code).toBe('FORBIDDEN');
     });
 });
+
+/**
+ * [#17273] A sandboxed body that CRASHED is a fault — the face of #15071 this
+ * door left open.
+ *
+ * #15071 ruled on the `/data` door: *"A declared code is the author's statement
+ * about the failure mode they **handled**. A crash (`isScriptFaultMessage`,
+ * #7543) is not that mode, so it is classified as a fault"*. This door read the
+ * question the other way round. The table above states the discriminator as the
+ * error's NAME, but the `unexpectedFault` predicate that implements it also
+ * requires `!innerMessage`, because `innerMessage` is "the sandbox's mark for
+ * user code threw this deliberately" — and for a CRASH the runner sets that
+ * same mark, to the native error text.
+ *
+ * So one shape fell between the two halves of this file: a `SandboxError` whose
+ * `innerMessage` is `TypeError: …` is neither a deliberate throw (the section
+ * above) nor an unexpected fault (the section below). It took the 400 terminal
+ * at the bottom of the catch, carrying `TypeError: …` as the client-facing
+ * message because `err.message` had already been rewritten to the inner text.
+ *
+ * Two things that answer made false at once, both published:
+ *
+ *  - `content/docs/api/error-catalog.mdx`, Action Errors: *"a `TypeError` / a
+ *    `ReferenceError` / a driver's own error class is a crash (500)"*;
+ *  - this module's own header: *"did it reject or crash? reject → 400; crash →
+ *    500"*.
+ *
+ * The four cases below are the line, in the shape this file already pins it:
+ * the crash, the crash that also declared a status (the branch that reads a
+ * declaration as intent sits above the predicate, so it had to move too), and
+ * the two negative controls one property away on either side.
+ */
+describe('[#17273] a sandboxed body that CRASHED is a fault, not a rejection', () => {
+    it('a sandboxed TypeError answers the sanitised 500, not a 400 carrying the native text', async () => {
+        // The exact shape `sandbox/quickjs-runner.ts` produces for
+        // `ctx.input.title.trim()` where `title` is a number: the wrapper in
+        // `.message` for the log, the native error text in `.innerMessage`.
+        const response = await invoke(
+            new SandboxError(
+                "action 'submit_signoff' threw: TypeError: ctx.input.title.trim is not a function",
+                'TypeError: ctx.input.title.trim is not a function',
+            ),
+        );
+
+        // This assertion IS the flip: it read `400` before.
+        expect(response.status).toBe(500);
+        expect(response.body.error.code).toBe('INTERNAL_ERROR');
+        // …and the native-error text is off the wire. It read
+        // `'TypeError: ctx.input.title.trim is not a function'` before —
+        // `looksLikeInternalErrorLeak` does not recognise stack-shaped prose,
+        // so the 5xx heuristic would not have caught it either.
+        expect(response.body.error.message).toBe('Internal server error');
+        expect(String(response.body.error.message)).not.toContain('TypeError');
+        expect(response.body.success).toBe(false);
+    });
+
+    it('a sandboxed crash that ALSO declared a 4xx status is still a fault', async () => {
+        // `SandboxError.status` is the #7867 side-channel: whatever error
+        // crossed out of the VM named this for itself. A declaration is a
+        // statement about a handled failure mode, and a crash is not one — so
+        // the crash terminal is asked ABOVE the branch that serves `.status`.
+        const err = new SandboxError(
+            "action 'submit_signoff' threw: TypeError: x is not a function",
+            'TypeError: x is not a function',
+            { status: 409, code: 'DELETE_RESTRICTED' },
+        );
+        const response = await invoke(err);
+
+        expect(response.status).toBe(500);
+        expect(response.body.error.code).toBe('INTERNAL_ERROR');
+        expect(response.body.error.message).toBe('Internal server error');
+    });
+
+    it('negative control: a sandboxed DELIBERATE throw keeps its 400 and its own sentence', async () => {
+        // One `innerMessage` away from the first case. #15071's ruling fences
+        // this explicitly — *"Ordinary declared refusals … are **untouched** —
+        // only the crash branch moves"* — and an implementation that degraded
+        // every sandbox-origin error to the fault terminal would turn the two
+        // cases above green while deleting this whole surface.
+        const response = await invoke(
+            new SandboxError("action 'submit_signoff' threw: Contact has no phone", 'Contact has no phone'),
+        );
+
+        expect(response.status).toBe(400);
+        expect(response.body.error.message).toBe('Contact has no phone');
+    });
+
+    it('negative control: a refusal whose text merely MENTIONS a native error name is not a crash', async () => {
+        // The name list is anchored (`isNativeErrorName`, `@objectstack/types`)
+        // — the ONE reader `@objectstack/rest` composes into
+        // `isScriptFaultMessage`, so this door and the `/data` door cannot
+        // disagree about what a crash is. A business sentence that happens to
+        // name one is still a refusal.
+        const response = await invoke(
+            new SandboxError(
+                "action 'submit_signoff' threw: Import failed with a TypeError in row 4",
+                'Import failed with a TypeError in row 4',
+            ),
+        );
+
+        expect(response.status).toBe(400);
+        expect(response.body.error.message).toBe('Import failed with a TypeError in row 4');
+    });
+});

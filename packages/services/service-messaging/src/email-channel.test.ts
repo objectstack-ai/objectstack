@@ -3,6 +3,9 @@
 import { describe, it, expect } from 'vitest';
 import { createEmailChannel } from './email-channel.js';
 import { NotificationTemplateStore } from './template-renderer.js';
+import { MessagingService } from './messaging-service.js';
+import { MemoryNotificationOutbox } from './memory-outbox.js';
+import { NotificationDispatcher } from './dispatcher.js';
 import type { Delivery } from './channel.js';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
@@ -84,11 +87,106 @@ describe('email channel', () => {
         expect(ch.id).toBe('email');
     });
 
-    it('no-ops (success) when no email service is registered', async () => {
-        const ch = channel(() => undefined, fakeData());
-        const r = await ch.send(silentCtx(), delivery());
-        expect(r.ok).toBe(true);
-        expect(r.externalId).toBeUndefined();
+    describe('no email service registered — REFUSED, ⛔ never reported as delivered (#18424)', () => {
+        // `isAvailable()` and `send()` are two members of ONE object answering
+        // ONE condition, and `send()` used to answer it `{ ok: true }`: the
+        // delivery row reached `status: 'success'` with nothing sent, so a
+        // deployment with no mail transport reported every notification as
+        // delivered. The three facts below are pinned together because each
+        // alone is satisfied by an implementation broken in another direction:
+        //
+        //   * "send() returned ok:false"        — also true of one that invents
+        //     a reason no operator can aggregate, or that retries forever.
+        //   * "the reason is the declared one"  — also true of a `send()` that
+        //     still succeeds and only names the token in a log line.
+        //   * "the row ends dead, not success"  — also true of a channel that
+        //     refuses everything, transport or not (the control below).
+        it('refuses with the SAME declared reason isAvailable() returns', async () => {
+            const ch = channel(() => undefined, fakeData());
+            const r = await ch.send(silentCtx(), delivery());
+
+            expect(r.ok).toBe(false);
+            expect(r.externalId).toBeUndefined();
+            // ⭐ The consistency this card is about: one condition, one answer.
+            // Read the token off `isAvailable()` rather than retyping it, so a
+            // future rename of the reason cannot leave the two members
+            // disagreeing while both tests stay green.
+            const probe = ch.isAvailable?.(silentCtx(), {});
+            expect(probe).toEqual({ available: false, reason: 'transport_not_configured' });
+            const reason = (probe as { reason: string }).reason;
+            expect(r.error).toContain(reason);
+            expect(r.error?.startsWith(`${reason}:`)).toBe(true);
+            // ...and it names the recipient nothing was sent to.
+            expect(r.error).toContain('user_1');
+        });
+
+        it('grades that refusal permanent, so the row dead-letters on attempt one', () => {
+            // Driven, ⛔ not assumed: the shipping composition gates the mount
+            // on this same resolver, so an absent transport already acks
+            // `dead: true, attempts: 1` there. `retryable` would make the two
+            // compositions answer one condition differently.
+            const ch = channel(() => undefined, fakeData());
+            expect(ch.classifyError?.('transport_not_configured: no \'email\' service is registered; nothing was sent to \'user_1\''))
+                .toBe('permanent');
+        });
+
+        it('THE CONTROL: a registered transport still delivers and is still graded retryable on a hiccup', async () => {
+            // Pairs with the two above on one variable — the transport — so
+            // "it refused" cannot be read as "this channel refuses everything".
+            const email = fakeEmail();
+            const ch = channel(() => email.service, fakeData());
+            const r = await ch.send(silentCtx(), delivery());
+            expect(r.ok).toBe(true);
+            expect(email.sent).toHaveLength(1);
+            expect(ch.classifyError?.('email send failed: smtp down')).toBe('retryable');
+        });
+
+        it('END TO END: one emit, one outbox, one dispatcher tick — the row lands `dead`, ⛔ not `success`', async () => {
+            // The unit assertions above are about a return value; THIS is the
+            // reading the card is written against — what an operator sees on
+            // `sys_notification_delivery`. Before #18424 this row read
+            // `status: 'success'`, which is the silent half of the defect.
+            const data = fakeData();
+            const outbox = new MemoryNotificationOutbox(1);
+            const service = new MessagingService({
+                logger: { info: () => {}, warn: () => {}, error: () => {} },
+                outbox,
+                getData: () => data,
+            });
+            // The direct composition the package's PUBLIC `createEmailChannel`
+            // export invites — no `lazyChannelMount` gate in front of it, which
+            // is why `send()` is reachable with no transport at all.
+            service.registerChannel(
+                createEmailChannel({
+                    // Present at emit, gone by dispatch: the residue the mount
+                    // gate cannot cover, because the row already exists.
+                    getEmail: (() => { let n = 0; return () => (n++ === 0 ? ({ async send() { return { id: 'e1' }; } }) : undefined); })(),
+                    getData: () => data,
+                    store: new NotificationTemplateStore({ getData: () => data }),
+                }),
+            );
+
+            await service.emit({
+                topic: 'deal.won',
+                audience: ['user_1'],
+                channels: ['email'],
+                payload: { title: 'Deal closed', body: 'Acme signed' },
+            });
+
+            await new NotificationDispatcher({
+                nodeId: 'node-test',
+                outbox,
+                channels: service,
+                channelContext: silentCtx(),
+                intervalMs: 10_000,
+            }).tick();
+
+            const rows = await outbox.list();
+            expect(rows).toHaveLength(1);
+            expect(rows[0].status).toBe('dead');
+            expect(rows[0].attempts).toBe(1);
+            expect(rows[0].error).toContain('transport_not_configured');
+        });
     });
 
     it('resolves the recipient user id → email and sends the fallback subject/body', async () => {

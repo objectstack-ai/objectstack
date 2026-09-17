@@ -1287,9 +1287,9 @@ export function renderTestVerdict(verdict) {
 // ── deriving the path list (#17003): three-dot, or a refusal ────────────────
 
 /**
- * What `--test` says about its own INPUT. Printed on STDERR, deliberately: the
- * enqueue hook (`.claude/hooks/guard-governed-enqueue.sh`) reads this mode's
- * STDOUT as JSON, and a predicate that changes what it hands its consumers in
+ * What `--test` says about its own INPUT. Printed on STDERR, deliberately: this
+ * mode's STDOUT is a machine-read surface (`--json` hands any caller a JSON
+ * verdict), and a predicate that changes what it hands its consumers in
  * order to warn its humans has broken something to say something. So `--test`'s
  * stdout is byte-identical to the pre-#17003 form in both renderings, and the
  * note travels beside it.
@@ -2747,8 +2747,8 @@ async function runTestMode(args) {
     return EXIT_CANNOT_SWEEP;
   }
   // #17003: on STDERR, so this mode's STDOUT stays byte-identical in both
-  // renderings for the consumers that parse it (the enqueue hook reads the
-  // `--json` form). A predicate that changes what it hands its callers in
+  // renderings for any consumer that parses it (the `--json` form is a
+  // machine-read surface). A predicate that changes what it hands its callers in
   // order to warn its humans has broken something in order to say something.
   console.error(CALLER_DERIVED_NOTE);
   return await emitVerdict(paths, args);

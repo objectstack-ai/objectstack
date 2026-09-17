@@ -8,12 +8,15 @@
  *   node scripts/pm/check-harness-current.mjs [--shared <dir>] [--ref origin/main]
  *   node scripts/pm/check-harness-current.mjs --self-test
  *
- * The harness reads `.claude/settings.json`, `.claude/agents/*.md` and `.claude/hooks/*` from
- * the PRIMARY checkout when a session starts and never reloads them, so a touch that lands on
- * `origin/main` after that clone is inert for the running session -- measured: a session whose
- * primary checkout predated the MCP-write deny list still carried every denied tool. Worktrees
- * do not help (the harness never reads them) and the primary checkout is never advanced in place
- * (worktree-first), so the remedy is to close the shift and re-seat in a fresh session.
+ * Measured for `.claude/settings.json` ONLY: the harness reads it from the PRIMARY checkout when
+ * a session starts and does not reload it, so a deny-roster change that lands on `origin/main`
+ * after that clone is inert for the running session -- a session whose primary checkout predated
+ * the MCP-write deny list still carried every denied tool. The load moment of `.claude/hooks/*`
+ * and `.claude/agents/*.md` is UNMEASURED: whether the harness reads them once at start or from
+ * disk at each use is not known, and this tool asserts neither. Worktrees do not help (the
+ * harness never reads them) and the primary checkout is not advanced in place (worktree-first).
+ * A STALE verdict is a REPORT, not a prescription: the seat notes it on its seat post and picks
+ * it up at its next natural shift boundary; ⛔ it never interrupts a batch.
  *
  * Reads git only -- fetch first. Exit 0 = current; 1 = stale (each stale path printed with its
  * touch); 2 = undecidable: the ancestry test is negative on a SHALLOW clone and the touch is not
@@ -104,7 +107,7 @@ function main() {
     console.log(`? ${path}: touch ${prov} is not under HEAD in a SHALLOW clone and not newer than HEAD -- UNDECIDED, deepen and rerun`);
   }
   const verdict = stale
-    ? `STALE -- ${stale} harness-loaded path(s) on ${ref} are not in ${shared} HEAD ${short(head.out)}: close the shift and re-seat in a fresh session; ⛔ never advance the shared checkout in place`
+    ? `STALE -- ${stale} harness-loaded path(s) on ${ref} are not in ${shared} HEAD ${short(head.out)}: note it on the seat post and pick it up at the seat's next natural shift boundary; ⛔ never interrupt a batch for it`
     : undecided ? `UNDECIDED -- ${undecided} path(s) could not be placed; fetch/deepen ${shared} and rerun` : `CURRENT -- every harness-loaded path on ${ref} is in ${shared} HEAD ${short(head.out)}`;
   console.log(`check-harness-current: ${verdict}`);
   return stale ? 1 : undecided ? 2 : 0;
@@ -118,7 +121,7 @@ function main() {
  * inside the fixture block leaves the same silence. Adding cases is ordinary work; a run BELOW
  * this floor means cases stopped running, and the floor names that rather than passing.
  */
-const SELF_TEST_CASE_FLOOR = 14;
+const SELF_TEST_CASE_FLOOR = 15;
 
 const FIXTURE_EPOCH = '2026-06-01T12:00:00Z';
 const FIXTURE_COMMITS = 40;
@@ -241,7 +244,14 @@ function selfTest() {
     // TWO paths, not one: HEAD sits at c34, below both the agents touch (c38) and the settings
     // touch (c39); only the hook touch (c1) is still under it.
     t('and its summary line is the STALE one, byte for byte',
-      summaryOf(behindRun.stdout) === `check-harness-current: STALE -- 2 harness-loaded path(s) on origin/main are not in ${behind} HEAD ${g(['rev-parse', 'HEAD'], behind).slice(0, 10)}: close the shift and re-seat in a fresh session; ⛔ never advance the shared checkout in place`,
+      summaryOf(behindRun.stdout) === `check-harness-current: STALE -- 2 harness-loaded path(s) on origin/main are not in ${behind} HEAD ${g(['rev-parse', 'HEAD'], behind).slice(0, 10)}: note it on the seat post and pick it up at the seat's next natural shift boundary; ⛔ never interrupt a batch for it`,
+      summaryOf(behindRun.stdout));
+    // The verdict is a REPORT: it names the seat post and the shift boundary, and it names neither
+    // re-seating nor advancing the shared checkout -- the prescription that used to sit there.
+    t('and that summary is a report, not a prescription: it names the seat post and the shift '
+      + 'boundary, and names neither a re-seat nor advancing the shared checkout',
+      /seat post/.test(summaryOf(behindRun.stdout)) && /shift boundary/.test(summaryOf(behindRun.stdout))
+        && !/re-seat|fresh session|advance the shared checkout/.test(summaryOf(behindRun.stdout)),
       summaryOf(behindRun.stdout));
 
     // An unreadable path stays exactly what it is today: UNDECIDED, exit 2, no provenance clause

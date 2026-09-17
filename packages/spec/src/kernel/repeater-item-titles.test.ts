@@ -84,16 +84,17 @@ const FORMS: ReadonlyArray<readonly [string, unknown]> = [
  * Carriers still owed titles, as measured on `origin/main` at
  * e758131b3900eb13260f03643e295ca6d625c42b. SHRINK-ONLY — see the header.
  *
- * The four `dashboard.*` / `view.*` / `field.*` entries were fenced out of
- * #17232's round by in-flight PRs on their carrier files (#17474 `dashboard.zod.ts`,
- * #17360 `view.zod.ts`, #17477 `field.zod.ts` — `field.options` and
- * `object.fields.options` are the same `SelectOptionSchema`). This pin
- * OBSERVES them without editing them, which is why the count below is the
- * whole class and not the slice one PR could reach.
+ * The remaining `view.*` / `field.*` entries were fenced out of #17232's
+ * round by in-flight PRs on their carrier files (#17360 `view.zod.ts`,
+ * #17477 `field.zod.ts` — `field.options` and `object.fields.options` are
+ * the same `SelectOptionSchema`). This pin OBSERVES them without editing
+ * them, which is why the set below is the rest of the class and not the
+ * slice one PR could reach.
+ *
+ * `dashboard:widgets` and `dashboard:globalFilters` were paid by #17505 and
+ * DELETED from this set — a paid debt leaves no entry behind.
  */
 const LEDGER: ReadonlySet<string> = new Set([
-  'dashboard:widgets',
-  'dashboard:globalFilters',
   'field:options',
   'object:fields.options',
   'view:columns',

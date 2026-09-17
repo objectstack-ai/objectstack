@@ -2,6 +2,7 @@
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import type {
+    ChannelUnavailableReason,
     Delivery,
     ErrorClass,
     MessagingChannel,
@@ -32,7 +33,12 @@ export interface SmsSenderSurface {
 }
 
 export interface SmsChannelOptions {
-    /** Resolve the SMS service; `undefined` ⇒ the channel no-ops (not installed). */
+    /**
+     * Resolve the SMS service; `undefined` ⇒ there is no transport, which
+     * {@link MessagingChannel.send} REFUSES with the declared
+     * `transport_not_configured` reason (#18424). ⛔ Not a no-op success: a
+     * delivery nothing was sent for is never reported as delivered.
+     */
     getSms(): SmsSenderSurface | undefined;
     /** Resolve the data engine (recipient phone-number lookup). */
     getData(): IDataEngine | undefined;
@@ -76,6 +82,22 @@ const PHONE_SHAPE = (s: string): string | undefined => {
 const SMS_QUOTA_EXCEEDED_CODE = 'TOO_MANY_REQUESTS';
 
 /**
+ * The ONE token used for "there is no transport" (#18424) — the same value the
+ * email channel's `isAvailable()` returns, so the refusal this channel writes
+ * onto a delivery row and the suppression fan-out records on
+ * `sys_notification.suppressed_channels` name one condition.
+ *
+ * ⛔ Deliberately NOT a new error code. The vocabulary is the closed
+ * `CHANNEL_UNAVAILABLE_REASONS` set in `channel.ts`, and the annotation is what
+ * holds this constant inside it: a token nobody declared would not compile
+ * here, so the spellings cannot drift apart silently.
+ *
+ * It leads the error string because `classifyError` below reads the row's error
+ * text — the same convention {@link SMS_QUOTA_EXCEEDED_CODE} already relies on.
+ */
+const TRANSPORT_NOT_CONFIGURED: ChannelUnavailableReason = 'transport_not_configured';
+
+/**
  * The `sms` channel (#2780) — delivers a notification by SMS.
  *
  * Mirrors the email channel (ADR-0022 "channel delegates transport to a
@@ -85,9 +107,11 @@ const SMS_QUOTA_EXCEEDED_CODE = 'TOO_MANY_REQUESTS';
  * `payload.title`/`body`), and hand the text to the `sms` service.
  * Retry/backoff/dead-letter come for free from the P1 outbox dispatcher.
  *
- * Degrades like the email channel: no sms service ⇒ logged no-op success
- * (capability not installed); a recipient with no resolvable phone number ⇒
- * a reported failure (so the delivery row shows why).
+ * Failure is always REPORTED, never absorbed (#18424): no sms service ⇒ a
+ * refusal carrying the declared `transport_not_configured` reason, graded
+ * `permanent` so the row dead-letters on attempt one; a recipient with no
+ * resolvable phone number ⇒ a reported failure. Either way the delivery row
+ * shows why — ⛔ nothing this channel did not send is recorded as delivered.
  */
 export function createSmsChannel(opts: SmsChannelOptions): MessagingChannel {
     const userObject = opts.userObject ?? USER_OBJECT;
@@ -148,8 +172,26 @@ export function createSmsChannel(opts: SmsChannelOptions): MessagingChannel {
         async send(ctx: MessagingChannelContext, delivery: Delivery): Promise<SendResult> {
             const sms = opts.getSms();
             if (!sms) {
-                ctx.logger.warn(`[sms] no sms service registered; '${delivery.recipient}' not messaged`);
-                return { ok: true }; // capability not installed — no-op, like email w/o service
+                // [#18424] A refusal, ⛔ never `{ ok: true }`. This used to
+                // return success ("capability not installed — no-op"), which
+                // recorded a delivery nobody performed: the row reached
+                // `status: 'success'`, nothing went red, and a deployment with
+                // no SMS transport reported every notification as delivered.
+                //
+                // ⛔ Not a suppression either. A suppression is fan-out's
+                // pre-write answer on `sys_notification.suppressed_channels`;
+                // by the time `send()` runs the delivery row exists and
+                // `SendResult` has no suppression arm. Where both answers are
+                // decidable at once — the plugin composition, whose
+                // `lazyChannelMount` gates the mount on this very resolver — an
+                // absent transport is already a REFUSAL (#18041/#18050), so
+                // refusing here is what makes the two compositions answer one
+                // condition the same way.
+                ctx.logger.warn(`[sms] no sms service registered; '${delivery.recipient}' was NOT messaged`);
+                return {
+                    ok: false,
+                    error: `${TRANSPORT_NOT_CONFIGURED}: no 'sms' service is registered; nothing was sent to '${delivery.recipient}'`,
+                };
             }
 
             const n = delivery.notification;
@@ -204,6 +246,14 @@ export function createSmsChannel(opts: SmsChannelOptions): MessagingChannel {
             // `sms send failed: TOO_MANY_REQUESTS: …`.
             const text = err instanceof Error ? err.message : String(err ?? '');
             if (text.includes(SMS_QUOTA_EXCEEDED_CODE)) return 'rate_limited';
+            // [#18424] The grade is driven rather than assumed: in the shipping
+            // composition the same condition already terminates a claimed row
+            // at once — the mount gate unmounts the channel and the dispatcher
+            // acks `dead: true, attempts: 1` without consulting this method at
+            // all. Grading the refusal `retryable` would make the two
+            // compositions answer one condition differently, burning the whole
+            // ladder against a transport that no attempt can install.
+            if (text.startsWith(`${TRANSPORT_NOT_CONFIGURED}:`)) return 'permanent';
             return 'retryable';
         },
     };

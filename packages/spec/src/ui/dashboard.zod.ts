@@ -535,22 +535,22 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
   guidanceSets: WIDGET_GUIDANCE_SETS,
 }, {
   /** Unique widget identifier (snake_case, used for targetWidgets references) */
-  id: SnakeCaseIdentifierSchema.describe('Unique widget identifier (snake_case)'),
+  id: SnakeCaseIdentifierSchema.describe('Unique widget identifier (snake_case)').meta({ title: 'Widget ID' }),
 
   /** Widget Title */
-  title: I18nLabelSchema.optional().describe('Widget title'),
+  title: I18nLabelSchema.optional().describe('Widget title').meta({ title: 'Title' }),
 
   /** Widget Description (displayed below the title) */
-  description: I18nLabelSchema.optional().describe('Widget description text below the header'),
+  description: I18nLabelSchema.optional().describe('Widget description text below the header').meta({ title: 'Description' }),
   
   /** Visualization Type */
-  type: ChartTypeSchema.default(WIDGET_TYPE_DEFAULT).describe('Visualization type'),
+  type: ChartTypeSchema.default(WIDGET_TYPE_DEFAULT).describe('Visualization type').meta({ title: 'Visualization Type' }),
   
   /** Chart Configuration */
-  chartConfig: ChartConfigSchema.optional().describe('Chart visualization configuration'),
+  chartConfig: ChartConfigSchema.optional().describe('Chart visualization configuration').meta({ title: 'Chart Configuration' }),
 
   /** Color variant for the widget (e.g., KPI card accent color) */
-  colorVariant: WidgetColorVariantSchema.optional().describe('Widget color variant for theming'),
+  colorVariant: WidgetColorVariantSchema.optional().describe('Widget color variant for theming').meta({ title: 'Color Variant' }),
 
   /**
    * Runtime capability gate — widget is hidden when the named object is
@@ -561,13 +561,13 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
    * Set explicitly to the dataset's base object when the widget should be
    * gated on that object's availability.
    */
-  requiresObject: z.string().optional().describe('Hide the widget unless the named object is registered'),
+  requiresObject: z.string().optional().describe('Hide the widget unless the named object is registered').meta({ title: 'Requires Object' }),
 
   /**
    * Runtime capability gate — widget is hidden when the named kernel
    * service is not registered. Mirrors `NavigationItem.requiresService`.
    */
-  requiresService: z.string().optional().describe('Hide the widget unless the named kernel service is registered'),
+  requiresService: z.string().optional().describe('Hide the widget unless the named kernel service is registered').meta({ title: 'Requires Service' }),
 
   // `actionUrl` / `actionType` / `actionIcon` REMOVED (#5010, ADR-0049 D2):
   // the three keys described a per-widget header action BUTTON that no renderer
@@ -583,7 +583,7 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
   actionIcon: retiredKey(WIDGET_ACTION_RETIRED('actionIcon')),
 
   /** Presentation-scope filter (MongoDB-style), ANDed into the dataset query as `runtimeFilter`. */
-  filter: FilterConditionSchema.optional().describe('Presentation-scope filter (runtimeFilter)'),
+  filter: FilterConditionSchema.optional().describe('Presentation-scope filter (runtimeFilter)').meta({ title: 'Filter' }),
 
   /**
    * Period-over-period comparison window.
@@ -689,7 +689,7 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
      */
     dimension: z.string().optional()
       .describe('Time dimension to shift; omit when the selection has exactly one dated time dimension'),
-  }).optional().describe('Period-over-period comparison window ({ kind, dimension? })'),
+  }).optional().describe('Period-over-period comparison window ({ kind, dimension? })').meta({ title: 'Compare To' }),
 
   /**
    * ADR-0021 — the semantic-layer `dataset` this widget binds to. The widget
@@ -699,11 +699,11 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
    * author-facing analytics shape (the legacy inline `object` + `categoryField`
    * + `valueField` + `aggregate` query was removed in the single-form cutover).
    */
-  dataset: SnakeCaseIdentifierSchema.describe('Dataset name to bind (ADR-0021)'),
+  dataset: SnakeCaseIdentifierSchema.describe('Dataset name to bind (ADR-0021)').meta({ title: 'Dataset' }),
   /** Dimension names (from the dataset) for X / group / split. */
-  dimensions: z.array(z.string()).optional().describe('Dimension names — X/group/split'),
+  dimensions: z.array(z.string()).optional().describe('Dimension names — X/group/split').meta({ title: 'Dimensions' }),
   /** Measure names (from the dataset) for the value axis. */
-  values: z.array(z.string()).min(1).describe('Measure names — Y (at least one)'),
+  values: z.array(z.string()).min(1).describe('Measure names — Y (at least one)').meta({ title: 'Values' }),
 
   /**
    * Layout Position (React-Grid-Layout style)
@@ -758,10 +758,10 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
     y: z.number(),
     w: z.number(),
     h: z.number(),
-  }).optional().describe('Grid layout position (auto-flowed when omitted)'),
+  }).optional().describe('Grid layout position (auto-flowed when omitted)').meta({ title: 'Layout' }),
   
   /** Widget specific options (colors, legend, etc.) — see {@link DashboardWidgetOptionsSchema}. */
-  options: DashboardWidgetOptionsSchema.optional().describe('Widget specific configuration'),
+  options: DashboardWidgetOptionsSchema.optional().describe('Widget specific configuration').meta({ title: 'Options' }),
 
   /**
    * Per-widget bindings from a dashboard-level filter (referenced by its
@@ -773,14 +773,15 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
    *   (dateRange: `dateRange.field ?? 'created_at'`)
    */
   filterBindings: z.record(z.string(), z.union([z.string(), z.literal(false)])).optional()
-    .describe("Per-widget dashboard-filter bindings: filter name → this widget's field, or false to opt out"),
+    .describe("Per-widget dashboard-filter bindings: filter name → this widget's field, or false to opt out")
+    .meta({ title: 'Filter Bindings' }),
 
   /**
    * Rule ids of build diagnostics intentionally suppressed on this widget
    * (e.g. `'table-count-only'` when a single-row summary table is deliberate).
    * Consumed by `objectstack build` / `objectstack lint`; no runtime effect.
    */
-  suppressWarnings: z.array(z.string()).optional().describe('Build diagnostic rule ids suppressed on this widget'),
+  suppressWarnings: z.array(z.string()).optional().describe('Build diagnostic rule ids suppressed on this widget').meta({ title: 'Suppress Warnings' }),
 
   // `responsive` REMOVED (#4876): authorable and inert, exactly like the
   // same-named `view.responsive` retired four days earlier (#3896 close-out).
@@ -1004,7 +1005,7 @@ export const GlobalFilterSchema = lazySchema(() => strictObject({
    * Defaults to `field`. The name `"dateRange"` is reserved for the built-in
    * dashboard date range.
    */
-  name: z.string().optional().describe('Stable filter name (variable key); defaults to field'),
+  name: z.string().optional().describe('Stable filter name (variable key); defaults to field').meta({ title: 'Name' }),
 
   /**
    * Field name to filter on — at the authoring layer it resolves against the
@@ -1028,7 +1029,8 @@ export const GlobalFilterSchema = lazySchema(() => strictObject({
    * dimension without the dataset declaring it, and `widget-dimension-unknown`
    * is what holds that line for authored dashboards.
    */
-  field: z.string().describe('Field name to filter on — at the authoring layer it resolves against the object behind each bound widget\'s dataset (`dataset.object`), not against that dataset\'s declared `dimensions`; enforced by the lint rule `dashboard-filter-field-unknown` (severity error)'),
+  field: z.string().describe('Field name to filter on — at the authoring layer it resolves against the object behind each bound widget\'s dataset (`dataset.object`), not against that dataset\'s declared `dimensions`; enforced by the lint rule `dashboard-filter-field-unknown` (severity error)')
+    .meta({ title: 'Field' }),
 
   /**
    * Source object for i18n label resolution (#7804): when set, this filter's
@@ -1046,13 +1048,14 @@ export const GlobalFilterSchema = lazySchema(() => strictObject({
    * keyed by. `optionsFrom.object` already proves the schema is willing to
    * name an object here — this reuses that same primitive one level up.
    */
-  object: z.string().optional().describe('Object whose `fields.<object>.<field>` translation-bundle entry resolves this filter\'s field label and option labels'),
+  object: z.string().optional().describe('Object whose `fields.<object>.<field>` translation-bundle entry resolves this filter\'s field label and option labels')
+    .meta({ title: 'Object' }),
 
   /** Display label for the filter */
-  label: I18nLabelSchema.optional().describe('Display label for the filter'),
+  label: I18nLabelSchema.optional().describe('Display label for the filter').meta({ title: 'Label' }),
 
   /** Filter input type */
-  type: z.enum(['text', 'select', 'date', 'number', 'lookup']).optional().describe('Filter input type'),
+  type: z.enum(['text', 'select', 'date', 'number', 'lookup']).optional().describe('Filter input type').meta({ title: 'Input Type' }),
 
   /** Static options for select/lookup filters */
   options: z.array(strictObject({
@@ -1062,19 +1065,19 @@ export const GlobalFilterSchema = lazySchema(() => strictObject({
   }, {
     value: z.union([z.string(), z.number(), z.boolean()]).describe('Option value'),
     label: I18nLabelSchema,
-  })).optional().describe('Static filter options'),
+  })).optional().describe('Static filter options').meta({ title: 'Options' }),
 
   /** Dynamic data binding for filter options */
-  optionsFrom: GlobalFilterOptionsFromSchema.optional().describe('Dynamic filter options from object'),
+  optionsFrom: GlobalFilterOptionsFromSchema.optional().describe('Dynamic filter options from object').meta({ title: 'Options From' }),
 
   /** Default filter value */
-  defaultValue: z.union([z.string(), z.number(), z.boolean()]).optional().describe('Default filter value'),
+  defaultValue: z.union([z.string(), z.number(), z.boolean()]).optional().describe('Default filter value').meta({ title: 'Default Value' }),
 
   /** Filter application scope */
-  scope: z.enum(['dashboard', 'widget']).default('dashboard').describe('Filter application scope'),
+  scope: z.enum(['dashboard', 'widget']).default('dashboard').describe('Filter application scope').meta({ title: 'Scope' }),
 
   /** Widget IDs to apply this filter to (when scope is widget) */
-  targetWidgets: z.array(z.string()).optional().describe('Widget IDs to apply this filter to'),
+  targetWidgets: z.array(z.string()).optional().describe('Widget IDs to apply this filter to').meta({ title: 'Target Widgets' }),
 })
   // #4614 — the date `defaultValue` vocabulary check. Attached by identifier,
   // not inlined: the export is the rule a `.shape` mirror re-attaches (#16489),

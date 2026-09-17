@@ -6,12 +6,28 @@
 // consumer is a silent no-op (worst case, a *security* no-op — false compliance).
 //
 // SOURCE OF TRUTH: the metadata-type registry (BUILTIN_METADATA_TYPE_SCHEMAS via
-// listMetadataTypeSchemaTypes/getMetadataTypeSchema). This is the same registry the
+// listMetadataTypeSchemaTypes/getMetadataTypeSchema). That is the same registry the
 // runtime `/api/v1/meta/types/:type` endpoint and the Studio metadata-admin forms
-// use — i.e. exactly the set of *authorable* metadata types. (We walk the Zod schema
+// use — i.e. the set of REGISTERED metadata KINDS. (We walk the Zod schema
 // directly rather than z.toJSONSchema, because a couple of schemas — object, action —
 // throw in the JSON-schema converter, which is precisely why the old json-schema/-based
 // gate was blind to them.)
+//
+// ⛔ REGISTERED IS NOT THE SAME SET AS AUTHORABLE, and this comment used to say it
+// was — "i.e. exactly the set of *authorable* metadata types", the sentence #17356
+// measured false one gate over and #18133 filed here. `listMetadataTypeSchemaTypes()`
+// deliberately does not enumerate `UNREGISTERED_KIND_SCHEMAS` (#6245: enrolling those
+// entries there "would claim a status this change is careful not to grant"), yet the
+// four kinds bound in that map are authored through real doors — `stack.connectors[]`
+// / `stack.sharingRules[]` / `stack.analyticsCubes[]` / `stack.webhooks[]` on every
+// boot, and `PUT /api/v1/meta/:type/:name`, whose `resolveOverlaySchema` resolves them
+// through `getMetadataTypeSchema()`'s third fallback. So the two questions are split
+// here the way `reachabilityRootTypes()` in build-schemas.ts splits them: the WALK
+// resolves a governed type's schema through the registry (plus SPEC_ONLY_SCHEMAS),
+// while the governance DENOMINATOR — "whom must a ledger exist for?" — is
+// `authorableTypes()` below, the registered kinds UNION the unregistered-kind stack
+// collections. See that function for why the union lives in this gate and not in the
+// registry.
 //
 // Governed types must declare every authorable property's liveness status with
 // evidence in packages/spec/liveness/<type>.json, or CI fails (the ratchet — no new
@@ -153,7 +169,11 @@ process.env.OS_EAGER_SCHEMAS = '1';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
-import { getMetadataTypeSchema, listMetadataTypeSchemaTypes } from '../../src/kernel/metadata-type-schemas';
+import {
+  getMetadataTypeSchema,
+  listMetadataTypeSchemaTypes,
+  listUnregisteredKindSchemaTypes,
+} from '../../src/kernel/metadata-type-schemas';
 import { WebhookSchema } from '../../src/automation/webhook.zod';
 import { QuerySchema } from '../../src/data/query.zod';
 import { ValidationRuleSchema } from '../../src/data/validation.zod';
@@ -243,9 +263,9 @@ const ledgerRoot = ledgerRootArg
 
 // Governed metadata types, rolled out highest-frequency / highest-risk first.
 // (`query` is not a metadata type — see SPEC_ONLY_SCHEMAS below.)
-const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'seed', 'translation', 'validation', 'api', 'capability', 'qa', 'manifest', 'crud_endpoints', 'metadata_endpoints', 'batch_endpoints', 'route_generation', 'realtime_subscription'];
+const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'seed', 'translation', 'validation', 'api', 'capability', 'qa', 'manifest', 'crud_endpoints', 'metadata_endpoints', 'batch_endpoints', 'route_generation', 'realtime_subscription', 'sharing_rule'];
 
-// Registered metadata types that are NOT yet governed — the coverage ratchet.
+// Authorable metadata types that are NOT yet governed — the coverage ratchet.
 //
 // WHY THIS EXISTS. `GOVERNED` was hand-maintained and nothing compared it
 // against the registry it claims to cover. So a type could be registered —
@@ -258,8 +278,9 @@ const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'po
 // type was not on the list — and a list that governs 15 of 25 registered types
 // while reporting itself complete is worse than one that admits the gap.
 //
-// So the list is now answerable to the registry: every registered type must be
-// governed OR appear here with a reason. Registering a type and forgetting the
+// So the list is now answerable to the denominator: every AUTHORABLE type must
+// be governed OR appear here with a reason. Registering a type — or binding a
+// new unregistered kind into `UNREGISTERED_KIND_SCHEMAS` — and forgetting the
 // ledger fails CI with the entry to write.
 //
 // This is a RATCHET, not an allowlist to grow. An entry is a debt with an issue
@@ -267,13 +288,37 @@ const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'po
 // add one to silence the gate on a type you just registered — that is exactly
 // the failure this map exists to make visible, and an entry with no issue is
 // indistinguishable from never having looked.
+//
+// [#18133] The map went from EMPTY to three rows without a single type changing
+// status, and that is the finding, not a regression: #4488 paid off all nine
+// debts the map opened with (app, book, doc, email_template, job, mapping, seed,
+// translation, validation) and the map then read empty under a denominator that
+// could not see the unregistered kinds at all. `connector`, `sharing_rule` and
+// `analytics_cube` were in neither `GOVERNED` nor here, so they produced no row
+// anywhere and the report read complete — a reader could not tell "nothing
+// ungoverned here" from "never looked". Widening the denominator (see
+// `authorableTypes()`) is what converts that silence into three declared debts.
+// ⛔ These rows are NOT a licence to leave them: the direction of travel is out
+// of this map, exactly as it was for the nine.
+//
+// [#18582] One of the three is PAID: `sharing_rule` moved into GOVERNED with
+// packages/spec/liveness/sharing_rule.json. The two left are `connector` and
+// `analytics_cube`, and the card that owes them is still open — the sentence
+// above is the whole reason this note updates the count instead of leaving a
+// stale "three" standing over a map of two.
 const PENDING_GOVERNANCE: Record<string, string> = {
-  // EMPTY since #4488 paid off all nine debts the map opened with (app, book,
-  // doc, email_template, job, mapping, seed, translation, validation) — every
-  // registered type is governed. The map stays because the ratchet is the
-  // point, not the entries: registering a NEW type without a ledger fails CI
-  // with instructions to either govern it or record the debt here (reason +
-  // issue number). Do not add an entry just to silence the gate.
+  connector:
+    'Authored via `stack.connectors[]` and `PUT /api/v1/meta/connector/:name` '
+    + '(#6245 bound DeclarativeConnectorEntrySchema for exactly those two doors), and '
+    + 'enrolled into this gate\'s denominator by #18133 — before which it was invisible '
+    + 'to the ratchet rather than covered by it. No ledger walked it yet: seed '
+    + 'packages/spec/liveness/connector.json (#18133).',
+  analytics_cube:
+    'Authored via `stack.analyticsCubes[]` and `PUT /api/v1/meta/analytics_cube/:name` '
+    + '(#10194). Whether that authoring is live end-to-end is its own measurement '
+    + '(#10238) and this row does not prejudge it — the debt recorded here is only that '
+    + 'no ledger asks who reads the cube\'s properties. Enrolled by #18133; seed '
+    + 'packages/spec/liveness/analytics_cube.json.',
 };
 
 // Spec-only override: governed types whose canonical schema is NOT (yet) in the
@@ -638,8 +683,11 @@ const report: any = {
   proofMissing: [] as string[], // a bound high-risk `live` entry with no proof at all
   orphanProofs: [] as string[], // a dogfood `@proof:` tag not registered in proof-registry.mts
   orphanEntries: [] as string[], // a ledger row whose property is gone from the schema (the reverse direction)
-  ungoverned: [] as string[], // a REGISTERED metadata type absent from both GOVERNED and PENDING_GOVERNANCE
-  stalePending: [] as string[], // a PENDING_GOVERNANCE row for a type that is now governed / no longer registered
+  authorable: [] as string[], // the governance DENOMINATOR itself — printed and emitted so "never looked" cannot pass for "nothing to report" (#18133)
+  authorableRegistered: 0, // how many of it are registered KINDS (listMetadataTypeSchemaTypes)
+  authorableUnregisteredKinds: [] as string[], // …and which are unregistered-kind stack collections (#6245/#6931)
+  ungoverned: [] as string[], // an AUTHORABLE metadata type absent from both GOVERNED and PENDING_GOVERNANCE
+  stalePending: [] as string[], // a PENDING_GOVERNANCE row for a type that is now governed / no longer authorable
   undrilledNew: [] as string[], // a container riding on inheritance that the baseline does not record (see drill.mts)
   undrilledStale: [] as string[], // a baseline row whose container now drills / is no longer a container
   undrilled: [] as Array<{ key: string; childKeys: string[] }>, // the recorded inheritance population — a worklist, not a failure
@@ -1188,20 +1236,80 @@ report.verification = buildVerificationReport(verificationEntries, { staleDays }
 const showProducerGap = args.includes('--producer-gap');
 report.producers = buildProducerReport(producerEntries);
 
-// ── coverage: is every REGISTERED metadata type accounted for? ──
+// ── coverage: is every AUTHORABLE metadata type accounted for? ──
 // The gate's own blind spot until #4487. Everything above asks "is every
 // property of a governed type classified?" — nothing asked "is every authorable
 // type governed?", so a type absent from GOVERNED was never in the denominator
 // and its silence read as success.
+//
+// #4487 closed that for REGISTERED types and left the same hole one set over,
+// which is #18133: the denominator was `listMetadataTypeSchemaTypes()` under a
+// comment claiming it was "exactly the set of authorable metadata types". It is
+// not, and the difference is not a rounding error — it is every entry of
+// `UNREGISTERED_KIND_SCHEMAS`. A type in neither `GOVERNED` nor
+// `PENDING_GOVERNANCE` produces no row in ANY of this gate's lists, so the
+// blindness was invisible in the gate's own output: `connector`,
+// `sharing_rule` and `analytics_cube` read exactly like "nothing to report".
+
+/**
+ * The governance denominator: every type somebody AUTHORS a document against.
+ *
+ * ⛔ Deliberately NOT `listMetadataTypeSchemaTypes()`, and ⛔ not to be
+ * "simplified" back into it. The two answer different questions, and #6245 drew
+ * that line on purpose:
+ *
+ *   - "is this a REGISTERED metadata KIND?" — `listMetadataTypeSchemaTypes()`.
+ *     Membership there carries KIND obligations (a `MetadataTypeSchema` enum
+ *     member, a `DEFAULT_METADATA_TYPE_REGISTRY` entry, a create seed, a place
+ *     in the #4001 campaign count), which is why enrolling the unregistered
+ *     kinds there "would claim a status this change is careful not to grant".
+ *     That function answers its own question correctly and this gate does not
+ *     touch it — the repair for #18133 is HERE, in the consumer that was asking
+ *     the wrong question, not in the registry that was answering the right one.
+ *   - "must a ledger exist for this type?" — the only question a governance
+ *     denominator asks, and for THAT question an unregistered kind is an
+ *     authored document like any other: `stack.connectors[]` parses one on every
+ *     boot and `PUT /api/v1/meta/connector/:name` parses one per write, both
+ *     against `UNREGISTERED_KIND_SCHEMAS['connector']`.
+ *
+ * `listUnregisteredKindSchemaTypes()` exists (#6931) so a check can ENUMERATE
+ * that map and for nothing else, and its own docblock is explicit that "being
+ * listed by this function grants NOTHING" — which is exactly why reading it here
+ * costs #6245 nothing: no kind is registered, no enum grows, no create seed is
+ * demanded, no accept set moves. The gate gains a row to fill in, that is all.
+ *
+ * SAME SHAPE, SECOND GATE. `reachabilityRootTypes()` in scripts/build-schemas.ts
+ * is this union under another name, landed for #17356 against the identical
+ * false sentence. The two are not yet ONE spelling because that file is held by
+ * in-flight work; folding them together is a follow-up, and until then this
+ * docblock and that one are each other's cross-reference.
+ *
+ * NOT in the denominator, on purpose: the `SPEC_ONLY_SCHEMAS` types that are not
+ * metadata types at all (`query`, `qa`, `manifest`, the four `RestServerConfig`
+ * sub-objects, `realtime_subscription`, `validation`). Those are governed BY the
+ * override — the override IS their governance — so asking "is it governed?" of
+ * them is a question the override already answered. They are counted separately
+ * in the coverage line so the two populations never read as one number.
+ */
+function authorableTypes(): string[] {
+  const types = new Set<string>(listMetadataTypeSchemaTypes());
+  for (const kind of listUnregisteredKindSchemaTypes()) types.add(kind);
+  return [...types].sort();
+}
+
 const governedSet = new Set(GOVERNED);
-report.ungoverned = listMetadataTypeSchemaTypes()
+const denominator = authorableTypes();
+report.authorable = denominator;
+report.authorableRegistered = listMetadataTypeSchemaTypes().length;
+report.authorableUnregisteredKinds = listUnregisteredKindSchemaTypes();
+report.ungoverned = denominator
   .filter((t) => !governedSet.has(t) && !(t in PENDING_GOVERNANCE))
   .sort();
 // A PENDING_GOVERNANCE row for a type that is now governed (or no longer
-// registered) is the same rot as an orphan ledger row: it claims a debt that
+// authorable) is the same rot as an orphan ledger row: it claims a debt that
 // does not exist, and it makes the map's length a lie about how much is left.
 report.stalePending = Object.keys(PENDING_GOVERNANCE)
-  .filter((t) => governedSet.has(t) || !listMetadataTypeSchemaTypes().includes(t))
+  .filter((t) => governedSet.has(t) || !denominator.includes(t))
   .sort();
 
 const totalUnclassified = report.unclassified.length;
@@ -1506,13 +1614,15 @@ if (asJson) {
     );
   }
   if (report.ungoverned.length) {
-    console.log(`\n✗ ${report.ungoverned.length} REGISTERED metadata type(s) governed by nothing:`);
+    console.log(`\n✗ ${report.ungoverned.length} AUTHORABLE metadata type(s) governed by nothing:`);
     report.ungoverned.forEach((t: string) => console.log(`    ${t}`));
     console.log(
-      '\n   These are authorable — `/api/v1/meta/types/:type` serves them and Studio edits\n' +
-      '   them — but no ledger asks who reads their properties, so an inert key on one is\n' +
-      '   invisible to CI. `datasource` sat here for its whole life and cost six inert keys\n' +
-      '   found by hand, two of them security-shaped (#4410, #4465, #4481).\n\n' +
+      '\n   These are authorable — a REGISTERED kind is served by `/api/v1/meta/types/:type`\n' +
+      '   and edited in Studio; an UNREGISTERED kind (#6245) is authored through its stack\n' +
+      '   collection and `PUT /api/v1/meta/:type/:name` — but no ledger asks who reads their\n' +
+      '   properties, so an inert key on one is invisible to CI. `datasource` sat here for its\n' +
+      '   whole life and cost six inert keys found by hand, two of them security-shaped\n' +
+      '   (#4410, #4465, #4481).\n\n' +
       '   Either govern the type (add it to GOVERNED and seed packages/spec/liveness/<type>.json\n' +
       '   — see the seeding aid: `tsx check-liveness.mts --dump <type>`), or record the debt in\n' +
       "   PENDING_GOVERNANCE with a reason AND an issue number. Do not pick the second option\n" +
@@ -1712,13 +1822,30 @@ if (asJson) {
   } else if (report.undrilled.length) {
     console.log('  run with --undrilled for the worklist.');
   }
+  // The DENOMINATOR, printed unconditionally (#18133). It used to print only when
+  // `PENDING_GOVERNANCE` was non-empty, which made the one state worth reporting —
+  // "this gate looked at N types and none of them is unaccounted for" — render as
+  // nothing at all, the same silence a type in no bucket produces. Now the run
+  // always says what it counted and how the count is composed, so a reader can
+  // tell "nothing ungoverned here" from "never looked" without reading the source.
   const pendingCount = Object.keys(PENDING_GOVERNANCE).length;
-  if (pendingCount) {
-    console.log(
-      `\ncoverage: ${GOVERNED.length} type(s) governed, ${pendingCount} registered type(s) awaiting a ledger ` +
-      `(${Object.keys(PENDING_GOVERNANCE).sort().join(', ')}) — a worklist, not a merge gate.`,
-    );
-  }
+  const unregisteredKinds = report.authorableUnregisteredKinds as string[];
+  const inDenominator = (t: string) => report.authorable.includes(t);
+  const governedInDenominator = GOVERNED.filter(inDenominator).length;
+  const governedOutside = GOVERNED.length - governedInDenominator;
+  console.log(
+    `\ngovernance denominator: ${report.authorable.length} authorable type(s) — ` +
+    `${report.authorableRegistered} registered kind(s) + ${unregisteredKinds.length} ` +
+    `unregistered-kind stack collection(s) (${unregisteredKinds.join(', ')}); ` +
+    `${governedInDenominator} governed, ${pendingCount} awaiting a ledger` +
+    (pendingCount ? ` (${Object.keys(PENDING_GOVERNANCE).sort().join(', ')})` : '') +
+    ' — a worklist, not a merge gate.',
+  );
+  console.log(
+    `  (+ ${governedOutside} type(s) governed from OUTSIDE the denominator via SPEC_ONLY_SCHEMAS — ` +
+    'not metadata types, so the override IS their governance; ' +
+    `${GOVERNED.length} governed in total.)`,
+  );
   if (!failed) {
     // Deliberately qualified. The old wording — "all governed-type properties
     // are classified" — was the instrument's own false claim: it counted a
@@ -1730,7 +1857,8 @@ if (asJson) {
     // a success line that overstates its own reach is the defect it qualifies.
     console.log(
       '\n✓ every governed-type property, at every depth the ledger drills, is classified, every ' +
-      'registered type is governed or explicitly pending, no ledger row outlives its property, ' +
+      'authorable type — registered kind or unregistered-kind stack collection — is governed or ' +
+      'explicitly pending, no ledger row outlives its property, ' +
       `every container inheritance is declared, every ${EVIDENCE_SCANNED_LABEL} entry's repo-local evidence path ` +
       'resolves, every `path:NNN` citation names a line that file actually has, every ' +
       '`path#symbol` anchor names a symbol its file contains, and every cited ' +

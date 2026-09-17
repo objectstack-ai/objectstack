@@ -23,9 +23,9 @@
 // - `① me() delivers the envelope it declares` — the card's first consequence.
 //   The decisive assertion is a PARSE against the declared schema, not a key
 //   spot-check: the defect is "the declared type is not delivered", so the
-//   declaration itself has to be the judge. Its second case pins the ONE gap
-//   the lift cannot close (`user.image`, declared string-or-absent, served
-//   `null`) as an exhaustive issue list, so the residue cannot quietly grow.
+//   declaration itself has to be the judge. Its second case pins that parse as
+//   an exhaustive issue list - empty since #17235 widened `user.image` to
+//   `z.string().nullish()` - so a regression cannot quietly grow back.
 // - `② the raw keys survive` — `.user` is what the field reads today, while
 //   the declared `.data.user` was `undefined`. The fix must not buy the
 //   declared shape by breaking the workaround callers were pushed onto.
@@ -292,22 +292,22 @@ describe('[#16760] /get-session is lifted into the SessionResponse envelope it d
       expect(res.data.session?.userId).toBe(res.data.user?.id);
     });
 
-    it('leaves exactly one declared-type gap, and it is not the envelope', async () => {
+    it('parses as the FULL declared type — no residue left', async () => {
       const { client } = await signedIn();
       const res = await client.auth.me();
 
-      // The FULL declared type still does not parse — for a reason that has
-      // nothing to do with this card and that the lift cannot reach:
-      // `SessionUserSchema.image` is declared `z.string().optional()`, which
-      // does not admit `null`, and better-auth serves `"image": null` for a
-      // user who never set one. Filed as #17235 — delete this case with it.
+      // #17235's acceptance, on the real route: a signed-in user with NO
+      // avatar parses against the WHOLE declaration. `SessionUserSchema.image`
+      // is `z.string().nullish()`, so the `"image": null` better-auth serves
+      // for such a user is admitted instead of rejected.
       //
-      // Pinned as the exhaustive issue list rather than as "it fails": if the
-      // envelope ever regresses, the missing `success` and `data` show up here
-      // as extra issues and this case reddens. It is the residue's tripwire,
-      // not an acceptance of it.
+      // Still pinned as the exhaustive issue list rather than as "it passes":
+      // if the envelope ever regresses, the missing `success` and `data` show
+      // up here as issues and this case reddens. The list is the tripwire; it
+      // is empty because the residue is closed, not because it stopped
+      // checking.
       const issues = SessionResponseSchema.safeParse(res).error?.issues ?? [];
-      expect(issues.map((i) => i.path.join('.'))).toEqual(['data.user.image']);
+      expect(issues.map((i) => i.path.join('.'))).toEqual([]);
     });
   });
 

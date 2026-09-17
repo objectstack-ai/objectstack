@@ -30,7 +30,21 @@ export const SessionUserSchema = lazySchema(() => z.object({
   email: z.string().email().describe('Email address'),
   emailVerified: z.boolean().default(false).describe('Is email verified?'),
   name: z.string().describe('Display name'),
-  image: z.string().optional().describe('Avatar URL'),
+  /**
+   * `null` is accepted alongside a string and alongside the key being absent.
+   * better-auth owns this column, stores it nullable, and serialises it
+   * present-and-null for a user who never set an avatar, so every `/auth/*`
+   * session body the platform produces carries `"image": null` (#17235). The
+   * declaration was the thing that was wrong: AGENTS.md Prime Directive #12's
+   * default (fix the producer, never widen the consumer) rests on a premise it
+   * states out loud - that we own both ends - which does not hold for a
+   * third-party model, so its exit clause is the operative sentence.
+   *
+   * `.nullish()`, NOT `.nullable()`: the key's ABSENCE is a legal shape today
+   * and no producer was ever measured omitting it, so retiring that shape
+   * would be a narrowing riding along with a widening. Pure widening only.
+   */
+  image: z.string().nullish().describe('Avatar URL'),
   username: z.string().optional().describe('Username (optional)'),
   roles: z.array(z.string()).optional().default([]).describe('Assigned role IDs'),
   tenantId: z.string().optional().describe('Current tenant ID'),

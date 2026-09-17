@@ -769,8 +769,16 @@ describe('#16458 — DashboardHeaderAction fields carry an item-level `title`', 
       }
       // Control — a sibling item property with no authored title has none:
       // the pin above is reading a title, not a default the emitter invents.
+      // The control is a `retiredKey()` TOMBSTONE, which is the one widget row
+      // property that must stay untitled on purpose: it declares the key
+      // unwritable, and an authoring label would advertise it as writable.
+      // (`widgets[].id` held this role until its carrier was titled.)
       const widgetProps = js.properties.widgets.items.properties;
-      expect(widgetProps.id.title).toBeUndefined();
+      expect(widgetProps.actionUrl.title).toBeUndefined();
+      expect(widgetProps.actionUrl.description).toMatch(/^\[REMOVED\] /);
+      // Lit — the authorable sibling really does carry one, so the line above
+      // measures the tombstone rule, not an emitter that never writes titles.
+      expect(widgetProps.id.title).toBe('Widget ID');
     });
   }
 

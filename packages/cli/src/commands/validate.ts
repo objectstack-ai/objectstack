@@ -45,6 +45,14 @@ import { checkProtocolVersionGap } from '../utils/protocol-version-gap.js';
 // Reports; never refuses — the runtime still relocates, deliberately.
 import { findNavGroupDiagnostics } from '../utils/nav-contribution-groups.js';
 import type { NavContributionGroupDiagnostic } from '@objectstack/objectql';
+// [#18024] The permission-set name-collision check, shared with `os compile`.
+// Reports; never refuses — the runtime still drops the foreign set, correctly
+// (ADR-0086 D4); what was missing was the author hearing about it.
+import {
+  findPermissionSetNameCollisions,
+  formatPermissionSetNameCollisions,
+} from '../utils/permission-set-name-collisions.js';
+import type { PermissionSetNameCollisionDiagnostic } from '@objectstack/plugin-security';
 
 export default class Validate extends Command {
   static override description =
@@ -135,6 +143,10 @@ export default class Validate extends Command {
     // validate does not also report, and the two commands being one wall with
     // two doors is the #4409 / #4463 discipline this list already follows.
     let navGroupWarnings: NavContributionGroupDiagnostic[] = [];
+    // [#18024] Computed HERE as well as in `os compile`, and for the same
+    // reason the line above it gives: the #11727 residue pin asserts that
+    // nothing rides in build's `warnings` that validate does not also report.
+    let permissionSetCollisionWarnings: PermissionSetNameCollisionDiagnostic[] = [];
     const warningsSoFar = () => [
       ...ruleAdvisories,
       ...docWarnings,
@@ -149,6 +161,8 @@ export default class Validate extends Command {
       // end and the pin keeps guarding exactly what it was written to guard.
       // ⛔ Do not "fix" that pin by loosening its regex.
       ...navGroupWarnings,
+      // [#18024] APPENDED for the same reason, one member later.
+      ...permissionSetCollisionWarnings,
     ];
     // [#12125] The ADR-0087 D2 conversion notices, hoisted for the SAME reason
     // and under the SAME ruling as the five lists above — one field over. The
@@ -394,6 +408,28 @@ export default class Validate extends Command {
         printBulletList(
           navGroupWarnings.map((d) => `[${d.code}] ${d.message} Fix: ${d.fix}`),
           { noun: 'navigation-contribution diagnostic' },
+        );
+      }
+
+      // [#18024] Permission sets declared under a name another package in this
+      //     same compilation unit already owns. Reports, never refuses, and
+      //     ⛔ changes nothing about the skip: refusing to write into a foreign
+      //     row is correct under ADR-0086 D4 and unchanged — the whole declared
+      //     set is dropped at runtime and until now no door said so before the
+      //     deployment. A name owned by a package some OTHER artifact installed
+      //     is NOT reported: that is the cross-artifact case a build cannot see.
+      permissionSetCollisionWarnings =
+        await findPermissionSetNameCollisions(result.data as Record<string, unknown>);
+      if (permissionSetCollisionWarnings.length > 0 && !flags.json) {
+        console.log('');
+        printWarning(
+          `Permission sets declared under a name another package in this artifact owns ` +
+            `(${permissionSetCollisionWarnings.length}) — at runtime the ENTIRE declared set is ` +
+            `dropped, not merged (ADR-0086 D4)`,
+        );
+        printBulletList(
+          await formatPermissionSetNameCollisions(permissionSetCollisionWarnings),
+          { noun: 'permission-set collision diagnostic' },
         );
       }
 

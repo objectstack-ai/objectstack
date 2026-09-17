@@ -62,6 +62,12 @@ import {
   RETIRED_DEFS_BY_MAJOR,
   RETIRED_KEYS_BY_MAJOR,
 } from '../src/migrations/registry';
+// Read ONLY to keep the #17356 fixture honest about which SET its root lives in
+// — never to assert gate behaviour, which is read off the spawned run's output.
+import {
+  listMetadataTypeSchemaTypes,
+  listUnregisteredKindSchemaTypes,
+} from '../src/kernel/metadata-type-schemas';
 import {
   AUTHORABLE_SURFACE_DIR_NAME,
   SCHEMA_MANIFEST_DIR_NAME,
@@ -496,7 +502,7 @@ afterAll(() => {
   if (sharedSandbox) fs.rmSync(sandboxRoot(sharedSandbox), { recursive: true, force: true });
 });
 
-function run(args: string[] = []): { status: number; output: string } {
+function run(args: string[] = [], extraEnv: NodeJS.ProcessEnv = {}): { status: number; output: string } {
   const r = spawnSync(TSX, [script, ...args], {
     cwd: sandbox,
     encoding: 'utf8',
@@ -505,10 +511,28 @@ function run(args: string[] = []): { status: number; output: string } {
     // The generator shells out to git itself (`merge-base`, `cat-file`, a
     // `--depth=1` fetch), so the fixture's isolation has to reach its children
     // too — a `GIT_DIR` inherited here would point them at another repo (#9068).
-    env: HERMETIC_ENV,
+    env: { ...HERMETIC_ENV, ...extraEnv },
   });
   return { status: r.status ?? -1, output: `${r.stdout ?? ''}${r.stderr ?? ''}` };
 }
+
+/**
+ * How `gen:schema` and `check:authorable-surface` actually run — both package
+ * scripts export `OS_EAGER_SCHEMAS=1`, so `lazySchema()` returns the real schema
+ * and every def key holds the instance the BFS walks.
+ *
+ * Left OFF by default, because it is: this file's other cases pin the gate's
+ * reporting and its side effects, which the flag does not touch, and turning it
+ * on for all of them would change a graph shape they were written against. But a
+ * REACHABILITY case cannot be indifferent to it. Without the flag `lazySchema()`
+ * hands back a Proxy, `zodByDefKey` holds the Proxy while the walk visits the
+ * resolved target, and a def that IS a root's own child resolves through the
+ * derived-clone bridge instead of by identity — 'reachable' either way, so the
+ * gate's verdict is the same, but it is not the closure CI computes and
+ * `reachableVia()` never answers 'root-graph'. #17356's acceptance is stated in
+ * that vocabulary, so the pin below reads both.
+ */
+const EAGER_SCHEMAS_ENV: NodeJS.ProcessEnv = { OS_EAGER_SCHEMAS: '1' };
 
 /** Seed the sandbox manifest shards from the committed set; returns the bytes. */
 function seedManifest(mutate: (schemas: string[]) => string[]): string {
@@ -957,6 +981,29 @@ const DELETED_LEAF_COLLIDER = `data/Object:${DELETED_LEAF_COLLIDER_LEAF} [RETIRE
  *  envelope no metadata document is ever parsed against (the issue's own
  *  over-collection example). */
 const DELETED_UNREACHABLE = 'api/SessionResponse:zzOverCollected4650';
+/** #17356's pin. A def whose ONLY root is an UNREGISTERED KIND — `connector`,
+ *  bound in `UNREGISTERED_KIND_SCHEMAS` by #6245 and deliberately absent from
+ *  `listMetadataTypeSchemaTypes()`. `integration/DataSyncConfig` sits two hops
+ *  from that root (`connector.syncConfig`, unwrapped once through `optional`),
+ *  and `stack.connectors[]` / `PUT /api/v1/meta/connector/:name` both parse a
+ *  real metadata document through it.
+ *
+ *  Until #17356 the gate built its roots from `listMetadataTypeSchemaTypes()`
+ *  alone, so this def read `null` and check (c) proof 2 WAIVED a bare deletion
+ *  of its baseline line as "over-collection, never parsed against a metadata
+ *  document" — the false "unreachable" the #4650 docblock names as the
+ *  dangerous direction. Measured on `main` at ca7886047b27 by deleting
+ *  `integration/DataSyncConfig:timestampField` from both the schema and the
+ *  baseline: `gen:schema` exit 0, with the proof-2 line printed.
+ *
+ *  The prop is synthetic for the reason every fixture here is: check (c) only
+ *  ever sees a key the build STOPPED emitting, and the def is judged by its
+ *  DEF half (`key.slice(0, key.indexOf(':'))`), so a synthetic leaf under the
+ *  real def runs the identical code path as the real deletion did. */
+const DELETED_VIA_UNREGISTERED_KIND_DEF = 'integration/DataSyncConfig';
+const DELETED_VIA_UNREGISTERED_KIND = `${DELETED_VIA_UNREGISTERED_KIND_DEF}:zzOnlyRootIsAnUnregisteredKind17356`;
+/** The unregistered kind that def's only root lives in. */
+const UNREGISTERED_KIND_ROOT = 'connector';
 /** Def the build no longer emits at all — the literal #4643 cluster. */
 const DELETED_GONE_DEF = ['identity/Session:userId', 'identity/Session:token'];
 /** Aged-out tombstone. Since #5898 the proof is a DECLARATION, not a clause
@@ -990,6 +1037,7 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       DELETED_UNREGISTERED,
       DELETED_LEAF_COLLIDER,
       DELETED_UNREACHABLE,
+      DELETED_VIA_UNREGISTERED_KIND,
       ...DELETED_GONE_DEF,
       DELETED_AGED,
       DELETED_BY_RENAME,
@@ -1023,6 +1071,26 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       Object.values(RETIRED_KEYS_BY_MAJOR).flat(),
       `${DELETED_LEAF_COLLIDER} is now declared for real — the pin needs an UNdeclared key`,
     ).not.toContain(DELETED_LEAF_COLLIDER.replace(RETIRED_MARK, ''));
+    // #17356's fixture is only a pin while its def's root is still an
+    // UNREGISTERED kind. Both halves are loud here: enrol `connector` into the
+    // registered set (reversing #6245) and the test below still passes while
+    // asserting nothing about this gate's own root union — the exact way a pin
+    // goes quiet. This pair is also acceptance 4 of the card, stated where it
+    // fails rather than where it is believed.
+    expect(
+      listMetadataTypeSchemaTypes(),
+      `'${UNREGISTERED_KIND_ROOT}' is now a REGISTERED metadata type — #6245's boundary moved, ` +
+        `so the #17356 fixture no longer models a def rooted only in UNREGISTERED_KIND_SCHEMAS`,
+    ).not.toContain(UNREGISTERED_KIND_ROOT);
+    expect(
+      listUnregisteredKindSchemaTypes(),
+      `'${UNREGISTERED_KIND_ROOT}' left UNREGISTERED_KIND_SCHEMAS — re-pick the fixture's root`,
+    ).toContain(UNREGISTERED_KIND_ROOT);
+    expect(
+      keys.some((k) => k.startsWith(`${DELETED_VIA_UNREGISTERED_KIND_DEF}:`)),
+      `${DELETED_VIA_UNREGISTERED_KIND_DEF} is no longer emitted with authorable keys — check (c) ` +
+        `would route this fixture to the vanished-def proof instead; re-pick the def`,
+    ).toBe(true);
     // The manifest ratchet runs first; keep it current so every run reaches (c).
     seedManifest((s) => s);
   });
@@ -1135,6 +1203,72 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       expect(output).toContain('json-schema.manifest/ (#2978)');
       expect(readSurface()).toBe(canonical);
       expect(status).toBe(0);
+    },
+  );
+
+  it(
+    '#17356 — a def rooted only in an UNREGISTERED kind is reachable, and a genuinely unreachable one still is not',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // BOTH directions in ONE run, because either alone is satisfiable by a
+      // gate that is simply wrong in the other direction: "always reachable"
+      // passes the first assertion and destroys proof 2, "always unreachable"
+      // passes the second and restores the defect.
+      //
+      // The defect: `computeSurfaceReachability()` built its roots from
+      // `listMetadataTypeSchemaTypes()`, which per #6245 deliberately does not
+      // enumerate `UNREGISTERED_KIND_SCHEMAS`. `connector` lives there, so the
+      // BFS never started from it, `integration/DataSyncConfig` read `null`,
+      // and a bare deletion of one of its baseline lines was waived as
+      // over-collection — for a def `stack.connectors[]` parses on every boot.
+      // The gate now enumerates its own reachability root union; the KIND
+      // vocabulary `listMetadataTypeSchemaTypes()` answers is untouched (the
+      // `beforeAll` guard above asserts that half).
+      seedBase((s) => [...s, DELETED_VIA_UNREGISTERED_KIND, DELETED_UNREACHABLE].sort());
+      const canonical = seedSurface((s) => s);
+
+      const rx = (key: string, tail: string): RegExp =>
+        new RegExp(`${key.replace(/[/$]/g, '\\$&')} — ${tail}`);
+
+      // Read the gate as CI runs it FIRST — `gen:schema` exports
+      // OS_EAGER_SCHEMAS=1, and only there does the card's acceptance sentence
+      // ("answers a root-graph hit rather than null") have a literal reading.
+      const eager = run(['--check'], EAGER_SCHEMAS_ENV);
+
+      // Direction 1 — the unregistered-kind root is a root: no waiver, and the
+      // verdict names the reason a reader has to act on (the entry was LIVE).
+      expect(eager.status).toBe(1);
+      expect(eager.output).toContain('authorable baseline line(s) were deleted without proof (#4650)');
+      expect(eager.output).toMatch(
+        rx(DELETED_VIA_UNREGISTERED_KIND, 'def reachable from the metadata-type roots; .*was LIVE'),
+      );
+      // Specifically NOT the proof-2 waiver, for this key. Asserting the absence
+      // is the pin: narrow the roots back to `listMetadataTypeSchemaTypes()` and
+      // the run exits 0 printing exactly the string below.
+      expect(eager.output).not.toMatch(rx(DELETED_VIA_UNREGISTERED_KIND, 'def not reachable from the'));
+
+      // Direction 2 — conservatism is not turned around. A REST response
+      // envelope no metadata document is parsed against still reads unreachable
+      // and still carries its own proof, in this same run.
+      expect(eager.output).toContain('carry their own proof (#4650)');
+      expect(eager.output).toMatch(rx(DELETED_UNREACHABLE, 'def not reachable from the \\d+ metadata-type roots'));
+      // The waiver message names all three sources of the union it computed, so
+      // a reader judging a waiver is not reading the pre-#17356 claim that the
+      // roots are the REGISTERED set.
+      expect(eager.output).toContain('BUILTIN_METADATA_TYPE_SCHEMAS + EXTRA_METADATA_TYPE_SCHEMAS');
+      expect(eager.output).toContain('UNREGISTERED_KIND_SCHEMAS');
+
+      // Same two directions under the lazy-Proxy graph, where the def resolves
+      // through the derived-clone bridge rather than by identity. The VERDICT is
+      // what this gate acts on, so it is the verdict that is pinned in both
+      // regimes; the wording differs and is deliberately not asserted here.
+      const lazy = run(['--check']);
+      expect(lazy.status).toBe(1);
+      expect(lazy.output).toMatch(rx(DELETED_VIA_UNREGISTERED_KIND, 'def .*was LIVE \\(never tombstoned\\)'));
+      expect(lazy.output).not.toMatch(rx(DELETED_VIA_UNREGISTERED_KIND, 'def not reachable from the'));
+      expect(lazy.output).toMatch(rx(DELETED_UNREACHABLE, 'def not reachable from the \\d+ metadata-type roots'));
+
+      expect(readSurface()).toBe(canonical);
     },
   );
 
