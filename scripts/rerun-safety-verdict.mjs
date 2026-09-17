@@ -54,6 +54,8 @@
 
 import { readFileSync } from 'node:fs';
 
+import { isEntrypoint } from './invoked-as.mjs';
+
 const STALL_EXIT_CODE = 75; // EX_TEMPFAIL -- matches run-with-stall-guard.mjs
 
 // ---------------------------------------------------------------------------
@@ -500,4 +502,10 @@ function main(argv) {
   return v.exit;
 }
 
-process.exitCode = main(process.argv.slice(2));
+// This module EXPORTS `failingTasks` / `verdict` / `renderVerdict` so the
+// workflow's verdict step and any future reader can use them, so its top level
+// must not run on import -- an importer would otherwise be ended mid-import by
+// the dispatch below (`pnpm check:entry-guard`).
+if (isEntrypoint(import.meta.url)) {
+  process.exitCode = main(process.argv.slice(2));
+}
