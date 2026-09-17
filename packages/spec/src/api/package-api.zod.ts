@@ -324,21 +324,61 @@ export type PackageInstallRequestParsed = z.infer<typeof PackageInstallRequestSc
  * ## Why the bare form is declared rather than dropped
  *
  * The door reads `const manifest = body.manifest || body`, so a bare manifest
- * IS the body it accepts, and first-party callers send it that way — the
+ * IS a body form it accepts, and first-party callers send it that way — the
  * runtime's own door drives (`package-door-namespace-conflict-code.test.ts`,
  * `domain-handler-registry.test.ts`) post a manifest with no wrapper at all. A
  * contract naming only the wrapped form would refuse bodies this door answers
  * `201` to, which is the defect this declaration exists to stop repeating.
  *
- * ## ⛔ A union of two whole CLOSED forms, never a tolerant shape
+ * ⚠️ What those two drives post is NOT covered by this branch, and saying so
+ * is the point. Measured: `{ id, name: id, namespace, version: '1.0.0' }` and
+ * `{ id: 'pkg-a', name: 'A' }` are both refused here (`invalid_union`) because
+ * neither carries `type`, and the second carries no `version` either. They are
+ * bare in FORM and incomplete in CONTENT — the form is declared, the content
+ * is part of the residual below, and they are pinned as REFUSED in
+ * `package-api.test.ts` rather than dressed up as green fixtures.
  *
- * This is the same discipline {@link InstalledPackageAtEitherStageSchema}
- * records on the read side, and for the same reason: every parse is a FULL
- * parse of ONE coherent form. The two are disjoint by construction —
- * `ManifestSchema` is a `strictObject` with no `manifest` key, so a wrapped
- * body can never fall through to the bare branch, and a bare manifest has no
- * `manifest` key, so it can never satisfy the wrapped branch. A body belonging
- * to neither is refused by both and therefore by this schema.
+ * ## The two branches are disjoint — but only ONE of them is closed
+ *
+ * Every parse is a FULL parse of ONE coherent form, the discipline
+ * {@link InstalledPackageAtEitherStageSchema} records on the read side. The
+ * two are disjoint by construction — `ManifestSchema` is a `strictObject`
+ * with no `manifest` key, so a wrapped body can never fall through to the bare
+ * branch, and a bare manifest has no `manifest` key, so it can never satisfy
+ * the wrapped branch.
+ *
+ * ⛔ Closedness, however, is NOT symmetric, and an earlier revision of this
+ * docblock claimed it was. {@link PackageInstallRequestSchema} is a plain
+ * `z.object`, i.e. STRIP mode: `{ manifest, bogus: 1 }` parses green and comes
+ * out with `bogus` GONE. Only the bare branch is closed, because
+ * `ManifestSchema` is a `strictObject` and refuses an unknown key by name.
+ *
+ * That asymmetry is the door's own behaviour, not a gap: the handler reads
+ * `body.manifest`, `body.settings`, `body.enableOnInstall` and `body.overwrite`
+ * and ignores every other key, so dropping them is what it does with them.
+ * ⛔ Do NOT close the wrapped branch with `.strict()` — that would refuse
+ * bodies this door answers `201` to, which is the one direction this binding
+ * may never move (ruling A). The pin lives in `package-api.test.ts`.
+ *
+ * ## What this declaration does NOT describe — the measured residual
+ *
+ * This is a SUBSET description of the live door, deliberately. Measured
+ * through `HttpDispatcher.handlePackages`, the door additionally answers `201`
+ * to five classes this schema refuses:
+ *
+ * 1. a manifest missing `type` and/or `version` (both door drives above);
+ * 2. unknown keys on either form — refused by name on the bare branch,
+ *    silently dropped on the wrapped one, `201` either way;
+ * 3. a string-typed `enableOnInstall` / `overwrite` — the door compares
+ *    against `true`/`false` and `'true'`, so `'false'` installs ENABLED and a
+ *    body-side `'true'` overwrite is treated as ABSENT;
+ * 4. install options spelled on the BARE form — ignored, never honoured;
+ * 5. and it answers `400` in the OPPOSITE direction, to a whitespace-only `id`
+ *    this declaration admits (the door trims before keying).
+ *
+ * ⛔ None of these is a licence to relax `ManifestSchema` or either branch —
+ * the residual is RECORDED here so a reader is not told the declaration is the
+ * door, and closing it is its own decision with its own card.
  *
  * ⚠️ The bare form carries NO install options: `settings`, `enableOnInstall`
  * and `overwrite` are not manifest keys and `ManifestSchema`'s strict close

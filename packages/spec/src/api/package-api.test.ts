@@ -644,7 +644,10 @@ describe('the read-API responses are declared at both stages (#17431)', () => {
  *
  * Every case below is a body a first-party caller really sends, or the
  * published example a reader really copies. ⛔ None is constructed to fit the
- * schema; each names where it was taken from.
+ * schema; each names where it was taken from — and where a real caller's body
+ * is REFUSED, that is what is pinned, under a name that says so. A fixture
+ * edited until it parses is the failure mode this block exists to prevent:
+ * it reports agreement between a declaration and traffic that never met.
  */
 describe('#18058 — install contract bound to the live door', () => {
   /** The client SDK's pinned manifest — `packages/client/src/client.test.ts`. */
@@ -704,14 +707,16 @@ describe('#18058 — install contract bound to the live door', () => {
     });
   });
 
-  describe('the two declared body forms, and nothing else', () => {
+  describe('the two declared body forms — disjoint, and only ONE of them closed', () => {
     it('parses the WRAPPED form the client SDK sends', () => {
       const body = { manifest: SDK_MANIFEST, settings: undefined, enableOnInstall: true };
       expect(PackageInstallBodySchema.safeParse(body).success).toBe(true);
     });
 
-    it('parses the BARE manifest form the runtime door drives send', () => {
-      // `package-door-namespace-conflict-code.test.ts` posts exactly this.
+    it('parses a COMPLETE manifest posted BARE — the form the door reads as `body.manifest || body`', () => {
+      // The bare form's green fixture is a manifest that is complete, not a
+      // transcription of any one caller: the callers that post bare bodies post
+      // INCOMPLETE ones, and those are pinned as refused in the block below.
       const bare = { id: 'com.acme.crm', name: 'com.acme.crm', namespace: 'crm', version: '1.0.0', type: 'app' };
       expect(PackageInstallBodySchema.safeParse(bare).success).toBe(true);
     });
@@ -732,6 +737,86 @@ describe('#18058 — install contract bound to the live door', () => {
     it('the BARE form carries no install options — they are refused, never dropped', () => {
       const verdict = PackageInstallBodySchema.safeParse({ ...SDK_MANIFEST, overwrite: true });
       expect(verdict.success).toBe(false);
+    });
+
+    /**
+     * ⭐ The WRAPPED branch is `z.object`, i.e. STRIP mode — it is NOT closed.
+     *
+     * An earlier revision of the docblock claimed both branches were closed.
+     * They are not, and the asymmetry is the DOOR's behaviour: the handler
+     * reads `manifest`, `settings`, `enableOnInstall` and `overwrite` and
+     * ignores every other key, so dropping an unknown one is exactly what it
+     * does with it. ⛔ Closing this branch with `.strict()` would refuse bodies
+     * the door answers `201` to — the direction ruling A forbids — so what is
+     * pinned here is the drop, not a refusal.
+     */
+    it('the WRAPPED branch DROPS an unknown key rather than refusing it', () => {
+      const verdict = PackageInstallBodySchema.safeParse({ manifest: SDK_MANIFEST, bogus: 1 });
+      expect(verdict.success).toBe(true);
+      expect(verdict.data && 'bogus' in verdict.data).toBe(false);
+    });
+
+    it('lit control: the BARE branch IS closed — the same unknown key is refused there', () => {
+      // `ManifestSchema` is a `strictObject`, so this is a refusal, not a drop.
+      expect(PackageInstallBodySchema.safeParse({ ...SDK_MANIFEST, bogus: 1 }).success).toBe(false);
+    });
+  });
+
+  /**
+   * [#18058 F2] The bodies the runtime's own door drives really post — pinned
+   * as REFUSED, because that is what they are.
+   *
+   * These two drives were cited as the evidence for KEEPING the bare form, and
+   * an earlier revision transcribed the first of them with `type: 'app'` ADDED
+   * under a comment claiming it posted "exactly this" — the one key that
+   * decides the parse. The form they use is declared; the manifests they send
+   * are incomplete, so every measured bare-form sender sits in the residual.
+   * ⛔ The remedy is to SAY that, not to relax `ManifestSchema`.
+   */
+  describe('the measured bare-form senders are the RESIDUAL, not green fixtures', () => {
+    /** `packages/runtime/src/package-door-namespace-conflict-code.test.ts:83` — no `type`. */
+    const DOOR_DRIVE_CONFLICT = { id: 'com.acme.crm', name: 'com.acme.crm', namespace: 'crm', version: '1.0.0' };
+    /** `packages/runtime/src/domain-handler-registry.test.ts:582` — no `type`, no `version`. */
+    const DOOR_DRIVE_REGISTRY = { id: 'pkg-a', name: 'A' };
+
+    it('the namespace-conflict drive is REFUSED — it carries no `type`', () => {
+      expect(PackageInstallBodySchema.safeParse(DOOR_DRIVE_CONFLICT).success).toBe(false);
+    });
+
+    it('the domain-handler-registry drive is REFUSED — no `type`, no `version`', () => {
+      expect(PackageInstallBodySchema.safeParse(DOOR_DRIVE_REGISTRY).success).toBe(false);
+    });
+
+    it('the missing keys are what decide it — completing each drive turns it green', () => {
+      // The control that makes the two refusals above a measurement of the
+      // MANIFEST's required keys rather than of the bare branch existing at all.
+      expect(PackageInstallBodySchema.safeParse({ ...DOOR_DRIVE_CONFLICT, type: 'app' }).success).toBe(true);
+      expect(PackageInstallBodySchema.safeParse({
+        ...DOOR_DRIVE_REGISTRY, version: '1.0.0', type: 'app',
+      }).success).toBe(true);
+    });
+
+    it('the door answers 201 to all of them anyway — so this declaration is a SUBSET of the door', () => {
+      // Pinned as prose-with-a-parse rather than a live HTTP drive: the door
+      // lives in `@objectstack/runtime`, which this package cannot import.
+      // `packages/runtime/src/domains/packages-install-enable-on-install.test.ts`
+      // and the two drive files above are where the 201s are measured.
+      for (const residual of [
+        DOOR_DRIVE_CONFLICT,
+        DOOR_DRIVE_REGISTRY,
+        { ...SDK_MANIFEST, label: 'an unknown key on the bare form' },
+        { ...SDK_MANIFEST, enableOnInstall: false },
+        { manifest: SDK_MANIFEST, enableOnInstall: 'false' },
+        { manifest: SDK_MANIFEST, overwrite: 'true' },
+      ]) {
+        expect(PackageInstallBodySchema.safeParse(residual).success).toBe(false);
+      }
+    });
+
+    it('and the residual runs the OTHER way too — a whitespace-only `id` parses here and the door answers 400', () => {
+      // `handlePackages` trims before keying and refuses an empty id, so this
+      // is the one class where the declaration is WIDER than the door.
+      expect(PackageInstallBodySchema.safeParse({ manifest: { ...SDK_MANIFEST, id: '   ' } }).success).toBe(true);
     });
   });
 

@@ -781,28 +781,46 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // is «declared ≠ enforced» on a published option, the exact shape
             // Prime Directive #10 refuses.
             //
-            // Only `false` does anything: the declared default is `true`, and
-            // `installPackage` already lands a package enabled, so the true
-            // case is the no-op it declares. The disable goes through the SAME
-            // two calls `PATCH /packages/:id/disable` uses — the registry flip
-            // and the durable `setPackageDisabled` write — so an install that
-            // asked to stay off is not silently re-enabled by the next restart.
+            // Only `false` moves the REGISTRY: the declared default is `true`
+            // and `installPackage` already lands a package enabled, so the true
+            // case needs no flip. The disable goes through the SAME call
+            // `PATCH /packages/:id/disable` uses.
             //
             // ⚠️ Read from the WRAPPED body alone. `manifest !== body` is this
             // handler's own test for which of the two declared body forms
             // arrived (`PackageInstallBodySchema`); in the BARE form the key
             // would be a manifest key, which `ManifestSchema`'s strict close
             // refuses by name — honouring it there would enforce something no
-            // schema declares.
+            // schema declares. So a bare body always installs at the default.
             const wrapped = manifest !== body;
-            if (wrapped && body?.enableOnInstall === false) {
+            const installDisabled = wrapped && body?.enableOnInstall === false;
+            if (installDisabled) {
                 const disabled = registry.disablePackage(pkgId);
                 if (disabled) pkg = disabled;
-                try {
-                    setPackageDisabled(_context?.environmentId, pkgId, true);
-                } catch (err) {
-                    console.warn('[handlePackages] failed to persist enableOnInstall:false', { id: pkgId, error: (err as Error)?.message });
-                }
+            }
+            // ⭐ The DURABLE half, and it is written on BOTH arms — the defect
+            // this branch shipped with was writing only `true`. `POST /packages`
+            // is a CREATE that an already-installed id reaches through
+            // `overwrite`, and `DELETE /packages/:id` never clears this record
+            // either, so the id in front of us may already be listed as
+            // disabled from an earlier install. An install that ANSWERS
+            // `enabled: true` and leaves `disabled` on disk is the silent
+            // durability defect Prime Directive #10 and the degradation-log
+            // rules both name: correct on the wire, wrong after a restart,
+            // because `SchemaRegistry.installPackage` re-reads
+            // `initialDisabledPackageIds` at boot and installs it DISABLED.
+            //
+            // Written unconditionally rather than only on the overwrite path:
+            // "was this id installed a moment ago" is not the question —
+            // "does the durable record agree with the row this door just
+            // returned" is, and that is one call either way. It is the same
+            // `false` call `PATCH /packages/:id/enable` makes below, in the
+            // same best-effort try/catch: the in-memory install already
+            // succeeded, so a state-file failure must not turn a 201 into a 500.
+            try {
+                setPackageDisabled(_context?.environmentId, pkgId, installDisabled);
+            } catch (err) {
+                console.warn('[handlePackages] failed to persist enableOnInstall', { id: pkgId, disabled: installDisabled, error: (err as Error)?.message });
             }
             const res = deps.success(pkg);
             res.status = 201;

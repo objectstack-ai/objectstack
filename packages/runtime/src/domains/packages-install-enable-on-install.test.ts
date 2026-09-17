@@ -167,3 +167,118 @@ describe('#18058 — the install door honours `enableOnInstall`', () => {
         expect(persistedDisabled().has('com.acme.bare')).toBe(false);
     });
 });
+
+/**
+ * [#18058 F1] The DURABLE half of the declared default, on the path the cases
+ * above structurally cannot reach: an id that is ALREADY INSTALLED.
+ *
+ * ## The defect these pin shut
+ *
+ * The handler wrote `setPackageDisabled(env, id, true)` and never `false`, so
+ * the three records this door is held to only agreed while every id was fresh:
+ *
+ * ```text
+ * POST {manifest, overwrite:true, enableOnInstall:false}  → 201, disabled, state file lists the id
+ * POST {manifest, overwrite:true}         (flag absent)   → 201, enabled:true, registry true,
+ *                                                           and the state file STILL lists it
+ * ```
+ *
+ * Nothing is red at that moment. The loss surfaces one restart later:
+ * `SchemaRegistry.installPackage` reads `initialDisabledPackageIds`, finds the
+ * id, and re-installs the package DISABLED — a door that answered correctly on
+ * the wire and wrongly on disk. `PATCH /packages/:id/enable` has always made
+ * exactly the `false` call these cases demand; the install door did not.
+ *
+ * ⚠️ The fix is deliberately UNCONDITIONAL rather than scoped to the overwrite
+ * path: `DELETE /packages/:id` does not clear the durable disable either, so a
+ * disable → uninstall → re-install lands on a FRESH registry id whose durable
+ * record still says disabled. Persisting the state the door actually returned,
+ * every time, is one call that cannot be out of step with the row.
+ */
+describe('#18058 — a re-install persists the state it RETURNS, not just a disable', () => {
+    let registry: SchemaRegistry;
+    let dispatcher: HttpDispatcher;
+
+    beforeEach(() => {
+        registry = freshRegistry();
+        dispatcher = makeDoor(registry);
+    });
+
+    /** Install once with `enableOnInstall: false`, and prove the disable really landed. */
+    const installDisabled = async (id: string, namespace: string) => {
+        const first = await install(dispatcher, {
+            manifest: manifest(id, namespace),
+            overwrite: true,
+            enableOnInstall: false,
+        });
+        expect(first.response?.status).toBe(201);
+        expect(first.response?.body?.data?.enabled, 'precondition: the first install really disabled it').toBe(false);
+        expect(persistedDisabled().has(id), 'precondition: the disable really reached disk').toBe(true);
+    };
+
+    it('re-installing with the flag ABSENT clears the durable disable — the declared default is `true`', async () => {
+        const id = 'com.acme.reinstall.absent';
+        await installDisabled(id, 'reinstallabsent');
+
+        const again = await install(dispatcher, { manifest: manifest(id, 'reinstallabsent'), overwrite: true });
+
+        expect(again.response?.status).toBe(201);
+        expect(again.response?.body?.data?.enabled, 'the row this door RETURNED').toBe(true);
+        expect(registry.getPackage(id)?.enabled, 'the registry the next read serves from').toBe(true);
+        // ⭐ The line this F item exists for: without it the next boot reads the
+        // stale id out of `initialDisabledPackageIds` and installs it DISABLED.
+        expect(
+            persistedDisabled().has(id),
+            'the durable state — a re-install that answered `enabled` must not leave `disabled` on disk',
+        ).toBe(false);
+    });
+
+    it('re-installing with `enableOnInstall: true` clears the durable disable', async () => {
+        const id = 'com.acme.reinstall.true';
+        await installDisabled(id, 'reinstalltrue');
+
+        const again = await install(dispatcher, {
+            manifest: manifest(id, 'reinstalltrue'),
+            overwrite: true,
+            enableOnInstall: true,
+        });
+
+        expect(again.response?.status).toBe(201);
+        expect(again.response?.body?.data?.enabled).toBe(true);
+        expect(registry.getPackage(id)?.enabled).toBe(true);
+        expect(persistedDisabled().has(id)).toBe(false);
+    });
+
+    it('a BARE re-install clears it too — that form cannot ask for `false`, so it installs enabled', async () => {
+        const id = 'com.acme.reinstall.bare';
+        await installDisabled(id, 'reinstallbare');
+
+        // No wrapper, so `enableOnInstall` is not a declared key here at all and
+        // the door installs at the default. The durable record must follow.
+        const again = await install(dispatcher, manifest(id, 'reinstallbare'));
+
+        expect(again.response?.status).toBe(409, 'the bare form reaches overwrite through the query string alone');
+
+        const forced = await dispatcher.handlePackages(
+            '', 'POST', manifest(id, 'reinstallbare'), { overwrite: 'true' }, PKG_ADMIN(),
+        );
+        expect(forced.response?.status).toBe(201);
+        expect(forced.response?.body?.data?.enabled).toBe(true);
+        expect(persistedDisabled().has(id)).toBe(false);
+    });
+
+    it('⛔ the disable direction is UNCHANGED — a re-install asking for `false` still persists it', async () => {
+        const id = 'com.acme.reinstall.stays-off';
+        await installDisabled(id, 'reinstallstaysoff');
+
+        const again = await install(dispatcher, {
+            manifest: manifest(id, 'reinstallstaysoff'),
+            overwrite: true,
+            enableOnInstall: false,
+        });
+
+        expect(again.response?.status).toBe(201);
+        expect(again.response?.body?.data?.enabled).toBe(false);
+        expect(persistedDisabled().has(id)).toBe(true);
+    });
+});
