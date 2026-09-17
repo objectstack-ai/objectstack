@@ -424,7 +424,7 @@ Trace sampling configuration
 | :--- | :--- | :--- | :--- |
 | **strategy** | `Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>` | ✅ | Strategy type |
 | **ratio** | `number` | optional |  |
-| **condition** | `Record<string, any> \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Condition for this strategy — structured filter or CEL predicate |
+| **condition** | `Record<string, any> \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Condition for this strategy — structured filter or CEL predicate |
 
 ### Nested Shape: `TraceSamplingConfig.rules[number]`
 

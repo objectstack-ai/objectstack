@@ -99,6 +99,7 @@
     "canonicalMetaUrlType": "src/meta-spelling/metadata-url-spelling.ts#canonicalMetaUrlType (function)",
     "cel": "src/shared/expression.zod.ts#cel (function)",
     "cron": "src/shared/expression.zod.ts#cron (function)",
+    "evaluatedExpressionUnionRefusal": "src/shared/expression.zod.ts#evaluatedExpressionUnionRefusal (function)",
     "expression": "src/shared/expression.zod.ts#expression (function)",
     "findClosestMatches": "src/shared/suggestions.zod.ts#findClosestMatches (function)",
     "formatSuggestion": "src/shared/suggestions.zod.ts#formatSuggestion (function)",

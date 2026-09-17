@@ -33,7 +33,7 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -106,7 +106,7 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -129,7 +129,7 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -146,7 +146,7 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -164,7 +164,7 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -182,7 +182,7 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -199,7 +199,7 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -216,7 +216,7 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -242,7 +242,7 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -333,7 +333,7 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -356,7 +356,7 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -378,7 +378,7 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -410,7 +410,7 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -433,7 +433,7 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -450,7 +450,7 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -468,7 +468,7 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -486,7 +486,7 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -503,7 +503,7 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -520,7 +520,7 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -546,7 +546,7 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -580,7 +580,7 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -603,7 +603,7 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -620,7 +620,7 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -638,7 +638,7 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -656,7 +656,7 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -673,7 +673,7 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -690,7 +690,7 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -716,7 +716,7 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -747,7 +747,7 @@ This schema accepts one of the following structures:
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -776,7 +776,7 @@ This schema accepts one of the following structures:
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -799,7 +799,7 @@ This schema accepts one of the following structures:
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -823,7 +823,7 @@ This schema accepts one of the following structures:
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -847,7 +847,7 @@ This schema accepts one of the following structures:
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -870,7 +870,7 @@ This schema accepts one of the following structures:
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -900,7 +900,7 @@ This schema accepts one of the following structures:
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -938,7 +938,7 @@ This schema accepts one of the following structures:
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -963,7 +963,7 @@ This schema accepts one of the following structures:
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -990,7 +990,7 @@ This schema accepts one of the following structures:
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -1013,7 +1013,7 @@ This schema accepts one of the following structures:
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -1035,7 +1035,7 @@ This schema accepts one of the following structures:
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
