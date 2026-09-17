@@ -480,7 +480,7 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
   // The block above asks "is this stamped organization still backed by a
   // membership?" and, until this card, asked it ONLY of an API key. A browser
   // session's `activeOrganizationId` reached `ctx.tenantId` unread: measured on
-  // a live `isolated` boot with the real cloud-private `Organizations` plugin,
+  // a live `isolated` boot with the real licence-gated `Organizations` plugin,
   // a session whose owner had been removed through better-auth's OWN
   // `/organization/remove-member` (driven by the org owner, 200, the
   // `sys_member` row really deleted) went on READING that organization's rows

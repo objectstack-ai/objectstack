@@ -89,6 +89,49 @@ const PUBLISHED_ENTRY = resolve(HERE, '../bin/run.js');
 const NEUTRALISER = resolve(HERE, 'fixtures/published-entry-auto-transpile-neutraliser.mjs');
 
 /**
+ * The ONE bound on a leg of this file, and the reason it is stated once (#18590).
+ *
+ * ## The defect this closes
+ *
+ * Every leg here boots a real, cold Node process running the published oclif
+ * entry and waits for it synchronously. Measured on an idle box, lock held,
+ * with the budget lifted so the numbers are costs and not verdicts:
+ *
+ *     NODE_ENV=development            3000ms
+ *     NODE_ENV=test                   2526ms
+ *     NODE_ENV=production             2742ms
+ *     CONTROL neutralised (dev)       3599ms
+ *     CONTROL neutralised (prod)      2467ms
+ *
+ * The `spawnSync` below already declares this file's real bound — 120s, chosen,
+ * and the same number the other spawning suites in this directory pin. But no
+ * leg named a vitest budget, so every one of them was ALSO measured against
+ * vitest's 5000ms DEFAULT, which nobody here chose. Against costs of 2.5-3.6s
+ * that is a margin thinner than the run-to-run variance on an idle machine, so
+ * WHICH leg reddens is decided by how busy the box is and by nothing this file
+ * tests. Both halves of that were measured: in `Rerun Safety` (the workflow
+ * that deliberately runs the whole suite twice on one runner) the three
+ * non-neutralised legs timed out while both CONTROL legs passed; locally, on a
+ * quiet box, the opposite happened — the neutralised CONTROL leg took 5710ms
+ * and was the only one to fail. Same file, same commit, disjoint casualties.
+ *
+ * ## ⛔ Why this is not "raise the timeout until it passes"
+ *
+ * That move hides a real failure, and this one cannot, because it raises no
+ * bound at all. The child is still killed by `spawnSync` at exactly the same
+ * 120s it was before; what is removed is a SECOND, lower, unchosen bound that
+ * was shadowing the chosen one. A leg that genuinely hangs still dies at 120s —
+ * and now says so, see `runPublishedEntry`. Nor can a slow leg pass silently:
+ * vitest prints each leg's duration, and the numbers above are the record to
+ * compare against.
+ *
+ * ⛔ And it must not be tuned DOWN to "catch a slowdown". The 5000ms budget
+ * proved exactly what a too-tight budget proves: nothing about the code, and a
+ * red whose casualty list is a function of the runner's load.
+ */
+const CHILD_BUDGET_MS = 120_000;
+
+/**
  * The card's verbatim signature. Asserted as text rather than as an exit code
  * alone because an exit code says only THAT the run failed — this says the run
  * failed for the reason the card names.
@@ -136,21 +179,52 @@ afterAll(() => {
  * sets to pin tsx away from the CWD's tsconfig, and a developer running the
  * suite under that shim would otherwise inherit the very mitigation this file
  * is measuring the absence of.
+ *
+ * ## The reading that tells a HUNG child from a SLOW one (#18590)
+ *
+ * Under the 5000ms default both arrived as the same line — `Error: Test timed
+ * out in 5000ms`, attributed to the `it()` and naming nothing about the child,
+ * its environment or how long it actually ran. That is why ten nights of this
+ * file's red could be read as anything at all.
+ *
+ * `spawnSync` distinguishes them and always did: a child killed by its own
+ * `timeout` comes back with `error.code === 'ETIMEDOUT'` and `signal ===
+ * 'SIGTERM'`, where a slow-but-correct child comes back with a status. So the
+ * hung case is now raised BY NAME, with the env and the elapsed time in the
+ * message, and the slow case stays a pass whose duration vitest prints. ⛔ Do
+ * not fold this back into a bare timeout: the two outcomes needing to be told
+ * apart is the whole reason this file went unread for seventeen nights.
  */
 function runPublishedEntry(
   env: Record<string, string | undefined>,
   options: { neutralise?: boolean } = {},
 ) {
+  const startedAt = Date.now();
   const result = spawnSync(
     process.execPath,
     [...(options.neutralise ? [`--import=${NEUTRALISER}`] : []), PUBLISHED_ENTRY, '--version'],
     {
       cwd: fixtureCwd,
       encoding: 'utf8',
-      timeout: 120_000,
+      timeout: CHILD_BUDGET_MS,
       env: childEnv({ TSX_TSCONFIG_PATH: undefined, ...env }),
     },
   );
+  const elapsedMs = Date.now() - startedAt;
+
+  const killedByOwnBound =
+    (result.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT' ||
+    result.signal === 'SIGTERM';
+  if (killedByOwnBound) {
+    throw new Error(
+      `The published entry did not exit within its own ${CHILD_BUDGET_MS}ms bound and was killed ` +
+        `(signal=${result.signal ?? 'none'}, code=${(result.error as NodeJS.ErrnoException | undefined)?.code ?? 'none'}, ` +
+        `elapsed=${elapsedMs}ms, neutralised=${options.neutralise === true}, env=${JSON.stringify(env)}). ` +
+        'This is a HUNG child, not a slow one — a slow child passes and vitest prints its duration. ' +
+        'Do not respond by raising a budget: read what the entry is waiting on.',
+    );
+  }
+
   return { status: result.status, output: `${result.stdout ?? ''}${result.stderr ?? ''}` };
 }
 
@@ -160,20 +234,20 @@ describe('#12271 - the published entry does not reroute to src/ on an ambient NO
     expect(output).not.toContain(CARD_SIGNATURE);
     expect(output).not.toContain(SOURCE_COMMANDS);
     expect(status).toBe(0);
-  });
+  }, CHILD_BUDGET_MS);
 
   it('resolves commands from dist/ under an ambient NODE_ENV=test', () => {
     const { status, output } = runPublishedEntry({ NODE_ENV: 'test' });
     expect(output).not.toContain(CARD_SIGNATURE);
     expect(output).not.toContain(SOURCE_COMMANDS);
     expect(status).toBe(0);
-  });
+  }, CHILD_BUDGET_MS);
 
   it('NODE_ENV=production stays green, the leg that was never broken', () => {
     const { status, output } = runPublishedEntry({ NODE_ENV: 'production' });
     expect(output).not.toContain(CARD_SIGNATURE);
     expect(status).toBe(0);
-  });
+  }, CHILD_BUDGET_MS);
 
   /**
    * THE CONTROL. If this ever goes green the three assertions above have
@@ -185,7 +259,7 @@ describe('#12271 - the published entry does not reroute to src/ on an ambient NO
     expect(output).toContain(CARD_SIGNATURE);
     expect(output).toContain(SOURCE_COMMANDS);
     expect(status).not.toBe(0);
-  });
+  }, CHILD_BUDGET_MS);
 
   /**
    * The second half of the control: with the declaration neutralised, the only
@@ -197,5 +271,5 @@ describe('#12271 - the published entry does not reroute to src/ on an ambient NO
     const { status, output } = runPublishedEntry({ NODE_ENV: 'production' }, { neutralise: true });
     expect(output).not.toContain(CARD_SIGNATURE);
     expect(status).toBe(0);
-  });
+  }, CHILD_BUDGET_MS);
 });
