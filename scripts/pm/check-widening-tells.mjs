@@ -643,11 +643,13 @@
  *
  * ⚠️ The quiet direction this does NOT close, measured on both boards so the
  * next reader meets it here instead of rediscovering it: a FILE-LOCAL declaring
- * factory. Both trees mint them — `placeholderFree(` (23 key lines),
- * `strictIdent(` (12), `emptyProps(` (9) at objectstack 6dfa3ea77;
+ * factory. Both trees mint them — `strictIdent(` (12 key lines),
+ * `emptyProps(` (9), `strictIdentOrNull(` (8) at objectstack 30bac2880;
  * `chatbotRequestBodyArm(` (2), `retiredDeclarativeKanbanKey(` (1) at objectui
  * 15f01223d — and a list of shared, exported helpers cannot name a factory
- * private to one file. ⭐ The OVERTURN CONDITION, written down so it needs no
+ * private to one file. (⚠️ This paragraph named `placeholderFree(` at 6dfa3ea77
+ * and was wrong about it: see #18702's section for the measurement that made it
+ * a ROW rather than a resolver case.) ⭐ The OVERTURN CONDITION, written down so it needs no
  * second discussion: a name-shaped heuristic (`*Refusal(` / `*Arm(` / `*Key(`)
  * is ⛔ refused, because it would recognise lines on evidence they do not carry;
  * what closes the class is a reading that resolves the factory's own value, and
@@ -807,7 +809,9 @@
  *
  *   `placeholderFree(`            23 key lines,  0 file-local — WRITABLE
  *                                 (`return schema.superRefine(…)`: it returns
- *                                 the schema it was handed)
+ *                                 the schema it was handed) ⇒ a
+ *                                 `SCHEMA_PROPERTY_FORMS` ROW, not a resolver
+ *                                 case: it is imported at every one of the 23
  *   `strictIdent(`                12 key lines, 12 file-local — WRITABLE
  *                                 (`z.string().regex(SNAKE_CASE)…`)
  *   `ruleArrayFilterError(`       11 key lines,  0 file-local — NOT A SCHEMA
@@ -834,17 +838,24 @@
  * nothing in the name says which — that is the measurement that retires the
  * name-shaped heuristic rather than merely declining it on principle.
  *
- * ⚠️ AND THE CARD'S OWN PROBE IS AN IMPORTED ONE — measured on the tip, not
+ * ⚠️ AND THE CARD'S OWN PROBE WAS NEVER FILE-LOCAL — measured on the tip, not
  * argued from the filing. `placeholderFree` is declared in
  * `packages/spec/src/data/driver/common.zod.ts` and IMPORTED at all 23 of its
- * key positions, `memory.zod.ts:9` included, so the card's probe line
- * (`snapshotPath: placeholderFree(z.string(), …)` on `memory.zod.ts`) is
- * BOUNDARY ONE, not the class this round closes. It exits 0 still — but no
- * longer in silence: the line is now reported by name, with its file:line and
- * the reason. ⇒ The class the card's TITLE names is closed over the 29
- * file-local key lines that carry a schema; the card's probe LINE is a shared,
- * exported helper absent from `SCHEMA_PROPERTY_FORMS`, which is #18560's
- * instrument and its own card.
+ * key positions, `memory.zod.ts:9` included, so no reading of ONE file could
+ * ever have reached the card's probe line and the resolver below is not what
+ * carries it. ⇒ TWO instruments, because the population is two populations:
+ * the class the card's TITLE names is closed by the resolver over the 29
+ * file-local key lines that carry a schema, and the card's probe LINE is closed
+ * by a `SCHEMA_PROPERTY_FORMS` ROW — #18560's instrument, used for what it is
+ * for, with its own counterfactual fixture carrying the filing probe verbatim.
+ *
+ * ⛔ And the row stops there. The other three factories the card names that are
+ * likewise IMPORTED — `ruleArrayFilterError(`, `INLINE_CREDENTIAL_REFUSED(` —
+ * and the two file-local ones that are not schemas — `objectBlockHistory(`,
+ * `belongsInConfig(` — return PROSE or a `$ZodErrorMap`, so rows for them would
+ * mint 38 false T1 positives. ⭐ Which instrument a factory belongs to is a
+ * fact about where it is DECLARED; whether it belongs to EITHER is a fact about
+ * what it RETURNS. Two questions, measured separately, ⛔ never one heuristic.
  *
  * ## The remedy with no reader — #17848, and a pin the shape never had
  *
@@ -1124,9 +1135,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the declared registry rows still exist in this tree': 4,
   '#17112 — the count is split: examined is not examinable': 23,
   '#17217 — the CLI can be told which board it judges': 22,
-  '#18560 — the declaring vocabulary is a NAMED list, every form pinned by a counterfactual fixture': 30,
+  '#18560 — the declaring vocabulary is a NAMED list, every form pinned by a counterfactual fixture': 32,
   '#18640 — an inline closed set RE-SPELLED at the same binding is not a set that gained a value': 20,
-  '#18702 — a declaring factory PRIVATE to one file, resolved through its own DEFINITION': 53,
+  '#18702 — a declaring factory PRIVATE to one file, resolved through its own DEFINITION': 54,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1635,12 +1646,20 @@ const KEY_HEAD_SOURCE =
  *
  * ⚠️ The quiet direction the list does NOT close, measured on both boards so
  * the next reader meets it here: a FILE-LOCAL declaring factory. Both trees
- * mint them — `placeholderFree(` (23 key lines), `strictIdent(` (12),
- * `emptyProps(` (9) at objectstack 6dfa3ea77; `chatbotRequestBodyArm(` (2),
- * `retiredDeclarativeKanbanKey(` (1) at objectui 15f01223d — and a list of
- * shared, exported helpers cannot name a factory private to one file. They stay
- * unrecognised, exactly as before this round; the class is filed as its own
- * finding rather than guessed at with a name-shaped heuristic here.
+ * mint them — `strictIdent(` (12 key lines), `emptyProps(` (9),
+ * `strictIdentOrNull(` (8) at objectstack 30bac2880; `chatbotRequestBodyArm(`
+ * (2), `retiredDeclarativeKanbanKey(` (1) at objectui 15f01223d — and a list of
+ * shared, exported helpers cannot name a factory private to one file. #18702's
+ * structural resolver is what reaches those, through the factory's own
+ * definition; ⛔ this list is still not where they belong.
+ *
+ * ⚠️ `placeholderFree(` used to be named in that paragraph and is a ROW now,
+ * because the classification was wrong rather than the population: it is
+ * EXPORTED from `common.zod.ts` and imported at all 23 of its key positions, so
+ * it was never file-local at any of them and no resolver reading one file could
+ * have reached it. ⇒ Which register a factory belongs in is a fact about where
+ * it is DECLARED, measured per key position — ⛔ never inferred from the file a
+ * probe happened to be written on.
  */
 export const SCHEMA_PROPERTY_FORMS = Object.freeze([
   Object.freeze({
@@ -1664,6 +1683,18 @@ export const SCHEMA_PROPERTY_FORMS = Object.freeze([
     where: '`packages/spec/src/shared/strict-object.ts`',
     measured: '47 key lines at objectstack 6dfa3ea77',
   }),
+  Object.freeze({
+    form: 'placeholderFree(',
+    pattern: 'placeholderFree\\(',
+    writable: true,
+    where: '`packages/spec/src/data/driver/common.zod.ts` — `return schema.superRefine(…)`, i.e. it hands back the schema it was GIVEN, so the key it declares is exactly as writable as that argument',
+    measured: '23 key lines at objectstack 30bac2880, across six driver files — every one of them an IMPORT, which is why #18702\'s file-local resolver cannot reach them and this row is what does',
+  }),
+  // ⛔ …and NO row for the four factories #18702 measured beside it:
+  // `ruleArrayFilterError(` (11 key lines), `INLINE_CREDENTIAL_REFUSED(` (10),
+  // `objectBlockHistory(` (9) and `belongsInConfig(` (8) return PROSE or a
+  // `$ZodErrorMap`, never a schema, so a row for any of them would mint 38
+  // false T1 positives on key lines that declare no author-writable key at all.
   Object.freeze({
     form: '*Schema',
     pattern: '[A-Za-z_$][\\w$]*Schema\\b',
@@ -4687,6 +4718,13 @@ export function selfTest() {
     'z.': { line: '+  cursor: z.string().optional(),', file: OS_SURFACE, repo: THIS_REPO },
     'lazySchema(': { line: '+  retry: lazySchema(() => RetryPolicySchema),', file: OS_SURFACE, repo: THIS_REPO },
     'strictObject(': { line: '+  window: strictObject({ from: z.string() }),', file: OS_SURFACE, repo: THIS_REPO },
+    // ⭐ #18702's filing probe, verbatim — the line that exited 0 in silence at
+    // 6dfa3ea77 and again at 30bac2880, on the file it was written against.
+    'placeholderFree(': {
+      line: "+    snapshotPath: placeholderFree(z.string(), 'persistence.snapshotPath').optional(),",
+      file: 'packages/spec/src/data/driver/memory.zod.ts',
+      repo: THIS_REPO,
+    },
     '*Schema': { line: '+  retry: RetryPolicySchema.optional(),', file: OS_SURFACE, repo: THIS_REPO },
     'stripImportedDefaults(': {
       line: "+  id: stripImportedDefaults(SpecNavigationAreaSchema).shape.id.describe('Unique identifier'),",
@@ -4783,7 +4821,7 @@ export function selfTest() {
   // this a strengthening and not a change to the `no` criterion.
   const LEGACY_SCHEMA_PROPERTY =
     /^[ \t]*(?:'[^']+'|"[^"]+"|\[[^\]]+\]|[A-Za-z_$][\w$]*)[ \t]*\??[ \t]*:[ \t]*(?:z\.|lazySchema\(|strictObject\(|retiredKey\(|[A-Za-z_$][\w$]*Schema\b)/;
-  const ADDED_FORMS = ['stripImportedDefaults(', 'retirementTombstone(', 'handlerKeyRefusal(', 'aliasKeyRefusal('];
+  const ADDED_FORMS = ['stripImportedDefaults(', 'retirementTombstone(', 'handlerKeyRefusal(', 'aliasKeyRefusal(', 'placeholderFree('];
   const legacyProbes = [
     ...Object.entries(FORM_FIXTURES).map(([form, fx]) => ({ text: fx.line.slice(1), added: ADDED_FORMS.includes(form) })),
     { text: '  enabled: true,', added: false },
@@ -4794,7 +4832,7 @@ export function selfTest() {
   const grew = legacyProbes.filter((p) => !LEGACY_SCHEMA_PROPERTY.test(p.text) && SCHEMA_PROPERTY.test(p.text));
   const lost = legacyProbes.filter((p) => LEGACY_SCHEMA_PROPERTY.test(p.text) && !SCHEMA_PROPERTY.test(p.text));
   t('⭐ ⛔ NOTHING the legacy literal recognised is unrecognised now — a vocabulary that SHRANK is the failure this list is against', lost.length === 0);
-  t('…and every cell that moved is one of the four forms this round added, never a line that merely looks new', grew.length === ADDED_FORMS.length && grew.every((p) => p.added));
+  t('…and every cell that moved is one of the forms these rounds ADDED, never a line that merely looks new', grew.length === ADDED_FORMS.length && grew.every((p) => p.added));
   t('⛔ …a comment is still not a key line, whichever vocabulary reads it', memberTellKind('  // cursor: z.string(),', { onContractSource: true }) === null);
   t('⛔ …and #17618’s parameter decline is untouched by the wider vocabulary', tellsInFile({ filename: OS_SURFACE, status: 'modified', patch: '@@ -30,0 +30,3 @@\n+export const refine = (\n+  ctx: z.RefinementCtx,\n+) => ctx;' }).length === 0);
 
@@ -5098,12 +5136,19 @@ export function selfTest() {
 
   // -- THE COUNTERFACTUAL ----------------------------------------------------
   //
-  // ⭐ The card's own probe LINE, on the file where its factory is DECLARED. It
-  // is silent before and fires after, and the "before" is taken by disabling the
-  // resolver — ⛔ never by editing the fixture, which would prove nothing about
-  // the reading.
-  const PROBE = FACTORY_FIXTURES.placeholderFree;
-  t('⭐ THE FINDING: a new key added through a file-local declaring factory FIRES — the row that was silent at 6dfa3ea77', localRun(PROBE.where, PROBE.line, PROBE.definition).rows[0]?.tell === 'T1');
+  // ⭐ A key added through a factory the shared list has NO row for, declared
+  // in the file that uses it. It is silent before and fires after, and the
+  // "before" is taken by disabling the RESOLVER — ⛔ never by editing the
+  // fixture, which would prove nothing about the reading.
+  //
+  // ⚠️ It is `strictIdent(` and not the card's own probe line, and the reason is
+  // the finding rather than a fixture preference: `placeholderFree` is EXPORTED
+  // and imported at all 23 of its key positions, so it is a
+  // `SCHEMA_PROPERTY_FORMS` row (above, with its own counterfactual fixture) and
+  // no reading of ONE file could ever have reached it. A counterfactual anchored
+  // on it would pass through the fast path and pin nothing about this resolver.
+  const PROBE = FACTORY_FIXTURES.strictIdent;
+  t('⭐ THE FINDING: a new key added through a file-local declaring factory FIRES — the row that was silent at 30bac2880', localRun(PROBE.where, PROBE.line, PROBE.definition).rows[0]?.tell === 'T1');
   t('…at the line the author can open', localRun(PROBE.where, PROBE.line, PROBE.definition).rows[0]?.line === 30);
   t('⭐ CONTROL — the SAME fixture with the resolver blind is silent, which is the state this card measured', localRun(PROBE.where, PROBE.line, PROBE.definition, { blind: true }).rows.length === 0);
   t('…and the whole verdict is a REFUSAL, not a clean reading', wideningRefusal({ declaration: 'no', files: [localRun(PROBE.where, PROBE.line, PROBE.definition).file], readSource: () => PROBE.definition }).state === 'refused');
@@ -5112,14 +5157,18 @@ export function selfTest() {
 
   // -- BOUNDARY ONE: an IMPORTED factory ------------------------------------
   //
-  // ⚠️ The card's LITERAL probe is one of these, measured rather than argued:
-  // `placeholderFree` is declared in `common.zod.ts` and imported at all 23 of
-  // its key positions, `memory.zod.ts` included. It exits 0 still — but the
-  // line is now NAMED.
-  const importedRun = localRun(MEMORY_DRIVER, PROBE.line, "import { placeholderFree } from './common.zod';\n");
+  // ⭐ `refusedInlineCredentialKey(` is a real one: declared in `common.zod.ts`,
+  // imported at all four of its key positions on the driver files.
+  const MONGO_DRIVER = 'packages/spec/src/data/driver/mongo.zod.ts';
+  const importedRun = localRun(MONGO_DRIVER, REFUSAL_LINE, "import { refusedInlineCredentialKey } from './common.zod';\n");
   t('⛔ BOUNDARY ONE — a factory defined in ANOTHER file stays unrecognised: imports are not chased', importedRun.rows.length === 0);
-  t('⭐ …but the silence is STATED — the line is reported with its file:line, the factory and the reason', importedRun.unresolved.length === 1 && importedRun.unresolved[0]?.name === 'placeholderFree' && importedRun.unresolved[0]?.reason.includes('IMPORTED'));
-  t('…and the reader PRINTS it, so exit 0 is no longer evidence about that line', unresolvedLines(importedRun.unresolved).some((l) => l.includes(`${MEMORY_DRIVER}:30`)));
+  t('⭐ …but the silence is STATED — the line is reported with its file:line, the factory and the reason', importedRun.unresolved.length === 1 && importedRun.unresolved[0]?.name === 'refusedInlineCredentialKey' && importedRun.unresolved[0]?.reason.includes('IMPORTED'));
+  t('…and the reader PRINTS it, so exit 0 is no longer evidence about that line', unresolvedLines(importedRun.unresolved).some((l) => l.includes(`${MONGO_DRIVER}:30`)));
+  // ⭐ …and the card's OWN probe line is no longer one of these at all. It is a
+  // `SCHEMA_PROPERTY_FORMS` row now, so it fires through the FAST PATH — with
+  // the resolver blind, which is what proves the row and not the resolver
+  // carries it.
+  t('⭐ the filing probe — `placeholderFree(` on `memory.zod.ts` — FIRES through the shared list, resolver blind: an EXPORTED helper was never the file-local class', localRun(MEMORY_DRIVER, FACTORY_FIXTURES.placeholderFree.line, '', { blind: true }).rows[0]?.tell === 'T1');
   t('⛔ …while an empty list prints NOTHING — a heading with no rows would read as a finding', unresolvedLines([]).length === 0 && unresolvedLines(null).length === 0);
 
   // -- BOUNDARY TWO: a body this reader cannot read -------------------------
