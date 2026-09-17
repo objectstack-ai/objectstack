@@ -6762,7 +6762,7 @@ const step18: MigrationStep = {
         + 'measures on a `metric` and the author meets the refusal later, at publish. ⇒ Do not '
         + 'read a green editor as a clean dashboard; re-parse through the spec. '
         + '⚠️ AND THE TODO CANNOT NAME YOUR MEASURES: a `SemanticMigration` is static prose '
-        + 'emitted once per hop — `applyMigrationChain` maps `step.semantic` straight onto the '
+        + 'emitted once per hop — `applyMetaMigrations` maps `step.semantic` straight onto the '
         + 'result with no per-document interpolation and no filtering by whether the stack '
         + 'even carries the shape — so `os migrate meta` prints THIS paragraph, not a list of '
         + 'your dropped measures. The refusal is what names them, per widget, on the re-parse. '
