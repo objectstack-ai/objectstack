@@ -440,7 +440,7 @@
  * `legacy: retiredKey('gone').or(z.string()),` and the same line with
  * `.catch(undefined)` — and each of those leaves a key an author may still
  * write. Both fired on the reading this file shipped before them, both went
- * silent on the first version of `declaresRetiredKeyTombstone`, and both fire
+ * silent on the first version of `declaresUnwritableKey`, and both fire
  * again now: the predicate requires the value to BE the call and nothing after
  * it, and the battery carries them as controls.
  *
@@ -1300,13 +1300,150 @@ export function splitUnifiedDiff(text) {
 const COMMENT_LINE = /^[ \t]*(?:\/\/|\/\*|\*|#)/;
 
 /**
+ * The KEY half of a property line, as regex SOURCE — the one spelling of "a
+ * property name at the head of a line" that every vocabulary below is built
+ * from, so two vocabularies can never disagree about a quoted or
+ * optional-marked name.
+ */
+const KEY_HEAD_SOURCE =
+  "^[ \\t]*(?:'[^']+'|\"[^\"]+\"|\\[[^\\]]+\\]|[A-Za-z_$][\\w$]*)[ \\t]*\\??[ \\t]*:[ \\t]*";
+
+/**
+ * The DECLARING FORMS — the vocabulary `SCHEMA_PROPERTY` is BUILT from, named
+ * and enumerable rather than five alternatives inside one regex literal
+ * (#18560).
+ *
+ * A form missing from here is not a line judged leniently, it is a line that is
+ * not a KEY LINE at all: `memberTellKind` answers `null`, so the row neither
+ * fires, nor spends the #16943 budget, nor earns it on the removed side — and
+ * nothing anywhere says so.
+ *
+ * Two fields carry the two questions, and they are deliberately not one:
+ *
+ *   `pattern` — what the property's VALUE must open with for the line to be
+ *   RECOGNISED as a key line. This is the whole of `SCHEMA_PROPERTY`.
+ *
+ *   `writable` — whether the key that form declares is one an author MAY write.
+ *   A `false` here puts the form in `UNWRITABLE_FORMS` below, where the tell
+ *   DECLINES on the positive, line-local evidence #17955 established. ⛔ It is
+ *   not an exclusion from the vocabulary: the row stays recognised, both sides
+ *   of the budget keep reading one question, and a live arm CHAINED onto the
+ *   helper still fires.
+ *
+ * ⛔ Adding a form here is ADDITIVE by construction — an unrecognised line
+ * reports nothing, so no row that fires today can stop firing when the list
+ * grows. That is why "teach it the form" is the repair and "relax the tell" is
+ * not; the `no` criterion is untouched by every row below.
+ *
+ * ⚠️ `measured` is a count PLUS the tree it was taken against, per this repo's
+ * own rule, and it is a key-POSITION count: `lazySchema(` reads 0 here while
+ * being live at DECLARATION positions (`export const X = lazySchema(…)`), which
+ * is a reason to keep the row and not a reason to drop it — dropping a form is
+ * the failure this list exists to make loud.
+ *
+ * ⚠️ The quiet direction the list does NOT close, measured on both boards so
+ * the next reader meets it here: a FILE-LOCAL declaring factory. Both trees
+ * mint them — `placeholderFree(` (23 key lines), `strictIdent(` (12),
+ * `emptyProps(` (9) at objectstack 6dfa3ea77; `chatbotRequestBodyArm(` (2),
+ * `retiredDeclarativeKanbanKey(` (1) at objectui 15f01223d — and a list of
+ * shared, exported helpers cannot name a factory private to one file. They stay
+ * unrecognised, exactly as before this round; the class is filed as its own
+ * finding rather than guessed at with a name-shaped heuristic here.
+ */
+export const SCHEMA_PROPERTY_FORMS = Object.freeze([
+  Object.freeze({
+    form: 'z.',
+    pattern: 'z\\.',
+    writable: true,
+    where: "zod's own namespace, both boards",
+    measured: '7,784 key lines at objectstack 6dfa3ea77 · 1,482 at objectui 15f01223d',
+  }),
+  Object.freeze({
+    form: 'lazySchema(',
+    pattern: 'lazySchema\\(',
+    writable: true,
+    where: '`packages/spec/src/shared/lazy-schema.ts` — a Proxy over a deferred `z.object`',
+    measured: '0 key lines at objectstack 6dfa3ea77 (live at DECLARATION positions)',
+  }),
+  Object.freeze({
+    form: 'strictObject(',
+    pattern: 'strictObject\\(',
+    writable: true,
+    where: '`packages/spec/src/shared/strict-object.ts`',
+    measured: '47 key lines at objectstack 6dfa3ea77',
+  }),
+  Object.freeze({
+    form: '*Schema',
+    pattern: '[A-Za-z_$][\\w$]*Schema\\b',
+    writable: true,
+    where: 'a schema binding referenced by name, both boards',
+    measured: '995 key lines at objectstack 6dfa3ea77 · 56 at objectui 15f01223d',
+  }),
+  Object.freeze({
+    form: 'stripImportedDefaults(',
+    pattern: 'stripImportedDefaults\\(',
+    writable: true,
+    where: '`packages/types/src/zod/imported-defaults.ts` (objectui) — its docblock: "the same TypeScript type, the same keys, the same checks, the same registry metadata and the same accept set"',
+    measured: '45 key lines at objectui 15f01223d',
+  }),
+  Object.freeze({
+    form: 'retiredKey(',
+    pattern: 'retiredKey\\(',
+    writable: false,
+    where: '`packages/spec/src/shared/retired-key.ts` — `z.never(…).optional()`',
+    measured: '255 key lines at objectstack 6dfa3ea77',
+  }),
+  Object.freeze({
+    form: 'retirementTombstone(',
+    pattern: 'retirementTombstone\\(',
+    writable: false,
+    where: '`packages/types/src/zod/tombstone.zod.ts` (objectui) — `z.never({ error }).optional().describe()`, the same primitive as `retiredKey`',
+    measured: '187 key lines at objectui 15f01223d',
+  }),
+  Object.freeze({
+    form: 'handlerKeyRefusal(',
+    pattern: 'handlerKeyRefusal\\(',
+    writable: false,
+    where: '`packages/types/src/zod/tombstone.zod.ts` (objectui) — `z.custom<never>(() => false)`, whose docblock reads "The predicate refuses EVERYTHING, a live function included"',
+    measured: '90 key lines at objectui 15f01223d',
+  }),
+  Object.freeze({
+    form: 'aliasKeyRefusal(',
+    pattern: 'aliasKeyRefusal\\(',
+    writable: false,
+    where: '`packages/types/src/zod/tombstone.zod.ts` (objectui) — `z.never({ error })` naming the canonical spelling',
+    measured: '13 key lines at objectui 15f01223d',
+  }),
+]);
+
+/**
+ * The forms whose value declares a key UNWRITABLE — recognised, then declined.
+ *
+ * ⛔ Every pattern here must END at the helper's open paren, because
+ * {@link declaresUnwritableKey} reads the match's own length to find that paren
+ * and hand it to `matchingCloser`. A form that ended anywhere else would make
+ * the "is the value the call and NOTHING after it" reading answer about the
+ * wrong character — silently, and in the direction that declines a live arm. So
+ * it is refused at module load rather than pinned only in the self-test: a
+ * malformed vocabulary must not be a gate that runs.
+ */
+const UNWRITABLE_FORMS = Object.freeze(SCHEMA_PROPERTY_FORMS.filter((f) => !f.writable));
+for (const f of UNWRITABLE_FORMS) {
+  if (!f.pattern.endsWith('\\(')) {
+    throw new Error(
+      `check-widening-tells: unwritable declaring form "${f.form}" has a pattern that does not end at its open paren ` +
+        `(${f.pattern}) — \`declaresUnwritableKey\` locates the call's paren by the match length, so this form would ` +
+        `decline or fire on the wrong character. Give it a \`helper\\(\`-shaped pattern, or make it \`writable\`.`,
+    );
+  }
+}
+
+/**
  * T1 — a property whose value is a SCHEMA.
  *
- * Calibrated against the real tree rather than guessed (measured 2026-09-07 over
- * `packages/spec/src/**`): 8,102 property lines take a `z.` value, and the
- * whole non-`z.` schema vocabulary beneath them is `retiredKey(` (235),
- * `I18nLabelSchema` and its `*Schema` siblings (≈300), `strictObject(` (46) and
- * `lazySchema(`. Requiring a schema-shaped VALUE is what keeps the tell off the
+ * Calibrated against the real tree rather than guessed — the calibration now
+ * lives per row in {@link SCHEMA_PROPERTY_FORMS}, which this regex is BUILT
+ * from. Requiring a schema-shaped VALUE is what keeps the tell off the
  * 1,655 `x: true` / 1,170 `x: string` lines that are object literals and type
  * annotations, not accept-set members.
  *
@@ -1321,7 +1458,9 @@ const COMMENT_LINE = /^[ \t]*(?:\/\/|\/\*|\*|#)/;
  * declines. Absence of that evidence leaves the match firing, so the regex
  * above is still the whole tell wherever the hunk says nothing.
  */
-const SCHEMA_PROPERTY = /^[ \t]*(?:'[^']+'|"[^"]+"|\[[^\]]+\]|[A-Za-z_$][\w$]*)[ \t]*\??[ \t]*:[ \t]*(?:z\.|lazySchema\(|strictObject\(|retiredKey\(|[A-Za-z_$][\w$]*Schema\b)/;
+const SCHEMA_PROPERTY = new RegExp(
+  `${KEY_HEAD_SOURCE}(?:${SCHEMA_PROPERTY_FORMS.map((f) => f.pattern).join('|')})`,
+);
 
 /** T2 — a closed set DECLARED or re-written on one line. */
 const CLOSED_SET_OPENER = /z\.(?:enum|union|discriminatedUnion|literal)\(/;
@@ -1801,8 +1940,9 @@ export function replacesUniversalAcceptorKey(text, removedTexts) {
  * not the diff's head and resolving anything against it answers about the wrong
  * commit — in the direction that keeps the false positive.
  */
-const RETIRED_KEY_TOMBSTONE =
-  /^[ \t]*(?:'[^']+'|"[^"]+"|\[[^\]]+\]|[A-Za-z_$][\w$]*)[ \t]*\??[ \t]*:[ \t]*retiredKey\(/;
+const UNWRITABLE_KEY_DECLARATION = new RegExp(
+  `${KEY_HEAD_SOURCE}(?:${UNWRITABLE_FORMS.map((f) => f.pattern).join('|')})`,
+);
 
 /** What may follow the balancing paren when the call closes on the key line. */
 const TOMBSTONE_TAIL = /^[ \t]*,?[ \t]*$/;
@@ -1831,13 +1971,23 @@ function withoutComments(text) {
 }
 
 /**
+ * #18560 — the reading is the FAMILY's, not one helper's. The helper name is
+ * now read from {@link UNWRITABLE_FORMS} rather than spelled here, so the
+ * vocabulary and the decline can never name different sets: a form declared
+ * `writable: false` is recognised by `SCHEMA_PROPERTY` and declined by this
+ * predicate in the same edit, and a form added to one register and not the
+ * other fails the counterfactual battery. objectui's three refusal helpers
+ * (`retirementTombstone`, `handlerKeyRefusal`, `aliasKeyRefusal`) join
+ * `retiredKey` here on the measured ground that each one's value refuses every
+ * input — ⛔ not on their names, and ⛔ not on the file they live in.
+ *
  * @param {string} text — one patch line's text, with its `+` / `-` already stripped
- * @returns {boolean} true when the line declares a `retiredKey()` tombstone
+ * @returns {boolean} true when the line declares a key UNWRITABLE
  */
-export function declaresRetiredKeyTombstone(text) {
+export function declaresUnwritableKey(text) {
   const s = String(text ?? '');
   if (COMMENT_LINE.test(s)) return false;
-  const opening = RETIRED_KEY_TOMBSTONE.exec(s);
+  const opening = UNWRITABLE_KEY_DECLARATION.exec(s);
   if (opening === null) return false;
   const open = opening[0].length - 1;
   const close = matchingCloser(s, open);
@@ -2082,7 +2232,7 @@ export function tellsInFile(file, { repo = THIS_REPO, licensed = null } = {}) {
       // and letting the tombstone pay for it would trade this file's loud
       // failure for a silent one on the only diff shape that re-opens an accept
       // set the tree had already closed.
-      if (kind === 'T1' && declaresRetiredKeyTombstone(r.text)) continue;
+      if (kind === 'T1' && declaresUnwritableKey(r.text)) continue;
       if (kind !== null) budget.set(kind, (budget.get(kind) ?? 0) + 1);
     }
     for (const i of block) {
@@ -2123,7 +2273,7 @@ export function tellsInFile(file, { repo = THIS_REPO, licensed = null } = {}) {
     // genuine member. A tombstone carries its own evidence on its own line and
     // takes nothing from the block, so a genuine key beside it still has the
     // full budget to pay with — and fires when it cannot.
-    if (kind === 'T1' && declaresRetiredKeyTombstone(text)) continue;
+    if (kind === 'T1' && declaresUnwritableKey(text)) continue;
     // #16943 — a member or key this block REPLACED is not a net addition.
     //
     // ⛔ A line that DECLARES a closed set is never spent against the budget,
@@ -3090,23 +3240,23 @@ export function selfTest() {
   t('⛔ …but a THIRD genuine key in that block still has nothing to pay with, and fires', tells({ filename: TOMBSTONE_FILE, status: 'modified', patch: "@@ -30,1 +30,3 @@\n-  schemaCacheTTL: z.number(),\n+  schemaCacheTtlSeconds: z.number(),\n+  schemaCacheTTL: retiredKey('x'),\n+  brandNew: z.string()," })[0]?.text === 'brandNew: z.string(),');
 
   // -- the reader itself -----------------------------------------------------
-  t('`declaresRetiredKeyTombstone` reads a key whose value opens the helper', declaresRetiredKeyTombstone("  legacy: retiredKey('gone'),") === true);
-  t('…in every key spelling `SCHEMA_PROPERTY` admits — quoted, and optional-marked', declaresRetiredKeyTombstone("  'a.b': retiredKey(") === true && declaresRetiredKeyTombstone('  legacy?: retiredKey(') === true);
-  t('⛔ …and declines a value that is not the helper', declaresRetiredKeyTombstone('  legacy: z.string(),') === false);
-  t('⛔ …a bare call that names no key — a tombstone is a PROPERTY, not an expression', declaresRetiredKeyTombstone("  retiredKey('gone'),") === false);
-  t('⛔ …and the same text in a COMMENT', declaresRetiredKeyTombstone("  // legacy: retiredKey('gone'),") === false);
-  t('⛔ …and a value that OPENS the call but chains onto its result — the value must BE the call and nothing after it', declaresRetiredKeyTombstone("  legacy: retiredKey('gone').or(z.string()),") === false && declaresRetiredKeyTombstone("  legacy: retiredKey('gone').catch(undefined),") === false);
-  t('⭐ …while BOTH spellings this tree actually uses still read as tombstones — 76 close the call on the key line, 178 do not', declaresRetiredKeyTombstone("  legacy: retiredKey('gone'),") === true && declaresRetiredKeyTombstone('  legacy: retiredKey(') === true);
-  t('…a trailing comment is not a chained arm, on either spelling', declaresRetiredKeyTombstone("  legacy: retiredKey('gone'), // ADR-0087") === true && declaresRetiredKeyTombstone('  legacy: retiredKey( // the prescription is below') === true);
-  t('…and a prescription that closes its OWN parens on the key line is still the call and nothing after it', declaresRetiredKeyTombstone("  legacy: retiredKey(useInstead('x')),") === true && declaresRetiredKeyTombstone('  legacy: retiredKey(LEGACY_PRESCRIPTION),') === true);
-  t('⛔ …but a paren inside the prescription STRING cannot close the call early and let a chain through', declaresRetiredKeyTombstone("  legacy: retiredKey('call foo(bar) instead'),") === true && declaresRetiredKeyTombstone("  legacy: retiredKey('call foo(bar) instead').or(z.string()),") === false);
+  t('`declaresUnwritableKey` reads a key whose value opens the helper', declaresUnwritableKey("  legacy: retiredKey('gone'),") === true);
+  t('…in every key spelling `SCHEMA_PROPERTY` admits — quoted, and optional-marked', declaresUnwritableKey("  'a.b': retiredKey(") === true && declaresUnwritableKey('  legacy?: retiredKey(') === true);
+  t('⛔ …and declines a value that is not the helper', declaresUnwritableKey('  legacy: z.string(),') === false);
+  t('⛔ …a bare call that names no key — a tombstone is a PROPERTY, not an expression', declaresUnwritableKey("  retiredKey('gone'),") === false);
+  t('⛔ …and the same text in a COMMENT', declaresUnwritableKey("  // legacy: retiredKey('gone'),") === false);
+  t('⛔ …and a value that OPENS the call but chains onto its result — the value must BE the call and nothing after it', declaresUnwritableKey("  legacy: retiredKey('gone').or(z.string()),") === false && declaresUnwritableKey("  legacy: retiredKey('gone').catch(undefined),") === false);
+  t('⭐ …while BOTH spellings this tree actually uses still read as tombstones — 76 close the call on the key line, 178 do not', declaresUnwritableKey("  legacy: retiredKey('gone'),") === true && declaresUnwritableKey('  legacy: retiredKey(') === true);
+  t('…a trailing comment is not a chained arm, on either spelling', declaresUnwritableKey("  legacy: retiredKey('gone'), // ADR-0087") === true && declaresUnwritableKey('  legacy: retiredKey( // the prescription is below') === true);
+  t('…and a prescription that closes its OWN parens on the key line is still the call and nothing after it', declaresUnwritableKey("  legacy: retiredKey(useInstead('x')),") === true && declaresUnwritableKey('  legacy: retiredKey(LEGACY_PRESCRIPTION),') === true);
+  t('⛔ …but a paren inside the prescription STRING cannot close the call early and let a chain through', declaresUnwritableKey("  legacy: retiredKey('call foo(bar) instead'),") === true && declaresUnwritableKey("  legacy: retiredKey('call foo(bar) instead').or(z.string()),") === false);
   // ⭐ The landed shape a literal reading of "nothing may follow `retiredKey(`"
   // re-breaks: the prescription helper's own ARGUMENTS continue on the next
   // line, so the key line ends INSIDE the argument list rather than at the open
   // paren. 30 of this tree's 254 judged tombstones are spelled this way, all in
   // `packages/spec/src/data/driver.zod.ts`, and each one fires T1 again — the
   // very false positive this reading exists to remove — if this case weakens.
-  t('⭐ a prescription helper whose ARGUMENTS continue on the next line is still a tombstone — 30 landed lines take this shape', declaresRetiredKeyTombstone("  create: retiredKey(capRemoved('create',") === true);
+  t('⭐ a prescription helper whose ARGUMENTS continue on the next line is still a tombstone — 30 landed lines take this shape', declaresUnwritableKey("  create: retiredKey(capRemoved('create',") === true);
   t('⭐ the vocabulary is INTACT — `memberTellKind` still classifies a tombstone as a key of kind T1, so both sides of the budget read one question', memberTellKind("  legacy: retiredKey('gone'),", { onContractSource: true }) === 'T1');
 
   // ⚠️ The residual QUIET direction, asserted rather than described so the next
