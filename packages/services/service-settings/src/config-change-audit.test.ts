@@ -80,6 +80,33 @@ const manifest: SettingsManifest = {
   ],
 };
 
+/**
+ * [#18368] The `sys_audit_log` MOUNT POINT — a stand-in declaration, not the
+ * object.
+ *
+ * `sys_audit_log` belongs to `@objectstack/plugin-audit` and must not be
+ * imported here (see the file header). That was free while the sink wrote
+ * blind; it is not free now that the sink ASKS the registry whether the ledger
+ * is mounted before writing, because a fixture registering nothing is a fixture
+ * of the UNMOUNTED deployment — every case below would go green on a sink that
+ * never writes at all.
+ *
+ * So the registry gets a declaration under that name and nothing more. The ROW
+ * is still asserted at the engine seam, where the real object's absence does not
+ * matter; what this buys is that `getSchema('sys_audit_log')` answers, which is
+ * the only thing the mount probe reads. It deliberately declares NO
+ * `organization_id`, so `makeFieldProbe`'s answer — and therefore every row
+ * asserted in this file — is byte-for-byte what it was before this existed.
+ */
+const LEDGER_MOUNT_STANDIN = {
+  name: 'sys_audit_log',
+  label: 'Audit Log (mount stand-in)',
+  fields: {
+    id: { type: 'text', label: 'Id' },
+    action: { type: 'text', label: 'Action' },
+  },
+};
+
 type Store = Map<string, Map<string, Record<string, unknown>>>;
 
 /** A driver over plain Maps — enough of `IDataDriver` for the settings write path. */
@@ -174,6 +201,12 @@ class MockHttp implements IHttpServer {
 interface BootOptions {
   /** Make every `sys_audit_log` insert fail, to exercise the best-effort path. */
   ledgerThrows?: boolean;
+  /**
+   * [#18368] Whether this deployment MOUNTS the platform audit ledger.
+   * Defaults to `true` — the shape every case written before #18368 assumed.
+   * `false` is the `--preset minimal` / no-`plugin-audit` host.
+   */
+  ledgerMounted?: boolean;
   /** Identity the write runs under. */
   userId?: string;
   tenantId?: string;
@@ -195,6 +228,10 @@ async function bootPlugin(opts: BootOptions = {}) {
   await engine.init();
   engine.registry.registerObject(SysSetting as any, OWNER_PACKAGE);
   engine.registry.registerObject(SysSettingAudit as any, OWNER_PACKAGE);
+  // [#18368] The mount point — see `LEDGER_MOUNT_STANDIN`.
+  if (opts.ledgerMounted !== false) {
+    engine.registry.registerObject(LEDGER_MOUNT_STANDIN as any, OWNER_PACKAGE);
+  }
 
   // `sys_audit_log` is plugin-audit's object and is deliberately not resolvable
   // from this package (see the file header), so its insert is answered at the
@@ -211,11 +248,20 @@ async function bootPlugin(opts: BootOptions = {}) {
   };
 
   const logged: string[] = [];
+  // [#18368] The same lines, carrying the CHANNEL they arrived on. `logged`
+  // stays level-blind so every pre-#18368 assertion keeps its meaning; the
+  // level is what the two arms of #18368 are about, and a level-blind capture
+  // cannot tell a suppressed expectation from a suppressed fault.
+  const loggedAt: Array<{ level: string; msg: string }> = [];
+  const at = (level: string) => (m: string) => {
+    loggedAt.push({ level, msg: m });
+    if (level !== 'debug' && level !== 'info') logged.push(m);
+  };
   const logger = {
-    info: () => {},
-    warn: (m: string) => { logged.push(m); },
-    error: (m: string) => { logged.push(m); },
-    debug: () => {},
+    info: at('info'),
+    warn: at('warn'),
+    error: at('error'),
+    debug: at('debug'),
   };
 
   const http = new MockHttp();
@@ -259,6 +305,10 @@ async function bootPlugin(opts: BootOptions = {}) {
     /** REAL `sys_setting` rows. */
     settingRows: () => [...rowsOf('sys_setting').values()],
     logged,
+    /** [#18368] Every captured line with the channel it arrived on. */
+    loggedAt,
+    /** [#18368] So a case can mount the ledger mid-process and write again. */
+    engine,
     http,
   };
 }
@@ -528,6 +578,9 @@ describe('#8145 — a refused write emits NO config_change row', () => {
     await engine.init();
     engine.registry.registerObject(SysSetting as any, OWNER_PACKAGE);
     engine.registry.registerObject(SysSettingAudit as any, OWNER_PACKAGE);
+    // [#18368] This case asserts the sink writes on its NON-VACUITY leg, so the
+    // ledger has to be mounted — see `LEDGER_MOUNT_STANDIN`.
+    engine.registry.registerObject(LEDGER_MOUNT_STANDIN as any, OWNER_PACKAGE);
 
     const ledgerRows: Array<Record<string, unknown>> = [];
     const realInsert = engine.insert.bind(engine);
@@ -580,7 +633,10 @@ describe('#8145 — a refused write emits NO config_change row', () => {
 
 describe('#8145 — the config_change write is best-effort', () => {
   it('a failing sys_audit_log insert leaves the settings write landed and reported', async () => {
-    // The shape of a deployment WITHOUT plugin-audit: the table does not exist.
+    // [#18368] The ledger IS mounted (the `bootPlugin` default) and its insert
+    // fails anyway — a provisioned-but-unreachable table. ⛔ This is no longer
+    // "the shape of a deployment WITHOUT plugin-audit": that shape is skipped
+    // before the insert now and is pinned in its own section below.
     const boot = await bootPlugin({ ledgerThrows: true, userId: 'usr_admin' });
 
     const out = await boot.service.setMany(
@@ -596,7 +652,7 @@ describe('#8145 — the config_change write is best-effort', () => {
     // …and the operator is told, once, with the consequence and the cause.
     const reported = boot.logged.filter((l) => l.includes('config_change audit row NOT written'));
     expect(reported).toHaveLength(1);
-    expect(reported[0]).toContain('plugin-audit');
+    expect(reported[0]).toContain('schema sync');
   });
 
   it('reports ONCE per process, not once per write', async () => {
@@ -607,5 +663,152 @@ describe('#8145 — the config_change write is best-effort', () => {
     expect(boot.logged.filter((l) => l.includes('config_change audit row NOT written'))).toHaveLength(1);
     // Every one of those writes still landed.
     expect(boot.settingAuditRows()).toHaveLength(3);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// 6. [#18368] An UNMOUNTED ledger is a CONFIGURATION, not a fault
+// ---------------------------------------------------------------------------
+
+/**
+ * Both arms, and NEITHER is optional.
+ *
+ * The quiet arm alone would pass just as well on a sink whose log line had
+ * simply been deleted — or on one that stopped writing the ledger entirely —
+ * so every case here carries its opposite: the control arm proves a MOUNTED
+ * ledger whose insert genuinely fails is still reported, and on the durability
+ * channel. What #18368 suppresses is an EXPECTATION; suppressing a fault would
+ * be the same defect one layer down.
+ */
+describe('#18368 — an unmounted `sys_audit_log` is a configuration, not a fault', () => {
+  const NOT_WRITTEN = 'config_change audit row NOT written';
+
+  it('QUIET ARM: no ledger mounted — the write lands, no insert is attempted, no ERROR', async () => {
+    const boot = await bootPlugin({ ledgerMounted: false, userId: 'usr_admin', tenantId: 'org_1' });
+
+    const out = await boot.service.setMany(
+      'branding_test',
+      { workspace_name: 'ObjectStack' },
+      boot.writeCtx,
+    );
+
+    // The settings write is untouched — the same two facts the cloud seat
+    // measured on the hosted plane before filing.
+    expect(out.workspace_name.value).toBe('ObjectStack');
+    expect(boot.settingRows()).toHaveLength(1);
+    expect(boot.settingAuditRows()).toHaveLength(1);
+
+    // ⭐ The insert is never ATTEMPTED. Asserting only on the log would leave
+    // `ObjectQL.insert`'s own per-write `Insert operation failed` line — the
+    // half that actually fires once per settings write — completely unpinned,
+    // because that one is logged a frame below this fixture.
+    expect(boot.ledgerRows()).toHaveLength(0);
+
+    // Nothing on `error`, nothing on `warn`, from this sink or any other.
+    expect(boot.loggedAt.filter((l) => l.level === 'error')).toEqual([]);
+    expect(boot.logged.filter((l) => l.includes(NOT_WRITTEN))).toEqual([]);
+
+    // …and it is not silent-by-accident: the configuration reading went to
+    // `debug`, naming the remedy once.
+    const debugLines = boot.loggedAt.filter((l) => l.level === 'debug' && l.msg.includes('sys_audit_log'));
+    expect(debugLines).toHaveLength(1);
+    expect(debugLines[0].msg).toContain('SKIPPED, not failed');
+    expect(debugLines[0].msg).toContain('@objectstack/plugin-audit');
+  });
+
+  it('CONTROL ARM: ledger MOUNTED and the insert genuinely fails — the ERROR still fires', async () => {
+    // Same fixture, same failing insert, ONE difference: the ledger is mounted.
+    const boot = await bootPlugin({ ledgerMounted: true, ledgerThrows: true, userId: 'usr_admin' });
+
+    await boot.service.setMany('branding_test', { workspace_name: 'ObjectStack' }, boot.writeCtx);
+
+    // The insert WAS attempted here — which is what makes this a fault and not
+    // an expectation.
+    expect(boot.ledgerRows()).toHaveLength(1);
+
+    const errors = boot.loggedAt.filter((l) => l.level === 'error' && l.msg.includes(NOT_WRITTEN));
+    expect(errors).toHaveLength(1);
+    // AGENTS.md → Degradation log levels: an `error` here owes the CONSEQUENCE
+    // and the FIX, both in the line it prints.
+    expect(errors[0].msg).toContain('SUCCEEDED and is on disk');
+    expect(errors[0].msg).toContain('schema sync');
+    // …and it did NOT land on the configuration channel.
+    expect(boot.loggedAt.filter((l) => l.level === 'debug' && l.msg.includes(NOT_WRITTEN))).toEqual([]);
+    // The settings write still landed, on both the row and the settings trail.
+    expect(boot.settingRows()).toHaveLength(1);
+    expect(boot.settingAuditRows()).toHaveLength(1);
+  });
+
+  it('the probe records NOTHING: a ledger mounted mid-process starts recording', async () => {
+    // ⛔ The memoized spelling would pass every case above and fail only this
+    // one — a verdict the same boot can still contradict (AGENTS.md → Startup
+    // registry reads). `plugin-audit` registers its objects from its own
+    // lifecycle, which may run after the settings service binds its engine.
+    const boot = await bootPlugin({ ledgerMounted: false, userId: 'usr_admin' });
+
+    await boot.service.setMany('branding_test', { workspace_name: 'before' }, boot.writeCtx);
+    expect(boot.ledgerRows()).toHaveLength(0);
+
+    boot.engine.registry.registerObject(LEDGER_MOUNT_STANDIN as any, OWNER_PACKAGE);
+
+    await boot.service.setMany('branding_test', { workspace_name: 'after' }, boot.writeCtx);
+    const rows = boot.ledgerRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].action).toBe(CONFIG_CHANGE_ACTION);
+    expect(metaOf(rows[0]).key).toBe('workspace_name');
+  });
+
+  it('an engine that cannot be ASKED still attempts the write, and still reports its failure', async () => {
+    // `getSchema` is an ObjectQL member, not an `IDataEngine` one. ⛔ An
+    // unanswerable probe is not an answer of "absent": read that way, this
+    // sink would go permanently silent on every lean host engine, which is the
+    // #18368 defect inverted.
+    const attempted: Array<Record<string, unknown>> = [];
+    const engineWithoutGetSchema: any = {
+      insert: async (_object: string, row: Record<string, unknown>) => {
+        attempted.push(row);
+        throw new Error('ledger unreachable');
+      },
+    };
+    const lines: Array<{ level: string; msg: string }> = [];
+    const sink = buildConfigChangeAuditSink(engineWithoutGetSchema, {
+      debug: (m: string) => lines.push({ level: 'debug', msg: m }),
+      warn: (m: string) => lines.push({ level: 'warn', msg: m }),
+      error: (m: string) => lines.push({ level: 'error', msg: m }),
+    } as any);
+
+    await sink.record({
+      namespace: 'branding_test',
+      key: 'workspace_name',
+      scope: 'global',
+      action: 'set',
+      valueDigest: 'sha256:abc',
+      encrypted: false,
+    });
+
+    expect(attempted).toHaveLength(1);
+    expect(attempted[0].action).toBe(CONFIG_CHANGE_ACTION);
+    expect(lines.filter((l) => l.level === 'error' && l.msg.includes(NOT_WRITTEN))).toHaveLength(1);
+    expect(lines.filter((l) => l.level === 'debug')).toEqual([]);
+  });
+
+  it('falls back to `warn` for a sink that declares no `error` channel', async () => {
+    // The receiver-safe fallback, pinned so the level flip cannot silently
+    // become a DROP on a host logger that only carries `warn`.
+    const lines: string[] = [];
+    const sink = buildConfigChangeAuditSink(
+      { insert: async () => { throw new Error('ledger unreachable'); } } as any,
+      { warn: (m: string) => lines.push(m) } as any,
+    );
+    await sink.record({
+      namespace: 'branding_test',
+      key: 'workspace_name',
+      scope: 'global',
+      action: 'set',
+      valueDigest: 'sha256:abc',
+      encrypted: false,
+    });
+    expect(lines.filter((l) => l.includes(NOT_WRITTEN))).toHaveLength(1);
   });
 });
