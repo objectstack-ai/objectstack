@@ -1084,7 +1084,7 @@ function declaredFieldsFor(ctx: HookContext): Record<string, unknown> | undefine
  * `before*` dispatch since #5574 (ADR-0058 Addendum II, D1/D2): both carry the
  * row's prior state, so both merge and materialise like any single-record
  * write — which is exactly what "`record` is the row's real state, not the
- * bare payload" means (#4862). A context whose prior row was never read keeps
+ * bare payload" means (#4862). A context whose prior row is not in hand keeps
  * its payload exactly as it is rather than gaining `null`s that contradict
  * stored state.
  *
@@ -1175,15 +1175,13 @@ function pickRecordPayload(ctx: HookContext): any {
  * identifier from the CEL scope. Same here:
  *   - **insert** — there is no prior state, so `previous` is unbound and any
  *     reference to it is an author error, reported as such;
- *   - **a `before*` dispatch that names no row** — the opt-in
- *     `dispatchUnscopedMultiWrite` one, fired once for a `multi: true` write
- *     carrying no caller predicate at all: with no row there is no single
- *     prior record to bind, so `previous` stays unbound rather than being
- *     invented. A predicate (`multi: true`) bulk write is NOT this case — it
- *     dispatches both phases per matched row (`after*` since #5038, `before*`
- *     since #5574, ADR-0058 Addendum II D1/D2), each binding the row's own
- *     pre-image, so a transition condition reads exactly as it does on a
- *     single-record write.
+ *   - **any update-shaped context whose prior row is not in hand** — with no
+ *     row there is no single prior record to bind, so `previous` stays unbound
+ *     rather than being invented. A predicate (`multi: true`) bulk write is no
+ *     longer one of these: since #5574 (ADR-0058 Addendum II, D1/D2) it
+ *     dispatches BOTH phases per matched row — `after*` since #5038 — each
+ *     context binding that row's own pre-image, so a transition condition
+ *     reads exactly as it does on a single-record write.
  * Binding `null`/`{}` instead would make `previous.x == null` answer "yes"
  * for a record whose prior state is simply unknown — a fabricated fact, the
  * one thing materialisation is careful never to do.
