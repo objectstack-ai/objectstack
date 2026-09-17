@@ -3672,19 +3672,57 @@ export class ObjectStackClient {
      * ```
      *
      * The default is `'member'` because {@link ObjectStackClient.organizations}
-     * `.invitations.resend` already substitutes exactly that over the same
-     * vendor endpoint: one family, one behaviour. It is also the least
-     * privileged name in the closed membership vocabulary (ADR-0108 D1 —
-     * `orgRoleGrade` floors at `member` and raises only for `owner`/`admin`),
-     * so the implicit choice cannot confer more reach than the caller asked
-     * for. Declaring `role` required instead would narrow a published request
-     * type to restate the vendor's requirement, and buy nothing.
+     * `.invitations.resend` has always substituted exactly that over the same
+     * vendor endpoint: one family, one behaviour. Since [#17274] `resend`
+     * takes the default FROM HERE instead of spelling a second copy of it, so
+     * the two cannot drift. It is also the least privileged name in the closed
+     * membership vocabulary (ADR-0108 D1 — `orgRoleGrade` floors at `member`
+     * and raises only for `owner`/`admin`), so the implicit choice cannot
+     * confer more reach than the caller asked for. Declaring `role` required
+     * instead would narrow a published request type to restate the vendor's
+     * requirement, and buy nothing.
+     *
+     * ## `teamId` — declared here, and DELIVERED [#17274]
+     *
+     * better-auth's `invite-member` body schema carries `teamId`, and the
+     * handler validates it against the organisation's own teams before
+     * storing the placement on the invitation row. Measured against a real
+     * `AuthManager` (better-auth 1.7.3, organization plugin,
+     * `teams: { enabled: true }` — the posture `auth-manager.ts` hard-wires)
+     * over a real `SqliteWasmDriver`:
+     *
+     * ```
+     * { …, teamId: 'team_abc' }   -> 200  invitation.teamId === 'team_abc'
+     * { …, teamId: 'nope' }       -> 400  Team not found            (TEAM_NOT_FOUND)
+     * { …, teamId: null }         -> 400  [body.teamId] Invalid input (VALIDATION_ERROR)
+     * { … }            (omitted)  -> 200  invitation.teamId === null
+     * ```
+     *
+     * The last two rows are why this member is NOT forwarded verbatim. `null`
+     * is the SDK's own spelling of "no team" — `invitations.list` answers
+     * `teamId: string | null` and a caller round-trips that object straight
+     * back into `resend` — while the vendor's spelling of the same fact is
+     * ABSENCE. So a `null` (or an omitted member) sends no `teamId` at all,
+     * and a string is forwarded unchanged. ⛔ Nothing else is normalised: an
+     * unknown id must keep reaching the vendor, because `TEAM_NOT_FOUND` is
+     * the loud refusal that replaces the silent drop this member used to be.
      */
-    invite: async (req: { email: string; role?: string; organizationId?: string }): Promise<OrganizationInvitationWire<'pending'>> => {
+    invite: async (
+      req: { email: string; role?: string; organizationId?: string; teamId?: string | null },
+    ): Promise<OrganizationInvitationWire<'pending'>> => {
       const route = this.getRoute('auth');
+      // `teamId` is lifted out of the spread so the two spellings of "no team"
+      // — `null` and absent — collapse to the ONE the vendor accepts. Every
+      // other member keeps its position, which is what the byte pins in
+      // `organization-invite-role-default.test.ts` assert.
+      const { teamId, ...rest } = req;
       const res = await this.fetch(`${this.baseUrl}${route}/organization/invite-member`, {
         method: 'POST',
-        body: JSON.stringify({ ...req, role: req.role ?? 'member' }),
+        body: JSON.stringify({
+          ...rest,
+          role: req.role ?? 'member',
+          ...(teamId == null ? {} : { teamId }),
+        }),
       });
       return res.json();
     },
@@ -3963,6 +4001,21 @@ export class ObjectStackClient {
        *
        * If `cancel()` fails (e.g. invite already accepted) the error is
        * re-thrown without re-inviting.
+       *
+       * ## [#17274] `teamId` reaches the wire
+       *
+       * This member has been declared since the family's first commit and was
+       * never forwarded: the re-invite carried `email`, `role` and
+       * `organizationId` only, so resending a TEAM invitation quietly landed
+       * it with no team — nothing refused, nothing warned, and the placement
+       * was simply gone. It is forwarded now. `null` and an omitted member
+       * both mean "no team" and both send no `teamId`; see
+       * {@link ObjectStackClient.organizations}`.invite` for the measured
+       * vendor behaviour that fixes those spellings.
+       *
+       * The `role` default is likewise {@link ObjectStackClient.organizations}
+       * `.invite`'s, not a second copy spelled here: an undeclared `role`
+       * reaches the wire as `'member'` exactly as before, from one place.
        */
       resend: async (
         invitation: { id?: string; email: string; role?: string; organizationId: string; teamId?: string | null },
@@ -3977,8 +4030,9 @@ export class ObjectStackClient {
         }
         return this.organizations.invite({
           email: invitation.email,
-          role: invitation.role ?? 'member',
+          role: invitation.role,
           organizationId: invitation.organizationId,
+          teamId: invitation.teamId,
         });
       },
     },
