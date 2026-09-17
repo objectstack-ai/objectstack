@@ -263,7 +263,7 @@ const ledgerRoot = ledgerRootArg
 
 // Governed metadata types, rolled out highest-frequency / highest-risk first.
 // (`query` is not a metadata type — see SPEC_ONLY_SCHEMAS below.)
-const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'seed', 'translation', 'validation', 'api', 'capability', 'qa', 'manifest', 'crud_endpoints', 'metadata_endpoints', 'batch_endpoints', 'route_generation', 'realtime_subscription', 'sharing_rule'];
+const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'seed', 'translation', 'validation', 'api', 'capability', 'qa', 'manifest', 'crud_endpoints', 'metadata_endpoints', 'batch_endpoints', 'route_generation', 'realtime_subscription', 'sharing_rule', 'connector', 'analytics_cube'];
 
 // Authorable metadata types that are NOT yet governed — the coverage ratchet.
 //
@@ -301,25 +301,20 @@ const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'po
 // ⛔ These rows are NOT a licence to leave them: the direction of travel is out
 // of this map, exactly as it was for the nine.
 //
-// [#18582] One of the three is PAID: `sharing_rule` moved into GOVERNED with
-// packages/spec/liveness/sharing_rule.json. The two left are `connector` and
-// `analytics_cube`, and the card that owes them is still open — the sentence
-// above is the whole reason this note updates the count instead of leaving a
-// stale "three" standing over a map of two.
-const PENDING_GOVERNANCE: Record<string, string> = {
-  connector:
-    'Authored via `stack.connectors[]` and `PUT /api/v1/meta/connector/:name` '
-    + '(#6245 bound DeclarativeConnectorEntrySchema for exactly those two doors), and '
-    + 'enrolled into this gate\'s denominator by #18133 — before which it was invisible '
-    + 'to the ratchet rather than covered by it. No ledger walked it yet: seed '
-    + 'packages/spec/liveness/connector.json (#18133).',
-  analytics_cube:
-    'Authored via `stack.analyticsCubes[]` and `PUT /api/v1/meta/analytics_cube/:name` '
-    + '(#10194). Whether that authoring is live end-to-end is its own measurement '
-    + '(#10238) and this row does not prejudge it — the debt recorded here is only that '
-    + 'no ledger asks who reads the cube\'s properties. Enrolled by #18133; seed '
-    + 'packages/spec/liveness/analytics_cube.json.',
-};
+// [#18582] ALL THREE ARE PAID and this map is now EMPTY — its intended steady
+// state, reached in two rounds: `sharing_rule` first (PR #18587), then
+// `connector` and `analytics_cube` together, each with a ledger under
+// packages/spec/liveness/. Kept rather than deleted, for the reason the ratchet
+// paragraph above gives: the map is how the NEXT authorable type that arrives
+// ungoverned gets a declared debt instead of silence, and `report.stalePending`
+// already fails a row that outlives its debt, so an empty map costs nothing and
+// removing it would take the channel with it. ⛔ An entry added here is a debt
+// with an issue number and a direction of travel, never a way to silence the
+// gate on a type somebody just registered — read the #18133 note above before
+// writing one, and note that "the map is empty" is a fact about the ratchet, not
+// a claim that every governed type is fully `live`: what each ledger measured is
+// in the ledger.
+const PENDING_GOVERNANCE: Record<string, string> = {};
 
 // Spec-only override: governed types whose canonical schema is NOT (yet) in the
 // metadata-type registry, so they can't be resolved via getMetadataTypeSchema.
