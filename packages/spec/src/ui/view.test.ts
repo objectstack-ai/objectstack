@@ -2640,13 +2640,26 @@ describe('RowColorConfigSchema', () => {
       shape: { colors: { description?: string } };
     }).shape.colors.description ?? '';
 
-    expect(description).not.toMatch(/hex/i);
-    // ⚠️ `token` went with it: read as the 23 colour NAMES it still stood
-    // beside hex as an equal alternative, and putting a bad option first is as
-    // harmful as offering only the bad option.
+    // ⛔ The trap literal, verbatim from the sentence this replaced.
+    expect(description).not.toContain('hex/token');
+    // ⚠️ `token` went with it. Read as the renderer's colour NAMES it was still
+    // standing beside hex as an equal alternative, and putting a bad option
+    // first is as harmful as offering only the bad option.
     expect(description).not.toMatch(/\btokens?\b/i);
-    // What it must do instead: name the two spellings that reach a class, and
-    // point at the rule that reports the ones that do not.
+
+    // ⭐ The property, not the wording: hex must still be NAMED — an author who
+    // comes here asking "can I paste the option colours in?" has to find the
+    // answer — but only ever in the same sentence as the consequence. Deleting
+    // the word would pass a bare `not.toMatch(/hex/)` and leave that reader
+    // with nothing, which is how the old sentence got written in the first
+    // place.
+    expect(description, 'the describe answers the hex question nowhere').toMatch(/hex/i);
+    for (const sentence of description.split('. ')) {
+      if (/hex/i.test(sentence)) expect(sentence).toContain('colours no row');
+    }
+
+    // And it names a spelling that DOES reach a class, plus the rule that
+    // reports the ones that do not.
     expect(description).toContain('bg-red-200');
     expect(description).toContain('view/row-color-unresolvable-value');
   });
