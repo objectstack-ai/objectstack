@@ -23740,8 +23740,8 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // discharge). A negative with no live control beside it is how a repair
   // becomes a silencer, so the controls are inside the same floored battery.
   'H19 judged-set founding': 34,
-  // Registered with the queued merged-delivery reading (#18372); the pin sits
-  // just under that on its neighbours' grounds. What this battery floors is a
+  // 151 registered with the queued merged-delivery reading (#18372); the pin
+  // sits just under that on its neighbours' grounds. What this battery floors is a
   // LISTING whose whole value is its discriminators — the bucket a card lands
   // in, the closing condition it quotes, the ownership record it dates against
   // the merge — plus the two negatives the filing card rules on TWICE: a
@@ -23749,7 +23749,7 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // must stand the row down. A listing whose discriminators quietly stopped
   // being asserted would still print rows, and every one of them would read as
   // 「close this」, which is the one thing the card forbids.
-  'H67 queued merged-delivery reading': 1,
+  'H67 queued merged-delivery reading': 142,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
