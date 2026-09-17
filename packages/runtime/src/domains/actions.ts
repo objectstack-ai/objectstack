@@ -969,7 +969,58 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
             && !validationFailureDetails(err);
         if (unexpectedFault) {
             console.error(`[action ${objectName}/${actionName}] unexpected fault (${name}): ${full}`);
-            return { handled: true, response: deps.errorFromThrown(err, 500) };
+            // [#18540] This branch is this door's UNCLASSIFIED-FAULT TERMINAL, so
+            // it answers the terminal's envelope — `INTERNAL_ERROR_MESSAGE`, the
+            // same sentence `/data` answers — instead of relaying `err.message`.
+            //
+            // The status was already right; what leaked was the SENTENCE. A
+            // non-sandboxed crash — a plain `TypeError` from an in-process
+            // registered handler — reached the wire as `500 INTERNAL_ERROR`
+            // carrying `Cannot read properties of undefined (reading 'id')`
+            // verbatim, while the IDENTICAL throw through the `/data` door
+            // answered `Internal server error`.
+            //
+            // Why neither existing guard caught it, both measured on this tree:
+            //
+            //   - #17273's crash terminal above is keyed on the SANDBOX
+            //     (`isNativeErrorName` over the `innerMessage` the QuickJS runner
+            //     fills). This face never crosses a VM boundary, so nothing sets
+            //     `innerMessage` and that terminal never fires. A predicate that
+            //     classifies by HOW a crash arrived is structurally blind to
+            //     crashes that did not arrive that way — while looking exhaustive.
+            //   - `errorFromThrown` relays `err.message` through the dispatcher's
+            //     5xx withhold, which is gated on `looksLikeInternalErrorLeak` —
+            //     a DRIVER-DUMP heuristic that reads FALSE for stack-shaped prose
+            //     (#17273's changeset records the same reading). So that relay is
+            //     DEFAULT-ALLOW: prose ships unless the heuristic recognises it.
+            //
+            // `/data` is default-DENY by construction: `classifyDataError` ends
+            // in an unconditional `UNCLASSIFIED_FAULT()`, and its
+            // `looksLikeInternalErrorLeak` limb only chooses `DATABASE_ERROR`
+            // over `INTERNAL_ERROR` — that limb is not what sanitises. Aligning
+            // therefore means answering the terminal here too, ⛔ never teaching
+            // the heuristic a new phrasing: re-pointing `looksLikeInternalErrorLeak`
+            // at stack-shaped prose would change what every OTHER boundary
+            // withholds, and it guards a different question.
+            //
+            // Nothing about the ANSWER moves but the sentence. Reaching here
+            // already proves `.status`/`.statusCode` are absent (the branch above
+            // serves them) and that this is not a `ValidationError`, so
+            // `resolveThrownHttpError` had no declared status either: its `status`
+            // was the 500 fallback and its `code` was
+            // `standardErrorCodeForHttpStatus(500)` — `INTERNAL_ERROR`, the code
+            // this exit emits. Same status, same code, same envelope shape.
+            //
+            // ⛔ Deliberately the SAME `deps.error` seam #17273's terminal uses,
+            // never a widened one: a fault's `userMessage` and its non-string
+            // `details.code` (a driver errno — the backend-naming disclosure
+            // `demotedDeclaredCode` already withholds on an undeclared 5xx) do not
+            // ride this exit, exactly as they do not ride `/data`'s.
+            //
+            // The words are not lost: the `console.error` above keeps the full
+            // text — the same "the client does not read it, the log keeps it"
+            // split #5437 draws in `rest`.
+            return { handled: true, response: deps.error(INTERNAL_ERROR_MESSAGE, 500) };
         }
 
         // [#3962] A deliberate REJECTION is a 400. The 200-with-inner-envelope
