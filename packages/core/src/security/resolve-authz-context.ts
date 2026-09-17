@@ -998,17 +998,38 @@ export async function resolveUserAuthzGrants(
     // detector (`plugin-security/src/bootstrap-platform-admin.ts` §2, which
     // spells the same `postureEnforcesWall(resolveTenancyPosture())`). Under
     // `single` — the DEFAULT posture — `bootstrapPlatformAdmin` MINTS this very
-    // row to promote the first human user, and Choice 4A rules that promotion,
-    // and its row, correct and UNCHANGED. Both halves of the notice are
-    // therefore false for such a rig: the row is not "removed in a later
-    // release", and re-anchoring through the config line gets the operator
-    // nothing, because the `single` promotion is pinned NEVER to consult that
-    // variable (`bootstrap-platform-admin-walled-owner.test.ts`, "never
-    // consults the owner-email variable"). That holds whichever way Choice 4B
-    // (#11979) is eventually ruled: under 4A the row is that rig's permanent
-    // anchor, and under 4B the advice only becomes true once 4B actually lands.
-    // So the migration window's loudness is scoped to the rigs actually in it —
-    // the walled ones, where the row really is the LEGACY anchor.
+    // row, so the notice's FIRST half is false for such a rig: the row is not
+    // "removed in a later release", it is the row that rig's own boot writes.
+    // Choice 4A rules that promotion, and its row, correct, and the maintainer
+    // ruling of 2026-09-08 (decision batch #100, on #16682) left that standing
+    // while re-keying WHO is promoted — verbatim: "The rest of Choice 4A
+    // (#11974, 2026-08-25) stands: retiring the walled write must not retire
+    // the `single` one, and the over-denial invariant (`adminPromoted === true`
+    // with a grant row minted) stays pinned."
+    //
+    // ⚠️ The SECOND half — "Re-anchor this deployment by declaring its
+    // administrators in configuration" — is NOT inert under `single`. The same
+    // ruling, verbatim: "Under `single` posture the first-boot promotion
+    // consults `OS_PLATFORM_OWNER_EMAIL` first." So a declaration DOES decide
+    // the `single` promotion, and the pin records THAT now:
+    // `bootstrap-platform-admin-walled-owner.test.ts` asserts "a declared owner
+    // DOES redirect the single-org promotion (#16682)". ⛔ The string "never
+    // consults the owner-email variable" survives in that file ONLY inside the
+    // re-authored block's account of what the case USED to assert — ⛔ never
+    // cite it as live support for the pre-ruling rule, which is what an earlier
+    // revision of THIS comment did (#18380).
+    //
+    // What the reversal did not change is the thing this gate turns on:
+    // declaring the variable does not move a `single` rig OFF the grant row.
+    // The declared-owner leg mints the same unscoped `admin_full_access` row
+    // (one `promote()` call site serves both legs), and a rig that already
+    // holds one never reaches that leg — the existing-admin check answers
+    // `already_have_admin` before it. Choice 4B (#11979) is the card that would
+    // end that, and it is ruled and filed, ⛔ not landed (#11663 comment
+    // 5404675670, verbatim: "4B is ruled as the sequenced follow-up, not
+    // dropped"). So the migration window's loudness is scoped to the rigs
+    // actually in it — the walled ones, where the row really is the LEGACY
+    // anchor.
     //
     // ⛔ This gates the NOTICE and nothing else. Standing is derived by the
     // `if (configConfersPlatformAdmin) / else if (hasPlatformAdminGrant)` chain
