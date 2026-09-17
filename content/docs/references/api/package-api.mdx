@@ -154,7 +154,7 @@ Get installed package response
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … } \| … +1 more` | ✅ | Installed package details |
 
 ### Nested Shape: `GetInstalledPackageResponse.error`
@@ -170,6 +170,15 @@ Get installed package response
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `GetInstalledPackageResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `GetInstalledPackageResponse.data[option 1]`
 
@@ -405,7 +414,7 @@ List installed packages response
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ packages: (object \| object)[]; total?: integer; nextCursor?: string; hasMore: boolean }` | ✅ |  |
 
 ### Nested Shape: `ListInstalledPackagesResponse.error`
@@ -421,6 +430,15 @@ List installed packages response
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `ListInstalledPackagesResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `ListInstalledPackagesResponse.data`
 
@@ -522,7 +540,7 @@ Install package response
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ package: object; dependencyResolution?: object; namespaceConflicts?: object[]; message?: string }` | ✅ |  |
 
 ### Nested Shape: `PackageInstallResponse.error`
@@ -538,6 +556,15 @@ Install package response
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `PackageInstallResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `PackageInstallResponse.data`
 
@@ -636,7 +663,7 @@ Upgrade package response
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ success: boolean; phase: string; plan?: object; snapshotId?: string; … }` | ✅ |  |
 
 ### Nested Shape: `PackageUpgradeResponse.error`
@@ -652,6 +679,15 @@ Upgrade package response
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `PackageUpgradeResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `PackageUpgradeResponse.data`
 
@@ -722,7 +758,7 @@ Resolve dependencies response
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ dependencies: object[]; canProceed: boolean; requiredActions: object[]; installOrder: string[]; … }` | ✅ | Dependency resolution result with topological sort |
 
 ### Nested Shape: `ResolveDependenciesResponse.error`
@@ -738,6 +774,15 @@ Resolve dependencies response
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `ResolveDependenciesResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `ResolveDependenciesResponse.data`
 
@@ -773,7 +818,7 @@ Uninstall package response
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ packageId: string; success: boolean; message?: string }` | ✅ |  |
 
 ### Nested Shape: `UninstallPackageApiResponse.error`
@@ -789,6 +834,15 @@ Uninstall package response
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `UninstallPackageApiResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `UninstallPackageApiResponse.data`
 
@@ -843,7 +897,7 @@ Upload artifact response
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ success: boolean; artifactRef?: object; submissionId?: string; message?: string }` | ✅ |  |
 
 ### Nested Shape: `UploadArtifactResponse.error`
@@ -859,6 +913,15 @@ Upload artifact response
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `UploadArtifactResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `UploadArtifactResponse.data`
 

@@ -196,7 +196,7 @@ Metadata file format
 | **fromCache** | `boolean` | optional |  |
 | **etag** | `string` | optional |  |
 | **notModified** | `boolean` | optional |  |
-| **loadTime** | `number` | optional |  |
+| **loadTime** | `integer` | optional | How long the load took, in milliseconds |
 
 ### Nested Shape: `MetadataLoadResult.stats`
 
@@ -351,7 +351,7 @@ Metadata file format
 | **stats** | `{ path?: string; size?: number; mtime?: string; hash?: string; … }` | optional |  |
 | **etag** | `string` | optional |  |
 | **size** | `number` | optional |  |
-| **saveTime** | `number` | optional |  |
+| **saveTime** | `integer` | optional | How long the save took, in milliseconds |
 | **backupPath** | `string` | optional |  |
 
 ### Nested Shape: `MetadataSaveResult.stats`
