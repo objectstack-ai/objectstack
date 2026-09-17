@@ -2700,12 +2700,43 @@ export function jobFilteredSteps(entries, paths) {
  * The reason is REQUIRED (not just the marker) — an opt-out with no reason
  * reads identically to a placeholder nobody will ever revisit, and is exactly
  * the shape a reviewer cannot tell apart from "forgot to name a family".
+ *
+ * ## The reason is WHOLE, or the declaration is REFUSED (#18662)
+ *
+ * This marker captured its reason with the same `(\S.*)$`-under-`m` shape the
+ * three population markers did, so the capture ended at the FIRST NEWLINE and
+ * a reason an author wrapped onto the comment line below reached its reader as
+ * a sentence that simply stops — the #18422 defect on a marker that repair did
+ * not reach. Measured on `origin/main` 034f5a3afd before this change: a
+ * two-line reason read back as line one, `checkFamilyCoverageGaps` accepted the
+ * workflow, and nothing sounded. So the grammar now comes out of the shared
+ * builder and the read is graded by the shared wholeness reading; a continued
+ * reason THROWS, naming the workflow, the line, the marker and the text that
+ * continues it.
+ *
+ * ⚠️ Nothing in this tool RENDERS this reason (measured, #18662): the only
+ * consumer is `checkFamilyCoverageGaps`, which reads the return value as a
+ * BOOLEAN. The refusal is still owed — wholeness is a property of the
+ * declaration, not of today's consumer, and the next reader of the reason is
+ * the seat that greps the workflow for it — but the cost of a cut here is that
+ * seat's, not a rendered row's, and this sentence is the price said out loud
+ * rather than left to be discovered.
+ *
+ * ## `#` is the ONLY form here, and that is a property of YAML (#18662)
+ *
+ * The key restriction in `MARKER_KEY_FORMS` is not a narrowing of the roster:
+ * this marker is read out of a workflow's YAML text, where `#` is the only
+ * comment syntax there is. `//`, and every BLOCK form #18661 added, are not
+ * comments in YAML at all — a line spelled that way is document content, so
+ * admitting one would read a declaration off text the workflow's own parser
+ * never treats as a remark. ⛔ The block forms therefore cannot apply to this
+ * marker, and widening it to them would be a defect rather than a courtesy.
  */
-const NO_CHECK_FAMILIES_MARKER = /^[ \t]*#[ \t]*dispatch-gates:[ \t]*no-check-families[ \t]*--[ \t]*(\S.*)$/m;
-
-export function declaredNoCheckFamiliesReason(workflowText) {
-  const m = NO_CHECK_FAMILIES_MARKER.exec(workflowText);
-  return m ? m[1].trim() : null;
+export function declaredNoCheckFamiliesReason(workflowText, file = null) {
+  const read = readPopulationMarker(workflowText, 'no-check-families');
+  if (!read) return null;
+  refuseCutMarkerReason(read, 'no-check-families', file);
+  return read.reason;
 }
 
 /**
@@ -2843,8 +2874,55 @@ const MARKER_COMMENT_FORMS = Object.freeze([
   Object.freeze({ label: '*', kind: 'block', open: '\\*' }),
 ]);
 
-const MARKER_LINE_HEAD =
-  `^[ \\t]*(${MARKER_COMMENT_FORMS.map((f) => f.open).join('|')})[ \\t]*dispatch-gates:[ \\t]*`;
+/**
+ * The marker keys whose files are NOT JavaScript, and the comment forms those
+ * files really have (#18662).
+ *
+ * The roster above is the set of idioms a `dispatch-gates:` declaration may be
+ * written in across this tree; it is not a claim that every one of them is a
+ * comment in every LANGUAGE a declaration is read out of. `no-check-families`
+ * is read out of workflow YAML, where `#` is the only comment there is: a
+ * `//` or slash-star line in a workflow is document content, and reading a
+ * declaration off one would be reading it off text the workflow's own parser
+ * never treats as a remark. So the alternation this key's pattern is built
+ * from is the roster FILTERED to the forms its language has — never a second
+ * roster, and never a second pattern.
+ *
+ * A key absent from this table gets the whole roster, which is the answer for
+ * every marker read out of a JavaScript or shell source.
+ *
+ * ⛔ This table may only ever NARROW: it names a subset of the labels in
+ * `MARKER_COMMENT_FORMS`, and a label that is not one of them throws below
+ * rather than silently contributing nothing to the alternation — a form set
+ * that quietly emptied would make every declaration of that key parse as
+ * nothing at all, which is precisely the #18661 failure one level up.
+ */
+const MARKER_KEY_FORMS = Object.freeze({
+  'no-check-families': Object.freeze(['#']),
+});
+
+function markerFormsFor(key) {
+  const labels = MARKER_KEY_FORMS[key];
+  if (!labels) return MARKER_COMMENT_FORMS;
+  const forms = MARKER_COMMENT_FORMS.filter((f) => labels.includes(f.label));
+  if (forms.length !== labels.length) {
+    throw new Error(
+      `dispatch-gates: MARKER_KEY_FORMS names ${labels.length} form(s) for '${key}' and only ${forms.length} of them ` +
+        `are in MARKER_COMMENT_FORMS (${MARKER_COMMENT_FORMS.map((f) => f.label).join(', ')}). The restriction may only ` +
+        'ever NARROW the roster — a label the roster does not carry contributes nothing to the alternation, and a ' +
+        'declaration of that key would then parse as nothing at all.',
+    );
+  }
+  return forms;
+}
+
+/**
+ * The HEAD every marker pattern is built out of — the indent, the comment form
+ * (group 1) and the key — for the forms THAT key's language has.
+ */
+function markerLineHead(key) {
+  return `^[ \\t]*(${markerFormsFor(key).map((f) => f.open).join('|')})[ \\t]*dispatch-gates:[ \\t]*`;
+}
 
 /**
  * Which KIND a captured comment form is — `line` or `block`. Read off the
@@ -2864,14 +2942,30 @@ function markerFormKind(form) {
   return known.kind;
 }
 
+/**
+ * The REASON-TAIL markers — the keys whose grammar is head + `-- <reason>`,
+ * with nothing between the key and the separator (#18662).
+ *
+ * The three population keys were the whole roster until this card, and the
+ * builder is still spelled `populationMarkerPattern` because `population*` is
+ * what this machinery is CALLED everywhere it is exported
+ * (`populationReasonContinuation`, `populationReasonCutRefusal`) and a rename
+ * would move the names a reader greps for without moving a single behaviour.
+ * ⚠️ The ROSTER, not the name, is the authority on which keys it serves:
+ * `no-check-families` has exactly this grammar and is built here rather than
+ * out of the fourth hand-written copy of the pattern it used to be — which is
+ * what left its reason outside the #18422 wholeness reading for two cards.
+ */
+const REASON_TAIL_MARKER_KEYS = Object.freeze([...POPULATION_MARKER_KEYS, 'no-check-families']);
+
 function populationMarkerPattern(key) {
-  if (!POPULATION_MARKER_KEYS.includes(key)) {
+  if (!REASON_TAIL_MARKER_KEYS.includes(key)) {
     throw new Error(
-      `dispatch-gates: unknown population marker key '${key}' — known keys: ${POPULATION_MARKER_KEYS.join(', ')}. ` +
+      `dispatch-gates: unknown population marker key '${key}' — known keys: ${REASON_TAIL_MARKER_KEYS.join(', ')}. ` +
         'A marker is added by naming it here, never by writing a fourth copy of this pattern.',
     );
   }
-  return new RegExp(`${MARKER_LINE_HEAD}${key}[ \\t]*--[ \\t]*(\\S.*)$`, 'm');
+  return new RegExp(`${markerLineHead(key)}${key}[ \\t]*--[ \\t]*(\\S.*)$`, 'm');
 }
 
 /**
@@ -2896,23 +2990,57 @@ function pathListMarkerPattern(key) {
         'A marker is added by naming it here, never by writing a third copy of this pattern.',
     );
   }
-  return new RegExp(`${MARKER_LINE_HEAD}${key}[ \\t]+(\\S.*?)[ \\t]+--[ \\t]+(\\S.*)$`, 'm');
+  return new RegExp(`${markerLineHead(key)}${key}[ \\t]+(\\S.*?)[ \\t]+--[ \\t]+(\\S.*)$`, 'm');
 }
 
 /**
- * A population declaration read WHOLE — its form, its reason, and the line that
- * CUTS the reason short — off ONE match (#18422, widened to the block forms by
- * #18661). Pure over the source text, so the refusals below, the three
- * `declared*` readers and any future caller cannot disagree about what a cut
- * reason is or about where a whole one ends.
+ * Which grammar every reason-bearing `dispatch-gates:` key is read by, and
+ * which capture group of it holds the REASON (#18662) — built BY CONSTRUCTION
+ * out of the two rosters above rather than hand-listed.
  *
- * Returns `{ form, kind, line, reason, cut }`, or null when this source carries
- * no usable declaration of that key — no match, or a match whose reason is
- * empty, which is a declaration written and dropped rather than one made.
+ * ## Why by construction, and not a fourth hand-written table
+ *
+ * Both builders end in a reason capture, so every key either builder serves
+ * carries a reason that can be CUT — the #18422 defect is a property of the
+ * grammar, not of the three keys it was found on. A hand-listed roster here
+ * would be a second copy of "which keys have a reason", and it would be wrong
+ * in exactly the silent direction the moment a sixth key was added to either
+ * builder: the key would parse, the reason would capture, and nothing would
+ * ask whether it ended where its author did — which is how `no-check-families`
+ * and both path-list markers sat outside the repair until this card. Derived,
+ * the class is closed: a key added to either roster gets the wholeness reading
+ * in the same line, and cannot be added without it.
+ *
+ * Group 2 is the reason for a reason-tail key (group 1 is the form); group 3
+ * is the reason for a path-list key (group 2 is the path list).
+ */
+const MARKER_REASON_GRAMMARS = Object.freeze(Object.fromEntries([
+  ...REASON_TAIL_MARKER_KEYS.map((k) => [k, Object.freeze({ build: populationMarkerPattern, reasonGroup: 2 })]),
+  ...PATH_LIST_MARKER_KEYS.map((k) => [k, Object.freeze({ build: pathListMarkerPattern, reasonGroup: 3 })]),
+]));
+
+/**
+ * A `dispatch-gates:` declaration read WHOLE — its form, its reason, and the
+ * line that CUTS the reason short — off ONE match (#18422, widened to the block
+ * forms by #18661 and to every reason-bearing marker key by #18662). Pure over
+ * the source text, so the refusals below, the five `declared*` readers and any
+ * future caller cannot disagree about what a cut reason is or about where a
+ * whole one ends.
+ *
+ * ⚠️ Still spelled `readPopulationMarker` for the reason
+ * `REASON_TAIL_MARKER_KEYS` states: the exported half of this machinery is
+ * named `population*` and a reader greps for it. `MARKER_REASON_GRAMMARS` is
+ * the authority on which keys it reads — today all six, population or not.
+ *
+ * Returns `{ form, kind, line, reason, cut, match }`, or null when this source
+ * carries no usable declaration of that key — no match, or a match whose reason
+ * is empty, which is a declaration written and dropped rather than one made.
  * `line` is the 1-based line the declaration is written on; `cut` is
  * `{ line, text, kind }` — the 1-based line that truncates the reason and its
  * text, because a refusal a reader cannot navigate to is a refusal they cannot
- * act on — or null when the reason is whole.
+ * act on — or null when the reason is whole. `match` is the raw match, so a
+ * path-list reader takes its path list off the SAME read its reason came from
+ * and the two can never describe different declarations.
  *
  * Reads the FIRST marker of that key, exactly as the capture does: a second
  * declaration of one key in one file is a different defect, and every reading
@@ -2923,8 +3051,16 @@ function pathListMarkerPattern(key) {
  * functions under this one are where that answer is executed.
  */
 function readPopulationMarker(scriptSource, markerKey) {
+  const grammar = MARKER_REASON_GRAMMARS[markerKey];
+  if (!grammar) {
+    throw new Error(
+      `dispatch-gates: unknown marker key '${markerKey}' — known keys: ` +
+        `${Object.keys(MARKER_REASON_GRAMMARS).join(', ')}. A marker is added by naming it in one of the two grammar ` +
+        'rosters, never by writing another copy of this pattern.',
+    );
+  }
   const text = String(scriptSource);
-  const m = populationMarkerPattern(markerKey).exec(text);
+  const m = grammar.build(markerKey).exec(text);
   if (!m) return null;
   // Counted off the SAME text the capture read, and off `m.index` rather than
   // by re-matching: the pattern is anchored at the line start, so the newlines
@@ -2932,11 +3068,12 @@ function readPopulationMarker(scriptSource, markerKey) {
   const declarationLine = text.slice(0, m.index).split('\n').length;
   const lines = text.split('\n');
   const kind = markerFormKind(m[1]);
+  const tail = m[grammar.reasonGroup];
   const read = kind === 'block'
-    ? blockFormReason(lines, declarationLine, m[2])
-    : lineFormReason(lines, declarationLine, m[1], m[2]);
+    ? blockFormReason(lines, declarationLine, tail)
+    : lineFormReason(lines, declarationLine, m[1], tail);
   if (!read.reason) return null;
-  return { form: m[1], kind, line: declarationLine, reason: read.reason, cut: read.cut };
+  return { form: m[1], kind, line: declarationLine, reason: read.reason, cut: read.cut, match: m };
 }
 
 /**
@@ -3045,6 +3182,83 @@ export function populationReasonContinuation(scriptSource, markerKey, file = nul
   const read = readPopulationMarker(scriptSource, markerKey);
   if (!read?.cut) return null;
   return { file: file ?? null, line: read.cut.line, text: read.cut.text, kind: read.cut.kind };
+}
+
+/**
+ * WHY a cut reason must be refused — the text, for ANY reason-bearing marker
+ * key (#18662), and the one place both sentences live.
+ *
+ * `populationReasonCutRefusal` below is this function reached through a
+ * discovery ENTRY, and its output is byte-identical to what it was before this
+ * split: the three population channels carry their reason and their cut in
+ * entry fields, which the other three markers have no entry to carry. Those
+ * three reach it with the cut in hand instead — one text, five keys, so a
+ * reader who has seen this refusal once has seen all of them.
+ *
+ * Returns null when `cut` is null, i.e. when the reason is whole.
+ */
+export function markerReasonCutRefusal(markerKey, cut) {
+  if (!MARKER_REASON_GRAMMARS[markerKey]) {
+    throw new Error(
+      `dispatch-gates: unknown marker key '${markerKey}' — known keys: ` +
+        `${Object.keys(MARKER_REASON_GRAMMARS).join(', ')}.`,
+    );
+  }
+  if (!cut) return null;
+  const where = `${cut.file ?? 'the declaring file'}:${cut.line}`;
+  // A BLOCK form is cut by a different shape and takes a different repair
+  // (#18661), so it gets its own text rather than the line forms' advice. In a
+  // block the star lines under a declaration ARE the reason — the walk joins
+  // them — so the only way to lose half of one is to write a line the walk
+  // cannot see as part of the comment. Telling that author to "put the whole
+  // reason on the marker line" would send them to the wrong half of their
+  // declaration, which is precisely what this family of refusals exists not to
+  // do. The line forms' text below is unchanged, byte for byte.
+  if (cut.kind === 'block') {
+    return `declares ${markerKey} inside a block comment and its reason is CUT at ${where} by a line the block walk `
+      + `cannot read as part of the comment: "${cut.text}". Inside a block the star-prefixed lines under a `
+      + 'declaration are the same comment and are joined into the reason; a line with text and no star prefix is '
+      + 'neither a continuation nor one of the endings (the closing delimiter, a blank star line, the next star-@tag, '
+      + 'another dispatch-gates: key), so everything from it on is dropped and the seat is handed the declaration cut '
+      + 'off mid-sentence. Give that line the block\'s star prefix, or end the reason before it with a blank star '
+      + 'line. Rewrite the declaration — never route around this refusal.';
+  }
+  return `declares ${markerKey} and its reason does not END on the marker line: ${where} continues it with `
+    + `"${cut.text}". The capture stops at the FIRST NEWLINE, so the seat is handed the declaration cut off `
+    + 'mid-sentence — and the reason is the one thing a seat reads off this row when deciding whether the family '
+    + 'belongs on its card. Put the WHOLE reason on the marker line, however long it runs (this tree already carries '
+    + 'one-line reasons past 1200 characters), and separate any comment written under the declaration with a blank '
+    + 'line. ⛔ Never widen the marker to swallow the next line instead: nothing in the text tells a wrapped reason '
+    + 'from an unrelated comment, so that repair would make the next paragraph part of a seat-facing reason silently. '
+    + 'Rewrite the declaration — never route around this refusal.';
+}
+
+/**
+ * The cut refusal DELIVERED, for the three markers whose reason no rendering
+ * ever prints (#18662) — `no-check-families`, `inherited-population` and
+ * `self-test-reads`.
+ *
+ * ## Why a throw here, where the population markers get a row
+ *
+ * The three population channels carry their declaration into a discovery entry
+ * that IS rendered, so their refusal is a printed row and a red self-test case.
+ * These three have no such row: measured on `origin/main` 034f5a3afd, every
+ * production call site of all three reads only the BOOLEAN or the PATH LIST,
+ * and not one renders the reason to a seat or to a log. A refusal returned as
+ * text would therefore be a refusal returned to nobody — the exact silence
+ * this whole marker family exists to end.
+ *
+ * So the read itself refuses, which is already how both path-list markers
+ * refuse an invented path: the tool's CLI catches it, prints
+ * `dispatch-gates: derivation failed — <this text>` and exits 2, so a cut
+ * reason reds every run of this tool rather than reaching a reader as half a
+ * sentence. The message names the FILE, the LINE, the MARKER and the text that
+ * continues it — the four a reader needs to navigate to it.
+ */
+function refuseCutMarkerReason(read, markerKey, file) {
+  if (!read?.cut) return;
+  const why = markerReasonCutRefusal(markerKey, { ...read.cut, file: file ?? null });
+  throw new Error(`dispatch-gates: ${file ?? 'the declaring file'} ${why}`);
 }
 
 /**
@@ -3449,34 +3663,11 @@ export function populationReasonCutRefusal(entry, markerKey) {
     );
   }
   if (!entry?.[fields.reason]) return null;
-  const cut = entry?.[fields.cut] ?? null;
-  if (!cut) return null;
-  const where = `${cut.file ?? 'the declaring file'}:${cut.line}`;
-  // A BLOCK form is cut by a different shape and takes a different repair
-  // (#18661), so it gets its own text rather than the line forms' advice. In a
-  // block the star lines under a declaration ARE the reason — the walk joins
-  // them — so the only way to lose half of one is to write a line the walk
-  // cannot see as part of the comment. Telling that author to "put the whole
-  // reason on the marker line" would send them to the wrong half of their
-  // declaration, which is precisely what this family of refusals exists not to
-  // do. The line forms' text below is unchanged, byte for byte.
-  if (cut.kind === 'block') {
-    return `declares ${markerKey} inside a block comment and its reason is CUT at ${where} by a line the block walk `
-      + `cannot read as part of the comment: "${cut.text}". Inside a block the star-prefixed lines under a `
-      + 'declaration are the same comment and are joined into the reason; a line with text and no star prefix is '
-      + 'neither a continuation nor one of the endings (the closing delimiter, a blank star line, the next star-@tag, '
-      + 'another dispatch-gates: key), so everything from it on is dropped and the seat is handed the declaration cut '
-      + 'off mid-sentence. Give that line the block\'s star prefix, or end the reason before it with a blank star '
-      + 'line. Rewrite the declaration — never route around this refusal.';
-  }
-  return `declares ${markerKey} and its reason does not END on the marker line: ${where} continues it with `
-    + `"${cut.text}". The capture stops at the FIRST NEWLINE, so the seat is handed the declaration cut off `
-    + 'mid-sentence — and the reason is the one thing a seat reads off this row when deciding whether the family '
-    + 'belongs on its card. Put the WHOLE reason on the marker line, however long it runs (this tree already carries '
-    + 'one-line reasons past 1200 characters), and separate any comment written under the declaration with a blank '
-    + 'line. ⛔ Never widen the marker to swallow the next line instead: nothing in the text tells a wrapped reason '
-    + 'from an unrelated comment, so that repair would make the next paragraph part of a seat-facing reason silently. '
-    + 'Rewrite the declaration — never route around this refusal.';
+  // The TEXT lives in `markerReasonCutRefusal` since #18662, so the three
+  // markers with no entry to carry a cut are refused in the same words as the
+  // three that have one. Byte-identical output either way: this reading is the
+  // entry-shaped half, nothing more.
+  return markerReasonCutRefusal(markerKey, entry?.[fields.cut] ?? null);
 }
 
 /**
@@ -4142,16 +4333,22 @@ export function workflowEnvValues(entry) {
  */
 const INHERITED_POPULATION_MARKER = pathListMarkerPattern('inherited-population');
 
-export function declaredInheritedPopulation(moduleSource, hints = null) {
+export function declaredInheritedPopulation(moduleSource, hints = null, file = null) {
   const source = String(moduleSource);
-  const m = INHERITED_POPULATION_MARKER.exec(source);
-  if (!m) return null;
+  // ONE read, both halves (#18662): the path list AND the wholeness of the
+  // reason come off the same match, so a refusal can never grade the reason of
+  // one declaration against the path list of another. The reason half is the
+  // #18422 reading this marker sat outside of until that card.
+  const read = readPopulationMarker(source, 'inherited-population');
+  if (!read) return null;
+  refuseCutMarkerReason(read, 'inherited-population', file);
+  const m = read.match;
   // The path list is non-empty by construction: the marker pattern requires a
   // non-space before the ` -- `, so a marker carrying only a reason does not
   // parse as a declaration at all — it reads as no marker, which is the safe
   // direction (inherit everything) rather than a silent blanket opt-out.
   const population = m[2].trim().split(/[ \t]+/).filter(Boolean);
-  const reason = m[3].trim();
+  const reason = read.reason;
   const spelled = new Set(hints ?? extractWatchHints(source));
   const invented = population.filter((h) => !spelled.has(h));
   if (invented.length > 0) {
@@ -4237,10 +4434,14 @@ export function declaredInheritedPopulation(moduleSource, hints = null) {
  */
 const SELF_TEST_READS_MARKER = pathListMarkerPattern('self-test-reads');
 
-export function declaredSelfTestReads(scriptSource, readTargets) {
+export function declaredSelfTestReads(scriptSource, readTargets, file = null) {
   const source = String(scriptSource);
-  const m = SELF_TEST_READS_MARKER.exec(source);
-  if (!m) return null;
+  // ONE read, both halves — see `declaredInheritedPopulation` (#18662). The
+  // wholeness reading reaches this marker by construction: both path-list keys
+  // come out of one grammar, so neither can carry a cut reason the other
+  // refuses.
+  const read = readPopulationMarker(source, 'self-test-reads');
+  if (!read) return null;
   // ⛔ NOT an optional argument with a permissive default. The whole contract of
   // this marker is that it cannot invent, and a caller that supplies no read set
   // would be handed a declaration nothing can refuse — a silent opt-in, which is
@@ -4252,8 +4453,9 @@ export function declaredSelfTestReads(scriptSource, readTargets) {
         + 'A declaration read with no read set is a declaration nothing can refuse.',
     );
   }
-  const population = m[2].trim().split(/[ \t]+/).filter(Boolean);
-  const reason = m[3].trim();
+  refuseCutMarkerReason(read, 'self-test-reads', file);
+  const population = read.match[2].trim().split(/[ \t]+/).filter(Boolean);
+  const reason = read.reason;
   const performed = new Set(readTargets);
   const invented = population.filter((p) => !performed.has(p));
   if (invented.length > 0) {
@@ -4295,7 +4497,7 @@ export function checkFamilyCoverageGaps(workflowEntries) {
   for (const { file, text } of workflowEntries) {
     if (extractTriggerPaths(text).length === 0) continue;
     if (extractCheckInvocations(text, file).length > 0) continue;
-    if (declaredNoCheckFamiliesReason(text)) continue;
+    if (declaredNoCheckFamiliesReason(text, file)) continue;
     out.push(file);
   }
   return out;
@@ -8802,7 +9004,7 @@ export function governedReadCensus({ files = null, read = null } = {}) {
     // carry, and one naming a path only the wider scan reaches throws here
     // rather than passing as coverage the derivation does not have.
     const declared = new Set(
-      declaredSelfTestReads(source, anchoredReadTargets(rel, source, isTracked))?.population ?? [],
+      declaredSelfTestReads(source, anchoredReadTargets(rel, source, isTracked), rel)?.population ?? [],
     );
     for (const file of [...governed].sort()) rows.push({ script: rel, file, declared: declared.has(file) });
   }
@@ -12058,7 +12260,7 @@ function discoverFamiliesPass(tree) {
       // module had before the marker existed.
       const source = sourceOfModule(rel);
       const spelled = extractWatchHints(source, rel, { tree });
-      const declared = declaredInheritedPopulation(source, spelled);
+      const declared = declaredInheritedPopulation(source, spelled, rel);
       moduleHints.set(rel, declared ? declared.population : spelled);
     }
     return moduleHints.get(rel);
@@ -12160,6 +12362,7 @@ function discoverFamiliesPass(tree) {
       const declaredReads = declaredSelfTestReads(
         source,
         anchoredReadTargets(f, source, (t) => trackedSet.has(t)),
+        f,
       );
       if (declaredReads) {
         for (const target of declaredReads.population) {
@@ -16148,7 +16351,7 @@ function selfTest() {
   const inheritableFromImports = importedByBareRoot.flatMap((m) => {
     const src = readFileSync(nodePath.join(ROOT, m), 'utf8');
     const spelled = extractWatchHints(src, m);
-    return declaredInheritedPopulation(src, spelled)?.population ?? spelled;
+    return declaredInheritedPopulation(src, spelled, m)?.population ?? spelled;
   });
   t(
     `a gate that IMPORTS the same modules inherits ${inheritableFromImports.length} of those ${wouldHaveInherited.length} literal(s)`,
@@ -21292,7 +21495,7 @@ function selfTest() {
   // marker line and these cases redden instead of 2632 fabricated pairs coming
   // back silently for the next gate that imports the tool.
   const ownToolSource = readFileSync(nodePath.join(ROOT, 'scripts/pm/dispatch-gates.mjs'), 'utf8');
-  const ownDeclared = declaredInheritedPopulation(ownToolSource);
+  const ownDeclared = declaredInheritedPopulation(ownToolSource, null, 'scripts/pm/dispatch-gates.mjs');
   // Read through `?.` on purpose: deleting the marker line must render as a
   // NAMED failing case, not as a TypeError that aborts the run and takes every
   // case after this one with it — a self-test that crashes reports one defect
@@ -21808,7 +22011,7 @@ function selfTest() {
   const liveModuleHints = (rel) => {
     const source = liveSource(rel);
     const spelled = extractWatchHints(source, rel, { tree: liveTree });
-    return declaredInheritedPopulation(source, spelled)?.population ?? spelled;
+    return declaredInheritedPopulation(source, spelled, rel)?.population ?? spelled;
   };
   const liveTargets = (rel) => firstPartyImportTargets(rel, liveSource(rel));
   // The THIRD followed edge (#13518). Its population comes from the manifest's
@@ -22235,7 +22438,7 @@ function selfTest() {
     for (const f of entry.files ?? []) {
       if (!existsSync(nodePath.join(ROOT, f))) continue;
       const src = liveSource(f);
-      const declared = declaredSelfTestReads(src, anchoredReadTargets(f, src, (x) => liveTree.files.has(x)));
+      const declared = declaredSelfTestReads(src, anchoredReadTargets(f, src, (x) => liveTree.files.has(x)), f);
       for (const r of declared?.population ?? []) if (!expected.includes(r)) expected.push(r);
     }
     if (expected.join(' · ') !== (entry.reads ?? []).join(' · ')) offReads.push(check);
@@ -22962,7 +23165,7 @@ function selfTest() {
   const CLI_PREREQ = 'scripts/cli-build-prerequisite.mjs';
   const cliPrereqSource = liveSource(CLI_PREREQ);
   const cliPrereqSpelled = extractWatchHints(cliPrereqSource, CLI_PREREQ, { tree: liveTree });
-  const cliPrereqPopulation = declaredInheritedPopulation(cliPrereqSource, cliPrereqSpelled)?.population ?? [];
+  const cliPrereqPopulation = declaredInheritedPopulation(cliPrereqSource, cliPrereqSpelled, CLI_PREREQ)?.population ?? [];
   t(
     `the CLI build-prerequisite module declares what its callers inherit (${cliPrereqPopulation.join(' ') || 'nothing'})`,
     cliPrereqPopulation.length === 3,
