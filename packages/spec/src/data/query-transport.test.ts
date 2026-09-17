@@ -34,26 +34,36 @@ import {
 import { QuerySchema } from './query.zod';
 
 describe('[#16066] §1 what the transport declares', () => {
-  it('declares exactly the `$`-spellings and the plural `filters`', () => {
+  it('declares exactly the spellings the two tables name, minus the one the AST already carries', () => {
     const declared = Object.keys((QueryTransportParamsSchema as unknown as { shape: object }).shape).sort();
+    // DERIVED, not transcribed: the set is every non-canonical spelling the
+    // tables fold, less `top` — which `BaseQuerySchema` declares beside `limit`,
+    // so re-declaring it here would widen a canonical member.
+    const fromTables = new Set<string>([
+      ...QUERY_TRANSPORT_ALIAS_SLOTS.flatMap((slot) => slot.aliases),
+      ...QUERY_TRANSPORT_DOLLAR_ALIASES.map(([dollar]) => dollar),
+    ]);
+    fromTables.delete('top');
+    expect(declared).toEqual([...fromTables].sort());
+    // …and a literal, so a table that shrank cannot make both sides agree at zero.
     expect(declared).toEqual([
       '$count', '$expand', '$filter', '$orderby', '$search', '$searchFields', '$select', '$skip', '$top',
-      'filters',
+      'filter', 'filters', 'populate', 'select', 'skip', 'sort',
     ]);
   });
 
-  it('every `$` spelling it declares is one the alias tables actually fold', () => {
+  it('every spelling it declares is one the alias tables actually fold', () => {
     const folded = new Set<string>([
       ...QUERY_TRANSPORT_DOLLAR_ALIASES.map(([dollar]) => dollar),
       ...QUERY_TRANSPORT_ALIAS_SLOTS.flatMap((slot) => slot.aliases),
     ]);
     const declared = Object.keys((QueryTransportParamsSchema as unknown as { shape: object }).shape);
     // Both directions: a declared spelling nothing folds would be a promise the
-    // door does not keep, and a folded `$` spelling nothing declares is the
-    // defect this card was filed about.
+    // door does not keep, and a folded spelling nothing declares is the defect
+    // this card was filed about.
     for (const key of declared) expect(folded.has(key), `declared but never folded: ${key}`).toBe(true);
     for (const key of folded) {
-      if (!key.startsWith('$') && key !== 'filters') continue;
+      if (key === 'top') continue; // carried by `BaseQuerySchema` itself
       expect(declared.includes(key), `folded but never declared: ${key}`).toBe(true);
     }
   });
@@ -82,9 +92,7 @@ describe('[#16066] §2 every alias parses to its canonical slot', () => {
     ['filters  -> where', { filters: { status: 'open' } }, { where: { status: 'open' } }],
     ['filter   -> where', { filter: { status: 'open' } }, { where: { status: 'open' } }],
     ['$top     -> limit', { $top: 10 }, { limit: 10 }],
-    ['top      -> limit', { top: 10 }, { limit: 10 }],
     ['$skip    -> offset', { $skip: 20 }, { offset: 20 }],
-    ['skip     -> offset', { skip: 20 }, { offset: 20 }],
     ['$orderby -> orderBy', { $orderby: [{ field: 'name', order: 'asc' }] }, { orderBy: [{ field: 'name', order: 'asc' }] }],
     ['sort     -> orderBy', { sort: [{ field: 'name', order: 'asc' }] }, { orderBy: [{ field: 'name', order: 'asc' }] }],
     ['$select  -> fields', { $select: ['name'] }, { fields: ['name'] }],
@@ -92,6 +100,9 @@ describe('[#16066] §2 every alias parses to its canonical slot', () => {
     ['$expand  -> expand', { $expand: { owner: { object: 'owner' } } }, { expand: { owner: { object: 'owner' } } }],
     ['$search  -> search', { $search: 'acme' }, { search: 'acme' }],
     ['$searchFields -> searchFields', { $searchFields: ['name'] }, { searchFields: ['name'] }],
+    ['skip     -> offset', { skip: 20 }, { offset: 20 }],
+    ['populate -> expand', { populate: ['owner'] }, { expand: { owner: { object: 'owner' } } }],
+    ['top      -> limit', { top: 10 }, { limit: 10 }],
   ];
 
   for (const [label, input, expected] of CASES) {
@@ -123,8 +134,10 @@ describe('[#16066] §2 every alias parses to its canonical slot', () => {
       .toEqual({ object: 'account', where: { a: 1 }, limit: 5, fields: ['name'] });
   });
 
-  it('`$count` is consumed, not smuggled into the AST — the AST has no count slot', () => {
-    expect(parse({ object: 'account', $count: true })).toEqual({ object: 'account' });
+  it('`$count` folds onto the bare `count` flag — the one target that is not an AST slot', () => {
+    // It is the response's total-count flag, read beside the query. Left on the
+    // bag rather than invented into the AST or silently dropped.
+    expect(parse({ object: 'account', $count: true })).toEqual({ object: 'account', count: true });
   });
 });
 
@@ -139,6 +152,11 @@ describe('[#16066] §3 the widening cannot narrow what already parsed', () => {
     expect(QueryWithTransportSchema.safeParse(query).success).toBe(true);
 
   it('a querystring-shaped `$top` (a string) still parses', () => stillParses({ object: 'a', $top: '50' }));
+  it('…and lowers to the number the AST slot declares', () => {
+    expect(QueryWithTransportSchema.parse({ object: 'a', $top: '50' })).toEqual({ object: 'a', limit: 50 });
+  });
+  it('an explicit null on a transport key is a withdrawal, not a value', () =>
+    expect(QueryWithTransportSchema.parse({ object: 'a', $top: null })).toEqual({ object: 'a' }));
   it('a JSON-encoded `$filter` string still parses', () => stillParses({ object: 'a', $filter: '{"x":1}' }));
   it('a `{field: direction}` `$orderby` record still parses', () => stillParses({ object: 'a', $orderby: { created_at: 'desc' } }));
   it('a comma-list `$select` still parses', () => stillParses({ object: 'a', $select: 'a,b' }));

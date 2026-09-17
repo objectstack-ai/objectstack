@@ -399,15 +399,17 @@ describe('[#16337] §2 the declared `FindDataRequest[\'query\']` contract', () =
         // merges a caller's parameters with its own actually assembles.
         const mixed: Query = { object: 'x', where: { status: 'queued' }, $top: 5 };
 
+        // The bare aliases the same table names assign for the same reason.
+        const wireSelect: Query = { object: 'x', select: ['id'] };
+        const wireSort: Query = { object: 'x', sort: [{ field: 'a', order: 'asc' }] };
+
         // Each directive below is LIVE: `tsconfig.test.json` compiles this
         // layer, and an unused `@ts-expect-error` is TS2578 there. So these are
         // assertions, not decoration — and they are the boundary of the
-        // widening: what the transport alias table does NOT name stays refused.
-        // @ts-expect-error `select` is an RPC alias, not a transport spelling; the declared key is `fields`
-        const wireSelect: Query = { object: 'x', select: ['id'] };
-        // @ts-expect-error `sort` is an RPC alias, not a transport spelling; the declared key is `orderBy`
-        const wireSort: Query = { object: 'x', sort: [{ field: 'a', order: 'asc' }] };
-        // @ts-expect-error the `{field: direction}` record is not `SortNode[]` — `$orderby` is the slot that takes it
+        // widening: what the transport alias table does NOT name stays refused,
+        // and a VALUE shape the canonical slot does not declare stays refused on
+        // that slot (the transport spelling is where the legacy shape lives).
+        // @ts-expect-error the `{field: direction}` record is not `SortNode[]` — `$orderby` / `sort` are the slots that take it
         const recordSort: Query = { object: 'x', orderBy: { created_at: 'desc' } };
         // @ts-expect-error a comma list is not `Record<string, QueryAST>` — `$expand` is the slot that takes it
         const commaExpand: Query = { object: 'x', expand: 'owner_id' };
