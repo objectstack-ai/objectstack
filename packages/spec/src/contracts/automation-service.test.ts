@@ -450,7 +450,8 @@ describe('FlowRuntimeState — the unbound reason (#18235)', () => {
     const doc = block.slice(0, block.indexOf('\n}'));
     // The ruling's distinction, stated on the field a consumer reads.
     expect(doc).toContain('SCHEDULED_WORK_DISABLED_REASON');
-    expect(doc).toMatch(/never reads as "binding failed"/);
+    // `[\s*]+` for the docblock's own line wrapping, the form the pins above use.
+    expect(doc).toMatch(/never reads as "binding[\s*]+failed"/);
     // Where the sentence is read FROM — the recorded refusal, never a live
     // environment read (the defect the producing round already caught once).
     expect(doc).toContain('RECORDED refusal');
