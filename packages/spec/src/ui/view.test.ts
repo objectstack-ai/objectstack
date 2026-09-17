@@ -2791,13 +2791,18 @@ describe('Airtable-style ListView enhancements', () => {
   it('should accept list view with row color', () => {
     const listView: ListView = {
       columns: ['name', 'priority'],
+      // #18791 — colour NAMES, not hexes. The assertion below only says the
+      // shape parses, and a hex parses just as well; what changed is that a
+      // fixture is read as an example, and this corpus was demonstrating the
+      // one spelling `colorToClass` resolves to `undefined`. The deliberate
+      // "a hex does parse" pin is kept, once, in `RowColorConfigSchema` above.
       rowColor: {
         field: 'priority',
         colors: {
-          critical: '#ff0000',
-          high: '#ff8800',
-          medium: '#ffcc00',
-          low: '#00cc00',
+          critical: 'red',
+          high: 'orange',
+          medium: 'amber',
+          low: 'green',
         },
       },
     };
@@ -2883,12 +2888,14 @@ describe('Airtable-style ListView enhancements', () => {
         ],
       },
       rowHeight: 'medium',
+      // #18791 — colour NAMES: this is the "realistic, fully-loaded view"
+      // fixture, so it is the one most likely to be copied as a template.
       rowColor: {
         field: 'status',
         colors: {
-          on_track: '#22c55e',
-          at_risk: '#f59e0b',
-          blocked: '#ef4444',
+          on_track: 'emerald',
+          at_risk: 'amber',
+          blocked: 'red',
         },
       },
       hiddenFields: ['internal_id', 'sys_updated_at'],
