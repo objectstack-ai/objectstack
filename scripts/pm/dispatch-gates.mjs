@@ -2901,8 +2901,8 @@ const MARKER_KEY_FORMS = Object.freeze({
   'no-check-families': Object.freeze(['#']),
 });
 
-function markerFormsFor(key) {
-  const labels = MARKER_KEY_FORMS[key];
+function markerFormsFor(key, table = MARKER_KEY_FORMS) {
+  const labels = table[key];
   if (!labels) return MARKER_COMMENT_FORMS;
   const forms = MARKER_COMMENT_FORMS.filter((f) => labels.includes(f.label));
   if (forms.length !== labels.length) {
@@ -4329,6 +4329,23 @@ export function workflowEnvValues(entry) {
  * The reason is REQUIRED, and separated from the path list by a SPACE-delimited
  * `--`: a bare `--` would split a path that legitimately contains one.
  *
+ * ## The reason half is WHOLE, or the declaration is REFUSED (#18662)
+ *
+ * The path list above is this marker's own grammar and is unchanged. Its
+ * REASON captured with the same `(\S.*)$`-under-`m` shape #18422 repaired for
+ * the three population markers, so a reason wrapped onto the comment line
+ * below was read as line ONE and nothing sounded — measured on `origin/main`
+ * 034f5a3afd before this change. The read is now graded by the shared
+ * wholeness reading and a continued reason THROWS, naming the module, the
+ * line, the marker and the text that continues it, exactly as an invented path
+ * already did.
+ *
+ * ⚠️ Nothing in this tool RENDERS this reason (measured, #18662): every
+ * production call site reads `.population` alone. The refusal is owed anyway —
+ * wholeness is a property of the declaration, and the next reader of the
+ * reason is the seat that greps the module for it — and this sentence is that
+ * cost stated rather than left to be discovered.
+ *
  * Returns `{ population, reason }`, or null when the module declares nothing.
  */
 const INHERITED_POPULATION_MARKER = pathListMarkerPattern('inherited-population');
@@ -4430,10 +4447,10 @@ export function declaredInheritedPopulation(moduleSource, hints = null, file = n
  *
  * @param {string} scriptSource  the script's contents
  * @param {string[]} readTargets  what `anchoredReadTargets` resolved from it
+ * @param {string|null} file  what the caller knows the source by, named by the
+ *   cut refusal (#18662) so a reader can navigate to the continuation
  * @returns {{ population: string[], reason: string } | null}
  */
-const SELF_TEST_READS_MARKER = pathListMarkerPattern('self-test-reads');
-
 export function declaredSelfTestReads(scriptSource, readTargets, file = null) {
   const source = String(scriptSource);
   // ONE read, both halves — see `declaredInheritedPopulation` (#18662). The
@@ -20546,6 +20563,118 @@ function selfTest() {
     checkFamilyCoverageGaps([{ file: 'x.yml', text: exemptedWf }]).length === 0,
   );
 
+  // ── This marker's reason is WHOLE, or the declaration is REFUSED (#18662) ──
+  //
+  // The capture was a fourth hand-written copy of the reason-tail grammar, so
+  // the #18422 wholeness reading never reached it: a reason wrapped onto the
+  // comment line below read back as line ONE and `checkFamilyCoverageGaps`
+  // accepted the workflow without a sound. Measured on `origin/main`
+  // 034f5a3afd before this change — the reading the cases below turn green.
+  const wrappedNoFamilyWf = [
+    'name: scaffold-e2e',
+    'on:',
+    '  pull_request:',
+    "    paths: ['packages/create-objectstack/**']",
+    '# dispatch-gates: no-check-families -- steps are an install/build/boot pipeline, and the verdict is',
+    '# whether the scaffolded app boots at all, which no named local check family covers',
+    '',
+    'jobs:',
+    '  e2e:',
+    '    steps:',
+    '      - run: pnpm install',
+  ].join('\n');
+  {
+    let refused = null;
+    try {
+      declaredNoCheckFamiliesReason(wrappedNoFamilyWf, '.github/workflows/scaffold-e2e.yml');
+    } catch (error) {
+      refused = String(error.message);
+    }
+    t(
+      'a no-check-families reason that does not END on the marker line is REFUSED, naming the workflow, the line, the marker and the continuation',
+      refused !== null
+        && refused.includes('.github/workflows/scaffold-e2e.yml declares no-check-families')
+        && refused.includes('.github/workflows/scaffold-e2e.yml:6 continues it with')
+        && refused.includes('"whether the scaffolded app boots at all, which no named local check family covers"')
+        && refused.includes('The capture stops at the FIRST NEWLINE'),
+      refused,
+    );
+  }
+  t(
+    'and the refusal reaches the ONE consumer this marker has — the boolean read in checkFamilyCoverageGaps refuses rather than accepting half a sentence',
+    (() => {
+      try {
+        checkFamilyCoverageGaps([{ file: '.github/workflows/scaffold-e2e.yml', text: wrappedNoFamilyWf }]);
+        return false;
+      } catch (error) {
+        return String(error.message).includes('declares no-check-families and its reason does not END on the marker line');
+      }
+    })(),
+  );
+  t(
+    'the WHOLE-reason control still reads back and is still not a gap — the repair refuses a cut, it does not refuse the marker',
+    (() => {
+      const whole = wrappedNoFamilyWf.replace(
+        '# whether the scaffolded app boots at all, which no named local check family covers\n',
+        '',
+      );
+      return declaredNoCheckFamiliesReason(whole, '.github/workflows/scaffold-e2e.yml')
+        === 'steps are an install/build/boot pipeline, and the verdict is'
+        && checkFamilyCoverageGaps([{ file: '.github/workflows/scaffold-e2e.yml', text: whole }]).length === 0;
+    })(),
+  );
+  t(
+    'nor is an unrelated comment separated by a blank line a continuation — the terminator the three live declarations already write',
+    declaredNoCheckFamiliesReason(
+      '# dispatch-gates: no-check-families -- an e2e pipeline, not named local checks\n\n# an unrelated remark\njobs:\n',
+      'x.yml',
+    ) === 'an e2e pipeline, not named local checks',
+  );
+  // ⛔ `#` is the ONLY comment form YAML has, so the forms #18661 added cannot
+  // apply to THIS marker: a `//` or slash-star line in a workflow is document
+  // content, not a remark. Both directions are pinned — the restriction holds,
+  // and it is a restriction of the shared roster rather than a second grammar.
+  t(
+    'a // or block-form spelling in a workflow is NOT a declaration — those are not comments in YAML',
+    declaredNoCheckFamiliesReason('// dispatch-gates: no-check-families -- not a YAML comment\n') === null
+      && declaredNoCheckFamiliesReason('/* dispatch-gates: no-check-families -- not a YAML comment */\n') === null
+      && declaredNoCheckFamiliesReason('/** dispatch-gates: no-check-families -- not a YAML comment */\n') === null,
+  );
+  t(
+    "and that restriction is the shared roster FILTERED, not a second pattern: the key's head lists exactly the `#` form",
+    populationMarkerPattern('no-check-families').source.startsWith('^[ \\t]*(#)[ \\t]*dispatch-gates:'),
+    populationMarkerPattern('no-check-families').source,
+  );
+  t(
+    'the restriction NARROWS and nothing else — a key the table does not name keeps the whole roster',
+    markerFormsFor('no-check-families').map((f) => f.label).join(' ') === '#'
+      && markerFormsFor('no-path-population').length === MARKER_COMMENT_FORMS.length,
+  );
+  t(
+    'every label MARKER_KEY_FORMS restricts a key to is one MARKER_COMMENT_FORMS really carries (the live half)',
+    Object.values(MARKER_KEY_FORMS)
+      .every((labels) => labels.every((l) => MARKER_COMMENT_FORMS.some((f) => f.label === l))),
+  );
+  t(
+    'and a restriction naming a label the roster does NOT carry REFUSES, rather than emptying the alternation silently — a form set that quietly emptied would make every declaration of that key parse as nothing',
+    (() => {
+      try {
+        markerFormsFor('no-check-families', { 'no-check-families': ['rem'] });
+        return false;
+      } catch (error) {
+        return String(error.message).includes('may only ever NARROW the roster');
+      }
+    })(),
+  );
+  t(
+    'the wholeness reading now REACHES this marker, in the same shape it reaches the population three',
+    (() => {
+      const cut = populationReasonContinuation(wrappedNoFamilyWf, 'no-check-families', 'w.yml');
+      return cut?.line === 6 && cut?.kind === 'line' && cut?.file === 'w.yml'
+        && cut?.text === 'whether the scaffolded app boots at all, which no named local check family covers';
+    })(),
+  );
+
   // ── The gate-level no-population declaration (#10542) ─────────────────────
   //
   // The workflow-level marker above says "this workflow names no gate"; this
@@ -21045,6 +21174,43 @@ function selfTest() {
     'the field roster and the marker roster name the SAME three channels — neither can grow one alone',
     Object.keys(POPULATION_DECLARATION_FIELDS).sort().join(' ') === [...POPULATION_MARKER_KEYS].sort().join(' '),
   );
+  // And the WHOLENESS roster covers every reason-bearing key BY CONSTRUCTION
+  // (#18662). The three cases above are the population channels' half; this is
+  // the half that closed the class. `no-check-families` and both path-list
+  // markers carried the same first-newline capture and sat outside the #18422
+  // reading for two cards, because the roster that decided who got the reading
+  // was hand-written. Derived from the two grammar builders' own key rosters,
+  // a key cannot be added to either without the reading arriving with it.
+  t(
+    'every key either grammar builder serves has a wholeness reading — the roster is derived, so none can be added without one',
+    Object.keys(MARKER_REASON_GRAMMARS).sort().join(' ')
+      === [...REASON_TAIL_MARKER_KEYS, ...PATH_LIST_MARKER_KEYS].sort().join(' '),
+    Object.keys(MARKER_REASON_GRAMMARS).join(' '),
+  );
+  t(
+    'and it names all SIX live marker keys, not the three the repair was filed on',
+    Object.keys(MARKER_REASON_GRAMMARS).sort().join(' ')
+      === 'inherited-population no-check-families no-path-population self-test-reads whole-tree-population wide-population',
+    Object.keys(MARKER_REASON_GRAMMARS).sort().join(' '),
+  );
+  t(
+    'the reason GROUP is read off the roster rather than assumed — a path-list key carries its reason in group 3, a reason-tail key in group 2',
+    REASON_TAIL_MARKER_KEYS.every((k) => MARKER_REASON_GRAMMARS[k].reasonGroup === 2)
+      && PATH_LIST_MARKER_KEYS.every((k) => MARKER_REASON_GRAMMARS[k].reasonGroup === 3),
+  );
+  t(
+    'an unknown key is REFUSED by the shared refusal TEXT too, so the three markers with no entry cannot reach it by a back door',
+    (() => { try { markerReasonCutRefusal('made-up-marker', { line: 1, text: 'x', kind: 'line' }); return false; } catch { return true; } })()
+      && markerReasonCutRefusal('no-check-families', null) === null,
+  );
+  t(
+    'and the entry-shaped reading is that same text: one refusal, five keys, byte for byte',
+    (() => {
+      const cut = { file: 'scripts/probe.mjs', line: 9, text: 'and the rest of the sentence', kind: 'line' };
+      return populationReasonCutRefusal({ widePopulationReason: 'r', widePopulationReasonCut: cut }, 'wide-population')
+        === markerReasonCutRefusal('wide-population', cut);
+    })(),
+  );
 
   // ── The BLOCK comment forms, and where a reason written in one ENDS (#18661) ──
   //
@@ -21488,6 +21654,73 @@ function selfTest() {
       return d.population.length === 1 && d.population[0] === 'packages/a--b/src' && d.reason === 'a real subtree';
     })(),
   );
+
+  // ── This marker's reason half is WHOLE, or the declaration is REFUSED (#18662) ──
+  //
+  // The path list is its own grammar and is untouched; only the reason after
+  // the ` -- ` is in question. It captured with the same first-newline shape
+  // #18422 repaired for the population three, and — measured on `origin/main`
+  // 034f5a3afd — a wrapped reason read back as line one with no throw, no
+  // refusal and no row. The path-list half is pinned unchanged above; these
+  // are the reason half.
+  const wrappedInherited = [
+    "const WORKFLOWS = '.github/workflows';",
+    '// dispatch-gates: inherited-population .github/workflows -- the workflow directory this module readdirs, and the verdict is',
+    '// that every other literal here is a join base no caller ever opens',
+    '',
+    'export default WORKFLOWS;',
+  ].join('\n');
+  {
+    let refused = null;
+    try {
+      declaredInheritedPopulation(wrappedInherited, null, 'scripts/x.mjs');
+    } catch (error) {
+      refused = String(error.message);
+    }
+    t(
+      'an inherited-population reason that does not END on the marker line is REFUSED, naming the module, the line, the marker and the continuation',
+      refused !== null
+        && refused.includes('scripts/x.mjs declares inherited-population')
+        && refused.includes('scripts/x.mjs:3 continues it with')
+        && refused.includes('"that every other literal here is a join base no caller ever opens"'),
+      refused,
+    );
+  }
+  t(
+    'the WHOLE-reason control still declares its population and its reason — the repair refuses a cut, it does not refuse the marker',
+    (() => {
+      const whole = wrappedInherited.replace(
+        '// that every other literal here is a join base no caller ever opens\n',
+        '',
+      );
+      const d = declaredInheritedPopulation(whole, null, 'scripts/x.mjs');
+      return d?.population.join(' ') === '.github/workflows'
+        && d?.reason === 'the workflow directory this module readdirs, and the verdict is';
+    })(),
+  );
+  t(
+    'the wholeness reading reaches this marker through the SAME helper the population three use, and reads its reason out of group 3',
+    (() => {
+      const cut = populationReasonContinuation(wrappedInherited, 'inherited-population', 'scripts/x.mjs');
+      return cut?.line === 3 && cut?.kind === 'line'
+        && cut?.text === 'that every other literal here is a join base no caller ever opens';
+    })(),
+  );
+  t(
+    'and the two refusals this marker now carries are INDEPENDENT — an invented path is still refused for being invented, not for being cut',
+    (() => {
+      try {
+        declaredInheritedPopulation(
+          "const A = '.github/workflows';\n// dispatch-gates: inherited-population packages/spec/src/** -- invented\n",
+          null,
+          'scripts/x.mjs',
+        );
+        return false;
+      } catch (error) {
+        return String(error.message).includes('never invent it');
+      }
+    })(),
+  );
   // ── LIVE: this file's own declaration ─────────────────────────────────────
   //
   // Pinned against the real source, because the whole value of the marker is
@@ -21549,6 +21782,78 @@ function selfTest() {
   t(
     `exactly the two priced modules in the scripts tree carry the declaration (${declaringModules.join(' · ') || 'none'})`,
     declaringModules.join(' · ') === 'scripts/cli-build-prerequisite.mjs · scripts/pm/dispatch-gates.mjs',
+  );
+
+  // ── LIVE CENSUS: the reason half of every marker outside the population
+  //    three, measured WHOLE over the real tree (#18662) ────────────────────
+  //
+  // The population three are censused further down against the discovery's
+  // entries; these three have no entry to be censused through, so the census
+  // is taken off the files themselves. It is the half a fixture cannot give:
+  // a fixture shows the refusal works, and only the tree shows that no live
+  // declaration is being cut by it today. The reading this card was filed on
+  // said every live declaration is a one-liner followed by a blank line — this
+  // is that reading, re-taken on every run, so the day someone wraps one the
+  // refusal lands here rather than in a seat's half-read sentence.
+  //
+  // Each row is NAMED, never counted: a bare count reddens for a seventh
+  // declaration without saying which six were already read.
+  const liveMarkerCensus = [];
+  const censusRead = (file, key, read) => {
+    liveMarkerCensus.push({ file, key, line: read.line, whole: read.cut === null, reason: read.reason });
+  };
+  for (const wf of readdirSync(nodePath.join(ROOT, '.github/workflows')).filter((f) => /\.ya?ml$/.test(f))) {
+    const rel = `.github/workflows/${wf}`;
+    const read = readPopulationMarker(readFileSync(nodePath.join(ROOT, rel), 'utf8'), 'no-check-families');
+    if (read) censusRead(rel, 'no-check-families', read);
+  }
+  for (const f of trackedFiles().filter((x) => x.startsWith('scripts/') && /\.(mjs|mts|js|sh)$/.test(x)).sort()) {
+    // Read from the MODULE BODY, so this self-test's own fixtures are not
+    // counted as live declarations — the discipline `declaringModules` above
+    // takes, and for the same reason.
+    const body = maskSelfTests(readFileSync(nodePath.join(ROOT, f), 'utf8'));
+    for (const key of ['inherited-population', 'self-test-reads']) {
+      const read = readPopulationMarker(body, key);
+      if (read) censusRead(f, key, read);
+    }
+  }
+  const censusRows = liveMarkerCensus.map((r) => `${r.file}:${r.line} ${r.key}`).sort();
+  t(
+    `the live tree carries the six declarations this card measured, and no others (${censusRows.join(' · ') || 'none'})`,
+    censusRows.join(' · ') === [
+      '.github/workflows/merged-branch-reaper.yml:212 no-check-families',
+      '.github/workflows/os-create-smoke.yml:48 no-check-families',
+      '.github/workflows/scaffold-e2e.yml:23 no-check-families',
+      'scripts/cli-build-prerequisite.mjs:111 inherited-population',
+      'scripts/pm/check-expected-skips.mjs:131 self-test-reads',
+      'scripts/pm/dispatch-gates.mjs:702 inherited-population',
+    ].join(' · '),
+    censusRows.join(' · '),
+  );
+  const censusCut = liveMarkerCensus.filter((r) => !r.whole).map((r) => `${r.file}:${r.line} ${r.key}`);
+  t(
+    `every live reason on those markers ENDS on its own marker line (cut: ${censusCut.join(', ') || 'none'})`,
+    censusCut.length === 0 && liveMarkerCensus.length === 6,
+  );
+  t(
+    'and every one of them carries a non-empty reason — whole is not the same claim as present, and both are owed',
+    liveMarkerCensus.every((r) => typeof r.reason === 'string' && r.reason.length > 0),
+  );
+  t(
+    'the census is not vacuous over this tree: put a continuation under a LIVE declaration and exactly that file is refused, by name',
+    (() => {
+      const specimen = liveMarkerCensus.find((r) => r.key === 'no-check-families');
+      if (!specimen) return false;
+      const lines = readFileSync(nodePath.join(ROOT, specimen.file), 'utf8').split('\n');
+      lines.splice(specimen.line, 0, '# and the rest of the sentence');
+      try {
+        declaredNoCheckFamiliesReason(lines.join('\n'), specimen.file);
+        return false;
+      } catch (error) {
+        return String(error.message).includes(`${specimen.file}:${specimen.line + 1} continues it with`)
+          && String(error.message).includes('and the rest of the sentence');
+      }
+    })(),
   );
   // The residue count that carries it refuses a missing or impossible value in
   // the same shape as every other count in that line: a subset that could go
@@ -22596,6 +22901,54 @@ function selfTest() {
     "both path-list markers are built from one head, so their comment-form alternation cannot drift apart",
     pathListMarkerPattern('inherited-population').source.replace('inherited-population', '<key>')
       === pathListMarkerPattern('self-test-reads').source.replace('self-test-reads', '<key>'),
+  );
+  // One head means ONE wholeness reading too (#18662): this marker was never
+  // named on that card, and it did not need to be — the roster is derived from
+  // the two builders, so the sixth reason-bearing key got the reading in the
+  // same line the two named ones did rather than becoming a third card on this
+  // file.
+  const wrappedSelfTestReads = [
+    "import { readFileSync } from 'node:fs';",
+    '// dispatch-gates: self-test-reads AGENTS.md -- the structural case asserts the bar still names this file, and the verdict is',
+    '// whether that bar moved',
+    '',
+    "function selfTest() { readFileSync(join(ROOT, 'AGENTS.md'), 'utf8'); }",
+  ].join('\n');
+  {
+    let refused = null;
+    try {
+      declaredSelfTestReads(wrappedSelfTestReads, ['AGENTS.md'], 'scripts/y.mjs');
+    } catch (error) {
+      refused = String(error.message);
+    }
+    t(
+      'a self-test-reads reason that does not END on the marker line is REFUSED too, in the same words and naming the same four things',
+      refused !== null
+        && refused.includes('scripts/y.mjs declares self-test-reads')
+        && refused.includes('scripts/y.mjs:3 continues it with')
+        && refused.includes('"whether that bar moved"'),
+      refused,
+    );
+  }
+  t(
+    'and its WHOLE-reason control is unmoved',
+    (() => {
+      const whole = wrappedSelfTestReads.replace('// whether that bar moved\n', '');
+      const d = declaredSelfTestReads(whole, ['AGENTS.md'], 'scripts/y.mjs');
+      return d?.population.join(' ') === 'AGENTS.md'
+        && d?.reason === 'the structural case asserts the bar still names this file, and the verdict is';
+    })(),
+  );
+  t(
+    'the missing-read-set refusal still fires FIRST — a declaration nothing can refuse is refused before its reason is graded',
+    (() => {
+      try {
+        declaredSelfTestReads(wrappedSelfTestReads, undefined, 'scripts/y.mjs');
+        return false;
+      } catch (error) {
+        return String(error.message).includes('must supply them');
+      }
+    })(),
   );
 
   // The CENSUS, live over the tree, against `GOVERNED_READ_FLOOR`.
