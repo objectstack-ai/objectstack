@@ -519,6 +519,162 @@ export function checkDashboardWidgetStageOrder(
 }
 
 /**
+ * The widget `type`s that render exactly ONE number — the metric FAMILY.
+ *
+ * Read off `ChartTypeSchema`'s own "Performance (single value)" group, which
+ * is the taxonomy's word for the same set: `metric`/`kpi` render a number and
+ * `gauge`/`solid-gauge`/`bullet` "render a value today and gain a dial when a
+ * gauge renderer lands". A dial is still one value; nothing in the group has a
+ * second mark to put a second measure on.
+ *
+ * Declared here beside the check rather than exported from `chart.zod.ts`: the
+ * taxonomy groups by RENDERER FAMILY in a comment, and a comment is not a set.
+ * Widening it later (a real gauge that draws a target band, say) is a one-line
+ * edit here plus a relaxation of this rule — the direction that costs an author
+ * nothing.
+ */
+const SINGLE_MEASURE_WIDGET_TYPES = ['metric', 'kpi', 'gauge', 'solid-gauge', 'bullet'] as const;
+
+/**
+ * objectui#8894 ruling D — a metric-family widget declares EXACTLY ONE measure.
+ *
+ * ## What was wrong
+ *
+ * `values` is `z.array(z.string()).min(1)` with no upper bound, so a `metric`
+ * tile could declare three measures. All three were selected, the analytics
+ * query ran all three, and the tile rendered `values[0]`: the other two were
+ * queried and thrown away. That is the declared≠delivered shape ADR-0049 exists
+ * to end, and it had been kept alive by a runtime warning — objectui#8887
+ * landed a sub-caption saying the extra measures are not rendered, which makes
+ * the tile HONEST about dropping them without making the document legal.
+ *
+ * The maintainer's standing ruling on this class is 「协议不正确的应该先修改协议。」
+ * and objectui#8894 decision batch #119 item 4 (2026-09-12) took option **D**
+ * on this instance: judge the protocol wrong. A single-value card is one
+ * measure on every mainstream dashboard product; several numbers is a different
+ * visual, not a variant of this one.
+ *
+ * ## Why an object-level check and not a per-`type` union arm — MEASURED
+ *
+ * The card left the spelling to this seat. Both spellings refuse the same
+ * document; they differ in what the author is told about EVERY OTHER mistake.
+ * Measured on this tree, eight widget bodies through
+ * `z.union([metricArm, otherArm])` (arms built with `.safeExtend()`, since zod
+ * 4.4.3 throws `Cannot overwrite keys on object schemas containing refinements`
+ * on a plain `.extend()` that redeclares a key) versus one more `.superRefine`
+ * on this strict object:
+ *
+ * | body | union arms | this spelling |
+ * |---|---|---|
+ * | `bogusProp` on a widget | `(root) invalid_union: Invalid input` | the strict-object refusal, naming the key + the history sentence |
+ * | `categoryField`/`valueField` | `(root) invalid_union: Invalid input` | the {@link WIDGET_GUIDANCE_SETS} ADR-0021 prescription |
+ * | `titel` | `(root) invalid_union: Invalid input` | `Did you mean \`titel\` → \`title\`?` |
+ * | `type: 'ziggurat'` | `(root) invalid_union: Invalid input` | `invalid_value` at `type`, listing all twenty |
+ *
+ * Four of eight bodies lose their whole diagnostic to one bare `Invalid input`.
+ * That is not a new observation on this file — the `compareTo` docblock above
+ * records the same measurement for the same reason (#5014: "a union collapses
+ * into one bare `Invalid input` on the wire … A plain strict object's errors
+ * reach the author"), and `view-union-diagnostics.test.ts` is the whole
+ * apparatus objectui needed because `ViewMetadataSchema` IS a union. Adding a
+ * second union to this file would be commissioning that apparatus again to buy
+ * a refusal the object-level form gives for free.
+ *
+ * So: one more check on the same door, attached by identifier, exactly as
+ * {@link checkDashboardWidgetStageOrder} is.
+ *
+ * ## What the refusal says
+ *
+ * It names the widget (its `id` and its `type`), states the rule in the ruling's
+ * own words — one measure per tile, make N tiles for N measures — and names the
+ * shapes that DO render several numbers, so "I really do want three" has an
+ * answer that is not "delete two".
+ *
+ * ## What this check deliberately does NOT reach
+ *
+ * Five shapes, named so the gate is not read as complete:
+ *
+ *  1. **The EMPTY array.** `values: []` is refused by the field's own `.min(1)`
+ *     with `too_small`, and this check returns on it rather than adding a
+ *     second issue about a tile with no measure at all. "Exactly one" is the
+ *     CONJUNCTION of that `.min(1)` and this upper bound, not this check alone
+ *     — a mirror that re-attaches this export onto a shape whose `values`
+ *     carries no `.min(1)` gets the upper bound only.
+ *  2. **A widget that declares no `type`.** `type` carries
+ *     `.default(WIDGET_TYPE_DEFAULT)`, which is `metric` — a member of this
+ *     family — and zod applies defaults BEFORE object-level checks, so an
+ *     omitted `type` arrives here as `metric` and is refused like an authored
+ *     one. The verdict is right either way; the message carries an extra
+ *     sentence in that ambiguous case rather than claiming the author wrote it.
+ *  3. **A `type` outside `ChartTypeSchema`.** zod treats that `invalid_value`
+ *     as aborting and skips every object-level check for the input, so
+ *     `type: 'ziggurat'` plus four measures reports the type refusal alone.
+ *  4. **Whether the measures EXIST in the bound dataset.** Still a fact about
+ *     the dataset, not about the widget, and unreachable from this schema — a
+ *     tile naming one measure nobody declared parses exactly as before.
+ *  5. **objectui's CLIENT-SIDE authoring door**, a `.shape` mirror that runs no
+ *     object-level check of this schema's: at the `.objectui-sha` pin,
+ *     `@object-ui/types` builds its own `DashboardWidgetSchema` from
+ *     `specFieldsExcept(SpecDashboardWidgetSchema.shape, …).extend({…}).strict()`
+ *     and re-attaches none of this file's exported checks. Until it imports and
+ *     chains this one, the dashboard EDITOR keeps accepting three measures on a
+ *     `metric` and the author meets the refusal at PUBLISH. That mirror also
+ *     redeclares `type` with no default, so a typeless widget reaches a
+ *     re-attached check as `undefined`; this function defaults it itself for
+ *     exactly that caller.
+ */
+export function checkDashboardWidgetMetricMeasureArity(
+  widget: { id?: unknown; type?: unknown; values?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const values = widget.values;
+  // Not an array, or empty, or already the one measure the family takes: the
+  // field's own `z.array(z.string()).min(1)` owns both of the first two
+  // verdicts and says them better (`too_small` at `values`), and the third is
+  // the legal document. See non-coverage 1.
+  if (!Array.isArray(values) || values.length <= 1) return;
+
+  // `?? WIDGET_TYPE_DEFAULT` is UNREACHABLE through this schema's own door —
+  // zod applies `type`'s default before object-level checks. It is here for the
+  // mirror that re-attaches this export onto a shape whose `type` carries no
+  // default (non-coverage 5), so the export never refuses LESS than the door it
+  // is exported from; `object-refinement-check-exports.test.ts` pins that
+  // equivalence on the raw fixture.
+  const type = widget.type ?? WIDGET_TYPE_DEFAULT;
+  if (typeof type !== 'string') return;
+  if (!(SINGLE_MEASURE_WIDGET_TYPES as readonly string[]).includes(type)) return;
+
+  // Same ambiguity the stage-order check carries, and the same repair: a widget
+  // that declared NO type arrives here as `metric` and cannot be told apart
+  // from one that wrote it, so the extra sentence is added only in that case.
+  const defaultedTypeNote = type === WIDGET_TYPE_DEFAULT
+    ? ' (`' + WIDGET_TYPE_DEFAULT + '` is also what a widget that declares no `type` at all '
+      + 'resolves to — if you meant a chart, the `type` key is missing rather than wrong.)'
+    : '';
+  const widgetName = typeof widget.id === 'string' && widget.id.length > 0
+    ? '`' + widget.id + '`'
+    : 'this widget';
+
+  ctx.addIssue({
+    code: 'custom',
+    path: ['values'],
+    message:
+      'Widget ' + widgetName + ' declares ' + values.length + ' measures on `type: '
+      + `'${type}'`
+      + '`, and a metric-family widget ('
+      + SINGLE_MEASURE_WIDGET_TYPES.map((t) => '`' + t + '`').join(' / ')
+      + ') renders exactly ONE number: one measure per tile, so make N tiles for N '
+      + 'measures. Every measure after `values[0]` was queried and then dropped on the '
+      + 'floor by the renderer — keep the one this tile is for, and give each of the '
+      + 'others its own widget with its own `id` (and `layout`, if you pin positions). '
+      + 'If you meant several numbers in ONE widget, that is a different visual: '
+      + "`type: 'table'` renders a row of measures, and the chart families "
+      + "(`bar` / `line` / `area` / `combo`) render one mark per measure."
+      + defaultedTypeNote,
+  });
+}
+
+/**
  * Dashboard Widget Schema
  * A single component on the dashboard grid.
  *
@@ -702,8 +858,19 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
   dataset: SnakeCaseIdentifierSchema.describe('Dataset name to bind (ADR-0021)').meta({ title: 'Dataset' }),
   /** Dimension names (from the dataset) for X / group / split. */
   dimensions: z.array(z.string()).optional().describe('Dimension names — X/group/split').meta({ title: 'Dimensions' }),
-  /** Measure names (from the dataset) for the value axis. */
-  values: z.array(z.string()).min(1).describe('Measure names — Y (at least one)').meta({ title: 'Values' }),
+  /**
+   * Measure names (from the dataset) for the value axis.
+   *
+   * At least one, always. For the METRIC FAMILY — `metric` / `kpi` / `gauge` /
+   * `solid-gauge` / `bullet`, and the `metric` default a widget with no `type`
+   * resolves to — exactly one: those types render a single number and dropped
+   * every measure after `values[0]` on the floor, so the second one is now a
+   * parse error rather than a queried-and-discarded column
+   * ({@link checkDashboardWidgetMetricMeasureArity}).
+   */
+  values: z.array(z.string()).min(1)
+    .describe('Measure names — Y (at least one; exactly one on the metric/kpi/gauge/solid-gauge/bullet family)')
+    .meta({ title: 'Values' }),
 
   /**
    * Layout Position (React-Grid-Layout style)
@@ -853,7 +1020,11 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
   // ADR-0049 enforce-or-remove on `options.stageOrder`. Attached by identifier
   // rather than inlined, the way `GlobalFilterSchema` attaches its own check:
   // the exported function IS the rule this door runs.
-  .superRefine(checkDashboardWidgetStageOrder));
+  .superRefine(checkDashboardWidgetStageOrder)
+  // objectui#8894 ruling D — the metric FAMILY takes exactly one measure. Same
+  // idiom, same reason: `values`'s arity is decided by its sibling `type` one
+  // level up, so the rule has to run where both keys are in scope.
+  .superRefine(checkDashboardWidgetMetricMeasureArity));
 
 /**
  * Dashboard date-range presets — the named windows a dashboard date filter may

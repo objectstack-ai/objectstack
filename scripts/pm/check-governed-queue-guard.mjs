@@ -285,12 +285,36 @@
  *
  * So a governed diff whose governed paths ALL lie under
  * `.claude/skills/pm-dispatch/references/` may land on a REVIEW OF RECORD in
- * place of the authorized approval: the `## Contract review` comment on the PR
- * thread that names the pull request's CURRENT head, carries a `Reviewed-by:`
- * line, and declares a `Served-tier:` reading that STANDS -- its token being the
- * NAME `CONTRACT_REVIEW_TIER`, ⛔ never a model identifier, which `AGENTS.md`
- * lets land in no comment and a record IS one (#18060). Every other governed
- * path is the rules layer and keeps the predicate above byte-for-byte.
+ * place of the authorized approval: the `## Contract review` comment — on the
+ * PULL REQUEST'S THREAD **or on its CARD'S** — that names the pull request's
+ * CURRENT head, carries a `Reviewed-by:` line, and declares a `Served-tier:`
+ * reading that STANDS -- its token being the NAME `CONTRACT_REVIEW_TIER`,
+ * ⛔ never a model identifier, which `AGENTS.md` lets land in no comment and a
+ * record IS one (#18060). Every other governed path is the rules layer and
+ * keeps the predicate above byte-for-byte.
+ *
+ * ⭐ THE TWO CARRIERS ARE ONE DELIVERY, and the location is the governed text's
+ * to decide rather than this file's — quoted, untranslated, because it IS the
+ * criterion: 「复核记录 = 一条评论落 PR 或卡」
+ * (`references/contract-review.md`), 「记录 = 同形评论落 PR 或卡」 (`SKILL.md`
+ * 〈入队与落地〉). Until #18701 this leg read the PR thread ALONE while the
+ * sibling's `--pair`, its `--template` and the rule itself all said either, and
+ * the cost was measured on PR #18689: the seat's record sat on card #18426, the
+ * queue leg answered 「0 comment(s) read on the PR thread」, the pull request was
+ * dequeued `CI_FAILURE`, and only a SECOND COPY of the same comment on the PR
+ * thread cured it. The thread set now travels inside the imported reader (see
+ * `recordVerdict`), so the set this leg searches and the set `--template`
+ * offers cannot be edited apart — a cross-tool pin in the sibling's self-test
+ * drives this guard to prove it.
+ *
+ * ⚖️ THE CARD IS DERIVED, never configured: from the pull request's own body
+ * by the closing-keyword / `Part of` / branch-name relation the whole regime
+ * pairs a PR with its card by (`deliveredCardNumber`, which asks
+ * `deliveryEvidence`). A pull request whose card cannot be derived — none
+ * named, or two named at equal strength — searches NO card thread and says so
+ * in the refusal. That is the refusing direction, which is the only direction a
+ * governed reading may be wrong in, and it leaves the PR-thread reading exactly
+ * as it was.
  *
  * ⭐ THE PROPERTY THAT MAKES THIS SAFE TO SHIP, and it is measured rather than
  * asserted (see the battery): this leg is MONOTONE. It is consulted only for an
@@ -299,24 +323,30 @@
  * authorized approver approved still clears on the approval alone, at exactly
  * today's cost, and reads exactly today's words.
  *
- * ⭐ RECOGNITION IS IMPORTED, NEVER RE-IMPLEMENTED. The heading marker, the
- * head-sha span test, the newest-of resolution, the `Reviewed-by:` key line and
- * the `Served-tier:` reader all come from the two files that already own them
- * (`check-half-states.mjs` H51/H47, `check-clause2-carriers.mjs` C6/C7). A
- * second parser for the same line is the exact drift C7 was written against,
- * and two tools answering differently about one comment is the failure this
- * whole regime is built from. The only thing spelled out here is the two-line
- * FILTER, and it is spelled for `reviewOfRecord`'s own stated reason:
- * `latestContractReviewOnHead` returns an id and not the row, and the row is
- * what the tier line is read from.
+ * ⭐ RECOGNITION IS IMPORTED, NEVER RE-IMPLEMENTED — and since #18701 the
+ * WHOLE reading is, not only the facts it is made of. `locateReviewOfRecord`
+ * (`check-clause2-carriers.mjs`, the function `--pair` judges C6 and C7 with)
+ * is what this leg calls: heading marker, head-sha span test, newest-of
+ * resolution, `Reviewed-by:` key line, `Served-tier:` reader — and THE SET OF
+ * THREADS to run them over. That last one is the fact a spelled-out filter here
+ * could not copy, and it is what dequeued #18689.
+ *
+ * ⛔ So this file spells no filter of its own any more. What is left here is
+ * the TIER gate on top of the located record, which is this leg's own fact and
+ * nobody else's. The H51/H47 recognisers still own every line of the
+ * recognition; they are simply reached through the file that already composes
+ * them, which imports them at module scope — so a rename there stops that
+ * module loading and this leg fails CLOSED with the loader's own reason.
  *
  * ⚠️ THE IMPORT IS LAZY, AND THAT IS LOAD-BEARING — see `CONTRACT_REVIEW_LABEL`
  * for the cycle it walks around, and `loadRecordRecognisers` for the rule that
  * keeps the walk legal. A failed load is a REFUSAL, never a pass.
  *
- * ⚖️ THE COST: one extra thread read, bought ONLY for a references-tier pull
- * request with no authorized approval — the population that is refused outright
- * today, so nothing that passes now pays anything. The head sha, which decides
+ * ⚖️ THE COST: up to TWO extra thread reads (the PR's and its card's), bought
+ * ONLY for a references-tier pull request with no authorized approval — the
+ * population that is refused outright today, so nothing that passes now pays
+ * anything. The card's NUMBER costs nothing at all: it is read off the pull
+ * object the head read already fetches. The head sha, which decides
  * nothing on the rules layer since 2026-09-04, IS decisive here: a record names
  * a head, so a head this guard could not read can find no record. That is not a
  * revival of the retired sha pin — it is the RECORD's own identity test, and it
@@ -340,8 +370,8 @@
  *                 differ, so the rendering carries the difference and the exit
  *                 register stays the one a reader already knows.
  *   4  REFUSED  — governed, and the REVIEW LIST could not be read — or, on the
- *                 references tier, the PR thread, its head, or the imported
- *                 recognisers could not be.
+ *                 references tier, one of the record's threads (the PR's or its
+ *                 card's), its head, or the imported recognisers could not be.
  *                 Distinct from 3 on purpose: "nobody approved" and "we could
  *                 not find out" are different facts and must be separable in a
  *                 log. ⚠️ An unreadable PR HEAD is NOT this refusal any more —
@@ -424,11 +454,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ #15406: a CLEAR reached through a lift is not a clear that saw nothing': 10,
   '⛔ #17040: the contract-review carrier is the enqueue gate': 39,
   '⭐ #18020: the references tier — a review of record, not an approval': 40,
+  '⭐ #18701: the record lives on the PR or its card, and BOTH are read': 14,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 20;
+const SELF_TEST_BATTERY_FLOOR = 21;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -552,6 +583,22 @@ export const TIER_RULES = 'rules';
 export const TIER_REFERENCES = 'references';
 
 /**
+ * WHERE a review of record may live, in the words a refusal prints — a MIRROR
+ * of `REVIEW_OF_RECORD_LOCATION` in `check-clause2-carriers.mjs`, which is the
+ * one place the set itself is declared (#18701).
+ *
+ * ⛔ A mirror for the same reason `CONTRACT_REVIEW_LABEL` is one, and read that
+ * constant's docblock before touching this: the module-scope import this would
+ * need is a MODULE-EVAL CYCLE, and `renderGuardVerdict` is pure and synchronous,
+ * so no lazy import can supply it there. The READING half takes no mirror —
+ * `runGuard` fetches one thread per entry in the loaded `threads` list, so the
+ * set this file ACTS on is never a copy. Only the WORDS are copied, and the
+ * battery pins them to the constant loaded through the real lazy import, so
+ * drift in either direction reddens.
+ */
+export const REVIEW_OF_RECORD_LOCATION = 'the PR or its card';
+
+/**
  * Which tier a governed pull request's governed paths fall in.
  *
  * ⭐ ALL, not ANY, and not a proportion: 「混合 diff 一条命中即整 PR 分叉」 is the
@@ -574,7 +621,6 @@ export function governedTierFor(paths) {
 
 /** Where each imported recogniser lives. Named, so a failure can say which file. */
 export const RECOGNISER_SOURCES = Object.freeze({
-  record: './check-half-states.mjs',
   tier: './check-clause2-carriers.mjs',
 });
 
@@ -604,29 +650,27 @@ export const RECOGNISER_SOURCES = Object.freeze({
  */
 export async function loadRecordRecognisers(load = (specifier) => import(specifier)) {
   try {
-    const [record, tier] = await Promise.all([load(RECOGNISER_SOURCES.record), load(RECOGNISER_SOURCES.tier)]);
+    const tier = await load(RECOGNISER_SOURCES.tier);
     const found = {
-      headingMarker: record?.CONTRACT_REVIEW_HEADING_MARKER,
-      headMatch: record?.contractReviewHeadMatch,
-      latestMarked: record?.latestMarkedComment,
-      shaMinHex: record?.H51_SHA_MIN_HEX,
-      readServedTier: tier?.readServedTier,
+      locate: tier?.locateReviewOfRecord,
+      deliveredCard: tier?.deliveredCardNumber,
       servedTierStands: tier?.servedTierStands,
       isModelIdentifierToken: tier?.isModelIdentifierToken,
-      reviewedByLine: tier?.REVIEWED_BY_LINE,
+      threads: tier?.REVIEW_OF_RECORD_THREADS,
+      location: tier?.REVIEW_OF_RECORD_LOCATION,
     };
     const missing = [
-      ...['headMatch', 'latestMarked', 'readServedTier', 'servedTierStands', 'isModelIdentifierToken'].filter((key) => typeof found[key] !== 'function'),
-      ...['headingMarker', 'reviewedByLine'].filter((key) => !(found[key] instanceof RegExp)),
-      ...(Number.isInteger(found.shaMinHex) && found.shaMinHex > 0 ? [] : ['shaMinHex']),
+      ...['locate', 'deliveredCard', 'servedTierStands', 'isModelIdentifierToken'].filter((key) => typeof found[key] !== 'function'),
+      ...(Array.isArray(found.threads) && found.threads.length > 0 ? [] : ['threads']),
+      ...(typeof found.location === 'string' && found.location.length > 0 ? [] : ['location']),
     ];
     if (missing.length > 0) {
       return {
         available: false,
         reason:
           `the contract-review recognisers loaded but did not export what this leg reads (${missing.join(', ')}) — ` +
-          `they live in ${RECOGNISER_SOURCES.record} and ${RECOGNISER_SOURCES.tier}, and a rename is the likely ` +
-          'cause. ⛔ The repair is to follow the rename, never to write a second parser here',
+          `they live in ${RECOGNISER_SOURCES.tier}, and a rename is the likely cause. ⛔ The repair is to follow ` +
+          'the rename, never to write a second parser here',
       };
     }
     return { available: true, ...found };
@@ -639,65 +683,80 @@ export async function loadRecordRecognisers(load = (specifier) => import(specifi
 }
 
 /**
- * What ONE pull request's thread says about the review of record on its head.
+ * What the pair's THREADS say about the review of record on this head.
  *
- * Pure — the comments and the head arrive as data, so every branch is offline-
+ * Pure — the rows and the head arrive as data, so every branch is offline-
  * testable and the battery drives all five.
  *
- * @returns {{ state: 'unreadable', reason: string }
- *          | { state: 'absent', commentsRead: number }
- *          | { state: 'unsigned'|'below-tier'|'stands', id: number|null, at: string|null, sha: string, served: object }}
+ * @returns {{ state: 'unreadable', reason: string, cardNote: string|null }
+ *          | { state: 'absent', read: object, cardNote: string|null }
+ *          | { state: 'unsigned'|'below-tier'|'stands', where: string, id: number|null, at: string|null, sha: string, served: object, cardNote: string|null }}
  *
  * Five-valued, and the split is the file's usual one: `unreadable` is "we could
  * not find out" (exit 4's fact), the other refusals are "it is not there or does
  * not stand" (exit 3's). ⛔ Never fold them: a thread nobody could read and a
  * thread with no record in it earn different remedies.
  *
- * ⭐ The two-line FILTER below is spelled out rather than taken from
- * `latestContractReviewOnHead`, and for that finder's own documented reason —
- * it returns an id and not the ROW, and the row is what the `Served-tier:` line
- * and the `Reviewed-by:` line are read from. `reviewOfRecord` spells the same
- * two lines for the same reason. Everything the filter is MADE of is imported.
+ * ⭐ THE FILTER IS NOT SPELLED HERE ANY MORE, and that is the whole of #18701.
+ * It used to be — two lines, for `latestContractReviewOnHead`'s own documented
+ * reason (that finder returns an id and not the ROW, and the row is what the
+ * tier line is read from) — and the copy was correct about every fact it read.
+ * What it could not copy was the SET OF THREADS to read them over: the rule puts
+ * the record 「一条评论落 PR 或卡」 and this leg searched the pull request's
+ * thread alone, so a record posted where the governed text, this file's sibling
+ * and its own `--template` all say it may live was read as no record at all.
+ * Measured: PR #18689, dequeued `CI_FAILURE` with 「0 comment(s) read on the PR
+ * thread」 against a record sitting on card #18426, cured only by a second copy.
+ *
+ * So the whole reading is now `locateReviewOfRecord`, imported — the function
+ * `--pair` judges C6 and C7 with. Two tools, one derivation of "the record on
+ * this head", and the thread set travels inside it rather than beside it. What
+ * is left here is the TIER gate on top of it, which is this leg's own fact:
+ * whether the record's `Served-tier:` stands, and whether its token is a model
+ * identifier that ⛔ must never be quoted back (#18060).
  */
-export function recordVerdict({ comments, headSha, recognisers }) {
+export function recordVerdict({ pair, recognisers, cardNote = null }) {
   if (recognisers?.available !== true) {
-    return { state: 'unreadable', reason: recognisers?.reason ?? 'the contract-review recognisers were not loaded' };
+    return { state: 'unreadable', reason: recognisers?.reason ?? 'the contract-review recognisers were not loaded', cardNote };
   }
-  const head = String(headSha ?? '').toLowerCase();
-  if (!/^[0-9a-f]+$/.test(head) || head.length < recognisers.shaMinHex) {
+  const located = recognisers.locate(pair);
+  if (located.state === 'unreadable') {
     return {
       state: 'unreadable',
+      cardNote,
       reason:
-        `this pull request's head sha was not readable (${recognisers.shaMinHex}+ hex digits needed) — a review of ` +
-        'record NAMES a head, so a head this guard could not read can find no record on it',
+        `${located.gaps.join(', ')} could not be read — a review of record NAMES a head and lives on one of ` +
+        `${recognisers.location}, so a head or a thread this guard could not read can find no record`,
     };
   }
-  if (!Array.isArray(comments)) return { state: 'unreadable', reason: 'the pull request thread was not read' };
+  if (located.state === 'absent') {
+    return {
+      state: 'absent',
+      read: located.read,
+      // Rendered HERE, where the thread set is in hand: the renderer is pure and
+      // synchronous and holds no recogniser, so a count it formatted itself
+      // would be a second place naming the threads.
+      readSummary: recognisers.threads.map((thread) => `${located.read[thread.number] ?? 0} on ${thread.words}`).join(' and '),
+      cardNote,
+    };
+  }
 
-  const onHead = comments.filter(
-    (row) =>
-      recognisers.headingMarker.test(String(row?.body ?? '')) && recognisers.headMatch(row?.body, head) !== null,
-  );
-  const newest = recognisers.latestMarked(onHead, recognisers.headingMarker);
-  if (!newest) return { state: 'absent', commentsRead: comments.length };
-
-  const row = onHead[newest.index];
-  const body = String(row?.body ?? '');
-  const served = recognisers.readServedTier(body);
   const found = {
-    id: row?.id ?? null,
-    at: row?.created_at ?? null,
-    sha: recognisers.headMatch(body, head),
-    served,
+    where: located.where,
+    id: located.id ?? null,
+    at: located.at ?? null,
+    sha: located.sha,
+    served: located.served,
+    cardNote,
     // ⭐ Decided HERE and carried, so the renderer never re-decides it and can
     // never print a token it should not (#18060): the accepted token is the
     // constant's NAME, and a token of model-identifier shape is refused AND
     // ⛔ never quoted back — a refusal that quotes it lands the identifier in
     // one more artifact, which is the thing `AGENTS.md` forbids of a comment.
-    servedIsIdentifier: served.state === 'read' && recognisers.isModelIdentifierToken(served.value),
+    servedIsIdentifier: located.served?.state === 'read' && recognisers.isModelIdentifierToken(located.served.value),
   };
-  if (!body.split(/\r?\n/).some((line) => recognisers.reviewedByLine.test(line))) return { state: 'unsigned', ...found };
-  if (!recognisers.servedTierStands(found.served)) return { state: 'below-tier', ...found };
+  if (located.state === 'unsigned') return { state: 'unsigned', ...found };
+  if (!recognisers.servedTierStands(located.served)) return { state: 'below-tier', ...found };
   return { state: 'stands', ...found };
 }
 
@@ -1097,7 +1156,8 @@ export function renderGuardVerdict(verdict) {
     } else if (entry.record?.state === 'stands') {
       lines.push(
         `        ✅ review of record on this head: comment ${entry.record.id ?? '(no readable id)'} ` +
-          `(${entry.record.at ?? 'undated'}) is a \`## Contract review\` comment naming \`${entry.record.sha}\`,`,
+          `(${entry.record.at ?? 'undated'}) on the ${entry.record.where} thread is a \`## Contract review\` ` +
+          `comment naming \`${entry.record.sha}\`,`,
         '           carrying a `Reviewed-by:` line and a `Served-tier:` naming the tier constant, which STANDS' +
           (entry.record.served?.stamps
             ? ` on a stamp control of ${entry.record.served.stamps.atTier}/${entry.record.served.stamps.total}.`
@@ -1126,8 +1186,9 @@ export function renderGuardVerdict(verdict) {
       lines.push(
         ...(entry.record.state === 'absent'
           ? [
-              `        ⛔ NO review of record on this head either (${entry.record.commentsRead} comment(s) read on the PR thread):`,
-              '           none is a `## Contract review` comment naming this head and carrying a `Reviewed-by:` line.',
+              `        ⛔ NO review of record on this head either — comment(s) read: ${entry.record.readSummary}`,
+              `           (${entry.record.cardNote}); none of them is a \`## Contract review\` comment naming this head`,
+              '           and carrying a `Reviewed-by:` line.',
             ]
           : entry.record.state === 'unreadable'
             ? [`        ⛔ the review of record could NOT be read — ${entry.record.reason}`]
@@ -1281,8 +1342,8 @@ export function renderGuardVerdict(verdict) {
     lines.push(
       `        3. Or — ONLY for a pull request whose governed paths all lie under ${REFERENCES_TIER_PREFIX},`,
       '           which the tier line on each entry above says outright — the skills seat posts its review of record',
-      '           on the CURRENT head and re-queues: a `## Contract review` comment on the PR thread naming this head,',
-      '           carrying a `Reviewed-by:` line and a `Served-tier:` line whose token is the NAME',
+      `           on the CURRENT head and re-queues: a \`## Contract review\` comment on ${REVIEW_OF_RECORD_LOCATION} naming`,
+      '           this head, carrying a `Reviewed-by:` line and a `Served-tier:` line whose token is the NAME',
       '           `CONTRACT_REVIEW_TIER` — ⛔ never its value and never any model identifier, because `AGENTS.md`',
       '           lets none land in a comment — on a stamp control that holds. The tier READING behind it is the',
       '           seat\'s own transcript grep, which leaves no repository artifact at all.',
@@ -1313,7 +1374,7 @@ export function renderGuardVerdict(verdict) {
  * still governs everything the verdict is derived FROM; it never governed
  * things the verdict merely mentions.
  */
-export async function runGuard({ event, rows, fetchReviews, fetchPullHead, fetchComments, loadRecognisers = loadRecordRecognisers, lifted = [] }) {
+export async function runGuard({ event, rows, fetchReviews, fetchPull, fetchComments, loadRecognisers = loadRecordRecognisers, lifted = [] }) {
   const { governed, unattributed } = decomposeGovernedWork(rows);
   if (governed.length === 0 && unattributed.length === 0) {
     return guardVerdict({ event, governed, unattributed, apiCalls: 0, lifted });
@@ -1321,6 +1382,7 @@ export async function runGuard({ event, rows, fetchReviews, fetchPullHead, fetch
   const approvals = new Map();
   const records = new Map();
   const heads = new Map();
+  const pulls = new Map();
   const headNotes = [];
   let apiCalls = 0;
   for (const entry of governed) {
@@ -1335,7 +1397,13 @@ export async function runGuard({ event, rows, fetchReviews, fetchPullHead, fetch
         let headSha = null;
         try {
           apiCalls += 1;
-          headSha = await fetchPullHead(entry.pr);
+          // ⭐ ONE request, two readings: the head the log names, and the BODY
+          // the references tier locates this pull request's card from (#18701).
+          // The pull object carries both, so the card thread costs no call the
+          // head read was not already making.
+          const pull = await fetchPull(entry.pr);
+          headSha = pull?.sha ?? null;
+          pulls.set(entry.pr, { number: entry.pr, body: pull?.body ?? '', head: { ref: pull?.headRef ?? '' } });
         } catch (error) {
           headNotes.push(
             `  ℹ️  #${entry.pr}: the PR head could not be read (${String(error?.message ?? error).split('\n')[0]}) — ` +
@@ -1374,18 +1442,49 @@ export async function runGuard({ event, rows, fetchReviews, fetchPullHead, fetch
           recognisers = { available: false, reason: `the recogniser load threw: ${String(error?.message ?? error).split('\n')[0]}` };
         }
       }
-      let comments;
-      try {
-        apiCalls += 1;
-        comments = await fetchComments(entry.pr);
-      } catch (error) {
-        records.set(entry.pr, {
-          state: 'unreadable',
-          reason: `the pull request thread could not be read (${String(error?.message ?? error).split('\n')[0]})`,
-        });
+      if (recognisers.available !== true) {
+        records.set(entry.pr, recordVerdict({ pair: null, recognisers }));
         continue;
       }
-      records.set(entry.pr, recordVerdict({ comments, headSha: heads.get(entry.pr) ?? null, recognisers }));
+      // ⭐ WHICH CARD, derived from the pull request this guard already read and
+      // by the ONE relation that answers it (#18701). A pull request whose card
+      // cannot be derived searches no card thread and says so — the REFUSING
+      // direction, and the only one a governance reading may be wrong in.
+      const pull = pulls.get(entry.pr) ?? null;
+      const card = pull
+        ? recognisers.deliveredCard(pull)
+        : { card: null, reason: 'its pull request row could not be read, so no card thread could be located for it' };
+      const cardNote =
+        card.card === null
+          ? `⚠️ no card thread was searched — ${card.reason}`
+          : `card #${card.card}, ${card.evidence}`;
+      // ⭐ ONE THREAD PER ENTRY IN THE SHARED SET, never a list spelled here: the
+      // locations this leg READS are the locations `--template` STATES, because
+      // both are this list. The cross-tool pin drives exactly this loop.
+      const numbers = { pr: entry.pr, card: card.card };
+      const pair = { pr: entry.pr, card: card.card, headSha: heads.get(entry.pr) ?? null };
+      let unreadable = null;
+      for (const thread of recognisers.threads) {
+        const number = numbers[thread.number];
+        if (number === null || number === undefined) {
+          // Not a gap: the pair has no such carrier at all, so that carrier
+          // holds no record. `cardNote` is what tells a reader which it was.
+          pair[thread.rows] = [];
+          continue;
+        }
+        try {
+          apiCalls += 1;
+          pair[thread.rows] = await fetchComments(number);
+        } catch (error) {
+          unreadable = `${thread.where} #${number}'s comment thread could not be read (${String(error?.message ?? error).split('\n')[0]})`;
+          break;
+        }
+      }
+      if (unreadable !== null) {
+        records.set(entry.pr, { state: 'unreadable', reason: unreadable, cardNote });
+        continue;
+      }
+      records.set(entry.pr, recordVerdict({ pair, recognisers, cardNote }));
     }
   }
   return guardVerdict({ event, governed, unattributed, approvals, records, apiCalls, headNotes, lifted });
@@ -1790,23 +1889,34 @@ export function makeReviewReader({ apiUrl, slug, token, fetchImpl = fetch, perPa
 }
 
 /**
- * The pull request's CURRENT head sha — what the 2026-08-27 predicate pins a
- * review's `commit_id` against. Same channel as the review read: the standard
- * GITHUB_TOKEN REST API under the workflow's existing `pull-requests: read`
- * scope, nothing wider. Throws on any non-2xx and on a body with no parseable
- * `head.sha` — a head this guard cannot read pins NOTHING, and the caller
+ * The pull request OBJECT, reduced to the three fields this file reads.
+ *
+ * `sha` is the CURRENT head — what the 2026-08-27 predicate pinned a review's
+ * `commit_id` against, and what a review of record names. `body` and `headRef`
+ * are what the references tier locates the pull request's CARD from (#18701):
+ * the same closing-keyword / `Part of` / branch-name relation the rest of the
+ * regime pairs a PR with its card by, asked through `deliveredCardNumber`.
+ *
+ * ⭐ ONE REQUEST for all three, deliberately: the card thread the tier leg
+ * gained costs no call the head read was not already making, because GitHub
+ * answers the whole pull object here. Same channel as the review read: the
+ * standard GITHUB_TOKEN REST API under the workflow's existing
+ * `pull-requests: read` scope, nothing wider.
+ *
+ * Throws on any non-2xx and on a body with no parseable `head.sha` — a head
+ * this guard cannot read pins NOTHING and can find no record, and the caller
  * turns the throw into a REFUSAL (exit 4), never a pass.
  */
-export function makePullHeadReader({ apiUrl, slug, token, fetchImpl = fetch }) {
-  return async function fetchPullHead(pull) {
+export function makePullReader({ apiUrl, slug, token, fetchImpl = fetch }) {
+  return async function fetchPull(pull) {
     const res = await fetchImpl(`${apiUrl}/repos/${slug}/pulls/${pull}`, { headers: apiHeaders(token) });
     if (!res.ok) throw new Error(`GET /repos/${slug}/pulls/${pull} answered HTTP ${res.status}`);
-    const body = await res.json();
-    const sha = String(body?.head?.sha ?? '');
+    const row = await res.json();
+    const sha = String(row?.head?.sha ?? '');
     if (!/^[0-9a-f]{7,40}$/i.test(sha)) {
       throw new Error(`GET /repos/${slug}/pulls/${pull} answered no parseable head.sha — cannot pin approvals`);
     }
-    return sha;
+    return { sha, body: String(row?.body ?? ''), headRef: String(row?.head?.ref ?? '') };
   };
 }
 
@@ -1933,11 +2043,11 @@ async function main() {
     token: env.GITHUB_TOKEN || env.GH_TOKEN || null,
   };
   const fetchReviews = makeReviewReader(reader);
-  const fetchPullHead = makePullHeadReader(reader);
+  const fetchPull = makePullReader(reader);
   const fetchLabels = makeLabelReader(reader);
   const fetchComments = makeCommentReader(reader);
 
-  const verdict = await runGuard({ event: context.event, rows, fetchReviews, fetchPullHead, fetchComments, lifted });
+  const verdict = await runGuard({ event: context.event, rows, fetchReviews, fetchPull, fetchComments, lifted });
   // The second leg (#17040). It runs on `merge_group` only and renders '' on the
   // other, so the `pull_request` output is byte-identical to what it was.
   const carrier = await runCarrierGuard({ event: context.event, rows, namedPull: context.namedPull, fetchLabels });
@@ -2061,6 +2171,10 @@ export async function selfTest() {
   const HEAD = 'f'.repeat(40);
   const OLD = '0'.repeat(40);
   const approvedAt = (login, sha) => ({ state: 'APPROVED', user: { login }, commit_id: sha });
+  // The shape `fetchPull` answers with: the head the log names plus the two
+  // fields the references tier locates a card from (#18701). Spelled once, so a
+  // fixture can never disagree with `makePullReader` about what a pull row is.
+  const pull = (sha = HEAD, { body = '', headRef = '' } = {}) => ({ sha, body, headRef });
   const authorizedPass = (login = GOVERNED_APPROVERS[0]) => authorizedApprovalVerdict([approvedAt(login, HEAD)], HEAD);
   // The same authorized approval, on a commit that is no longer the head. Under
   // the retired sha pin this exact fixture was the REFUSAL case.
@@ -2305,7 +2419,7 @@ export async function selfTest() {
   let orderedClear = null;
   let orderedThrow = null;
   try {
-    orderedClear = await runGuard({ event: 'merge_group', rows: clearRows, fetchReviews: explode, fetchPullHead: explode });
+    orderedClear = await runGuard({ event: 'merge_group', rows: clearRows, fetchReviews: explode, fetchPull: explode });
   } catch (error) {
     orderedThrow = String(error?.message ?? error);
   }
@@ -2320,9 +2434,9 @@ export async function selfTest() {
   const traced = await runGuard({
     event: 'merge_group',
     rows: [row(1, ['AGENTS.md'])],
-    fetchPullHead: () => {
+    fetchPull: () => {
       trace.push('head');
-      return HEAD;
+      return pull();
     },
     fetchReviews: () => {
       trace.push('reviews');
@@ -2338,7 +2452,7 @@ export async function selfTest() {
   const tracedOlder = await runGuard({
     event: 'merge_group',
     rows: [row(1, ['AGENTS.md'])],
-    fetchPullHead: () => HEAD,
+    fetchPull: () => pull(),
     fetchReviews: () => [approvedAt(GOVERNED_APPROVERS[0], OLD)],
   });
   assert(
@@ -2353,9 +2467,9 @@ export async function selfTest() {
   const prLeg = await runGuard({
     event: 'pull_request',
     rows: [row(1, ['AGENTS.md'])],
-    fetchPullHead: () => {
+    fetchPull: () => {
       prHeadReads += 1;
-      return HEAD;
+      return pull();
     },
     fetchReviews: () => approved('anyone'),
   });
@@ -2376,7 +2490,7 @@ export async function selfTest() {
     thrown = await runGuard({
       event: 'merge_group',
       rows: [row(1, ['AGENTS.md'])],
-      fetchPullHead: () => HEAD,
+      fetchPull: () => pull(),
       fetchReviews: () => {
         throw new Error('HTTP 403');
       },
@@ -2397,7 +2511,7 @@ export async function selfTest() {
   const headFailed = await runGuard({
     event: 'merge_group',
     rows: [row(1, ['AGENTS.md'])],
-    fetchPullHead: () => {
+    fetchPull: () => {
       throw new Error('HTTP 500');
     },
     fetchReviews: () => {
@@ -2590,10 +2704,10 @@ export async function selfTest() {
     pr: 13794,
     paths: ['packages/spec/src/query/operators.zod.ts', ...regenPaths, ...extra],
   });
-  const endToEnd = async (recompute, rows, { head = () => HEAD, reviews = () => [] } = {}) => {
+  const endToEnd = async (recompute, rows, { head = () => pull(), reviews = () => [] } = {}) => {
     const notes = [];
     const lifted = await liftGeneratedExceptions('/w', 'base', rows, notes, recompute);
-    return { verdict: await runGuard({ event: 'merge_group', rows: lifted, fetchPullHead: head, fetchReviews: reviews }), notes };
+    return { verdict: await runGuard({ event: 'merge_group', rows: lifted, fetchPull: head, fetchReviews: reviews }), notes };
   };
   // ⭐ Zero approvals AND zero API calls: once the row is lifted the diff
   // touches nothing governed, so the guard returns before a request exists —
@@ -2712,7 +2826,7 @@ export async function selfTest() {
     const verdict = await runGuard({
       event: 'merge_group',
       rows: after,
-      fetchPullHead: io.head ?? (() => HEAD),
+      fetchPull: io.head ?? (() => pull()),
       fetchReviews: io.reviews ?? (() => []),
       lifted,
     });
@@ -2808,11 +2922,22 @@ export async function selfTest() {
   const readerArgs = { apiUrl: 'https://api.example', slug: 'o/r', token: null };
   assert(
     'the-pull-head-reader-answers-the-current-head-sha',
-    (await makePullHeadReader({ ...readerArgs, fetchImpl: fakeRes({ head: { sha: HEAD } }) })(7)) === HEAD,
+    (await makePullReader({ ...readerArgs, fetchImpl: fakeRes({ head: { sha: HEAD } }) })(7)).sha === HEAD,
+  );
+  assert(
+    '⭐ and-the-SAME-request-answers-the-body-and-branch-the-card-is-located-from-so-the-card-thread-costs-no-extra-call',
+    await (async () => {
+      let calls = 0;
+      const row7 = await makePullReader({
+        ...readerArgs,
+        fetchImpl: async () => { calls += 1; return { ok: true, status: 200, json: async () => ({ head: { sha: HEAD, ref: 'claude/issue-321-x' }, body: 'Fixes #321' }) }; },
+      })(7);
+      return calls === 1 && row7.body === 'Fixes #321' && row7.headRef === 'claude/issue-321-x';
+    })(),
   );
   const readerThrow = async (fetchImpl) => {
     try {
-      await makePullHeadReader({ ...readerArgs, fetchImpl })(7);
+      await makePullReader({ ...readerArgs, fetchImpl })(7);
       return null;
     } catch (error) {
       return String(error?.message ?? error);
@@ -3176,11 +3301,19 @@ export async function selfTest() {
     ].join('\n'),
   });
 
+  // The CARD this fixture pull request delivers, and the body that declares it.
+  // ⭐ The record fixtures below sit on ONE thread at a time, which is the whole
+  // of #18701: a record on either carrier is a record.
+  const REF_CARD = 69;
   let tierApiCalls = 0;
+  let tierThreadsRead = [];
   const tierRun = async ({
     files = [REF_A],
     reviews = [],
     comments = [],
+    cardComments = [],
+    prBody = `Fixes #${REF_CARD}`,
+    branch = `claude/issue-${REF_CARD}-x`,
     head = REF_HEAD,
     headThrows = false,
     commentsThrow = false,
@@ -3190,12 +3323,18 @@ export async function selfTest() {
     pr = 70,
   } = {}) => {
     tierApiCalls = 0;
+    tierThreadsRead = [];
     return runGuard({
       event,
       rows: [row(pr, files, 'c'.repeat(40), `x (#${pr})`)],
       fetchReviews: async () => { tierApiCalls += 1; return reviews; },
-      fetchPullHead: async () => { tierApiCalls += 1; if (headThrows) throw new Error('head unreadable'); return head; },
-      fetchComments: async () => { tierApiCalls += 1; if (commentsThrow) throw new Error('thread unreadable'); return comments; },
+      fetchPull: async () => { tierApiCalls += 1; if (headThrows) throw new Error('head unreadable'); return pull(head, { body: prBody, headRef: branch }); },
+      fetchComments: async (n) => {
+        tierApiCalls += 1;
+        tierThreadsRead.push(n);
+        if (commentsThrow) throw new Error('thread unreadable');
+        return n === pr ? comments : cardComments;
+      },
       loadRecognisers: async () => { if (loaderThrows) throw new Error('loader exploded'); return recognisers; },
     });
   };
@@ -3260,11 +3399,118 @@ export async function selfTest() {
   );
   const tierAbsent = await tierRun({ comments: [{ id: 1, created_at: '2026-09-13T12:00:00Z', body: 'looks good to me' }] });
   assert(
-    '⛔ a-thread-with-NO-record-in-it-is-REFUSED-and-says-how-many-comments-it-read',
-    tierAbsent.exitCode === EXIT_REFUSED_UNAPPROVED && tierAbsent.entries[0].record.state === 'absent' && tierAbsent.entries[0].record.commentsRead === 1,
+    '⛔ a-thread-with-NO-record-in-it-is-REFUSED-and-says-how-many-comments-it-read-ON-EACH-CARRIER',
+    tierAbsent.exitCode === EXIT_REFUSED_UNAPPROVED && tierAbsent.entries[0].record.state === 'absent' &&
+      tierAbsent.entries[0].record.read.pr === 1 && tierAbsent.entries[0].record.read.card === 0 &&
+      tierAbsent.entries[0].record.readSummary === '1 on the PR and 0 on its card',
+    JSON.stringify(tierAbsent.entries[0].record),
+  );
+
+  // ── ⭐ #18701: the record lives on the PR **or its card**, and both are read ──
+  //
+  battery('⭐ #18701: the record lives on the PR or its card, and BOTH are read');
+  //
+  // The dequeue this leg cost, reproduced offline: a references-tier pair whose
+  // record sits ONLY on the card thread. Refused before this case existed
+  // (「0 comment(s) read on the PR thread」, PR #18689, `CI_FAILURE`), and the
+  // rule it was refused against says 「一条评论落 PR 或卡」.
+  const tierOnCard = await tierRun({ comments: [{ id: 1, created_at: '2026-09-13T12:00:00Z', body: 'os-dev-report' }], cardComments: [recordComment({ id: 901 })] });
+  assert(
+    '⭐ a-record-on-the-CARD-thread-alone-PASSES-the-two-carriers-are-one-delivery',
+    tierOnCard.exitCode === EXIT_CLEAR && tierOnCard.entries[0].record.state === 'stands' && tierOnCard.entries[0].record.where === 'card',
+    JSON.stringify(tierOnCard.entries[0].record),
+  );
+  assert(
+    '…and-BOTH-threads-were-actually-fetched-the-PR-number-and-the-card-it-delivers',
+    tierThreadsRead.join() === '70,69',
+    tierThreadsRead.join(),
+  );
+  assert(
+    '…and-the-passing-rendering-NAMES-the-thread-it-found-the-record-on',
+    /on the card thread is a `## Contract review`/.test(renderGuardVerdict(tierOnCard)),
+    renderGuardVerdict(tierOnCard),
+  );
+  // The lit control for the case above: the PR-thread reading is untouched.
+  const tierOnPrThread = await tierRun({ comments: [recordComment()], cardComments: [] });
+  assert(
+    'a-record-on-the-PR-thread-alone-still-PASSES-exactly-as-before',
+    tierOnPrThread.exitCode === EXIT_CLEAR && tierOnPrThread.entries[0].record.where === 'PR',
+  );
+  // ⭐ NEWEST-GOVERNS SPANS THE TWO THREADS, because the located record is ONE
+  // comment chosen once by the imported reader — never a per-thread winner.
+  const tierNewestAcross = await tierRun({
+    comments: [recordComment({ id: 910, at: '2026-09-13T10:00:00Z', tierLine: 'Served-tier: 75/75 `a-lesser-tier`' })],
+    cardComments: [recordComment({ id: 911, at: '2026-09-13T11:00:00Z' })],
+  });
+  assert(
+    '⭐ the-NEWEST-record-governs-ACROSS-the-two-threads-not-one-winner-per-thread',
+    tierNewestAcross.entries[0].record.state === 'stands' && tierNewestAcross.entries[0].record.id === 911,
+    JSON.stringify(tierNewestAcross.entries[0].record),
+  );
+  const tierNewestOnPr = await tierRun({
+    comments: [recordComment({ id: 912, at: '2026-09-13T14:00:00Z' })],
+    cardComments: [recordComment({ id: 913, at: '2026-09-13T11:00:00Z', tierLine: 'Served-tier: 75/75 `a-lesser-tier`' })],
+  });
+  assert(
+    '…in-both-directions-a-newer-PR-thread-record-displaces-an-older-card-one',
+    tierNewestOnPr.entries[0].record.state === 'stands' && tierNewestOnPr.entries[0].record.id === 912,
+  );
+  // ⛔ The card is DERIVED, and an underivable one searches NO card thread — the
+  // refusing direction, stated in the refusal rather than guessed at.
+  const tierNoCard = await tierRun({ prBody: 'no card named here', branch: 'feat/whatever', cardComments: [recordComment()] });
+  assert(
+    '⛔ a-pull-request-naming-NO-card-searches-no-card-thread-and-is-REFUSED',
+    tierNoCard.exitCode === EXIT_REFUSED_UNAPPROVED && tierNoCard.entries[0].record.state === 'absent' && tierThreadsRead.join() === '70',
+    JSON.stringify({ record: tierNoCard.entries[0].record, read: tierThreadsRead }),
+  );
+  assert(
+    '…and-the-refusal-SAYS-no-card-thread-was-searched-and-why-so-a-seat-is-not-left-guessing',
+    /no card thread was searched/.test(renderGuardVerdict(tierNoCard)) && /names no card/.test(renderGuardVerdict(tierNoCard)),
+    renderGuardVerdict(tierNoCard),
+  );
+  const tierTwoCards = await tierRun({ prBody: 'Fixes #101\nFixes #102', cardComments: [recordComment()] });
+  assert(
+    '⛔ and-a-pull-request-delivering-TWO-cards-at-equal-strength-picks-NEITHER',
+    tierTwoCards.exitCode === EXIT_REFUSED_UNAPPROVED && tierThreadsRead.join() === '70' &&
+      /same strength/.test(renderGuardVerdict(tierTwoCards)),
+    renderGuardVerdict(tierTwoCards),
+  );
+  // The branch-name fallback is the relation's own, reached only when the body
+  // declares nothing — so a record on the branch's card is still found.
+  const tierByBranch = await tierRun({ prBody: 'no declaration at all', cardComments: [recordComment({ id: 920 })] });
+  assert(
+    'the-card-comes-from-the-BRANCH-NAME-when-the-body-declares-nothing-the-relations-own-fallback',
+    tierByBranch.exitCode === EXIT_CLEAR && tierByBranch.entries[0].record.id === 920 && tierThreadsRead.join() === '70,69',
+    tierThreadsRead.join(),
+  );
+  // ⛔ An unreadable CARD thread is exit 4 on the same rule the PR thread is:
+  // an unread carrier is not a carrier with no record on it.
+  const tierCardThrew = await tierRun({ commentsThrow: true });
+  assert(
+    '⛔ an-unreadable-thread-on-EITHER-carrier-is-exit-4-never-an-absent-record',
+    tierCardThrew.exitCode === EXIT_REFUSED_UNREADABLE && tierCardThrew.entries[0].record.state === 'unreadable',
+  );
+  // ⭐ THE MIRROR PIN. `renderGuardVerdict` is pure and synchronous, so the
+  // WORDS a refusal prints are a module-scope mirror here; the SET this leg
+  // reads is not (it is the loaded list). Drift between the two reddens.
+  const { REVIEW_OF_RECORD_LOCATION: OWNED_LOCATION, REVIEW_OF_RECORD_THREADS: OWNED_THREADS } = await import(RECOGNISER_SOURCES.tier);
+  assert(
+    '⭐ the-location-WORDS-this-file-prints-are-pinned-to-the-constant-that-OWNS-them',
+    REVIEW_OF_RECORD_LOCATION === OWNED_LOCATION && OWNED_LOCATION === OWNED_THREADS.map((t) => t.words).join(' or '),
+    `${REVIEW_OF_RECORD_LOCATION} vs ${OWNED_LOCATION}`,
+  );
+  assert(
+    '…and-the-remedy-a-refusal-offers-names-exactly-that-location-never-one-thread-of-it',
+    renderGuardVerdict(tierAbsent).includes(`comment on ${OWNED_LOCATION} naming`),
+    renderGuardVerdict(tierAbsent),
+  );
+  assert(
+    '…while-the-leg-itself-reads-the-LOADED-set-so-a-stale-mirror-can-never-shrink-what-is-searched',
+    live.threads === OWNED_THREADS && live.threads.length === 2,
   );
 
   // ⭐ The BOUNDARY: one rules-layer path and the tier is not reachable at all.
+  battery('⭐ #18020: the references tier — a review of record, not an approval');
   const tierMixed = await tierRun({ files: [REF_A, RULES_PATH], comments: [recordComment()] });
   assert(
     '⛔ a-MIXED-diff-with-one-rules-layer-path-is-REFUSED-even-with-a-perfect-record',
@@ -3288,7 +3534,7 @@ export async function selfTest() {
     event: EVENT_MERGE_GROUP,
     rows: [row(71, [REF_A])],
     fetchReviews: async () => [approvedAt(GOVERNED_APPROVERS[1], REF_HEAD)],
-    fetchPullHead: async () => REF_HEAD,
+    fetchPull: async () => REF_HEAD,
     fetchComments: async () => { throw new Error('the thread must not be read when an approval already satisfies the entry'); },
     loadRecognisers: async () => { throw new Error('the recognisers must not be loaded when an approval already satisfies the entry'); },
   });
@@ -3325,9 +3571,11 @@ export async function selfTest() {
   assert(
     'a-RENAMED-export-names-itself-rather-than-half-loading-a-parser-nobody-checked',
     renamed.available === false &&
-      /readServedTier/.test(renamed.reason) &&
+      /locate/.test(renamed.reason) &&
+      /deliveredCard/.test(renamed.reason) &&
       /servedTierStands/.test(renamed.reason) &&
-      /isModelIdentifierToken/.test(renamed.reason),
+      /isModelIdentifierToken/.test(renamed.reason) &&
+      /threads/.test(renamed.reason),
     renamed.reason,
   );
   const wontLoad = await loadRecordRecognisers(async () => { throw new Error('ERR_MODULE_NOT_FOUND'); });
@@ -3339,7 +3587,7 @@ export async function selfTest() {
     event: EVENT_PULL_REQUEST,
     rows: [row(72, [REF_A])],
     fetchReviews: async () => [],
-    fetchPullHead: async () => { throw new Error('the PR leg reads no head'); },
+    fetchPull: async () => { throw new Error('the PR leg reads no head'); },
     fetchComments: async () => { throw new Error('the PR leg reads no thread'); },
     loadRecognisers: async () => { throw new Error('the PR leg loads no recognisers'); },
   });
@@ -3352,7 +3600,7 @@ export async function selfTest() {
     event: EVENT_MERGE_GROUP,
     rows: [row(73, ['packages/spec/src/index.ts'])],
     fetchReviews: async () => { throw new Error('no review lookup may be made on a clear diff'); },
-    fetchPullHead: async () => { throw new Error('no head read may be made on a clear diff'); },
+    fetchPull: async () => { throw new Error('no head read may be made on a clear diff'); },
     fetchComments: async () => { throw new Error('no thread read may be made on a clear diff'); },
     loadRecognisers: async () => { throw new Error('the recognisers may not even be LOADED on a clear diff'); },
   });
@@ -3407,8 +3655,9 @@ export async function selfTest() {
     'a top-level await here deadlocks the recogniser import — see loadRecordRecognisers',
   );
   assert(
-    'and-the-recogniser-sources-are-the-two-files-that-OWN-these-parsers',
-    RECOGNISER_SOURCES.record === './check-half-states.mjs' && RECOGNISER_SOURCES.tier === './check-clause2-carriers.mjs',
+    'and-the-recogniser-source-is-the-ONE-file-that-COMPOSES-these-parsers',
+    RECOGNISER_SOURCES.tier === './check-clause2-carriers.mjs' && Object.keys(RECOGNISER_SOURCES).length === 1,
+    Object.keys(RECOGNISER_SOURCES).join(', '),
   );
   assert(
     '⛔ the-tier-prefix-keeps-its-trailing-slash-and-is-NOT-written-as-a-register-glob',

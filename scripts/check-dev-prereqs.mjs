@@ -202,6 +202,31 @@
  *   how every package builds, for packages whose stale dist fails loudly instead
  *   of lying. AGENTS.md §9's stale-artefact table names exactly one dist that
  *   presents as *other people's* contract drift, and it is `packages/spec`.
+ *
+ *   A SECOND ADMISSION CRITERION, read from one repo further out (#16529). A
+ *   sibling checkout links `@objectstack/*` by `link:` — objectstack-ai/cloud
+ *   does it for 184 specifiers — and compiles against the linked package's
+ *   `dist/`. A stale dist there surfaces as `TS2305 … has no exported member
+ *   …` naming an import nobody touched, with the symbol present in `src/` the
+ *   whole time: row one's lie, read across a repository boundary. The consumer
+ *   cannot close it from its side — its preflight compares the sibling's HEAD
+ *   against its pin, and a sibling sitting EXACTLY on the pin whose dist was
+ *   built from an older commit is silent through that comparison. So a package a
+ *   sibling checkout actually links is admitted here too, and the stamp its build
+ *   already writes is what that preflight reads.
+ *   ⛔ That reading does NOT make this file's stamp a cross-repo contract. It is
+ *   internal dev tooling shared by sibling checkouts — both repositories are
+ *   ours, the format may change without notice, and when it does the sibling's
+ *   preflight reds once and is fixed in the same breath. No version number, no
+ *   stable-location promise, no docs page (maintainer ruling on #16529).
+ *   ⚠ THIS LIST IS SHORT OF THAT CLOSURE, declared rather than inherited: the
+ *   three entries under criterion 2 are the ones that ruling names; the remainder
+ *   of the 184-specifier closure is not derivable from inside this repository.
+ *   ⛔ "Every workspace package that emits a `dist/`" is a DIFFERENT set and not
+ *   a stand-in for it — it would add a build step for packages no reader links.
+ *   The shortfall is monotone-safe: the coverage error fires only on LISTED
+ *   packages, so a short list checks less and can never false-red.
+ *
  *   Adding the next amplifier is two lines: its path in AMPLIFIERS, and `--stamp`
  *   at the end of its build script — and NEITHER half can be forgotten, because
  *   a listed package whose build script does not stamp fails this gate as a
@@ -355,14 +380,23 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
  * Packages whose dist is checked for FRESHNESS and not merely existence, as
- * workspace-relative POSIX paths. See the header for the admission criterion
- * ("a stale dist that presents as somebody else's contract drift") and for why
- * this is a declared list rather than every package.
+ * workspace-relative POSIX paths. See the header for the TWO admission criteria
+ * ("a stale dist that presents as somebody else's contract drift", and "a
+ * sibling checkout links it") and for why this is a declared list rather than
+ * every package.
  *
  * Every entry MUST end its `build` script with STAMP_INVOCATION; a listed
  * package that does not is a coverage error, not a silent pass.
  */
-const AMPLIFIERS = ['packages/spec'];
+const AMPLIFIERS = [
+  // Criterion 1 — a stale dist here reads as somebody else's contract drift.
+  'packages/spec',
+  // Criterion 2 — linked by `link:` from a sibling checkout, where a stale dist
+  // is a TS2305 naming an import nobody touched. See the header.
+  'packages/core',
+  'packages/plugins/plugin-auth',
+  'packages/plugins/organizations',
+];
 
 /** What an amplifier's build script must END WITH for its stamp to be maintained. */
 const STAMP_INVOCATION = 'check-dev-prereqs.mjs --stamp';

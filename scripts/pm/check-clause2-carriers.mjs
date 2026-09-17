@@ -662,9 +662,12 @@ import {
   H51_SHA_MIN_HEX,
   PROXY_FLAG,
   SWEEP_REPO_SHAPE,
+  branchNameTarget,
+  closingKeywordTargets,
   contractReviewHeadMatch,
   deliveryEvidence,
   deliveryEvidenceNote,
+  partOfTargets,
   claimGovernance,
   claimedBranches,
   governingClaim,
@@ -766,6 +769,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#17919: the correction remedy names THIS card\'s claim comment, never another card\'s': 24,
   '#16833: an UNJUDGED refusal names the CHANNEL that answered, what it answered, and which carrier': 30,
   '#18456: the `--pair` input record — the same block on every exit, so two runs that disagree can be diffed': 38,
+  '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 16,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -777,7 +781,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // one #17915 adds, by the one #17959 adds, by the one #18042 adds, and by the
 // one #18174 adds, and by the one #18141 adds, and by the one #17919 adds, and
 // by the one #16833 adds, and by the one #18456 adds.
-const SELF_TEST_BATTERY_FLOOR = 27;
+const SELF_TEST_BATTERY_FLOOR = 28;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -3143,6 +3147,126 @@ export const RECORD_TEMPLATE_FENCE_START = '----- copy from here; replace the th
 export const RECORD_TEMPLATE_FENCE_END = '----- to here -----';
 
 /**
+ * ⭐ WHERE A REVIEW OF RECORD LIVES — the ONE set every reader in this regime
+ * searches and every printed instruction names.
+ *
+ * The governed text decides this and the constant does not; what the constant
+ * stops is TWO TOOLS ANSWERING IT DIFFERENTLY. The rule is quoted rather than
+ * paraphrased because it IS the operative criterion, and untranslated because
+ * rewriting a quoted ruling rewrites the ruling:
+ *
+ *   > 复核记录 = 一条评论落 PR 或卡，达档与默认档同形
+ *
+ * — `references/contract-review.md` 〈复核归属与资格〉, with SKILL.md
+ * 〈入队与落地〉 saying the same in the same words
+ * (「记录 = 同形评论落 PR 或卡」) and the landing check's own ① repeating it
+ * (「即 PR 或卡上同形的复核记录」). Two carriers, one record.
+ *
+ * ⚖️ THE MEASURED COST of spelling that set twice, on one pull request in one
+ * day: the skills seat posted its `## Contract review` on carrier card #18426
+ * (comment 5716694216) — a location `--template` offers in those exact words —
+ * and this file's `--pair` read it as a record on the card thread. The merge
+ * queue's own guard read the PR thread ALONE, answered
+ * 「0 comment(s) read on the PR thread」 and dequeued PR #18689 `CI_FAILURE`. A
+ * SECOND COPY of the same comment, on the PR thread, is what cured it. The two
+ * tools already shared every recogniser; what they did not share was the set of
+ * threads to run them over.
+ *
+ * ⛔ So nothing here spells a thread set of its own. `locateReviewOfRecord`
+ * builds the rows it searches from this list, `contractReviewTemplateLines`
+ * builds the sentence it prints from it, and `check-governed-queue-guard.mjs`
+ * fetches one thread per entry in it — which is what the cross-tool pin in this
+ * file's self-test measures, by DRIVING that guard rather than by restating the
+ * two sets beside each other.
+ *
+ *   `where`   the tag a located record carries, so a row can name its thread
+ *   `rows`    the key a pair carries that thread's comment rows under
+ *   `number`  the key a pair carries that thread's issue number under
+ *   `words`   how that location is NAMED to a human, in reading order
+ */
+export const REVIEW_OF_RECORD_THREADS = Object.freeze([
+  Object.freeze({ where: 'PR', rows: 'prComments', number: 'pr', words: 'the PR' }),
+  Object.freeze({ where: 'card', rows: 'cardComments', number: 'card', words: 'its card' }),
+]);
+
+/**
+ * The location in the words every instruction prints — DERIVED from the set
+ * above, so an instruction can never offer a thread no reader searches.
+ */
+export const REVIEW_OF_RECORD_LOCATION = REVIEW_OF_RECORD_THREADS.map((thread) => thread.words).join(' or ');
+
+/**
+ * The grades `deliveryEvidence` answers with, STRONGEST FIRST — the ranking that
+ * function already applies internally, written down here because a caller
+ * choosing AMONG several delivered cards needs it as data and
+ * `check-half-states.mjs` exports the relation rather than its ordering.
+ *
+ * ⛔ A MIRROR, so the self-test MEASURES it rather than trusting it: every
+ * neighbouring pair is driven through `deliveryEvidence` on a body that could
+ * grade either way, and the set is held equal to the kinds `deliveryEvidenceNote`
+ * recognises. A grade added or reordered upstream reds here instead of silently
+ * re-ranking a governance reading.
+ */
+export const DELIVERY_EVIDENCE_PRECEDENCE = Object.freeze(['closing-keyword', 'part-of', 'part-of-inline', 'branch-name']);
+
+/**
+ * The card a pull request DELIVERS, as a number — the other half of the pair a
+ * record read needs, for a caller that holds the pull request and no board.
+ *
+ * ⭐ DERIVED THROUGH `deliveryEvidence`, never beside it: this function only
+ * enumerates the numbers a body or a branch name could be naming, and then asks
+ * the ONE relation `derivePairs`, H8 and H31 already ask whether each is
+ * delivered. So it can never accept a card that relation rejects, and the
+ * precedence between a closing keyword, a `Part of` declaration and the branch
+ * name stays where it is written down rather than being graded twice.
+ *
+ * ⛔ AMBIGUITY IS NOT RESOLVED, it is REPORTED. A body naming two cards at the
+ * same strength delivers both, and picking one of them would decide which
+ * thread a governance reading searches by an accident of number order. The
+ * caller gets `card: null` and a reason it can print; on the queue guard that
+ * is the REFUSING direction (no card thread is searched, so no record can be
+ * found on one), which is the direction a governance reading is wrong in
+ * safely.
+ *
+ * @param {object} pr — a REST pull row: `body`, and `head.ref` for the fallback
+ * @returns {{ card: number, evidence: string } | { card: null, reason: string }}
+ */
+export function deliveredCardNumber(pr) {
+  const body = String(pr?.body ?? '');
+  const candidates = new Set([
+    ...closingKeywordTargets(body).keys(),
+    ...partOfTargets(body).keys(),
+    ...[branchNameTarget(pr?.head?.ref)].filter((n) => n !== null && n !== undefined),
+  ]);
+  const delivered = [];
+  for (const n of candidates) {
+    const evidence = deliveryEvidence(pr, n);
+    if (evidence === null) continue;
+    delivered.push({ card: Number(n), evidence, rank: DELIVERY_EVIDENCE_PRECEDENCE.indexOf(evidence) });
+  }
+  if (delivered.length === 0) {
+    return {
+      card: null,
+      reason:
+        'its body names no card (no closing keyword and no `Part of` declaration) and its branch is not '
+        + 'the protocol dev-branch shape, so no card thread could be located for it',
+    };
+  }
+  const best = Math.min(...delivered.map((row) => row.rank));
+  const strongest = delivered.filter((row) => row.rank === best);
+  if (strongest.length > 1) {
+    return {
+      card: null,
+      reason:
+        `it delivers ${strongest.length} cards at the same strength (${strongest.map((row) => `#${row.card}`).join(', ')}, `
+        + `${deliveryEvidenceNote(strongest[0].evidence)}), so WHICH card thread carries its record is not derivable `
+        + 'from the pull request alone',
+    };
+  }
+  return { card: strongest[0].card, evidence: strongest[0].evidence };
+}
+
+/**
  * What `--template` prints: the record, fenced, with the calibration around it.
  *
  * ⭐ The notes live OUTSIDE the fence and carry no key-initial line, so nothing
@@ -3156,7 +3280,7 @@ export const RECORD_TEMPLATE_FENCE_END = '----- to here -----';
 export function contractReviewTemplateLines(values = {}) {
   return [
     'check-clause2-carriers --template — the contract-review record of record, copyable. It is',
-    'ONE comment on the PR or its card; the NEWEST one naming this head governs.',
+    `ONE comment on ${REVIEW_OF_RECORD_LOCATION}; the NEWEST one naming this head governs.`,
     '',
     '⛔ The value is the FIRST thing after the colon. A leading word — "branch ", "the dev on " —',
     '   IS the value as far as the reader is concerned, the pair is refused HALF WRITTEN, and a',
@@ -3238,25 +3362,34 @@ export function contractReviewTemplateLines(values = {}) {
  */
 export function locateReviewOfRecord(pair) {
   const gaps = [];
-  if (!Array.isArray(pair?.prComments)) gaps.push(`PR #${pair?.pr}'s comment thread`);
-  if (!Array.isArray(pair?.cardComments)) gaps.push(`card #${pair?.card}'s comment thread`);
+  // \u2b50 THE THREAD SET IS READ FROM `REVIEW_OF_RECORD_THREADS`, never spelled
+  // here: this loop, the template's printed sentence and the queue guard's
+  // fetches are the three consumers of that one list, and the whole point of it
+  // is that no two of them can name different threads (#18701).
+  for (const thread of REVIEW_OF_RECORD_THREADS) {
+    if (!Array.isArray(pair?.[thread.rows])) gaps.push(`${thread.where} #${pair?.[thread.number]}'s comment thread`);
+  }
   const head = String(pair?.headSha ?? '');
   // A head too short to be matched by H51's span test can never find its
   // record, so it is a read that could not be made -- never an absent record.
   if (head.length < H51_SHA_MIN_HEX) gaps.push(`PR #${pair?.pr}'s head sha`);
   if (gaps.length > 0) return { state: 'unreadable', gaps };
 
-  const tagged = [
-    ...pair.prComments.map((row) => ({ row, where: 'PR' })),
-    ...pair.cardComments.map((row) => ({ row, where: 'card' })),
-  ];
+  const tagged = REVIEW_OF_RECORD_THREADS.flatMap((thread) =>
+    pair[thread.rows].map((row) => ({ row, where: thread.where })),
+  );
   const onHead = tagged.filter(
     ({ row }) =>
       CONTRACT_REVIEW_HEADING_MARKER.test(String(row?.body ?? '')) &&
       contractReviewHeadMatch(row?.body, head) !== null,
   );
   const newest = latestMarkedComment(onHead.map(({ row }) => row), CONTRACT_REVIEW_HEADING_MARKER);
-  if (!newest) return { state: 'absent', read: { pr: pair.prComments.length, card: pair.cardComments.length } };
+  if (!newest) {
+    return {
+      state: 'absent',
+      read: Object.fromEntries(REVIEW_OF_RECORD_THREADS.map((thread) => [thread.number, pair[thread.rows].length])),
+    };
+  }
   const { row, where } = onHead[newest.index];
   const found = {
     where,
@@ -5267,7 +5400,7 @@ const CLAIM = (extra) => ({
 // handshake is a flag rather than a returned sentinel.
 let selfTestReachedVerdict = false;
 
-export function selfTest() {
+export async function selfTest() {
   // The battery ledger this self-test's floor is evaluated against (#13489).
   // `battery()` opens a battery; every assertion below is attributed to the one
   // most recently opened, so a section that stops running stops registering and
@@ -7203,6 +7336,85 @@ export function selfTest() {
   t('⛔ CONTROL: building the record changes no reading — the same rows read the same way after it', (() => { const rows = [R56_SUPERSEDED, R56_GOVERNING]; const before = cardDeclaration(rows).state; buildInputRecord({ pairs: [R56_PAIR()] }); return cardDeclaration(rows).state === before; })());
   t('⛔ CONTROL: the record carries no verdict, no exit code and no finding row', !says(R56_LINES(R56_OK).join('\n'), 'exit ') && !says(R56_LINES(R56_OK).join('\n'), 'PASS'));
 
+  // -- #18701: ONE thread set -- what the template STATES, the guard READS -----
+  //
+  // ⭐ THE PIN THE CARD ASKS FOR, and it is a MEASUREMENT rather than two lists
+  // written side by side. The stated set is read out of the text `--template`
+  // actually prints; the read set is obtained by DRIVING
+  // `check-governed-queue-guard.mjs` once per thread, with a record copied from
+  // this file's own template sitting on that thread ALONE. Edit either side by
+  // itself -- drop a location from the sentence, or stop the guard fetching a
+  // carrier -- and the two sets stop matching here.
+  //
+  // ⛔ The guard is imported LAZILY, from a function body. This file reaches
+  // that module at module scope already (through `check-half-states.mjs`'s
+  // top-level await), so the import below is a cache hit; what it must never
+  // become is a top-level `await` in the dispatch, which that guard's own
+  // docblock records as an exit-13 deadlock for BOTH modules.
+  battery('#18701: ONE thread set -- what the template STATES is what the queue guard READS');
+  const GUARD = await import('./check-governed-queue-guard.mjs');
+  const TEMPLATE_TEXT = contractReviewTemplateLines().join('\n');
+  const THREAD_SET = REVIEW_OF_RECORD_THREADS.map((thread) => thread.where).join();
+
+  // STATED -- read off the printed instruction, never restated here.
+  const stated = REVIEW_OF_RECORD_THREADS.filter((thread) => TEMPLATE_TEXT.includes(thread.words)).map((thread) => thread.where).join();
+
+  // READ -- measured by driving the guard's references tier, one run per thread.
+  const PIN_HEAD = 'dead1234beef5678'.padEnd(40, '0');
+  const PIN_PR = 4101;
+  const PIN_CARD = 4102;
+  // ⭐ The fixture record IS what `--template` tells a seat to paste, so this
+  // pin also answers "is the thing we tell them to copy accepted where we tell
+  // them to put it" -- in both places, on the same run.
+  const PIN_RECORD = {
+    id: 7701,
+    created_at: '2026-09-16T10:00:00Z',
+    body: contractReviewRecordLines({ headSha: PIN_HEAD, reviewedBy: 'session_01PINSEAT' }).join('\n'),
+  };
+  const pinRun = async (where) => {
+    const threadsRead = [];
+    const verdict = await GUARD.runGuard({
+      event: GUARD.EVENT_MERGE_GROUP,
+      rows: [{ sha: 'e'.repeat(40), subject: `x (#${PIN_PR})`, pr: PIN_PR, paths: [`${GUARD.REFERENCES_TIER_PREFIX}contract-review.md`] }],
+      fetchReviews: async () => [],
+      fetchPull: async () => ({ sha: PIN_HEAD, body: `Fixes #${PIN_CARD}`, headRef: `claude/issue-${PIN_CARD}-x` }),
+      fetchComments: async (n) => {
+        threadsRead.push(n);
+        return (n === PIN_PR ? 'PR' : 'card') === where ? [PIN_RECORD] : [];
+      },
+      loadRecognisers: GUARD.loadRecordRecognisers,
+    });
+    return { verdict, threadsRead, record: verdict.entries[0]?.record ?? null };
+  };
+  const pinRuns = [];
+  for (const thread of REVIEW_OF_RECORD_THREADS) pinRuns.push([thread.where, await pinRun(thread.where)]);
+  const readSet = pinRuns.filter(([, r]) => r.verdict.exitCode === GUARD.EXIT_CLEAR && r.record?.state === 'stands').map(([where]) => where).join();
+
+  t(`⭐ the set the TEMPLATE states IS the set the GUARD reads (${THREAD_SET})`, stated === THREAD_SET && readSet === THREAD_SET, `stated=[${stated}] read=[${readSet}]`);
+  t('⛔ CONTROL: the pin is not vacuous -- the set has two locations, not one', REVIEW_OF_RECORD_THREADS.length === 2 && stated.includes('PR') && stated.includes('card'));
+  t('…and each run located the record on the thread it was posted to, not on the other one', pinRuns.every(([where, r]) => r.record?.where === where), JSON.stringify(pinRuns.map(([w, r]) => [w, r.record?.where])));
+  t('…and the guard fetched exactly ONE thread per entry in the set, no more and no fewer', pinRuns.every(([, r]) => r.threadsRead.join() === `${PIN_PR},${PIN_CARD}`), JSON.stringify(pinRuns.map(([, r]) => r.threadsRead)));
+  t('⛔ CONTROL: with the record on NEITHER thread the same run is refused -- the pin can fail', await (async () => { const none = await pinRun('nowhere'); return none.verdict.exitCode !== GUARD.EXIT_CLEAR && none.record?.state === 'absent'; })());
+  t('the guard prints the location in the WORDS this file owns, so a seat is told one thing', GUARD.REVIEW_OF_RECORD_LOCATION === REVIEW_OF_RECORD_LOCATION && TEMPLATE_TEXT.includes(`ONE comment on ${REVIEW_OF_RECORD_LOCATION}`));
+
+  // The reader itself is built FROM the set, so a thread added to it is a thread
+  // searched -- the property the two consumers above rest on.
+  const PIN_PAIR = { pr: PIN_PR, card: PIN_CARD, headSha: PIN_HEAD, prComments: [], cardComments: [] };
+  t('`locateReviewOfRecord` accounts for EVERY thread in the set, by the keys the set itself declares', (() => { const r = locateReviewOfRecord(PIN_PAIR); return r.state === 'absent' && REVIEW_OF_RECORD_THREADS.every((thread) => Object.hasOwn(r.read, thread.number)); })());
+  t('…and a thread the pair does not carry is a GAP named in the words the set itself declares', (() => { const r = locateReviewOfRecord({ ...PIN_PAIR, cardComments: null }); return r.state === 'unreadable' && r.gaps.some((g) => g.includes(`card #${PIN_CARD}`)); })());
+
+  // `deliveredCardNumber` -- the other half the guard needs, and it asks the ONE
+  // relation rather than grading evidence a second time.
+  const PIN_PULL = (body, ref = 'feat/none') => ({ number: PIN_PR, body, head: { ref } });
+  t('a closing keyword names the card', deliveredCardNumber(PIN_PULL(`Fixes #${PIN_CARD}`)).card === PIN_CARD && deliveredCardNumber(PIN_PULL(`Fixes #${PIN_CARD}`)).evidence === 'closing-keyword');
+  t('a `Part of` declaration names it too, at its own grade', deliveredCardNumber(PIN_PULL(`Part of #${PIN_CARD}`)).evidence === 'part-of');
+  t('the branch name is the fallback, and ONLY when the body declares nothing', deliveredCardNumber(PIN_PULL('no declaration', `claude/issue-${PIN_CARD}-x`)).evidence === 'branch-name' && deliveredCardNumber(PIN_PULL('Fixes #4444', `claude/issue-${PIN_CARD}-x`)).card === 4444);
+  t('⛔ a body naming NO card yields no card and a reason, never a guess', (() => { const r = deliveredCardNumber(PIN_PULL('nothing here')); return r.card === null && r.reason.includes('names no card'); })());
+  t('⛔ two cards at the SAME strength yield NEITHER, and the reason names both', (() => { const r = deliveredCardNumber(PIN_PULL('Fixes #4444\nFixes #5555')); return r.card === null && r.reason.includes('#4444') && r.reason.includes('#5555'); })());
+  t('…while a STRONGER grade still decides, so a stray `Part of` beside a keyword is not a tie', deliveredCardNumber(PIN_PULL(`Fixes #${PIN_CARD}\n\npart of #4444 already landed`)).card === PIN_CARD);
+  t('⛔ CONTROL: the ranking belongs to `deliveryEvidence` -- every grade it answers is ranked here, none invented', DELIVERY_EVIDENCE_PRECEDENCE.every((kind) => deliveryEvidenceNote(kind) !== 'evidence unread') && new Set(DELIVERY_EVIDENCE_PRECEDENCE).size === DELIVERY_EVIDENCE_PRECEDENCE.length);
+  t('…and it is ranked in the order that function applies, measured pair by pair', DELIVERY_EVIDENCE_PRECEDENCE.indexOf(deliveryEvidence(PIN_PULL(`Fixes #1\nPart of #2`), '1')) < DELIVERY_EVIDENCE_PRECEDENCE.indexOf(deliveryEvidence(PIN_PULL(`Fixes #1\nPart of #2`), '2')) && DELIVERY_EVIDENCE_PRECEDENCE.indexOf('part-of') < DELIVERY_EVIDENCE_PRECEDENCE.indexOf('branch-name'));
+
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -7473,7 +7685,7 @@ export function boardProvenanceLine({ repo, source }) {
 
 async function main(argv) {
   if (flagIndex(argv, '--self-test') !== -1) {
-    const selfTestCode = selfTest();
+    const selfTestCode = await selfTest();
     if (!selfTestReachedVerdict) {
       console.error(
         '\n✗ check-clause2-carriers self-test: selfTest() returned without reaching its verdict,\n'
@@ -7654,16 +7866,22 @@ async function runBoard(argv, repo, repoRes, keepRecord) {
 
 if (isEntrypoint(import.meta.url)) {
   if (flagIndex(process.argv.slice(2), '--self-test') !== -1) {
-    const selfTestCode = selfTest();
-    if (!selfTestReachedVerdict) {
-      console.error(
-        '\n✗ check-clause2-carriers self-test: selfTest() returned without reaching its verdict,\n'
-          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
-          + 'that never finished as a self-test that passed.\n',
-      );
-      process.exit(1);
-    }
-    process.exit(selfTestCode);
+    // ⭐ `.then`, ⛔ never a top-level `await`. `selfTest` became async to take a
+    // LAZY import of `check-governed-queue-guard.mjs` for the cross-tool pin
+    // (#18701), and that guard's own docblock records what a top-level await in
+    // an entrypoint dispatch costs on this cycle: node exits 13 with "Detected
+    // unsettled top-level await" and BOTH modules stop loading.
+    selfTest().then((selfTestCode) => {
+      if (!selfTestReachedVerdict) {
+        console.error(
+          '\n✗ check-clause2-carriers self-test: selfTest() returned without reaching its verdict,\n'
+            + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+            + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+      }
+      process.exit(selfTestCode);
+    });
   } else {
     // ⭐ Answered HERE, above the proxy re-exec, so neither usage nor a refused
     // argument spawns a child process or opens a socket. `main` judges both

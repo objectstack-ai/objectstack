@@ -643,15 +643,219 @@
  *
  * ⚠️ The quiet direction this does NOT close, measured on both boards so the
  * next reader meets it here instead of rediscovering it: a FILE-LOCAL declaring
- * factory. Both trees mint them — `placeholderFree(` (23 key lines),
- * `strictIdent(` (12), `emptyProps(` (9) at objectstack 6dfa3ea77;
+ * factory. Both trees mint them — `strictIdent(` (12 key lines),
+ * `emptyProps(` (9), `strictIdentOrNull(` (8) at objectstack 30bac2880;
  * `chatbotRequestBodyArm(` (2), `retiredDeclarativeKanbanKey(` (1) at objectui
  * 15f01223d — and a list of shared, exported helpers cannot name a factory
- * private to one file. ⭐ The OVERTURN CONDITION, written down so it needs no
+ * private to one file. (⚠️ This paragraph named `placeholderFree(` at 6dfa3ea77
+ * and was wrong about it: see #18702's section for the measurement that made it
+ * a ROW rather than a resolver case.) ⭐ The OVERTURN CONDITION, written down so it needs no
  * second discussion: a name-shaped heuristic (`*Refusal(` / `*Arm(` / `*Key(`)
  * is ⛔ refused, because it would recognise lines on evidence they do not carry;
  * what closes the class is a reading that resolves the factory's own value, and
  * the FIRST landed widening through a file-local factory is its card.
+ *
+ * ## The ninth accidental variable #18640 removed — WHERE THE NEWLINES ARE
+ *
+ * T2's sentence is "the accept set gains a VALUE", and #18640 raised it on a
+ * line that appends a zod options object to a union whose member list is
+ * unchanged. Measured on PR #18638's own pushed bytes, at a7e9a6600b:
+ * `check-clause2-carriers --pair 18638` exit 4, row C5, against a declaration
+ * two at-tier contract reviews had already read as correct.
+ *
+ * ⭐ The finding is the CONTROL SET, not the reasoning about that one diff. The
+ * same edit spelled one member per line DECLINES today, and has since #16943:
+ * the added opener re-declares the removed binding (#16822's
+ * `rewritesExistingOpener`) and each removed arm line buys the added line that
+ * replaced it. Spelled INLINE it FIRES. Measured, four probes on one synthetic
+ * file, this tree:
+ *
+ *   `const C = z.union([z.boolean(), E]);` -> the same line with `, { error }`
+ *   appended                                                   exit 4, one T2
+ *   the identical edit with each arm on its own line           exit 0
+ *   the identical edit at a KEYED property                     exit 0 (#16943)
+ *   the same append plus a THIRD arm, inline                   exit 4, one T2
+ *
+ * One semantic change, three spellings, two opposite verdicts — decided by
+ * nothing but where the author put the newlines and whether the set is bound to
+ * a name or to a key. That is not a scale set too strict; it is the accidental
+ * variable this family removes, the seventh time.
+ *
+ * ⛔ The gap is NOT in either reading that already exists, and neither could
+ * have closed it. #16822's `rewritesExistingOpener` reads an opener-ONLY line
+ * by construction — its regex refuses a line that already carries members, on
+ * purpose, because such a line is not merely a declaration — so an inline
+ * opener was never in its population. #16943's budget cannot reach the line
+ * either: `memberTellKind` answers `null` for `const C = z.union([…])`, which
+ * names no key and is no bare element, so the row neither earns on the removed
+ * side nor spends on the added one. The line falls through every reading in
+ * this file to the raw `CLOSED_SET_OPENER` test, which is the whole of the
+ * tell for it.
+ *
+ * What is added is the same positive, block-local evidence the other two
+ * spellings already accept, at the one position that had none: the block
+ * removed a line declaring the SAME BINDING, both member lists are readable
+ * inline, and the added list adds no NET member. The arithmetic is #16943's
+ * own — "the ruling this implements is replacement-vs-net-addition, not
+ * spelling" — applied to the members the inline line carries, so this reading
+ * is bounded EXACTLY by what the multi-line spelling of the same block does and
+ * by nothing wider.
+ *
+ * ⛔ #17618's KEYED subset test is deliberately NOT changed, and the refusal is
+ * the whole direction of this round rather than a scoping detail. A keyed value
+ * whose list opens on a later line is unreadable and FIRES — measured, same
+ * harness — so the keyed population has no control bounding a relaxation, and
+ * carrying this arithmetic across to it would be a loosening with nothing to
+ * measure it against. `closedSetBindingMembers` refuses a keyed line by its
+ * first condition so the two populations can never merge by accident.
+ *
+ * ⚠️ Consequence, recorded because the filing card's own pair still shows it:
+ * PR #18638's SECOND row — `visible: z.union([z.boolean(),
+ * EvaluatedExpressionInputSchema], {` on `component.zod.ts` — is a KEYED line
+ * whose union member was RENAMED, so it fails #17618's fact 3 and still fires.
+ * That row is a separate question this round refuses to answer by itself:
+ * whether a renamed member defeats a subset test is a ruling about fact 3, not
+ * a repair of an accidental variable, and buying #18638's green with it is the
+ * one motive this round had to refuse.
+ *
+ * The price, measured over the 749 commits touching these surfaces in the
+ * history provably present in this tree (`git-history ensure --days=30`: floor
+ * 2026-08-11, tip 2026-09-17 — the clone is shallow and the window is stated
+ * because a partial is not a zero): of the 20,452 tell rows the previous
+ * reading raises, 20,452 stand and **0** move. 55 of the 3,902 T2 rows in that
+ * window sit on a line this reading can READ, and it declined none of them,
+ * because none had a same-binding removal in its own change block — absent by
+ * default, exactly like every decline in this file. ⭐ And NO row anywhere in
+ * that window begins firing. On the tree itself (6dfa3ea77 + this branch), the
+ * population the reading can read is 50 lines in 31 files of the 998 judged
+ * source files, against 666 keyed inline sets (#17618's, untouched) and 311
+ * opener-only lines (#16822's, untouched).
+ *
+ * ⚠️ The quiet direction this buys, stated rather than left to be discovered: a
+ * one-for-one member SWAP at an existing binding — `z.union([A, B])` ->
+ * `z.union([A, C])` — now declines, and `C` may accept more than `B` did.
+ * ⛔ It is NOT a new class: #16943 bought exactly that silence for every set
+ * spelled one member per line and measured it over 82 commits (34 declines, not
+ * one of them a member rename); this removes the accidental exception, not the
+ * rule. ⭐ The OVERTURN CONDITION, so it needs no second discussion: the FIRST
+ * landed widening carried by a same-binding inline member swap — landed, never
+ * a synthetic sample — closes it by reading the members' own declarations.
+ *
+ * ## The tenth accidental variable #18702 removed — a declaring factory
+ * PRIVATE to one file
+ *
+ * #18560 repaired the vocabulary as a NAMED list of shared, exported helpers,
+ * and wrote down in the same edit what a list of names can never reach: a
+ * factory declared inside the one file that uses it. `SCHEMA_PROPERTY_FORMS`
+ * cannot name it — there is nothing to import and nothing to share — so
+ * `memberTellKind` answers `null`, the row neither fires nor spends the #16943
+ * budget nor earns it on the removed side, and nothing in the output says a
+ * thing. That is the SAME failure shape #18560 turned, on the one population
+ * its instrument was built not to reach.
+ *
+ * ⭐ The repair is STRUCTURAL, and the name-shaped heuristic #18560's header
+ * refused stays refused. This reading resolves the factory's OWN DEFINITION and
+ * classifies it by what its body RETURNS. The measurement that settles which of
+ * the two readings is right is the census below: of the eight factories the
+ * filing card names, FOUR mint PROSE or an error map rather than a schema
+ * (`objectBlockHistory(`, `belongsInConfig(`, `INLINE_CREDENTIAL_REFUSED(`,
+ * `ruleArrayFilterError(`), so a `*Refusal(`/`*Arm(`-shaped reading would have
+ * fired on 38 key lines that declare no author-writable key at all.
+ *
+ * ## How the definition is read — the BLOB, never "the file of that name"
+ *
+ * The judged file's full text is read as a BLOB, by its object id. #17300
+ * measured the other reading wrong for this whole family — a seat's worktree is
+ * not the diff's head, so resolving anything against it answers about the wrong
+ * commit — and a blob id is CONTENT, so it cannot answer about the wrong one.
+ * The id comes from the diff itself: `index <old>..<new>` on the local path,
+ * the `sha` field on a `/pulls/N/files` row. It is read out of this repo's
+ * object store (`git cat-file blob`); only when that fails is the working tree
+ * consulted at all, and then only after `git hash-object` proves the file on
+ * disk IS that blob, byte for byte. Every other outcome is `null`.
+ *
+ * ⛔ BOUNDARY ONE — an IMPORTED factory stays unrecognised, and imports are ⛔
+ * not chased. Only the file the diff CARRIES is pinned to the judged head by
+ * the diff itself; the file an import points at is not in the diff, nothing
+ * pins it, and reading it out of the local tree is exactly #17300's mistake
+ * wearing a longer path.
+ *
+ * ⛔ BOUNDARY TWO — a body this reader cannot classify stays unrecognised: a
+ * return it cannot find at the body's own top level, or one that is a template
+ * string, an arrow, a number. None of them is read as a schema, and ⛔ none is
+ * guessed at.
+ *
+ * ⭐ Both boundaries are a STATED silence rather than the invisible one the
+ * card measured: every unresolved key line is reported with its file:line, the
+ * factory's name and the reason it could not be read. An unread line is now a
+ * line this reader NAMES.
+ *
+ * ⛔ The `no` criterion does not loosen, and the direction is provable rather
+ * than argued. The resolver only ever ADDS a recognition — the shared-helper
+ * list is consulted FIRST and unchanged — and it is consulted ONLY on the ADDED
+ * side, so a removed key line declared through a local factory buys nothing and
+ * no line that fires today can stop firing because a removal newly pays for it.
+ * ⚠️ The price of that asymmetry, stated: a block that REPLACES one
+ * local-factory key with another fires on the added one. That is a false
+ * positive, which is the cost #16448 accepted, and it is the loud direction.
+ * ⭐ The OVERTURN CONDITION, written down so it needs no second discussion:
+ * the first LANDED diff whose only tell is such a replacement moves the reading
+ * to the removed side under #16943's arithmetic — a ruling about that
+ * arithmetic, never a repair of an accidental variable.
+ *
+ * ⚠️ CENSUS — report-only, the eight factories the card names, at objectstack
+ * 30bac2880 (a count plus the tree it was taken against; key POSITIONS on
+ * `packages/spec/src/**`):
+ *
+ *   `placeholderFree(`            23 key lines,  0 file-local — WRITABLE
+ *                                 (`return schema.superRefine(…)`: it returns
+ *                                 the schema it was handed) ⇒ a
+ *                                 `SCHEMA_PROPERTY_FORMS` ROW, not a resolver
+ *                                 case: it is imported at every one of the 23
+ *   `strictIdent(`                12 key lines, 12 file-local — WRITABLE
+ *                                 (`z.string().regex(SNAKE_CASE)…`)
+ *   `ruleArrayFilterError(`       11 key lines,  0 file-local — NOT A SCHEMA
+ *                                 (`return (issue) => {…}`, a `$ZodErrorMap`)
+ *   `INLINE_CREDENTIAL_REFUSED(`  10 key lines,  0 file-local — NOT A SCHEMA
+ *                                 (a template string)
+ *   `objectBlockHistory(`          9 key lines,  9 file-local — NOT A SCHEMA
+ *                                 (a template string)
+ *   `emptyProps(`                  9 key lines,  9 file-local — WRITABLE
+ *                                 (`strictObject(…)`, itself a declared form)
+ *   `strictIdentOrNull(`           8 key lines,  8 file-local — WRITABLE
+ *                                 (`z.string().regex(SNAKE_CASE).nullable()…`)
+ *   `belongsInConfig(`             8 key lines,  8 file-local — NOT A SCHEMA
+ *                                 (a template string)
+ *
+ * ⚠️ …and the sibling board, where the SAME census answers the heuristic
+ * question outright. At objectui 15f01223d, file-local to
+ * `packages/types/src/zod/complex.zod.ts`: `chatbotRequestBodyArm(` (2 key
+ * lines) returns `z.record(…)` ⇒ WRITABLE, `chatbotEnableMarkdownArm(` (2) and
+ * `chatbotEnableFileUploadArm(` (2) return `z.boolean()` ⇒ WRITABLE, while
+ * `chatbotOnClearArm(` (2) returns `handlerKeyRefusal(…)` ⇒ REFUSING and
+ * `retiredDeclarativeKanbanKey(` (1) returns `retirementTombstone(…)` ⇒
+ * REFUSING. ⭐ FOUR `*Arm(` factories in ONE file, in OPPOSITE registers, and
+ * nothing in the name says which — that is the measurement that retires the
+ * name-shaped heuristic rather than merely declining it on principle.
+ *
+ * ⚠️ AND THE CARD'S OWN PROBE WAS NEVER FILE-LOCAL — measured on the tip, not
+ * argued from the filing. `placeholderFree` is declared in
+ * `packages/spec/src/data/driver/common.zod.ts` and IMPORTED at all 23 of its
+ * key positions, `memory.zod.ts:9` included, so no reading of ONE file could
+ * ever have reached the card's probe line and the resolver below is not what
+ * carries it. ⇒ TWO instruments, because the population is two populations:
+ * the class the card's TITLE names is closed by the resolver over the 29
+ * file-local key lines that carry a schema, and the card's probe LINE is closed
+ * by a `SCHEMA_PROPERTY_FORMS` ROW — #18560's instrument, used for what it is
+ * for, with its own counterfactual fixture carrying the filing probe verbatim.
+ *
+ * ⛔ And the row stops there. The other three factories the card names that are
+ * likewise IMPORTED — `ruleArrayFilterError(`, `INLINE_CREDENTIAL_REFUSED(` —
+ * and the two file-local ones that are not schemas — `objectBlockHistory(`,
+ * `belongsInConfig(` — return PROSE or a `$ZodErrorMap`, so rows for them would
+ * mint 38 false T1 positives. ⭐ Which instrument a factory belongs to is a
+ * fact about where it is DECLARED; whether it belongs to EITHER is a fact about
+ * what it RETURNS. Two questions, measured separately, ⛔ never one heuristic.
  *
  * ## The remedy with no reader — #17848, and a pin the shape never had
  *
@@ -886,6 +1090,7 @@
 // well over 540s to reach (#16448 patch round 2).
 
 import process from 'node:process';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -930,7 +1135,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the declared registry rows still exist in this tree': 4,
   '#17112 — the count is split: examined is not examinable': 23,
   '#17217 — the CLI can be told which board it judges': 22,
-  '#18560 — the declaring vocabulary is a NAMED list, every form pinned by a counterfactual fixture': 30,
+  '#18560 — the declaring vocabulary is a NAMED list, every form pinned by a counterfactual fixture': 32,
+  '#18640 — an inline closed set RE-SPELLED at the same binding is not a set that gained a value': 20,
+  '#18702 — a declaring factory PRIVATE to one file, resolved through its own DEFINITION': 54,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1439,12 +1646,20 @@ const KEY_HEAD_SOURCE =
  *
  * ⚠️ The quiet direction the list does NOT close, measured on both boards so
  * the next reader meets it here: a FILE-LOCAL declaring factory. Both trees
- * mint them — `placeholderFree(` (23 key lines), `strictIdent(` (12),
- * `emptyProps(` (9) at objectstack 6dfa3ea77; `chatbotRequestBodyArm(` (2),
- * `retiredDeclarativeKanbanKey(` (1) at objectui 15f01223d — and a list of
- * shared, exported helpers cannot name a factory private to one file. They stay
- * unrecognised, exactly as before this round; the class is filed as its own
- * finding rather than guessed at with a name-shaped heuristic here.
+ * mint them — `strictIdent(` (12 key lines), `emptyProps(` (9),
+ * `strictIdentOrNull(` (8) at objectstack 30bac2880; `chatbotRequestBodyArm(`
+ * (2), `retiredDeclarativeKanbanKey(` (1) at objectui 15f01223d — and a list of
+ * shared, exported helpers cannot name a factory private to one file. #18702's
+ * structural resolver is what reaches those, through the factory's own
+ * definition; ⛔ this list is still not where they belong.
+ *
+ * ⚠️ `placeholderFree(` used to be named in that paragraph and is a ROW now,
+ * because the classification was wrong rather than the population: it is
+ * EXPORTED from `common.zod.ts` and imported at all 23 of its key positions, so
+ * it was never file-local at any of them and no resolver reading one file could
+ * have reached it. ⇒ Which register a factory belongs in is a fact about where
+ * it is DECLARED, measured per key position — ⛔ never inferred from the file a
+ * probe happened to be written on.
  */
 export const SCHEMA_PROPERTY_FORMS = Object.freeze([
   Object.freeze({
@@ -1468,6 +1683,18 @@ export const SCHEMA_PROPERTY_FORMS = Object.freeze([
     where: '`packages/spec/src/shared/strict-object.ts`',
     measured: '47 key lines at objectstack 6dfa3ea77',
   }),
+  Object.freeze({
+    form: 'placeholderFree(',
+    pattern: 'placeholderFree\\(',
+    writable: true,
+    where: '`packages/spec/src/data/driver/common.zod.ts` — `return schema.superRefine(…)`, i.e. it hands back the schema it was GIVEN, so the key it declares is exactly as writable as that argument',
+    measured: '23 key lines at objectstack 30bac2880, across six driver files — every one of them an IMPORT, which is why #18702\'s file-local resolver cannot reach them and this row is what does',
+  }),
+  // ⛔ …and NO row for the four factories #18702 measured beside it:
+  // `ruleArrayFilterError(` (11 key lines), `INLINE_CREDENTIAL_REFUSED(` (10),
+  // `objectBlockHistory(` (9) and `belongsInConfig(` (8) return PROSE or a
+  // `$ZodErrorMap`, never a schema, so a row for any of them would mint 38
+  // false T1 positives on key lines that declare no author-writable key at all.
   Object.freeze({
     form: '*Schema',
     pattern: '[A-Za-z_$][\\w$]*Schema\\b',
@@ -1816,17 +2043,19 @@ export function keyedPropertyName(text) {
 }
 
 /**
- * The key a T1 line names and the closed-set members its value declares INLINE,
- * or `null` when either half is not readable on this one line.
+ * The closed-set members one line declares INLINE, or `null` when the list is
+ * not readable on this one line.
  *
  * ⭐ "Not readable" is the common answer and it is the safe one: a value whose
  * list opens on a later line (`strategy: z.enum([`) reads `null`, and a `null`
- * on either side of the comparison below leaves the tell firing.
+ * on either side of either comparison below leaves the tell firing.
+ *
+ * ⛔ ONE reading, for the reason {@link keyedPropertyName} is one: the keyed
+ * spend (#17618) and the binding spend (#18640) both ask "which members does
+ * this line carry", and two spellings of that question would disagree about a
+ * nested bracket or a comma inside a string on the day one of them moved.
  */
-export function keyedClosedSetMembers(text) {
-  const s = String(text ?? '');
-  const key = keyedPropertyName(s);
-  if (key === null) return null;
+function inlineClosedSetMembers(s) {
   const ctor = CLOSED_SET_CONSTRUCTOR.exec(s);
   if (ctor === null) return null;
   const openParen = ctor.index + ctor[0].length - 1;
@@ -1834,14 +2063,26 @@ export function keyedClosedSetMembers(text) {
   if (ctor[1] === 'literal') {
     if (closeParen === -1) return null;
     const members = topLevelMembers(s, openParen, closeParen);
-    return members.length > 0 ? { key, members } : null;
+    return members.length > 0 ? members : null;
   }
   const openBracket = s.indexOf('[', openParen);
   if (openBracket === -1 || (closeParen !== -1 && openBracket > closeParen)) return null;
   const closeBracket = matchingCloser(s, openBracket);
   if (closeBracket === -1) return null;
   const members = topLevelMembers(s, openBracket, closeBracket);
-  return members.length > 0 ? { key, members } : null;
+  return members.length > 0 ? members : null;
+}
+
+/**
+ * The key a T1 line names and the closed-set members its value declares INLINE,
+ * or `null` when either half is not readable on this one line.
+ */
+export function keyedClosedSetMembers(text) {
+  const s = String(text ?? '');
+  const key = keyedPropertyName(s);
+  if (key === null) return null;
+  const members = inlineClosedSetMembers(s);
+  return members === null ? null : { key, members };
 }
 
 /**
@@ -1866,6 +2107,118 @@ export function respellsExistingClosedSetKey(text, removedTexts) {
     const before = keyedClosedSetMembers(r);
     if (before === null || before.key !== added.key) return false;
     return added.members.every((m) => before.members.includes(m));
+  });
+}
+
+/**
+ * The BINDING a closed-set declaration line names — everything left of the
+ * constructor, the way {@link closedSetOpenerBinding} reads it — together with
+ * the members the SAME line carries inline. `null` when the line is not one
+ * (#18640).
+ *
+ * Three things must all hold, and each one is the loud direction when it does
+ * not:
+ *
+ *   ① the line is NOT a keyed property. That population is #17618's three-fact
+ *     spend and this reading must never reach it — see
+ *     {@link respellsExistingClosedSetBinding} for why the two answer different
+ *     questions and why collapsing them would be a real loosening.
+ *   ② the binding is NON-EMPTY. Identity is what makes "the same set was
+ *     re-spelled" a fact rather than a resemblance, and an anonymous inline set
+ *     (`z.union([A, B]),` as one arm of an outer union) declares none — two of
+ *     them in one block are not evidence they are the same set.
+ *   ③ the member list closes ON THIS LINE. A list that opens here and closes
+ *     later is unreadable, exactly as it is for a keyed value.
+ */
+const CLOSED_SET_BINDING_HEAD = /^(.*?)z\.(?:enum|union|discriminatedUnion|literal)\(/;
+
+export function closedSetBindingMembers(text) {
+  const s = String(text ?? '');
+  if (COMMENT_LINE.test(s)) return null;
+  if (keyedPropertyName(s) !== null) return null; // ① a keyed line is #17618's, never this reading's
+  const head = CLOSED_SET_BINDING_HEAD.exec(s);
+  if (head === null) return null;
+  const binding = head[1].trim();
+  if (binding === '') return null; // ② no declaration identity, no evidence
+  const members = inlineClosedSetMembers(s); // ③ readable on this line, or `null`
+  return members === null ? null : { binding, members };
+}
+
+/**
+ * Every member of `added` that `before` did not already carry, counted as a
+ * MULTISET difference — the surplus, and what the removed list freed to pay for
+ * it.
+ *
+ * ⛔ Multiset, not set: a list that repeats a member twice where the removed one
+ * carried it once has gained a member, and a set difference would call that
+ * zero.
+ */
+function netMemberDelta(added, before) {
+  const pool = [...before];
+  let surplus = 0;
+  for (const m of added) {
+    const at = pool.indexOf(m);
+    if (at === -1) surplus += 1;
+    else pool.splice(at, 1);
+  }
+  return { surplus, freed: pool.length };
+}
+
+/**
+ * Does this added line RE-SPELL a closed set the same change block declared at
+ * the SAME BINDING, without the set gaining a value? (instance 3, #18640)
+ *
+ * ⭐ The evidence is the CONTROL SET, not an argument about direction. The
+ * identical edit spelled one member per line already declines, through
+ * #16822's `rewritesExistingOpener` (the opener re-declares the same binding)
+ * and #16943's budget (each removed arm line buys the added one that replaced
+ * it); spelled INLINE it fires, because an inline opener is not an opener-only
+ * line and a `const` declaration is not a key, so no reading in this file
+ * reaches it. One semantic change, two opposite verdicts, decided by nothing
+ * but where the author put the newlines — which is not a scale set too strict,
+ * it is the accidental variable this family removes.
+ *
+ * ⇒ this reading supplies the same positive evidence the other two spellings
+ * already accept, at the one position that had none, and is bounded EXACTLY by
+ * what the multi-line spelling of the same block does: the per-line budget is
+ * replacement-vs-net-addition arithmetic (#16943 — "the ruling this implements
+ * is replacement-vs-net-addition, not spelling"), so this is the same
+ * arithmetic over the members the inline line carries.
+ *
+ * ⛔ It is NOT #17618's subset test, and the difference is deliberate rather
+ * than overlooked. #17618 governs a KEYED value, where the multi-line spelling
+ * FIRES too (a keyed value whose list opens on a later line is unreadable and
+ * still tells) — so there is no control bounding a relaxation there, and
+ * carrying this arithmetic across to it would be a loosening with nothing to
+ * measure it against. The two populations are kept apart by ① in
+ * {@link closedSetBindingMembers}.
+ *
+ * The sensitivity guarantee is the surplus, exactly as #16943's is: a list that
+ * grows reports, with its own file:line. `z.enum(['a', 'b'])` ->
+ * `z.enum(['a', 'b', 'c'])` at one binding still fires; a different binding
+ * pays nothing; a brand-new declaration has no removal to pay for it; and a
+ * genuine new key beside the re-spelling still fires, because this reading
+ * takes nothing out of the #16943 budget.
+ *
+ * ⚠️ The quiet direction this buys, stated rather than left to be discovered: a
+ * one-for-one member SWAP at an existing binding — `z.union([A, B])` ->
+ * `z.union([A, C])` — now declines, and `C` may accept more than `B` did.
+ * ⛔ That is not a new class: #16943 bought exactly this silence for every set
+ * spelled one member per line, and measured it over 82 commits (34 declines,
+ * not one a member rename). What this removes is the accidental exception, not
+ * the rule. What still catches a swap that slips past is what caught it for the
+ * spelled-out form: `check:api-surface` on any exported name it moves,
+ * `check:authorable-surface` on any authorable key it changes, and the ADR-0087
+ * registries.
+ */
+export function respellsExistingClosedSetBinding(text, removedTexts) {
+  const added = closedSetBindingMembers(text);
+  if (added === null || !Array.isArray(removedTexts)) return false;
+  return removedTexts.some((r) => {
+    const before = closedSetBindingMembers(r);
+    if (before === null || before.binding !== added.binding) return false;
+    const { surplus, freed } = netMemberDelta(added.members, before.members);
+    return surplus <= freed;
   });
 }
 
@@ -2078,13 +2431,22 @@ function withoutComments(text) {
  * `retiredKey` here on the measured ground that each one's value refuses every
  * input — ⛔ not on their names, and ⛔ not on the file they live in.
  *
+ * #18702 — a FILE-LOCAL factory whose own definition returns a refusal joins
+ * the same reading through `localRefusal`, a regex built the same way from the
+ * same {@link KEY_HEAD_SOURCE} and ending at the same open paren. ⛔ It is a
+ * second SOURCE of forms, never a second reading: the evidence a line must
+ * carry is unchanged, so a live arm chained onto a local refusal fires exactly
+ * as one chained onto `retiredKey(` does.
+ *
  * @param {string} text — one patch line's text, with its `+` / `-` already stripped
+ * @param {RegExp|null} [localRefusal] — the file's own refusing forms (#18702)
  * @returns {boolean} true when the line declares a key UNWRITABLE
  */
-export function declaresUnwritableKey(text) {
+export function declaresUnwritableKey(text, localRefusal = null) {
   const s = String(text ?? '');
   if (COMMENT_LINE.test(s)) return false;
-  const opening = UNWRITABLE_KEY_DECLARATION.exec(s);
+  const opening = UNWRITABLE_KEY_DECLARATION.exec(s)
+    ?? (localRefusal instanceof RegExp ? localRefusal.exec(s) : null);
   if (opening === null) return false;
   const open = opening[0].length - 1;
   const close = matchingCloser(s, open);
@@ -2093,6 +2455,515 @@ export function declaresUnwritableKey(text) {
   if (close === -1) return true;
   // ① It closed here, so the value ends here too, give or take a comma.
   return TOMBSTONE_TAIL.test(withoutComments(s.slice(close + 1)));
+}
+
+
+// ---------------------------------------------------------------------------
+// #18702 — a declaring factory PRIVATE to one file
+// ---------------------------------------------------------------------------
+
+/**
+ * The identifier a key line's VALUE opens with AS A CALL, or `null`.
+ *
+ * ⛔ The shared list is the FAST PATH and is consulted first: a line
+ * `SCHEMA_PROPERTY` already recognises answers `null` here, so the resolver
+ * never re-judges a form the vocabulary has a row for and the two registers
+ * cannot disagree about one line.
+ */
+const KEY_VALUE_CALL = new RegExp(`${KEY_HEAD_SOURCE}([A-Za-z_$][\\w$]*)\\(`);
+
+/** @param {string} text @returns {string|null} */
+export function keyValueFactoryName(text) {
+  const s = String(text ?? '');
+  if (COMMENT_LINE.test(s)) return null;
+  if (SCHEMA_PROPERTY.test(s)) return null;
+  const m = KEY_VALUE_CALL.exec(s);
+  return m ? m[1] : null;
+}
+
+/**
+ * The HEAD blob id this diff names for one file, or `null`.
+ *
+ * ⭐ Both input paths carry it, and neither is a ref: the API row's `sha` IS
+ * the blob at the pull request's head, and `git diff` writes the same fact into
+ * its `index <old>..<new>` line. A blob id is content-addressed, so a reading
+ * taken through it can be missing but can never be about the wrong commit —
+ * which is the whole reason this resolver is allowed to exist at all after
+ * #17300.
+ */
+const DIFF_INDEX_BLOBS = /^index [0-9a-f]{7,40}\.\.([0-9a-f]{7,40})/m;
+const ALL_ZEROES = /^0+$/;
+
+/** @param {{ filename?: string, sha?: string, patch?: string|null }} file */
+export function headBlobId(file) {
+  const sha = String(file?.sha ?? '');
+  if (/^[0-9a-f]{40}$/.test(sha) && !ALL_ZEROES.test(sha)) return sha;
+  const m = DIFF_INDEX_BLOBS.exec(String(file?.patch ?? ''));
+  return m && !ALL_ZEROES.test(m[1]) ? m[1] : null;
+}
+
+/** A repo-relative path that cannot climb out of the tree. */
+const CONTAINED_PATH = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[^\0]+$/;
+
+function gitAt(args) {
+  return execFileSync('git', ['-C', ROOT, ...args], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+}
+
+/**
+ * That blob's bytes, or `null`.
+ *
+ * ⛔ The working tree is read ONLY after git proves the file on disk hashes to
+ * the very blob the diff named — that is not "the working tree of a different
+ * commit", it is the same content-addressed fact arriving by a second route.
+ * Anything else answers `null`, and `null` is a stated silence.
+ */
+function readHeadBlob(id, filename) {
+  try {
+    return gitAt(['cat-file', 'blob', id]);
+  } catch {
+    // Not in this object store — an unstaged edit, or another repo's pull.
+  }
+  try {
+    const hashed = gitAt(['hash-object', '--', filename]).trim();
+    if (/^[0-9a-f]{40}$/.test(hashed) && hashed.startsWith(id)) {
+      return readFileSync(join(ROOT, filename), 'utf8');
+    }
+  } catch {
+    // Not a file here, or not a git tree at all.
+  }
+  return null;
+}
+
+/** Content-addressed, so a hit can never be stale. */
+const headBlobCache = new Map();
+
+/** @param {{ filename?: string, sha?: string, patch?: string|null }} file */
+export function headBlobSource(file) {
+  const filename = String(file?.filename ?? '');
+  const id = headBlobId(file);
+  if (id === null || filename === '' || !CONTAINED_PATH.test(filename)) return null;
+  if (headBlobCache.has(id)) return headBlobCache.get(id);
+  const text = readHeadBlob(id, filename);
+  headBlobCache.set(id, text);
+  return text;
+}
+
+// -- reading ONE definition out of that text --------------------------------
+//
+// ⛔ Not a parser, and it must never grow into one. It answers exactly one
+// question — what does this function's body RETURN, as the leading text of that
+// expression — and every shape it cannot walk answers `null`, which the caller
+// reads as "unresolved" and reports by name. There is no truncating failure
+// mode: an unreadable definition is never "a definition that returns nothing".
+
+/** The index past whitespace and comments at `k`. */
+function skipTrivia(s, k) {
+  let i = k;
+  while (i < s.length) {
+    const ch = s[i];
+    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') { i += 1; continue; }
+    if (ch === '/' && s[i + 1] === '/') {
+      const nl = s.indexOf('\n', i);
+      if (nl === -1) return s.length;
+      i = nl + 1;
+      continue;
+    }
+    if (ch === '/' && s[i + 1] === '*') {
+      const end = s.indexOf('*/', i + 2);
+      if (end === -1) return s.length;
+      i = end + 2;
+      continue;
+    }
+    return i;
+  }
+  return i;
+}
+
+/** Where the string opening at `start` closes, across lines for a template. */
+function endOfStringAcross(s, start) {
+  const quote = s[start];
+  for (let k = start + 1; k < s.length; k += 1) {
+    if (s[k] === '\\') { k += 1; continue; }
+    if (quote !== '`' && s[k] === '\n') return -1;
+    if (s[k] === quote) return k;
+  }
+  return -1;
+}
+
+/** `matchingCloser`'s reading, carried ACROSS lines. */
+function closerAcross(s, open) {
+  const stack = [s[open]];
+  for (let k = open + 1; k < s.length; k += 1) {
+    const ch = s[k];
+    const next = s[k + 1];
+    if (ch === '/' && next === '/') {
+      const nl = s.indexOf('\n', k);
+      if (nl === -1) return -1;
+      k = nl;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      const end = s.indexOf('*/', k + 2);
+      if (end === -1) return -1;
+      k = end + 1;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const end = endOfStringAcross(s, k);
+      if (end === -1) return -1;
+      k = end;
+      continue;
+    }
+    if (BRACKET_CLOSERS[ch] !== undefined) { stack.push(ch); continue; }
+    if (ch === ')' || ch === ']' || ch === '}') {
+      if (BRACKET_CLOSERS[stack[stack.length - 1]] !== ch) return -1;
+      stack.pop();
+      if (stack.length === 0) return k;
+    }
+  }
+  return -1;
+}
+
+/** Where a generic parameter list opening at `k` closes, or -1. */
+function closeAngle(s, k) {
+  let depth = 0;
+  for (let i = k; i < s.length; i += 1) {
+    const ch = s[i];
+    if (ch === '<') depth += 1;
+    else if (ch === '>') { depth -= 1; if (depth === 0) return i; }
+    else if (ch === '\n' || ch === ';') return -1;
+  }
+  return -1;
+}
+
+/** The parameter NAMES between `open` and `close`. */
+function parameterNames(s, open, close) {
+  const names = [];
+  const push = (seg) => {
+    const m = /^\s*(?:\.\.\.)?([A-Za-z_$][\w$]*)/.exec(seg);
+    if (m) names.push(m[1]);
+  };
+  let depth = 0;
+  let from = open + 1;
+  for (let k = open + 1; k < close; k += 1) {
+    const ch = s[k];
+    const next = s[k + 1];
+    if (ch === '/' && next === '/') {
+      const nl = s.indexOf('\n', k);
+      if (nl === -1 || nl > close) break;
+      k = nl;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      const end = s.indexOf('*/', k + 2);
+      if (end === -1 || end > close) break;
+      k = end + 1;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const end = endOfStringAcross(s, k);
+      if (end === -1 || end > close) break;
+      k = end;
+      continue;
+    }
+    if (BRACKET_CLOSERS[ch] !== undefined) { depth += 1; continue; }
+    if (ch === ')' || ch === ']' || ch === '}') { depth -= 1; continue; }
+    if (ch === ',' && depth === 0) { push(s.slice(from, k)); from = k + 1; }
+  }
+  push(s.slice(from, close));
+  return names;
+}
+
+/**
+ * Where the body opening at `bodyOpen` RETURNS, at its own top level.
+ *
+ * ⛔ Brace depth, never the first textual `return`. A `return` inside a nested
+ * callback belongs to that callback, and reading it as the factory's own answer
+ * is how a live factory would be classified by a refusal it merely contains —
+ * the quiet direction.
+ */
+function topLevelReturn(s, bodyOpen) {
+  let depth = 1;
+  for (let k = bodyOpen + 1; k < s.length; k += 1) {
+    const ch = s[k];
+    const next = s[k + 1];
+    if (ch === '/' && next === '/') {
+      const nl = s.indexOf('\n', k);
+      if (nl === -1) return -1;
+      k = nl;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      const end = s.indexOf('*/', k + 2);
+      if (end === -1) return -1;
+      k = end + 1;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const end = endOfStringAcross(s, k);
+      if (end === -1) return -1;
+      k = end;
+      continue;
+    }
+    if (ch === '{') { depth += 1; continue; }
+    if (ch === '}') { depth -= 1; if (depth === 0) return -1; continue; }
+    if (depth !== 1) continue;
+    if (
+      ch === 'r'
+      && s.startsWith('return', k)
+      && !/[\w$.]/.test(s[k - 1] ?? ' ')
+      && !/[\w$]/.test(s[k + 6] ?? ' ')
+    ) {
+      return skipTrivia(s, k + 6);
+    }
+  }
+  return -1;
+}
+
+/** The leading text of the expression at `at`, whitespace collapsed. */
+function leadingExpression(s, at) {
+  return s.slice(at, at + 200).replace(/\s+/g, ' ').trim();
+}
+
+/** The `=>` of an arrow whose parameter list has already been walked, or -1. */
+function arrowAfter(s, from) {
+  let depth = 0;
+  for (let k = from; k < s.length - 1; k += 1) {
+    const ch = s[k];
+    const next = s[k + 1];
+    if (ch === '/' && next === '/') {
+      const nl = s.indexOf('\n', k);
+      if (nl === -1) return -1;
+      k = nl;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      const end = s.indexOf('*/', k + 2);
+      if (end === -1) return -1;
+      k = end + 1;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const end = endOfStringAcross(s, k);
+      if (end === -1) return -1;
+      k = end;
+      continue;
+    }
+    if (BRACKET_CLOSERS[ch] !== undefined) { depth += 1; continue; }
+    if (ch === ')' || ch === ']' || ch === '}') { depth -= 1; continue; }
+    if (depth !== 0) continue;
+    if (ch === ';') return -1;
+    if (ch === '=' && next === '>') return k;
+  }
+  return -1;
+}
+
+/**
+ * Every place `name` is DEFINED in `source`, as a top-of-line declaration.
+ *
+ * ⛔ A doc-comment line (` * const x = …`) and a commented-out one (`// const
+ * x = …`) cannot match, because the declaration keyword must follow the line's
+ * indentation and nothing else. Two sites answer AMBIGUOUS, never "the first
+ * one".
+ */
+function definitionSites(source, name) {
+  if (!/^[A-Za-z_$][\w$]*$/.test(name)) return [];
+  const re = new RegExp(
+    `(?:^|\\n)[ \\t]*(?:export[ \\t]+)?(?:default[ \\t]+)?(?:async[ \\t]+)?`
+      + `(?:(function)[ \\t]+${name}\\b|(?:const|let|var)[ \\t]+${name}\\b)`,
+    'g',
+  );
+  const sites = [];
+  let m = re.exec(source);
+  while (m !== null) {
+    sites.push({ index: m.index + m[0].length, isFunction: m[1] !== undefined });
+    m = re.exec(source);
+  }
+  return sites;
+}
+
+/** The body of a `function` form starting at the name's end. */
+function functionReturn(s, from) {
+  let k = skipTrivia(s, from);
+  if (s[k] === '<') {
+    const g = closeAngle(s, k);
+    if (g === -1) return null;
+    k = skipTrivia(s, g + 1);
+  }
+  if (s[k] !== '(') return null;
+  const close = closerAcross(s, k);
+  if (close === -1) return null;
+  const params = parameterNames(s, k, close);
+  const bodyOpen = s.indexOf('{', close + 1);
+  if (bodyOpen === -1) return null;
+  const at = topLevelReturn(s, bodyOpen);
+  if (at === -1) return null;
+  return { expr: leadingExpression(s, at), params };
+}
+
+/** What `name`'s definition RETURNS, or `null` when this reader cannot say. */
+export function factoryReturnExpression(source, name) {
+  const s = String(source ?? '');
+  const sites = definitionSites(s, String(name ?? ''));
+  if (sites.length !== 1) return null;
+  const site = sites[0];
+  if (site.isFunction) return functionReturn(s, site.index);
+
+  // A binding: skip an optional type annotation, then read the initialiser.
+  let i = skipTrivia(s, site.index);
+  if (s[i] === ':') {
+    let depth = 0;
+    for (; i < s.length; i += 1) {
+      const ch = s[i];
+      if (ch === '\n' && depth === 0 && s[skipTrivia(s, i)] === '=') { i = skipTrivia(s, i); break; }
+      if (BRACKET_CLOSERS[ch] !== undefined) { depth += 1; continue; }
+      if (ch === ')' || ch === ']' || ch === '}') { depth -= 1; continue; }
+      if (ch === ';') return null;
+      if (ch === '=' && depth === 0 && s[i + 1] !== '=' && s[i + 1] !== '>' && !'=!<>'.includes(s[i - 1] ?? '')) break;
+    }
+  }
+  if (s[i] !== '=') return null;
+  i = skipTrivia(s, i + 1);
+  if (s.startsWith('async', i) && !/[\w$]/.test(s[i + 5] ?? ' ')) i = skipTrivia(s, i + 5);
+  if (s.startsWith('function', i) && !/[\w$]/.test(s[i + 8] ?? ' ')) return functionReturn(s, i + 8);
+  if (s[i] === '<') {
+    const g = closeAngle(s, i);
+    if (g === -1) return null;
+    i = skipTrivia(s, g + 1);
+  }
+  let params = [];
+  if (s[i] === '(') {
+    const close = closerAcross(s, i);
+    if (close === -1) return null;
+    params = parameterNames(s, i, close);
+    i = close + 1;
+  } else {
+    const m = /^[A-Za-z_$][\w$]*/.exec(s.slice(i, i + 120));
+    if (m === null) return null;
+    params = [m[0]];
+    i += m[0].length;
+  }
+  const arrow = arrowAfter(s, i);
+  if (arrow === -1) return null;
+  const body = skipTrivia(s, arrow + 2);
+  if (s[body] === '{') {
+    const at = topLevelReturn(s, body);
+    if (at === -1) return null;
+    return { expr: leadingExpression(s, at), params };
+  }
+  return { expr: leadingExpression(s, body), params };
+}
+
+/**
+ * The register a returned expression puts the key in — `'writable'`,
+ * `'refusing'`, or `null` for "this reader does not classify that".
+ *
+ * ⛔ Positive evidence only, in both directions. A refusal is `z.never(` or a
+ * `z.custom` whose predicate refuses everything — the SAME primitives
+ * `UNWRITABLE_FORMS` names, read off the definition instead of off a name. A
+ * writable key is a `z.` schema, a `*Schema` binding, a form the shared
+ * vocabulary already declares writable, or the factory's OWN ARGUMENT handed
+ * back (`placeholderFree(schema, …)` returns `schema`). Everything else —
+ * prose, an error map, a number — is `null`, and `null` is reported, never
+ * rounded to either arm.
+ */
+const REFUSING_RETURN = /^z\.never[ \t]*\(|^z\.custom[ \t]*<[ \t]*never[ \t]*>[ \t]*\(|^z\.custom[ \t]*\([ \t]*\([ \t]*\)[ \t]*=>[ \t]*false\b/;
+const WRITABLE_ZOD_RETURN = /^z\.[A-Za-z_$]/;
+const WRITABLE_SCHEMA_BINDING = /^[A-Za-z_$][\w$]*Schema\b/;
+
+/** @returns {'writable'|'refusing'|null} */
+export function classifyFactoryReturn(expr, params = []) {
+  const e = String(expr ?? '').trim();
+  if (e === '') return null;
+  if (REFUSING_RETURN.test(e)) return 'refusing';
+  const call = /^([A-Za-z_$][\w$]*)[ \t]*\(/.exec(e);
+  if (call !== null) {
+    const form = SCHEMA_PROPERTY_FORMS.find((f) => f.pattern === `${call[1]}\\(`);
+    if (form !== undefined) return form.writable ? 'writable' : 'refusing';
+  }
+  if (WRITABLE_ZOD_RETURN.test(e)) return 'writable';
+  if (WRITABLE_SCHEMA_BINDING.test(e)) return 'writable';
+  const head = /^([A-Za-z_$][\w$]*)/.exec(e);
+  if (head !== null && Array.isArray(params) && params.includes(head[1])) return 'writable';
+  return null;
+}
+
+/**
+ * The verdict on ONE factory name against ONE file's text, with the reason.
+ *
+ * @returns {{ verdict: 'writable'|'refusing'|null, reason: string }}
+ */
+export function resolveDeclaringFactory(source, name) {
+  const s = String(source ?? '');
+  if (s === '') {
+    return { verdict: null, reason: 'the head blob for this file is not readable here' };
+  }
+  const sites = definitionSites(s, String(name ?? ''));
+  if (sites.length === 0) {
+    return { verdict: null, reason: 'no definition in this file — an IMPORTED factory is outside this reading' };
+  }
+  if (sites.length > 1) {
+    return { verdict: null, reason: `${sites.length} definitions of that name in this file — ambiguous, never guessed` };
+  }
+  const read = factoryReturnExpression(s, name);
+  if (read === null) {
+    return { verdict: null, reason: "no `return` this reader can read at the body's own top level" };
+  }
+  const verdict = classifyFactoryReturn(read.expr, read.params);
+  if (verdict === null) {
+    return { verdict: null, reason: `its body returns \`${read.expr.slice(0, 48)}\`, which this reader does not classify as a schema` };
+  }
+  return { verdict, reason: `its body returns \`${read.expr.slice(0, 48)}\`` };
+}
+
+/** One file's own declaring forms, built from `KEY_HEAD_SOURCE` like the list. */
+function localFormPattern(names) {
+  if (names.length === 0) return null;
+  return new RegExp(`${KEY_HEAD_SOURCE}(?:${names.map((n) => `${n}\\(`).join('|')})`);
+}
+
+/**
+ * The FILE-LOCAL declaring forms this file's ADDED lines name, resolved.
+ *
+ * ⛔ The ADDED side only, and the asymmetry is the loud direction (the header's
+ * section says why): a removed local-factory key line buys nothing, so nothing
+ * that fires today stops firing. Nothing is read at all unless an added key
+ * line names a form the shared vocabulary has no row for — the overwhelming
+ * majority of diffs never reach the blob.
+ *
+ * @returns {{ recognises: RegExp, refusal: RegExp|null }|null}
+ */
+function localDeclaringForms(file, lines, onContractSource, readSource, unresolved) {
+  if (!onContractSource) return null;
+  const wanted = new Map();
+  for (const r of lines) {
+    if (r.kind !== 'added') continue;
+    const name = keyValueFactoryName(r.text);
+    if (name === null) continue;
+    if (!wanted.has(name)) wanted.set(name, []);
+    wanted.get(name).push(r.line);
+  }
+  if (wanted.size === 0) return null;
+  const source = typeof readSource === 'function' ? readSource(file) : null;
+  const writable = [];
+  const refusing = [];
+  for (const [name, at] of wanted) {
+    const read = resolveDeclaringFactory(source ?? '', name);
+    if (read.verdict === 'writable') writable.push(name);
+    else if (read.verdict === 'refusing') refusing.push(name);
+    else if (Array.isArray(unresolved)) {
+      for (const line of at) {
+        unresolved.push({ file: String(file?.filename ?? ''), line, name, reason: read.reason });
+      }
+    }
+  }
+  const recognises = localFormPattern([...writable, ...refusing]);
+  if (recognises === null) return null;
+  return { recognises, refusal: localFormPattern(refusing) };
 }
 
 /**
@@ -2185,11 +3056,15 @@ const REGISTRATION_ROW =
  * carry), so counting it would let a `z.union([` -> `z.enum([` rewrite pay for a
  * member the same block really did add.
  */
-export function memberTellKind(text, { onContractSource = false, onPublished = false, onRegistry = false } = {}) {
+export function memberTellKind(text, { onContractSource = false, onPublished = false, onRegistry = false, localForms = null } = {}) {
   const s = String(text ?? '');
   if (COMMENT_LINE.test(s)) return null;
   if (onRegistry && REGISTRATION_ROW.test(s)) return 'T4';
   if (onContractSource && SCHEMA_PROPERTY.test(s)) return 'T1';
+  // #18702 — the file's OWN declaring factories, resolved through their own
+  // definitions. Read AFTER the shared vocabulary, never instead of it: the
+  // list is the fast path, and a form with a row never reaches this line.
+  if (onContractSource && localForms !== null && localForms.recognises.test(s)) return 'T1';
   if (onContractSource && (BARE_STRING_ELEMENT.test(s) || BARE_SCHEMA_ARM.test(s))) return 'T2';
   if (onPublished && JSON_STRING_ROW.test(s)) return 'T3';
   return null;
@@ -2241,13 +3116,20 @@ export function changeBlocks(lines) {
 /**
  * Every tell one file's added lines carry.
  *
- * @param {{ filename?: string, status?: string, patch?: string|null }} file
- * @param {{ repo?: string, licensed?: Set<string> }} [opts] — `licensed` is the
- *   whole diff's {@link ledgerRowLicences}; omitted, NOTHING is licensed and
- *   every row tells, because an unread licence is not a granted one.
+ * @param {{ filename?: string, status?: string, patch?: string|null, sha?: string }} file
+ * @param {{ repo?: string, licensed?: Set<string>, readSource?: Function,
+ *   unresolved?: object[] }} [opts] — `licensed` is the whole diff's
+ *   {@link ledgerRowLicences}; omitted, NOTHING is licensed and every row tells,
+ *   because an unread licence is not a granted one. `readSource` is #18702's
+ *   head-blob reader (defaulted, injectable so the self-test stays offline) and
+ *   `unresolved` collects the key lines whose declaring factory could not be
+ *   read — a STATED silence this file reports rather than swallows.
  * @returns {{ tell: string, file: string, line: number, text: string, why: string }[]}
  */
-export function tellsInFile(file, { repo = THIS_REPO, licensed = null } = {}) {
+export function tellsInFile(
+  file,
+  { repo = THIS_REPO, licensed = null, readSource = headBlobSource, unresolved = null } = {},
+) {
   const filename = String(file?.filename ?? '');
   if (filename === '') return [];
   if (file?.status === 'removed') return []; // a deleted file adds nothing.
@@ -2290,6 +3172,12 @@ export function tellsInFile(file, { repo = THIS_REPO, licensed = null } = {}) {
     typeof idx === 'number' && isConcatenationFragment(neighbourOn(side, idx, -1), neighbourOn(side, idx, 1));
   const surfaces = surfaceFlags(filename, repo);
   const { onContractSource } = surfaces;
+  // #18702 — THE ONE CALL that consults the file-local factory resolver. The
+  // ablation reverts exactly this line to `null`, which restores the pre-#18702
+  // reading byte for byte: `addedSurfaces` is then `surfaces` itself.
+  const localForms = localDeclaringForms(file, lines, onContractSource, readSource, unresolved);
+  const addedSurfaces = localForms === null ? surfaces : { ...surfaces, localForms };
+  const localRefusal = localForms === null ? null : localForms.refusal;
   // #17300 — is THIS file the ADR-0087 ledger? A licence clears a row in the
   // ledger table and nowhere else: the same string added to any other file on
   // any other surface still tells, with its own file:line.
@@ -2350,7 +3238,7 @@ export function tellsInFile(file, { repo = THIS_REPO, licensed = null } = {}) {
     // (`reason: 'prose ' +`) is a different reading and keeps its own tells.
     if (BARE_STRING_ELEMENT.test(text) && fragmentOn(newFile, newAt.get(i))) continue;
     const at = { file: filename, line, text: text.trim().slice(0, 160) };
-    const kind = memberTellKind(text, surfaces);
+    const kind = memberTellKind(text, addedSurfaces);
     // #17955 — a `retiredKey()` tombstone DECLARES a key unwritable. It is read
     // BEFORE the budget, and that ordering is the whole repair rather than a
     // detail: a tombstone must neither FIRE nor SPEND.
@@ -2370,7 +3258,7 @@ export function tellsInFile(file, { repo = THIS_REPO, licensed = null } = {}) {
     // genuine member. A tombstone carries its own evidence on its own line and
     // takes nothing from the block, so a genuine key beside it still has the
     // full budget to pay with — and fires when it cannot.
-    if (kind === 'T1' && declaresUnwritableKey(text)) continue;
+    if (kind === 'T1' && declaresUnwritableKey(text, localRefusal)) continue;
     // #16943 — a member or key this block REPLACED is not a net addition.
     //
     // ⛔ A line that DECLARES a closed set is never spent against the budget,
@@ -2439,7 +3327,21 @@ export function tellsInFile(file, { repo = THIS_REPO, licensed = null } = {}) {
     }
     // #16822 — an opener that re-declares a set the same hunk removed adds no
     // member; the members are read below, one line each.
-    const opener = CLOSED_SET_OPENER.test(text) && !rewritesExistingOpener(text, removedByHunk.get(hunk));
+    //
+    // #18640 — … and an opener that carries its members INLINE re-declares one
+    // too, when the same BLOCK removed a line declaring that same binding and
+    // the list did not grow. #16822's reading cannot see this line: an opener
+    // carrying members is not an opener-only line, by its own construction, so
+    // the population it left behind is every closed set DECLARED and re-spelled
+    // on one line — where the #16943 budget cannot reach either, because a
+    // `const` declaration names no key and `memberTellKind` answers `null` for
+    // it. The control set is the same edit spelled one member per line, which
+    // declines today; see `respellsExistingClosedSetBinding` for what bounds it
+    // and for why #17618's keyed subset test is deliberately NOT changed.
+    const opener =
+      CLOSED_SET_OPENER.test(text) &&
+      !rewritesExistingOpener(text, removedByHunk.get(hunk)) &&
+      !respellsExistingClosedSetBinding(text, removedHere);
     if (onContractSource && (opener || kind === 'T2')) {
       rows.push({ tell: 'T2', ...at, why: 'a new member of a closed set (z.enum / union / an `as const` array) — the accept set gains a value' });
       continue;
@@ -2506,46 +3408,53 @@ export function unreadFiles(files, { repo = THIS_REPO } = {}) {
  * files by construction, so the reading that clears a tombstone row is the only
  * one in this file whose evidence a single file cannot hold.
  */
-export function wideningTells(files, { repo = THIS_REPO } = {}) {
+export function wideningTells(files, { repo = THIS_REPO, readSource = headBlobSource, unresolved = null } = {}) {
   const rows = [];
   const licensed = ledgerRowLicences(files, { repo });
-  for (const file of files ?? []) rows.push(...tellsInFile(file, { repo, licensed }));
+  for (const file of files ?? []) rows.push(...tellsInFile(file, { repo, licensed, readSource, unresolved }));
   return rows;
 }
 
 /**
  * The verdict: a declaration plus a diff.
  *
+ * ⚠️ `unresolved` rides beside `rows` and is NEVER one: a key line whose
+ * declaring factory could not be read (#18702) fired nothing and cleared
+ * nothing, so it moves no exit code and is reported under its own heading.
+ *
  * @param {{ declaration: 'yes'|'no'|null|undefined,
- *           files: object[]|null, repo?: string }} input
+ *           files: object[]|null, repo?: string, readSource?: Function }} input
  * @returns {{ state: 'not-applicable'|'unreadable'|'incomplete'|'refused'|'clean',
- *   rows: object[], gaps: string[], text: string|null }}
+ *   rows: object[], gaps: string[], unresolved: object[], text: string|null }}
  */
-export function wideningRefusal({ declaration, files, repo = THIS_REPO } = {}) {
+export function wideningRefusal({ declaration, files, repo = THIS_REPO, readSource = headBlobSource } = {}) {
   // A `yes` is never blocked here, and an unreadable declaration is the
   // sibling's C2 row — issuing a verdict on it from this file would be a second
   // reader of the same limb, which is the drift this family punishes.
   if (declaration !== 'no') {
-    return { state: 'not-applicable', rows: [], gaps: [], text: null };
+    return { state: 'not-applicable', rows: [], gaps: [], unresolved: [], text: null };
   }
   if (!Array.isArray(files)) {
     return {
       state: 'unreadable',
       rows: [],
       gaps: [],
+      unresolved: [],
       text:
         'the changed-file listing could not be read, so this diff is UNJUDGED for widening tells. ' +
         '⛔ An unread diff is not a narrow diff.',
     };
   }
   const gaps = unreadFiles(files, { repo });
-  const rows = wideningTells(files, { repo });
+  const unresolved = [];
+  const rows = wideningTells(files, { repo, readSource, unresolved });
   if (rows.length > 0) {
     const where = rows.map((r) => `${r.file}:${r.line}`).join(', ');
     return {
       state: 'refused',
       rows,
       gaps,
+      unresolved,
       text: `${REFUSAL_SENTENCE} — ${rows.length} tell(s): ${where}`,
     };
   }
@@ -2554,12 +3463,13 @@ export function wideningRefusal({ declaration, files, repo = THIS_REPO } = {}) {
       state: 'incomplete',
       rows,
       gaps,
+      unresolved,
       text:
         `${gaps.length} file(s) on a tell surface arrived with no patch to read (${gaps.join(', ')}), ` +
         'so this diff is UNJUDGED for widening tells rather than clear of them.',
     };
   }
-  return { state: 'clean', rows: [], gaps: [], text: null };
+  return { state: 'clean', rows: [], gaps: [], unresolved, text: null };
 }
 
 /** The exit code one verdict maps to — one place, so no caller re-derives it. */
@@ -2667,6 +3577,33 @@ export function coverageLines(census, { cap = 10 } = {}) {
   return lines;
 }
 
+/**
+ * The key lines whose DECLARING FACTORY this reader could not resolve (#18702).
+ *
+ * ⭐ The whole point of printing them. Before this round a key line declared
+ * through a factory the vocabulary had no row for produced nothing at all — no
+ * tell, no gap, no sentence — and that silence is indistinguishable from a
+ * correct `no`, which is the one failure shape this chain is written against.
+ * These lines still move no exit code: nothing fired on them and nothing
+ * cleared them. What changed is that the reader now NAMES them.
+ *
+ * ⛔ Not a gap and not a tell. A gap (`unreadFiles`) is a file that arrived
+ * with no patch; a tell is a refusal. This is a third state — read, recognised
+ * as a key line SHAPE, and unjudged — and collapsing it into either would make
+ * a count say something nobody measured.
+ */
+export function unresolvedLines(rows, { cap = 10 } = {}) {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+  const lines = [
+    `  ⚠️ ${rows.length} key line(s) name a declaring factory this reader could not resolve — a STATED `
+      + 'silence: no tell fired on them and nothing cleared them, so this verdict is evidence about '
+      + 'neither.',
+  ];
+  for (const r of rows.slice(0, cap)) lines.push(`      ${r.file}:${r.line} — \`${r.name}(\` — ${r.reason}`);
+  if (rows.length > cap) lines.push(`      … and ${rows.length - cap} more`);
+  return lines;
+}
+
 /** The success sentence itself, counts split. */
 export function cleanVerdictLine(census) {
   const judged = census.judged.length;
@@ -2705,6 +3642,7 @@ export function verdictLines({ declaration, files, board }) {
     out.push(cleanVerdictLine(census));
     out.push(boardProvenanceLine(board));
     out.push(...coverageLines(census));
+    out.push(...unresolvedLines(verdict.unresolved));
     out.push(
       '  ⚠️ A tell is not a proof and its absence is not one either — false negatives are the ' +
         'cost the #16349 ruling accepted.',
@@ -2713,6 +3651,7 @@ export function verdictLines({ declaration, files, board }) {
   }
   for (const line of refusalLines(verdict)) err.push(`✗ ${line}`);
   err.push(`check-widening-tells: ${verdict.text}`);
+  err.push(...unresolvedLines(verdict.unresolved));
   err.push(boardProvenanceLine(board));
   return { exit: exitForRefusal(verdict), out, err };
 }
@@ -3779,6 +4718,13 @@ export function selfTest() {
     'z.': { line: '+  cursor: z.string().optional(),', file: OS_SURFACE, repo: THIS_REPO },
     'lazySchema(': { line: '+  retry: lazySchema(() => RetryPolicySchema),', file: OS_SURFACE, repo: THIS_REPO },
     'strictObject(': { line: '+  window: strictObject({ from: z.string() }),', file: OS_SURFACE, repo: THIS_REPO },
+    // ⭐ #18702's filing probe, verbatim — the line that exited 0 in silence at
+    // 6dfa3ea77 and again at 30bac2880, on the file it was written against.
+    'placeholderFree(': {
+      line: "+    snapshotPath: placeholderFree(z.string(), 'persistence.snapshotPath').optional(),",
+      file: 'packages/spec/src/data/driver/memory.zod.ts',
+      repo: THIS_REPO,
+    },
     '*Schema': { line: '+  retry: RetryPolicySchema.optional(),', file: OS_SURFACE, repo: THIS_REPO },
     'stripImportedDefaults(': {
       line: "+  id: stripImportedDefaults(SpecNavigationAreaSchema).shape.id.describe('Unique identifier'),",
@@ -3875,7 +4821,7 @@ export function selfTest() {
   // this a strengthening and not a change to the `no` criterion.
   const LEGACY_SCHEMA_PROPERTY =
     /^[ \t]*(?:'[^']+'|"[^"]+"|\[[^\]]+\]|[A-Za-z_$][\w$]*)[ \t]*\??[ \t]*:[ \t]*(?:z\.|lazySchema\(|strictObject\(|retiredKey\(|[A-Za-z_$][\w$]*Schema\b)/;
-  const ADDED_FORMS = ['stripImportedDefaults(', 'retirementTombstone(', 'handlerKeyRefusal(', 'aliasKeyRefusal('];
+  const ADDED_FORMS = ['stripImportedDefaults(', 'retirementTombstone(', 'handlerKeyRefusal(', 'aliasKeyRefusal(', 'placeholderFree('];
   const legacyProbes = [
     ...Object.entries(FORM_FIXTURES).map(([form, fx]) => ({ text: fx.line.slice(1), added: ADDED_FORMS.includes(form) })),
     { text: '  enabled: true,', added: false },
@@ -3886,9 +4832,386 @@ export function selfTest() {
   const grew = legacyProbes.filter((p) => !LEGACY_SCHEMA_PROPERTY.test(p.text) && SCHEMA_PROPERTY.test(p.text));
   const lost = legacyProbes.filter((p) => LEGACY_SCHEMA_PROPERTY.test(p.text) && !SCHEMA_PROPERTY.test(p.text));
   t('⭐ ⛔ NOTHING the legacy literal recognised is unrecognised now — a vocabulary that SHRANK is the failure this list is against', lost.length === 0);
-  t('…and every cell that moved is one of the four forms this round added, never a line that merely looks new', grew.length === ADDED_FORMS.length && grew.every((p) => p.added));
+  t('…and every cell that moved is one of the forms these rounds ADDED, never a line that merely looks new', grew.length === ADDED_FORMS.length && grew.every((p) => p.added));
   t('⛔ …a comment is still not a key line, whichever vocabulary reads it', memberTellKind('  // cursor: z.string(),', { onContractSource: true }) === null);
   t('⛔ …and #17618’s parameter decline is untouched by the wider vocabulary', tellsInFile({ filename: OS_SURFACE, status: 'modified', patch: '@@ -30,0 +30,3 @@\n+export const refine = (\n+  ctx: z.RefinementCtx,\n+) => ctx;' }).length === 0);
+
+  // -- #18640: an inline closed set RE-SPELLED at the same binding -----------
+  //
+  // The live pair is PR #18638 (card #15811): `const ActionConditionInputSchema
+  // = z.union([z.boolean(), ExpressionInputSchema]);` gains a zod options object
+  // — `, { error: … }` — and the union carries the SAME members before and
+  // after. `--pair 18638` exited 4 on row C5 against a declaration two at-tier
+  // contract reviews had read as correct.
+  //
+  // ⭐ Read the CONTROL SET first, because the control set IS the finding: the
+  // identical edit spelled one member per line declines today, and so does the
+  // identical edit at a KEYED property. Three spellings of one semantic change,
+  // two opposite verdicts — the accidental variable, in one pair of assertions.
+  //
+  // ⭐ And read the FIRING half before the decline, the way #17300's, #17955's
+  // and #18234's batteries are ordered: a reading that can only suppress is
+  // untestable in the direction that matters, so the decline is bracketed on
+  // every side — a member ADDED beside the options object, a DIFFERENT binding,
+  // a brand-new declaration with nothing removed, an enum widened in place, and
+  // a genuine new key riding along that must still report.
+  battery('#18640 — an inline closed set RE-SPELLED at the same binding is not a set that gained a value');
+  const INLINE_SURFACE = 'packages/spec/src/ui/action.zod.ts';
+  const inlineDiff = (start, ...lines) => ({
+    filename: INLINE_SURFACE,
+    status: 'modified',
+    patch: [`@@ -${start},3 +${start},${lines.length + 1} @@ context`, ' const before = 1;', ...lines, ' const after = 2;'].join('\n'),
+  });
+  // The card's own specimen: the members are byte-identical, only the options
+  // object is new. ⛔ No rename in this fixture — the rename is a SEPARATE
+  // question and the case below pins that it is still refused.
+  const OPTIONS_APPENDED = inlineDiff(
+    830,
+    '-const ActionConditionInputSchema = z.union([z.boolean(), ExpressionInputSchema]);',
+    '+const ActionConditionInputSchema = z.union([z.boolean(), ExpressionInputSchema], {',
+    '+  error: (issue) => evaluatedExpressionUnionRefusal(issue.input),',
+    '+});',
+  );
+  // The same edit, one member per line — what the gate has done since #16943.
+  const OPTIONS_APPENDED_MULTILINE = inlineDiff(
+    830,
+    '-const ActionConditionInputSchema = z.union([',
+    '-  z.boolean(),',
+    '-  ExpressionInputSchema,',
+    '-]);',
+    '+const ActionConditionInputSchema = z.union([',
+    '+  z.boolean(),',
+    '+  ExpressionInputSchema,',
+    '+], {',
+    '+  error: (issue) => evaluatedExpressionUnionRefusal(issue.input),',
+    '+});',
+  );
+  // ⭐ THE COUNTERFACTUAL the repair owes: a real arm added ALONGSIDE the
+  // options object. The list grew, so the surplus reports — this is the whole
+  // sensitivity guarantee, and a fix that cannot demonstrate it is not a fix.
+  const ARM_ADDED_BESIDE_OPTIONS = inlineDiff(
+    830,
+    '-const ActionConditionInputSchema = z.union([z.boolean(), ExpressionInputSchema]);',
+    '+const ActionConditionInputSchema = z.union([z.boolean(), ExpressionInputSchema, LegacyStringSchema], {',
+    '+  error: (issue) => evaluatedExpressionUnionRefusal(issue.input),',
+    '+});',
+  );
+  const DIFFERENT_BINDING = inlineDiff(
+    830,
+    '-const ActionConditionInputSchema = z.union([z.boolean(), ExpressionInputSchema]);',
+    '+const OtherConditionInputSchema = z.union([z.boolean(), ExpressionInputSchema], {',
+    '+  error: (issue) => evaluatedExpressionUnionRefusal(issue.input),',
+    '+});',
+  );
+  const BRAND_NEW_DECLARATION = inlineDiff(830, '+const ActionConditionInputSchema = z.union([z.boolean(), ExpressionInputSchema]);');
+  const ENUM_WIDENED_INLINE = inlineDiff(
+    830,
+    "-const ActionModeSchema = z.enum(['eager', 'lazy']);",
+    "+const ActionModeSchema = z.enum(['eager', 'lazy', 'scheduled']);",
+  );
+  const ENUM_NARROWED_INLINE = inlineDiff(
+    830,
+    "-const ActionModeSchema = z.enum(['eager', 'lazy', 'scheduled']);",
+    "+const ActionModeSchema = z.enum(['eager', 'lazy']);",
+  );
+  const RESPELL_PLUS_NEW_KEY = inlineDiff(
+    830,
+    '-const ActionConditionInputSchema = z.union([z.boolean(), ExpressionInputSchema]);',
+    '+const ActionConditionInputSchema = z.union([z.boolean(), ExpressionInputSchema], {',
+    '+  error: (issue) => evaluatedExpressionUnionRefusal(issue.input),',
+    '+});',
+    '+  brandNewKey: z.string(),',
+  );
+  t('⛔ THE CONTROL SET — the same edit spelled one member per line declines, and has since #16943', tells(OPTIONS_APPENDED_MULTILINE).length === 0);
+  t("⛔ …and the same edit at a KEYED property declines too (#17848's battery pins that half)", tells({ filename: INLINE_SURFACE, status: 'modified', patch: ['@@ -1591,3 +1591,5 @@ export const RecordAlertProps = strictObject({', '   title: I18nLabelSchema.optional(),', "-  visible: z.union([z.boolean(), ExpressionInputSchema]).optional().describe('x'),", '+  visible: z.union([z.boolean(), ExpressionInputSchema], {', '+    error: (issue) => evaluatedExpressionUnionRefusal(issue.input),', "+  }).optional().describe('x'),", '   icon: z.string(),'].join('\n') }).length === 0);
+  t("⭐ THE FINDING: the card's specimen — the SAME members, a zod options object appended — is not a set that gained a value", tells(OPTIONS_APPENDED).length === 0);
+  t('…and the pair reads CLEAN end to end, which is the exit code the card reported as unreachable', wideningRefusal({ declaration: 'no', files: [OPTIONS_APPENDED] }).state === 'clean');
+  t('⭐ THE COUNTERFACTUAL — a real ARM added beside the options object still FIRES: the list grew and the surplus reports', tells(ARM_ADDED_BESIDE_OPTIONS).length === 1 && tells(ARM_ADDED_BESIDE_OPTIONS)[0]?.tell === 'T2');
+  t('…at the line that declares the set, the line the author can open', at(ARM_ADDED_BESIDE_OPTIONS)[0] === `${INLINE_SURFACE}:831`);
+  t('⭐ …and a genuine new KEY riding along still fires — this reading takes nothing out of the #16943 budget', tells(RESPELL_PLUS_NEW_KEY).length === 1 && tells(RESPELL_PLUS_NEW_KEY)[0]?.tell === 'T1');
+  t('⛔ DARK CONTROL — a BRAND-NEW declaration has no removal to pay for it and fires', tells(BRAND_NEW_DECLARATION).length === 1 && tells(BRAND_NEW_DECLARATION)[0]?.tell === 'T2');
+  t('⛔ CONTROL — a DIFFERENT binding is not the same set: the removal pays nothing and the row fires', tells(DIFFERENT_BINDING).length === 1 && tells(DIFFERENT_BINDING)[0]?.tell === 'T2');
+  t('⛔ CONTROL — an inline `z.enum` WIDENED in place still fires: this is the row that can report it and nothing else can', tells(ENUM_WIDENED_INLINE).length === 1 && tells(ENUM_WIDENED_INLINE)[0]?.tell === 'T2');
+  t('⭐ …and the same enum NARROWED in place declines, which is the direction clause ② exists to let through', tells(ENUM_NARROWED_INLINE).length === 0);
+  t('⛔ the KEYED subset test is UNTOUCHED — a keyed union whose member was RENAMED still fires, because that ruling is not this round\'s', tells({ filename: INLINE_SURFACE, status: 'modified', patch: ['@@ -1591,3 +1591,3 @@ export const RecordAlertProps = strictObject({', '   title: I18nLabelSchema.optional(),', "-  visible: z.union([z.boolean(), ExpressionInputSchema]).optional().describe('x'),", "+  visible: z.union([z.boolean(), EvaluatedExpressionInputSchema]).optional().describe('x'),", '   icon: z.string(),'].join('\n') }).length === 1);
+  t('⛔ …and a KEYED line is refused by the binding reading itself, so the two populations cannot merge by accident', closedSetBindingMembers("  visible: z.union([z.boolean(), ExpressionInputSchema], {") === null);
+  t('⛔ an ANONYMOUS inline set declares no binding, so two of them in one block are not evidence they are the same set', closedSetBindingMembers('  z.union([z.boolean(), ExpressionInputSchema]),') === null);
+  t('⛔ a list that does not CLOSE on the line is unreadable, and an unreadable list keeps the tell', closedSetBindingMembers('const ActionConditionInputSchema = z.union([z.boolean(),') === null);
+  t('⭐ a readable one carries the binding AND the members, both off the one line', JSON.stringify(closedSetBindingMembers('const C = z.union([z.boolean(), ExpressionInputSchema], {')) === JSON.stringify({ binding: 'const C =', members: ['z.boolean()', 'ExpressionInputSchema'] }));
+  t('⛔ a comment is not a declaration, whichever bracket it carries', closedSetBindingMembers("// const C = z.union([z.boolean(), ExpressionInputSchema]);") === null);
+  t('⛔ the arithmetic is a MULTISET: a member repeated where the removed list carried it once is a member GAINED', respellsExistingClosedSetBinding("const C = z.enum(['a', 'a']);", ["const C = z.enum(['a']);"]) === false);
+  t('⭐ …and a one-for-one swap at the same binding is a replacement, not a net addition — #16943’s own ruling, applied inline', respellsExistingClosedSetBinding("const C = z.enum(['a', 'b']);", ["const C = z.enum(['a', 'c']);"]) === true);
+  t('⛔ …while a list that GREW is not, however much of it is unchanged', respellsExistingClosedSetBinding("const C = z.enum(['a', 'b', 'c']);", ["const C = z.enum(['a', 'b']);"]) === false);
+  t('⛔ a removal in a DIFFERENT change block buys nothing — the block is the unit, as it is for #16943 and #17618', respellsExistingClosedSetBinding("const C = z.enum(['a']);", []) === false);
+  t('⛔ CONTROL — the identical specimen with `Clause-②: yes` is not refused either way: this file never blocks the honest declaration', wideningRefusal({ declaration: 'yes', files: [ARM_ADDED_BESIDE_OPTIONS] }).state !== 'refused');
+
+
+  // -- #18702 ----------------------------------------------------------------
+  //
+  // The counterfactual pin, in #18560's shape and for the same reason: the unit
+  // is the FACTORY, and a frozen fixture roster is asserted EQUAL to the set of
+  // factories the filing card names, so a factory dropped from the roster reds
+  // here rather than going quiet.
+  //
+  // ⭐ Each fixture carries that factory's REAL definition from the tip —
+  // signature verbatim, return expression verbatim at its opener, prose
+  // truncated — and its `returns` field is asserted to be text the definition
+  // actually contains, so a fixture cannot drift into describing a definition
+  // it does not carry. ⛔ The fixtures are NOT read off the tree: a generated
+  // fixture makes every future factory pass by construction, which is the shape
+  // this card exists because of.
+  battery('#18702 — a declaring factory PRIVATE to one file, resolved through its own DEFINITION');
+  const DRIVER_COMMON = 'packages/spec/src/data/driver/common.zod.ts';
+  const BLUEPRINT = 'packages/spec/src/ai/solution-blueprint.zod.ts';
+  const COMPONENT = 'packages/spec/src/ui/component.zod.ts';
+  const DATASOURCE = 'packages/spec/src/data/datasource.zod.ts';
+  const FILTER_RULE_ARRAY = 'packages/spec/src/ui/filter-rule-array.ts';
+  const MEMORY_DRIVER = 'packages/spec/src/data/driver/memory.zod.ts';
+  // The eight the card names, and nothing else — the roster this battery is
+  // held equal to.
+  const CARD_FACTORIES = Object.freeze([
+    'placeholderFree', 'strictIdent', 'strictIdentOrNull', 'emptyProps',
+    'objectBlockHistory', 'belongsInConfig', 'INLINE_CREDENTIAL_REFUSED', 'ruleArrayFilterError',
+  ]);
+  const FACTORY_FIXTURES = Object.freeze({
+    placeholderFree: {
+      where: DRIVER_COMMON,
+      measured: '23 key lines at objectstack 30bac2880, 0 of them file-local',
+      arm: 'writable',
+      returns: 'return schema.superRefine((value, ctx) => {',
+      definition:
+        'export function placeholderFree<S extends z.ZodString>(schema: S, key: string) {\n'
+        + '  return schema.superRefine((value, ctx) => {\n'
+        + "    if (typeof value !== 'string') return;\n"
+        + '  });\n}\n',
+      line: "+    snapshotPath: placeholderFree(z.string(), 'persistence.snapshotPath').optional(),",
+    },
+    strictIdent: {
+      where: BLUEPRINT,
+      measured: '12 key lines at objectstack 30bac2880, all 12 file-local',
+      arm: 'writable',
+      returns: 'z.string().regex(SNAKE_CASE).describe(description)',
+      definition: 'const strictIdent = (description: string) => z.string().regex(SNAKE_CASE).describe(description);\n',
+      line: "+  snapshotObject: strictIdent('Object whose snapshot is taken (snake_case)'),",
+    },
+    strictIdentOrNull: {
+      where: BLUEPRINT,
+      measured: '8 key lines at objectstack 30bac2880, all 8 file-local',
+      arm: 'writable',
+      returns: 'z.string().regex(SNAKE_CASE).nullable().describe(description)',
+      definition:
+        'const strictIdentOrNull = (description: string) =>\n'
+        + '  z.string().regex(SNAKE_CASE).nullable().describe(description);\n',
+      line: "+  snapshotField: strictIdentOrNull('Numeric field to snapshot, or null'),",
+    },
+    emptyProps: {
+      where: COMPONENT,
+      measured: '9 key lines at objectstack 30bac2880, all 9 file-local',
+      arm: 'writable',
+      returns: 'strictObject(',
+      definition:
+        'const emptyProps = (type: string) =>\n'
+        + '  strictObject(\n'
+        + '    {\n'
+        + '      guidanceSets: COMPONENT_LEVEL_GUIDANCE,\n'
+        + '    },\n'
+        + '    {},\n'
+        + '  );\n',
+      line: "+  'nav:launcher': emptyProps('nav:launcher'),",
+    },
+    objectBlockHistory: {
+      where: COMPONENT,
+      measured: '9 key lines at objectstack 30bac2880, all 9 file-local',
+      arm: null,
+      returns: '`Until this type was added to ComponentPropsMap',
+      definition:
+        'const objectBlockHistory = (type: string) =>\n'
+        + '  `Until this type was added to ComponentPropsMap, it had no entry there at all, so `\n'
+        + "  + 'the authoring gate skipped it.';\n",
+      line: "+  history: objectBlockHistory('object-grid'),",
+    },
+    belongsInConfig: {
+      where: DATASOURCE,
+      measured: '8 key lines at objectstack 30bac2880, all 8 file-local',
+      arm: null,
+      returns: '`is a driver connection detail',
+      definition:
+        'const belongsInConfig = (key: string, canonical: string = key) =>\n'
+        + '  `is a driver connection detail — it belongs inside config, not at the top level.`;\n',
+      line: "+      host: belongsInConfig('host'),",
+    },
+    INLINE_CREDENTIAL_REFUSED: {
+      where: DRIVER_COMMON,
+      measured: '10 key lines at objectstack 30bac2880, 0 of them file-local',
+      arm: null,
+      returns: '`is a credential and is not accepted inline',
+      definition:
+        'export const INLINE_CREDENTIAL_REFUSED = (key: string): string =>\n'
+        + '  `is a credential and is not accepted inline in driver config: the `\n'
+        + "  + 'datasource is persisted whole into sys_metadata.';\n",
+      line: "+      passwd: INLINE_CREDENTIAL_REFUSED('passwd'),",
+    },
+    ruleArrayFilterError: {
+      where: FILTER_RULE_ARRAY,
+      measured: '11 key lines at objectstack 30bac2880, 0 of them file-local',
+      arm: null,
+      returns: 'return (issue) => {',
+      definition:
+        'export function ruleArrayFilterError(options: RuleArrayFilterErrorOptions): z.core.$ZodErrorMap {\n'
+        + '  const { surface, migration } = options;\n\n'
+        + '  return (issue) => {\n'
+        + "    if (issue.code !== 'invalid_type') return undefined;\n"
+        + '  };\n}\n',
+      line: '+    error: ruleArrayFilterError({',
+    },
+  });
+  const rosterMissing = CARD_FACTORIES.filter((n) => FACTORY_FIXTURES[n] === undefined);
+  const rosterOrphan = Object.keys(FACTORY_FIXTURES).filter((n) => !CARD_FACTORIES.includes(n));
+  t(
+    `⭐ every factory the card names has a fixture — a new one with no fixture reds HERE${rosterMissing.length ? ` (missing: ${rosterMissing.join(', ')})` : ''}`,
+    rosterMissing.length === 0,
+  );
+  t(
+    `⭐ …and every fixture names a factory still on that roster — one silently dropped reds HERE${rosterOrphan.length ? ` (orphaned: ${rosterOrphan.join(', ')})` : ''}`,
+    rosterOrphan.length === 0,
+  );
+  t(
+    '⛔ …and every fixture QUOTES a return its own definition really carries — a fixture describing a definition it does not hold pins nothing',
+    Object.values(FACTORY_FIXTURES).every((fx) => fx.definition.includes(fx.returns.replace(/^return /, ''))),
+  );
+  t('…each carrying its measurement WITH the tree it was taken against — a count with no tree is not a reading', Object.values(FACTORY_FIXTURES).every((fx) => /\bobjectstack [0-9a-f]{7,}/.test(fx.measured)));
+
+  const localRun = (where, line, source, opts = {}) => {
+    const unresolved = [];
+    const file = { filename: where, status: 'modified', patch: patchOf(30, line) };
+    const rows = tellsInFile(file, {
+      repo: opts.repo ?? THIS_REPO,
+      readSource: opts.blind === true ? () => null : () => source,
+      unresolved,
+    });
+    return { rows, unresolved, file };
+  };
+
+  // RESOLUTION is the first half, asserted for every fixture against its own
+  // arm — a writable factory, and one whose body mints prose or an error map
+  // rather than a schema. ⛔ `null` is a THIRD state and never rounded to
+  // either: it is what a name-shaped heuristic would have guessed at.
+  for (const name of CARD_FACTORIES) {
+    const fx = FACTORY_FIXTURES[name];
+    const read = resolveDeclaringFactory(fx.definition, name);
+    t(
+      fx.arm === 'writable'
+        ? `⭐ \`${name}(\` returns \`${fx.returns}\` ⇒ a WRITABLE key`
+        : `⭐ \`${name}(\` returns \`${fx.returns}\` ⇒ NOT a schema this reader classifies — a named silence, never a guess`,
+      read.verdict === fx.arm,
+      `verdict ${JSON.stringify(read.verdict)} — ${read.reason}`,
+    );
+  }
+  // The VERDICT is the second half, each fixture against its own arm.
+  for (const name of CARD_FACTORIES) {
+    const fx = FACTORY_FIXTURES[name];
+    const { rows, unresolved } = localRun(fx.where, fx.line, fx.definition);
+    if (fx.arm === 'writable') {
+      t(
+        `⭐ \`${name}(\` declares a WRITABLE key, so a \`Clause-②: no\` diff carrying it FIRES — with its own file:line`,
+        rows.length === 1 && rows[0]?.tell === 'T1' && rows[0]?.line === 30 && unresolved.length === 0,
+      );
+    } else {
+      t(
+        `⭐ \`${name}(\` is unclassifiable, so nothing fires — and the line is REPORTED by name rather than swallowed`,
+        rows.length === 0 && unresolved.length === 1 && unresolved[0]?.name === name && unresolved[0]?.line === 30,
+      );
+    }
+  }
+
+  // -- the REFUSING arm, read off a definition rather than off a name --------
+  const REFUSAL_DEFINITION =
+    'export function refusedInlineCredentialKey(key: string, formTitle: string) {\n'
+    + '  return z.never({ error: () => INLINE_CREDENTIAL_REFUSED(key) }).optional()\n'
+    + "    .describe('Set through the connection form secret field');\n}\n";
+  const REFUSAL_LINE = "+  password: refusedInlineCredentialKey('password', 'Password'),";
+  t('⭐ a file-local factory whose body returns `z.never(…)` declares the key UNWRITABLE — the same primitive `retiredKey(` carries, read off the DEFINITION', resolveDeclaringFactory(REFUSAL_DEFINITION, 'refusedInlineCredentialKey').verdict === 'refusing');
+  t('…so it is RECOGNISED and DECLINES — a stated silence, and NOT an unresolved line either', localRun(DRIVER_COMMON, REFUSAL_LINE, REFUSAL_DEFINITION).rows.length === 0 && localRun(DRIVER_COMMON, REFUSAL_LINE, REFUSAL_DEFINITION).unresolved.length === 0);
+  t('⛔ …and a live arm CHAINED onto it leaves the key writable, so it FIRES — the decline is bound to the line\'s own evidence, never to the factory', localRun(DRIVER_COMMON, `${REFUSAL_LINE.replace(/,$/, '')}.or(z.string()),`, REFUSAL_DEFINITION).rows[0]?.tell === 'T1');
+
+  // -- THE COUNTERFACTUAL ----------------------------------------------------
+  //
+  // ⭐ A key added through a factory the shared list has NO row for, declared
+  // in the file that uses it. It is silent before and fires after, and the
+  // "before" is taken by disabling the RESOLVER — ⛔ never by editing the
+  // fixture, which would prove nothing about the reading.
+  //
+  // ⚠️ It is `strictIdent(` and not the card's own probe line, and the reason is
+  // the finding rather than a fixture preference: `placeholderFree` is EXPORTED
+  // and imported at all 23 of its key positions, so it is a
+  // `SCHEMA_PROPERTY_FORMS` row (above, with its own counterfactual fixture) and
+  // no reading of ONE file could ever have reached it. A counterfactual anchored
+  // on it would pass through the fast path and pin nothing about this resolver.
+  const PROBE = FACTORY_FIXTURES.strictIdent;
+  t('⭐ THE FINDING: a new key added through a file-local declaring factory FIRES — the row that was silent at 30bac2880', localRun(PROBE.where, PROBE.line, PROBE.definition).rows[0]?.tell === 'T1');
+  t('…at the line the author can open', localRun(PROBE.where, PROBE.line, PROBE.definition).rows[0]?.line === 30);
+  t('⭐ CONTROL — the SAME fixture with the resolver blind is silent, which is the state this card measured', localRun(PROBE.where, PROBE.line, PROBE.definition, { blind: true }).rows.length === 0);
+  t('…and the whole verdict is a REFUSAL, not a clean reading', wideningRefusal({ declaration: 'no', files: [localRun(PROBE.where, PROBE.line, PROBE.definition).file], readSource: () => PROBE.definition }).state === 'refused');
+  t('⛔ CONTROL — the identical diff with `Clause-②: yes` is not refused: this file never blocks the honest declaration', wideningRefusal({ declaration: 'yes', files: [localRun(PROBE.where, PROBE.line, PROBE.definition).file], readSource: () => PROBE.definition }).state !== 'refused');
+  t('⛔ CONTROL — the same widening judged on the objectui board is not judged at all, so the board resolution still decides it', wideningRefusal({ declaration: 'no', files: [localRun(PROBE.where, PROBE.line, PROBE.definition).file], repo: UI_BOARD, readSource: () => PROBE.definition }).state !== 'refused');
+
+  // -- BOUNDARY ONE: an IMPORTED factory ------------------------------------
+  //
+  // ⭐ `refusedInlineCredentialKey(` is a real one: declared in `common.zod.ts`,
+  // imported at all four of its key positions on the driver files.
+  const MONGO_DRIVER = 'packages/spec/src/data/driver/mongo.zod.ts';
+  const importedRun = localRun(MONGO_DRIVER, REFUSAL_LINE, "import { refusedInlineCredentialKey } from './common.zod';\n");
+  t('⛔ BOUNDARY ONE — a factory defined in ANOTHER file stays unrecognised: imports are not chased', importedRun.rows.length === 0);
+  t('⭐ …but the silence is STATED — the line is reported with its file:line, the factory and the reason', importedRun.unresolved.length === 1 && importedRun.unresolved[0]?.name === 'refusedInlineCredentialKey' && importedRun.unresolved[0]?.reason.includes('IMPORTED'));
+  t('…and the reader PRINTS it, so exit 0 is no longer evidence about that line', unresolvedLines(importedRun.unresolved).some((l) => l.includes(`${MONGO_DRIVER}:30`)));
+  // ⭐ …and the card's OWN probe line is no longer one of these at all. It is a
+  // `SCHEMA_PROPERTY_FORMS` row now, so it fires through the FAST PATH — with
+  // the resolver blind, which is what proves the row and not the resolver
+  // carries it.
+  t('⭐ the filing probe — `placeholderFree(` on `memory.zod.ts` — FIRES through the shared list, resolver blind: an EXPORTED helper was never the file-local class', localRun(MEMORY_DRIVER, FACTORY_FIXTURES.placeholderFree.line, '', { blind: true }).rows[0]?.tell === 'T1');
+  t('⛔ …while an empty list prints NOTHING — a heading with no rows would read as a finding', unresolvedLines([]).length === 0 && unresolvedLines(null).length === 0);
+
+  // -- BOUNDARY TWO: a body this reader cannot read -------------------------
+  t('⛔ BOUNDARY TWO — two definitions of one name in a file are AMBIGUOUS, never "the first one"', resolveDeclaringFactory('const dup = (a: string) => z.string();\nconst dup = (a: string) => z.never();\n', 'dup').verdict === null);
+  t('⛔ …a body with no `return` this reader can find stays unresolved', resolveDeclaringFactory('function opaque(a) {\n  doSomething(a);\n}\n', 'opaque').verdict === null);
+  t('⭐ …and a `return` belonging to a NESTED callback is not read as the factory\'s own — the quiet direction, refused by brace depth', resolveDeclaringFactory('function live(schema) {\n  const g = () => {\n    return z.never();\n  };\n  return schema;\n}\n', 'live').verdict === 'writable');
+  t('⛔ …a factory named in a COMMENT is no definition — the declaration must follow the line\'s indentation and nothing else', resolveDeclaringFactory('// const ghost = (a: string) => z.string();\n * const ghost = (a: string) => z.string();\n', 'ghost').verdict === null);
+
+  // -- the head BLOB, which is what makes this reading legal after #17300 ----
+  t('the API row carries the head blob as `sha`', headBlobId({ filename: 'x.ts', sha: 'a'.repeat(40) }) === 'a'.repeat(40));
+  t('…and the local path carries the same fact in its `index <old>..<new>` line', headBlobId({ filename: 'x.ts', patch: 'index eb82214af9..34232a3ac5 100644\n@@ -1,0 +1,1 @@\n+x' }) === '34232a3ac5');
+  t('⛔ …an all-zero id is no blob — a deleted side names nothing to read', headBlobId({ filename: 'x.ts', patch: 'index eb82214af9..0000000 100644\n@@ -1,1 +1,0 @@\n-x' }) === null);
+  t('⭐ ⛔ …and a patch that names NEITHER answers null, which is why every other fixture in this file never touches an object store', headBlobId({ filename: 'x.ts', patch: patchOf(30, '+  a: z.string(),') }) === null);
+  t('⛔ …a path that climbs out of the tree is never read, whatever id it carries', headBlobSource({ filename: '../elsewhere/x.ts', sha: 'a'.repeat(40) }) === null);
+
+  // -- the direction: the resolver only ever ADDS ----------------------------
+  t('⭐ the shared vocabulary is the FAST PATH — a line `SCHEMA_PROPERTY` already reads is never re-judged here', keyValueFactoryName('  window: strictObject({ from: z.string() }),') === null && keyValueFactoryName("  legacy: retiredKey('gone'),") === null);
+  t('…and a line it does not read hands over its identifier', keyValueFactoryName("  snapshotObject: strictIdent('x'),") === 'strictIdent');
+  t('⛔ a line that fires WITHOUT the resolver still fires with it — the `no` criterion is untouched', localRun(BLUEPRINT, '+  cursor: z.string().optional(),', FACTORY_FIXTURES.strictIdent.definition).rows[0]?.tell === 'T1');
+  t('⭐ ⛔ the resolver is read on the ADDED side ONLY: a REMOVED local-factory key buys nothing, so a `z.` key added beside it STILL fires', tellsInFile({ filename: BLUEPRINT, status: 'modified', patch: "@@ -30,1 +30,1 @@\n-  gone: strictIdent('x'),\n+  cursor: z.string().optional()," }, { readSource: () => FACTORY_FIXTURES.strictIdent.definition }).length === 1);
+  t('⚠️ …and the PRICE of that asymmetry, pinned rather than discovered: a block REPLACING one local-factory key with another fires on the added one', tellsInFile({ filename: BLUEPRINT, status: 'modified', patch: "@@ -30,1 +30,1 @@\n-  gone: strictIdent('x'),\n+  fresh: strictIdent('y')," }, { readSource: () => FACTORY_FIXTURES.strictIdent.definition }).length === 1);
+
+
+  // -- ⭐ the measurement that RETIRES the name-shaped heuristic outright ----
+  //
+  // #18560's header refused `*Refusal(` / `*Arm(` on principle. This is the
+  // measurement, on the sibling board: TWO factories with the same `*Arm(`
+  // shape, file-local to ONE objectui file, land in OPPOSITE registers. A
+  // name-shaped reading is wrong about one of them whichever way it guesses —
+  // and which one is decided by nothing a name carries.
+  const UI_ARMS =
+    'const chatbotRequestBodyArm = () =>\n'
+    + "  z.record(z.string(), z.unknown()).optional().describe('Additional body parameters');\n"
+    + 'const chatbotOnClearArm = () =>\n'
+    + "  handlerKeyRefusal('onClear', 'runtime-slot', 'Called after the conversation is cleared');\n";
+  t('⭐ `chatbotRequestBodyArm(` returns `z.record(…)` ⇒ a WRITABLE key (objectui 15f01223d, 2 key lines, file-local)', resolveDeclaringFactory(UI_ARMS, 'chatbotRequestBodyArm').verdict === 'writable');
+  t('⭐ …while `chatbotOnClearArm(` returns `handlerKeyRefusal(…)` ⇒ REFUSING — two `*Arm(` factories in ONE file, opposite registers', resolveDeclaringFactory(UI_ARMS, 'chatbotOnClearArm').verdict === 'refusing');
+  t('…so a factory returning ANOTHER declared form inherits THAT form\'s register, never the one its own name suggests', resolveDeclaringFactory("const retiredDeclarativeKanbanKey = (key: string) =>\n  retirementTombstone('this key is RETIRED');\n", 'retiredDeclarativeKanbanKey').verdict === 'refusing');
+
+  // -- the readings this round must NOT disturb ------------------------------
+  t('⛔ #17618 — a typed PARAMETER is still not a key, and the resolver never sees one: its value opens no CALL', keyValueFactoryName('  ctx: z.RefinementCtx,') === null && tellsInFile({ filename: BLUEPRINT, status: 'modified', patch: '@@ -30,0 +30,3 @@\n+export const refine = (\n+  ctx: z.RefinementCtx,\n+) => ctx;' }).length === 0);
+  t('⛔ …a COMMENT carrying a local-factory key line is still not a key line', localRun(BLUEPRINT, "+  // snapshotObject: strictIdent('x'),", FACTORY_FIXTURES.strictIdent.definition).rows.length === 0);
+  t('⛔ …and a file OFF the contract source surface reads no blob at all, whatever its lines say', localRun('README.md', FACTORY_FIXTURES.strictIdent.line, FACTORY_FIXTURES.strictIdent.definition).unresolved.length === 0);
 
   // -- the floor -------------------------------------------------------------
   const floorFailures = [];
@@ -3943,6 +5266,8 @@ export function selfTest() {
       '#17955\'s tombstone decline — read before the budget so a rename is still paid for, and requiring the value to BE the call — with the un-retiring control, the two chained-arm controls that fire, and the multi-line chained close pinned as the residual quiet direction, ' +
       "#17848's re-declared key with a zod `error` param — declined by #16943's budget, bracketed by the dark control that fires when nothing paid and the surplus control that fires on a real new key beside it, " +
       "#18234's key narrowed out of a universal acceptor — certified by the REMOVED value's own semantics rather than by the added value's spelling, with the dark, different-key, never-universal, narrowing-step and surplus controls that still fire, " +
+      "#18640's inline closed set re-spelled at the same binding — bounded by the control set that IS the finding, the same edit spelled one member per line and at a keyed property, with the added-arm, different-binding, brand-new, widened-enum and new-key controls that still fire, " +
+      "#18702's FILE-LOCAL declaring factory, resolved through its own definition at the head BLOB and classified by what its body returns — every factory the filing card names pinned against its own arm, the refusal arm read off a `z.never` definition rather than a name with its chained-arm control, the counterfactual bracketed by the same fixture with the resolver blind, and both boundaries (an imported factory, an unclassifiable body) pinned as a STATED silence the reader prints, " +
       "#16448's four positive controls each with its file:line, its negative controls — " +
       'the same diffs with `yes`, and a removal-only diff with `no` — the local path composed end ' +
       'to end so a binary change to a tell surface cannot read as clean, #17112\'s split count with ' +
