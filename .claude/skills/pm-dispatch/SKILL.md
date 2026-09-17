@@ -88,7 +88,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 维护者明示召唤是仲裁:有简报径直坐席;无简报才走保守确认,确认终止即坐席。
 - 互斥清 ⇒ fetch 后三章程(本文、core-rules、本席章程)最新触碰 sha 走 `git-history.mjs touch`。
 - 异于上一开轮标记即先重读;留开轮标记(session ID + fire 时刻 + 该触碰,注明重读)再跑轮。
-- 同读 harness 载入面 `.claude/{settings.json,agents/*.md,hooks/*}` 的最新触碰是否已在共享检出 HEAD。
+- 同读 harness 载入面 `.claude/**` 的最新触碰与内容是否已在共享检出 HEAD。
 - 否 ⇒ 记座位贴,自然收班时换会话,⛔ 不中断批次;读数走 `scripts/pm/check-harness-current.mjs`。
 
 ## 全体座位的不变量
