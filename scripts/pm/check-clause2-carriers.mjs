@@ -771,6 +771,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#16833: an UNJUDGED refusal names the CHANNEL that answered, what it answered, and which carrier': 30,
   '#18456: the `--pair` input record — the same block on every exit, so two runs that disagree can be diffed': 38,
   '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 16,
+  '#18719: a RETRACTED claim leaves the pool — a withdrawn claim never governs': 36,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -781,8 +782,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // effect, and once more by the one #17149 adds, by the one #17098 adds, by the
 // one #17915 adds, by the one #17959 adds, by the one #18042 adds, and by the
 // one #18174 adds, and by the one #18141 adds, and by the one #17919 adds, and
-// by the one #16833 adds, and by the one #18456 adds.
-const SELF_TEST_BATTERY_FLOOR = 28;
+// by the one #16833 adds, and by the one #18456 adds, and by the one #18719
+// adds.
+const SELF_TEST_BATTERY_FLOOR = 29;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -7728,6 +7730,149 @@ export async function selfTest() {
   t('…while a STRONGER grade still decides, so a stray `Part of` beside a keyword is not a tie', deliveredCardNumber(PIN_PULL(`Fixes #${PIN_CARD}\n\npart of #4444 already landed`)).card === PIN_CARD);
   t('⛔ CONTROL: the ranking belongs to `deliveryEvidence` -- every grade it answers is ranked here, none invented', DELIVERY_EVIDENCE_PRECEDENCE.every((kind) => deliveryEvidenceNote(kind) !== 'evidence unread') && new Set(DELIVERY_EVIDENCE_PRECEDENCE).size === DELIVERY_EVIDENCE_PRECEDENCE.length);
   t('…and it is ranked in the order that function applies, measured pair by pair', DELIVERY_EVIDENCE_PRECEDENCE.indexOf(deliveryEvidence(PIN_PULL(`Fixes #1\nPart of #2`), '1')) < DELIVERY_EVIDENCE_PRECEDENCE.indexOf(deliveryEvidence(PIN_PULL(`Fixes #1\nPart of #2`), '2')) && DELIVERY_EVIDENCE_PRECEDENCE.indexOf('part-of') < DELIVERY_EVIDENCE_PRECEDENCE.indexOf('branch-name'));
+
+  // -- #18719: a RETRACTED claim leaves the pool -----------------------------
+  //
+  // The pool used to be closed under addition: a `Claim:` comment entered it
+  // and nothing ever took one out, so the withdrawal that the protocol calls an
+  // explicit act was the one act the arbiter could not see. These cases pin the
+  // MEMBERSHIP rule and its three shapes, each against the control that makes
+  // the shape a reading rather than a coincidence.
+  battery('#18719: a RETRACTED claim leaves the pool — a withdrawn claim never governs');
+
+  // The #18373 thread, replayed OFFLINE and ⛔ never re-graded: that card is
+  // `needs-user-decision` and another seat's. Ids, stamps and logins are the
+  // REAL ones; each body carries the load-bearing LINES of the real comment,
+  // extracted from the REST rows rather than retyped — so a case here fails
+  // when the reader changes, ⛔ never when a transcription slipped.
+  const RTX_18373 = [
+  {
+    // the triage comment — no `Claim:` line, so never a pool candidate
+    id: 5716318188,
+    created_at: '2026-09-17T14:45:28Z',
+    user: { login: 'os-sam' },
+    body: '**Triage:`pm:queue` · `priority:p1` · `domain:spec` · 类型 Bug · 摘 `finding`** · 2026-09-17T14:45Z · 分诊席 #6015 · R+275',
+  },
+  {
+    // `os-litant` — the claim the card is actually being worked on, and the card's only assignee
+    id: 5717143021,
+    created_at: '2026-09-17T15:40:44Z',
+    user: { login: 'os-litant' },
+    body: [
+      'Claim: PM loop round 2026-09-17 R1',
+      'Session: `session_01LvwGppdonww4zGLWZo5rho`',
+      'Branch: `claude/issue-18373-type-source-resolution-bare-dir-include`',
+      'Clause-②: no',
+    ].join('\n'),
+  },
+  {
+    // `os-bill` — claimed 13 minutes later, and withdrawn 84 seconds after that
+    id: 5717315121,
+    created_at: '2026-09-17T15:53:24Z',
+    user: { login: 'os-bill' },
+    body: [
+      'Claim: PM loop round 8',
+      'Session: `session_01JbZnqu8bt6YqfJsr9vaFb3`',
+      'Branch: `claude/issue-18373-include-bare-directory-provenance`',
+      'Clause-②: no',
+    ].join('\n'),
+  },
+  {
+    // THE RETRACTION — no `Claim:` line of its own, which is why the pool could not see it
+    id: 5717333576,
+    created_at: '2026-09-17T15:54:48Z',
+    user: { login: 'os-bill' },
+    body: '🚨 **撤回上一条认领(`5717315121`)—— 本卡已由 `os-litant` 在先认领,本席晚了 13 分钟。** `domain:spec` seat 2(`session_01JbZnqu8bt6YqfJsr9vaFb3`,座位贴 #18549)。⏱️ 本条读数取自同一动作:2026-09-17T15:54Z。',
+  },
+  {
+    // `os-litant`'s report line: an anchor and its OWN claim id, mid-line — the `includes` trap
+    id: 5717738051,
+    created_at: '2026-09-17T16:22:40Z',
+    user: { login: 'os-litant' },
+    body: '      "question": "The governing-claim instrument now names a retracted claim. check-clause2-carriers --pair 18708 (exit 0) selects comment 5717315121 as governing and marks my dispatch\'s 5717143021 as SUPERSEDED, because the retraction 5717333576 carries no `Claim:` line and so is not in the pool. Is that worth a rule change?",',
+  },
+  {
+    // `os-litant` describing the retraction: an anchor, another seat's claim id — shape (3)
+    id: 5717775707,
+    created_at: '2026-09-17T16:25:37Z',
+    user: { login: 'os-litant' },
+    body: '- ⚠️ 但它暴露了一个**工具缺陷**:`check-clause2-carriers --pair 18708` 仍机械地把**那条已撤回的** `5717315121` 选为 governing claim —— 因为撤回评论不带 `Claim:` 行,不在候选池里。**本席另行立卡**,⛔ 不在本卡处理。',
+  },
+  ];
+  const RTX_LIVE_CLAIM = 5717143021;
+  const RTX_WITHDRAWN = 5717315121;
+  const RTX_RETRACTION = 5717333576;
+  const RTX_LIVE_BRANCH = 'claude/issue-18373-type-source-resolution-bare-dir-include';
+  const RTX_GHOST_BRANCH = 'claude/issue-18373-include-bare-directory-provenance';
+  const RTX_AFTER = claimCarrierSelection(RTX_18373);
+  // ⛔ The BEFORE leg is the reading `main` takes, produced by REMOVING the
+  // retraction rather than by describing it: the same rows, minus the one
+  // comment the old pool could not see.
+  const RTX_BEFORE = claimCarrierSelection(RTX_18373.filter((r) => r.id !== RTX_RETRACTION));
+  const RTX_REASON = (sel, id) => sel.rejected.find((r) => r.row.id === id)?.reason ?? '';
+  const RTX_RECORD = (rows) => {
+    const rec = pairInputRecord({ pr: 18708, card: 18373, cardComments: rows, headSha: 'offline' });
+    const flat = (v) => (Array.isArray(v) ? v.join('\n') : String(v ?? ''));
+    return { selected: flat(rec['claim.selected']), rejected: flat(rec['claim.rejected']), rule: flat(rec['claim.rule']) };
+  };
+
+  t('⭐ the #18373 counterfactual, AFTER: the pool is the LIVE claimant\'s claim alone', RTX_AFTER.pool.length === 1 && RTX_AFTER.pool[0].id === RTX_LIVE_CLAIM, JSON.stringify(RTX_AFTER.pool.map((r) => r.id)));
+  t('…and the branch it names is the ONE ref origin actually has', (RTX_AFTER.governing?.branches ?? []).join() === RTX_LIVE_BRANCH);
+  t('…while the branch the withdrawn claim named — absent from origin — governs nothing', !(RTX_AFTER.governing?.branches ?? []).includes(RTX_GHOST_BRANCH));
+  t('the withdrawn claim is listed RETRACTED, naming the comment that took it back', RTX_REASON(RTX_AFTER, RTX_WITHDRAWN).startsWith('RETRACTED') && RTX_REASON(RTX_AFTER, RTX_WITHDRAWN).includes(String(RTX_RETRACTION)));
+  t('⛔ …never as SUPERSEDED: a withdrawn record and an out-ranked one are two different facts', !/a SUPERSEDED claim/.test(RTX_REASON(RTX_AFTER, RTX_WITHDRAWN)));
+  t('⛔ …and never DROPPED: the full claim listing still carries both records', RTX_AFTER.claims.length === 2 && RTX_AFTER.claims.some((r) => r.id === RTX_WITHDRAWN));
+  t('…and the LIVE claim is no longer rejected at all', RTX_REASON(RTX_AFTER, RTX_LIVE_CLAIM) === '');
+  t('⛔ CONTROL — the #18373 counterfactual, BEFORE: drop the retraction and the withdrawn claim governs again', RTX_BEFORE.pool.length === 1 && RTX_BEFORE.pool[0].id === RTX_WITHDRAWN && (RTX_BEFORE.governing?.branches ?? []).join() === RTX_GHOST_BRANCH);
+  t('⛔ …and in that reading the real claimant is the one marked SUPERSEDED — the defect, replayed', /a SUPERSEDED claim/.test(RTX_REASON(RTX_BEFORE, RTX_LIVE_CLAIM)));
+  t('⭐ the two faces side by side: the record NAMES the author the pool selected', RTX_RECORD(RTX_18373).selected.includes('os-litant') && !RTX_RECORD(RTX_18373).selected.includes('os-bill'));
+  t('⛔ CONTROL: the BEFORE record named the other seat, which is how the contradiction went unread', RTX_RECORD(RTX_18373.filter((r) => r.id !== RTX_RETRACTION)).selected.includes('os-bill'));
+  t('the printed RULE carries the membership half, so two runs are comparable on it', RTX_RECORD(RTX_18373).rule.includes(CLAIM_RETRACTION_RULE) && CLAIM_SELECTION_RULE.includes(CLAIM_RETRACTION_RULE));
+
+  // ⚠️ The measured trap, and the reason the anchor OPENS a line instead of
+  // being searched for inside one. Both lines below are real bytes off this
+  // thread; the first is the report that FILED this defect.
+  const RTX_OWN_REPORT = RTX_18373.find((r) => r.id === 5717738051);
+  const RTX_DESCRIPTION = RTX_18373.find((r) => r.id === 5717775707);
+  t('⛔ a seat REPORTING the defect does not commit it — an anchor and its own claim id, mid-line', !claimRetractions(RTX_18373).has(RTX_18373.find((r) => r.id === RTX_LIVE_CLAIM)));
+  t('⛔ …and the author test alone would NOT have saved it: that line is the claim\'s OWN author', RTX_OWN_REPORT.user.login === RTX_18373.find((r) => r.id === RTX_LIVE_CLAIM).user.login && /retract/i.test(RTX_OWN_REPORT.body) && RTX_OWN_REPORT.body.includes(String(RTX_LIVE_CLAIM)));
+  t('⛔ …and a THIRD seat describing the retraction retracts nothing either — anchor, id, wrong author', RTX_DESCRIPTION.body.includes('撤回') && RTX_DESCRIPTION.body.includes(String(RTX_WITHDRAWN)) && RTX_DESCRIPTION.user.login !== RTX_18373.find((r) => r.id === RTX_WITHDRAWN).user.login);
+
+  // The three shapes, synthetic so each one varies exactly one thing.
+  const RTX_ROW = (id, at, login, lines) => ({ id, created_at: at, user: { login }, body: [].concat(lines).join('\n') });
+  const RTX_CLAIM = (id, at, login, value = 'no') => RTX_ROW(id, at, login, ['Claim: round 1', 'Branch: `claude/issue-4242-x`', `Clause-②: ${value}`]);
+  const RTX_A = RTX_CLAIM(6000000011, '2026-09-17T10:00:00Z', 'seat-a');
+  const RTX_B = RTX_CLAIM(6000000012, '2026-09-17T11:00:00Z', 'seat-b');
+  const RTX_POOL_IDS = (rows) => claimCarrierSelection(rows).pool.map((r) => r.id).join();
+
+  t('shape (1) — a retraction NAMING the claim by comment id takes it out of the pool', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回本席的认领 `6000000012` —— 先到者是 seat-a')]) === '6000000011');
+  t('⛔ shape (1) CONTROL: the SAME words from a DIFFERENT author retract nothing', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-a', '撤回本席的认领 `6000000012` —— 先到者是 seat-a')]) === '6000000012');
+  t('shape (2) — a `Release:` line from the claim\'s own author, no id at all, takes it out', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', 'Release: session X, cause: 先到者是 seat-a, 去向: back to the queue')]) === '6000000011');
+  t('⛔ shape (2) CONTROL: the same `Release:` posted BEFORE the claim retracts nothing', RTX_POOL_IDS([RTX_A, RTX_ROW(6000000013, '2026-09-17T10:30:00Z', 'seat-b', 'Release: session X, cause: y, 去向: queue'), RTX_B]) === '6000000012');
+  t('shape (3) — a `Release:` from a DIFFERENT author retracts nobody else\'s claim', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-c', 'Release: session Z, cause: y, 去向: queue')]) === '6000000012');
+  t('⛔ shape (3) CONTROL: the live claimant\'s claim still GOVERNS, it is not merely un-rejected', (() => { const sel = claimCarrierSelection([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-c', 'Release: session Z')]); return sel.governing?.createdAt === RTX_B.created_at && sel.rejected.every((r) => !r.reason.startsWith('RETRACTED')); })());
+  t('⛔ the anchor OPENS the line: the same act and id buried mid-sentence retract nothing', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '本席读到工具把 `6000000012` 当作已撤回的认领,记一笔')]) === '6000000012');
+  t('…while decoration in FRONT of the act is not a difference — 「- ⚠️ **撤回** …」 reads', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '- ⚠️ **撤回**了 `6000000012`,本席让行')]) === '6000000011');
+  t('⛔ a retraction naming SOME OTHER comment id retracts nothing here', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000009999` —— 另一张卡上的认领')]) === '6000000012');
+  t('⛔ an unreadable author on the RETRACTOR retracts nothing — fail closed, never a wildcard', RTX_POOL_IDS([RTX_A, RTX_B, { id: 6000000013, created_at: '2026-09-17T12:00:00Z', body: '撤回 `6000000012`' }]) === '6000000012');
+  t('⛔ an unreadable author on the CLAIM is not retractable either', RTX_POOL_IDS([RTX_A, { id: 6000000012, created_at: '2026-09-17T11:00:00Z', body: ['Claim: r', 'Branch: `claude/issue-4242-x`'].join('\n') }, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]) === '6000000012');
+  t('⛔ a RETRACTED claim\'s declaration is not the one read — the LIVE carrier\'s line is', cardDeclaration([RTX_CLAIM(6000000011, '2026-09-17T10:00:00Z', 'seat-a', 'no'), RTX_CLAIM(6000000012, '2026-09-17T11:00:00Z', 'seat-b', 'yes'), RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]).value === 'no');
+  // ⭐ Every claim retracted ⇒ a state this file ALREADY has, ⛔ never a
+  // fabricated carrier and ⛔ never the withdrawn record's own value. WHICH
+  // existing state depends on what is left on the thread, and both are pinned
+  // because collapsing them would describe neither: a withdrawn claim that
+  // carried a declaration leaves that line ON the thread with no carrier under
+  // it (`misplaced`, a C2 row, the value ⛔ not accepted), and one that carried
+  // none leaves nothing to read at all (`absent`).
+  t('⭐ every claim retracted, declaration left on the thread ⇒ `misplaced` — a finding, ⛔ not a reading', (() => { const rows = [RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]; const d = cardDeclaration(rows); return claimCarrierSelection(rows).pool.length === 0 && d.state === 'misplaced'; })());
+  t('⛔ …and the withdrawn record\'s OWN value is never handed back as the card\'s declaration', (() => { const rows = [RTX_CLAIM(6000000012, '2026-09-17T11:00:00Z', 'seat-b', 'yes'), RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]; return cardDeclaration(rows).state !== 'declared'; })());
+  t('⭐ …and with nothing left to read the state is `absent` — the carrier is owed, ⛔ not invented', (() => { const rows = [RTX_ROW(6000000012, '2026-09-17T11:00:00Z', 'seat-b', ['Claim: r', 'Branch: `claude/issue-4242-x`']), RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]; return cardDeclaration(rows).state === 'absent'; })());
+  t('⛔ CONTROL: without the retraction that same thread reads `missing` — the claim IS the carrier', cardDeclaration([RTX_ROW(6000000012, '2026-09-17T11:00:00Z', 'seat-b', ['Claim: r', 'Branch: `claude/issue-4242-x`'])]).state === 'missing');
+  t('…and the record SAYS that, instead of reporting a thread nobody claimed', RTX_RECORD([RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]).selected.includes('RETRACTED'));
+  t('⛔ CONTROL: a thread with no claim at all still reads as the OTHER sentence', RTX_RECORD([RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', 'no claim here')]).selected.includes('no comment on this thread carries'));
+  t('ONE derivation: the map the selection rejects from is the map `claimRetractions` returns', (() => { const rows = [RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]; const sel = claimCarrierSelection(rows); return sel.retracted.size === 1 && sel.retracted.get(RTX_B)?.id === '6000000013' && claimRetractions(rows).get(RTX_B)?.id === '6000000013'; })());
+  t('⛔ an unreadable thread retracts nothing and carries the empty halves', claimRetractions(null).size === 0 && claimCarrierSelection(null).live.length === 0 && claimCarrierSelection(null).retracted.size === 0);
+  t('the anchor roster is CLOSED, and bare `release` is not on it — a version release is not a retraction', RETRACTION_PROSE_ANCHORS.length === 5 && !RETRACTION_PROSE_ANCHORS.includes('release') && RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', 'release 阻塞在 `6000000012` 上,等维护者')]) === '6000000012');
 
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //
