@@ -228,7 +228,33 @@ export const TaskViews = defineView({
         { field: 'estimate_hours' },
         { field: 'due_date' },
       ],
-      rowColor: { field: 'priority' },
+      // Row colouring by priority. The `colors` map is what does the work:
+      // `rowColor: { field }` alone parses and publishes clean and colours
+      // nothing (author-time diagnostic `view/row-color-without-colors`).
+      //
+      // The values are COLOUR NAMES, not hex. objectui `plugin-grid`'s
+      // `useRowColor` resolves each authored value through its own
+      // `COLOR_TO_CLASS` vocabulary to a literal Tailwind class
+      // (`red` -> `bg-red-100`), hands a `bg-*` value through untouched, and
+      // returns `undefined` for everything else — Tailwind v4 has no runtime,
+      // so a fabricated class string would name no rule in the compiled
+      // stylesheet. A hex here would clear the resolver's `!config.colors`
+      // guard, silence the diagnostic above, and still colour no row.
+      //
+      // Each name is the entry of that vocabulary nearest to the colour
+      // `priority` already declares on the option itself (`task.object.ts`):
+      // #94A3B8 slate, #3B82F6 blue, #F59E0B amber, #EF4444 red. The renderer
+      // paints the `-100` tint of the name, so the row background stays light
+      // enough to read the row's own text on.
+      rowColor: {
+        field: 'priority',
+        colors: {
+          low: 'slate',
+          medium: 'blue',
+          high: 'amber',
+          urgent: 'red',
+        },
+      },
       // List-level inline edit — cells become editable in place, with a
       // per-row edit affordance and a save-all/cancel-all toolbar (view-level
       // master switch; distinct from the master-detail `inlineEdit` on fields).
