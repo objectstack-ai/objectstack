@@ -225,10 +225,26 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
 const NOT_A_GATE_NAMES: ReadonlySet<string> = new Set(Object.values(NOT_A_GATE).flat());
 
 /**
- * The two doors this file holds equal. `lint.ts` is the third authoring
- * command and is held to the registry by the checks further down, but it emits
- * no artifact and runs no artifact-level gate, so it is not part of the parity
- * question.
+ * The two doors this file holds equal. `lint.ts` is the third authoring command
+ * and is held to the registry by the checks further down; it emits no artifact,
+ * so it is not part of THIS file's parity question — which is the one its
+ * header states, `os validate` as the read-only superset of `os build`.
+ *
+ * ⚠️ [#18778] That clause used to read "and runs no artifact-level gate", and
+ * it was FALSE on the tree when it was written: `lint.ts` has called
+ * `collectAndLintDocs` — a name in {@link SHARED_NON_REGISTRY_GATES} above —
+ * since long before it, and since #18778 it calls
+ * `runPerPackageAuthoringRules` as well. The sentence is corrected rather than
+ * deleted because it is the one statement in this repository that could be read
+ * as "`os lint` is exempt from the artifact-level gates", and #18778's dispatch
+ * had to settle exactly that question before wiring the third door. What
+ * excludes `lint.ts` from PARITY_COMMANDS is the ARTIFACT, not the gates.
+ *
+ * ⛔ Do NOT answer that by adding `lint.ts` here. The rosters below are keyed to
+ * the two commands' call sites and the ledgers classify exactly those; widening
+ * the constant would re-open every classification against a third file in the
+ * same stroke, which is a card, not a line. `AUTHORING_COMMANDS` is the list
+ * that means all three, and the checks that belong to all three already use it.
  */
 const PARITY_COMMANDS: readonly string[] = ['compile.ts', 'validate.ts'];
 
