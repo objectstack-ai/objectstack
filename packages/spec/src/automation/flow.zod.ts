@@ -24,6 +24,7 @@ import { retryPolicyShape } from '../shared/retry-policy.zod';
 import { strictObject } from '../shared/strict-object';
 import { collectFlowGraphs, parseFlowNodeRegions } from './control-flow.zod';
 import { EndConfigSchema } from './builtin-node-config.zod';
+import { APPROVAL_NODE_TYPE, APPROVAL_REVISE_NODE_TYPE } from './approval.zod';
 export const FlowNodeAction = z.enum([
   'start',              // Trigger
   'end',                // Return/Stop
@@ -66,6 +67,44 @@ export const FLOW_BUILTIN_NODE_TYPES: readonly string[] = FlowNodeAction.options
  * regardless of what executors are registered.
  */
 export const FLOW_STRUCTURAL_NODE_TYPES: readonly string[] = ['start', 'end'];
+
+/**
+ * Built-in node types that can park a run on a **durable pause** (ADR-0019) —
+ * the vocabulary a structured region body may not contain.
+ *
+ * A capability list, not a behaviour prediction. Each entry is a node type
+ * whose shipped executor declares `supportsPause: true`; whether a given node
+ * of that type pauses on a given run is decided elsewhere and, for two of
+ * them, in ANOTHER metadata record: `map` and `subflow` pause exactly when the
+ * child flow they name pauses, which this flow's own text cannot answer. That
+ * is why the region rule keys on the TYPE — a contract whose verdict depends
+ * on a record the author is not editing is not a contract, and "legal until
+ * somebody adds a `wait` to the child flow" is the authoring trap this refusal
+ * exists to remove.
+ *
+ * Derived by reading the descriptors, not by recall: the shipped
+ * `defineActionDescriptor({... supportsPause: true ...})` literals are
+ * `screen` / `wait` / `subflow` / `map` in `service-automation`'s builtins and
+ * `approval` / `approval_revise` in `plugin-approvals`, which is the same set
+ * of six the ADR-0044 `resumeAuthority` default-flip migration entry names.
+ * `check:resume-authority-declared` is the gate that already scans exactly
+ * that population.
+ *
+ * ⚠️ **Not closed, and cannot be.** ADR-0018 made the node-type namespace open
+ * — `FlowNodeSchema.type` is a validated `string` and a plugin registers new
+ * types, pause-capable ones included, at run time. A parse has no registry, so
+ * a plugin-contributed pausing type inside a region is NOT refused here; the
+ * engine's own run-time refusal is what meets it. Extending this list is how a
+ * first-party type joins the rule.
+ */
+export const FLOW_PAUSE_CAPABLE_NODE_TYPES: readonly string[] = [
+  'screen',
+  'wait',
+  'subflow',
+  'map',
+  APPROVAL_NODE_TYPE,
+  APPROVAL_REVISE_NODE_TYPE,
+];
 
 /*
  * ── Unknown-key strictness (#4001, ADR-0078) ────────────────────────────────
@@ -1151,6 +1190,81 @@ export const FlowSchema = lazySchema(() => strictObject(
           'every depth) share it — so a region node may not reuse an id declared outside its ' +
           'region either.',
       });
+    });
+  }
+
+  // What a structured region body may NOT contain (#15646, absorbing #18112).
+  //
+  // Two refusals, one rule family, because they are one limit read twice: an
+  // ADR-0031 region body (`loop` / `try_catch` / `parallel`, at every depth the
+  // walk above reaches) runs SYNCHRONOUSLY inside the enclosing run — it can
+  // neither park that run on a durable pause nor end it. #3267 ruled that limit
+  // 禁 rather than a gap to be filled, so this is its authoring-time
+  // enforcement, ⛔ not an interim.
+  //
+  //   PAUSE — the engine converts a suspension raised inside a region into an
+  //   error at the region boundary, but the executor has already written its
+  //   progress state into the ENCLOSING scope by then. Contain that error in a
+  //   `try_catch` and the residue is read back as progress by the next entry to
+  //   the same node: measured on `loop { try_catch { map(pausing child) } }`,
+  //   iteration 3 read `started === collection.length`, ran nothing, and
+  //   returned SUCCESS with `summary.failed = 0`. A sweep that reports green
+  //   having done nothing is the worst available failure, and it is reachable
+  //   only because the shape can be declared at all.
+  //
+  //   END — an `end` inside a region is a no-op today whatever its `outcome`,
+  //   and a refusing one is converted into a region error at exactly the
+  //   boundary above (#15788). Neither is what the author wrote, so the shape
+  //   has never once been honoured.
+  //
+  // Judged on the node TYPE, and the reason is in
+  // {@link FLOW_PAUSE_CAPABLE_NODE_TYPES}: for `map` / `subflow` whether a pause
+  // happens is decided by a DIFFERENT metadata record. Two boundaries, declared
+  // rather than discovered — a plugin-registered pausing type is invisible to a
+  // parse (ADR-0018's open namespace), and this walk stops at
+  // `MAX_REGION_DEPTH`, so a region nested past the ceiling is not judged here
+  // and only the engine's run-time refusal meets it.
+  for (const graph of collectFlowGraphs(flow)) {
+    // The flow's own graph is the one place both are legal — that is the whole
+    // prescription both messages give, so it must stay true.
+    if (graph.path.length === 0) continue;
+    graph.nodes.forEach((node, index) => {
+      const type: unknown = (node as { type?: unknown } | null)?.type;
+      if (typeof type !== 'string') return;
+      const id: unknown = (node as { id?: unknown } | null)?.id;
+      const named = typeof id === 'string' ? `\`${id}\`` : `at index ${index}`;
+      if (type === 'end') {
+        ctx.addIssue({
+          code: 'custom',
+          path: [...graph.path, 'nodes', index, 'type'],
+          message:
+            `An \`end\` node may not sit inside a structured region — \`${graph.scope}\` is a region ` +
+            `body and the \`end\` node ${named} is inside it. A region body cannot END the run: it runs ` +
+            'synchronously inside the enclosing run, so an `end` here is a no-op whatever its `outcome`, ' +
+            'and a refusing one is converted into a region error rather than terminating anything. Put ' +
+            "the `end` on the top-level graph and route the region's exit to it.",
+        });
+        return;
+      }
+      if (FLOW_PAUSE_CAPABLE_NODE_TYPES.includes(type)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [...graph.path, 'nodes', index, 'type'],
+          message:
+            `A \`${type}\` node may not sit inside a structured region — \`${graph.scope}\` is a region ` +
+            `body and the \`${type}\` node ${named} is inside it. A region body runs synchronously and ` +
+            'cannot durably pause, while `' + type + '` is one of the node types that can park a run ' +
+            '(`screen` / `wait` / `subflow` / `map` / `approval` / `approval_revise`). The engine ' +
+            'refuses such a pause at the region boundary AFTER the node has written its progress state ' +
+            'into the enclosing scope, so a contained refusal leaves residue a later entry reads back as ' +
+            'progress — the run then reports success having processed nothing. Move the `' + type + '` ' +
+            "node onto the top-level graph and route the region's exit to it; when the work must repeat " +
+            'per item, make the top-level graph the repeating construct rather than nesting the pause. ' +
+            'Judged on the node TYPE because `map` / `subflow` pause exactly when the child flow they ' +
+            'name pauses, which is a different metadata record and can change without this flow being ' +
+            'edited.',
+        });
+      }
     });
   }
 
