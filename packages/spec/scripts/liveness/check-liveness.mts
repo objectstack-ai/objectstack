@@ -263,7 +263,7 @@ const ledgerRoot = ledgerRootArg
 
 // Governed metadata types, rolled out highest-frequency / highest-risk first.
 // (`query` is not a metadata type — see SPEC_ONLY_SCHEMAS below.)
-const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'seed', 'translation', 'validation', 'api', 'capability', 'qa', 'manifest', 'crud_endpoints', 'metadata_endpoints', 'batch_endpoints', 'route_generation', 'realtime_subscription'];
+const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'seed', 'translation', 'validation', 'api', 'capability', 'qa', 'manifest', 'crud_endpoints', 'metadata_endpoints', 'batch_endpoints', 'route_generation', 'realtime_subscription', 'sharing_rule'];
 
 // Authorable metadata types that are NOT yet governed — the coverage ratchet.
 //
@@ -298,8 +298,14 @@ const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'po
 // anywhere and the report read complete — a reader could not tell "nothing
 // ungoverned here" from "never looked". Widening the denominator (see
 // `authorableTypes()`) is what converts that silence into three declared debts.
-// ⛔ These three rows are NOT a licence to leave them: the direction of travel
-// is out of this map, exactly as it was for the nine.
+// ⛔ These rows are NOT a licence to leave them: the direction of travel is out
+// of this map, exactly as it was for the nine.
+//
+// [#18582] One of the three is PAID: `sharing_rule` moved into GOVERNED with
+// packages/spec/liveness/sharing_rule.json. The two left are `connector` and
+// `analytics_cube`, and the card that owes them is still open — the sentence
+// above is the whole reason this note updates the count instead of leaving a
+// stale "three" standing over a map of two.
 const PENDING_GOVERNANCE: Record<string, string> = {
   connector:
     'Authored via `stack.connectors[]` and `PUT /api/v1/meta/connector/:name` '
@@ -307,12 +313,6 @@ const PENDING_GOVERNANCE: Record<string, string> = {
     + 'enrolled into this gate\'s denominator by #18133 — before which it was invisible '
     + 'to the ratchet rather than covered by it. No ledger walked it yet: seed '
     + 'packages/spec/liveness/connector.json (#18133).',
-  sharing_rule:
-    'Authored via `stack.sharingRules[]` and `PUT /api/v1/meta/sharing_rule/:name` '
-    + '(#6245). Security-shaped surface — a sharing rule grants read scope — which is '
-    + 'the class the #4410/#4465/#4481 datasource keys came from, and enrolling it here '
-    + 'is #18133. No ledger walked it yet: seed packages/spec/liveness/sharing_rule.json '
-    + '(#18133).',
   analytics_cube:
     'Authored via `stack.analyticsCubes[]` and `PUT /api/v1/meta/analytics_cube/:name` '
     + '(#10194). Whether that authoring is live end-to-end is its own measurement '
