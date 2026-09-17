@@ -2063,10 +2063,21 @@ recognisable rather than as patterns to use:
 |:---|:---|
 | not a declared stack key | the build **fails**, naming the key (above) |
 | a declared stack key the default export does **not** carry | merged in and **accepted** — the `onEnable` / `functions` path |
-| a key the default export **already** carries | dropped **silently**; the build exits 0 and the exported value is never read |
+| a key the default export **already** carries | the default's value wins and the exported one is dropped — the build still exits 0, and the drop is **reported on stderr** |
 
 The last row is why every stack key belongs inside `defineStack()`: a second
-copy beside it is not a second declaration.
+copy beside it is not a second declaration, it is a value nothing reads.
+
+```console
+$ printf '\nexport const objects = [myExtraObject];\n' >> objectstack.config.ts
+$ os build
+  ⚠ `objects` is a named export that was DROPPED — the default-exported stack already declares that key
+```
+
+The advisory goes to **stderr**, so it reaches a `--json` run's operator without
+putting anything but the envelope on stdout. It does not fail the build: the
+stack it produces is valid, it is simply missing what the shadowed export
+carried.
 
 ### Config File Auto-Detection
 
