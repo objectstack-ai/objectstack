@@ -490,6 +490,32 @@
  * tried, so a seat can tell "no network reached this board" from "that PR is
  * not open".
  *
+ * ## Which channel answered, per RESOURCE — the per-seat fact (#16833)
+ *
+ * The path report above is about the RUN. It cannot answer the question a seat
+ * actually has when `--pair` goes UNJUDGED at step ② of 落地前检: *my* container
+ * answered `403` on this carrier's `/issues/N/events`, and two other containers
+ * that re-took the same reading answered `200`. Before this, "the stream is
+ * unreachable" was a GLOBAL assumption standing in for a PER-SEAT fact, and the
+ * only way to find the delta was for a seat to notice it by accident.
+ *
+ * So every read this run could not complete is recorded WHERE IT FAILED — the
+ * channel it was tried on, in the same `(i)`/`(ii)`/`(iii)` spelling the path
+ * report uses, and what the platform answered on it (an HTTP status, a
+ * transport fault with no status at all, a page cap that went short, or the
+ * `--pair-json` bag and key the document omits) — and rides on the pair as
+ * `pair.reads`, so the UNJUDGED sentence names the CHANNEL, the ANSWER and the
+ * CARRIER together.
+ *
+ * ⛔ Three things this deliberately is NOT. It is not a new evidence source: no
+ * predicate reads `pair.reads`, and an evidence source merely ASSUMED readable
+ * is exactly what would turn today's honest exit 2 into a silent clearance.
+ * It is not a relaxation: an unread stream is as unread as it ever was, the
+ * pair is as UNJUDGED, and 0/1/2/3/4 keep their meanings to the letter. And it
+ * is not an inference: a read with no recorded answer SAYS so rather than
+ * borrowing the last channel that happened to work, because a diagnosis that
+ * guesses is worse than one that is absent.
+ *
  * ## The request budget, per run
  *
  * `--pair N`: one open-PR listing page (100 PRs per page) plus 2 reads per card
@@ -715,6 +741,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 24,
   '#18141: the head sha sits in a span of ITS OWN — the key-in-span spelling, refused and NAMED': 19,
   '#17919: the correction remedy names THIS card\'s claim comment, never another card\'s': 24,
+  '#16833: an UNJUDGED refusal names the CHANNEL that answered, what it answered, and which carrier': 30,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -724,8 +751,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // existing slack is preserved rather than tightened or loosened as a side
 // effect, and once more by the one #17149 adds, by the one #17098 adds, by the
 // one #17915 adds, by the one #17959 adds, by the one #18042 adds, and by the
-// one #18174 adds, and by the one #18141 adds, and by the one #17919 adds.
-const SELF_TEST_BATTERY_FLOOR = 25;
+// one #18174 adds, and by the one #18141 adds, and by the one #17919 adds, and
+// by the one #16833 adds.
+const SELF_TEST_BATTERY_FLOOR = 26;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2740,7 +2768,8 @@ export function wideningUnjudged(pair, repo) {
   if (v.state !== 'unreadable' && v.state !== 'incomplete') return null;
   return (
     `pair PR #${pair?.pr} / card #${pair?.card} declares \`Clause-②: no\`, and its diff is UNJUDGED ` +
-    `for widening tells: ${v.text}`
+    `for widening tells: ${v.text}` +
+    renderReadDiagnosis(pair?.reads) // #16833 — the same diagnosis, same words.
   );
 }
 
@@ -3558,7 +3587,8 @@ export function locatedRecordUnjudged(pair) {
     `pair PR #${pair?.pr} / card #${pair?.card} owes no review of record, and whether it HAS one ` +
     `could not be read: ${v.gaps.join(', ')}. A record on this head is judged for what its ` +
     '`Served-tier:` line declares wherever it exists (「无此行不成裁决」), so an unread thread here is a ' +
-    'missing reading, never a pair without a record.'
+    'missing reading, never a pair without a record.' +
+    renderReadDiagnosis(pair?.reads) // #16833 — the same diagnosis, same words.
   );
 }
 
@@ -3766,7 +3796,11 @@ export function pairUnjudged(pair) {
   return (
     `pair PR #${pair?.pr} / card #${pair?.card} — UNJUDGED: ${gaps.join(', ')} could not be read. ` +
     'An unread carrier is not a bare carrier and an unread thread is not an absent declaration; ' +
-    'this pair is missing from the readings above, not clean in them.'
+    'this pair is missing from the readings above, not clean in them.' +
+    // ⭐ #16833: WHICH channel was tried and WHAT it answered, per carrier —
+    // appended, so the sentence above is byte-identical for a pair whose reads
+    // simply were not diagnosed, and the verdict it carries is untouched.
+    renderReadDiagnosis(pair?.reads)
   );
 }
 
@@ -3850,10 +3884,16 @@ const readPathState = {
   pairJsonSource: null,
   /** the last `x-ratelimit-*` headers seen, whatever the status. */
   rate: null,
+  /** the path id that last served a read, for the cap/short-read diagnosis. */
+  lastServed: null,
 };
 
 function noteServed(pathId) {
   readPathState.served.set(pathId, (readPathState.served.get(pathId) ?? 0) + 1);
+  // The channel that last ANSWERED, so a read that fails without a refusal —
+  // a page cap, a short listing — can name the channel it was served on
+  // instead of reporting no channel at all (#16833).
+  readPathState.lastServed = pathId;
 }
 
 /**
@@ -3910,16 +3950,158 @@ export function renderReadPathReport(state) {
   );
 }
 
+/**
+ * The channel each read path is called by in a refusal, spelled ONCE.
+ *
+ * Same numerals and same words as `renderReadPathReport` above, because a seat
+ * comparing the per-read diagnosis with the run's path report is comparing two
+ * sentences about the same three channels — and two spellings of one channel is
+ * how a reader ends up believing there are four.
+ */
+export const READ_PATH_LABELS = Object.freeze({
+  [READ_PATH_TOKEN]: '(i) token',
+  [READ_PATH_PUBLIC]: '(ii) token-less public read',
+  [READ_PATH_PAIR_JSON]: '(iii) --pair-json',
+});
+
+/**
+ * The CHANNEL diagnosis — which path was tried for ONE resource, and what the
+ * platform answered on it (#16833).
+ *
+ * ⭐ The gap this closes, measured on this very card: a seat whose container
+ * answers `403` on `/issues/N/events` gets exit 2 and the sentence "card #N's
+ * label event stream could not be read" — correct, and indistinguishable from a
+ * rate limit, a 404, a network fault, or a document that simply omits the key.
+ * Two of the three containers that re-took that reading answered 200, so
+ * "the stream is unreachable" was a GLOBAL assumption doing duty for a PER-SEAT
+ * fact. This makes it a fact: the refusal names the channel, the answer and the
+ * carrier.
+ *
+ * ⛔ It changes no predicate and adds no evidence source. An unread stream is
+ * exactly as unread as it was, the pair is exactly as UNJUDGED, and every exit
+ * code is unchanged — what moves is only what the message can tell a reader.
+ * The diagnosis is therefore a pure render of what the READER recorded: it
+ * never infers a channel, and a read with nothing recorded says so rather than
+ * borrowing the last channel that happened to answer.
+ */
+export function renderReadDiagnosis(reads) {
+  const entries = (Array.isArray(reads) ? reads : []).filter((r) => r && typeof r.subject === 'string');
+  if (entries.length === 0) return '';
+  const parts = entries.map((entry) => {
+    const attempts = Array.isArray(entry.attempts) ? entry.attempts : [];
+    // A retry and a page ladder both answer the same thing twice, and one read
+    // reported as two refusals reads like two problems. Consecutive IDENTICAL
+    // answers collapse and carry their count; ⛔ two DIFFERENT answers never
+    // do — "403 then 502" is the reading, and a count would erase half of it.
+    const runs = [];
+    for (const a of attempts) {
+      const last = runs[runs.length - 1];
+      if (last && last.channel === a?.channel && last.answer === a?.answer) {
+        last.count += 1;
+        continue;
+      }
+      runs.push({ channel: a?.channel, answer: a?.answer, count: 1 });
+    }
+    const tried = runs.length === 0
+      ? 'NO channel recorded an answer — ⛔ an unrecorded channel, never a channel that answered'
+      : runs
+        .map((a) => {
+          const label = READ_PATH_LABELS[a.channel] ?? `(?) ${String(a.channel)}`;
+          const again = a.count > 1 ? ` (${a.count}× — the same answer on every attempt)` : '';
+          return `${label} answered ${a.answer ?? 'nothing this run recorded'}${again}`;
+        })
+        .join(', then ');
+    return `${entry.subject} — ${tried}`;
+  });
+  return (
+    ' Channel diagnosis, one entry per read this run could not complete: ' + parts.join('; ') +
+    '. ⛔ A channel that refused is a measured fact about THIS seat\'s access to THAT resource and ' +
+    'about nothing else — ⛔ never a fact about the pair, and ⛔ never a clearance. It is what lets ' +
+    'a seat tell its own container\'s answer from the board\'s without taking a second reading by ' +
+    'accident.'
+  );
+}
+
+/**
+ * The attempts belonging to the read currently in flight, or `null` when no
+ * read is being diagnosed. Written by `restOnce`, drained by `diagnosedRead`.
+ */
+let inFlightAttempts = null;
+
+function noteAttempt(channel, answer) {
+  if (inFlightAttempts) inFlightAttempts.push({ channel, answer });
+}
+
+/** Channel diagnoses this run filed, keyed by the RESOURCE that went unread. */
+const readDiagnoses = new Map();
+
+/** The ledger key for one resource — the reader files it, `gather` reads it. */
+export function readDiagnosisKey(kind, id) {
+  return `${kind}:${id}`;
+}
+
+/** File one diagnosis. The LAST filing wins — a retried read is one read. */
+function fileReadDiagnosis(key, attempts) {
+  readDiagnoses.set(key, (attempts ?? []).map((a) => ({ channel: a.channel, answer: a.answer })));
+}
+
+/**
+ * Run one LOGICAL read (all of its pages, both rungs of the ladder, every
+ * retry) with its channel attempts recorded, and file them under `key` when it
+ * comes back unread.
+ *
+ * ⛔ A read that SUCCEEDS files nothing: the diagnosis reports refusals, so a
+ * resource WITH an entry is one this run did not get, and a resource without
+ * one is not evidence of anything at all.
+ */
+async function diagnosedRead(key, read) {
+  const outer = inFlightAttempts;
+  inFlightAttempts = [];
+  try {
+    const value = await read();
+    if (value === null || value === undefined) fileReadDiagnosis(key, inFlightAttempts);
+    return value;
+  } finally {
+    inFlightAttempts = outer;
+  }
+}
+
+/**
+ * Hang the diagnosis for `key` on the pair, under the SAME words the gap that
+ * reports it uses, so a reader matches the two by sight rather than by guess.
+ *
+ * ⛔ Called on the null branch ALONE: a pair carries an entry only for a read
+ * that actually came back unread.
+ */
+function attachReadDiagnosis(pair, key, subject) {
+  const attempts = readDiagnoses.get(key);
+  if (!attempts) return;
+  if (!Array.isArray(pair.reads)) pair.reads = [];
+  if (pair.reads.some((r) => r.subject === subject)) return;
+  pair.reads.push({ subject, attempts });
+}
+
 /** One request on ONE path. `token` empty means: send no `authorization`. */
 async function restOnce(path, token) {
-  const res = await fetch(`${API}${path}`, {
-    headers: {
-      accept: 'application/vnd.github+json',
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-    },
-  });
+  const channel = token ? READ_PATH_TOKEN : READ_PATH_PUBLIC;
+  let res;
+  try {
+    res = await fetch(`${API}${path}`, {
+      headers: {
+        accept: 'application/vnd.github+json',
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+    });
+  } catch (err) {
+    // ⛔ A transport fault IS an answer for this purpose: "no status at all" is
+    // exactly the reading a seat behind a refusing proxy needs, and it is the
+    // one a status-only diagnosis would render as silence.
+    noteAttempt(channel, `no HTTP response (${err?.message ?? 'transport error'})`);
+    throw err;
+  }
   noteRateLimit(res);
   if (!res.ok) {
+    noteAttempt(channel, `HTTP ${res.status}`);
     const err = new Error(`GET ${path} -> HTTP ${res.status}`);
     err.status = res.status;
     throw err;
@@ -4055,14 +4237,24 @@ export const EVENT_PAGE_CAP = 10;
  * "hang I did not read".
  */
 async function readCarrierEvents(repo, number) {
-  const out = [];
-  for (let page = 1; page <= EVENT_PAGE_CAP; page++) {
-    const batch = await restOrNull(`/repos/${repo}/issues/${number}/events?per_page=100&page=${page}`);
-    if (!Array.isArray(batch)) return null;
-    out.push(...batch);
-    if (batch.length < 100) return out;
-  }
-  return null; // cap hit: the tail is unread, so the history is unread.
+  return diagnosedRead(readDiagnosisKey('events', number), async () => {
+    const out = [];
+    for (let page = 1; page <= EVENT_PAGE_CAP; page++) {
+      const batch = await restOrNull(`/repos/${repo}/issues/${number}/events?per_page=100&page=${page}`);
+      if (!Array.isArray(batch)) return null;
+      out.push(...batch);
+      if (batch.length < 100) return out;
+    }
+    // ⛔ Not a refusal: every page ANSWERED and the stream is still unread, so
+    // the diagnosis names the channel that served and says what went short
+    // rather than reporting a channel nobody tried (#16833).
+    noteAttempt(
+      readPathState.lastServed ?? READ_PATH_PUBLIC,
+      `${EVENT_PAGE_CAP} page(s) of 100 events each, all of them full — the tail is past this ` +
+        'file\'s page cap and therefore unread',
+    );
+    return null; // cap hit: the tail is unread, so the history is unread.
+  });
 }
 
 /**
@@ -4080,8 +4272,10 @@ async function readCarrierEvents(repo, number) {
  */
 async function readHeadCommitDate(repo, sha) {
   if (!sha) return null;
-  const commit = await restOrNull(`/repos/${repo}/commits/${sha}`);
-  return commit?.commit?.committer?.date ?? null;
+  return diagnosedRead(readDiagnosisKey('commit', sha), async () => {
+    const commit = await restOrNull(`/repos/${repo}/commits/${sha}`);
+    return commit?.commit?.committer?.date ?? null;
+  });
 }
 
 /**
@@ -4106,14 +4300,21 @@ export const FILE_PAGE_CAP = 3;
  * function over: a caller cannot tell a short read from a narrow diff.
  */
 async function readPullFiles(repo, number) {
-  const out = [];
-  for (let page = 1; page <= FILE_PAGE_CAP; page++) {
-    const batch = await restOrNull(`/repos/${repo}/pulls/${number}/files?per_page=100&page=${page}`);
-    if (!Array.isArray(batch)) return null;
-    out.push(...batch);
-    if (batch.length < 100) return out;
-  }
-  return null; // cap hit: the tail is unread, so the diff is unread.
+  return diagnosedRead(readDiagnosisKey('files', number), async () => {
+    const out = [];
+    for (let page = 1; page <= FILE_PAGE_CAP; page++) {
+      const batch = await restOrNull(`/repos/${repo}/pulls/${number}/files?per_page=100&page=${page}`);
+      if (!Array.isArray(batch)) return null;
+      out.push(...batch);
+      if (batch.length < 100) return out;
+    }
+    noteAttempt(
+      readPathState.lastServed ?? READ_PATH_PUBLIC,
+      `${FILE_PAGE_CAP} page(s) of 100 files each, all of them full — the tail is past this file's ` +
+        'page cap and therefore unread',
+    );
+    return null; // cap hit: the tail is unread, so the diff is unread.
+  });
 }
 
 /**
@@ -4139,8 +4340,9 @@ const NETWORK_READER = Object.freeze({
   id: 'network',
   repo: null,
   listOpenPulls: (repo) => listOpenPulls(repo),
-  readCard: (repo, n) => restOrNull(`/repos/${repo}/issues/${n}`),
-  readCardComments: (repo, n) => restOrNull(`/repos/${repo}/issues/${n}/comments?per_page=100`),
+  readCard: (repo, n) => diagnosedRead(readDiagnosisKey('card', n), () => restOrNull(`/repos/${repo}/issues/${n}`)),
+  readCardComments: (repo, n) =>
+    diagnosedRead(readDiagnosisKey('comments', n), () => restOrNull(`/repos/${repo}/issues/${n}/comments?per_page=100`)),
   readCarrierEvents: (repo, n) => readCarrierEvents(repo, n),
   readHeadCommitDate: (repo, sha) => readHeadCommitDate(repo, sha),
   readPullFiles: (repo, n) => readPullFiles(repo, n),
@@ -4179,26 +4381,41 @@ export function pairJsonReader(doc, { source = 'the --pair-json document' } = {}
     noteServed(READ_PATH_PAIR_JSON);
     return value;
   };
+  // ⭐ The document's own refusal, in the same register the network channels
+  // report theirs (#16833): a key the document omits is a read this seat could
+  // not complete, and naming the bag and the id is what turns "UNJUDGED" into a
+  // one-line remedy — ⛔ it is still UNJUDGED, exactly as before.
+  const served = (key, bag, id, value) => {
+    if (value === null || value === undefined) {
+      fileReadDiagnosis(key, [
+        {
+          channel: READ_PATH_PAIR_JSON,
+          answer: `${source} carries no \`${bag}\` entry for \`${id}\` (add one, or take the reading live)`,
+        },
+      ]);
+    }
+    return serve(value);
+  };
   return Object.freeze({
     id: READ_PATH_PAIR_JSON,
     repo: typeof doc.repo === 'string' && doc.repo.trim() ? doc.repo.trim() : null,
     listOpenPulls: () => serve(pulls),
-    readCard: (_repo, n) => serve(fromDocument(doc.cards, n)),
+    readCard: (_repo, n) => served(readDiagnosisKey('card', n), 'cards', n, fromDocument(doc.cards, n)),
     readCardComments: (_repo, n) => {
       const rows = fromDocument(doc.comments, n);
-      return serve(Array.isArray(rows) ? rows : null);
+      return served(readDiagnosisKey('comments', n), 'comments', n, Array.isArray(rows) ? rows : null);
     },
     readCarrierEvents: (_repo, n) => {
       const rows = fromDocument(doc.events, n);
-      return serve(Array.isArray(rows) ? rows : null);
+      return served(readDiagnosisKey('events', n), 'events', n, Array.isArray(rows) ? rows : null);
     },
     readHeadCommitDate: (_repo, sha) => {
       const commit = fromDocument(doc.commits, sha);
-      return serve(commit?.commit?.committer?.date ?? null);
+      return served(readDiagnosisKey('commit', sha), 'commits', sha, commit?.commit?.committer?.date ?? null);
     },
     readPullFiles: (_repo, n) => {
       const rows = fromDocument(doc.files, n);
-      return serve(Array.isArray(rows) ? rows : null);
+      return served(readDiagnosisKey('files', n), 'files', n, Array.isArray(rows) ? rows : null);
     },
   });
 }
@@ -4245,7 +4462,7 @@ async function gather(repo, prFilter = null, reader = NETWORK_READER, { landingR
       if (!prDeliversCard(pr, n)) continue;
       const card = await reader.readCard(repo, n);
       const comments = await reader.readCardComments(repo, n);
-      pairs.push({
+      const pair = {
         pr: pr.number,
         draft: Boolean(pr.draft),
         card: Number(n),
@@ -4253,7 +4470,15 @@ async function gather(repo, prFilter = null, reader = NETWORK_READER, { landingR
         prLabels: Array.isArray(pr.labels) ? labelNames(pr) : null,
         cardLabels: card && Array.isArray(card.labels) ? labelNames(card) : null,
         cardComments: Array.isArray(comments) ? comments : null,
-      });
+      };
+      // ⭐ The channel diagnosis rides on the pair (#16833), attached under the
+      // SAME words the gap that reports it uses, and only where the read came
+      // back unread — so nothing about a pair that read cleanly moves at all.
+      if (pair.cardLabels === null) attachReadDiagnosis(pair, readDiagnosisKey('card', n), `card #${pair.card}'s labels`);
+      if (pair.cardComments === null) {
+        attachReadDiagnosis(pair, readDiagnosisKey('comments', n), `card #${pair.card}'s comment thread`);
+      }
+      pairs.push(pair);
     }
   }
 
@@ -4263,13 +4488,22 @@ async function gather(repo, prFilter = null, reader = NETWORK_READER, { landingR
   for (const pair of pairs) {
     if (!needsGateHistory(pair)) continue;
     pair.cardEvents = await reader.readCarrierEvents(repo, pair.card);
+    if (pair.cardEvents === null) {
+      attachReadDiagnosis(pair, readDiagnosisKey('events', pair.card), `card #${pair.card}'s label event stream`);
+    }
     pair.prEvents = await reader.readCarrierEvents(repo, pair.pr);
+    if (pair.prEvents === null) {
+      attachReadDiagnosis(pair, readDiagnosisKey('events', pair.pr), `PR #${pair.pr}'s label event stream`);
+    }
     // The head commit is owed only once both carriers read CLEARED — the one
     // state whose verdict turns on head motion.
     const card = carrierGateHistory(pair.cardEvents);
     const prHist = carrierGateHistory(pair.prEvents);
     if (card.state === 'cleared' && prHist.state === 'cleared') {
       pair.headCommittedAt = await reader.readHeadCommitDate(repo, pair.headSha);
+      if (pair.headCommittedAt === null) {
+        attachReadDiagnosis(pair, readDiagnosisKey('commit', pair.headSha), `PR #${pair.pr}'s head commit date`);
+      }
     }
   }
 
@@ -4287,6 +4521,9 @@ async function gather(repo, prFilter = null, reader = NETWORK_READER, { landingR
     for (const pair of pairs) {
       if (!needsWideningRead(pair)) continue;
       pair.files = await reader.readPullFiles(repo, pair.pr);
+      if (pair.files === null) {
+        attachReadDiagnosis(pair, readDiagnosisKey('files', pair.pr), `PR #${pair.pr}'s changed-file listing`);
+      }
     }
   }
 
@@ -4314,6 +4551,9 @@ async function gather(repo, prFilter = null, reader = NETWORK_READER, { landingR
     if (!prThreads.has(pair.pr)) prThreads.set(pair.pr, await reader.readCardComments(repo, pair.pr));
     const rows = prThreads.get(pair.pr);
     pair.prComments = Array.isArray(rows) ? rows : null;
+    if (pair.prComments === null) {
+      attachReadDiagnosis(pair, readDiagnosisKey('comments', pair.pr), `PR #${pair.pr}'s comment thread`);
+    }
   }
   return { pulls, pairs };
 }
@@ -5246,6 +5486,71 @@ export function selfTest() {
   t('an ABSENT token is reported as absent — which of the two it was is the seat\'s next move', says(report, 'absent from this environment'));
   t('the run prints the remaining budget it SAW', says(renderRateNote({ limit: '15000', remaining: '14576', resource: 'core' }), '14576 of 15000'));
   t('…and refuses to state a budget it did not see, rather than implying plenty', says(renderRateNote(null), 'UNKNOWN'));
+
+  // -- #16833: the refusal names the CHANNEL, the ANSWER and the CARRIER ------
+  //
+  // The path report one battery up is about the RUN. This one is about ONE
+  // RESOURCE: the measured shape is a container that answers 403 on a carrier's
+  // `/issues/N/events` while two other containers answer 200 on the same URL,
+  // which the old sentence rendered identically to a 404, a rate limit, a
+  // transport fault and a document that simply omits the key.
+  //
+  // ⛔ Every case here is about the MESSAGE. The predicate cases are the
+  // controls at the end: an unread stream still answers UNJUDGED and a readable
+  // one still answers exactly what it did, because a diagnosis that moved a
+  // verdict would be the silent clearance this card's own constraint forbids.
+  battery('#16833: an UNJUDGED refusal names the CHANNEL that answered, what it answered, and which carrier');
+  const CARD_STREAM = 'card #13476\'s label event stream';
+  const PR_STREAM = 'PR #13910\'s label event stream';
+  const refused403 = (subject) => ({
+    subject,
+    attempts: [
+      { channel: READ_PATH_TOKEN, answer: 'HTTP 403' },
+      { channel: READ_PATH_PUBLIC, answer: 'HTTP 403' },
+    ],
+  });
+  const streamUnread = declaredYes({ cardEvents: null, prEvents: [] });
+  const streamDiagnosed = { ...streamUnread, reads: [refused403(CARD_STREAM)] };
+  const diagnosedMsg = pairUnjudged(streamDiagnosed);
+  t('the refusal names WHICH CARRIER went unread, in the gap\'s own words', says(diagnosedMsg, CARD_STREAM));
+  t('…WHICH CHANNEL was tried, in the path report\'s own numbering', says(diagnosedMsg, '(i) token answered'));
+  t('…the FALLBACK channel too, in the order the ladder tried them', says(diagnosedMsg, ', then (ii) token-less public read answered'));
+  t('…and WHAT THE PLATFORM ANSWERED — the 403 this card was filed on', says(diagnosedMsg, 'HTTP 403'));
+  t('⭐ so a seat can tell its own container\'s answer from the board\'s without re-reading by accident', says(diagnosedMsg, 'THIS seat\'s access'));
+  t('⛔ and the refusal still refuses: a named channel is never a clearance', says(diagnosedMsg, 'never a clearance'));
+  // ⛔ DIRECTION ①, the whole safety property: the verdict does not move.
+  t('⛔ an unread stream is STILL UNJUDGED — the diagnosis is appended to the verdict, never instead of it', typeof diagnosedMsg === 'string' && says(diagnosedMsg, 'UNJUDGED'));
+  t('…carrying the unmoved sentence verbatim, ⛔ not a softened one', says(diagnosedMsg, 'missing from the readings above, not clean in them.'));
+  t('…and the pair reads exactly as unread WITHOUT the diagnosis as with it — the gap set is untouched', says(pairUnjudged(streamUnread), CARD_STREAM) && pairUnjudged(streamUnread).endsWith('not clean in them.'));
+  // ⛔ DIRECTION ②: a READABLE stream keeps the verdict it always had.
+  const streamRead = declaredYes({ cardEvents: [], prEvents: [] });
+  t('⛔ CONTROL: a pair whose streams READ is not UNJUDGED, with or without the field', pairUnjudged(streamRead) === null && pairUnjudged({ ...streamRead, reads: [] }) === null);
+  t('⛔ CONTROL: …and its C3 verdict is the one it always was — a diagnosis reads no predicate', typeof c3DeclaredYesUngated(streamRead) === 'string' && c3DeclaredYesUngated({ ...streamRead, reads: [refused403(CARD_STREAM)] }) === c3DeclaredYesUngated(streamRead));
+  t('⛔ CONTROL: a caller that predates the field prints exactly what it printed before', pairUnjudged({ ...streamUnread, reads: undefined }) === pairUnjudged(streamUnread));
+  t('⛔ CONTROL: a non-array `reads` is ignored rather than rendered as half a diagnosis', renderReadDiagnosis('403') === '' && renderReadDiagnosis(null) === '' && renderReadDiagnosis([]) === '');
+  // The channels, each in its own spelling, and the answers that are not statuses.
+  t('the `--pair-json` channel is named as itself — the path an MCP-only seat has', says(renderReadDiagnosis([{ subject: CARD_STREAM, attempts: [{ channel: READ_PATH_PAIR_JSON, answer: 'pair.json carries no `events` entry for `13476`' }] }]), '(iii) --pair-json answered'));
+  t('…and its answer names the BAG and the KEY to add, so the remedy is one line', says(renderReadDiagnosis([{ subject: CARD_STREAM, attempts: [{ channel: READ_PATH_PAIR_JSON, answer: 'pair.json carries no `events` entry for `13476`' }] }]), 'no `events` entry for `13476`'));
+  t('a transport fault with NO status is an answer, ⛔ never rendered as silence', says(renderReadDiagnosis([{ subject: CARD_STREAM, attempts: [{ channel: READ_PATH_PUBLIC, answer: 'no HTTP response (fetch failed)' }] }]), 'no HTTP response (fetch failed)'));
+  t('a page cap that went short names the cap, ⛔ never a refusal nobody got', says(renderReadDiagnosis([{ subject: CARD_STREAM, attempts: [{ channel: READ_PATH_TOKEN, answer: '10 page(s) of 100 events each, all of them full — the tail is past this file\'s page cap and therefore unread' }] }]), 'past this file\'s page cap'));
+  t('⛔ an entry with NO recorded attempt SAYS so — it never borrows the last channel that worked', says(renderReadDiagnosis([{ subject: CARD_STREAM, attempts: [] }]), 'NO channel recorded an answer'));
+  t('…and that entry can never be read as a channel that answered', !says(renderReadDiagnosis([{ subject: CARD_STREAM, attempts: [] }]), 'answered HTTP'));
+  t('an unrecognised channel id renders VISIBLY rather than vanishing from the ladder', says(renderReadDiagnosis([{ subject: CARD_STREAM, attempts: [{ channel: 'mcp', answer: 'HTTP 403' }] }]), '(?) mcp answered HTTP 403'));
+  t('the three labels are read from READ_PATH_LABELS, so a fourth channel needs an edit there', Object.keys(READ_PATH_LABELS).length === 3 && READ_PATH_LABELS[READ_PATH_TOKEN] === '(i) token');
+  t('⛔ CONTROL: the labels are the PATH REPORT\'s own spellings — one channel, ⛔ never two names', Object.values(READ_PATH_LABELS).every((label) => says(renderReadPathReport({ served: new Map() }), label.split(' ')[0])));
+  // BOTH carriers, and the other two sentences that report an unread read.
+  const bothUnread = { ...declaredYes({ cardEvents: null, prEvents: null }), reads: [refused403(CARD_STREAM), refused403(PR_STREAM)] };
+  t('two unread carriers produce two entries, each naming its own carrier', says(pairUnjudged(bothUnread), CARD_STREAM) && says(pairUnjudged(bothUnread), PR_STREAM));
+  t('…in the order the reader attached them, ⛔ never merged into one reading', pairUnjudged(bothUnread).indexOf(`${CARD_STREAM} — (i)`) < pairUnjudged(bothUnread).indexOf(`${PR_STREAM} — (i)`));
+  t('C5\'s own UNJUDGED sentence carries the same diagnosis, in the same words', says(String(wideningUnjudged({ ...pair({ files: null }), reads: [refused403('PR #13910\'s changed-file listing')] }, 'objectstack-ai/objectstack')), '(i) token answered HTTP 403'));
+  t('…and so does the located-record one, so no refusal in this file is channel-silent', says(String(locatedRecordUnjudged({ ...pair({ prComments: null }), reads: [refused403('PR #13910\'s comment thread')] })), '(i) token answered HTTP 403'));
+  t('⛔ CONTROL: each of those two is unchanged when nothing was diagnosed', String(wideningUnjudged(pair({ files: null }), 'objectstack-ai/objectstack')).endsWith(String(pairWidening(pair({ files: null }), 'objectstack-ai/objectstack').text)) && !says(String(locatedRecordUnjudged(pair({ prComments: null }))), 'Channel diagnosis'));
+  t('the ledger key is one spelling for both the reader and the attach side', readDiagnosisKey('events', 13476) === 'events:13476');
+  // The retry and the page ladder answer the same thing twice; one read
+  // reported as two refusals reads like two problems.
+  const twice = [{ channel: READ_PATH_PUBLIC, answer: 'HTTP 403' }, { channel: READ_PATH_PUBLIC, answer: 'HTTP 403' }];
+  t('a repeated identical answer collapses and CARRIES ITS COUNT — one read, not two problems', says(renderReadDiagnosis([{ subject: CARD_STREAM, attempts: twice }]), 'HTTP 403 (2× — the same answer on every attempt)'));
+  t('⛔ …and two DIFFERENT answers are never collapsed — "403 then 502" is the whole reading', says(renderReadDiagnosis([{ subject: CARD_STREAM, attempts: [twice[0], { channel: READ_PATH_PUBLIC, answer: 'HTTP 502' }] }]), 'HTTP 403, then (ii) token-less public read answered HTTP 502'));
 
   // -- the exit register is distinct in every direction it must be -----------
   // -- C5: the direction claim, checked against the diff (#16448) -----------
