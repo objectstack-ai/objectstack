@@ -16506,14 +16506,53 @@ export function h67ReadOrder(issues, cap = H67_TIMELINE_READ_CAP) {
  * all — which is the weakest evidence of delivery there is, and the row says so
  * rather than upgrading it.
  */
-export function h67DeclaredRelation(body, n) {
+export function h67DeclaredRelation(body, n, repo) {
   const target = String(n);
   const text = String(body ?? '');
   const keyword = closingKeywordTargets(text).get(target);
   if (keyword) return { relation: 'closing', keyword };
   if (partOfTargets(text).has(target)) return { relation: 'part-of', keyword: null };
   if (refsTargets(text).has(target)) return { relation: 'refs', keyword: null };
+  // `referencedNumbers` rather than a fifth grammar — H59's own call, for its
+  // reason: a mention is a POINTER A READER FOLLOWS, so fenced blocks go and an
+  // inline span STAYS. Measured on the filer's instance three: PR #17309's body
+  // opens 「Addresses items 1 and 3 of #16565」 and declares nothing at all.
+  if (referencedNumbers(text, repo).has(Number(n))) return { relation: 'mention', keyword: null };
   return { relation: 'none', keyword: null };
+}
+
+/**
+ * The READ pass audit (#18372) — read off this file's own source, the detector
+ * shape `h66BuyAudit`, `seatWindowAudit` and `familyRegistryCoverage` use, and
+ * for their reason: the pass lives inside `sweepInto`, which takes no
+ * injectable transport, so the two properties a spy would prove have to be
+ * proved on the text.
+ *
+ *   timelineSites   call sites requesting a card TIMELINE page. Exactly TWO in
+ *                   this file — H59's per-card read and this row's — and a
+ *                   third is a new row quietly spending a page per card against
+ *                   a budget three rows now share.
+ *   cacheWrites     `commentCache` writes, file-wide. This pass must add NONE:
+ *                   a timeline page's `commented` events are the thread's
+ *                   OLDEST window — the object #18312 measured as five weeks
+ *                   stale — and handing it to H2's claim read or H4's fallback
+ *                   would manufacture an absence out of a window nobody chose.
+ *
+ * ⚠️ The needles are ASSEMBLED, for `SEAT_MEMO_OPEN`'s measured reason: a
+ * literal one would be found at its own declaration in this very file.
+ *
+ * @param {string} [source] — defaults to this file; injectable for the self-test.
+ * @returns {{ timelineSites: number, cacheWrites: number }}
+ */
+export function h67ReadAudit(source) {
+  const text =
+    typeof source === 'string' ? source : readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  const timeline = new RegExp(['/issues/', '\\$\\{[A-Za-z.]+\\}', '/timeline', '\\?'].join(''), 'g');
+  const cache = new RegExp(['commentCache', '\\.set\\('].join(''), 'g');
+  return {
+    timelineSites: (text.match(timeline) ?? []).length,
+    cacheWrites: (text.match(cache) ?? []).length,
+  };
 }
 
 /**
@@ -16550,7 +16589,7 @@ export function h67TimelineDelivery(rows, cardNumber, repo, pageSize = H67_TIMEL
       // the row says the relation went unread rather than inventing one.
       const declared = foreign
         ? { relation: 'foreign', keyword: null }
-        : h67DeclaredRelation(src?.body ?? '', cardNumber);
+        : h67DeclaredRelation(src?.body ?? '', cardNumber, repo);
       out.merged.push({
         number,
         repo: from,
@@ -16657,7 +16696,9 @@ export function h67QueuedCardWithMergedDelivery(issue, timeline, repo) {
             ? `\`Refs #${issue.number}\``
             : m.relation === 'foreign'
               ? 'a FOREIGN repo, so its body was ⛔ not read for a relation'
-              : 'NO declaration to this card in its body at all'
+              : m.relation === 'mention'
+                ? `a BARE mention of \`#${issue.number}\`, with NO relation keyword bound to it`
+                : 'NO reference to this card in its body at all — the cross-reference came from somewhere else on the PR'
     })`;
   const bucket =
     closing.length > 0
@@ -17102,6 +17143,22 @@ export const SWEEP_COUNT_KEYS = [
   'queueReleaseDeferred',
   'queueReleaseUnjudged',
   'queueReleaseRows',
+  // H67's coverage QUADRUPLE (#18372). `queueDeliveryCandidates` is the whole
+  // unassigned queue population (`h67SpeaksAbout`, which IS H66's),
+  // `queueDeliveryRead` how many of them got their one timeline page this run,
+  // `queueDeliveryRows` what was LISTED, and `queueDeliveryDeferred` the
+  // candidates the cap did NOT attempt — the fourth member, and the one the
+  // filing card demands, because a partial read published as a zero is the fake
+  // number it is about. `queueDeliveryCap` is a CONSTANT on the contract rather
+  // than a count, so the clause can say `cap K` without a second import, and
+  // `queueDeliveryUnjudged` is the two ways a bought page still answers nothing
+  // (the fetch failed, or the page came back FULL).
+  'queueDeliveryCandidates',
+  'queueDeliveryRead',
+  'queueDeliveryCap',
+  'queueDeliveryDeferred',
+  'queueDeliveryUnjudged',
+  'queueDeliveryRows',
   'refBeyond',
 ];
 
@@ -23683,10 +23740,20 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // discharge). A negative with no live control beside it is how a repair
   // becomes a silencer, so the controls are inside the same floored battery.
   'H19 judged-set founding': 34,
+  // Registered with the queued merged-delivery reading (#18372); the pin sits
+  // just under that on its neighbours' grounds. What this battery floors is a
+  // LISTING whose whole value is its discriminators — the bucket a card lands
+  // in, the closing condition it quotes, the ownership record it dates against
+  // the merge — plus the two negatives the filing card rules on TWICE: a
+  // `Part of` card must never read as a candidate for closing, and an OPEN PR
+  // must stand the row down. A listing whose discriminators quietly stopped
+  // being asserted would still print rows, and every one of them would read as
+  // 「close this」, which is the one thing the card forbids.
+  'H67 queued merged-delivery reading': 1,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
-export const SELF_TEST_BATTERY_FLOOR = 2;
+export const SELF_TEST_BATTERY_FLOOR = 3;
 
 async function selfTest() {
   const cases = [];
@@ -33826,6 +33893,282 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY66, 'H66 floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY66] > 0, true);
   b(BATTERY66, 'H66 floor: the roster is frozen', Object.isFrozen(SELF_TEST_BATTERIES), true);
   b(BATTERY66, 'H66 floor: …and the roster floor is at least one battery', SELF_TEST_BATTERY_FLOOR >= 1, true);
+
+
+  // -- BATTERY: H67 — a queued card a PR already landed on (#18372) ----------
+  //
+  // Every case here goes through `b(BATTERY67, …)` rather than `t(…)`, so
+  // deleting the block fails the roster floor instead of shrinking a total
+  // nobody reads — the H66 and H19 batteries' shape, the file's third.
+  //
+  // ⛔ The self-test never touches GitHub. Every fixture below is shaped on a
+  // LIVE reading taken 2026-09-17 off the three instances the filing card
+  // names, and the two that must NOT be listed as candidates for closing are
+  // exercised here precisely BECAUSE they must not be.
+  //
+  // ⭐ The load-bearing fact the card rules on, pinned as a pair rather than
+  // asserted in prose: #15815 (work done, closed) and #16529 (a true remainder,
+  // correctly KEPT) carry the SAME machine evidence — a merged PR declaring
+  // `Part of #N` and nothing else. So no bucket here may read as 「close this」,
+  // and the `Part of` bucket says so in as many words (acceptance ③).
+  const BATTERY67 = 'H67 queued merged-delivery reading';
+  const REPO67 = 'objectstack-ai/objectstack';
+  const xref67 = (number, { merged = null, state = 'closed', body = '', repo = REPO67, at = '2026-09-05T12:00:00Z' } = {}) => ({
+    event: 'cross-referenced',
+    created_at: at,
+    source: { type: 'issue', issue: { number, state, body, repository: { full_name: repo }, pull_request: { merged_at: merged } } },
+  });
+  const comment67 = (body, at) => ({ event: 'commented', body, created_at: at });
+  const card67 = (extra = {}) => ({
+    number: 15815,
+    state: 'open',
+    labels: [{ name: 'pm:queue' }, { name: 'domain:devx' }, { name: 'priority:p2' }],
+    assignees: [],
+    created_at: '2026-08-28T00:00:00Z',
+    body: '## What\n\n`git merge-tree` is read-only in name only here.\n',
+    ...extra,
+  });
+  const tl67 = (rows, extra = {}) => h67TimelineDelivery(rows, card67(extra).number, REPO67);
+  const h67 = (rows, extra = {}) => h67QueuedCardWithMergedDelivery(card67(extra), tl67(rows, extra), REPO67);
+  const h67row = (rows, extra = {}) => String(h67(rows, extra) ?? '');
+
+  // INSTANCE ONE — objectstack#15815, in its recorded shape: two merged PRs
+  // both declaring `Part of #15815` (#15868 12:49:58Z, #15885 09:15:52Z), and
+  // the card's own closing condition parked in a landing-record COMMENT
+  // (`5551946223`) rather than in the body. Listed.
+  const I15815 = [
+    xref67(15868, { merged: '2026-09-05T12:49:58Z', body: 'Part of #15815 — the ORDINARY half only.' }),
+    xref67(15885, { merged: '2026-09-07T09:15:52Z', body: 'Fixes #15871\nPart of #15815 — the GOVERNED half.' }),
+    comment67('**LANDED (partial — `Part of`)** — PR #15868 merged.\n\nRemainder: the governed half, #15871 / draft PR #15885; it closes when #15885 lands.', '2026-09-05T12:52:22Z'),
+  ];
+  b(BATTERY67, 'H67 #15815: a queued card with two merged PRs and no open one is LISTED', typeof h67(I15815), 'string');
+  b(BATTERY67, 'H67 #15815: …naming both merges with their dates', h67row(I15815).includes('#15868 (merged 2026-09-05') && h67row(I15815).includes('#15885 (merged 2026-09-07'), true);
+  b(BATTERY67, 'H67 #15815: …and the relation each one declared', (h67row(I15815).match(/`Part of #15815`/g) ?? []).length, 2);
+  b(BATTERY67, 'H67 #15815: ⭐ the card\'s own closing condition is QUOTED, not paraphrased', h67row(I15815).includes('it closes when #15885 lands'), true);
+  b(BATTERY67, 'H67 #15815: …with the channel it was read from', h67row(I15815).includes('states one in the thread'), true);
+  b(BATTERY67, 'H67 #15815: …and the anchor named beside the live comment it was measured on', h67row(I15815).includes('measured on objectstack#15815 `5551946223`'), true);
+  b(BATTERY67, 'H67 #15815: the ownership reading says nobody looked since the merge', h67row(I15815).includes('nobody has looked at this card SINCE the delivery landed'), true);
+
+  // INSTANCE TWO — objectstack#16529, `Part of #16529` on merged PR #18347 and
+  // a TRUE remainder. ⛔ It must never read as a candidate for closing, and the
+  // row says so on its face. This is acceptance ③.
+  const I16529 = [xref67(18347, { merged: '2026-09-16T02:39:26Z', body: 'Part of #16529\n\nSegment 1 only — the `limit 2` question.' })];
+  b(BATTERY67, 'H67 #16529: a `Part of`-only card is listed, because the queue count is what is wrong', typeof h67(I16529, { number: 16529 }), 'string');
+  b(BATTERY67, 'H67 #16529: ⭐ …and it is ⛔ NOT A CANDIDATE FOR CLOSING, in as many words', h67row(I16529, { number: 16529 }).includes('⛔ NOT A CANDIDATE FOR CLOSING'), true);
+  b(BATTERY67, 'H67 #16529: …naming H49 as the row that owns the shape', h67row(I16529, { number: 16529 }).includes("H49's shape"), true);
+  b(BATTERY67, 'H67 #16529: …and quoting the partial-landing rule VERBATIM rather than paraphrasing it', h67row(I16529, { number: 16529 }).includes(PARTIAL_RULE_LINE), true);
+  b(BATTERY67, 'H67 #16529: …saying what IS owed instead — a re-read, ⛔ never a close', h67row(I16529, { number: 16529 }).includes('a RE-READ of the remainder, ⛔ never a close'), true);
+  // ⭐ The pair that carries the card's ruling: the two instances differ in
+  // their disposition and NOT in their machine evidence.
+  b(BATTERY67, 'H67 ⭐ #15815 and #16529 land in the SAME bucket — the evidence cannot tell them apart', h67row(I15815).includes('⛔ NOT A CANDIDATE FOR CLOSING') && h67row(I16529, { number: 16529 }).includes('⛔ NOT A CANDIDATE FOR CLOSING'), true);
+  b(BATTERY67, 'H67 ⭐ …which is why every row says 「有已合 PR」 is NOT a closing criterion', h67row(I15815).includes('⛔ 「有已合 PR」 is NOT a closing criterion'), true);
+  b(BATTERY67, 'H67 ⭐ …and names both instances as the proof', h67row(I16529, { number: 16529 }).includes('#15815 (work done)') && h67row(I16529, { number: 16529 }).includes('#16529 (a true remainder, correctly KEPT)'), true);
+
+  // INSTANCE THREE — objectstack#16565, whose merged PRs name the card with NO
+  // relation keyword at all (「Addresses items 1 and 3 of #16565」) and whose
+  // third linked PR does not reference it in its body. Listed, weakest bucket.
+  const I16565 = [
+    xref67(17309, { merged: '2026-09-10T06:53:54Z', body: 'Addresses items 1 and 3 of #16565. **This PR does not close that card**.' }),
+    xref67(17310, { merged: '2026-09-13T14:08:38Z', body: 'Item 2 of #16565. No closing keyword is used here.' }),
+    xref67(17766, { merged: '2026-09-12T04:36:25Z', body: 'Fixes #17149\n\nA `Claim:` comment that parses to ZERO branches.' }),
+  ];
+  b(BATTERY67, 'H67 #16565: a card reached only by BARE mentions is listed too', typeof h67(I16565, { number: 16565 }), 'string');
+  b(BATTERY67, 'H67 #16565: …the mention is named as a bare one, ⛔ not upgraded to a declaration', h67row(I16565, { number: 16565 }).includes('a BARE mention of `#16565`, with NO relation keyword bound to it'), true);
+  b(BATTERY67, 'H67 #16565: …a PR that names the card NOWHERE in its body says exactly that', h67row(I16565, { number: 16565 }).includes('NO reference to this card in its body at all'), true);
+  b(BATTERY67, 'H67 #16565: …and the bucket declares itself the WEAKEST evidence', h67row(I16565, { number: 16565 }).includes('Weakest evidence of the three'), true);
+  b(BATTERY67, 'H67 #16565: …carrying the reason it is listed anyway — this instance\'s work really was done', h67row(I16565, { number: 16565 }).includes('its work really was done'), true);
+  b(BATTERY67, 'H67 #16565: a card that states NO closing condition says so, ⛔ rather than going quiet', h67row(I16565, { number: 16565 }).includes('⛔ NONE this row can find'), true);
+  b(BATTERY67, 'H67 #16565: …and names how many anchors it looked for', h67row(I16565, { number: 16565 }).includes(`${H67_CLOSING_CONDITION_ANCHORS.length} frozen anchor(s)`), true);
+
+  // The CLOSING-KEYWORD bucket — the strongest evidence, and still ⛔ not a
+  // criterion. It is also the ONE overlap with H59, stated rather than hidden.
+  const CLOSING67 = [xref67(17558, { merged: '2026-09-10T23:44:33Z', body: 'Fixes #15815\n\nthe delivery.' })];
+  b(BATTERY67, 'H67 closing: a merged PR BINDING a closing keyword fires its own bucket', h67row(CLOSING67).includes('BINDS A CLOSING KEYWORD'), true);
+  b(BATTERY67, 'H67 closing: …naming the keyword as written', h67row(CLOSING67).includes('`Fixes #15815`'), true);
+  b(BATTERY67, 'H67 closing: …and still refusing to read it as a criterion', h67row(CLOSING67).includes('still ⛔ NOT a criterion'), true);
+  b(BATTERY67, 'H67 closing: ⛔ …and never as a `Part of` card', h67row(CLOSING67).includes('⛔ NOT A CANDIDATE FOR CLOSING'), false);
+
+  // THE B BUCKET — an OPEN PR is work in flight and stands the row down.
+  b(BATTERY67, 'H67 B bucket: an OPEN linked PR stands the row down', h67([...I15815, xref67(18648, { state: 'open', body: 'Fixes #18343' })]), null);
+  b(BATTERY67, 'H67 B bucket: …even when it declares nothing about this card', h67([...I16529, xref67(99, { state: 'open', body: 'unrelated' })], { number: 16529 }), null);
+  // THE C BUCKET — no linked PR at all.
+  b(BATTERY67, 'H67 C bucket: a card with NO cross-referenced PR is silent', h67([comment67('graded p2', '2026-09-01T00:00:00Z')]), null);
+  b(BATTERY67, 'H67 C bucket: …a cross-referenced ISSUE is not a PR and does not count', h67([{ event: 'cross-referenced', created_at: 'x', source: { type: 'issue', issue: { number: 6023, state: 'open', repository: { full_name: REPO67 } } } }]), null);
+  b(BATTERY67, 'H67 C bucket: an empty timeline is a real reading, ⛔ not a crash', h67([]), null);
+  // ABANDONED — closed, never merged. It neither fires nor clears, and it is
+  // NAMED, because a reader told 「none is open」 should know one was dropped.
+  b(BATTERY67, 'H67 abandoned: a closed-unmerged PR alone founds nothing', h67([xref67(77, { state: 'closed', body: 'Part of #15815' })]), null);
+  b(BATTERY67, 'H67 abandoned: …beside a merged one it is NAMED on the row', h67row([...I16529, xref67(77, { state: 'closed', body: 'Part of #16529' })], { number: 16529 }).includes('1 further linked PR(s) CLOSED WITHOUT MERGING (#77)'), true);
+  b(BATTERY67, 'H67 abandoned: …and is ⛔ never counted as an open PR', typeof h67([...I16529, xref67(77, { state: 'closed' })], { number: 16529 }), 'string');
+
+  // RECENCY — H49's stand-down, reused: a seat that looked SINCE the merge.
+  const RELEASED67 = [...I16529, comment67('Release: session `session_x` — 去向 `pm:queue`, next seat re-claims', '2026-09-16T03:11:44Z')];
+  b(BATTERY67, 'H67 recency: a `Release:` NEWER than the merge stands the row down', h67(RELEASED67, { number: 16529 }), null);
+  b(BATTERY67, 'H67 recency: a `Claim:` newer than the merge does too — the remainder is re-dispatched', h67([...I16529, comment67('Claim: PM loop round 2\nBranch: `claude/issue-16529-x`', '2026-09-16T03:11:44Z')], { number: 16529 }), null);
+  b(BATTERY67, 'H67 recency: …a blockquoted marker reads the same, as at the claim marker', h67([...I16529, comment67('> Release: session `session_x`', '2026-09-16T03:11:44Z')], { number: 16529 }), null);
+  b(BATTERY67, 'H67 recency: a marker OLDER than the merge does NOT stand it down — that seat never saw the landing', typeof h67([comment67('Claim: PM loop round 1', '2026-09-01T00:00:00Z'), ...I16529], { number: 16529 }), 'string');
+  b(BATTERY67, 'H67 recency: ⛔ an ordinary comment after the merge is not an ownership record', typeof h67([...I16529, comment67('a reading, no marker here', '2026-09-16T03:11:44Z')], { number: 16529 }), 'string');
+  // …and an UNPLACEABLE marker LISTS rather than clears — H66's call on an
+  // unreadable record, the #4690 direction for a listing.
+  const UNPLACEABLE67 = [...I16529, comment67('Release: session `session_x`', 'not-a-timestamp')];
+  b(BATTERY67, 'H67 recency: a marker whose stamp does not parse LISTS rather than clears', typeof h67(UNPLACEABLE67, { number: 16529 }), 'string');
+  b(BATTERY67, 'H67 recency: …and the row says the record could not be PLACED against the merge', h67row(UNPLACEABLE67, { number: 16529 }).includes('cannot be PLACED against the merge'), true);
+  b(BATTERY67, 'H67 recency: …citing the reason a listing lists rather than clears', h67row(UNPLACEABLE67, { number: 16529 }).includes('exactly what a human should look at'), true);
+  // ⚠️ THE DECLARED LOSS, pinned as a control rather than hidden: a DECORATED
+  // release line is invisible to `RELEASE_COMMENT_MARKER`, measured live on
+  // objectstack#16529 `5697022358`. The row FIRES and DECLARES the loss; ⛔
+  // widening the marker is H2/H47/H66's surface and a different card.
+  b(BATTERY67, 'H67 ⚠️ loss: a DECORATED `**Release:**` line does not stand the row down', typeof h67([...I16529, comment67('**Release:** session `session_x` — 去向 `pm:queue`', '2026-09-16T03:11:44Z')], { number: 16529 }), 'string');
+  b(BATTERY67, 'H67 ⚠️ loss: …and the row DECLARES that blind spot rather than hiding it', h67row(I16529, { number: 16529 }).includes('a DECORATED ownership line'), true);
+  b(BATTERY67, 'H67 ⚠️ loss: …the marker really does refuse the decorated spelling, so the control is live', RELEASE_COMMENT_MARKER.test('**Release:** session `session_x`'), false);
+  b(BATTERY67, 'H67 ⚠️ loss: …while the bare spelling still matches, so the reader is not simply broken', RELEASE_COMMENT_MARKER.test('Release: session `session_x`'), true);
+
+  // THE THREE PAGE STATES, never two (#4690) — H59's contract verbatim.
+  b(BATTERY67, 'H67 page: an UNBOUGHT page is UNJUDGED, ⛔ never clean', h67QueuedCardWithMergedDelivery(card67(), undefined, REPO67), null);
+  b(BATTERY67, 'H67 page: a FAILED fetch is UNJUDGED too', h67QueuedCardWithMergedDelivery(card67(), null, REPO67), null);
+  b(BATTERY67, 'H67 page: a FULL page may hide a later merge or a later `Claim:` — UNJUDGED', h67QueuedCardWithMergedDelivery(card67(), h67TimelineDelivery(Array.from({ length: H67_TIMELINE_PAGE_SIZE }, () => I15815[0]), 15815, REPO67), REPO67), null);
+  b(BATTERY67, 'H67 page: …and a page one SHORT of full is complete and judged', typeof h67QueuedCardWithMergedDelivery(card67(), h67TimelineDelivery([...Array.from({ length: H67_TIMELINE_PAGE_SIZE - 1 }, () => I15815[0])], 15815, REPO67), REPO67), 'string');
+  b(BATTERY67, 'H67 page: a non-array page is ⛔ never read as an empty one', h67TimelineDelivery(undefined, 15815, REPO67).complete, false);
+
+  // THE POPULATION GATES — H66's, called rather than restated.
+  const NEGATIVES67 = [
+    ['a card with NO `pm:queue` — nothing over-reads it as capacity', { labels: [{ name: 'tracking' }] }],
+    ['a CLOSED card — the queue label on it is residue the closed census counts', { state: 'closed' }],
+    ['a PULL REQUEST — the dispatch pool is cards, ⛔ never PRs', { pull_request: { url: 'x' } }],
+    ['an unreadable `labels` — ⛔ never read as unlabelled', { labels: undefined }],
+    ['an ASSIGNED card — that is H24\'s row', { assignees: [{ login: 'os-justin' }] }],
+    ['a card ALSO carrying `pm:dispatched` — H3\'s contradiction, ⛔ not an exit', { labels: [{ name: 'pm:queue' }, { name: 'pm:dispatched' }] }],
+    ['a card ALSO carrying `needs-user-decision` — the board reads it as somewhere else', { labels: [{ name: 'pm:queue' }, { name: 'needs-user-decision' }] }],
+  ];
+  b(BATTERY67, 'H67 population: the negative table is exercised WHOLE — seven fixtures, none quietly dropped', NEGATIVES67.length, 7);
+  for (const [why, extra] of NEGATIVES67) b(BATTERY67, `H67 silent: ${why}`, h67(I15815, extra), null);
+  b(BATTERY67, 'H67 population: …and it is H66\'s gate CALLED, so the two rows cannot drift apart', h67SpeaksAbout(card67()) === h66SpeaksAbout(card67()), true);
+  b(BATTERY67, 'H67 population: the predicate does not crash on a missing card', h67QueuedCardWithMergedDelivery(undefined, tl67(I15815), REPO67), null);
+
+  // A FOREIGN PR — counted as a merge, its body ⛔ NOT read for a relation,
+  // because a bare `#N` in another repo's PR names a card in THAT repo.
+  const FOREIGN67 = [xref67(9498, { merged: '2026-09-05T12:00:00Z', repo: 'objectstack-ai/objectui', body: 'Fixes #15815' })];
+  b(BATTERY67, 'H67 foreign: a foreign merged PR is still a delivery on this card\'s timeline', typeof h67(FOREIGN67), 'string');
+  b(BATTERY67, 'H67 foreign: …named with its own repo', h67row(FOREIGN67).includes('objectstack-ai/objectui#9498'), true);
+  b(BATTERY67, 'H67 foreign: ⛔ …and its body is NOT read for a relation to this board\'s `#N`', h67row(FOREIGN67).includes('a FOREIGN repo, so its body was ⛔ not read for a relation'), true);
+  b(BATTERY67, 'H67 foreign: ⛔ …so it can never be mistaken for a closing keyword bound here', h67row(FOREIGN67).includes('BINDS A CLOSING KEYWORD'), false);
+
+  // THE RELATION LADDER — one grammar per rung, this file's own four, CALLED.
+  b(BATTERY67, 'H67 relation: a closing keyword wins the ladder', h67DeclaredRelation('Fixes #15815', 15815, REPO67).relation, 'closing');
+  b(BATTERY67, 'H67 relation: …carrying the keyword the author wrote', h67DeclaredRelation('Resolves #15815', 15815, REPO67).keyword, 'Resolves');
+  b(BATTERY67, 'H67 relation: `Part of` is the next rung', h67DeclaredRelation('Part of #15815', 15815, REPO67).relation, 'part-of');
+  b(BATTERY67, 'H67 relation: `Refs` is the third', h67DeclaredRelation('Refs #15815 (item 2)', 15815, REPO67).relation, 'refs');
+  b(BATTERY67, 'H67 relation: a bare mention is the fourth', h67DeclaredRelation('Addresses item 1 of #15815.', 15815, REPO67).relation, 'mention');
+  b(BATTERY67, 'H67 relation: …and no reference at all is a real answer', h67DeclaredRelation('Fixes #17149', 15815, REPO67).relation, 'none');
+  b(BATTERY67, 'H67 relation: ⛔ bound PER CARD NUMBER — a keyword on ANOTHER card is not this card\'s', h67DeclaredRelation('Fixes #15871\nPart of #15815', 15815, REPO67).relation, 'part-of');
+  b(BATTERY67, 'H67 relation: …and that other card reads its own keyword', h67DeclaredRelation('Fixes #15871\nPart of #15815', 15871, REPO67).relation, 'closing');
+  b(BATTERY67, 'H67 relation: a BACKTICKED keyword is inert to GitHub and to this ladder', h67DeclaredRelation('the body says `Fixes #15815` in a span', 15815, REPO67).relation, 'mention');
+
+  // THE CLOSING-CONDITION READER — measured anchors, quoted lines, and the
+  // shapes it structurally refuses.
+  b(BATTERY67, 'H67 condition: the BODY is read first', h67ClosingConditionLine('## 验收(⛔ 不规定实现)\n\n1. judge per card.\n', []).spelling, '## 验收 — the acceptance section');
+  b(BATTERY67, 'H67 condition: …and the matched LINE is what is quoted', h67ClosingConditionLine('## 验收(⛔ 不规定实现)\n', []).line, '## 验收(⛔ 不规定实现)');
+  b(BATTERY67, 'H67 condition: a condition parked in a COMMENT is found when the body is clean', h67ClosingConditionLine('## What\n\nnothing.\n', [{ body: 'it closes when #15885 lands.', created_at: '2026-09-05T12:52:22Z' }]).channel, 'the thread');
+  b(BATTERY67, 'H67 condition: comments are read NEWEST-first, so a later record supersedes an older one', h67ClosingConditionLine('', [{ body: 'it closes when #1 lands', created_at: '2026-09-01T00:00:00Z' }, { body: 'it closes when #2 lands', created_at: '2026-09-09T00:00:00Z' }]).line, 'it closes when #2 lands');
+  b(BATTERY67, 'H67 condition: ⛔ a condition inside a FENCE declares nothing', h67ClosingConditionLine('## What\n\n```\nit closes when #15885 lands\n```\n', []), null);
+  b(BATTERY67, 'H67 condition: ⛔ …and a tilde fence likewise', h67ClosingConditionLine('~~~\nit closes when #15885 lands\n~~~\n', []), null);
+  b(BATTERY67, 'H67 condition: a card stating none at all answers null, ⛔ never a guess', h67ClosingConditionLine('## What\n\na `groupBy` survives the lane resolve.\n', []), null);
+  b(BATTERY67, 'H67 condition: a long line is bounded and says it was cut', h67ClosingConditionLine(`it closes when ${'x'.repeat(H67_QUOTE_LIMIT + 50)}`, []).line.endsWith('…'), true);
+  b(BATTERY67, 'H67 condition: …at the declared limit', h67ClosingConditionLine(`it closes when ${'x'.repeat(H67_QUOTE_LIMIT + 50)}`, []).line.length, H67_QUOTE_LIMIT + 1);
+  b(BATTERY67, 'H67 condition: the anchor set is FROZEN', Object.isFrozen(H67_CLOSING_CONDITION_ANCHORS), true);
+  b(BATTERY67, 'H67 condition: …and inside its own cap', H67_CLOSING_CONDITION_ANCHORS.length <= H67_CLOSING_CONDITION_ANCHOR_CAP, true);
+  b(BATTERY67, 'H67 condition: every anchor names the live instance it was measured on', H67_CLOSING_CONDITION_ANCHORS.every((a) => typeof a.instance === 'string' && a.instance.length > 20), true);
+  b(BATTERY67, 'H67 condition: …and every one of them is MEASURED, ⛔ none carried from imagination', H67_CLOSING_CONDITION_ANCHORS.every((a) => a.measured === true), true);
+  b(BATTERY67, 'H67 condition: a non-string body is not a crash', h67ClosingConditionLine(undefined, undefined), null);
+
+  // THE READ PLAN — OLDEST-FIRST, the OPPOSITE of H66's, and the cap.
+  const CAND67 = [
+    { number: 1, created_at: '2026-09-10T00:00:00Z', labels: [{ name: 'pm:queue' }] },
+    { number: 2, created_at: '2026-08-01T00:00:00Z', labels: [{ name: 'pm:queue' }] },
+    { number: 3, created_at: '2026-09-01T00:00:00Z', labels: [{ name: 'pm:queue' }, { name: 'priority:p0' }] },
+    { number: 4, created_at: 'not-a-date', labels: [{ name: 'pm:queue' }] },
+  ];
+  const order67 = (rows, cap) => h67ReadOrder(rows, cap).read.map((i) => i.number).join(',');
+  b(BATTERY67, 'H67 order: `priority:p0` is reached FIRST, whatever its age', order67(CAND67, 4), '3,2,1,4');
+  b(BATTERY67, 'H67 order: …then OLDEST-FIRST among equals, which is the order in force', order67(CAND67.filter((i) => i.number !== 3), 3), '2,1,4');
+  b(BATTERY67, 'H67 order: ⛔ an unreadable `created_at` sorts LAST, ⛔ never promoted', order67([CAND67[3], CAND67[1]], 2), '2,4');
+  b(BATTERY67, 'H67 order: `pm:blocking` ranks above p1, as the selection order does', order67([{ number: 8, created_at: '2026-09-10T00:00:00Z', labels: [{ name: 'priority:p1' }] }, { number: 9, created_at: '2026-09-11T00:00:00Z', labels: [{ name: 'pm:blocking' }] }], 2), '9,8');
+  b(BATTERY67, 'H67 order: ⭐ it is the OPPOSITE of H66\'s, and that is the point', order67(CAND67.filter((i) => i.number !== 3 && i.number !== 4), 2) === h66BuyOrder(CAND67.filter((i) => i.number !== 3 && i.number !== 4).map((i) => ({ ...i, updated_at: i.created_at })), 2).buy.map((i) => i.number).join(','), false);
+  b(BATTERY67, 'H67 cap: the rest are DEFERRED, ⛔ not dropped silently', h67ReadOrder(CAND67, 2).deferred.map((i) => i.number).join(','), '1,4');
+  b(BATTERY67, 'H67 cap: read + deferred always account for the whole set', h67ReadOrder(CAND67, 2).read.length + h67ReadOrder(CAND67, 2).deferred.length, CAND67.length);
+  b(BATTERY67, 'H67 cap: a cap ABOVE the population reads all of it and defers none', h67ReadOrder(CAND67, 100).deferred.length, 0);
+  b(BATTERY67, 'H67 cap: a zero cap reads nothing and defers everything', `${h67ReadOrder(CAND67, 0).read.length}:${h67ReadOrder(CAND67, 0).deferred.length}`, '0:4');
+  b(BATTERY67, 'H67 cap: a nonsense cap is read as zero, ⛔ never as unbounded', h67ReadOrder(CAND67, Number.NaN).read.length, 0);
+  b(BATTERY67, 'H67 cap: a negative cap likewise', h67ReadOrder(CAND67, -5).read.length, 0);
+  b(BATTERY67, 'H67 cap: an empty candidate set is not a crash', `${h67ReadOrder([], 10).read.length}:${h67ReadOrder([], 10).deferred.length}`, '0:0');
+  b(BATTERY67, 'H67 cap: a non-array is not a crash either', h67ReadOrder(undefined, 10).read.length, 0);
+  b(BATTERY67, 'H67 cap: the plan is PURE — the caller\'s array is not reordered under it', (() => { const input = [...CAND67]; h67ReadOrder(input, 2); return input.map((i) => i.number).join(','); })(), '1,2,3,4');
+  b(BATTERY67, 'H67 cap: the selection-order legs are frozen and partial BY DECLARATION', Object.isFrozen(H67_SELECTION_ORDER_LABELS) && H67_SELECTION_ORDER_LABELS.length, 5);
+
+  // THE PASS ITSELF, read off this file's source — the two properties no
+  // in-process call can observe.
+  const audit67 = h67ReadAudit();
+  b(BATTERY67, 'H67 pass: exactly TWO timeline reads in this file — H59\'s and this row\'s', audit67.timelineSites, 2);
+  b(BATTERY67, 'H67 pass: ⛔ …and this pass adds NO `commentCache` write, so no other row\'s corpus moves', audit67.cacheWrites, 4);
+  b(BATTERY67, 'H67 pass: the audit SEES a third timeline read when one exists', h67ReadAudit(['`/repos/x/issues/', '${n}', '/timeline?per_page=1`'].join('')).timelineSites, 1);
+  b(BATTERY67, 'H67 pass: …and the assembled needles did not defeat the file-wide read', h67ReadAudit().timelineSites >= 2, true);
+  b(BATTERY67, 'H67 pass: ⭐ the located-page purchase bound is untouched — this row buys no COMMENT page', seatWindowAudit().seatPurchaseSites, 1);
+  b(BATTERY67, 'H67 pass: …and no pageless comment path was added', seatWindowAudit().pagelessPaths.length, 1);
+
+  // DISJOINTNESS — argued on each neighbouring row's OWN criterion, as PR
+  // #18514 did for H66.
+  b(BATTERY67, 'H67 disjoint H8: H8 needs `pm:dispatched`, which this population cannot carry', h67SpeaksAbout(card67({ labels: [{ name: 'pm:queue' }, { name: 'pm:dispatched' }] })), false);
+  b(BATTERY67, 'H67 disjoint H49: H49 needs `pm:dispatched` AND an assignee — silent here', h49PartialLandingUnreleased(card67(), [{ number: 18347, body: 'Refs #15815', merged_at: '2026-09-16T02:39:26Z' }], [], []), null);
+  b(BATTERY67, 'H67 disjoint H49: …and this row is silent on H49\'s own carrier', h67SpeaksAbout({ number: 1, state: 'open', labels: [{ name: 'pm:dispatched' }], assignees: [{ login: 'os-justin' }] }), false);
+  b(BATTERY67, 'H67 disjoint H66: H66 reads the NEWEST COMMENT for a release and is silent on a delivery', h66ReleasedNonDispatchableRemainder(card67(), [{ body: 'a landing record, no release', created_at: '2026-09-05T12:52:22Z' }]), null);
+  b(BATTERY67, 'H67 disjoint H66: ⭐ …and the stand-down legs point OPPOSITE ways — a release FIRES H66 and CLEARS this row', `${typeof h66ReleasedNonDispatchableRemainder(card67({ number: 16529 }), [{ body: 'Release: session `session_x` — 去向 the maintainer', created_at: '2026-09-16T03:11:44Z' }])}:${h67(RELEASED67, { number: 16529 })}`, 'string:null');
+  b(BATTERY67, 'H67 disjoint H58: H58 reads the card\'s own RULING heading and never looks at a PR', h58QueuedRulingRow(card67(), []), null);
+  b(BATTERY67, 'H67 disjoint H59: the overlap is STATED on the row rather than hidden', h67row(CLOSING67).includes('still ⛔ NOT a criterion'), true);
+  b(BATTERY67, 'H67 disjoint H59: …and the axes really differ — H59 is bounded by a merged WINDOW this row does not read', MERGED_WINDOW_DAYS > 0 && H67_TIMELINE_READ_CAP > 0, true);
+
+  // THE ROW'S STANDING REFUSALS — the two the card rules on twice.
+  b(BATTERY67, 'H67 refusal: report-only, and it says so', h67row(I15815).includes('⛔ nothing is closed, ⛔ no label is written, ⛔ no state is proposed'), true);
+  b(BATTERY67, 'H67 refusal: ⛔ it judges NONE of the filing lane\'s A-bucket cards for anybody', h67row(I15815).includes('judges NONE of the'), true);
+  b(BATTERY67, 'H67 refusal: the residue clause is on EVERY row, because it is the half a reader skips', h67row(I16565, { number: 16565 }).includes('carry the thread\'s residual readings out into a NEW card first'), true);
+  b(BATTERY67, 'H67 refusal: …quoting the recorded reason', h67row(I15815).includes('a second card would be **invisible** to whoever fixes this one'), true);
+  b(BATTERY67, 'H67 refusal: …and naming the two cards that were filed before the closes', h67row(I15815).includes('#18343 and #18364'), true);
+  b(BATTERY67, 'H67 refusal: the instrument\'s own blind spot is declared on the row', h67row(I15815).includes('a delivery that left NO cross-reference on the timeline is invisible'), true);
+
+  // THE COVERAGE QUADRUPLE — candidates / read / listed / not attempted.
+  const q67 = (counts) => saidBy('h67QueueDelivery', summaryLine(counts, 1));
+  const FULL67 = q67({ queueDeliveryCandidates: 202, queueDeliveryRead: 120, queueDeliveryRows: 41, queueDeliveryDeferred: 82, queueDeliveryCap: H67_TIMELINE_READ_CAP, queueDeliveryUnjudged: 3 });
+  b(BATTERY67, 'H67 quadruple ①: the whole candidate population is stated', FULL67.includes('202 open unassigned `pm:queue` card(s) could be spoken about'), true);
+  b(BATTERY67, 'H67 quadruple ②: …how many were READ this run', FULL67.includes('120 had ONE timeline page READ this run'), true);
+  b(BATTERY67, 'H67 quadruple ③: …how many were LISTED', FULL67.includes('41 LISTED'), true);
+  b(BATTERY67, 'H67 quadruple ④: ⭐ …and how many were NOT ATTEMPTED at the cap', FULL67.includes('82 NOT ATTEMPTED at that cap'), true);
+  b(BATTERY67, 'H67 quadruple: the cap itself is named, so the fourth number can be checked', FULL67.includes(`cap ${H67_TIMELINE_READ_CAP} page(s)`), true);
+  b(BATTERY67, 'H67 quadruple: UNJUDGED is its own number, ⛔ never folded into clean', FULL67.includes('3 card(s) stayed UNJUDGED'), true);
+  b(BATTERY67, 'H67 quadruple: …naming both ways a bought page still answers nothing', FULL67.includes('fetch FAILED') && FULL67.includes('came back FULL'), true);
+  b(BATTERY67, 'H67 quadruple: ⛔ …and saying a candidate the cap skipped is not clean either', FULL67.includes('a candidate the cap did not attempt is not clean either'), true);
+  b(BATTERY67, 'H67 quadruple: the clause renders UNCONDITIONALLY — a zero run is a reading, not a silence', q67({}).includes('0 open unassigned `pm:queue` card(s) could be spoken about'), true);
+  b(BATTERY67, 'H67 quadruple: …and the cap still renders from the constant on a zero run', q67({}).includes(`cap ${H67_TIMELINE_READ_CAP} page(s)`), true);
+  b(BATTERY67, 'H67 quadruple: the clause declares there is NO free half', FULL67.includes('this row has no free half at all'), true);
+  b(BATTERY67, 'H67 quadruple: …and the OLDEST-FIRST order with its reason', FULL67.includes('清不空的那一刻起改最老优先'), true);
+  b(BATTERY67, 'H67 quadruple: ⛔ …and what the order does NOT model', FULL67.includes('⛔ not `target:` board membership'), true);
+  b(BATTERY67, 'H67 quadruple: the anchor is UNIQUE in the rendered line', (summaryLine({}, 0).match(/Queued cards with a merged delivery \(H67\): /g) ?? []).length, 1);
+  b(BATTERY67, 'H67 quadruple: every count key rides the enumerated forwarding contract', ['queueDeliveryCandidates', 'queueDeliveryRead', 'queueDeliveryCap', 'queueDeliveryDeferred', 'queueDeliveryUnjudged', 'queueDeliveryRows'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+
+  // BAND — `state`, with each other band refused on its own criterion.
+  b(BATTERY67, 'H67 band: registered as a STATE row', familyBand('H67'), 'state');
+  b(BATTERY67, 'H67 band: ⛔ NOT `gate` — nothing here decides whether something may LAND', familyBand('H67') === 'gate', false);
+  b(BATTERY67, 'H67 band: ⛔ NOT `stall` — the card is in the pool and a hand read moves it', familyBand('H67') === 'stall', false);
+  b(BATTERY67, 'H67 band: ⛔ NOT `inventory` — the row alarms about ONE card; the population is a clause', familyBand('H67') === 'inventory', false);
+  b(BATTERY67, 'H67 band: the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H67'), true);
+  b(BATTERY67, 'H67 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  b(BATTERY67, 'H67 band: …and none is registered that the sweep never pushes', familyRegistryCoverage().extra.length, 0);
+  b(BATTERY67, 'H67 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
+  b(BATTERY67, 'H67 band: it shares H66\'s band, the row it sits beside', familyBand('H67'), familyBand('H66'));
+
+  // THE ROSTER — a floor that cannot be satisfied by a zero.
+  b(BATTERY67, 'H67 floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY67), true);
+  b(BATTERY67, 'H67 floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY67] > 0, true);
+  b(BATTERY67, 'H67 floor: the roster now declares THREE batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 3);
+  b(BATTERY67, 'H67 floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.
