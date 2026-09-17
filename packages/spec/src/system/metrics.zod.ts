@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { DurationSeconds } from '../shared/duration.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { evaluatedExpressionUnionRefusal } from '../shared/evaluated-slot-union';
 
@@ -408,9 +409,13 @@ export const MetricAggregationConfigSchema = lazySchema(() => z.object({
     sliding: z.boolean().optional().default(false),
 
     /**
-     * Slide interval for sliding windows
+     * Slide interval for sliding windows, in seconds
      */
-    slideInterval: z.number().int().positive().optional(),
+    // Seconds, from the sibling `durationSeconds` this interval slides across in
+    // the same object literal. `.positive()` is kept on top of `DurationSeconds`
+    // (`.int().nonnegative()`) so the floor this key already declared is unchanged.
+    slideInterval: DurationSeconds.positive().optional()
+      .describe('Slide interval for sliding windows, in seconds'),
   }).optional(),
 
   /**
@@ -846,7 +851,10 @@ export const MetricsConfigSchema = lazySchema(() => z.object({
       /**
        * Resolution in seconds
        */
-      resolution: z.number().int().positive().describe('Downsampled resolution'),
+      // The unit lived in the JSDoc alone — the published reference page prints
+      // the describe, so the reader who needed it could not reach it. Typed and
+      // described now; `.positive()` keeps the floor this key already declared.
+      resolution: DurationSeconds.positive().describe('Downsampled resolution in seconds'),
     })).optional(),
   }).optional(),
 

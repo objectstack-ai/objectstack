@@ -620,7 +620,13 @@ export const KernelSecurityPolicySchema = lazySchema(() => z.object({
     allowedMethods: z.array(z.string()),
     allowedHeaders: z.array(z.string()),
     allowCredentials: z.boolean().default(false),
-    maxAge: z.number().int().optional(),
+    // `externalVocabulary` mirror (#14478 ruling B), the same declaration its
+    // twin `CorsConfig.maxAge` (`src/shared/http.zod.ts`) already carries: this
+    // key IS the CORS `Access-Control-Max-Age` response header, whose value the
+    // standard defines in seconds. Renaming it to `maxAgeSeconds` would break the
+    // one-to-one reading between this policy and the header it emits.
+    maxAge: z.number().int().optional().describe('Preflight cache duration in seconds')
+      .meta({ externalVocabulary: 'CORS `Access-Control-Max-Age` (WHATWG Fetch)' }),
   }).optional(),
   
   /**

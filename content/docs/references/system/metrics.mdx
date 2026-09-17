@@ -88,7 +88,7 @@ Metric aggregation configuration
 | **durationSeconds** | `integer` | ✅ | Window duration in seconds |
 | **size** | `never` | optional | [REMOVED] The aggregation/SLI window key `size` was renamed to `durationSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. The new name is not `sizeSeconds`: `size` means a byte or row count everywhere else in this spec, so the rename drops it rather than bolting a unit onto it. Rename `window.size` to `window.durationSeconds` on both MetricAggregationConfig and ServiceLevelIndicator; the value (seconds) is unchanged. |
 | **sliding** | `boolean` | optional (default: `false`) |  |
-| **slideInterval** | `integer` | optional |  |
+| **slideInterval** | `integer` | optional | Slide interval for sliding windows, in seconds |
 
 
 ---
@@ -355,7 +355,7 @@ Service Level Indicator
 | **description** | `string` | optional | SLI description |
 | **metric** | `string` | ✅ | Base metric name |
 | **type** | `Enum<'availability' \| 'latency' \| 'throughput' \| 'error_rate' \| 'saturation' \| 'custom'>` | ✅ | SLI type |
-| **successCriteria** | `{ threshold: number; operator: Enum<'lt' \| 'lte' \| 'gt' \| 'gte' \| 'eq'>; percentile?: number } \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | ✅ | Success criteria — structured or CEL predicate |
+| **successCriteria** | `{ threshold: number; operator: Enum<'lt' \| 'lte' \| 'gt' \| 'gte' \| 'eq'>; percentile?: number } \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Success criteria — structured or CEL predicate |
 | **window** | `{ durationSeconds: integer; rolling?: boolean }` | ✅ | Measurement window |
 | **enabled** | `boolean` | optional (default: `true`) |  |
 
@@ -413,7 +413,7 @@ Service Level Indicator
 | **description** | `string` | optional | SLI description |
 | **metric** | `string` | ✅ | Base metric name |
 | **type** | `Enum<'availability' \| 'latency' \| 'throughput' \| 'error_rate' \| 'saturation' \| 'custom'>` | ✅ | SLI type |
-| **successCriteria** | `{ threshold: number; operator: Enum<'lt' \| 'lte' \| 'gt' \| 'gte' \| 'eq'>; percentile?: number } \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | ✅ | Success criteria — structured or CEL predicate |
+| **successCriteria** | `{ threshold: number; operator: Enum<'lt' \| 'lte' \| 'gt' \| 'gte' \| 'eq'>; percentile?: number } \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Success criteria — structured or CEL predicate |
 | **window** | `{ durationSeconds: integer; rolling?: boolean }` | ✅ | Measurement window |
 | **enabled** | `boolean` | optional (default: `true`) |  |
 

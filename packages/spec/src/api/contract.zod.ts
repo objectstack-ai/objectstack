@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { QuerySchema } from '../data/query.zod';
+import { DurationMs } from '../shared/duration.zod';
 import { ErrorCode } from './error-code-ledger.zod';
 import { StandardErrorCode } from './errors.zod';
 
@@ -308,7 +309,7 @@ export const BaseResponseSchema = lazySchema(() => z.object({
   error: ApiErrorSchema.optional().describe('Error details if success is false'),
   meta: z.object({
     timestamp: z.string(),
-    duration: z.number().optional(),
+    duration: DurationMs.optional().describe('Server-side processing duration in milliseconds'),
     requestId: z.string().optional(),
     traceId: z.string().optional(),
   }).optional().describe('Response metadata'),
