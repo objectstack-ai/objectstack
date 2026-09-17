@@ -55,17 +55,57 @@
 // runtime has already committed to refusing, understates it.
 //
 // Deliberately conservative to keep false positives near zero:
-//   - Only `record.`-prefixed tokens are checked. Other `{var}` tokens address
-//     flow variables / node outputs the rule cannot resolve statically.
-//   - Only flows bound to an object THIS stack defines are checked; when the
-//     object is unknown here (another package, `sys_*`) the rule has no schema
-//     to compare against and skips the whole flow.
+//   - A token is checked only when its ROOT resolves to an object THIS stack
+//     defines. Two kinds of root resolve (#17305): `record`, the triggering
+//     record of a record-triggered flow, and a flow VARIABLE that a node in
+//     this flow binds to a record by a STATIC declaration carried beside the
+//     name (the variable-root section below). Every other `{var}` token
+//     addresses something this pass cannot resolve, and stays unjudged.
+//   - A root whose object is unknown here (another package, `sys_*`) has no
+//     schema to compare against, so that root is skipped; a flow with no
+//     resolvable root at all is skipped whole.
 //   - `formula` / `summary` fields are VALID heads (formula is hydrated onto the
 //     record since #3445; summary is stored on write) — never flagged.
 //   - A trailing NUMERIC segment (`{record.target_channels.0}`) is an array
 //     index into a `multiple` lookup (#1872), not a cross-object hop — allowed.
 //   - Structured scalar heads (`json` / `composite` / `repeater` / `record`) may
 //     carry legitimate sub-paths — their `.<sub>` access is left alone.
+//
+// VARIABLE ROOTS (#17305) — the same failure, one spelling further out.
+//
+// `{record.…}` used to be the only root this rule could resolve, which left
+// cases 1 and 2 above invisible whenever the author reached the record through
+// a flow variable instead. They are not unresolvable: a `get_record` node
+// declares `objectName` AND `outputVariable` in ONE config, so the name it
+// binds holds a record of a known object — a static binding, not an inference.
+// A `loop` declares `collection` and `iteratorVariable`, so when the collection
+// is one of those multi-record outputs each element is a record of that same
+// object. `{caseRecord.owner_id.manager}` and `{currentCase.owner_id.manager}`
+// are then case 2 exactly, reached by a root the rule used to ignore.
+//
+// Two gates move, both deliberately:
+//
+//   - The record-trigger gate now applies to the `record` root ALONE. It is
+//     right there (no trigger, no triggering record) and meaningless for a name
+//     a node inside the flow binds: a `schedule` flow's `get_record` output is
+//     as statically typed as a record-change flow's. So a non-record-triggered
+//     flow is no longer skipped whole — its `record.` tokens stay unjudged and
+//     its variable roots are checked.
+//   - A variable root resolves only when NOTHING ELSE in the flow can bind that
+//     name. `seedRunVariables` keeps one flat map per run, so a declared flow
+//     variable, an assignment target, another node's `outputVariable`, an
+//     `indexVariable` / `errorVariable`, a node id (a bare CEL root in its own
+//     right) or a trigger field flattened to top level all make the name
+//     ambiguous — and ambiguous means SILENT, which is the conservatism this
+//     rule already had rather than a new one.
+//
+// Deliberately NOT resolved, each silent rather than guessed: an
+// `outputVariable` on any node type other than `get_record` (the value's shape
+// is that executor's, not a declared object); a `loop` whose `collection` is
+// not a bare variable name holding a multi-record `get_record` output; and
+// case 3 above, which stays a TRIGGER-root question — `config.expand` and the
+// registry-injected columns are both read off the START node and neither has a
+// counterpart on a variable root.
 
 import {
   SYSTEM_FIELDS,
@@ -73,7 +113,7 @@ import {
   unprovisionedAnchorCause,
   unprovisionedAnchorHint,
 } from './system-fields.js';
-import { walkFlowNodes } from './flow-walk.js';
+import { walkFlowNodes, type WalkedFlowNode } from './flow-walk.js';
 import { recordsOf } from './object-graph.js';
 
 export type FlowTemplatePathSeverity = 'error' | 'warning';
@@ -139,17 +179,27 @@ function fieldTypesOf(obj: AnyRec): Map<string, string> {
   return types;
 }
 
+/** One dotted `{root.seg…}` reference found in a template string. */
+interface TemplateRef {
+  /** The token's first segment — the name the run resolves in its variable map. */
+  root: string;
+  /** The segments AFTER the root, e.g. `{record.account.name}` -> `['account', 'name']`. */
+  rest: string[];
+}
+
 /**
- * Extract the `record.<path>` references from a template string. Mirrors the
- * runtime interpolator's token grammar (service-automation builtin/template.ts):
- * a `{...}` token whose body is a dotted path whose HEAD is `record`. Arithmetic
- * / function tokens (`{NOW()}`, `{a + b}`) and non-`record` heads are ignored.
+ * Extract the dotted `{root.<path>}` references from a template string. Mirrors
+ * the runtime interpolator's token grammar (service-automation
+ * builtin/template.ts): a `{...}` token whose body is a plain dotted path.
+ * Arithmetic / function tokens (`{NOW()}`, `{a + b}`) are ignored, and so is a
+ * single-segment token — there is no `.<field>` hop in it to judge.
  *
- * Returns each reference's segment list AFTER the `record` head, e.g.
- * `{record.account.name}` -> `[['account', 'name']]`.
+ * The ROOT is returned rather than filtered here (#17305): which roots are
+ * resolvable is the caller's per-flow question, and it is no longer the single
+ * literal `record`.
  */
-function recordRefsIn(text: string): string[][] {
-  const refs: string[][] = [];
+function templateRefsIn(text: string): TemplateRef[] {
+  const refs: TemplateRef[] = [];
   const tokenRe = /\{([^{}]+)\}/g;
   let m: RegExpExecArray | null;
   while ((m = tokenRe.exec(text)) !== null) {
@@ -159,9 +209,8 @@ function recordRefsIn(text: string): string[][] {
     // operators / spaces / quotes is an arithmetic token — not a bare field ref.
     if (!/^[A-Za-z_$][\w$]*(?:\.(?:[A-Za-z_$][\w$]*|\d+))*$/.test(body)) continue;
     const segments = body.split('.');
-    if (segments[0] !== 'record') continue;
     const rest = segments.slice(1);
-    if (rest.length > 0) refs.push(rest);
+    if (rest.length > 0) refs.push({ root: segments[0], rest });
   }
   return refs;
 }
@@ -285,9 +334,173 @@ function declaredExpandOf(flow: AnyRec): Set<string> {
   return new Set();
 }
 
+/** Shared empty set — a root with no `expand` opt-ins and no injected anchors. */
+const NO_NAMES: ReadonlySet<string> = new Set<string>();
+
+/** Roots the run owns outright, so no node declaration may claim the name. */
+const RESERVED_ROOTS: ReadonlySet<string> = new Set(['record', 'previous']);
+
+/** A bare variable name — the only `loop.collection` spelling resolved here. */
+const BARE_NAME_RE = /^[A-Za-z_$][\w$]*$/;
+
+/** Everything the token checks need about ONE resolvable template root. */
+interface TemplateRoot {
+  /** The object whose fields this root's `.<field>` segments address. */
+  objectName: string;
+  /** `fieldName -> type` for that object. */
+  fieldTypes: Map<string, string>;
+  /** True for the `record` root — the two start-node-scoped checks below are its alone. */
+  isTrigger: boolean;
+  /** [#8340] Injected-but-unprovisioned anchors. Empty on a variable root. */
+  unprovisionedAnchors: ReadonlySet<string>;
+  /** [#3475] Relations the start node opted in to expanding. Empty on a variable root. */
+  expand: ReadonlySet<string>;
+}
+
 /**
- * Validate `{record.<path>}` template references across every record-change
- * flow. Pure and dependency-free; safe on pre- or post-parse stacks.
+ * The body of a string that is EXACTLY one `{…}` token, or the string itself
+ * when it carries no braces — the two spellings `loop-node.ts` accepts for
+ * `config.collection` (it interpolates the template, then falls back to a bare
+ * variable lookup).
+ */
+function loneTokenBody(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  const braced = /^\{([^{}]+)\}$/.exec(trimmed);
+  return (braced ? braced[1] : trimmed).trim();
+}
+
+/**
+ * The flow variables that hold ONE record of a known object, as `name ->
+ * objectName` (#17305).
+ *
+ * Two declarations bind one, and both carry the object statically:
+ *
+ *   - `get_record` — `config.objectName` + `config.outputVariable`. `limit > 1`
+ *     switches the executor to a multi-record read, so that variable holds an
+ *     ARRAY and is recorded as a list rather than a record root.
+ *   - `loop` — `config.collection` + `config.iteratorVariable`. When the
+ *     collection names one of those lists, each element is a record of its
+ *     object.
+ *
+ * Everything else that can bind a name POISONS it instead. `seedRunVariables`
+ * keeps ONE flat map per run, so a second binder makes the root ambiguous and
+ * an ambiguous root must stay silent — the same conservatism the `record` root
+ * has always had, not a new one. Poisoned: declared flow variables, assignment
+ * targets, `indexVariable` / `errorVariable`, an `outputVariable` on any other
+ * node type, an unresolvable `iteratorVariable`, every node id (the engine
+ * writes each node's outputs under `<nodeId>.<key>` and `evaluateCondition`
+ * expands that dotted key into an object AT the node id), and any name a
+ * trigger field is flattened to.
+ */
+function resolveVariableRoots(
+  flow: AnyRec,
+  walked: readonly WalkedFlowNode[],
+  triggerScope: ReadonlySet<string>,
+): Map<string, string> {
+  const single = new Map<string, string>();
+  const lists = new Map<string, string>();
+  const poisoned = new Set<string>();
+
+  const poison = (name: unknown): void => {
+    if (typeof name !== 'string' || !name) return;
+    poisoned.add(name);
+    single.delete(name);
+    lists.delete(name);
+  };
+  const bind = (into: Map<string, string>, name: string, objectName: string): void => {
+    if (poisoned.has(name)) return;
+    const other = into === single ? lists : single;
+    const prior = into.get(name);
+    if (other.has(name) || (prior !== undefined && prior !== objectName)) {
+      poison(name);
+      return;
+    }
+    into.set(name, objectName);
+  };
+
+  // A declared flow variable is seeded before any node runs, so the name
+  // already means whatever the author declared.
+  for (const declared of recordsOf(flow.variables)) poison(declared.name);
+
+  const loops: Array<{ collection: unknown; iterator: string }> = [];
+
+  for (const { node } of walked) {
+    poison(node.id);
+    const rawConfig = node.config;
+    if (!rawConfig || typeof rawConfig !== 'object' || Array.isArray(rawConfig)) continue;
+    const config = rawConfig as AnyRec;
+    const nodeType = typeof node.type === 'string' ? node.type : '';
+
+    poison(config.indexVariable);
+    poison(config.errorVariable);
+
+    if (nodeType === 'assignment') {
+      // Every shape `logic-nodes.ts` dispatches on, read as a POISON list
+      // rather than as the executor's precedence order: over-poisoning only
+      // costs silence, and silence is this rule's safe direction.
+      const raw = config.assignments;
+      if (Array.isArray(raw)) {
+        for (const item of raw) {
+          if (!item || typeof item !== 'object') continue;
+          const entry = item as AnyRec;
+          poison(entry.variable);
+          poison(entry.name);
+          poison(entry.key);
+        }
+      } else if (raw && typeof raw === 'object') {
+        for (const key of Object.keys(raw as AnyRec)) poison(key);
+      } else {
+        for (const key of Object.keys(config)) poison(key);
+      }
+    }
+
+    const output = config.outputVariable;
+    if (typeof output === 'string' && output) {
+      const objectName = typeof config.objectName === 'string' ? config.objectName : '';
+      if (nodeType !== 'get_record' || !objectName) {
+        poison(output);
+      } else if (typeof config.limit === 'number' && config.limit > 1) {
+        bind(lists, output, objectName);
+      } else {
+        bind(single, output, objectName);
+      }
+    }
+
+    const iterator = config.iteratorVariable;
+    if (typeof iterator === 'string' && iterator) {
+      // Deferred: a loop may iterate a list bound by a LATER node in the walk,
+      // and the run's variable map is flow-scoped, not traversal-ordered.
+      if (nodeType === 'loop') loops.push({ collection: config.collection, iterator });
+      else poison(iterator);
+    }
+  }
+
+  for (const { collection, iterator } of loops) {
+    const body = loneTokenBody(collection);
+    const source = body && BARE_NAME_RE.test(body) ? lists.get(body) : undefined;
+    if (source) bind(single, iterator, source);
+    else poison(iterator);
+  }
+
+  const roots = new Map<string, string>();
+  for (const [name, objectName] of single) {
+    if (poisoned.has(name)) continue;
+    if (RESERVED_ROOTS.has(name) || name.startsWith('$')) continue;
+    // A trigger field flattened to top level answers to this name too, and the
+    // winner depends on whether the binding node has run yet.
+    if (triggerScope.has(name)) continue;
+    roots.set(name, objectName);
+  }
+  return roots;
+}
+
+/**
+ * Validate the dotted `{root.<path>}` template references of every flow whose
+ * root this pass can resolve — the trigger record of a record-triggered flow,
+ * and the flow variables {@link resolveVariableRoots} binds to an object.
+ * Pure and dependency-free; safe on pre- or post-parse stacks.
  */
 export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFinding[] {
   const findings: FlowTemplatePathFinding[] = [];
@@ -299,27 +512,45 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
     if (typeof obj.name === 'string') objectsByName.set(obj.name, obj);
   }
 
+  // One field map per object, not per root: a flow may resolve several roots
+  // onto the same object (a trigger record plus a `get_record` re-read of it).
+  const fieldTypeCache = new Map<string, Map<string, string>>();
+  const fieldTypesFor = (objectName: string, obj: AnyRec): Map<string, string> => {
+    let types = fieldTypeCache.get(objectName);
+    if (!types) {
+      types = fieldTypesOf(obj);
+      fieldTypeCache.set(objectName, types);
+    }
+    return types;
+  };
+
   flows.forEach((flow, flowIndex) => {
     const flowName = typeof flow.name === 'string' ? flow.name : `#${flowIndex}`;
     const nodes = recordsOf(flow.nodes);
     const start = (nodes.find((n) => n.type === 'start')?.config ?? {}) as AnyRec;
-    if (!isRecordTriggered(flow, start)) return;
 
-    const objectName = boundObjectOf(flow);
-    if (!objectName) return;
-    const obj = objectsByName.get(objectName);
+    const roots = new Map<string, TemplateRoot>();
+
+    // ── Root 1: `record` — the TRIGGERING record. The trigger gate is this
+    // root's alone (#17305): without a record trigger there is no such record.
     // Unknown object here -> no schema to compare against (another package /
     // `sys_*`). The trigger-readiness rule already flags a wrong name; we can't
-    // meaningfully classify field paths, so skip the whole flow.
-    if (!obj) return;
-
-    const fieldTypes = fieldTypesOf(obj);
-    // [#8340] The injected anchors THIS trigger object registers with no
-    // storage behind them. Read off the object def already resolved above —
-    // there is no second lookup and no stack-level index, because this rule
-    // judges every token of a flow against ONE object (the trigger's).
-    const unprovisionedAnchors = unprovisionedInjectedColumnsFor(obj);
-    const expandSet = declaredExpandOf(flow);
+    // meaningfully classify field paths, so this root does not resolve.
+    if (isRecordTriggered(flow, start)) {
+      const objectName = boundObjectOf(flow);
+      const obj = objectName ? objectsByName.get(objectName) : undefined;
+      if (objectName && obj) {
+        roots.set('record', {
+          objectName,
+          fieldTypes: fieldTypesFor(objectName, obj),
+          isTrigger: true,
+          // [#8340] The injected anchors THIS trigger object registers with no
+          // storage behind them. Read off the object def already resolved above.
+          unprovisionedAnchors: unprovisionedInjectedColumnsFor(obj),
+          expand: declaredExpandOf(flow),
+        });
+      }
+    }
 
     // Every node, INCLUDING those nested in try_catch / loop / parallel regions
     // (#4380). This rule was not merely blind to them — it was WORSE than
@@ -329,7 +560,31 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
     // lost its position and the gating #3810 finding silently degraded to a
     // warning reported against the wrapping `try_catch`. Walking to the real
     // node restores both the severity and the location.
-    walkFlowNodes(flow, `flows[${flowIndex}]`).forEach(({ node, path: nodePath, regionTrail, localConfig }, walkIndex) => {
+    const walked = walkFlowNodes(flow, `flows[${flowIndex}]`);
+
+    // ── Roots 2..n: flow variables a node binds to a record (#17305). The
+    // trigger's own scope is handed in because those names are flattened to
+    // top level on a record-triggered run and a root that collides with one is
+    // ambiguous.
+    const triggerRoot = roots.get('record');
+    const triggerScope: ReadonlySet<string> = triggerRoot
+      ? new Set<string>([...triggerRoot.fieldTypes.keys(), ...IMPLICIT_HEADS])
+      : NO_NAMES;
+    for (const [name, objectName] of resolveVariableRoots(flow, walked, triggerScope)) {
+      const obj = objectsByName.get(objectName);
+      if (!obj) continue;
+      roots.set(name, {
+        objectName,
+        fieldTypes: fieldTypesFor(objectName, obj),
+        isTrigger: false,
+        unprovisionedAnchors: NO_NAMES,
+        expand: NO_NAMES,
+      });
+    }
+
+    if (roots.size === 0) return;
+
+    walked.forEach(({ node, path: nodePath, regionTrail, localConfig }, walkIndex) => {
       const nodeLabel =
         typeof node.type === 'string' ? node.type : typeof node.id === 'string' ? node.id : `#${walkIndex}`;
       const where = regionTrail
@@ -351,19 +606,27 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
       if (leaves.length === 0) return;
 
       // Dedupe references so one repeated typo yields one finding per node.
+      // Keyed by the whole token, root included: two roots may legitimately
+      // carry the same head, and they are two findings.
       const seenUnknown = new Set<string>();
       const seenTraversal = new Set<string>();
       const seenUnprovisioned = new Set<string>();
 
       for (const leaf of leaves) {
         const inFilter = leaf.inFilter;
-        for (const rest of recordRefsIn(leaf.text)) {
+        for (const { root: rootName, rest } of templateRefsIn(leaf.text)) {
+          const root = roots.get(rootName);
+          // An unresolvable root — a flow variable nothing binds statically, an
+          // ambiguous one, `{record.…}` on a flow with no record trigger.
+          if (!root) continue;
+          const objectName = root.objectName;
+          const token = `${rootName}.${rest.join('.')}`;
           const head = rest[0];
           const hasSubPath = rest.length > 1;
           // A trailing numeric segment is an array index (#1872), not a hop.
           const nextIsIdentifier = hasSubPath && !/^\d+$/.test(rest[1]);
 
-          const isKnown = fieldTypes.has(head) || IMPLICIT_HEADS.has(head);
+          const isKnown = root.fieldTypes.has(head) || IMPLICIT_HEADS.has(head);
 
           // [#8340] The head RESOLVES — `IMPLICIT_HEADS` keeps owning that
           // decision, exactly as before — but on an ADR-0015 `external` trigger
@@ -374,7 +637,7 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
           // refuses the node at run time. Warning, not error, on both positions:
           // unlike a typo (a closed oracle — the field is simply absent) this
           // pass cannot see whether the remote schema resolves the column.
-          if (unprovisionedAnchors.has(head)) {
+          if (root.unprovisionedAnchors.has(head)) {
             if (!seenUnprovisioned.has(head)) {
               seenUnprovisioned.add(head);
               findings.push({
@@ -384,7 +647,7 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
                 path: nodePath,
                 message:
                   (inFilter ? `${nodeType} filter references ` : 'template references ') +
-                  `'{record.${rest.join('.')}}', and ${unprovisionedAnchorCause(objectName, head)} — ` +
+                  `'{${token}}', and ${unprovisionedAnchorCause(objectName, head)} — ` +
                   (inFilter
                     ? `the token resolves to nothing on every run, which DROPS the condition from ` +
                       `the query instead of narrowing it; the node then refuses to run at execution ` +
@@ -396,57 +659,78 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
           }
 
           if (!isKnown) {
-            if (seenUnknown.has(head)) continue;
-            seenUnknown.add(head);
+            if (seenUnknown.has(token)) continue;
+            seenUnknown.add(token);
             findings.push({
               severity: inFilter ? 'error' : 'warning',
               rule: FLOW_TEMPLATE_UNKNOWN_FIELD,
               where,
               path: nodePath,
               message: inFilter
-                ? `${nodeType} filter references '{record.${rest.join('.')}}', but '${head}' is not a field on ` +
+                ? `${nodeType} filter references '{${token}}', but '${head}' is not a field on ` +
                   `object '${objectName}' — the token resolves to nothing, which DROPS the condition from the ` +
                   `query instead of narrowing it. The node refuses to run at execution time (#3810).`
-                : `template references '{record.${rest.join('.')}}', but '${head}' is not a field on ` +
+                : `template references '{${token}}', but '${head}' is not a field on ` +
                   `object '${objectName}' — it resolves to an empty string at runtime (silently).`,
-              hint: inFilter
-                ? `Check the field name against the object's field definitions (e.g. '{record.full_name}', ` +
-                  `not '{record.full_naem}'); system columns like id/created_at/owner are also addressable. ` +
-                  `This gates the build rather than warning: an absent condition WIDENS the query, so the ` +
-                  `runtime has already decided to refuse this node.`
-                : `Check the field name against the object's field definitions (e.g. '{record.full_name}', ` +
-                  `not '{record.full_naem}'). System columns like id/created_at/owner are also addressable.`,
+              hint: root.isTrigger
+                ? inFilter
+                  ? `Check the field name against the object's field definitions (e.g. '{record.full_name}', ` +
+                    `not '{record.full_naem}'); system columns like id/created_at/owner are also addressable. ` +
+                    `This gates the build rather than warning: an absent condition WIDENS the query, so the ` +
+                    `runtime has already decided to refuse this node.`
+                  : `Check the field name against the object's field definitions (e.g. '{record.full_name}', ` +
+                    `not '{record.full_naem}'). System columns like id/created_at/owner are also addressable.`
+                : inFilter
+                  ? `Check the field name against object '${objectName}'s field definitions — '${rootName}' is ` +
+                    `bound to a '${objectName}' record by this flow; system columns like id/created_at/owner ` +
+                    `are also addressable. This gates the build rather than warning: an absent condition ` +
+                    `WIDENS the query, so the runtime has already decided to refuse this node.`
+                  : `Check the field name against object '${objectName}'s field definitions — '${rootName}' is ` +
+                    `bound to a '${objectName}' record by this flow. System columns like id/created_at/owner ` +
+                    `are also addressable.`,
             });
             continue;
           }
 
           if (nextIsIdentifier) {
-            const headType = fieldTypes.get(head) ?? '';
-            if (RELATION_TYPES.has(headType) && !expandSet.has(head)) {
-              const key = rest.join('.');
-              if (seenTraversal.has(key)) continue;
-              seenTraversal.add(key);
+            const headType = root.fieldTypes.get(head) ?? '';
+            if (RELATION_TYPES.has(headType) && !root.expand.has(head)) {
+              if (seenTraversal.has(token)) continue;
+              seenTraversal.add(token);
               findings.push({
                 severity: inFilter ? 'error' : 'warning',
                 rule: FLOW_TEMPLATE_LOOKUP_TRAVERSAL,
                 where,
                 path: nodePath,
                 message: inFilter
-                  ? `${nodeType} filter references '{record.${key}}', a cross-object hop through the ` +
-                    `${headType} field '${head}' — the flow record carries '${head}' as a scalar id, not an ` +
+                  ? `${nodeType} filter references '{${token}}', a cross-object hop through the ` +
+                    `${headType} field '${head}' — the ${root.isTrigger ? 'flow record' : `'${rootName}' record`} ` +
+                    `carries '${head}' as a scalar id, not an ` +
                     `expanded object, so the token resolves to nothing and the condition is DROPPED from the ` +
                     `query instead of narrowing it. The node refuses to run at execution time (#3810).`
-                  : `template references '{record.${key}}', a cross-object hop through the ${headType} field ` +
-                    `'${head}' — the flow record carries '${head}' as a scalar id, not an expanded object, so ` +
+                  : `template references '{${token}}', a cross-object hop through the ${headType} field ` +
+                    `'${head}' — the ${root.isTrigger ? 'flow record' : `'${rootName}' record`} carries ` +
+                    `'${head}' as a scalar id, not an expanded object, so ` +
                     `this resolves to an empty string at runtime (silently).`,
-                hint: inFilter
-                  ? `Opt in to resolve it: add '${head}' to the start node's config.expand (#3475) and the ` +
-                    `engine re-reads it as the run's identity. Otherwise filter on the foreign-key id directly ` +
-                    `('{record.${head}}'), or project the value via a formula field on '${objectName}'. This ` +
-                    `gates the build rather than warning: an absent condition WIDENS the query.`
-                  : `Opt in to resolve it: add '${head}' to the start node's config.expand (#3475) and the ` +
-                    `engine re-reads it as the run's identity. Otherwise reference the foreign-key id directly ` +
-                    `('{record.${head}}'), or project the value via a formula field on '${objectName}'.`,
+                hint: root.isTrigger
+                  ? inFilter
+                    ? `Opt in to resolve it: add '${head}' to the start node's config.expand (#3475) and the ` +
+                      `engine re-reads it as the run's identity. Otherwise filter on the foreign-key id directly ` +
+                      `('{record.${head}}'), or project the value via a formula field on '${objectName}'. This ` +
+                      `gates the build rather than warning: an absent condition WIDENS the query.`
+                    : `Opt in to resolve it: add '${head}' to the start node's config.expand (#3475) and the ` +
+                      `engine re-reads it as the run's identity. Otherwise reference the foreign-key id directly ` +
+                      `('{record.${head}}'), or project the value via a formula field on '${objectName}'.`
+                  : inFilter
+                    ? `A record read into a flow variable is not expanded either — config.expand (#3475) is the ` +
+                      `START node's opt-in and covers the trigger record alone. Filter on the foreign-key id ` +
+                      `directly ('{${rootName}.${head}}'), project the value via a formula field on ` +
+                      `'${objectName}', or add a get_record node that reads the related record. This gates the ` +
+                      `build rather than warning: an absent condition WIDENS the query.`
+                    : `A record read into a flow variable is not expanded either — config.expand (#3475) is the ` +
+                      `START node's opt-in and covers the trigger record alone. Reference the foreign-key id ` +
+                      `directly ('{${rootName}.${head}}'), project the value via a formula field on ` +
+                      `'${objectName}', or add a get_record node that reads the related record.`,
               });
             }
             // STRUCTURED_TYPES + any other scalar `.sub` access is left alone:
