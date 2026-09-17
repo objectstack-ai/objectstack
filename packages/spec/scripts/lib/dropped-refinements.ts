@@ -302,27 +302,46 @@ function readablePath(raw: string): string {
 }
 
 /**
- * The identity two references to the SAME schema share in both schema-evaluation
- * modes — the node's zod `def` object, falling back to the instance when a node
- * has none.
+ * The identity two references to the SAME schema node share in BOTH
+ * schema-evaluation modes — the node's zod internals (`_zod`), with a
+ * `lazySchema()` Proxy resolved to the internals it stands for.
  *
- * ⛔ Not the instance itself, which is not mode-invariant. `lazySchema()`
+ * ⛔ Not the schema instance, which is not mode-invariant. `lazySchema()`
  * (`src/shared/lazy-schema.ts`) returns the real schema under
  * `OS_EAGER_SCHEMAS=1` — how `gen:schema` and `check:authorable-surface` run —
  * and a Proxy over it otherwise. Keyed on the instance, a sub-schema reached
  * once directly and once through a `lazySchema()` edge is ONE node to the eager
- * walk and TWO to the lazy one, so the census — and therefore the ledger it is
- * compared against — differs between two runs of the same generator over the
- * same tree. Measured on `ui/View`, whose `list`/`listViews.valueType` and
+ * walk and TWO to the lazy one, so the census — and the ledger comparison built
+ * on it — differed between two runs of the same generator over the same tree.
+ * Measured on `ui/View`, whose `list`/`listViews.valueType` and
  * `form`/`formViews.valueType` pairs each reach one schema by both routes: 11
  * dropped sites eager, 13 lazy.
  *
- * The `def` survives the Proxy because its `_zod` facade prototype-delegates
- * every read it does not wrap, so `proxy._zod.def` IS `real._zod.def` — the
- * same object, not a copy.
+ * ⛔ And not the `def` either, which over-collapses in the other direction:
+ * `clone()` with no argument produces a SECOND instance carrying the FIRST's
+ * def object, so two nodes the eager walk counts separately become one. Keyed
+ * on the def, the shipped tree lost `…options[3].object.fields.valueType` from
+ * `system/ChangeSet` and `system/MigrationOperation` — a reading the accepted
+ * ledger does not make. `_zod` is per instance and the def is not, so `_zod` is
+ * the narrower key, and it moves nothing in eager mode: no Proxy exists there,
+ * and every other node maps to its own internals one-to-one.
+ *
+ * The Proxy is resolved by shape, not by asking it: its `_zod` facade is
+ * `Object.create(realInternals, { processJSONSchema })`, so the real internals
+ * ARE its prototype — and a real `_zod` descends from `Object.prototype`, which
+ * owns no `def`. Looped rather than unwrapped once, so a Proxy over a Proxy
+ * resolves the whole way down.
  */
 function identityOf(schema: z.ZodType): unknown {
-  return defOf(schema) ?? schema;
+  let internals = (schema as unknown as { _zod?: object })._zod;
+  if (!internals || typeof internals !== 'object') return schema;
+  for (let hop = 0; hop < MAX_DEPTH; hop += 1) {
+    const proto = Object.getPrototypeOf(internals) as object | null;
+    if (!proto || proto === Object.prototype) break;
+    if (!Object.prototype.hasOwnProperty.call(proto, 'def')) break;
+    internals = proto;
+  }
+  return internals;
 }
 
 /**

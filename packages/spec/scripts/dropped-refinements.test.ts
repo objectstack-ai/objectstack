@@ -43,6 +43,7 @@ import {
 } from './lib/dropped-refinements';
 import { ContextTokenSchema } from '../src/data/context-tokens.zod';
 import { AggregationFunction } from '../src/data/query.zod';
+import { lazySchema } from '../src/shared/lazy-schema';
 
 const PKG_DIR = path.resolve(__dirname, '..');
 const project = (schema: z.ZodType): string =>
@@ -162,6 +163,47 @@ describe('the differential isolates the refinement, not the node', () => {
     );
     expect(entry.projected).toHaveLength(0);
     expect(entry.dropped.map((s) => s.path)).toEqual(['a']);
+  });
+
+  it('one node reached by TWO routes is ONE site — a shared sub-schema, counted once', () => {
+    const Shared = z.object({ q: z.string().refine((v) => v !== '', 'non-empty') });
+    const entry = collectDroppedRefinements('t/TwoRoutes', z.object({ first: Shared, second: Shared }));
+    // Reported at the route it was reached by first, and not again at the other
+    // — the census question is which published FILE the gap lands on.
+    expect(entry.dropped.map((s) => s.path)).toEqual(['first.q']);
+  });
+
+  it('a `lazySchema()` edge is the SAME node as the schema it stands for, in either mode', () => {
+    // The mode-dependence this pin exists for. `lazySchema()` returns the real
+    // schema under `OS_EAGER_SCHEMAS=1` — how `gen:schema` and
+    // `check:authorable-surface` run — and a Proxy over it otherwise. Keyed on
+    // the INSTANCE, the walk saw one node in the first case and two in the
+    // second, so the same generator over the same tree produced two different
+    // censuses and the ledger only held under one of them. `ui/View` measured
+    // 11 dropped sites eager and 13 lazy; `@objectstack/spec#test:repo` spawns
+    // the generator WITHOUT the flag, which is where it surfaced.
+    //
+    // This file runs in the `local` project, which does not set the flag, so
+    // the Proxy is the live shape here and the assertion is about it.
+    const Shared = z.object({ q: z.string().refine((v) => v !== '', 'non-empty') });
+    const entry = collectDroppedRefinements(
+      't/LazyEdge',
+      z.object({ direct: Shared, viaLazy: lazySchema(() => Shared) }),
+    );
+    expect(entry.dropped.map((s) => s.path)).toEqual(['direct.q']);
+  });
+
+  it('LIT CONTROL — two DISTINCT nodes carrying the same rule are two sites', () => {
+    // Without it, the two assertions above pass just as well on a walk that
+    // dedupes everything structurally and reports one site per export.
+    const entry = collectDroppedRefinements(
+      't/TwoNodes',
+      z.object({
+        first: z.object({ q: z.string().refine((v) => v !== '', 'non-empty') }),
+        second: z.object({ q: z.string().refine((v) => v !== '', 'non-empty') }),
+      }),
+    );
+    expect(entry.dropped.map((s) => s.path)).toEqual(['first.q', 'second.q']);
   });
 
   it('a recursive schema reports its refinement ONCE (the `_cachedInner` regression)', () => {
