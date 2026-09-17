@@ -2072,7 +2072,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the substitution: one clock, read once, written everywhere': 9,
   'the read-back: what the transcript can actually prove': 33,
   'the exit code: the read-back reaches `$?`, or it reaches nobody': 24,
-  'the re-anchored footer: a newline the platform MOVED is not a byte lost': 27,
+  'the re-anchored footer: a newline the platform MOVED is not a byte lost': 39,
   'the CLI: the one decision a typo must never make': 16,
   'the unread-knock check: a refresh cannot void what nobody read': 49,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
