@@ -627,6 +627,28 @@ export interface ToolExecutionContext {
      * Populated by whichever layer owns the agent route (cloud, post-ADR-0025).
      */
     userMessageText?: string;
+    /**
+     * Blueprint-identity digest stamped on a CONFIRM REPLAY of an already
+     * approved proposal — the consent record saying *this exact blueprint* is
+     * the one the user approved, carried onto the turn that replays it.
+     * Populated by whichever layer owns the agent route (cloud, post-cloud
+     * ADR-0025) — the same provenance {@link userMessageText} carries — and set
+     * only by in-process server code on that route. ⛔ NEVER derived from a
+     * request body, a tool argument or the transcript: anything the caller can
+     * write is not a confirmation.
+     *
+     * `undefined` means "no confirmed identity on this turn" and authorizes
+     * NOTHING — the same fail-closed reading as {@link actor} and
+     * {@link isSystem} (#2991). A handler MUST NOT read consent out of a
+     * missing field.
+     *
+     * Declared here because a published handler already AUTHORIZES on it:
+     * cloud's `apply_blueprint` gate makes a matching identity one clause of
+     * the decision to build a whole app (cloud#1954, cloud PR #2005). A field a
+     * handler authorizes on belongs in the declared contract, not in a
+     * consumer's structural cast.
+     */
+    confirmedBlueprintIdentity?: string;
     /** Distributed-trace id for cross-service correlation. */
     traceId?: string;
     /**
