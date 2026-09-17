@@ -46,10 +46,12 @@ const COMMANDS_DIR = join(__dirname, '..', 'src', 'commands');
  * to `BUILD_ONLY_GATES` below with a reason. There is no third option — that is
  * the whole point of the file.
  *
- * ⚠️ The roster is the ONLY thing holding an artifact-level gate to both doors.
- * The scan below extracts `lintFoo(`/`validateFoo(` call sites, so a gate named
- * anything else — `findFoo(`, say — is invisible to it and drifts silently the
- * day it is wired into one command only.
+ * ⭐ [#18491] This roster is now CLOSED rather than advisory: every bare
+ * identifier either command calls must appear in exactly one of the three
+ * ledgers in this file — here, in {@link BUILD_ONLY_GATES}, or in
+ * {@link NOT_A_GATE} with the reason it is not a gate. A name nobody
+ * classified fails, so a gate arrives here by being ADDED to the commands, not
+ * by being spelled a particular way.
  */
 const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // [#3366] Resolves each `requires` token's provider in the active edition.
@@ -73,9 +75,30 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // artifact owns — the compile-time half of #17516's runtime refusal. Neither
   // the filesystem nor the emitted artifact, but cross-package by construction:
   // the name is declared by package A and declared again by package B, so the
-  // per-package walk a registry rule gets sees one half at a time. Listed by
-  // name because the extractor below cannot see a `find*` gate.
+  // per-package walk a registry rule gets sees one half at a time.
   'findPermissionSetNameCollisions',
+  // [#14553] Navigation contributions aimed at a group the target app does not
+  // declare. Reports, never refuses. Not a registry rule: it is judged across
+  // the whole ARTIFACT — a contribution in package A against an app declared in
+  // package B — so the per-package stack a rule is handed sees one side only.
+  //
+  // ⭐ This row is #18491's positive control, and it is the reason that card
+  // exists. The gate has been hand-wired into BOTH commands since #14553 and
+  // appeared in NO roster, because the pre-#18491 extractor matched
+  // `lintFoo(`/`validateFoo(` and this gate is named `find*`. It was held by
+  // nothing at all: had one of the two wirings been dropped, every assertion in
+  // this file would have stayed green.
+  'findNavGroupDiagnostics',
+  // [#18491] Protocol-version drift advisory. Reports, never refuses. Not a
+  // registry rule: it resolves the `@objectstack/spec` actually installed in
+  // the APP's `node_modules`, which is the filesystem, not the stack.
+  //
+  // ⚠️ Found by falsifying "`find*` is the only invisible family" — it is not.
+  // `check*` is a second one, live on the tree, wired into both commands and
+  // in no roster. Two families were invisible, which is the evidence that
+  // widening the pattern to cover `find*` would have moved the blind spot
+  // rather than closed it.
+  'checkProtocolVersionGap',
 ];
 
 /**
@@ -94,6 +117,111 @@ const BUILD_ONLY_GATES: Readonly<Record<string, string>> = {
   diffAccessMatrix: 'The comparison half of the same D6 snapshot gate.',
   buildRuntimeBundle: 'Emits the objectstack-runtime.{hash}.mjs sibling module. Artifact output by definition.',
 };
+
+/**
+ * Everything else the two commands call, and the reason each one is NOT an
+ * artifact-level gate. Keyed by reason so the classification is readable as a
+ * set of claims rather than a wall of names.
+ *
+ * ⭐ [#18491] This ledger is the price of a CLOSED roster, and it is the point.
+ * The scan below extracts every bare-identifier call site in `compile.ts` and
+ * `validate.ts` — it keys on nothing but "this source calls it" — so the only
+ * way a gate can stay out of the two gate rosters above is for a human to write
+ * it down HERE, in a diff, next to a sentence saying it does not judge
+ * anything. Before #18491 the scan matched `lintFoo(`/`validateFoo(` and saw
+ * exactly TWO names in each command (`lintUnknownStackKeys`,
+ * `lintUnknownAuthoringKeys`) out of 45 and 39 call sites: an entire gate could
+ * be added to one command and this file had no way to notice.
+ *
+ * ⛔ Do not answer a red from the classification test by dropping a name in the
+ * nearest bucket. The buckets are assertions; a gate filed under
+ * "presentation" is a false statement that a reviewer can read in the diff,
+ * which is exactly the visibility this ledger buys.
+ */
+const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
+  'The authoring-rule registry and the stack it judges — held by packages/cli/src/commands/authoring-rule-wiring.test.ts and by the union-fold assertions above, not by this roster':
+    [
+      'runAuthoringRules',
+      'authoringRulesFor',
+      'splitBySeverity',
+      'authoringRuleUnionStack',
+      'normalizeStackInput',
+      'resolveSduiManifest',
+      'loadConfig',
+      'ObjectStackDefinitionSchema',
+    ],
+  // ⚠️ [#18491] These two are compile-only, and so is the SECOND
+  // `runAuthoringRules` run they feed. That run is not covered by the roster
+  // above and is not covered by the union fold either: `compile.ts`'s own
+  // comment says what survives its de-duplication is "exactly the set the union
+  // could not see". So `os build` judges something `os validate` does not, in
+  // the false-clean direction. Recorded here rather than silently wired up —
+  // wiring a real gate into the other door is a decision, not a test fix.
+  'Input to the compile-only per-package rule walk — a real parity gap, reported not closed (see the note above this entry)':
+    ['artifactPackages', 'packageBodyAsStack'],
+  'Presentation — renders, formats or serialises a verdict something else reached; judges nothing':
+    [
+      'printHeader',
+      'printKV',
+      'printStep',
+      'printSuccess',
+      'printError',
+      'printWarning',
+      'printBulletList',
+      'printAuthoringAdvisories',
+      'printAuthoringRuleErrors',
+      'printDocIssueErrors',
+      'printMetadataStats',
+      'collectMetadataStats',
+      'formatConversionNotice',
+      'formatZodErrors',
+      'formatPermissionSetNameCollisions',
+      'formatUnknownAuthoringKey',
+      'JSON_FULL_LIST_REMEDY',
+      'renderCapabilityMessage',
+      'namedExportRejectionHints',
+      'errorCodeFields',
+      'emitJson',
+    ],
+  'Control flow, cleanup and local helpers — no diagnostic of its own': [
+    'createTimer',
+    'isExitSignal',
+    'isReportedError',
+    'cleanupOldRuntimeBundles',
+    'findingKey',
+    'warningsSoFar',
+  ],
+  'Not ours — a Node builtin, a global, an oclif base or a third-party namespace': [
+    'dirname',
+    'Set',
+    'String',
+    'path',
+    'fs',
+    'chalk',
+    'ZodError',
+    'Args',
+    'Command',
+    'Flags',
+  ],
+};
+
+/** Every name in {@link NOT_A_GATE}, flattened. */
+const NOT_A_GATE_NAMES: ReadonlySet<string> = new Set(Object.values(NOT_A_GATE).flat());
+
+/**
+ * The two doors this file holds equal. `lint.ts` is the third authoring
+ * command and is held to the registry by the checks further down, but it emits
+ * no artifact and runs no artifact-level gate, so it is not part of the parity
+ * question.
+ */
+const PARITY_COMMANDS: readonly string[] = ['compile.ts', 'validate.ts'];
+
+/** Every name any ledger in this file accounts for. */
+const CLASSIFIED: ReadonlySet<string> = new Set([
+  ...SHARED_NON_REGISTRY_GATES,
+  ...Object.keys(BUILD_ONLY_GATES),
+  ...NOT_A_GATE_NAMES,
+]);
 
 const sourceOf = (file: string) => readFileSync(join(COMMANDS_DIR, file), 'utf8');
 
@@ -117,14 +245,184 @@ const AUTHORING_COMMANDS: readonly string[] = ['compile.ts', 'validate.ts', 'lin
  */
 const NOTICE_PROSE = 'converted at load; conversion';
 
-/** Every `lintFoo(`/`validateFoo(` call site in a command's source. */
-function gateCallsIn(file: string): Set<string> {
-  const calls = sourceOf(file).match(/\b(?:lint|validate)[A-Z]\w*(?=\s*\()/g) ?? [];
-  return new Set(calls);
+/**
+ * The source with every comment body and every string/template body blanked to
+ * spaces, character offsets and line breaks preserved.
+ *
+ * ⭐ [#18491] This is what lets the scan below mean "this command CALLS it"
+ * instead of "these characters appear somewhere in the file". Both halves were
+ * live holes: {@link calls} matched raw text, so a prose line writing
+ * `preflightRequiredCapabilities(...)` would have satisfied the roster
+ * assertion for a command that had stopped calling it, and every name named in
+ * a docblock counted as a call site.
+ *
+ * ⛔ Deliberately NOT used by the inline-notice assertion at the bottom of this
+ * file. An inline copy of the conversion sentence IS a string literal, so the
+ * check that no command spells it out must read the RAW source — blanking
+ * strings there would make that assertion pass on exactly the file it exists to
+ * reject. `sourceOf` stays, and which of the two a reader wants is a real
+ * choice, not an oversight.
+ *
+ * ⚠️ Bound: a regex literal containing `//` or a quote would derail the scan.
+ * Neither command contains a regex literal today, and the failure direction is
+ * loud rather than silent — a derailed scan blanks call sites, which strands
+ * ledger entries and reds `no ledger entry is stale` below.
+ */
+function codeOnly(src: string): string {
+  const out = src.split('');
+  const N = src.length;
+  const blank = (from: number, to: number): void => {
+    for (let k = from; k < to && k < N; k++) if (out[k] !== '\n') out[k] = ' ';
+  };
+  let i = 0;
+  while (i < N) {
+    const c = src[i];
+    const d = src[i + 1];
+    if (c === '/' && d === '/') {
+      const j = src.indexOf('\n', i);
+      blank(i, j === -1 ? N : j);
+      i = j === -1 ? N : j;
+    } else if (c === '/' && d === '*') {
+      const j = src.indexOf('*/', i + 2);
+      blank(i, j === -1 ? N : j + 2);
+      i = j === -1 ? N : j + 2;
+    } else if (c === "'" || c === '"' || c === '`') {
+      let j = i + 1;
+      while (j < N) {
+        if (src[j] === '\\') {
+          j += 2;
+          continue;
+        }
+        if (src[j] === c) break;
+        j++;
+      }
+      blank(i + 1, j);
+      i = Math.min(j + 1, N);
+    } else {
+      i++;
+    }
+  }
+  return out.join('');
 }
 
+/** Keywords that take a parenthesis and are not calls of anything. */
+const NOT_CALLABLE: ReadonlySet<string> = new Set([
+  'if', 'for', 'while', 'switch', 'catch', 'return', 'typeof', 'await', 'function',
+  'new', 'do', 'else', 'yield', 'void', 'delete', 'in', 'of', 'import', 'super',
+  'constructor', 'as', 'async',
+]);
+
+/**
+ * Every bare-identifier call site in a command's source: `foo(` wherever `foo`
+ * is not a property access, not the tail of a longer identifier, not a keyword
+ * and not a declaration.
+ *
+ * ⭐ [#18491] THE DIRECTION OF THIS FILE IS INVERTED HERE. The old extractor
+ * asked "which call sites LOOK like gates" — a regex for the two prefixes
+ * `lint` and `validate` followed by a capital — and answered with 2 of the 45
+ * names `compile.ts` calls. Everything else was
+ * invisible, so the roster was advisory: a gate could be wired into one command
+ * only and nothing in this file could tell. Two families were invisible on the
+ * tree at once (`findNavGroupDiagnostics`, `checkProtocolVersionGap`), which is
+ * why widening the pattern was the wrong fix: it would have moved the blind
+ * spot to whatever the repo names a gate next.
+ *
+ * This asks the opposite question — "what does this command call" — and hands
+ * the answer to the ledgers, which must account for ALL of it. A naming choice
+ * cannot defeat it because it reads no names.
+ *
+ * ⚠️ What it still cannot see, stated so it is a known bound and not a
+ * surprise. Each is asserted absent by `the command sources use no call shape
+ * this scan cannot read` below, so none of them is silent:
+ *   - a gate reached through a namespace import (`import * as g` → `g.run()`)
+ *     or a dynamic `await import(...)` / `require(...)`;
+ *   - a gate never CALLED here but handed on as a value (`list.map(gate)`).
+ *     Asserted absent by requiring every value import to be either called or
+ *     declared in a ledger.
+ */
+function callSitesOf(src: string): Set<string> {
+  const code = codeOnly(src);
+  const found = new Set<string>();
+  const re = /([A-Za-z_$][\w$]*)\s*\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(code)) !== null) {
+    const before = code.slice(0, m.index);
+    // Tail of a longer identifier, or a property access. `...spread(` is a
+    // call of `spread`, so the dot test must not fire on the third dot.
+    if (/[\w$]$/.test(before)) continue;
+    if (/(?<!\.\.)\.\s*$/.test(before)) continue;
+    // `function foo(` / `async foo(` declare; they do not call.
+    if (/\b(?:function|async)\s+$/.test(before)) continue;
+    if (NOT_CALLABLE.has(m[1])) continue;
+    found.add(m[1]);
+  }
+  return found;
+}
+
+const callSitesIn = (file: string): Set<string> => callSitesOf(sourceOf(file));
+
 /** Is `name` invoked anywhere in this command's source? */
-const calls = (file: string, name: string) => new RegExp(String.raw`\b${name}\s*\(`).test(sourceOf(file));
+const calls = (file: string, name: string) => callSitesIn(file).has(name);
+
+/**
+ * Every value symbol a command's static imports bind, with `import type` and
+ * inline `type` specifiers dropped.
+ *
+ * ⛔ A parse that quietly skipped an import statement would remove names from
+ * the classification demand — a silent hole of exactly the kind this file is
+ * about — so {@link importStatementCount} is asserted equal to the number of
+ * statements actually consumed.
+ */
+/** How many import statements {@link valueImportsOf} actually consumed. */
+const importsConsumed = new Map<string, number>();
+
+function valueImportsOf(src: string): Set<string> {
+  const names = new Set<string>();
+  const re = /import\s+(type\s+)?([\s\S]*?)\s+from\s+['"][^'"]+['"];/g;
+  let m: RegExpExecArray | null;
+  let consumed = 0;
+  while ((m = re.exec(src)) !== null) {
+    consumed++;
+    if (m[1]) continue;
+    const clause = m[2];
+    const braced = /\{([\s\S]*)\}/.exec(clause);
+    for (const raw of braced ? braced[1].split(',') : []) {
+      const t = raw.trim();
+      if (!t || /^type\s/.test(t)) continue;
+      const local = t.split(/\s+as\s+/).pop()?.trim();
+      if (local) names.add(local);
+    }
+    const dflt = clause.replace(/\{[\s\S]*\}/, '').replace(/,/g, ' ').trim();
+    if (dflt) names.add(dflt);
+  }
+  importsConsumed.set(src, consumed);
+  return names;
+}
+
+/** How many import statements the source has, counted independently. */
+const importStatementCount = (src: string): number =>
+  (codeOnly(src).match(/^import\s/gm) ?? []).length;
+
+/**
+ * The names `os build` calls and `os validate` does not, once the two written
+ * excuses are taken out: a declared build-only gate, and a declared non-gate.
+ *
+ * ⭐ Pure over source TEXT, not over file names, so the negative controls can
+ * hand it fabricated commands. A guard that can only be run against the real
+ * tree can only ever be observed passing.
+ */
+function parityGapBetween(
+  compileSrc: string,
+  validateSrc: string,
+  notGates: ReadonlySet<string>,
+): string[] {
+  const inValidate = callSitesOf(validateSrc);
+  return [...callSitesOf(compileSrc)]
+    .filter((name) => !inValidate.has(name))
+    .filter((name) => !(name in BUILD_ONLY_GATES))
+    .filter((name) => !notGates.has(name))
+    .sort();
+}
 
 /**
  * The `runAuthoringRules(...)` call in one command's source, from the call
@@ -373,17 +671,54 @@ describe('os validate is the read-only superset of os build (#3782, #4409)', () 
     ).toBe(true);
   });
 
-  it('compile.ts hand-wires no gate validate.ts is missing', () => {
-    const compileGates = gateCallsIn('compile.ts');
-    const validateGates = gateCallsIn('validate.ts');
+  /**
+   * ⭐ [#18491] THE COMPLETENESS HALF, and the reason the roster above can be
+   * called closed. Every name either command calls must be classified; a name
+   * nobody classified fails HERE, which is how a gate gets onto the roster
+   * without anyone having to notice it.
+   *
+   * Before this, the roster was advisory and the drift scan matched
+   * `lintFoo(`/`validateFoo(` — 2 of the 45 names `compile.ts` calls. Two
+   * artifact-level gates were wired into both commands and held by nothing
+   * (`findNavGroupDiagnostics` since #14553, `checkProtocolVersionGap`), and a
+   * third wired into one command only would have passed every assertion in this
+   * file. That is the FALSE-CLEAN direction, and it is the direction that
+   * matters: `os validate` is the check an author runs before shipping.
+   */
+  it('every call site in compile.ts and validate.ts is classified', () => {
+    // Non-vacuity FIRST. A scan that derailed — a stripper that blanked real
+    // code, a regex that stopped matching — reports an empty difference and
+    // reads exactly like agreement. These floors are deliberately far below
+    // today's 47 and 39: they catch collapse, not growth.
+    for (const file of PARITY_COMMANDS) {
+      expect(
+        callSitesIn(file).size,
+        `${file}: the call-site scan found almost nothing, so every assertion in this file that ` +
+          `reads it is vacuous. The scan has derailed — do not "fix" this by lowering the floor.`,
+      ).toBeGreaterThan(20);
+    }
 
-    // Non-vacuity: the extraction must still find the pre-parse key lints.
-    expect(compileGates.size).toBeGreaterThan(0);
-
-    const missing = [...compileGates]
-      .filter((g) => !validateGates.has(g))
-      .filter((g) => !(g in BUILD_ONLY_GATES))
+    const unclassified = [
+      ...new Set(PARITY_COMMANDS.flatMap((file) => [...callSitesIn(file)])),
+    ]
+      .filter((name) => !CLASSIFIED.has(name))
       .sort();
+
+    expect(
+      unclassified,
+      `compile.ts / validate.ts call ${unclassified.length} name(s) this file has not classified: ` +
+        `${unclassified.join(', ')}.\n` +
+        `Every call site must land in exactly one ledger. If it is an artifact-level gate, wire it ` +
+        `into BOTH commands and add it to SHARED_NON_REGISTRY_GATES; if it genuinely cannot run ` +
+        `read-only, add it to BUILD_ONLY_GATES with a reason; if it is not a gate at all, add it to ` +
+        `NOT_A_GATE under the reason that says so. Registering it in ` +
+        `packages/lint/src/authoring-rules.ts instead is better than all three — then all THREE ` +
+        `authoring commands get it and no roster row is needed.`,
+    ).toEqual([]);
+  });
+
+  it('compile.ts hand-wires no gate validate.ts is missing', () => {
+    const missing = parityGapBetween(sourceOf('compile.ts'), sourceOf('validate.ts'), NOT_A_GATE_NAMES);
 
     expect(
       missing,
@@ -393,6 +728,170 @@ describe('os validate is the read-only superset of os build (#3782, #4409)', () 
         `BUILD_ONLY_GATES with a reason.`,
     ).toEqual([]);
   });
+
+  /**
+   * The negative controls for the scan above, on the same pass — a guard that
+   * cannot fail is not a guard, and this one replaced a pattern that could not
+   * fail for an entire naming family.
+   *
+   * ⭐ [#18491] The first case is the defect itself, in the shape it would
+   * actually arrive in: a gate wired into `compile.ts` and not `validate.ts`,
+   * named something the old extractor could not see. Every family here is one
+   * this repository already uses or plausibly would; the scan reads none of
+   * them, which is the whole claim.
+   */
+  it('the parity scan sees a gate wired into one command only, whatever it is named', () => {
+    const NONE: ReadonlySet<string> = new Set();
+    const validateSrc = 'const findings = runAuthoringRules(stack);\n';
+
+    for (const gate of [
+      'lintFoo', // the two the old extractor could see …
+      'validateFoo',
+      'findFoo', // … and the families it could not. `find*` and `check*` are
+      'checkFoo', //  both live on this tree today.
+      'collectFoo',
+      'preflightFoo',
+      'assertFoo',
+      'auditFoo',
+      'ensureFoo',
+      'foo',
+    ]) {
+      const compileSrc = `const findings = runAuthoringRules(stack);\nconst d = ${gate}(stack);\n`;
+      expect(
+        parityGapBetween(compileSrc, validateSrc, NONE),
+        `a gate named ${gate} wired into compile.ts and not validate.ts must be reported`,
+      ).toEqual([gate]);
+    }
+
+    // … and the same gate in BOTH commands is not a parity gap. Without this
+    // the assertions above are satisfied by a scan that reports everything.
+    expect(
+      parityGapBetween('const d = findFoo(s);\n', 'const d = findFoo(s);\n', NONE),
+      'a gate wired into both commands is not a parity gap',
+    ).toEqual([]);
+
+    // A build-only gate is excused, and only because it is written down.
+    expect(parityGapBetween('buildRuntimeBundle(s);\n', '', NONE)).toEqual([]);
+    expect(parityGapBetween('buildSomethingElse(s);\n', '', NONE)).toEqual(['buildSomethingElse']);
+  });
+
+  /**
+   * ⭐ [#18491] Prose is not wiring. The scan this file used to run matched raw
+   * source text, so a command that had STOPPED calling a rostered gate stayed
+   * green as long as some comment still wrote the name with a parenthesis after
+   * it — a vacuous pass in the same false-clean direction as the naming blind
+   * spot, one layer over.
+   */
+  it('a comment or a string literal is not a wiring', () => {
+    const NONE: ReadonlySet<string> = new Set();
+    const compileSrc = 'const d = findFoo(stack);\n';
+
+    expect(
+      parityGapBetween(compileSrc, '// findFoo(stack) used to run here\n', NONE),
+      'a comment naming the gate must not count as validate.ts running it',
+    ).toEqual(['findFoo']);
+    expect(
+      parityGapBetween(compileSrc, "const hint = 'run findFoo(stack) first';\n", NONE),
+      'a string naming the gate must not count as validate.ts running it',
+    ).toEqual(['findFoo']);
+    expect(
+      parityGapBetween(compileSrc, '/* findFoo(stack) */\n', NONE),
+      'a block comment naming the gate must not count as validate.ts running it',
+    ).toEqual(['findFoo']);
+
+    // The mirror, on the predicate the roster's own `both commands run %s`
+    // assertions use.
+    expect(callSitesOf('// preflightRequiredCapabilities(x)\n').has('preflightRequiredCapabilities')).toBe(false);
+    expect(callSitesOf('preflightRequiredCapabilities(x);\n').has('preflightRequiredCapabilities')).toBe(true);
+
+    // Two shapes the scan must get right in the OTHER direction, or it
+    // under-reports: a spread-applied call is a call, a property access is not.
+    expect(callSitesOf('const a = [...lintUnknownStackKeys(s)];\n').has('lintUnknownStackKeys')).toBe(true);
+    expect(callSitesOf('const a = registry.findFoo(s);\n').has('findFoo')).toBe(false);
+  });
+
+  it('no ledger entry is stale', () => {
+    // A ratchet nobody prunes rots into a permission slip — the same reason
+    // BUILD_ONLY_GATES is pruned below. A NOT_A_GATE entry for a name neither
+    // command mentions any more is a standing excuse waiting for a gate to be
+    // given that name.
+    const live = new Set(
+      PARITY_COMMANDS.flatMap((file) => [...callSitesIn(file), ...valueImportsOf(sourceOf(file))]),
+    );
+    const stale = [...NOT_A_GATE_NAMES].filter((name) => !live.has(name)).sort();
+    expect(
+      stale,
+      `NOT_A_GATE entries neither compile.ts nor validate.ts uses any more: ${stale.join(', ')}. ` +
+        `Delete them.`,
+    ).toEqual([]);
+
+    // Exactly one ledger per name: a name in two of them makes the "classified"
+    // test above green while leaving which claim is being made undecidable.
+    const buckets: ReadonlyArray<readonly [string, ReadonlySet<string>]> = [
+      ['SHARED_NON_REGISTRY_GATES', new Set(SHARED_NON_REGISTRY_GATES)],
+      ['BUILD_ONLY_GATES', new Set(Object.keys(BUILD_ONLY_GATES))],
+      ['NOT_A_GATE', NOT_A_GATE_NAMES],
+    ];
+    const doubled = [...CLASSIFIED].filter(
+      (name) => buckets.filter(([, set]) => set.has(name)).length > 1,
+    );
+    expect(doubled, `classified in more than one ledger: ${doubled.join(', ')}`).toEqual([]);
+  });
+
+  /**
+   * ⚠️ [#18491] The bounds of the scan, asserted rather than written down and
+   * hoped for. The scan reads bare-identifier call sites in the command's own
+   * source, so three shapes would hide a gate from it. None is present today,
+   * and each is refused here so that introducing one is a RED — a decision
+   * someone makes on purpose — instead of a silent return to the blind spot
+   * this file was just repaired for.
+   */
+  it('the command sources use no call shape this scan cannot read', () => {
+    for (const file of PARITY_COMMANDS) {
+      const src = sourceOf(file);
+      const code = codeOnly(src);
+
+      expect(
+        /\bimport\s+\*\s+as\b/.test(code),
+        `${file} uses a namespace import. A gate reached as \`ns.gate()\` is a property access, ` +
+          `which this scan deliberately does not count — import the gate by name.`,
+      ).toBe(false);
+      expect(
+        /(?<![.\w$])import\s*\(/.test(code),
+        `${file} uses a dynamic import. A gate resolved at runtime has no call site this file can ` +
+          `read — import it statically.`,
+      ).toBe(false);
+      expect(
+        /(?<![.\w$])require\s*\(/.test(code),
+        `${file} uses require(). Same reason as the dynamic import above.`,
+      ).toBe(false);
+
+      // The import parse must have consumed EVERY import statement: a
+      // statement it skipped drops names from the classification demand, which
+      // is silent in the wrong direction.
+      const values = valueImportsOf(src);
+      expect(
+        importsConsumed.get(src),
+        `${file}: the import parse consumed ${importsConsumed.get(src)} of ${importStatementCount(src)} ` +
+          `import statements, so some imported names are invisible to the ledgers.`,
+      ).toBe(importStatementCount(src));
+
+      // And every value import is either called here or written down. This is
+      // what closes the last shape: a gate handed on as a value
+      // (`list.map(gate)`) rather than called, which has no `gate(` call site
+      // at all. `formatUnknownAuthoringKey` is exactly that shape today.
+      const unaccounted = [...values]
+        .filter((name) => !callSitesIn(file).has(name) && !CLASSIFIED.has(name))
+        .sort();
+      expect(
+        unaccounted,
+        `${file} imports ${unaccounted.length} value(s) it never calls and this file has not ` +
+          `classified: ${unaccounted.join(', ')}. An imported gate that is handed on as a value ` +
+          `instead of called still runs — classify it.`,
+      ).toEqual([]);
+    }
+  });
+
 
   it('every BUILD_ONLY_GATES entry is still called by the build', () => {
     // A ratchet nobody prunes rots into a permission slip.
