@@ -582,15 +582,15 @@ Even inside your own worktree, operate defensively:
    `pre-commit` refuses the commit until those artifacts check clean. Sequence after a
    merge unchanged from §9: rebuild, then `check:generated --fix`. Worth knowing:
    - **The MERGE commit itself is the one exemption, and it is a deferral, not a pass.**
-     `scripts/pm/os-regen-merge.sh` is the in-repo authority for landing one of these
-     branches, and its step 3 commits the merge **before** regenerating on purpose: the
-     driver exits 0 while silently dropping one side, so only a separate regeneration
-     commit on a known-good base lets a reviewer read "what main brought" apart from
-     "what the change produces". `pre-commit` records that merge as a deferral and then
-     holds you to it — the immediately following commit must discharge it (every commit
-     until then is refused, and a second merge cannot defer on top of an outstanding
-     one), and `.githooks/pre-push` refuses a push that still owes one. ⛔ So this step
-     never needs `--no-verify`, which skips *every* pre-commit check rather than this one.
+     `scripts/pm/os-regen-merge.sh` is the in-repo authority for landing one onto `main`,
+     and its step 3 commits the merge **before** regenerating on purpose: the driver exits
+     0 while silently dropping one side, and no diffstat or `git diff` shows the drop, so
+     only a separate regeneration commit on a known-good base lets a reviewer read "what
+     main brought" apart from "what the change produces". `pre-commit` records it as a
+     deferral and holds you to it — the next commit must discharge it (every commit until
+     then is refused, and a second merge cannot defer onto an outstanding one), and
+     `.githooks/pre-push` refuses a push that still owes one. ⛔ So this step never needs
+     `--no-verify`, which skips *every* pre-commit check, not this one.
    - **The driver is a LOCAL facility** — the merge queue rebuilds server-side where no
      custom driver runs, so the three hottest artifacts are **sharded** per category/entry
      (`authorable-surface/`, `json-schema.manifest/`, `api-surface/`) to keep parallel
@@ -603,9 +603,9 @@ Even inside your own worktree, operate defensively:
      clone that shares the object store and has no driver registered
      (`git clone --bare --shared . PROBE.git`, then
      `git --git-dir=PROBE.git merge-tree --write-tree --name-only BASE HEAD`), ⛔ never
-     with `-c merge.os-regen.driver=`, which does not disable the driver but leaves git
-     failing to run it and reporting a conflict for every routed path, including ones that
-     text-merge cleanly.
+     with `-c merge.os-regen.driver=` or `-c merge.os-regen.driver=false`, neither of
+     which disables the driver: git runs the configured program, it fails, and every
+     routed path is reported conflicted, including ones that text-merge cleanly.
    - **Registration is per clone** (`pnpm install` → `prepare` →
      `scripts/setup-git-hooks.mjs`); an unregistered clone falls back to git's default
      text merge — older behaviour, not breakage.
