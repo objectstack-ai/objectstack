@@ -380,10 +380,17 @@ const EXTERNAL_INPUT_REQUIRED: ReadonlyArray<{
     runBy: 'scripts/gen-sdui-manifest.sh',
     why:
       'compares the spec schema props against the registry-declared inputs (two declarations, no renderer: #4472). ' +
-      'The registry is a browser app, so its manifest exists only after objectui is built at .objectui-sha and ' +
-      'enumerated in a real browser — nothing in this repo (console dist is gitignored, the published console ships ' +
-      'no sdui.manifest.json) can hand it one. `pnpm sdui:manifest` produces it and runs the ratchet; without it the ' +
-      'gate now exits 1 rather than skipping (#4690)',
+      'It reads its manifest from MANIFEST=<path> and THIS AGGREGATE PASSES NONE — that, and only that, is what ' +
+      '"cannot run here" means for this entry. The input is NOT unavailable in the repo: since #13446 a dump is ' +
+      'TRACKED at the repo root as sdui.manifest.json, and lint.yml runs the gate --strict against it on every PR ' +
+      '(MANIFEST="$PWD/sdui.manifest.json"), so the gate is neither unrun nor unrunnable — it is unrun BY THIS ' +
+      'AGGREGATE. Nor does producing one require a browser: scripts/gen-sdui-manifest-node.mjs regenerates the ' +
+      'tracked artefact under plain Node from the PUBLISHED @object-ui/* packages (the browser-only claim was ' +
+      'measured false in objectui#6741), and scripts/check-sdui-manifest.mjs holds artefact, record and pin ' +
+      'together. `pnpm sdui:manifest` (runBy) is the other producer: it builds objectui at .objectui-sha and dumps ' +
+      'the registry from a real browser, then runs this ratchet against THAT. ⚠️ The two producers read two ' +
+      'different registries — published packages vs the pinned checkout\'s source — and do not agree today (#17735). ' +
+      'Without a MANIFEST the gate exits 1 rather than skipping (#4690)',
   },
 ];
 
