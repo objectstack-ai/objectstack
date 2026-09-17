@@ -26,4 +26,4 @@ Step ③ of ruling A on #18115. Step ① added the closed duration vocabulary an
 Every unit is a measurement of the row's producer, printed in the PR body per row, never a reading of the key name.
 
 Clause-②: no (narrowing)
-ADR-0087 disposition: none — no key is renamed, removed or retired, so no conversion-layer entry and no tombstone is owed. The three narrowing rows refuse a value no measured producer writes.
+<!-- adr-0087: not-required (no-migration-prescription) No key is renamed, removed or retired, so there is no FROM to TO mapping an upgrader could be given: the three narrowing rows refuse only a fraction or a negative span, and every measured producer already writes a whole, non-negative count. -->
