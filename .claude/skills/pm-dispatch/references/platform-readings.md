@@ -47,7 +47,7 @@
 - undraft 单通道:席位凭据走 `POST .../pulls/{n}/ccr/ready_for_review`;MCP 兜底已拒。
 - 2026-09-12 两席实调:裸 GraphQL 会话内被拒,建议的 REST 正是 ccr 路 ⇒ 池 0 不再只能等重置。
 - ⛔ 裸 `PATCH /pulls/{n}` 传 `draft: false` 回 200 而无操作(2026-09-11);读回才作数:`GET /pulls/{n}`。
-- 挂上的 auto-merge 存的方法恒为 `merge`,不论请求了什么;REST `auto_merge.merge_method` 读回 `merge`。
+- auto-merge 回读 `merge_method` 不恒定:同 `SQUASH` 载荷 `merge`/`squash` 皆现,⛔ 非落地方法判据。
 - 仓库 `allow_merge_commit:false` 时同样读回 `merge`;无 REST 端点设该方法。
 - 设方法的 GraphQL mutation 不服务 agent 会话 ⇒ 席位既设不了也纠不了。
 - 它在本仓无实效:`main` 的合并队列规则带 `merge_method: SQUASH`,合并由队列执行。
@@ -199,8 +199,7 @@
 - ⛔ 不是可疑时才验:归零下空结果与真无重复逐字节同形,读作搜过了没有。
 - 后果是重复卡照开、空车道照停;控制词回 0 ⇒ 本会话 search 已坏,立刻换通道,⛔ 不重试。
 - 控制词命中只证通道活着:同一文档换个词即回零,故障按词形不按文档,零仍不是读数。
-- 换道:探针绿走 REST 列表端点 `GET /repos/{o}/{r}/issues?state=open&labels=a,b&per_page=N`。
-- 它走 core 桶且 `labels` 是真 AND;⛔ 完整性自证靠 `&page=N` 加总数核对。
+- 换道:探针绿走 REST 列表端点列卡,走 core 桶且 `labels` 真 AND;拼写与自证见 `rest-channel.md`。
 - 翻页在偏移 ~9,900 硬拒:422 Pagination with the page parameter is not supported for large datasets。
 - 该拒绝与规模、`per_page` 无关:小结果集同样在 `page=100` 拒,`per_page=1` 拒在 `page=9000`。
 - ⇒ 总体超过它就按 `sort=created` 拆成 `asc` 加 `desc` 两趟、各 ≤99 页。
@@ -270,6 +269,7 @@
 - ⛔ 永不读作交集;判据 = 结果比任一输入都宽:两标签的交集回 135 张而一道只有 132 张。
 - 正典解法:逐标签单独计数,按容斥推交集;负数或不合理的隐含交集 = 模型坏了。
 - 结果良构、失效全静默,混入别车道同状态卡与本车道全状态卡。
+- 多标签页还静默截断:`totalCount` 231 而 `returned` 30,单标签同车道 24/24 ⇒ 求交读成空车道。
 - 正确读法 = 整车道单标签一次读全加本地对 labels 求交,或改走 REST。
 - 两个通道的 `labels` 语义相反:REST 列表端点的 `labels=a,b` 是真 AND ⇒ ⛔ 不无条件改走 REST。
 - 被拦的下载不是缺席证明:出口策略 403 只说取不来,不说没有,先找产物再下结论。
