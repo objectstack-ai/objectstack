@@ -739,6 +739,102 @@
  * landed widening carried by a same-binding inline member swap — landed, never
  * a synthetic sample — closes it by reading the members' own declarations.
  *
+ * ## The tenth accidental variable #18702 removed — a declaring factory
+ * PRIVATE to one file
+ *
+ * #18560 repaired the vocabulary as a NAMED list of shared, exported helpers,
+ * and wrote down in the same edit what a list of names can never reach: a
+ * factory declared inside the one file that uses it. `SCHEMA_PROPERTY_FORMS`
+ * cannot name it — there is nothing to import and nothing to share — so
+ * `memberTellKind` answers `null`, the row neither fires nor spends the #16943
+ * budget nor earns it on the removed side, and nothing in the output says a
+ * thing. That is the SAME failure shape #18560 turned, on the one population
+ * its instrument was built not to reach.
+ *
+ * ⭐ The repair is STRUCTURAL, and the name-shaped heuristic #18560's header
+ * refused stays refused. This reading resolves the factory's OWN DEFINITION and
+ * classifies it by what its body RETURNS. The measurement that settles which of
+ * the two readings is right is the census below: of the eight factories the
+ * filing card names, FOUR mint PROSE or an error map rather than a schema
+ * (`objectBlockHistory(`, `belongsInConfig(`, `INLINE_CREDENTIAL_REFUSED(`,
+ * `ruleArrayFilterError(`), so a `*Refusal(`/`*Arm(`-shaped reading would have
+ * fired on 38 key lines that declare no author-writable key at all.
+ *
+ * ## How the definition is read — the BLOB, never "the file of that name"
+ *
+ * The judged file's full text is read as a BLOB, by its object id. #17300
+ * measured the other reading wrong for this whole family — a seat's worktree is
+ * not the diff's head, so resolving anything against it answers about the wrong
+ * commit — and a blob id is CONTENT, so it cannot answer about the wrong one.
+ * The id comes from the diff itself: `index <old>..<new>` on the local path,
+ * the `sha` field on a `/pulls/N/files` row. It is read out of this repo's
+ * object store (`git cat-file blob`); only when that fails is the working tree
+ * consulted at all, and then only after `git hash-object` proves the file on
+ * disk IS that blob, byte for byte. Every other outcome is `null`.
+ *
+ * ⛔ BOUNDARY ONE — an IMPORTED factory stays unrecognised, and imports are ⛔
+ * not chased. Only the file the diff CARRIES is pinned to the judged head by
+ * the diff itself; the file an import points at is not in the diff, nothing
+ * pins it, and reading it out of the local tree is exactly #17300's mistake
+ * wearing a longer path.
+ *
+ * ⛔ BOUNDARY TWO — a body this reader cannot classify stays unrecognised: a
+ * return it cannot find at the body's own top level, or one that is a template
+ * string, an arrow, a number. None of them is read as a schema, and ⛔ none is
+ * guessed at.
+ *
+ * ⭐ Both boundaries are a STATED silence rather than the invisible one the
+ * card measured: every unresolved key line is reported with its file:line, the
+ * factory's name and the reason it could not be read. An unread line is now a
+ * line this reader NAMES.
+ *
+ * ⛔ The `no` criterion does not loosen, and the direction is provable rather
+ * than argued. The resolver only ever ADDS a recognition — the shared-helper
+ * list is consulted FIRST and unchanged — and it is consulted ONLY on the ADDED
+ * side, so a removed key line declared through a local factory buys nothing and
+ * no line that fires today can stop firing because a removal newly pays for it.
+ * ⚠️ The price of that asymmetry, stated: a block that REPLACES one
+ * local-factory key with another fires on the added one. That is a false
+ * positive, which is the cost #16448 accepted, and it is the loud direction.
+ * ⭐ The OVERTURN CONDITION, written down so it needs no second discussion:
+ * the first LANDED diff whose only tell is such a replacement moves the reading
+ * to the removed side under #16943's arithmetic — a ruling about that
+ * arithmetic, never a repair of an accidental variable.
+ *
+ * ⚠️ CENSUS — report-only, the eight factories the card names, at objectstack
+ * 30bac2880 (a count plus the tree it was taken against; key POSITIONS on
+ * `packages/spec/src/**`):
+ *
+ *   `placeholderFree(`            23 key lines,  0 file-local — WRITABLE
+ *                                 (`return schema.superRefine(…)`: it returns
+ *                                 the schema it was handed)
+ *   `strictIdent(`                12 key lines, 12 file-local — WRITABLE
+ *                                 (`z.string().regex(SNAKE_CASE)…`)
+ *   `ruleArrayFilterError(`       11 key lines,  0 file-local — NOT A SCHEMA
+ *                                 (`return (issue) => {…}`, a `$ZodErrorMap`)
+ *   `INLINE_CREDENTIAL_REFUSED(`  10 key lines,  0 file-local — NOT A SCHEMA
+ *                                 (a template string)
+ *   `objectBlockHistory(`          9 key lines,  9 file-local — NOT A SCHEMA
+ *                                 (a template string)
+ *   `emptyProps(`                  9 key lines,  9 file-local — WRITABLE
+ *                                 (`strictObject(…)`, itself a declared form)
+ *   `strictIdentOrNull(`           8 key lines,  8 file-local — WRITABLE
+ *                                 (`z.string().regex(SNAKE_CASE).nullable()…`)
+ *   `belongsInConfig(`             8 key lines,  8 file-local — NOT A SCHEMA
+ *                                 (a template string)
+ *
+ * ⚠️ AND THE CARD'S OWN PROBE IS AN IMPORTED ONE — measured on the tip, not
+ * argued from the filing. `placeholderFree` is declared in
+ * `packages/spec/src/data/driver/common.zod.ts` and IMPORTED at all 23 of its
+ * key positions, `memory.zod.ts:9` included, so the card's probe line
+ * (`snapshotPath: placeholderFree(z.string(), …)` on `memory.zod.ts`) is
+ * BOUNDARY ONE, not the class this round closes. It exits 0 still — but no
+ * longer in silence: the line is now reported by name, with its file:line and
+ * the reason. ⇒ The class the card's TITLE names is closed over the 29
+ * file-local key lines that carry a schema; the card's probe LINE is a shared,
+ * exported helper absent from `SCHEMA_PROPERTY_FORMS`, which is #18560's
+ * instrument and its own card.
+ *
  * ## The remedy with no reader — #17848, and a pin the shape never had
  *
  * #17848 filed two halves against this family. Re-measuring both on the tree
@@ -972,6 +1068,7 @@
 // well over 540s to reach (#16448 patch round 2).
 
 import process from 'node:process';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -2291,13 +2388,22 @@ function withoutComments(text) {
  * `retiredKey` here on the measured ground that each one's value refuses every
  * input — ⛔ not on their names, and ⛔ not on the file they live in.
  *
+ * #18702 — a FILE-LOCAL factory whose own definition returns a refusal joins
+ * the same reading through `localRefusal`, a regex built the same way from the
+ * same {@link KEY_HEAD_SOURCE} and ending at the same open paren. ⛔ It is a
+ * second SOURCE of forms, never a second reading: the evidence a line must
+ * carry is unchanged, so a live arm chained onto a local refusal fires exactly
+ * as one chained onto `retiredKey(` does.
+ *
  * @param {string} text — one patch line's text, with its `+` / `-` already stripped
+ * @param {RegExp|null} [localRefusal] — the file's own refusing forms (#18702)
  * @returns {boolean} true when the line declares a key UNWRITABLE
  */
-export function declaresUnwritableKey(text) {
+export function declaresUnwritableKey(text, localRefusal = null) {
   const s = String(text ?? '');
   if (COMMENT_LINE.test(s)) return false;
-  const opening = UNWRITABLE_KEY_DECLARATION.exec(s);
+  const opening = UNWRITABLE_KEY_DECLARATION.exec(s)
+    ?? (localRefusal instanceof RegExp ? localRefusal.exec(s) : null);
   if (opening === null) return false;
   const open = opening[0].length - 1;
   const close = matchingCloser(s, open);
@@ -2306,6 +2412,515 @@ export function declaresUnwritableKey(text) {
   if (close === -1) return true;
   // ① It closed here, so the value ends here too, give or take a comma.
   return TOMBSTONE_TAIL.test(withoutComments(s.slice(close + 1)));
+}
+
+
+// ---------------------------------------------------------------------------
+// #18702 — a declaring factory PRIVATE to one file
+// ---------------------------------------------------------------------------
+
+/**
+ * The identifier a key line's VALUE opens with AS A CALL, or `null`.
+ *
+ * ⛔ The shared list is the FAST PATH and is consulted first: a line
+ * `SCHEMA_PROPERTY` already recognises answers `null` here, so the resolver
+ * never re-judges a form the vocabulary has a row for and the two registers
+ * cannot disagree about one line.
+ */
+const KEY_VALUE_CALL = new RegExp(`${KEY_HEAD_SOURCE}([A-Za-z_$][\\w$]*)\\(`);
+
+/** @param {string} text @returns {string|null} */
+export function keyValueFactoryName(text) {
+  const s = String(text ?? '');
+  if (COMMENT_LINE.test(s)) return null;
+  if (SCHEMA_PROPERTY.test(s)) return null;
+  const m = KEY_VALUE_CALL.exec(s);
+  return m ? m[1] : null;
+}
+
+/**
+ * The HEAD blob id this diff names for one file, or `null`.
+ *
+ * ⭐ Both input paths carry it, and neither is a ref: the API row's `sha` IS
+ * the blob at the pull request's head, and `git diff` writes the same fact into
+ * its `index <old>..<new>` line. A blob id is content-addressed, so a reading
+ * taken through it can be missing but can never be about the wrong commit —
+ * which is the whole reason this resolver is allowed to exist at all after
+ * #17300.
+ */
+const DIFF_INDEX_BLOBS = /^index [0-9a-f]{7,40}\.\.([0-9a-f]{7,40})/m;
+const ALL_ZEROES = /^0+$/;
+
+/** @param {{ filename?: string, sha?: string, patch?: string|null }} file */
+export function headBlobId(file) {
+  const sha = String(file?.sha ?? '');
+  if (/^[0-9a-f]{40}$/.test(sha) && !ALL_ZEROES.test(sha)) return sha;
+  const m = DIFF_INDEX_BLOBS.exec(String(file?.patch ?? ''));
+  return m && !ALL_ZEROES.test(m[1]) ? m[1] : null;
+}
+
+/** A repo-relative path that cannot climb out of the tree. */
+const CONTAINED_PATH = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[^\0]+$/;
+
+function gitAt(args) {
+  return execFileSync('git', ['-C', ROOT, ...args], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+}
+
+/**
+ * That blob's bytes, or `null`.
+ *
+ * ⛔ The working tree is read ONLY after git proves the file on disk hashes to
+ * the very blob the diff named — that is not "the working tree of a different
+ * commit", it is the same content-addressed fact arriving by a second route.
+ * Anything else answers `null`, and `null` is a stated silence.
+ */
+function readHeadBlob(id, filename) {
+  try {
+    return gitAt(['cat-file', 'blob', id]);
+  } catch {
+    // Not in this object store — an unstaged edit, or another repo's pull.
+  }
+  try {
+    const hashed = gitAt(['hash-object', '--', filename]).trim();
+    if (/^[0-9a-f]{40}$/.test(hashed) && hashed.startsWith(id)) {
+      return readFileSync(join(ROOT, filename), 'utf8');
+    }
+  } catch {
+    // Not a file here, or not a git tree at all.
+  }
+  return null;
+}
+
+/** Content-addressed, so a hit can never be stale. */
+const headBlobCache = new Map();
+
+/** @param {{ filename?: string, sha?: string, patch?: string|null }} file */
+export function headBlobSource(file) {
+  const filename = String(file?.filename ?? '');
+  const id = headBlobId(file);
+  if (id === null || filename === '' || !CONTAINED_PATH.test(filename)) return null;
+  if (headBlobCache.has(id)) return headBlobCache.get(id);
+  const text = readHeadBlob(id, filename);
+  headBlobCache.set(id, text);
+  return text;
+}
+
+// -- reading ONE definition out of that text --------------------------------
+//
+// ⛔ Not a parser, and it must never grow into one. It answers exactly one
+// question — what does this function's body RETURN, as the leading text of that
+// expression — and every shape it cannot walk answers `null`, which the caller
+// reads as "unresolved" and reports by name. There is no truncating failure
+// mode: an unreadable definition is never "a definition that returns nothing".
+
+/** The index past whitespace and comments at `k`. */
+function skipTrivia(s, k) {
+  let i = k;
+  while (i < s.length) {
+    const ch = s[i];
+    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') { i += 1; continue; }
+    if (ch === '/' && s[i + 1] === '/') {
+      const nl = s.indexOf('\n', i);
+      if (nl === -1) return s.length;
+      i = nl + 1;
+      continue;
+    }
+    if (ch === '/' && s[i + 1] === '*') {
+      const end = s.indexOf('*/', i + 2);
+      if (end === -1) return s.length;
+      i = end + 2;
+      continue;
+    }
+    return i;
+  }
+  return i;
+}
+
+/** Where the string opening at `start` closes, across lines for a template. */
+function endOfStringAcross(s, start) {
+  const quote = s[start];
+  for (let k = start + 1; k < s.length; k += 1) {
+    if (s[k] === '\\') { k += 1; continue; }
+    if (quote !== '`' && s[k] === '\n') return -1;
+    if (s[k] === quote) return k;
+  }
+  return -1;
+}
+
+/** `matchingCloser`'s reading, carried ACROSS lines. */
+function closerAcross(s, open) {
+  const stack = [s[open]];
+  for (let k = open + 1; k < s.length; k += 1) {
+    const ch = s[k];
+    const next = s[k + 1];
+    if (ch === '/' && next === '/') {
+      const nl = s.indexOf('\n', k);
+      if (nl === -1) return -1;
+      k = nl;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      const end = s.indexOf('*/', k + 2);
+      if (end === -1) return -1;
+      k = end + 1;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const end = endOfStringAcross(s, k);
+      if (end === -1) return -1;
+      k = end;
+      continue;
+    }
+    if (BRACKET_CLOSERS[ch] !== undefined) { stack.push(ch); continue; }
+    if (ch === ')' || ch === ']' || ch === '}') {
+      if (BRACKET_CLOSERS[stack[stack.length - 1]] !== ch) return -1;
+      stack.pop();
+      if (stack.length === 0) return k;
+    }
+  }
+  return -1;
+}
+
+/** Where a generic parameter list opening at `k` closes, or -1. */
+function closeAngle(s, k) {
+  let depth = 0;
+  for (let i = k; i < s.length; i += 1) {
+    const ch = s[i];
+    if (ch === '<') depth += 1;
+    else if (ch === '>') { depth -= 1; if (depth === 0) return i; }
+    else if (ch === '\n' || ch === ';') return -1;
+  }
+  return -1;
+}
+
+/** The parameter NAMES between `open` and `close`. */
+function parameterNames(s, open, close) {
+  const names = [];
+  const push = (seg) => {
+    const m = /^\s*(?:\.\.\.)?([A-Za-z_$][\w$]*)/.exec(seg);
+    if (m) names.push(m[1]);
+  };
+  let depth = 0;
+  let from = open + 1;
+  for (let k = open + 1; k < close; k += 1) {
+    const ch = s[k];
+    const next = s[k + 1];
+    if (ch === '/' && next === '/') {
+      const nl = s.indexOf('\n', k);
+      if (nl === -1 || nl > close) break;
+      k = nl;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      const end = s.indexOf('*/', k + 2);
+      if (end === -1 || end > close) break;
+      k = end + 1;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const end = endOfStringAcross(s, k);
+      if (end === -1 || end > close) break;
+      k = end;
+      continue;
+    }
+    if (BRACKET_CLOSERS[ch] !== undefined) { depth += 1; continue; }
+    if (ch === ')' || ch === ']' || ch === '}') { depth -= 1; continue; }
+    if (ch === ',' && depth === 0) { push(s.slice(from, k)); from = k + 1; }
+  }
+  push(s.slice(from, close));
+  return names;
+}
+
+/**
+ * Where the body opening at `bodyOpen` RETURNS, at its own top level.
+ *
+ * ⛔ Brace depth, never the first textual `return`. A `return` inside a nested
+ * callback belongs to that callback, and reading it as the factory's own answer
+ * is how a live factory would be classified by a refusal it merely contains —
+ * the quiet direction.
+ */
+function topLevelReturn(s, bodyOpen) {
+  let depth = 1;
+  for (let k = bodyOpen + 1; k < s.length; k += 1) {
+    const ch = s[k];
+    const next = s[k + 1];
+    if (ch === '/' && next === '/') {
+      const nl = s.indexOf('\n', k);
+      if (nl === -1) return -1;
+      k = nl;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      const end = s.indexOf('*/', k + 2);
+      if (end === -1) return -1;
+      k = end + 1;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const end = endOfStringAcross(s, k);
+      if (end === -1) return -1;
+      k = end;
+      continue;
+    }
+    if (ch === '{') { depth += 1; continue; }
+    if (ch === '}') { depth -= 1; if (depth === 0) return -1; continue; }
+    if (depth !== 1) continue;
+    if (
+      ch === 'r'
+      && s.startsWith('return', k)
+      && !/[\w$.]/.test(s[k - 1] ?? ' ')
+      && !/[\w$]/.test(s[k + 6] ?? ' ')
+    ) {
+      return skipTrivia(s, k + 6);
+    }
+  }
+  return -1;
+}
+
+/** The leading text of the expression at `at`, whitespace collapsed. */
+function leadingExpression(s, at) {
+  return s.slice(at, at + 200).replace(/\s+/g, ' ').trim();
+}
+
+/** The `=>` of an arrow whose parameter list has already been walked, or -1. */
+function arrowAfter(s, from) {
+  let depth = 0;
+  for (let k = from; k < s.length - 1; k += 1) {
+    const ch = s[k];
+    const next = s[k + 1];
+    if (ch === '/' && next === '/') {
+      const nl = s.indexOf('\n', k);
+      if (nl === -1) return -1;
+      k = nl;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      const end = s.indexOf('*/', k + 2);
+      if (end === -1) return -1;
+      k = end + 1;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const end = endOfStringAcross(s, k);
+      if (end === -1) return -1;
+      k = end;
+      continue;
+    }
+    if (BRACKET_CLOSERS[ch] !== undefined) { depth += 1; continue; }
+    if (ch === ')' || ch === ']' || ch === '}') { depth -= 1; continue; }
+    if (depth !== 0) continue;
+    if (ch === ';') return -1;
+    if (ch === '=' && next === '>') return k;
+  }
+  return -1;
+}
+
+/**
+ * Every place `name` is DEFINED in `source`, as a top-of-line declaration.
+ *
+ * ⛔ A doc-comment line (` * const x = …`) and a commented-out one (`// const
+ * x = …`) cannot match, because the declaration keyword must follow the line's
+ * indentation and nothing else. Two sites answer AMBIGUOUS, never "the first
+ * one".
+ */
+function definitionSites(source, name) {
+  if (!/^[A-Za-z_$][\w$]*$/.test(name)) return [];
+  const re = new RegExp(
+    `(?:^|\\n)[ \\t]*(?:export[ \\t]+)?(?:default[ \\t]+)?(?:async[ \\t]+)?`
+      + `(?:(function)[ \\t]+${name}\\b|(?:const|let|var)[ \\t]+${name}\\b)`,
+    'g',
+  );
+  const sites = [];
+  let m = re.exec(source);
+  while (m !== null) {
+    sites.push({ index: m.index + m[0].length, isFunction: m[1] !== undefined });
+    m = re.exec(source);
+  }
+  return sites;
+}
+
+/** The body of a `function` form starting at the name's end. */
+function functionReturn(s, from) {
+  let k = skipTrivia(s, from);
+  if (s[k] === '<') {
+    const g = closeAngle(s, k);
+    if (g === -1) return null;
+    k = skipTrivia(s, g + 1);
+  }
+  if (s[k] !== '(') return null;
+  const close = closerAcross(s, k);
+  if (close === -1) return null;
+  const params = parameterNames(s, k, close);
+  const bodyOpen = s.indexOf('{', close + 1);
+  if (bodyOpen === -1) return null;
+  const at = topLevelReturn(s, bodyOpen);
+  if (at === -1) return null;
+  return { expr: leadingExpression(s, at), params };
+}
+
+/** What `name`'s definition RETURNS, or `null` when this reader cannot say. */
+export function factoryReturnExpression(source, name) {
+  const s = String(source ?? '');
+  const sites = definitionSites(s, String(name ?? ''));
+  if (sites.length !== 1) return null;
+  const site = sites[0];
+  if (site.isFunction) return functionReturn(s, site.index);
+
+  // A binding: skip an optional type annotation, then read the initialiser.
+  let i = skipTrivia(s, site.index);
+  if (s[i] === ':') {
+    let depth = 0;
+    for (; i < s.length; i += 1) {
+      const ch = s[i];
+      if (ch === '\n' && depth === 0 && s[skipTrivia(s, i)] === '=') { i = skipTrivia(s, i); break; }
+      if (BRACKET_CLOSERS[ch] !== undefined) { depth += 1; continue; }
+      if (ch === ')' || ch === ']' || ch === '}') { depth -= 1; continue; }
+      if (ch === ';') return null;
+      if (ch === '=' && depth === 0 && s[i + 1] !== '=' && s[i + 1] !== '>' && !'=!<>'.includes(s[i - 1] ?? '')) break;
+    }
+  }
+  if (s[i] !== '=') return null;
+  i = skipTrivia(s, i + 1);
+  if (s.startsWith('async', i) && !/[\w$]/.test(s[i + 5] ?? ' ')) i = skipTrivia(s, i + 5);
+  if (s.startsWith('function', i) && !/[\w$]/.test(s[i + 8] ?? ' ')) return functionReturn(s, i + 8);
+  if (s[i] === '<') {
+    const g = closeAngle(s, i);
+    if (g === -1) return null;
+    i = skipTrivia(s, g + 1);
+  }
+  let params = [];
+  if (s[i] === '(') {
+    const close = closerAcross(s, i);
+    if (close === -1) return null;
+    params = parameterNames(s, i, close);
+    i = close + 1;
+  } else {
+    const m = /^[A-Za-z_$][\w$]*/.exec(s.slice(i, i + 120));
+    if (m === null) return null;
+    params = [m[0]];
+    i += m[0].length;
+  }
+  const arrow = arrowAfter(s, i);
+  if (arrow === -1) return null;
+  const body = skipTrivia(s, arrow + 2);
+  if (s[body] === '{') {
+    const at = topLevelReturn(s, body);
+    if (at === -1) return null;
+    return { expr: leadingExpression(s, at), params };
+  }
+  return { expr: leadingExpression(s, body), params };
+}
+
+/**
+ * The register a returned expression puts the key in — `'writable'`,
+ * `'refusing'`, or `null` for "this reader does not classify that".
+ *
+ * ⛔ Positive evidence only, in both directions. A refusal is `z.never(` or a
+ * `z.custom` whose predicate refuses everything — the SAME primitives
+ * `UNWRITABLE_FORMS` names, read off the definition instead of off a name. A
+ * writable key is a `z.` schema, a `*Schema` binding, a form the shared
+ * vocabulary already declares writable, or the factory's OWN ARGUMENT handed
+ * back (`placeholderFree(schema, …)` returns `schema`). Everything else —
+ * prose, an error map, a number — is `null`, and `null` is reported, never
+ * rounded to either arm.
+ */
+const REFUSING_RETURN = /^z\.never[ \t]*\(|^z\.custom[ \t]*<[ \t]*never[ \t]*>[ \t]*\(|^z\.custom[ \t]*\([ \t]*\([ \t]*\)[ \t]*=>[ \t]*false\b/;
+const WRITABLE_ZOD_RETURN = /^z\.[A-Za-z_$]/;
+const WRITABLE_SCHEMA_BINDING = /^[A-Za-z_$][\w$]*Schema\b/;
+
+/** @returns {'writable'|'refusing'|null} */
+export function classifyFactoryReturn(expr, params = []) {
+  const e = String(expr ?? '').trim();
+  if (e === '') return null;
+  if (REFUSING_RETURN.test(e)) return 'refusing';
+  const call = /^([A-Za-z_$][\w$]*)[ \t]*\(/.exec(e);
+  if (call !== null) {
+    const form = SCHEMA_PROPERTY_FORMS.find((f) => f.pattern === `${call[1]}\\(`);
+    if (form !== undefined) return form.writable ? 'writable' : 'refusing';
+  }
+  if (WRITABLE_ZOD_RETURN.test(e)) return 'writable';
+  if (WRITABLE_SCHEMA_BINDING.test(e)) return 'writable';
+  const head = /^([A-Za-z_$][\w$]*)/.exec(e);
+  if (head !== null && Array.isArray(params) && params.includes(head[1])) return 'writable';
+  return null;
+}
+
+/**
+ * The verdict on ONE factory name against ONE file's text, with the reason.
+ *
+ * @returns {{ verdict: 'writable'|'refusing'|null, reason: string }}
+ */
+export function resolveDeclaringFactory(source, name) {
+  const s = String(source ?? '');
+  if (s === '') {
+    return { verdict: null, reason: 'the head blob for this file is not readable here' };
+  }
+  const sites = definitionSites(s, String(name ?? ''));
+  if (sites.length === 0) {
+    return { verdict: null, reason: 'no definition in this file — an IMPORTED factory is outside this reading' };
+  }
+  if (sites.length > 1) {
+    return { verdict: null, reason: `${sites.length} definitions of that name in this file — ambiguous, never guessed` };
+  }
+  const read = factoryReturnExpression(s, name);
+  if (read === null) {
+    return { verdict: null, reason: "no `return` this reader can read at the body's own top level" };
+  }
+  const verdict = classifyFactoryReturn(read.expr, read.params);
+  if (verdict === null) {
+    return { verdict: null, reason: `its body returns \`${read.expr.slice(0, 48)}\`, which this reader does not classify as a schema` };
+  }
+  return { verdict, reason: `its body returns \`${read.expr.slice(0, 48)}\`` };
+}
+
+/** One file's own declaring forms, built from `KEY_HEAD_SOURCE` like the list. */
+function localFormPattern(names) {
+  if (names.length === 0) return null;
+  return new RegExp(`${KEY_HEAD_SOURCE}(?:${names.map((n) => `${n}\\(`).join('|')})`);
+}
+
+/**
+ * The FILE-LOCAL declaring forms this file's ADDED lines name, resolved.
+ *
+ * ⛔ The ADDED side only, and the asymmetry is the loud direction (the header's
+ * section says why): a removed local-factory key line buys nothing, so nothing
+ * that fires today stops firing. Nothing is read at all unless an added key
+ * line names a form the shared vocabulary has no row for — the overwhelming
+ * majority of diffs never reach the blob.
+ *
+ * @returns {{ recognises: RegExp, refusal: RegExp|null }|null}
+ */
+function localDeclaringForms(file, lines, onContractSource, readSource, unresolved) {
+  if (!onContractSource) return null;
+  const wanted = new Map();
+  for (const r of lines) {
+    if (r.kind !== 'added') continue;
+    const name = keyValueFactoryName(r.text);
+    if (name === null) continue;
+    if (!wanted.has(name)) wanted.set(name, []);
+    wanted.get(name).push(r.line);
+  }
+  if (wanted.size === 0) return null;
+  const source = typeof readSource === 'function' ? readSource(file) : null;
+  const writable = [];
+  const refusing = [];
+  for (const [name, at] of wanted) {
+    const read = resolveDeclaringFactory(source ?? '', name);
+    if (read.verdict === 'writable') writable.push(name);
+    else if (read.verdict === 'refusing') refusing.push(name);
+    else if (Array.isArray(unresolved)) {
+      for (const line of at) {
+        unresolved.push({ file: String(file?.filename ?? ''), line, name, reason: read.reason });
+      }
+    }
+  }
+  const recognises = localFormPattern([...writable, ...refusing]);
+  if (recognises === null) return null;
+  return { recognises, refusal: localFormPattern(refusing) };
 }
 
 /**
@@ -2398,11 +3013,15 @@ const REGISTRATION_ROW =
  * carry), so counting it would let a `z.union([` -> `z.enum([` rewrite pay for a
  * member the same block really did add.
  */
-export function memberTellKind(text, { onContractSource = false, onPublished = false, onRegistry = false } = {}) {
+export function memberTellKind(text, { onContractSource = false, onPublished = false, onRegistry = false, localForms = null } = {}) {
   const s = String(text ?? '');
   if (COMMENT_LINE.test(s)) return null;
   if (onRegistry && REGISTRATION_ROW.test(s)) return 'T4';
   if (onContractSource && SCHEMA_PROPERTY.test(s)) return 'T1';
+  // #18702 — the file's OWN declaring factories, resolved through their own
+  // definitions. Read AFTER the shared vocabulary, never instead of it: the
+  // list is the fast path, and a form with a row never reaches this line.
+  if (onContractSource && localForms !== null && localForms.recognises.test(s)) return 'T1';
   if (onContractSource && (BARE_STRING_ELEMENT.test(s) || BARE_SCHEMA_ARM.test(s))) return 'T2';
   if (onPublished && JSON_STRING_ROW.test(s)) return 'T3';
   return null;
@@ -2454,13 +3073,20 @@ export function changeBlocks(lines) {
 /**
  * Every tell one file's added lines carry.
  *
- * @param {{ filename?: string, status?: string, patch?: string|null }} file
- * @param {{ repo?: string, licensed?: Set<string> }} [opts] — `licensed` is the
- *   whole diff's {@link ledgerRowLicences}; omitted, NOTHING is licensed and
- *   every row tells, because an unread licence is not a granted one.
+ * @param {{ filename?: string, status?: string, patch?: string|null, sha?: string }} file
+ * @param {{ repo?: string, licensed?: Set<string>, readSource?: Function,
+ *   unresolved?: object[] }} [opts] — `licensed` is the whole diff's
+ *   {@link ledgerRowLicences}; omitted, NOTHING is licensed and every row tells,
+ *   because an unread licence is not a granted one. `readSource` is #18702's
+ *   head-blob reader (defaulted, injectable so the self-test stays offline) and
+ *   `unresolved` collects the key lines whose declaring factory could not be
+ *   read — a STATED silence this file reports rather than swallows.
  * @returns {{ tell: string, file: string, line: number, text: string, why: string }[]}
  */
-export function tellsInFile(file, { repo = THIS_REPO, licensed = null } = {}) {
+export function tellsInFile(
+  file,
+  { repo = THIS_REPO, licensed = null, readSource = headBlobSource, unresolved = null } = {},
+) {
   const filename = String(file?.filename ?? '');
   if (filename === '') return [];
   if (file?.status === 'removed') return []; // a deleted file adds nothing.
@@ -2503,6 +3129,12 @@ export function tellsInFile(file, { repo = THIS_REPO, licensed = null } = {}) {
     typeof idx === 'number' && isConcatenationFragment(neighbourOn(side, idx, -1), neighbourOn(side, idx, 1));
   const surfaces = surfaceFlags(filename, repo);
   const { onContractSource } = surfaces;
+  // #18702 — THE ONE CALL that consults the file-local factory resolver. The
+  // ablation reverts exactly this line to `null`, which restores the pre-#18702
+  // reading byte for byte: `addedSurfaces` is then `surfaces` itself.
+  const localForms = localDeclaringForms(file, lines, onContractSource, readSource, unresolved);
+  const addedSurfaces = localForms === null ? surfaces : { ...surfaces, localForms };
+  const localRefusal = localForms === null ? null : localForms.refusal;
   // #17300 — is THIS file the ADR-0087 ledger? A licence clears a row in the
   // ledger table and nowhere else: the same string added to any other file on
   // any other surface still tells, with its own file:line.
@@ -2563,7 +3195,7 @@ export function tellsInFile(file, { repo = THIS_REPO, licensed = null } = {}) {
     // (`reason: 'prose ' +`) is a different reading and keeps its own tells.
     if (BARE_STRING_ELEMENT.test(text) && fragmentOn(newFile, newAt.get(i))) continue;
     const at = { file: filename, line, text: text.trim().slice(0, 160) };
-    const kind = memberTellKind(text, surfaces);
+    const kind = memberTellKind(text, addedSurfaces);
     // #17955 — a `retiredKey()` tombstone DECLARES a key unwritable. It is read
     // BEFORE the budget, and that ordering is the whole repair rather than a
     // detail: a tombstone must neither FIRE nor SPEND.
@@ -2583,7 +3215,7 @@ export function tellsInFile(file, { repo = THIS_REPO, licensed = null } = {}) {
     // genuine member. A tombstone carries its own evidence on its own line and
     // takes nothing from the block, so a genuine key beside it still has the
     // full budget to pay with — and fires when it cannot.
-    if (kind === 'T1' && declaresUnwritableKey(text)) continue;
+    if (kind === 'T1' && declaresUnwritableKey(text, localRefusal)) continue;
     // #16943 — a member or key this block REPLACED is not a net addition.
     //
     // ⛔ A line that DECLARES a closed set is never spent against the budget,
@@ -2733,46 +3365,53 @@ export function unreadFiles(files, { repo = THIS_REPO } = {}) {
  * files by construction, so the reading that clears a tombstone row is the only
  * one in this file whose evidence a single file cannot hold.
  */
-export function wideningTells(files, { repo = THIS_REPO } = {}) {
+export function wideningTells(files, { repo = THIS_REPO, readSource = headBlobSource, unresolved = null } = {}) {
   const rows = [];
   const licensed = ledgerRowLicences(files, { repo });
-  for (const file of files ?? []) rows.push(...tellsInFile(file, { repo, licensed }));
+  for (const file of files ?? []) rows.push(...tellsInFile(file, { repo, licensed, readSource, unresolved }));
   return rows;
 }
 
 /**
  * The verdict: a declaration plus a diff.
  *
+ * ⚠️ `unresolved` rides beside `rows` and is NEVER one: a key line whose
+ * declaring factory could not be read (#18702) fired nothing and cleared
+ * nothing, so it moves no exit code and is reported under its own heading.
+ *
  * @param {{ declaration: 'yes'|'no'|null|undefined,
- *           files: object[]|null, repo?: string }} input
+ *           files: object[]|null, repo?: string, readSource?: Function }} input
  * @returns {{ state: 'not-applicable'|'unreadable'|'incomplete'|'refused'|'clean',
- *   rows: object[], gaps: string[], text: string|null }}
+ *   rows: object[], gaps: string[], unresolved: object[], text: string|null }}
  */
-export function wideningRefusal({ declaration, files, repo = THIS_REPO } = {}) {
+export function wideningRefusal({ declaration, files, repo = THIS_REPO, readSource = headBlobSource } = {}) {
   // A `yes` is never blocked here, and an unreadable declaration is the
   // sibling's C2 row — issuing a verdict on it from this file would be a second
   // reader of the same limb, which is the drift this family punishes.
   if (declaration !== 'no') {
-    return { state: 'not-applicable', rows: [], gaps: [], text: null };
+    return { state: 'not-applicable', rows: [], gaps: [], unresolved: [], text: null };
   }
   if (!Array.isArray(files)) {
     return {
       state: 'unreadable',
       rows: [],
       gaps: [],
+      unresolved: [],
       text:
         'the changed-file listing could not be read, so this diff is UNJUDGED for widening tells. ' +
         '⛔ An unread diff is not a narrow diff.',
     };
   }
   const gaps = unreadFiles(files, { repo });
-  const rows = wideningTells(files, { repo });
+  const unresolved = [];
+  const rows = wideningTells(files, { repo, readSource, unresolved });
   if (rows.length > 0) {
     const where = rows.map((r) => `${r.file}:${r.line}`).join(', ');
     return {
       state: 'refused',
       rows,
       gaps,
+      unresolved,
       text: `${REFUSAL_SENTENCE} — ${rows.length} tell(s): ${where}`,
     };
   }
@@ -2781,12 +3420,13 @@ export function wideningRefusal({ declaration, files, repo = THIS_REPO } = {}) {
       state: 'incomplete',
       rows,
       gaps,
+      unresolved,
       text:
         `${gaps.length} file(s) on a tell surface arrived with no patch to read (${gaps.join(', ')}), ` +
         'so this diff is UNJUDGED for widening tells rather than clear of them.',
     };
   }
-  return { state: 'clean', rows: [], gaps: [], text: null };
+  return { state: 'clean', rows: [], gaps: [], unresolved, text: null };
 }
 
 /** The exit code one verdict maps to — one place, so no caller re-derives it. */
@@ -2894,6 +3534,33 @@ export function coverageLines(census, { cap = 10 } = {}) {
   return lines;
 }
 
+/**
+ * The key lines whose DECLARING FACTORY this reader could not resolve (#18702).
+ *
+ * ⭐ The whole point of printing them. Before this round a key line declared
+ * through a factory the vocabulary had no row for produced nothing at all — no
+ * tell, no gap, no sentence — and that silence is indistinguishable from a
+ * correct `no`, which is the one failure shape this chain is written against.
+ * These lines still move no exit code: nothing fired on them and nothing
+ * cleared them. What changed is that the reader now NAMES them.
+ *
+ * ⛔ Not a gap and not a tell. A gap (`unreadFiles`) is a file that arrived
+ * with no patch; a tell is a refusal. This is a third state — read, recognised
+ * as a key line SHAPE, and unjudged — and collapsing it into either would make
+ * a count say something nobody measured.
+ */
+export function unresolvedLines(rows, { cap = 10 } = {}) {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+  const lines = [
+    `  ⚠️ ${rows.length} key line(s) name a declaring factory this reader could not resolve — a STATED `
+      + 'silence: no tell fired on them and nothing cleared them, so this verdict is evidence about '
+      + 'neither.',
+  ];
+  for (const r of rows.slice(0, cap)) lines.push(`      ${r.file}:${r.line} — \`${r.name}(\` — ${r.reason}`);
+  if (rows.length > cap) lines.push(`      … and ${rows.length - cap} more`);
+  return lines;
+}
+
 /** The success sentence itself, counts split. */
 export function cleanVerdictLine(census) {
   const judged = census.judged.length;
@@ -2932,6 +3599,7 @@ export function verdictLines({ declaration, files, board }) {
     out.push(cleanVerdictLine(census));
     out.push(boardProvenanceLine(board));
     out.push(...coverageLines(census));
+    out.push(...unresolvedLines(verdict.unresolved));
     out.push(
       '  ⚠️ A tell is not a proof and its absence is not one either — false negatives are the ' +
         'cost the #16349 ruling accepted.',
@@ -2940,6 +3608,7 @@ export function verdictLines({ declaration, files, board }) {
   }
   for (const line of refusalLines(verdict)) err.push(`✗ ${line}`);
   err.push(`check-widening-tells: ${verdict.text}`);
+  err.push(...unresolvedLines(verdict.unresolved));
   err.push(boardProvenanceLine(board));
   return { exit: exitForRefusal(verdict), out, err };
 }
