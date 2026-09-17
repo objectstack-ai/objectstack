@@ -2670,8 +2670,13 @@ export function logUnexpectedRouteError(error: any, resolved: { status: number; 
  * So the question is asked about the ANSWER, not the status:
  *
  *  - `status` is 404, and
- *  - `code` is `RESOURCE_NOT_FOUND` — which this door derives from the status
- *    when the producer named none, and otherwise is the producer agreeing, and
+ *  - `code` is `RESOURCE_NOT_FOUND`, i.e. the producer named that member. ⚠️
+ *    MEASURED: a producer that declares a 404 and NO code at all does not get
+ *    one derived into its BODY — {@link thrownCodeFields} answers `{}`,
+ *    ADR-0112's rule that nothing is invented for the half the producer did
+ *    not name — so that answer is false here and keeps the shape it had.
+ *    Folding it in would mean inventing the member the ADR declines to
+ *    invent, and
  *  - no `declaredCode` sits beside it. Presence MEANS demotion (see
  *    `ApiErrorSchema`): the producer spelled a code the ledger does not know,
  *    and ADR-0112 keeps that spelling as the open, author-authored channel.

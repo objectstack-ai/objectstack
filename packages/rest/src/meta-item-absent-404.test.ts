@@ -446,7 +446,7 @@ describe('[#18402] §5 — ONE absence body on this route, whichever arm produce
         return getItem(rest, 'view', 'no_such_view');
     }
 
-    it('⭐ all four arms are byte-identical — the three-dialect table collapses to one', async () => {
+    it('⭐ the three absence arms are byte-identical — the dialect fork closes', async () => {
         // ① the uncached arm's item-less RETURN (the #18066 condition).
         const returned = await getItem(
             setup({}, { config: { api: { requireAuth: false }, metadata: { enableCache: false } } }).rest,
@@ -473,15 +473,7 @@ describe('[#18402] §5 — ONE absence body on this route, whichever arm produce
             }),
             { config: { api: { requireAuth: false }, metadata: { enableCache: false } } },
         );
-        // ④ a producer that declares the 404 and NO code at all. The door
-        //    derives `RESOURCE_NOT_FOUND` from the status, so this is the same
-        //    answer arriving by a different road.
-        const uncoded = await thrownMiss(
-            Object.assign(new Error('nothing there'), { status: 404 }),
-            { config: { api: { requireAuth: false }, metadata: { enableCache: false } } },
-        );
-
-        const arms = { returned, cached, thrown, uncoded };
+        const arms = { returned, cached, thrown };
         for (const [name, res] of Object.entries(arms)) {
             expect(`${name}: ${wire(res)}`).toBe(`${name}: ${wire(returned)}`);
         }
@@ -555,6 +547,22 @@ describe('[#18402] §5 — ONE absence body on this route, whichever arm produce
         );
         expect(bespoke.statusCode).toBe(404);
         expect(bespoke.body?.declaredCode).toBe('MY_OWN_MISS');
+
+        // ⚠️ MEASURED, and it corrected this file's first draft. A producer
+        // that declares a 404 and NO code does not get `RESOURCE_NOT_FOUND`
+        // derived into its body — `thrownCodeFields` answers `{}`, ADR-0112's
+        // own rule that nothing is invented for the half the producer did not
+        // name. So the door emits neither `code` nor `declaredCode` here, the
+        // predicate reads false, and this arm keeps the answer it had. Folding
+        // it in would mean INVENTING the vocabulary member the ADR declines to
+        // invent, in order to make a table look tidier.
+        const uncoded = await thrownMiss(
+            Object.assign(new Error('nothing there'), { status: 404 }),
+            { config: { api: { requireAuth: false }, metadata: { enableCache: false } } },
+        );
+        expect(uncoded.statusCode).toBe(404);
+        expect(uncoded.body).toEqual({ error: 'nothing there' });
+        expect(uncoded.body?.code).toBeUndefined();
     });
 
     it('⛔ 503, 403 and 401 are untouched — the three other boundaries', async () => {
