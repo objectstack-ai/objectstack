@@ -25,6 +25,7 @@
 - `dirty` 即入队否决(冲突对象是当前 main);draft PR 照答 `clean`/`blocked`/`unknown`,不答 `draft`。
 - `needs:contract-review` 是合并闸:实测 `blocked` 而 `mergeable: true`,无标签同形兄弟回 `clean`。
 - ready 翻转实测两序列 `clean→blocked→clean` 与 `blocked→unstable→clean`;`unstable` 瞬态非失败。
+- `unstable` 可源自 check-runs 看不见的 commit STATUS(如 `Vercel`)⇒ ③ 另读 `/commits/{sha}/status`。
 - 判头脏走零配额本地试合并:fetch PR ref 后 `git merge-tree --write-tree origin/main <ref>`。
 - 它直接列出冲突文件;读数随 fetch 老化,重跑先 fetch。
 - 它跑 `git merge` 的 merge-ort ⇒ 注册 `merge=os-regen` 的克隆照用驱动,未注册的退回文本合并。
@@ -299,8 +300,7 @@
 - cancel-in-progress 窗口只罩得住慢载体 ⇒ 先比对 run `head_sha` 与 PR 当前 head,不开调查。
 - 两仓 CI 并发组都按 PR 号不按 head:重跑过期 head 取消当前 head 的 run ⇒ 重跑是写不是读。
 - CI 红了先取完整日志归档再下结论:断言文本只在归档里,直读工具拿不到。
-- `get_check_run` 对本仓 CI job 回空 `output.text`。
-- `get_job_logs` 无论 `tail_lines` 只回占满日志尾部的 post-step service-container teardown。
+- `get_check_run` 回空 `output.text`;`get_job_logs` 无论 `tail_lines` 只回尾部的 service-container teardown。
 - ⇒ 两者都答不了到底挂在哪;`GET /actions/jobs/{id}/logs` 被出口代理拒绝,CONNECT 403。
 - 失败 step 名免下载即得:`actions_get method=get_workflow_job`。
 - check-run annotations 端点带退出码与失败命令,是免归档的第二条便宜读。
@@ -328,8 +328,7 @@
 - 写侧 · issue body:落库删字节,网页同显;sanitizer 按 tag 形状删,不按尖括号。
 - 行内反引号里的 tag 形状 token 整个被删,含注释标记、占位符、泛型这些未知标签形。
 - HTML 注释形状标记裸写被整删留空行;孤立的行内尖括号与非 tag 形状带尖括号正则存活。
-- ⛔ 围栏不防护:照删、留空围栏。
-- 另一坑:感叹号紧跟左方括号即触发(TS 非空断言下标),无需尖括号。
+- ⛔ 围栏不防护,照删留空围栏;另一坑:感叹号紧跟左方括号即触发(非空断言),无需尖括号。
 - 围栏与行内代码同样丢字符,幸存文本仍像代码但意义已变;感叹号不接左方括号则存活。
 - 作者侧:运算符用词拼出,或占位词定义一次。
 - 写侧 · 评论是截断不是删片段:sanitizer 从首个命名 HTML 元素的尖括号片段起吃到结尾。
@@ -345,6 +344,7 @@
 - MCP `update_pull_request` 包装器删掉 PR 正文的页脚块;该通道锁 1 已拒,读作历史。
 - 裸 REST `PATCH /pulls` 追加一个裸页脚并保留既有 session-URL 页脚,差恰 58 字节。
 - 同路送无页脚正文存回恰一条(平台裸形)⇒ 该格处方是不送页脚,⛔ 不是不重送正文。
+- 页脚两拼写:裸版与 session-URL 版都要剥,漏剥的卡在正文中段,而 58 字节差照常。
 - 第四形:建 PR 两通道同判 —— 送出体尾部不是 `---` 加页脚块时,追加一条同形页脚。
 - 该追加带前置横线、恰 90 字节,送出体是存储体的严格前缀。
 - 尾部已是该块则一字不追加,两通道各实测两向 ⇒ 建侧通道不是变量,判据是送出体尾部。
