@@ -30,7 +30,6 @@ New published surface on `@objectstack/plugin-security`, on the criterion the tw
 - `CAPABILITY_PLATFORM_NAME_REFUSED` / `capabilityPlatformNameRefusedDiagnostic()` / `reportCapabilityPlatformNameRefused()` and the `CapabilityPlatformNameRefusedDiagnostic` record.
 - `CAPABILITY_DECLARATION_UNOWNED` / `capabilityDeclarationUnownedDiagnostic()` / `reportCapabilityDeclarationUnowned()` and the `CapabilityDeclarationUnownedDiagnostic` record.
 - `PERMISSION_SET_DECLARATION_UNOWNED` / `permissionSetDeclarationUnownedDiagnostic()` / `reportPermissionSetDeclarationUnowned()` and the `PermissionSetDeclarationUnownedDiagnostic` record.
-- `reportThroughSink()` — the delivery rule itself.
 
 ⛔ The two unreadable-rows summaries are deliberately **not** published: an unreadable database is a runtime condition no compile-time door can raise, so they stay package-private for the reason `position_name_fold_grant` does.
 

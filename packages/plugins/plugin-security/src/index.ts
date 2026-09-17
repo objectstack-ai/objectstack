@@ -111,9 +111,6 @@ export type {
   CapabilityPlatformNameRefusedDiagnostic,
   PermissionSetDeclarationUnownedDiagnostic,
 } from './seed-refusal-diagnostics.js';
-// [#18091] The delivery rule itself — one derivation, so a sixth refusal site
-// never re-spells `logger?.warn?.(…)` and re-earns this card.
-export { reportThroughSink } from './seed-refusal-sink.js';
 // [ADR-0094] sys_permission_set pure-projection machinery.
 export {
   permissionSetRowFields,
