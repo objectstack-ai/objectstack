@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { EpochMs } from './epoch.zod';
 
 /**
  * SHARED CONNECTOR AUTHENTICATION SCHEMAS
@@ -35,7 +36,7 @@ export const ConnectorOAuth2Schema = lazySchema(() => z.object({
   scopes: z.array(z.string()).optional().describe('Requested OAuth2 scopes'),
   redirectUri: z.string().url().optional().describe('OAuth2 redirect URI'),
   refreshToken: z.string().optional().describe('Refresh token for token renewal'),
-  tokenExpiry: z.number().optional().describe('Token expiry timestamp'),
+  tokenExpiry: EpochMs.optional().describe('Token expiry timestamp (Unix milliseconds)'),
 }));
 
 /**

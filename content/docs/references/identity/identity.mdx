@@ -42,7 +42,7 @@ const result = AccountSchema.parse(data);
 | **providerAccountId** | `string` | ✅ | Provider account ID |
 | **refreshToken** | `string` | optional | OAuth refresh token |
 | **accessToken** | `string` | optional | OAuth access token |
-| **expiresAt** | `number` | optional | Token expiry timestamp (Unix) |
+| **expiresAt** | `integer` | optional | Token expiry timestamp (Unix milliseconds) |
 | **tokenType** | `string` | optional | OAuth token type |
 | **scope** | `string` | optional | OAuth scope |
 | **idToken** | `string` | optional | OAuth ID token |
