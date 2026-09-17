@@ -427,6 +427,18 @@ export interface NodeExecutionResult {
      * to close. No first-party executor sets both (`subflow` / `map` read one
      * child status); one that does has declared a contradiction.
      *
+     * ⚠️ With ONE exception, and it is FAIL-CLOSED. The #6667
+     * undeclared-suspension guard runs ahead of all of this and reads
+     * {@link NodeExecutionResult.suspend} alone: when the node type resolves to
+     * an action descriptor that does not declare `supportsPause: true`, that
+     * guard REPLACES the whole result with a guard refusal, the failure arm
+     * answers it, and `refuse` is never read at all — the run ends `failed`,
+     * not `refused`. That is the correct end for a declaration defect (⛔ no
+     * `fault` edge may route it, and re-running the flow unchanged can never
+     * fix it), so ⛔ do not reorder the guard to let this member through. The
+     * paragraph above describes the case the guard has nothing to say about:
+     * a type with no descriptor, or one that declares the pause it uses.
+     *
      * Set today by `subflow` (#18110) and `map` (#18555) when their child run
      * returned `status: 'refused'`: a refusal an author wrote inside a child
      * flow must not roll up to the parent as an ordinary success.
