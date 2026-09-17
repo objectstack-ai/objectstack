@@ -3812,14 +3812,19 @@ export const ROOT_WALK_RESIDUE_LEDGER = [
   // the #15753 placement this row was written about: that one came from a
   // noise-floor constant and said the opposite of what the constant declares,
   // while these two literals are exactly what the self-test reads.
-  [
-    'scripts/symbol-anchors.mjs --self-test',
-    'a shared grammar-and-extractor LIBRARY, invoked by CI only as its own self-test; its `git ls-files` runs over a '
-      + 'corpus its caller passes in. The corpus walk it lends is exercised by its registrations — '
-      + 'check-adr-symbol-anchors.mjs, which declares ROOT_DIR_WATCH_HINTS = [docs/adr/**], '
-      + 'check-scripts-symbol-anchors.mjs, which declares [scripts/**], and '
-      + 'check-spec-docblock-symbol-anchors.mjs, which declares [packages/spec/src/**] — and each is placed by its own.',
-  ],
+  // ⚖️ `scripts/symbol-anchors.mjs --self-test` LEFT this population under
+  // #18661 and its row is gone with it — a listed family that stops being a
+  // member reds here, and a stale exclusion is an exclusion nobody measures.
+  // It left through the OUTCOME this table exists to push toward: it DECLARES.
+  // The declaration was there the whole time — a `no-path-population` marker
+  // written in that file's own block-comment idiom, in a form the marker
+  // grammar did not list, so it read back `null` and the family arrived here
+  // looking like a gate whose emptiness nobody had examined. This row was the
+  // price of that silence: a hand-written exclusion, carrying by hand the
+  // reading the gate's own source already carried, for a family that was never
+  // a member of this population at all. Widening the form set (see
+  // `MARKER_COMMENT_FORMS`) is what let the declaration be read; deleting the
+  // row is the other half of the same landing.
 ];
 
 /** The ledger as a Map, keyed by the family key this derivation places. */
