@@ -166,44 +166,45 @@ describe('the differential isolates the refinement, not the node', () => {
   });
 
   it('one node reached by TWO routes is ONE site — a shared sub-schema, counted once', () => {
-    const Shared = z.object({ q: z.string().refine((v) => v !== '', 'non-empty') });
+    // ⚠️ The rule sits on the SHARED node itself, not on a property under it.
+    // With it one level down, the property schema is the same instance by both
+    // routes and the walk dedupes on that alone — an assertion that holds
+    // whatever the identity is, which is no assertion at all (measured: the
+    // first draft of this pin passed against the defect it was written for).
+    const Shared = z.object({ q: z.string() }).refine((v) => v.q !== '', 'non-empty');
     const entry = collectDroppedRefinements('t/TwoRoutes', z.object({ first: Shared, second: Shared }));
     // Reported at the route it was reached by first, and not again at the other
     // — the census question is which published FILE the gap lands on.
-    expect(entry.dropped.map((s) => s.path)).toEqual(['first.q']);
+    expect(entry.dropped.map((s) => s.path)).toEqual(['first']);
   });
 
-  it('a `lazySchema()` edge is the SAME node as the schema it stands for, in either mode', () => {
+  it('a `lazySchema()` edge is the SAME node as the schema it stands for', () => {
     // The mode-dependence this pin exists for. `lazySchema()` returns the real
     // schema under `OS_EAGER_SCHEMAS=1` — how `gen:schema` and
     // `check:authorable-surface` run — and a Proxy over it otherwise. Keyed on
     // the INSTANCE, the walk saw one node in the first case and two in the
     // second, so the same generator over the same tree produced two different
-    // censuses and the ledger only held under one of them. `ui/View` measured
-    // 11 dropped sites eager and 13 lazy; `@objectstack/spec#test:repo` spawns
-    // the generator WITHOUT the flag, which is where it surfaced.
+    // censuses and the committed ledger only held under one of them. `ui/View`
+    // measured 11 dropped sites eager and 13 lazy; `@objectstack/spec#test:repo`
+    // spawns the generator WITHOUT the flag, which is where it surfaced.
     //
     // This file runs in the `local` project, which does not set the flag, so
     // the Proxy is the live shape here and the assertion is about it.
-    const Shared = z.object({ q: z.string().refine((v) => v !== '', 'non-empty') });
+    const Shared = z.object({ q: z.string() }).refine((v) => v.q !== '', 'non-empty');
     const entry = collectDroppedRefinements(
       't/LazyEdge',
       z.object({ direct: Shared, viaLazy: lazySchema(() => Shared) }),
     );
-    expect(entry.dropped.map((s) => s.path)).toEqual(['direct.q']);
+    expect(entry.dropped.map((s) => s.path)).toEqual(['direct']);
   });
 
   it('LIT CONTROL — two DISTINCT nodes carrying the same rule are two sites', () => {
     // Without it, the two assertions above pass just as well on a walk that
-    // dedupes everything structurally and reports one site per export.
-    const entry = collectDroppedRefinements(
-      't/TwoNodes',
-      z.object({
-        first: z.object({ q: z.string().refine((v) => v !== '', 'non-empty') }),
-        second: z.object({ q: z.string().refine((v) => v !== '', 'non-empty') }),
-      }),
-    );
-    expect(entry.dropped.map((s) => s.path)).toEqual(['first.q', 'second.q']);
+    // dedupes structurally and reports one site per export however many nodes
+    // carry the rule.
+    const mk = (): z.ZodType => z.object({ q: z.string() }).refine((v) => v.q !== '', 'non-empty');
+    const entry = collectDroppedRefinements('t/TwoNodes', z.object({ first: mk(), second: mk() }));
+    expect(entry.dropped.map((s) => s.path)).toEqual(['first', 'second']);
   });
 
   it('a recursive schema reports its refinement ONCE (the `_cachedInner` regression)', () => {
