@@ -99,6 +99,21 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // widening the pattern to cover `find*` would have moved the blind spot
   // rather than closed it.
   'checkProtocolVersionGap',
+  // [#18677] The author-time rule table, run once per `packages[]` entry with
+  // `packageBodyAsStack` as resolution context and de-duplicated against the
+  // union run. Not a registry rule and it cannot become one: a registry rule is
+  // handed ONE stack, and this pass is the thing that DECIDES which stack — the
+  // artifact sliced per package (ADR-0130 D4/D5), which is the answer the
+  // runtime will live with.
+  //
+  // ⭐ This row is the #18491 NOT_A_GATE entry CLOSED. That entry read "a real
+  // parity gap, reported not closed", and it was right: `os build` ran this
+  // pass and `os validate` did not, so `os build` judged something
+  // `os validate` structurally could not, in the false-clean direction. The
+  // entry is deleted rather than reworded — the gap it recorded is gone, and a
+  // ledger row that outlives its finding is how a closed gap reads as an open
+  // one.
+  'runPerPackageAuthoringRules',
 ];
 
 /**
@@ -152,15 +167,16 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
       'loadConfig',
       'ObjectStackDefinitionSchema',
     ],
-  // ⚠️ [#18491] These two are compile-only, and so is the SECOND
-  // `runAuthoringRules` run they feed. That run is not covered by the roster
-  // above and is not covered by the union fold either: `compile.ts`'s own
-  // comment says what survives its de-duplication is "exactly the set the union
-  // could not see". So `os build` judges something `os validate` does not, in
-  // the false-clean direction. Recorded here rather than silently wired up —
-  // wiring a real gate into the other door is a decision, not a test fix.
-  'Input to the compile-only per-package rule walk — a real parity gap, reported not closed (see the note above this entry)':
-    ['artifactPackages', 'packageBodyAsStack'],
+  // [#18677] Was "Input to the compile-only per-package rule walk — a real
+  // parity gap, reported not closed", carrying `artifactPackages` and
+  // `packageBodyAsStack`. That gap is CLOSED: the walk is
+  // `runPerPackageAuthoringRules` in SHARED_NON_REGISTRY_GATES above, run by
+  // both doors. `packageBodyAsStack` left this file with the loop — it is read
+  // inside the shared pass now, by neither command directly — and
+  // `artifactPackages` stays, on its own reason, because it is no longer input
+  // to a gap: both commands read it to COUNT the packages for the step line.
+  'Reads the artifact\'s `packages[]` for a count both commands print; the pass that judges them is a gate above':
+    ['artifactPackages'],
   'Presentation — renders, formats or serialises a verdict something else reached; judges nothing':
     [
       'printHeader',
@@ -190,12 +206,10 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
     'isExitSignal',
     'isReportedError',
     'cleanupOldRuntimeBundles',
-    'findingKey',
     'warningsSoFar',
   ],
   'Not ours — a Node builtin, a global, an oclif base or a third-party namespace': [
     'dirname',
-    'Set',
     'String',
     'path',
     'fs',

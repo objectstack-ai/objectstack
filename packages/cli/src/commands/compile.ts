@@ -16,7 +16,7 @@ import {
 import { loadConfig, namedExportRejectionHints } from '../utils/config.js';
 import { lowerCallables } from '../utils/lower-callables.js';
 import { authoringRuleUnionStack } from '../utils/stack-collections.js';
-import { artifactPackages, packageBodyAsStack } from '../utils/artifact-packages.js';
+import { artifactPackages, runPerPackageAuthoringRules } from '../utils/artifact-packages.js';
 import { buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
 import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
 import { resolveSduiManifest } from '../utils/sdui-manifest.js';
@@ -58,10 +58,6 @@ import {
   formatPermissionSetNameCollisions,
 } from '../utils/permission-set-name-collisions.js';
 import type { PermissionSetNameCollisionDiagnostic } from '@objectstack/plugin-security';
-
-/** Identity of one finding, for the per-package de-duplication below. */
-const findingKey = (f: { rule: string; where: string; path: string; message: string }): string =>
-  `${f.rule}\u0000${f.where}\u0000${f.path}\u0000${f.message}`;
 
 export default class Compile extends Command {
   static override description = 'Compile ObjectStack configuration to JSON artifact';
@@ -425,32 +421,35 @@ export default class Compile extends Command {
       //     is the one `artifactPackages` above walked, off the same parsed
       //     stack, so the context a package resolves against is exactly the set
       //     of packages this artifact will register (ADR-0130 D4/D5).
-      const artifactPackageEntries = (result.data as Record<string, unknown>).packages;
+      //
+      //     ⛔ [#18677] The LOOP itself is not written here either — it is
+      //     `runPerPackageAuthoringRules`, beside the two seams it reads, for
+      //     the reason that module's header already gives about them: the
+      //     `os validate` door owes the identical pass, and the thing that
+      //     would have drifted between two hand-written copies is the VERDICT
+      //     (the de-duplication key, the severity split, the `where` prefix),
+      //     not the package reading. Every observable of this step — the step
+      //     line, the advisory order, the error sentence, the `--json` envelope
+      //     — is unchanged; only the loop moved.
+      //
+      //     The count is read for the step LINE before the pass runs, so the
+      //     line still precedes the work it announces on every path — including
+      //     a rule that throws inside it.
       const packageEntries = artifactPackages(result.data as Record<string, unknown>);
       if (packageEntries.length > 0) {
         if (!flags.json) {
           printStep(`Running author-time rules per package (${packageEntries.length})...`);
         }
-        const alreadyReported = new Set(findings.map(findingKey));
-        const perPackageErrors: Array<{ package: string } & typeof ruleErrors[number]> = [];
-        for (const pkg of packageEntries) {
-          const asStack = packageBodyAsStack(pkg.body, artifactPackageEntries);
-          const pkgFindings = runAuthoringRules('build', {
-            normalized: asStack,
-            parsed: asStack,
-            sduiManifest: resolveSduiManifest(),
-            loweredHookRefs: lowering.loweredHookRefs,
-          }).filter((f) => !alreadyReported.has(findingKey(f)));
-          for (const f of pkgFindings) alreadyReported.add(findingKey(f));
-          const split = splitBySeverity(pkgFindings);
-          ruleAdvisories = [
-            ...ruleAdvisories,
-            ...split.advisories.map((a) => ({ ...a, where: `package '${pkg.id}' — ${a.where}` })),
-          ];
-          perPackageErrors.push(
-            ...split.errors.map((e) => ({ ...e, package: pkg.id, where: `package '${pkg.id}' — ${e.where}` })),
-          );
-        }
+        const perPackage = runPerPackageAuthoringRules({
+          command: 'build',
+          parsed: result.data as Record<string, unknown>,
+          unionFindings: findings,
+          sduiManifest: resolveSduiManifest(),
+          loweredHookRefs: lowering.loweredHookRefs,
+        });
+        const perPackageErrors: Array<{ package: string } & typeof ruleErrors[number]> =
+          perPackage.errors;
+        ruleAdvisories = [...ruleAdvisories, ...perPackage.advisories];
         if (perPackageErrors.length > 0) {
           if (flags.json) {
             await emitJson(

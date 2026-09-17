@@ -45,6 +45,19 @@ import {
   projectByPruningUnionBranches,
   type PrunedBranch,
 } from './lib/union-branch-projection';
+// The dropped-refinement ratchet (#18670). The mirror image of the branch
+// pruning above, and deliberately its own module for the same reason: the
+// pruner guards a projection NARROWER than the Zod type, this one the direction
+// nothing guarded at all — a projection WIDER than it, which is the direction an
+// author's validator says yes in and the runtime says no.
+import {
+  DROPPED_REFINEMENTS_BASELINE_FILE,
+  checkDroppedRefinements,
+  collectDroppedRefinements,
+  hasDroppedRefinementProblems,
+  readDroppedRefinementsBaseline,
+  type RefinementCensusEntry,
+} from './lib/dropped-refinements';
 // Who owns what under json-schema/. This generator shares that directory with
 // gen:openapi, and used to clear it by deleting the directory itself (#5371).
 import {
@@ -424,6 +437,13 @@ const branchPrunedProjections: Array<{
   readonly pruned: readonly PrunedBranch[];
 }> = [];
 
+// Every published schema's refinement census (#18670) — the rules that reach
+// the runtime and NOT the file. Collected inside the emit loop rather than
+// re-derived afterwards because this loop is the only place that holds both the
+// Zod value and the def key the artifact is written under, and a second walk
+// keyed by something else is a second thing to keep in step.
+const refinementCensus: RefinementCensusEntry[] = [];
+
 // Error messages for schema types that inherently cannot be represented in JSON Schema.
 // These are expected warnings, not build-breaking errors.
 const KNOWN_UNSUPPORTED_PATTERNS = [
@@ -528,6 +548,25 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
               type: branch.type,
             }));
             branchPrunedProjections.push({ namespace: namespaceName, exportKey: key, pruned: prunedBranches });
+          }
+
+          // The refinements this projection DROPPED (#18670), named on the
+          // artifact for the same reason `x-unprojectable-branches` is: a reader
+          // of this file — an author, a reference page, an AI validating a
+          // document against it — can otherwise not tell that the contract
+          // underneath carries rules this file does not state. It is an
+          // annotation and nothing more: `x-` keywords are ignored by every
+          // validator, so the set of documents this schema ACCEPTS is unchanged
+          // by it. Narrowing the published shape to match the Zod type is a
+          // public-contract change and is deliberately NOT done here.
+          const census = collectDroppedRefinements(`${categorySlug}/${schemaName}`, value);
+          refinementCensus.push(census);
+          if (census.dropped.length > 0) {
+            jsonSchema['x-dropped-refinements'] = census.dropped.map((site) => ({
+              at: site.path,
+              type: site.nodeType,
+              count: site.count,
+            }));
           }
 
           const fileName = `${schemaName}.json`;
@@ -3354,6 +3393,155 @@ if (unemittedSkips.length > 0) {
     console.log(`     ${ledgerKey(skip)}  (${causeOf(skip.message)})`);
     console.log(`       ${unemittedBaseline.entries[ledgerKey(skip)].reason}`);
   }
+}
+
+// ─── The dropped-refinement ratchet (#18670) ─────────────────────────
+//
+// Runs after the never-published ratchet above, and the two populations are
+// DISJOINT by construction: that one adjudicates exports this build published
+// NOTHING for, this one adjudicates what it DID publish. So neither can mask
+// the other, and an export that stops emitting still gets the remedy the
+// ratchet above prescribes rather than this block's.
+//
+// What it holds closed: a rule written as `.refine()` reaches the runtime and
+// not the file. `z.toJSONSchema()` has no arm for a `custom` check, so the
+// published JSON Schema is WIDER than the Zod type it was generated from — the
+// direction in which an author's validator says yes and the platform then says
+// no. Measured on this tree at the change that added this block: 682 refinement
+// sites across 237 published schemas, zero of which projected anything.
+//
+// ⛔ It does NOT narrow any published shape and does not touch the refinements
+// themselves — the runtime rule is correct. It makes the population declared,
+// so the next one arrives as a line in a diff instead of as nothing at all.
+const droppedRefinementsBaseline = readDroppedRefinementsBaseline(PKG_DIR);
+if (!droppedRefinementsBaseline) {
+  console.error(`\n❌ ${DROPPED_REFINEMENTS_BASELINE_FILE} is missing — it is a committed, hand-edited ledger (#18670).`);
+  console.error(
+    `\n   Without it nothing holds the dropped-refinement population closed, and a rule that\n` +
+      `   reaches the runtime but not packages/spec/json-schema/** arrives in total silence —\n` +
+      `   the state #18670 measured. Restore packages/spec/${DROPPED_REFINEMENTS_BASELINE_FILE}\n` +
+      `   from git rather than regenerating it: it has no generator on purpose (see\n` +
+      `   scripts/lib/dropped-refinements.ts).`,
+  );
+  process.exit(1);
+}
+
+const droppedRefinementProblems = checkDroppedRefinements({
+  census: refinementCensus,
+  publishedKeys: new Set(generatedSchemas.keys()),
+  baseline: droppedRefinementsBaseline,
+});
+
+if (hasDroppedRefinementProblems(droppedRefinementProblems)) {
+  const { undeclared, miscounted, repaired, vanished, unreasoned } = droppedRefinementProblems;
+
+  if (undeclared.length > 0) {
+    console.error(
+      `\n❌ ${undeclared.length} published schema(s) drop a refinement and are not declared in ${DROPPED_REFINEMENTS_BASELINE_FILE}:`,
+    );
+    for (const entry of undeclared) {
+      console.error(`     + ${entry.defKey}  (${entry.dropped.length} site(s))`);
+      for (const site of entry.dropped) {
+        console.error(`         ${site.path || '<root>'}  (${site.nodeType}${site.aborting ? ', aborting' : ''})`);
+      }
+    }
+    console.error(
+      `\n   The rule is enforced by the runtime and absent from the published file: a document\n` +
+        `   the file ACCEPTS can be refused at parse time, and the author — or the AI — that\n` +
+        `   validated against json-schema/** finds out a release later. The refinement itself is\n` +
+        `   correct; ⛔ do not delete or weaken it to make this line go away.\n\n` +
+        `   Declare it by adding to packages/spec/${DROPPED_REFINEMENTS_BASELINE_FILE}:\n\n` +
+        undeclared
+          .map(
+            (entry) =>
+              `        "${entry.defKey}": {\n` +
+              `          "sites": [${entry.dropped.map((s) => `"${s.path}"`).join(', ')}]\n` +
+              `        },\n`,
+          )
+          .join(''),
+    );
+  }
+
+  if (miscounted.length > 0) {
+    console.error(`\n❌ ${miscounted.length} ledger entry(ies) in ${DROPPED_REFINEMENTS_BASELINE_FILE} name a different set of sites:`);
+    for (const m of miscounted) {
+      console.error(`     ~ ${m.defKey}:`);
+      for (const site of m.added) console.error(`         + ${site || '<root>'}`);
+      for (const site of m.removed) console.error(`         - ${site || '<root>'}`);
+    }
+    console.error(
+      `\n   A \`+\` is a new gap: a rule that now reaches the runtime and not the file. A \`-\` is a\n` +
+        `   gap that closed or a path that moved — good news either way, and the line has to move\n` +
+        `   with it in the same PR. A ledger that keeps naming sites the build no longer sees has\n` +
+        `   stopped describing the tree and started covering for it, and the next gap then arrives\n` +
+        `   inside a list nobody re-read.\n\n` +
+        `   The corrected entries, in full:\n\n` +
+        miscounted
+          .map(
+            (m) =>
+              `        "${m.defKey}": {\n` +
+              `          "sites": [${m.observedSites.map((s) => `"${s}"`).join(', ')}]\n` +
+              `        },\n`,
+          )
+          .join(''),
+    );
+  }
+
+  if (repaired.length > 0) {
+    console.error(`\n❌ ${repaired.length} ledger entry(ies) in ${DROPPED_REFINEMENTS_BASELINE_FILE} drop NOTHING now:`);
+    for (const defKey of repaired) console.error(`     - ${defKey}`);
+    console.error(
+      `\n   Good news, and the line goes with it — in this same PR. Either the refinement was\n` +
+        `   removed, or the projection learned to emit what it constrains. Say which in the PR:\n` +
+        `   the second is the repair this ledger exists to become unnecessary for.`,
+    );
+  }
+
+  if (vanished.length > 0) {
+    console.error(`\n❌ ${vanished.length} ledger entry(ies) in ${DROPPED_REFINEMENTS_BASELINE_FILE} name no published schema:`);
+    for (const defKey of vanished) console.error(`     - ${defKey}`);
+    console.error(
+      `\n   The schema was removed, renamed, or stopped being published altogether. Delete the\n` +
+        `   line (a rename gets a new line under the new key), so the ledger keeps naming exactly\n` +
+        `   the population this build measures.`,
+    );
+  }
+
+  if (unreasoned.length > 0) {
+    console.error(`\n❌ ${unreasoned.length} ledger entry(ies) carry an empty \`sites\` list:`);
+    for (const defKey of unreasoned) console.error(`     - ${defKey}`);
+    console.error(
+      `\n   An entry that records only that a schema IS in the population is a count wearing a\n` +
+        `   ledger's shape. The site paths are the whole instrument: they are what makes a new\n` +
+        `   gap legible as a line in a diff instead of a number going up by one.`,
+    );
+  }
+
+  process.exit(1);
+}
+
+// The accepted population, reported in full on every run — the same discipline
+// as the never-published ledger above, and for the same reason: a population
+// that passes in silence is the silence this ratchet was built to end.
+const droppedSiteTotal = refinementCensus.reduce((sum, entry) => sum + entry.dropped.length, 0);
+const droppedFiles = refinementCensus.filter((entry) => entry.dropped.length > 0);
+const projectedSiteTotal = refinementCensus.reduce((sum, entry) => sum + entry.projected.length, 0);
+const undecidableSiteTotal = refinementCensus.reduce((sum, entry) => sum + entry.undecidable.length, 0);
+if (droppedSiteTotal > 0) {
+  console.log(
+    `\n🔇 ${droppedSiteTotal} refinement site(s) across ${droppedFiles.length} published schema(s) reach the ` +
+      `RUNTIME and not the published JSON Schema — all declared in ${DROPPED_REFINEMENTS_BASELINE_FILE} (#18670).`,
+  );
+  console.log(
+    `     The published files are therefore WIDER than the Zod types they are generated from:\n` +
+      `     a document one of them accepts can still be refused at parse time. Each affected file\n` +
+      `     names its own sites as \`x-dropped-refinements\`. Narrowing the published shape to match\n` +
+      `     is a public-contract change and is NOT what this ratchet does.`,
+  );
+  console.log(
+    `     Also measured this run: ${projectedSiteTotal} refinement site(s) DID reach the file, ` +
+      `${undecidableSiteTotal} had no JSON form on either side to compare.`,
+  );
 }
 
 // ─── Generate Bundled Schema ─────────────────────────────────────────
