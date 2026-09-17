@@ -118,16 +118,23 @@ export function isNestedAuthorableKey(key: string): boolean {
 /**
  * Follow `$ref` chains that point inside this document. Returns `null` for an
  * external ref or a cycle — an unresolvable node, never a wrong one.
+ *
+ * The bare root pointer `#` is a third of the shipped spellings (36 emitted
+ * occurrences against 1,032 `#/$defs/…` ones): it is how a RECURSIVE schema
+ * refers back to its own document, and reading it as external would make every
+ * path under a recursive node read as a typo.
  */
 function dereference(node: unknown, doc: Record<string, unknown>): unknown {
   const seen = new Set<string>();
   let current = node;
   while (current && typeof current === 'object' && typeof (current as Record<string, unknown>).$ref === 'string') {
     const ref = (current as Record<string, unknown>).$ref as string;
-    if (!ref.startsWith('#/') || seen.has(ref)) return null;
+    if (!ref.startsWith('#') || seen.has(ref)) return null;
     seen.add(ref);
+    const pointer = ref.slice(1);
+    if (pointer !== '' && !pointer.startsWith('/')) return null;
     let target: unknown = doc;
-    for (const rawToken of ref.slice(2).split('/')) {
+    for (const rawToken of pointer === '' ? [] : pointer.slice(1).split('/')) {
       const token = rawToken.replace(/~1/g, '/').replace(/~0/g, '~');
       if (!target || typeof target !== 'object') return null;
       target = (target as Record<string, unknown>)[token];
