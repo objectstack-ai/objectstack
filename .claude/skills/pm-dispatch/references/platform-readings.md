@@ -26,6 +26,7 @@
 - `needs:contract-review` 是合并闸:实测 `blocked` 而 `mergeable: true`,无标签同形兄弟回 `clean`。
 - ready 翻转实测两序列 `clean→blocked→clean` 与 `blocked→unstable→clean`;`unstable` 瞬态非失败。
 - `unstable` 可源自 check-runs 看不见的 commit STATUS(如 `Vercel`)⇒ ③ 另读 `/commits/{sha}/status`。
+- 零 legacy status 的仓恒答空集默认值 `pending`+`total_count: 0`,⛔ 非门禁读数,门禁读 check-runs。
 - 判头脏走零配额本地试合并:fetch PR ref 后 `git merge-tree --write-tree origin/main <ref>`。
 - 它直接列出冲突文件;读数随 fetch 老化,重跑先 fetch。
 - 它跑 `git merge` 的 merge-ort ⇒ 注册 `merge=os-regen` 的克隆照用驱动,未注册的退回文本合并。
@@ -340,7 +341,6 @@
 - 去掉横线只写页脚则原样存活;评论不受影响,两种拼法都活。
 - ⇒ 失效既依拼写又依载体:评论里验过页脚对 PR 正文什么都没证明。
 - ⇒ PR 正文页脚不带前置横线,且写后回读正文 —— 那是唯一检测手段;评论两形皆可。
-- 署名页脚的写侧变异按通道与输入双重定域,⛔ 不是一条定律。
 - MCP `update_pull_request` 包装器删掉 PR 正文的页脚块;该通道锁 1 已拒,读作历史。
 - 裸 REST `PATCH /pulls` 追加一个裸页脚并保留既有 session-URL 页脚,差恰 58 字节。
 - 同路送无页脚正文存回恰一条(平台裸形)⇒ 该格处方是不送页脚,⛔ 不是不重送正文。
