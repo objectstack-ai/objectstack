@@ -798,7 +798,7 @@ Map view configuration
 | **resizable** | `boolean` | optional | Enable column resizing |
 | **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
-| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
@@ -916,7 +916,7 @@ View filter rule
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
-| **view** | `string` | optional | Name of the form view to use for details (e.g. "summary_view", "edit_form") |
+| **view** | `never` | optional | [REMOVED] `view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the form view to open for a record detail, and no layer resolved a view by that name: the value was passed straight into the navigation-MODE argument of the console's `onNavigate`, where anything other than `edit` or `view` matched no branch, so the key selected nothing and could silently deaden the row click. Delete the key; to choose what opens for a record, assign a `record` page to the object and let `isDefault` pick the one that opens — page assignment is the machinery that resolves a detail layout, and a list view's navigation block only decides HOW the detail is surfaced (`mode`, `size`). |
 | **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
 | **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
 | **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
@@ -1163,7 +1163,7 @@ Tab configuration for multi-tab view interface
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
-| **view** | `string` | optional | Name of the form view to use for details (e.g. "summary_view", "edit_form") |
+| **view** | `never` | optional | [REMOVED] `view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the form view to open for a record detail, and no layer resolved a view by that name: the value was passed straight into the navigation-MODE argument of the console's `onNavigate`, where anything other than `edit` or `view` matched no branch, so the key selected nothing and could silently deaden the row click. Delete the key; to choose what opens for a record, assign a `record` page to the object and let `isDefault` pick the one that opens — page assignment is the machinery that resolves a detail layout, and a list view's navigation block only decides HOW the detail is surfaced (`mode`, `size`). |
 | **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
 | **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
 | **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
@@ -1205,7 +1205,7 @@ Tab configuration for multi-tab view interface
 | **resizable** | `boolean` | optional | Enable column resizing |
 | **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
-| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
@@ -1314,7 +1314,7 @@ View filter rule
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
-| **view** | `string` | optional | Name of the form view to use for details (e.g. "summary_view", "edit_form") |
+| **view** | `never` | optional | [REMOVED] `view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the form view to open for a record detail, and no layer resolved a view by that name: the value was passed straight into the navigation-MODE argument of the console's `onNavigate`, where anything other than `edit` or `view` matched no branch, so the key selected nothing and could silently deaden the row click. Delete the key; to choose what opens for a record, assign a `record` page to the object and let `isDefault` pick the one that opens — page assignment is the machinery that resolves a detail layout, and a list view's navigation block only decides HOW the detail is surfaced (`mode`, `size`). |
 | **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
 | **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
 | **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
@@ -1803,7 +1803,7 @@ Tab configuration for multi-tab view interface
 | **resizable** | `boolean` | optional | Enable column resizing |
 | **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
-| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
@@ -1888,7 +1888,7 @@ Tab configuration for multi-tab view interface
 | **resizable** | `boolean` | optional | Enable column resizing |
 | **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
-| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
@@ -2129,7 +2129,7 @@ This schema accepts one of the following structures:
 | **resizable** | `boolean` | optional | Enable column resizing |
 | **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
-| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
@@ -2305,7 +2305,7 @@ This schema accepts one of the following structures:
 | **resizable** | `boolean` | optional | Enable column resizing |
 | **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
-| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |

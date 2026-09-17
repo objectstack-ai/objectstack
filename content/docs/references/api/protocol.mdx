@@ -1638,7 +1638,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **resizable** | `boolean` | optional | Enable column resizing |
 | **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
-| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
@@ -1723,7 +1723,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **resizable** | `boolean` | optional | Enable column resizing |
 | **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
-| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
+| **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
