@@ -172,6 +172,48 @@ export default class Compile extends Command {
       ...navGroupWarnings,
       ...permissionSetCollisionWarnings,
     ];
+    // [#18780] ONE rendering of the author-time advisory block, from the
+    // COMPLETE list — hoisted here for the same reason the lists above are.
+    //
+    // The block used to be printed inline at step 3b, BEFORE step 3b-ii
+    // appended the per-package survivors to `ruleAdvisories`. So on a
+    // multi-package stack this command's summary line counted a set strictly
+    // larger than the one it pointed at. Measured on
+    // `examples/app-multi-package` at 17.4.0: `⚠ 4 author-time warning(s) —
+    // see above` standing over a list of THREE, while `--json` carried all
+    // four and `os validate` — which renders its advisory list once, at the
+    // end, after the same per-package append — printed all four (#18769). The
+    // reader is sent back up to find a warning that was never printed, and the
+    // direction reads as "I must have missed it".
+    //
+    // ⛔ THE COUNT IS NOT THE SIDE THAT MOVES. #11529 settled that axis one
+    // list over: the summary counts the whole set and the PRINTER names what
+    // it withheld, because a count quietly shrunk to match a short list is the
+    // false-clean direction — it deletes a finding from the text face of the
+    // command that ships, while `--json` and `os validate` keep reporting it.
+    // So the list grows to the count.
+    //
+    // ⛔ AND IT STAYS ONE PRINTER CALL. A second `printAuthoringAdvisories`
+    // for the survivors alone would hand the 50-entry cap a second budget and
+    // its truncation notice a second, partial total — two locally-honest
+    // notices for one list, which is #11529's defect wearing its own fix.
+    //
+    // Deferring the call is what the guard below is for: every text face that
+    // used to be DOWNSTREAM of the old inline site flushes the block itself,
+    // so both author-time rule failures still print their advisories ahead of
+    // their error list, and the catch-all still prints them when a rule throws
+    // inside the per-package pass — the one window between the two sites.
+    let advisoriesPrinted = false;
+    const printAdvisoriesOnce = (): void => {
+      if (advisoriesPrinted || flags.json || ruleAdvisories.length === 0) return;
+      advisoriesPrinted = true;
+      console.log('');
+      // #11529 — rendered by ONE printer, which also names the remainder when
+      // the list is cut. The loop used to sit inline here and stop dead at 50
+      // with no notice, so a truncated report read exactly like a complete
+      // one. See `printAuthoringAdvisories` for the measurement.
+      printAuthoringAdvisories(ruleAdvisories);
+    };
     // [#12125] The ADR-0087 D2 conversion notices, hoisted for the SAME reason
     // and under the SAME ruling as the four lists above — one field over. The
     // notices were computed at step 2 (below) and reached the terminal SUCCESS
@@ -366,14 +408,6 @@ export default class Compile extends Command {
       const { errors: ruleErrors, advisories } = splitBySeverity(findings);
       ruleAdvisories = advisories;
 
-      if (ruleAdvisories.length > 0 && !flags.json) {
-        console.log('');
-        // #11529 — rendered by ONE printer, which also names the remainder when
-        // the list is cut. The loop used to sit inline here and stop dead at 50
-        // with no notice, so a truncated report read exactly like a complete
-        // one. See `printAuthoringAdvisories` for the measurement.
-        printAuthoringAdvisories(ruleAdvisories);
-      }
       if (ruleErrors.length > 0) {
         // Every failing rule reports at once — see the note in `validate.ts`.
         if (flags.json) {
@@ -384,6 +418,11 @@ export default class Compile extends Command {
           );
           this.exit(1);
         }
+        // [#18780] This exit is UPSTREAM of the per-package append below — a
+        // union-level `error` refuses before that pass runs — so the list
+        // flushed here is the union's alone, byte-for-byte what this face
+        // printed when the call sat inline above.
+        printAdvisoriesOnce();
         console.log('');
         printError(`Author-time rules failed (${ruleErrors.length} issue${ruleErrors.length > 1 ? 's' : ''})`);
         // [#11642] `--json` on this same exit publishes every one of them as
@@ -465,6 +504,10 @@ export default class Compile extends Command {
             );
             this.exit(1);
           }
+          // [#18780] Downstream of the append, so this flush carries the
+          // per-package advisories too — the same list `warningsSoFar()` has
+          // published on this exit's `--json` twin since #11772.
+          printAdvisoriesOnce();
           console.log('');
           printError(
             `Author-time rules failed inside the artifact's packages (${perPackageErrors.length} issue${perPackageErrors.length > 1 ? 's' : ''})`,
@@ -473,6 +516,12 @@ export default class Compile extends Command {
           this.exit(1);
         }
       }
+      // [#18780] The continuing path — and the only one the summary line at
+      // the foot of this command is reachable from. `ruleAdvisories` is
+      // complete here on BOTH shapes: a stack with `packages[]` has just had
+      // the survivors appended, and one without skips the block entirely and
+      // arrives with the union list the summary already counted.
+      printAdvisoriesOnce();
 
       // 3b-bis. [#14553] Navigation contributions whose `group` names no group
       //     in the target app. RUNS ON EVERY BUILD, artifact or not — the block
@@ -946,6 +995,14 @@ export default class Compile extends Command {
         await emitJson({ success: false, error: error.message, ...errorCodeFields(error), warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
         this.exit(1);
       }
+      // [#18780] The one window the three flushes above do not cover: a throw
+      // between step 3b's split and step 3b-ii's append — a rule throwing
+      // inside the per-package pass. The inline call this replaced had already
+      // rendered the union list by then, so flushing here keeps that path's
+      // output rather than shortening it. Every other throw on this face is
+      // downstream of a flush and the guard makes this a no-op; a throw
+      // upstream of step 3b finds the list empty and renders nothing.
+      printAdvisoriesOnce();
       // [#15547] `resolveConfigPath()` already wrote its refusal and hint lines
       // to stderr before throwing, so this face has nothing left to render —
       // and `this.error()` below is NOT a no-op for it: it re-renders the same
