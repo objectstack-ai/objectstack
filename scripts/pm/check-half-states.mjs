@@ -15383,7 +15383,7 @@ export function h64ExposureClause(counts = {}, cap = H64_LOGIN_ROSTER_CAP) {
 // first" is a different reading over a different corpus. This row forces the
 // NAMING, and the naming is what sends the seat to the selector.
 //
-// ## The one spelling, and why it is closed
+// ## The English spelling, and why its WORD SET is closed
 //
 // A line beginning `Tier:` followed by `hourly` or `daily`; everything after the
 // tier word is free text, so both of these are clean:
@@ -15396,14 +15396,67 @@ export function h64ExposureClause(counts = {}, cap = H64_LOGIN_ROSTER_CAP) {
 // refusals are the same call the skill's own remedy order makes: 让正确形态成为
 // 唯一拼写. A lenient reader here would accept `Tier: full` / `Tier: 全量` /
 // `**Tier:** hourly` and hand the next seat four spellings of one declaration,
-// which is the state the rule exists to leave. The remedy text prints the two
-// legal lines verbatim, so the row can only ever be cleared into the spelling
+// which is the state the rule exists to leave. The remedy text prints the
+// legal lines verbatim, so the row can only ever be cleared into a spelling
 // it names.
 //
 // ⚠️ A blockquoted `> Tier: daily` is NOT accepted, and that is the deliberate
 // half of the line-start rule: a quoted line is this artefact repeating ANOTHER
 // one, and letting it clean the carrier would let a marker quoting last round's
 // brief satisfy this round's duty.
+//
+// ## The CHINESE spelling — the clause prescribes none, so neither may this row
+//
+// The measured defect (#18547): this row asks 「did the seat write down which
+// tier this round ran」 and answered it with an ASCII-LITERAL predicate, so a
+// round-open marker that DOES name its tier — in Chinese — was reported as
+// SILENCE. The live specimen is objectstack#6015 comment `5706306387`, whose
+// headline reads
+//
+//   **Round-open marker** · triage seat · `session_…` · **R+259** · fire … ·
+//   **objectstack 轮** · **层:小时层(增量)**,锚 = 本席 R+258 轮报 …
+//
+// 「层:小时层(增量)」 IS the declaration the clause asks for. One sweep
+// reported that carrier plus 45 further artefacts on it as tier-less: 46 false
+// rows drowning the true ones.
+//
+// The filing card measured, and this file's flight re-measured, that the
+// English word `Tier` in any casing appears NOWHERE in the charter: the only
+// clause is SKILL.md 〈分诊座位职责〉 「选层按 fire 时刻,⛔ 不用计数器;简报写明
+// 本轮跑的层」, which requires the tier to be WRITTEN and prescribes no
+// spelling. So the repair is HERE, in the predicate, and ⛔ NOT in adding an
+// English spelling to a charter that is a governed surface and never said it.
+//
+// ⛔ What this is NOT: it is not "accept any text that mentions a tier-ish
+// word". The Chinese reading keeps every property the English one has, and each
+// one has a control in the battery below:
+//
+//   · the KEY is closed — 「层」 plus a colon (ASCII or full-width), nothing else;
+//   · the WORD SET is closed — 「小时层」/「每日层」, the runbook's own two names
+//     (〈分诊两级盘点细则〉「每日层(当日首 fire)= 四仓全量对账 …」). Any other
+//     word after the key is `unknown-tier`, exactly as `Tier: full` is;
+//   · it must sit in a DECLARATION SLOT, never mid-sentence: the start of a
+//     line, or immediately after a 「·」 field separator, which is the marker
+//     headline's own field idiom (`**R+259**`, `**objectstack 轮**` and the
+//     tier field itself are all written that way). 「…简报写明本轮跑的层:小时
+//     层」 inside a sentence is prose and still reads as `absent` — the verdict
+//     it has today, KEPT and pinned rather than reclassified;
+//   · a BLOCKQUOTED Chinese declaration is refused for the same reason
+//     `> Tier: daily` is: a quoted line is this artefact repeating another.
+//
+// ⚠️ ONE asymmetry, deliberate and named: a leading `**` is refused on the
+// English line (`**Tier:** daily` stays `not-at-line-start`, untouched) and
+// ACCEPTED on the Chinese field. The English spelling is a whole LINE whose
+// legal forms the remedy prints verbatim; the Chinese spelling as MEASURED is a
+// bold field inside a `·`-separated headline, where every sibling field is bold
+// too — refusing the bold would refuse the idiom itself and re-file the same
+// false positive one layer down. The property preserved in both is the one the
+// design rests on: a key in a declaration slot, never a mention in prose.
+//
+// ⛔ And the row still fires on real silence. That is the half a repair like
+// this one is measured by, so it is not left to the reader: the battery keeps
+// the three tier-less specimens firing, plus a mid-sentence Chinese mention, a
+// blockquoted Chinese declaration and an unknown Chinese tier word.
 //
 // ## The artefact shapes, measured and named
 //
@@ -15504,6 +15557,66 @@ export const H65_TIER_LINE = /^[ \t]*Tier:[ \t]*(\S*)/m;
 export const H65_TIER_KEY = /Tier:/;
 
 /**
+ * The CHINESE tier words (#18547) — the runbook's own two names, mapped onto
+ * the same closed set the English words resolve to.
+ *
+ * ⛔ A closed set for exactly the reason `H65_TIER_WORDS` is one: 「层:全量」 is
+ * a dialect and reports as `unknown-tier`, not as a tolerated third tier.
+ * Neither word is a prefix of the other, so the scan order carries no meaning.
+ */
+/** How the Chinese key is NAMED in a row, so the row never claims `Tier:`. */
+export const H65_TIER_KEY_CN_LABEL = '层:';
+
+export const H65_TIER_WORDS_CN = Object.freeze([
+  Object.freeze({ word: '小时层', tier: 'hourly' }),
+  Object.freeze({ word: '每日层', tier: 'daily' }),
+]);
+
+/**
+ * The Chinese declaration, matched against ONE line at a time.
+ *
+ * `(?:^|·)` is the whole declaration-slot rule: the start of the line, or
+ * immediately after the 「·」 field separator the marker headline is built from.
+ * ⛔ Nothing else anchors it — a 「层:」 reached from inside a sentence does not
+ * match, which is what keeps this a declaration reader rather than a mention
+ * finder. The optional `**` is the headline's field decoration, not a general
+ * licence (see the asymmetry note in this row's header).
+ *
+ * The value runs to the first delimiter rather than to whitespace: the measured
+ * field is `层:小时层(增量)**,锚 = …` with no space anywhere near the word, so a
+ * `\S*` capture would swallow the rest of the headline. Everything after the
+ * tier word is free text, exactly as it is on the English line.
+ *
+ * ⛔ No `g` and no `m` flag: the caller feeds it single lines, and a sticky
+ * `lastIndex` would make this row's answer depend on what it read before.
+ */
+export const H65_TIER_FIELD_CN = /(?:^|·)[ \t]*(?:\*\*)?层[:\uFF1A][ \t]*([^\s*·,\uFF0C、;\uFF1B。]*)/;
+
+/**
+ * The Chinese declaration's reading, or null when the artefact carries none.
+ *
+ * A line whose first non-blank character is `>` is SKIPPED, the deliberate half
+ * of the slot rule on this side too: a quoted line is this artefact repeating
+ * ANOTHER one, and letting it clean the carrier would let a marker quoting last
+ * round's headline satisfy this round's duty.
+ *
+ * @param {string} text — the body, fences already blanked.
+ * @returns {{ tier: string|null, word: string }|null} — `tier` is null when the
+ *   slot is filled with a word outside the closed set (including no word).
+ */
+export function h65DeclaredTierCn(text) {
+  for (const line of String(text ?? '').split('\n')) {
+    if (/^[ \t]*>/.test(line)) continue;
+    const hit = H65_TIER_FIELD_CN.exec(line);
+    if (!hit) continue;
+    const rest = hit[1];
+    const named = H65_TIER_WORDS_CN.find((entry) => rest.startsWith(entry.word));
+    return named ? { tier: named.tier, word: named.word } : { tier: null, word: rest };
+  }
+  return null;
+}
+
+/**
  * The artefact grammar, as data so the self-test can drive every shape by name.
  * ⛔ No `g` flag on any of them: a sticky `lastIndex` would make this row's
  * answer depend on how many comments preceded it (H44's rule, same reason).
@@ -15586,13 +15699,26 @@ export function h65TierlessRoundArtefact(body) {
   if (!shape) return null;
   const text = h44StripFences(body);
   const declared = H65_TIER_LINE.exec(text);
-  if (declared) {
-    const word = declared[1];
-    if (H65_TIER_WORDS.includes(word)) return null;
+  const declaredCn = h65DeclaredTierCn(text);
+  // EITHER spelling naming a legal tier answers the clause, so both are read
+  // before any defect is classified: an artefact that names its tier in Chinese
+  // AND carries an off-spec `Tier:` line has still named its tier (#18547).
+  if (declared && H65_TIER_WORDS.includes(declared[1])) return null;
+  if (declaredCn?.tier) return null;
+  // The classification order below is the English one, UNCHANGED: a `Tier:`
+  // line outranks the Chinese slot for the echo, so every row this file printed
+  // before #18547 about an English dialect still prints the same words.
+  const dialect = declared ? declared[1] : declaredCn ? declaredCn.word : null;
+  if (dialect !== null) {
     return {
       shape,
       reason: 'unknown-tier',
-      detail: word ? word.slice(0, H44_FRAGMENT_ECHO_CAP) : '(nothing)',
+      // ⛔ The row must name the key it actually read: a `层:全量层` field
+      // reported as 「carries a `Tier:` line」 would be this row asserting a
+      // spelling the artefact does not carry — the same class of false
+      // statement #18547 was filed on, one layer down.
+      key: declared ? 'Tier:' : H65_TIER_KEY_CN_LABEL,
+      detail: dialect ? dialect.slice(0, H44_FRAGMENT_ECHO_CAP) : '(nothing)',
     };
   }
   if (H65_TIER_KEY.test(text)) return { shape, reason: 'not-at-line-start', detail: null };
@@ -15612,6 +15738,15 @@ export const H65_TIER_EXAMPLES =
   '`Tier: hourly (since 2026-09-15T13:45Z)` or `Tier: daily (first fire of the day)`';
 
 /**
+ * The Chinese legal forms, printed beside the English ones (#18547).
+ *
+ * The clause prescribes no spelling, so a remedy that named only the English
+ * one would be this row teaching a rule the charter does not carry — the very
+ * defect the card was filed on, relocated into the remedy text.
+ */
+export const H65_TIER_EXAMPLES_CN = '`层:小时层(增量)` or `层:每日层(当日首 fire)`';
+
+/**
  * The row. Report-only, and it names the comment so the remedy is an EDIT of a
  * known artefact rather than a hunt.
  *
@@ -15629,7 +15764,7 @@ export function h65TierlessRoundArtefactRow(hit, comment, total = 1) {
   const id = String(comment?.id ?? 'an unread id');
   const because =
     hit.reason === 'unknown-tier'
-      ? `carries a \`Tier:\` line naming ${hit.detail === '(nothing)' ? 'NOTHING' : `\`${hit.detail}\``}, which is not one of \`${H65_TIER_WORDS.join('` / `')}\``
+      ? `carries a \`${hit.key ?? 'Tier:'}\` declaration naming ${hit.detail === '(nothing)' ? 'NOTHING' : `\`${hit.detail}\``}, which is not one of \`${[...H65_TIER_WORDS, ...H65_TIER_WORDS_CN.map((entry) => entry.word)].join('` / `')}\``
       : hit.reason === 'not-at-line-start'
         ? 'spells `Tier:` somewhere that is NOT the start of a line — decorated or mid-paragraph, where neither a reader nor this row looks for a declaration'
         : 'names NO tier at all';
@@ -15643,7 +15778,9 @@ export function h65TierlessRoundArtefactRow(hit, comment, total = 1) {
     '简报写明本轮跑的层」) is satisfied by SILENCE here. The clause is the rule\'s forcing ' +
     'function: a seat that must NAME its tier cannot skip choosing one, and the one measured ' +
     'instance of the skipped choice was a full-board enumeration on a fire that owed a `since` ' +
-    `window. Remedy: one line, at the start of a line — ${H65_TIER_EXAMPLES} — with the selector ` +
+    `window. Remedy: one declaration — ${H65_TIER_EXAMPLES} at the start of a line, or ` +
+    `${H65_TIER_EXAMPLES_CN} at the start of a line or as a 「·」-delimited field of the ` +
+    'headline — with the selector ' +
     'read from `.claude/skills/pm-dispatch/references/dispatch-runbook.md` 〈分诊两级盘点细则〉 ' +
     '(「每日层(当日首 fire)= 四仓全量对账 + 归集本就日频的职责」). ⛔ This row does NOT judge ' +
     'whether the tier chosen was the RIGHT one — that reading is the seat\'s and is pinned in the ' +
@@ -23740,6 +23877,15 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // discharge). A negative with no live control beside it is how a repair
   // becomes a silencer, so the controls are inside the same floored battery.
   'H19 judged-set founding': 34,
+  // Registered with the second-spelling repair (#18547): 45 cases, the pin just
+  // under the count on the same grounds as its two neighbours. What this
+  // battery floors is a WIDENING — the row stopped reporting a Chinese
+  // declaration as silence — so the FIRING CONTROLS are inside it: the three
+  // measured tier-less specimens, a Chinese mention in prose, a blockquoted
+  // declaration, a dialect word, a bare key and a key-less mention. A widening
+  // whose controls can drift out of the suite is how a repair becomes a
+  // silencer, which is the failure this row was filed for in the first place.
+  'H65 tier declaration spelling': 42,
   // 151 registered with the queued merged-delivery reading (#18372); the pin
   // sits just under that on its neighbours' grounds. What this battery floors is a
   // LISTING whose whole value is its discriminators — the bucket a card lands
@@ -23753,7 +23899,7 @@ export const SELF_TEST_BATTERIES = Object.freeze({
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
-export const SELF_TEST_BATTERY_FLOOR = 3;
+export const SELF_TEST_BATTERY_FLOOR = 4;
 
 async function selfTest() {
   const cases = [];
@@ -33557,6 +33703,96 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H65 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h65RoundTier', summaryLine({}, 0)).includes('0 of 0'), true);
   t('H65 summary: a bare line renders numbers, never `undefined`', saidBy('h65RoundTier', summaryLine({}, 0)).includes('undefined'), false);
 
+  // -- BATTERY: H65 reads the DECLARATION, not the ASCII string (#18547) -----
+  //
+  // Every case here goes through `b(BATTERY65, …)` rather than `t(…)`, so the
+  // repair cannot quietly lose its cases — the H66 and H19 batteries' shape,
+  // the file's third.
+  //
+  // What this battery floors is a WIDENING: the row stopped reporting a Chinese
+  // declaration as silence, and a widening with no live control beside it is
+  // how a repair becomes a silencer. So the firing controls live INSIDE the
+  // same floored battery — the three measured tier-less specimens, a Chinese
+  // mention in PROSE, a BLOCKQUOTED Chinese declaration, a Chinese dialect
+  // word, a bare key naming nothing, and 「层」 with no key punctuation at all.
+  // Take any of them away and the battery is short of its pin.
+  //
+  // ⛔ The English cases are repeated here rather than referenced: this repair's
+  // one live hazard is a Chinese branch that changes an English verdict, and a
+  // control for that has to be in the battery that floors the branch.
+  const BATTERY65 = 'H65 tier declaration spelling';
+  // The MEASURED specimen, headline verbatim from objectstack#6015 comment
+  // `5706306387` (2026-09-16T23:58Z) — the artefact the card was filed on.
+  const MARKER65_CN =
+    '**Round-open marker** · triage seat · `session_01U6nJJSVZb476ckbRxmaMCA` · **R+259** · fire 2026-09-16T23:56Z · 2026-09-16T23:58Z · **objectstack 轮** · **层:小时层(增量)**,锚 = 本席 R+258 轮报 2026-09-16T23:15Z\n\n'
+    + 'Doubles as this fire\'s **write self-check**(step 0)。';
+  const cnTier = (body) => String(h65DeclaredTierCn(body)?.tier ?? 'none');
+  const cnWord = (body) => String(h65DeclaredTierCn(body)?.word ?? 'none');
+
+  // ⭐ The acceptance: the measured marker DOES name its tier, and the row now
+  // reads the VALUE rather than merely declining to fire.
+  b(BATTERY65, 'H65 #18547: ⭐ the MEASURED Chinese marker reads as DECLARED, not as silence', h65(MARKER65_CN), null);
+  b(BATTERY65, 'H65 #18547: …and the tier VALUE is extracted', cnTier(MARKER65_CN), 'hourly');
+  b(BATTERY65, 'H65 #18547: …naming the word the charter uses', cnWord(MARKER65_CN), '小时层');
+  b(BATTERY65, 'H65 #18547: the daily spelling resolves too', cnTier(withTier65(MARKER65, '层:每日层(当日首 fire)')), 'daily');
+  b(BATTERY65, 'H65 #18547: …and clears the artefact', h65(withTier65(MARKER65, '层:每日层(当日首 fire)')), null);
+  b(BATTERY65, 'H65 #18547: a full-width colon is the same key', cnTier(withTier65(MARKER65, '层\uFF1A小时层(增量)')), 'hourly');
+  b(BATTERY65, 'H65 #18547: …and that case is NO PHANTOM — the two colon spellings are different bytes', '层\uFF1A' === '层:', false);
+  b(BATTERY65, 'H65 #18547: leading indentation does not break the slot rule', h65(withTier65(MARKER65, '  层:小时层')), null);
+  b(BATTERY65, 'H65 #18547: free text after the tier word is allowed, as it is in English', h65(withTier65(MARKER65, '层:小时层 —— 锚 = 上一份收班简报')), null);
+  b(BATTERY65, 'H65 #18547: the round close clears the same way', h65(withTier65(CLOSE65, '层:每日层(当日首 fire)')), null);
+  b(BATTERY65, 'H65 #18547: …and so does the stand-down brief', h65(withTier65(BRIEF65, '层:小时层(增量)')), null);
+
+  // ⭐ FIRING CONTROLS — what must STILL fire, or this repair is a silencer.
+  b(BATTERY65, 'H65 #18547 control: the measured tier-LESS marker still fires', h65reason(MARKER65), 'absent');
+  b(BATTERY65, 'H65 #18547 control: …the measured round close still fires', h65reason(CLOSE65), 'absent');
+  b(BATTERY65, 'H65 #18547 control: …the measured stand-down brief still fires', h65reason(BRIEF65), 'absent');
+  b(BATTERY65, 'H65 #18547 control: …and each is still NAMED as the artefact it is', h65shape(MARKER65), 'a round-open marker');
+  b(BATTERY65, 'H65 #18547 control: ⛔ a mid-sentence Chinese mention is PROSE — it keeps today\'s verdict', h65reason(MARKER65 + '\n\n简报写明本轮跑的层:小时层,照旧。'), 'absent');
+  b(BATTERY65, 'H65 #18547 control: ⛔ …and a 「·」 elsewhere on that line does not license it', h65reason(MARKER65 + '\n\n锚 · 简报写明本轮跑的层:小时层。'), 'absent');
+  b(BATTERY65, 'H65 #18547 control: ⛔ a BLOCKQUOTED Chinese declaration is this artefact quoting another', h65reason(withTier65(MARKER65, '> 层:每日层(当日首 fire)')), 'absent');
+  // ⚠️ The case above is carried by the SLOT rule, not by the blockquote skip:
+  // `> ` is not `[ \t]`, so the line-start branch never reaches the key. The
+  // measured hazard is a quoted HEADLINE, where the 「·」 branch does reach it — a
+  // marker repeating last round's field would otherwise clear this round's duty.
+  // An ablation deleting the skip left the case above GREEN, which is how this
+  // second one came to exist; ⛔ do not merge them.
+  b(BATTERY65, 'H65 #18547 control: ⛔ …and a quoted HEADLINE cannot clear the duty through its 「·」 field', h65reason(withTier65(MARKER65, '> **Round-open marker** · triage seat · **R+258** · **层:小时层(增量)**')), 'absent');
+  b(BATTERY65, 'H65 #18547 control: ⛔ the WORD SET is closed — a Chinese dialect is a finding', h65reason(withTier65(MARKER65, '层:全量层')), 'unknown-tier');
+  b(BATTERY65, 'H65 #18547 control: …and the row echoes the word it refused', h65row(withTier65(MARKER65, '层:全量层')).includes('`全量层`'), true);
+  b(BATTERY65, 'H65 #18547 control: …naming the key it ACTUALLY read', h65row(withTier65(MARKER65, '层:全量层')).includes('carries a `层:` declaration'), true);
+  b(BATTERY65, 'H65 #18547 control: ⛔ …and never claiming a `Tier:` the artefact does not carry', h65row(withTier65(MARKER65, '层:全量层')).includes('`Tier:` declaration'), false);
+  b(BATTERY65, 'H65 #18547 control: …while an English dialect still names `Tier:`', h65row(withTier65(MARKER65, 'Tier: full')).includes('carries a `Tier:` declaration'), true);
+  b(BATTERY65, 'H65 #18547 control: …and the refusal lists all four legal words, not two', ['hourly', 'daily', '小时层', '每日层'].every((w) => h65row(withTier65(MARKER65, 'Tier: full')).includes(`\`${w}\``)), true);
+  b(BATTERY65, 'H65 #18547 control: …a bare 「层:」 naming nothing reports as naming nothing', h65row(withTier65(MARKER65, '层:')).includes('naming NOTHING'), true);
+  b(BATTERY65, 'H65 #18547 control: ⛔ the KEY is closed — 「层」 with no colon declares nothing', h65reason(withTier65(MARKER65, '本轮跑 小时层 增量')), 'absent');
+  b(BATTERY65, 'H65 #18547 control: ⛔ …nor does another key carrying the same word', h65reason(withTier65(MARKER65, '本轮:小时层(增量)')), 'absent');
+  b(BATTERY65, 'H65 #18547 control: ⛔ scope is untouched — a Chinese declaration is not owed by ordinary prose', h65('分诊答复 #18042:评级维持。层:小时层'), null);
+
+  // ⭐ ENGLISH IS UNTOUCHED — the one live hazard of a second spelling.
+  b(BATTERY65, 'H65 #18547: `Tier: hourly …` still clears', h65(withTier65(MARKER65, 'Tier: hourly (since 2026-09-15T13:45Z)')), null);
+  b(BATTERY65, 'H65 #18547: `Tier: daily …` still clears', h65(withTier65(MARKER65, 'Tier: daily (first fire of the day)')), null);
+  b(BATTERY65, 'H65 #18547: `Tier: full` is still the dialect finding', h65reason(withTier65(MARKER65, 'Tier: full')), 'unknown-tier');
+  b(BATTERY65, 'H65 #18547: …and still echoes the English word, not a Chinese one', h65row(withTier65(MARKER65, 'Tier: full')).includes('`full`'), true);
+  b(BATTERY65, 'H65 #18547: `**Tier:** daily` is still `not-at-line-start`', h65reason(withTier65(MARKER65, '**Tier:** daily')), 'not-at-line-start');
+  b(BATTERY65, 'H65 #18547: a mid-paragraph `Tier: daily` is still `not-at-line-start`', h65reason(MARKER65 + '\n\nThe round ran with Tier: daily, as it happens.'), 'not-at-line-start');
+  b(BATTERY65, 'H65 #18547: `> Tier: daily` is still `not-at-line-start`', h65reason(withTier65(MARKER65, '> Tier: daily (first fire of the day)')), 'not-at-line-start');
+  b(BATTERY65, 'H65 #18547: `Tier: 全量` is still a dialect, not a Chinese declaration', h65reason(withTier65(MARKER65, 'Tier: 全量')), 'unknown-tier');
+
+  // ⭐ Either spelling answers the clause — the seat that wrote BOTH has named
+  // its tier, whichever half is off-spec.
+  b(BATTERY65, 'H65 #18547: a legal Chinese field outranks an off-spec `Tier:` line — the tier IS named', h65(withTier65(MARKER65_CN, 'Tier: full')), null);
+  b(BATTERY65, 'H65 #18547: …and a legal `Tier:` line outranks an off-spec Chinese field', h65(withTier65(MARKER65, 'Tier: daily\n层:全量层')), null);
+
+  // ⭐ The declared shape of the second spelling, pinned where it is read.
+  b(BATTERY65, 'H65 #18547: the Chinese word set is CLOSED at two', H65_TIER_WORDS_CN.length, 2);
+  b(BATTERY65, 'H65 #18547: …and every one of them resolves into the English closed set', H65_TIER_WORDS_CN.every((e) => H65_TIER_WORDS.includes(e.tier)), true);
+  b(BATTERY65, 'H65 #18547: ⛔ no `g` flag on the field regex — a sticky index would make the answer order-dependent', H65_TIER_FIELD_CN.global, false);
+  b(BATTERY65, 'H65 #18547: ⛔ nor `m` — the caller feeds it one line at a time', H65_TIER_FIELD_CN.multiline, false);
+  b(BATTERY65, 'H65 #18547: the remedy prints the Chinese forms too, so the row teaches no rule the charter lacks', h65row(MARKER65).includes('层:每日层(当日首 fire)'), true);
+  b(BATTERY65, 'H65 #18547: …and still prints the English ones', h65row(MARKER65).includes('Tier: daily (first fire of the day)'), true);
+  b(BATTERY65, 'H65 #18547: …and still names the 「·」 field slot rather than implying any placement works', h65row(MARKER65).includes('-delimited field'), true);
+
   // -- H66 — a released `pm:queue` card whose remainder is not work (#18299) --
   //
   // ⛔ The self-test never touches GitHub. Every heading below is a spelling
@@ -34167,7 +34403,8 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // THE ROSTER — a floor that cannot be satisfied by a zero.
   b(BATTERY67, 'H67 floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY67), true);
   b(BATTERY67, 'H67 floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY67] > 0, true);
-  b(BATTERY67, 'H67 floor: the roster now declares THREE batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 3);
+  b(BATTERY67, 'H67 floor: the roster now declares FOUR batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 4);
+  b(BATTERY67, 'H67 floor: …including the two batteries this row landed BESIDE, so neither side of the base merge silently dropped one', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, 'H65 tier declaration spelling') && Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, 'H19 judged-set founding'), true);
   b(BATTERY67, 'H67 floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
