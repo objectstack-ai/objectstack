@@ -576,8 +576,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'direction A — anchor missing refuses': 5,
   'direction B — anchor present lands on disk': 8,
   'restore is proven, never assumed': 4,
+  'WRAP mode holds the trap and restores after the child': 7,
 });
-const SELF_TEST_BATTERY_FLOOR = 5;
+const SELF_TEST_BATTERY_FLOOR = 6;
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 function selfTest() {
@@ -684,6 +685,38 @@ function selfTest() {
     ok(blobHash(target, tmp) === headBlob, 'after restore the blob equals the HEAD blob');
     ok(/git diff HEAD\s+empty/.test(r1.stdout), 'the restore leg prints the git diff HEAD proof');
     ok(readFileSync(target, 'utf8').includes('GUARD = true'), 'the original text is back on disk');
+
+    battery('WRAP mode holds the trap and restores after the child');
+    // The wrapped command reads the target and reports what it saw, so the
+    // mutation is proven to have been LIVE for the child -- not merely written
+    // and restored around a command that never looked.
+    const reader = join(tmp, 'reader.mjs');
+    writeFileSync(
+      reader,
+      "import { readFileSync } from 'node:fs';\n"
+        + `const t = readFileSync(${JSON.stringify(target)}, 'utf8');\n`
+        + "process.stdout.write(t.includes('GUARD = false') ? 'CHILD_SAW_MUTATION' : 'CHILD_SAW_PRISTINE');\n"
+        + "process.exit(t.includes('GUARD = false') ? 7 : 0);\n",
+      'utf8',
+    );
+    const w1 = invoke(['--file', target, '--anchor', 'GUARD = true', '--replacement', 'GUARD = false', '--', process.execPath, reader]);
+    ok(/CHILD_SAW_MUTATION/.test(w1.stdout), 'the wrapped child ran against the MUTATED file');
+    ok(w1.status === 7, `the child's own status passes through untouched (got ${w1.status}) — a red child is the ablation's reading, not this tool's failure`);
+    ok(blobHash(target, tmp) === headBlob, 'WRAP restored the file once the child exited');
+    ok(/git diff HEAD\s+empty/.test(w1.stdout), 'WRAP prints the restore proof, not just a restore');
+    // `--self-test` after the `--` belongs to the CHILD. Read off the WHOLE
+    // argv it hijacked the dispatcher: the parent ran its own self-test, printed
+    // a green line, and performed no ablation at all. Found by dogfooding this
+    // tool on its own self-test; pinned here.
+    //
+    // The child is the reader, NOT this script: wrapping the real self-test
+    // makes the self-test spawn itself, unbounded. That recursion is the reason
+    // this case uses a stand-in -- the property under test is the parent's argv
+    // slicing, and the reader carries the flag just as well.
+    const w2 = invoke(['--file', target, '--anchor', 'GUARD = true', '--replacement', 'GUARD = false', '--', process.execPath, reader, '--self-test']);
+    ok(/CHILD_SAW_MUTATION/.test(w2.stdout), 'a `--self-test` AFTER the -- does not hijack the dispatcher — the parent still performs the ablation');
+    ok(!/self-test: all/.test(w2.stdout), 'and the parent does not print a self-test verdict for an ablation it was asked to run');
+    ok(blobHash(target, tmp) === headBlob, 'and that wrapped run still restores the file');
   } finally {
     cleanup();
   }
@@ -723,9 +756,16 @@ function selfTest() {
 const argv = process.argv.slice(2);
 const invokedDirectly = isEntrypoint(import.meta.url);
 
+// `--self-test` counts only BEFORE the `--`. Everything after it belongs to the
+// wrapped command, and the natural way to dogfood this tool is to wrap its own
+// self-test -- which, read off the whole argv, silently made the parent run its
+// self-test instead of the ablation and printed a GREEN that described nothing.
+// Found by doing exactly that; the WRAP battery below now pins it.
+const headArgv = argv.includes('--') ? argv.slice(0, argv.indexOf('--')) : argv;
+
 if (!invokedDirectly) {
   // imported for its exports — run nothing
-} else if (argv.includes('--self-test')) {
+} else if (headArgv.includes('--self-test')) {
   if (selfTest() !== SELF_TEST_VERDICT) {
     console.error(
       `\nx ${TOOL} self-test: selfTest() returned without reaching its verdict,\n`
