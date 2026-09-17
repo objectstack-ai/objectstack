@@ -3890,6 +3890,21 @@ export function declaredInheritedPopulation(moduleSource, hints = null) {
  * The reason is REQUIRED, and separated from the path list by a SPACE-delimited
  * `--`, exactly as `inherited-population` spells it.
  *
+ * ## Measured at the landing, both directions
+ *
+ * For a change set holding `.claude/skills/pm-dispatch/SKILL.md` alone, the
+ * derived command list goes 18 -> 19 and the new member is
+ * `pnpm check:pm-expected-skips`, keyed `declared self-test read by
+ * scripts/pm/check-expected-skips.mjs`. Replayed against the run record the
+ * defect produced — the 18 commands, each with an exit code — `--ran` stops
+ * saying 「0 NOT-MEASURED, 0 UNRUN」 and says `1 of 19 derived famil(ies) UNRUN
+ * — pnpm check:pm-expected-skips [absent from the run record]`. Ablated on disk
+ * from the committed fix by deleting the declaration line, the derivation falls
+ * back to 18 without that family and this file's self-test fails 5 of 1788
+ * cases: the specimen, the census's declared half, the flag pin, the
+ * class-wide derived pin, and the declared-data-read hole beside the
+ * program-text refusal. Nothing else moves.
+ *
  * @param {string} scriptSource  the script's contents
  * @param {string[]} readTargets  what `anchoredReadTargets` resolved from it
  * @returns {{ population: string[], reason: string } | null}
