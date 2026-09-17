@@ -130,8 +130,10 @@ const BUILD_ONLY_GATES: Readonly<Record<string, string>> = {
  * it down HERE, in a diff, next to a sentence saying it does not judge
  * anything. Before #18491 the scan matched `lintFoo(`/`validateFoo(` and saw
  * exactly TWO names in each command (`lintUnknownStackKeys`,
- * `lintUnknownAuthoringKeys`) out of 45 and 39 call sites: an entire gate could
- * be added to one command and this file had no way to notice.
+ * `lintUnknownAuthoringKeys`) out of the 47 and 39 bare-identifier call sites
+ * those two commands have — measured on objectstack-ai/objectstack at
+ * 62d830e54, the tree this landed against. An entire gate could be added to one
+ * command and this file had no way to notice.
  *
  * ⛔ Do not answer a red from the classification test by dropping a name in the
  * nearest bucket. The buckets are assertions; a gate filed under
@@ -319,8 +321,9 @@ const NOT_CALLABLE: ReadonlySet<string> = new Set([
  *
  * ⭐ [#18491] THE DIRECTION OF THIS FILE IS INVERTED HERE. The old extractor
  * asked "which call sites LOOK like gates" — a regex for the two prefixes
- * `lint` and `validate` followed by a capital — and answered with 2 of the 45
- * names `compile.ts` calls. Everything else was
+ * `lint` and `validate` followed by a capital — and answered with 2 of the 47
+ * call sites `compile.ts` has (objectstack-ai/objectstack at 62d830e54).
+ * Everything else was
  * invisible, so the roster was advisory: a gate could be wired into one command
  * only and nothing in this file could tell. Two families were invisible on the
  * tree at once (`findNavGroupDiagnostics`, `checkProtocolVersionGap`), which is
