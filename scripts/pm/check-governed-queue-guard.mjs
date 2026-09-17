@@ -454,11 +454,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ #15406: a CLEAR reached through a lift is not a clear that saw nothing': 10,
   '⛔ #17040: the contract-review carrier is the enqueue gate': 39,
   '⭐ #18020: the references tier — a review of record, not an approval': 40,
+  '⭐ #18701: the record lives on the PR or its card, and BOTH are read': 14,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 20;
+const SELF_TEST_BATTERY_FLOOR = 21;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -3405,7 +3406,111 @@ export async function selfTest() {
     JSON.stringify(tierAbsent.entries[0].record),
   );
 
+  // ── ⭐ #18701: the record lives on the PR **or its card**, and both are read ──
+  //
+  battery('⭐ #18701: the record lives on the PR or its card, and BOTH are read');
+  //
+  // The dequeue this leg cost, reproduced offline: a references-tier pair whose
+  // record sits ONLY on the card thread. Refused before this case existed
+  // (「0 comment(s) read on the PR thread」, PR #18689, `CI_FAILURE`), and the
+  // rule it was refused against says 「一条评论落 PR 或卡」.
+  const tierOnCard = await tierRun({ comments: [{ id: 1, created_at: '2026-09-13T12:00:00Z', body: 'os-dev-report' }], cardComments: [recordComment({ id: 901 })] });
+  assert(
+    '⭐ a-record-on-the-CARD-thread-alone-PASSES-the-two-carriers-are-one-delivery',
+    tierOnCard.exitCode === EXIT_CLEAR && tierOnCard.entries[0].record.state === 'stands' && tierOnCard.entries[0].record.where === 'card',
+    JSON.stringify(tierOnCard.entries[0].record),
+  );
+  assert(
+    '…and-BOTH-threads-were-actually-fetched-the-PR-number-and-the-card-it-delivers',
+    tierThreadsRead.join() === '70,69',
+    tierThreadsRead.join(),
+  );
+  assert(
+    '…and-the-passing-rendering-NAMES-the-thread-it-found-the-record-on',
+    /on the card thread is a `## Contract review`/.test(renderGuardVerdict(tierOnCard)),
+    renderGuardVerdict(tierOnCard),
+  );
+  // The lit control for the case above: the PR-thread reading is untouched.
+  const tierOnPrThread = await tierRun({ comments: [recordComment()], cardComments: [] });
+  assert(
+    'a-record-on-the-PR-thread-alone-still-PASSES-exactly-as-before',
+    tierOnPrThread.exitCode === EXIT_CLEAR && tierOnPrThread.entries[0].record.where === 'PR',
+  );
+  // ⭐ NEWEST-GOVERNS SPANS THE TWO THREADS, because the located record is ONE
+  // comment chosen once by the imported reader — never a per-thread winner.
+  const tierNewestAcross = await tierRun({
+    comments: [recordComment({ id: 910, at: '2026-09-13T10:00:00Z', tierLine: 'Served-tier: 75/75 `a-lesser-tier`' })],
+    cardComments: [recordComment({ id: 911, at: '2026-09-13T11:00:00Z' })],
+  });
+  assert(
+    '⭐ the-NEWEST-record-governs-ACROSS-the-two-threads-not-one-winner-per-thread',
+    tierNewestAcross.entries[0].record.state === 'stands' && tierNewestAcross.entries[0].record.id === 911,
+    JSON.stringify(tierNewestAcross.entries[0].record),
+  );
+  const tierNewestOnPr = await tierRun({
+    comments: [recordComment({ id: 912, at: '2026-09-13T14:00:00Z' })],
+    cardComments: [recordComment({ id: 913, at: '2026-09-13T11:00:00Z', tierLine: 'Served-tier: 75/75 `a-lesser-tier`' })],
+  });
+  assert(
+    '…in-both-directions-a-newer-PR-thread-record-displaces-an-older-card-one',
+    tierNewestOnPr.entries[0].record.state === 'stands' && tierNewestOnPr.entries[0].record.id === 912,
+  );
+  // ⛔ The card is DERIVED, and an underivable one searches NO card thread — the
+  // refusing direction, stated in the refusal rather than guessed at.
+  const tierNoCard = await tierRun({ prBody: 'no card named here', branch: 'feat/whatever', cardComments: [recordComment()] });
+  assert(
+    '⛔ a-pull-request-naming-NO-card-searches-no-card-thread-and-is-REFUSED',
+    tierNoCard.exitCode === EXIT_REFUSED_UNAPPROVED && tierNoCard.entries[0].record.state === 'absent' && tierThreadsRead.join() === '70',
+    JSON.stringify({ record: tierNoCard.entries[0].record, read: tierThreadsRead }),
+  );
+  assert(
+    '…and-the-refusal-SAYS-no-card-thread-was-searched-and-why-so-a-seat-is-not-left-guessing',
+    /no card thread was searched/.test(renderGuardVerdict(tierNoCard)) && /names no card/.test(renderGuardVerdict(tierNoCard)),
+    renderGuardVerdict(tierNoCard),
+  );
+  const tierTwoCards = await tierRun({ prBody: 'Fixes #101\nFixes #102', cardComments: [recordComment()] });
+  assert(
+    '⛔ and-a-pull-request-delivering-TWO-cards-at-equal-strength-picks-NEITHER',
+    tierTwoCards.exitCode === EXIT_REFUSED_UNAPPROVED && tierThreadsRead.join() === '70' &&
+      /same strength/.test(renderGuardVerdict(tierTwoCards)),
+    renderGuardVerdict(tierTwoCards),
+  );
+  // The branch-name fallback is the relation's own, reached only when the body
+  // declares nothing — so a record on the branch's card is still found.
+  const tierByBranch = await tierRun({ prBody: 'no declaration at all', cardComments: [recordComment({ id: 920 })] });
+  assert(
+    'the-card-comes-from-the-BRANCH-NAME-when-the-body-declares-nothing-the-relations-own-fallback',
+    tierByBranch.exitCode === EXIT_CLEAR && tierByBranch.entries[0].record.id === 920 && tierThreadsRead.join() === '70,69',
+    tierThreadsRead.join(),
+  );
+  // ⛔ An unreadable CARD thread is exit 4 on the same rule the PR thread is:
+  // an unread carrier is not a carrier with no record on it.
+  const tierCardThrew = await tierRun({ commentsThrow: true });
+  assert(
+    '⛔ an-unreadable-thread-on-EITHER-carrier-is-exit-4-never-an-absent-record',
+    tierCardThrew.exitCode === EXIT_REFUSED_UNREADABLE && tierCardThrew.entries[0].record.state === 'unreadable',
+  );
+  // ⭐ THE MIRROR PIN. `renderGuardVerdict` is pure and synchronous, so the
+  // WORDS a refusal prints are a module-scope mirror here; the SET this leg
+  // reads is not (it is the loaded list). Drift between the two reddens.
+  const { REVIEW_OF_RECORD_LOCATION: OWNED_LOCATION, REVIEW_OF_RECORD_THREADS: OWNED_THREADS } = await import(RECOGNISER_SOURCES.tier);
+  assert(
+    '⭐ the-location-WORDS-this-file-prints-are-pinned-to-the-constant-that-OWNS-them',
+    REVIEW_OF_RECORD_LOCATION === OWNED_LOCATION && OWNED_LOCATION === OWNED_THREADS.map((t) => t.words).join(' or '),
+    `${REVIEW_OF_RECORD_LOCATION} vs ${OWNED_LOCATION}`,
+  );
+  assert(
+    '…and-the-remedy-a-refusal-offers-names-exactly-that-location-never-one-thread-of-it',
+    renderGuardVerdict(tierAbsent).includes(`comment on ${OWNED_LOCATION} naming`),
+    renderGuardVerdict(tierAbsent),
+  );
+  assert(
+    '…while-the-leg-itself-reads-the-LOADED-set-so-a-stale-mirror-can-never-shrink-what-is-searched',
+    live.threads === OWNED_THREADS && live.threads.length === 2,
+  );
+
   // ⭐ The BOUNDARY: one rules-layer path and the tier is not reachable at all.
+  battery('⭐ #18020: the references tier — a review of record, not an approval');
   const tierMixed = await tierRun({ files: [REF_A, RULES_PATH], comments: [recordComment()] });
   assert(
     '⛔ a-MIXED-diff-with-one-rules-layer-path-is-REFUSED-even-with-a-perfect-record',
