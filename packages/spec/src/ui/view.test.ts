@@ -2613,11 +2613,42 @@ describe('RowColorConfigSchema', () => {
       },
     };
 
+    // ⚠️ #18791 — this ASSERTION is correct and is deliberately left alone: the
+    // accept set really is `z.record(z.string(), z.string())`, and hexes really
+    // do parse. What is wrong is believing a parse means a colour. None of
+    // these three values resolves — objectui `useRowColor.ts`'s `colorToClass`
+    // returns `undefined` for every one of them — so this map parses,
+    // publishes, and paints nothing. The schema is not the enforcement point
+    // for that; the author-time diagnostic
+    // `view/row-color-unresolvable-value` (`kernel/functional-completeness.ts`)
+    // is, and it reports exactly this fixture.
     expect(() => RowColorConfigSchema.parse(rowColor)).not.toThrow();
   });
 
   it('should require field', () => {
     expect(() => RowColorConfigSchema.parse({})).toThrow();
+  });
+
+  // #18791 — the describe read `Map of field value to color (hex/token)`, and a
+  // hex is the one spelling the only renderer cannot resolve. The schema told
+  // an author to write the value that silently does nothing; the diagnostic
+  // that would have caught it checks presence only, so the hex map turned it
+  // GREEN. This pins the two properties that made the old sentence a trap,
+  // rather than the wording that replaced it.
+  it('⛔ the `colors` describe never offers a hex — it names what actually resolves (#18791)', () => {
+    const description = (RowColorConfigSchema as unknown as {
+      shape: { colors: { description?: string } };
+    }).shape.colors.description ?? '';
+
+    expect(description).not.toMatch(/hex/i);
+    // ⚠️ `token` went with it: read as the 23 colour NAMES it still stood
+    // beside hex as an equal alternative, and putting a bad option first is as
+    // harmful as offering only the bad option.
+    expect(description).not.toMatch(/\btokens?\b/i);
+    // What it must do instead: name the two spellings that reach a class, and
+    // point at the rule that reports the ones that do not.
+    expect(description).toContain('bg-red-200');
+    expect(description).toContain('view/row-color-unresolvable-value');
   });
 });
 

@@ -1186,7 +1186,7 @@ export const RowColorConfigSchema = lazySchema(() => strictObject({
   history: VIEW_HISTORY,
 }, {
   field: z.string().describe('Field whose value is looked up in the `colors` map below to pick a row colour (typically a select/status field). The map is what does the colouring — with no `colors`, no row is ever coloured, whatever this field holds. Author-time diagnostic `view/row-color-without-colors` reports that combination.'),
-  colors: z.record(z.string(), z.string()).optional().describe('Map of field value to color (hex/token)'),
+  colors: z.record(z.string(), z.string()).optional().describe('Map of field value to row colour. The spellings that actually paint a row are not free-form: objectui `plugin-grid`\'s `useRowColor` hands a value already written as a complete Tailwind background class (`bg-red-200`) straight through, otherwise lower-cases and trims it and resolves it through its own closed vocabulary of colour NAMES (`red`, `blue`, `slate`, … each mapping to `bg-NAME-100`), and returns undefined for anything else. A hex, an `rgb()` or a CSS variable parses here, publishes, and colours no row — Tailwind v4 has no runtime, so no class can be fabricated from one. Author-time diagnostic `view/row-color-unresolvable-value` reports a value that cannot resolve.'),
 }).describe('Row color configuration based on field values'));
 
 /**
