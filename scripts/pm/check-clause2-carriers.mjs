@@ -683,6 +683,7 @@ import {
   isGateSemanticLabel,
   labelNames,
   latestMarkedComment,
+  markerMatches,
   prDeliversCard,
   proxyRearmPlan,
   resolveSweepRepo,
@@ -1756,7 +1757,7 @@ export function claimRetractions(commentRows) {
   });
   const out = new Map();
   for (const claim of indexed) {
-    if (!CLAIM_COMMENT_MARKER.test(String(claim.row?.body ?? ''))) continue;
+    if (!markerMatches(CLAIM_COMMENT_MARKER, String(claim.row?.body ?? ''))) continue;
     // Fail closed, twice: an unattributable claim cannot be matched against an
     // author, and an unattributable candidate cannot be the seat that wrote it.
     if (claim.author === null) continue;
@@ -1791,11 +1792,81 @@ export function claimRetractions(commentRows) {
  */
 export const CLAIM_SELECTION_RULE =
   'the GOVERNING claim — the NEWEST comment whose body carries a line beginning `Claim:`/`Claimed:` '
+  + '(read through the sibling reader\'s ONE reading, `markerMatches`: the bare marker first, then the '
+  + 'shared stripper per line, with a markdown LIST ITEM refused — so a decorated `**Claim:**` is the '
+  + 'same record as a bare one and ⛔ the two readers of this thread cannot answer differently) '
   + 'AND whose `Branch:` line parses at least one protocol-shaped branch (newest by `created_at`; an '
   + 'unreadable stamp or a tie falls back to thread order, later row wins). The pool is every claim '
   + 'comment sharing that `created_at`; when NO claim names a branch at all, every claim comment is '
   + 'the pool. ⛔ Not earliest, ⛔ not a session match, ⛔ not the one whose body mentions the key. '
   + `MEMBERSHIP comes first: ${CLAIM_RETRACTION_RULE}`;
+
+// ---------------------------------------------------------------------------
+// #18764 — a DECORATED claim ENTERS the pool. ONE reading, and it is the
+// sibling's.
+//
+// The pool and the retraction indexer each tested `CLAIM_COMMENT_MARKER`
+// against the RAW body. The constant anchors the bare word at line start and
+// tolerates leading whitespace and one `>` — nothing else — so a claim a seat
+// wrote as `**Claim:** …` or `` `Claim:` … `` was not SUPERSEDED here, it was
+// never a candidate: not listed, not rejected, not named anywhere in the
+// record. Meanwhile `claimGovernance`, imported from the same sibling, had
+// already been reading both markers through `markerMatches` since #18680, so
+// ONE FUNCTION held both answers at once — governance saw the bolded claim and
+// the pool beside it did not.
+//
+// Measured on the two live records the #18764 escalation named (read
+// 2026-09-17T22:02Z; ⚠️ both cards have since left that state and the reading
+// is stated with its time for that reason), replayed through `--pair-json`:
+//
+//   a bolded/backticked claim carrying its own `Branch:` and `Clause-②: no`
+//     → `claim.selected: none — no comment on this thread carries a line
+//       beginning `Claim:``, the limb read MISPLACED and `--pair` exited 4,
+//       prescribing a `Clause-②-correction:` for a line the seat had already
+//       written in the right place.
+//   a BARE older claim declaring `yes` beneath a DECORATED newer one declaring
+//     `no` → the OLD claim governed the declaration, the reading answered
+//     `DECLARED yes`, and the newer record was not even listed as rejected.
+//     ⭐ That is the expensive direction: not a missing reading but a WRONG
+//     value, reported with every appearance of having been read.
+//
+// ⛔ The repair is NOT a `\*\*` added to `CLAIM_COMMENT_MARKER`. Decoration is
+// an OPEN set (#18680 settled that), so admitting one spelling buys exactly
+// that spelling and replays this card on the next one — and the constant is
+// the PROTOCOL's spelling, which is why every reader imports it rather than
+// restating it. ⛔ Nor is it a second undecorator written here: this file
+// would then own a definition of "decorated" that the sibling could drift
+// from, which is the very failure the card names. What both raw tests do
+// instead is READ THROUGH `markerMatches` — the sibling's one reading, bare
+// test first (so the change is provably additive: no body that matched
+// yesterday stops matching) and the shared stripper after it, with the list
+// item refused there and the near-miss vocabulary
+// (`OWNERSHIP_MARKER_NEAR_MISS_FORMS`) kept where it lives. ⛔ That vocabulary
+// is the sibling's and is not re-declared here.
+//
+// ## The OTHER undecorator in this file stays where it is, and that is MEASURED
+//
+// `undecorateRetractionLine` looks like the same job one section up, and the
+// card asked whether the file should end up with one undecoration path. It
+// should not, and the two paths were run over one fixture set to find out:
+// 5 of 12 fixtures read DIFFERENTLY. `undecorateRetractionLine` strips `_` and
+// then every leading non-letter/non-digit character, so it reads
+// `__Claim:__`, `- Claim:`, `* Claim:`, `## Claim:` and `🚨 Claim:` as the
+// directive; `markerMatches` reads none of those, deliberately — the list item
+// and the heading are NAMED refusals with pins behind them, and the underscore
+// form is a named near miss.
+//
+// ⭐ The divergence is load-bearing in BOTH directions, which is why unifying
+// by hand would be a regression whichever way it went. The #18373 retraction
+// this file's own battery replays opens `🚨 **撤回上一条认领…`, and the leading
+// sigil is exactly what the prose channel must strip before the anchor can
+// OPEN the line — narrowing the retraction stripper to the shared one would
+// stop reading the measured specimen #18719 landed for. Widening the shared
+// one the other way would make `- Claim:` a claim, which H20 pins as not one.
+// ⇒ two strippers, two jobs, and the difference is stated here rather than
+// discovered again. ⛔ Not unified from here: it is filed, with the fixture
+// table, for the seat to route.
+// ---------------------------------------------------------------------------
 
 /**
  * WHICH claim comment this reading is built from, and which it is not — the
@@ -1837,7 +1908,7 @@ export function claimCarrierSelection(commentRows) {
   // ⭐ The full claim listing KEEPS the retracted rows: the record names them
   // RETRACTED below. A pool that silently shrank would replace one invisible
   // fact with another.
-  const claims = commentRows.filter((row) => CLAIM_COMMENT_MARKER.test(String(row?.body ?? '')));
+  const claims = commentRows.filter((row) => markerMatches(CLAIM_COMMENT_MARKER, String(row?.body ?? '')));
   const live = claims.filter((row) => !retracted.has(row));
   const governing = governance.governing;
   const matched = governing ? live.filter((row) => (row?.created_at ?? null) === governing.createdAt) : [];
@@ -1898,13 +1969,17 @@ const CLAUSE2_CORRECTION_KEY_TEXT = 'Clause-②-correction';
  * because the older claim happened to agree.
  *
  * The predicate that separates them is `CLAIM_COMMENT_MARKER`, imported rather
- * than restated: a claim comment is one whose body carries a LINE BEGINNING
- * `Claim:` (or `Claimed:`, optionally blockquoted), and that one spelling is
- * the whole set — so a heading-style claim (`## Claim — …`) is not a claim
- * comment here, however complete the reasoning under it, and its thread reads
- * `absent`. ⛔ Widening the predicate is not this file's to do: it is the
- * sibling's constant precisely so the two readers cannot drift, and the remedy
- * for a thread that reads `absent` is a comment in the fixed spelling.
+ * than restated, and OFFERED through `markerMatches` — the sibling's one
+ * reading (#18764), imported for the same reason the constant is. A claim
+ * comment is one whose body carries a LINE BEGINNING `Claim:` (or `Claimed:`,
+ * optionally blockquoted), read bare first and then with the shared
+ * decoration stripped, so `**Claim:**` and `` `Claim:` `` are that same line
+ * and ⛔ not a second spelling this file admits on its own. A heading-style
+ * claim (`## Claim — …`) is still not a claim comment here, however complete
+ * the reasoning under it, and its thread reads `absent`. ⛔ Widening the
+ * predicate is not this file's to do: the constant AND the reading are the
+ * sibling's precisely so the two readers cannot drift, and the remedy for a
+ * thread that reads `absent` is a comment in the fixed spelling.
  *
  * @param {{ body?: string, created_at?: string }[]|null} commentRows — the REST
  *   comment rows, or `null` when the thread could NOT be read.
