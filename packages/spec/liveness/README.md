@@ -28,12 +28,26 @@ route decides the disposition — see `scripts/liveness/orphans.mts` and
 The gate reads `BUILTIN_METADATA_TYPE_SCHEMAS` (`packages/spec/src/kernel/metadata-type-schemas.ts`)
 via `listMetadataTypeSchemaTypes()` / `getMetadataTypeSchema()` — **the same registry the
 runtime `/api/v1/meta/types/:type` endpoint and the Studio metadata-admin forms use**,
-i.e. exactly the set of *authorable* metadata types. It walks each type's Zod schema
+i.e. the set of *registered* metadata KINDS. It walks each type's Zod schema
 directly (not `z.toJSONSchema`, which throws on `object`/`action`).
 
 This matters: the older gate read the generated `json-schema/` directory, which omits
 most top-level authorable types (object/field/flow/action/...) — so it was blind to the
-core surface. The registry is complete.
+core surface. The registry is complete *as a registry*.
+
+⛔ **Registered is not the same set as authorable, and this page used to say it was** —
+"i.e. exactly the set of *authorable* metadata types" was the sentence #17356 measured
+false for the reachability gate and #18133 for this one. `listMetadataTypeSchemaTypes()`
+deliberately does not enumerate `UNREGISTERED_KIND_SCHEMAS` (#6245: enrolling those
+entries there "would claim a status this change is careful not to grant"), yet the kinds
+bound in that map are authored on every boot through their stack collections
+(`connectors:` / `sharingRules:` / `analyticsCubes:` / `webhooks:`) and on every write
+through `PUT /api/v1/meta/:type/:name`. So the WALK is registry-rooted, as above, while
+the **governance denominator** — whom a ledger must exist for — is the registered kinds
+UNION `listUnregisteredKindSchemaTypes()` (#6931), computed by `authorableTypes()` in
+`check-liveness.mts`. Every run prints that denominator and how it is composed, because
+a type in no bucket produces no row anywhere: without the printed count, "nothing
+ungoverned here" and "never looked" are the same output.
 
 **Spec-only exception (`SPEC_ONLY_SCHEMAS`).** A type can be authorable yet deliberately
 *not* registered — `webhook` is the case: its schema is authored on a Stack/connector but
@@ -929,12 +943,21 @@ misleading entry carries `authorWarn` so authors hear about it at compile time
 (governed types with warn entries must also be registered in the CLI lint's
 `TYPE_COLLECTIONS` — see lint-liveness-properties.ts).
 
-**Coverage is complete as of #4488**: every type in the metadata-type registry
-is governed, and `PENDING_GOVERNANCE` in `check-liveness.mts` is empty. The map
-itself stays, because the ratchet is the point — registering a new type without
-a ledger fails CI with instructions to govern it or record the debt (reason +
-issue number). The paragraph that used to sit here, listing nine ungoverned
-types as prose, is precisely how the gap survived for a year: prose cannot fail
-a build. Now the gate compares `GOVERNED` against the registry in both
-directions (an ungoverned registered type fails; so does a stale pending row
-whose debt is already paid).
+**Every registered type has been governed since #4488**, which emptied
+`PENDING_GOVERNANCE` of all nine debts the map opened with. The map itself stays,
+because the ratchet is the point — registering a new type without a ledger fails
+CI with instructions to govern it or record the debt (reason + issue number). The
+paragraph that used to sit here, listing nine ungoverned types as prose, is
+precisely how the gap survived for a year: prose cannot fail a build. Now the gate
+compares `GOVERNED` against the denominator in both directions (an ungoverned
+authorable type fails; so does a stale pending row whose debt is already paid).
+
+⚠️ **The map is no longer empty, and that is #18133's finding rather than a
+regression.** Widening the denominator from the registered kinds to the authorable
+set (see the ⛔ note under *Source of truth* above) made three types visible that
+had been in **neither** `GOVERNED` **nor** `PENDING_GOVERNANCE` — `connector`,
+`sharing_rule` and `analytics_cube` — and therefore produced no row in any of the
+gate's lists while the report read complete. They are now declared debts with a
+reason and an issue number apiece, which is the state this ratchet exists to
+produce; the direction of travel is out of that map and into `GOVERNED`, exactly
+as it was for the nine. ⛔ Their presence is not a licence to leave them there.
