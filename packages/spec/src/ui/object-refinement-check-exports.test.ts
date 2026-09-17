@@ -61,6 +61,7 @@ import {
   checkGlobalFilterDateDefaultValue,
   DashboardWidgetSchema,
   checkDashboardWidgetStageOrder,
+  checkDashboardWidgetMetricMeasureArity,
 } from './dashboard.zod';
 import * as ui from './index';
 
@@ -272,6 +273,67 @@ const stageOrderFixtures: Fixture[] = [
   { label: 'a non-funnel with no `options` at all', value: { ...WIDGET, type: 'horizontal-bar' }, refusesAt: [] },
 ];
 
+/**
+ * objectui#8894 ruling D — the metric FAMILY takes exactly one measure.
+ *
+ * Shape-valid like every fixture here, and deliberately carrying NO
+ * `options.stageOrder`: the two checks on this door must be separable, and leg
+ * 2's bijection is only discriminating if each export's issue vector over the
+ * union matrix is its own.
+ *
+ * ⛔ No `values: []` fixture: the empty array is refused by the field's own
+ * `.min(1)` (`too_small`, not `custom`), so it is not shape-valid and `runParse`
+ * refuses to judge it — the accompanying pin lives in `dashboard.test.ts`, where
+ * the field-level verdict can be read directly.
+ */
+const metricMeasureArityFixtures: Fixture[] = [
+  {
+    label: 'three measures on a `metric` tile',
+    value: { ...WIDGET, type: 'metric', values: ['amount_sum', 'count', 'avg_days'] },
+    refusesAt: ['values'],
+  },
+  {
+    label: 'two measures on a `kpi` — the message interpolates, the family does not',
+    value: { ...WIDGET, type: 'kpi', values: ['amount_sum', 'count'] },
+    refusesAt: ['values'],
+  },
+  {
+    label: 'two measures on a `gauge`',
+    value: { ...WIDGET, type: 'gauge', values: ['amount_sum', 'count'] },
+    refusesAt: ['values'],
+  },
+  {
+    label: 'two measures on a `solid-gauge`',
+    value: { ...WIDGET, type: 'solid-gauge', values: ['amount_sum', 'count'] },
+    refusesAt: ['values'],
+  },
+  {
+    label: 'two measures on a `bullet`',
+    value: { ...WIDGET, type: 'bullet', values: ['amount_sum', 'count'] },
+    refusesAt: ['values'],
+  },
+  {
+    label: 'two measures on a widget that declares NO type (the `metric` default)',
+    value: { ...WIDGET, values: ['amount_sum', 'count'] },
+    refusesAt: ['values'],
+  },
+  {
+    label: 'ONE measure on a `metric` — the legal single-value tile',
+    value: { ...WIDGET, type: 'metric', values: ['amount_sum'] },
+    refusesAt: [],
+  },
+  {
+    label: 'three measures on a `bar` — the non-metric families are untouched',
+    value: { ...WIDGET, type: 'bar', values: ['amount_sum', 'count', 'avg_days'] },
+    refusesAt: [],
+  },
+  {
+    label: 'three measures on a `table` — likewise',
+    value: { ...WIDGET, type: 'table', values: ['amount_sum', 'count', 'avg_days'] },
+    refusesAt: [],
+  },
+];
+
 // ---------------------------------------------------------------------------
 // The population — every mirrored spec object that carries an object-level check
 // ---------------------------------------------------------------------------
@@ -312,7 +374,14 @@ const MIRRORED: MirroredSchema[] = [
   {
     name: 'DashboardWidgetSchema',
     schema: DashboardWidgetSchema,
-    exports: [{ name: 'checkDashboardWidgetStageOrder', check: checkDashboardWidgetStageOrder, fixtures: stageOrderFixtures }],
+    exports: [
+      { name: 'checkDashboardWidgetStageOrder', check: checkDashboardWidgetStageOrder, fixtures: stageOrderFixtures },
+      {
+        name: 'checkDashboardWidgetMetricMeasureArity',
+        check: checkDashboardWidgetMetricMeasureArity,
+        fixtures: metricMeasureArityFixtures,
+      },
+    ],
     cleanFixtures: [{ ...WIDGET, type: 'horizontal-bar' }],
   },
 ];
@@ -444,9 +513,11 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
 // ---------------------------------------------------------------------------
 
 describe('`./index` (the `@objectstack/spec/ui` surface) exports the same function objects', () => {
-  // NOT the full export list: `checkDashboardWidgetStageOrder` is catalogued in
-  // `MIRRORED` above (legs 1-2) and carries its own legs 3-4 — barrel identity
-  // and attached-by-identifier — beside the schema it guards, in
+  // NOT the full export list: the two widget checks —
+  // `checkDashboardWidgetStageOrder` and
+  // `checkDashboardWidgetMetricMeasureArity` — are catalogued in `MIRRORED`
+  // above (legs 1-2) and carry their own legs 3-4 — barrel identity and
+  // attached-by-identifier — beside the schema they guard, in
   // `dashboard.test.ts`. Read this `it.each` as the rows that live here, not as
   // an enumeration of every exported refinement.
   it.each([
