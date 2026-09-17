@@ -1493,7 +1493,13 @@ function selfTestSourceLineCitations() {
 // The dotted `#Outer.member` form this ledger's grammar carried is now the
 // shared grammar's, and `sweepCorpus` requires EVERY segment to resolve — the
 // capability moved into the core rather than being dropped with the fork.
-export const CORPUS = defineCorpus({
+/* ⛔ NOT exported, and that is `scripts/check-entry-guard.mjs`'s rule rather
+ * than a style choice: this file's top level RUNS the gate, so a single export
+ * would make it importable for that binding and run the whole gate — including
+ * its `process.exit` — inside the importer. The sibling corpus gates export
+ * their `CORPUS` because their dispatch sits behind `isEntrypoint`; this one's
+ * does not, and nothing outside reads this corpus. */
+const CORPUS = defineCorpus({
   id: 'platform-checklist',
   label: 'the standing platform test checklist (docs/qa/platform-checklist)',
   docRoots: [CHECKLIST_REL],
