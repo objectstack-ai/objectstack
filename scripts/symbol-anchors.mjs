@@ -355,8 +355,9 @@ const UNSPANNED_ANCHOR = new RegExp(
 const LINE_SPEC = '\\d+(?:\\s*[-–—]\\s*\\d+)?(?:\\s*[,/]\\s*\\d+(?:\\s*[-–—]\\s*\\d+)?)*\\+?';
 /* ⭐ A TENTH spelling, folded in from the checklist's private grammar (#18592):
  * the approximation tilde written INSIDE the colon form, `<file>.tsx:~605-615`
- * for "about line 605". It is the same rot wearing the same hat as `:2214+` --
- * an author hedging a number does not make the number survive an edit -- and
+ * for "about line 605". It is the same rot wearing the same hat as the
+ * open-ended `<file>.ts:NNN+` form -- an author hedging a number does not make
+ * the number survive an edit -- and
  * the two graders disagreed about it, which is the drift the fold closes.
  *
  * ⛔ The tilde is the ONLY thing admitted here, and ⛔ no whitespace with it: a
@@ -401,8 +402,9 @@ const TILDE_LINE = /~\s*`(\d{2,5})`/g;
  * ⛔ DEFAULT OFF, and that is a MEASUREMENT, not caution. Turned on for every
  * corpus, these two would fire 222 and 23 times respectively across
  * `docs/adr/**`, `scripts/**` and `packages/spec/src/**` -- a dev-server port
- * written `(:3000)`, a scenario label `L11`, a docblock's own back-reference
- * `` `:148` `` -- essentially all of them false positives, because in PROSE a
+ * written as a parenthesised colon-port, a two-character scenario label, a
+ * docblock pointing back at a line of its own -- essentially all of them false
+ * positives, because in PROSE a
  * colon before digits is punctuation. In this checklist's DATA, where every
  * citation lives inside a JSON string value beside the filename it continues,
  * it is a line pin. Which of the two a corpus is, is the corpus's declaration
@@ -698,8 +700,9 @@ export function extractAnchors(markdown, options = {}) {
     }
     /* The spans every line citation recorded on this line occupies. The
      * path-less pass below runs over the SAME text and its two spellings are
-     * SUFFIXES of forms already recorded here -- a backticked `` `:2933` `` is
-     * a `:2933` too -- so without this it would report ONE citation twice, and
+     * SUFFIXES of forms already recorded here -- a backticked continuation
+     * ENDS in the bare colon form the pass below looks for -- so without this
+     * it would report ONE citation twice, and
      * a corpus counting citations would read the duplicate as a second defect.
      * Same reasoning, and same remedy, as the unspanned anchor pass above. */
     const lineAnchorRanges = [];
