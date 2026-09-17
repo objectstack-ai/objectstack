@@ -956,6 +956,9 @@ export function sweepCorpus(corpus, root = process.cwd()) {
       bump(cls);
     }
   }
+  /* Corpus-wide only, and deliberately NOT in `byDoc`: it counts DISTINCT
+   * cited target files, and a distinct count does not sum across documents. */
+  counts.citedSources = sourceCache.size;
   return { findings, counts, declined, byDoc };
 }
 
