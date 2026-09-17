@@ -66,6 +66,30 @@
 // It does NOT judge whether an item is testable or its oracle sufficient — no
 // static check can. It guarantees the *structure* a run can be trusted against.
 //
+// ## Honest limitations, stated up front rather than discovered later
+//
+//   1. **An anchor whose file extension is outside the shared anchorable
+//      vocabulary is NOT REPORTED — it is simply not swept.** Detection is the
+//      registered corpus's, and the shared extractor matches only a path ending
+//      in one of `scripts/symbol-anchors.mjs#ANCHORABLE_EXTENSIONS`, so a
+//      `#symbol` on any other extension matches nothing and produces no finding
+//      at all — where the pre-registration detector raised a hard
+//      `UNRESOLVABLE ANCHOR` red telling the author to cite that file bare.
+//      The silent class is recorded here rather than compensated: the shared
+//      vocabulary is 23 extensions against the private 8, so what it can hide
+//      is strictly smaller than what the private set refused, and MEASURED on
+//      today's population it is ZERO — every anchor-shaped token in this family
+//      names `.ts` (622), `.json` (9) or `.mjs` (3), all three inside the
+//      vocabulary. ⚠️ Read that zero with the cadence beside it: this gate is
+//      NOT wired into per-PR CI (the maintainer decision recorded in
+//      `.github/workflows/lint.yml` — it runs by hand before a release or after
+//      a large platform surface lands, with
+//      `.github/workflows/platform-checklist-watchdog.yml` sweeping `main`
+//      daily as its only standing caller), so a future out-of-vocabulary anchor
+//      sits unreported until somebody runs this gate. The exit is the ruling's
+//      own: widen the shared vocabulary in `scripts/symbol-anchors.mjs`, and
+//      ⛔ never re-fork a private extension set here.
+//
 // Usage: node scripts/check-platform-checklist.mjs   (pnpm check:platform-checklist)
 
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
