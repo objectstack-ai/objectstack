@@ -21,7 +21,7 @@ import { isActionParamValuePresent } from './action-params.zod';
 // reaches only `shared/` + `data/`, so it cannot close a cycle back to `ui/`.
 import { BulkActionExecutionSchema } from './bulk-action.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
-import { ExpressionInputSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { HookBodySchema } from '../data/hook-body.zod';
 // Imported file-directly (not via the kernel barrel): the module is
@@ -247,8 +247,8 @@ export const ActionParamSchema = lazySchema(() => strictObject(
    *   metadata), and `SelectField` / `MultiSelectField` / `RadioField` /
    *   `CheckboxesField` all narrow the offered set through
    *   `useCascadingOptions` → `resolveCascadingOptions`, which reads this key
-   *   and accepts the `{ dialect, source }` envelope `ExpressionInputSchema`
-   *   emits. The spec door was the ONLY thing between an author and a working
+   *   and accepts the `{ dialect, source }` envelope
+   *   `EvaluatedExpressionInputSchema` emits. The spec door was the ONLY thing between an author and a working
    *   per-option gate.
    * - **`color` / `default` — not opened**, and `icon` / `disabled` not added to
    *   `SelectOptionSchema` either (#5016's option C). None has a reader an
@@ -333,7 +333,7 @@ export const ActionParamSchema = lazySchema(() => strictObject(
      * action's own body or a permission check. Hiding it in the dropdown is
      * bypassable.
      */
-    visibleWhen: ExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Same env as the field-level per-option visibleWhen (record + current_user). e.g. P`record.tier == 'gold'`"),
+    visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Same env as the field-level per-option visibleWhen (record + current_user). e.g. P`record.tier == 'gold'`"),
   })).optional().meta({ title: 'Options' }),
   /** Placeholder override. */
   placeholder: z.string().optional().meta({ title: 'Placeholder' }),
@@ -427,7 +427,7 @@ export const ActionParamSchema = lazySchema(() => strictObject(
    * param gated on `features.phoneNumber` so the form never offers a field the
    * default backend rejects. Absent = always visible.
    */
-  visible: ExpressionInputSchema.optional().describe('Param visibility predicate (CEL); omits the param when false.').meta({ title: 'Visible When' }),
+  visible: EvaluatedExpressionInputSchema.optional().describe('Param visibility predicate (CEL); omits the param when false.').meta({ title: 'Visible When' }),
   /**
    * Declarative capability gate (#2874): name a public auth feature flag
    * (see `PUBLIC_AUTH_FEATURES` in `@objectstack/spec/kernel`) and the schema
@@ -829,7 +829,7 @@ export type ActionAiParsed = z.infer<typeof ActionAiSchema>;
  * source:'true'}`: a literal survives as a literal, so a renderer can branch on
  * it without standing up an evaluator, and `false` stays statically greppable.
  */
-const ActionConditionInputSchema = z.union([z.boolean(), ExpressionInputSchema]);
+const ActionConditionInputSchema = z.union([z.boolean(), EvaluatedExpressionInputSchema]);
 
 /**
  * The object half of {@link ActionSchema}, before its refinements.

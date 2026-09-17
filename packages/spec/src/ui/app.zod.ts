@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
-import { ExpressionInputSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { I18nLabelSchema } from './i18n.zod';
 import { retiredKey } from '../shared/retired-key';
 import { strictObject, type StrictObjectOptions } from '../shared/strict-object';
@@ -316,7 +316,7 @@ const BaseNavItemSchema = z.object({
    * Formula expression returning boolean. 
    * e.g. "user.is_admin || user.department == 'sales'"
    */
-  visible: ExpressionInputSchema.optional().describe('Visibility predicate (CEL). e.g. P`\'org_admin\' in current_user.positions`'),
+  visible: EvaluatedExpressionInputSchema.optional().describe('Visibility predicate (CEL). e.g. P`\'org_admin\' in current_user.positions`'),
 
   /** Permissions required to see/access this navigation item */
   requiredPermissions: z.array(z.string()).optional().describe('Permissions required to access this item'),

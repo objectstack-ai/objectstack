@@ -6,7 +6,7 @@ import { InlineActionSchema, ActionLocationSchema } from './action.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 import { lazySchema } from '../shared/lazy-schema';
-import { ExpressionInputSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { retiredKey } from '../shared/retired-key';
 // The retired page-component TYPES' prescriptions — one string per type, three
 // doors (#14159): the enum's error map and the `PageComponentSchema.type` check
@@ -738,7 +738,7 @@ export const PageTabsProps = strictObject({
      * rejection a pointer at this key for all four spellings (message only:
      * being pointed AT `visibleWhen` is not the same as being accepted).
      */
-    visibleWhen: ExpressionInputSchema.optional().describe(
+    visibleWhen: EvaluatedExpressionInputSchema.optional().describe(
       'Visibility predicate (CEL) — the whole tab (header + panel) is omitted when FALSE; the renderer falls back to the first visible tab when the active one is hidden. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user`), `page.<var>`. ⚠️ NOT the same environment as page-component `visibleWhen`: this surface\'s own evaluator binds `data` to the record ROW (not the data-source adapter) and also spreads the row\'s bare fields — renderer behaviour, NOT contract-guaranteed. ADR-0089 canonical name — `visible`/`showWhen`/`visibility`/`visibleOn` are all rejected here (not folded in), each with a pointer at this key.',
     ),
     /**
@@ -1591,7 +1591,7 @@ export const RecordAlertProps = strictObject({
   severity: z.enum(['info', 'warning', 'error', 'success']).optional().describe('Banner severity — styling, default icon, and the a11y role (`error` renders `role="alert"`/assertive; the rest `role="status"`/polite). Renderer default: `info`.'),
   title: I18nLabelSchema.optional().describe('Banner title — a string or an inline locale map ({ en, "zh-CN", … }), resolved to the current language at render (pickLocalized).'),
   body: I18nLabelSchema.optional().describe('Banner body — a string or an inline locale map, resolved like `title`.'),
-  visible: z.union([z.boolean(), ExpressionInputSchema]).optional().describe('Visibility predicate evaluated against the record page scope (`record`, `user` + `ctx.*` mirror, `objectName`, `features`) — a boolean literal, a CEL string, or a `{ dialect, source }` envelope. Omit for always-visible; the banner is hidden while the record is still loading either way.'),
+  visible: z.union([z.boolean(), EvaluatedExpressionInputSchema]).optional().describe('Visibility predicate evaluated against the record page scope (`record`, `user` + `ctx.*` mirror, `objectName`, `features`) — a boolean literal, a CEL string, or a `{ dialect, source }` envelope. Omit for always-visible; the banner is hidden while the record is still loading either way.'),
   icon: z.string().optional().describe('Lucide icon name (renderer default: the severity\'s own icon). Read on this component — contrast the rail\'s refused `icon`, which no render path reads.'),
   action: RecordAlertActionSchema.optional().describe('Optional call-to-action button rendered under the body — `{ actionName, label?, variant? }`, resolved from the object\'s declared actions.'),
   dismissible: z.boolean().optional().describe('Render an X control; dismissal is remembered per object/record in localStorage (renderer default: off).'),
@@ -1601,7 +1601,8 @@ export type RecordAlertProps = z.input<typeof RecordAlertProps>;
 /**
  * ADR-0122: the parsed state differs from the authored state on exactly one
  * key — `visible`'s bare-string arm normalizes to the canonical
- * `{ dialect: 'cel', source }` envelope (ExpressionInputSchema's transform).
+ * `{ dialect: 'cel', source }` envelope (EvaluatedExpressionInputSchema's
+ * transform).
  */
 export type RecordAlertPropsParsed = z.infer<typeof RecordAlertProps>;
 

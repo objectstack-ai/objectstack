@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { ExpressionInputSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 
 /**
  * # Plugin Versioning and Compatibility Protocol
@@ -374,7 +374,7 @@ export const MultiVersionSupportSchema = lazySchema(() => z.object({
    * Version routing rules
    */
   routing: z.array(z.object({
-    condition: ExpressionInputSchema.describe('Routing predicate (CEL).'),
+    condition: EvaluatedExpressionInputSchema.describe('Routing predicate (CEL).'),
     version: z.string().describe('Version to use when condition matches'),
     priority: z.number().int().default(100).describe('Rule priority'),
   })).optional(),

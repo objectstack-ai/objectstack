@@ -227,7 +227,7 @@ function evaluatedExpressionInputRefusal(input: unknown): string | undefined {
  * required and non-blank there too. `ExpressionSchema` / `ExpressionInputSchema`
  * are NOT narrowed: they remain the persistence contract (`source` OR `ast`).
  *
- * The first slot to compose it is `FlowEdgeSchema.condition`, the branch
+ * The first slot to compose it was `FlowEdgeSchema.condition`, the branch
  * predicate `evaluateCondition` runs: an `ast`-only envelope authored there
  * used to parse, register, pass `objectstack validate`, and then land in the
  * evaluator's empty-source arm and answer a SILENT `false` — a branch that
@@ -240,6 +240,21 @@ function evaluatedExpressionInputRefusal(input: unknown): string | undefined {
  * The string arm's transform returns the narrowed `{ dialect: 'cel', source }`
  * as an `EvaluatedExpression`, so the parsed value of an evaluated slot stays
  * assignable to its own input type — the same move the typed arms make.
+ *
+ * Since #15811 it is the schema of EVERY evaluated slot in the spec, not of one
+ * of them: the flow-node ledger's rule generalised to the other declaring
+ * positions the #15811 census enumerated by identity — the formula
+ * `expression`, the field / option / grid-column / form / section / component
+ * `visibleWhen` / `visibleOn` / `readonlyWhen` / `requiredWhen` / `visibility`
+ * predicates, validation `condition` / `when`, hook `condition`, the object
+ * field-group and row-CRUD `visibleWhen` / `disabledWhen`, the sharing-rule
+ * `condition`, plugin-security-advanced and plugin-versioning `condition`,
+ * action `visible` / `disabled` / per-option `visibleWhen` / param `visible`,
+ * app nav `visible`, bulk-action `visible`, settings-manifest visibility, and
+ * the metrics / tracing expression union members. What is deliberately NOT
+ * narrowed is the pair above it: `ExpressionSchema` and
+ * `ExpressionInputSchema` remain the persistence contract (`source` OR `ast`),
+ * and so does `PredicateInputSchema`, which is a plain alias of the latter.
  */
 export const EvaluatedExpressionInputSchema = z.union([
   z.string()
