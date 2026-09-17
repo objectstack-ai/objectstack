@@ -767,17 +767,22 @@ try {
   if (!isApiError(err) || err.code !== 'FLOW_FAILED') throw err;
   const verdict = ResumeFailureDetailsSchema.safeParse(err.details);
   if (verdict.success && verdict.data.repairable) {
-    // verdict.data.status === 'stranded' — verdict.data.runId names the run
-    // an operator can re-arm; offer that instead of closing as terminal.
+    // verdict.data.runId names the run an operator can re-arm; offer that
+    // instead of closing as terminal. Read `repairable` alone: `status` is
+    // absent on the subflow delegation failure, which is repairable without
+    // ever carrying the word `stranded`.
   }
 }
 ```
 
 `repairable` is always present on the resume door's `400` — `false` on a plain
 terminal failure, deliberately, so an absent member reads as an older server
-rather than as "not repairable". `status` is the engine's own stamp
-(`'stranded'` or `'failed'`), forwarded when the engine set one and never
-invented by the door. The code stays `FLOW_FAILED`: there is no `FLOW_STRANDED`
+rather than as "not repairable". It is not a reading of `status`: where the
+engine stamped one, that stamp decides; where it stamped none — the subflow
+delegation failure — the door asks the engine's read-only inspection, so
+`repairable: true` can arrive with no `status` beside it. `status` is the
+engine's own stamp (`'stranded'` or `'failed'`), forwarded when the engine set
+one and never invented by the door. The code stays `FLOW_FAILED`: there is no `FLOW_STRANDED`
 sibling, and the trigger door's `400` carries `errorMessage` / `summary` only —
 it never resumes, so "repairable" has no referent there.
 
