@@ -267,6 +267,85 @@
  * before it is identical in both by construction, so a window spent on them
  * would print the one thing already known.
  *
+ * ## The read-back reaches the caller as an EXIT CODE, or it reaches nobody (#18663)
+ *
+ * That comparison is worth exactly what the caller reads, and until this rule
+ * it was printed and nothing else. Measured on a live card: a seat-post
+ * refresh sent 263,533 bytes, the platform stored 257,945 — the byte count of
+ * the version BEFORE that write — with the first difference at byte 6792,
+ * where the new block began. The old body had been kept whole and not one byte
+ * of the new one was there. The tool printed its MUTATED line and returned 0,
+ * and the seat walked on to post the comments that say the conclusion had
+ * already landed in the body.
+ *
+ * ⛔ That is NOT the pipeline trap two sections up. That one is about a caller
+ * throwing the code away; this was the tool HANDING OUT a zero. A caller that
+ * pipes nothing and checks `$?` — every discipline this header prescribes —
+ * was still told the write had landed.
+ *
+ * So the verdict carries an exit code, and ONE question decides it:
+ *
+ *   DID EVERY BYTE THIS ACT SENT REACH THE PLATFORM?
+ *
+ * ⛔ Not "did the bytes come back identical" — they never do, which is the
+ * whole point of the declared set above. All three benign classes keep the
+ * sent body whole: `identical` by definition, `trailing-newline-stripped`
+ * gives up only newlines the platform does not keep, `footer-appended` adds
+ * without removing. Every one of them exits 0, unchanged by this rule.
+ *
+ * `mutated` is the only class this rule reads, and it splits in two:
+ *
+ *   FOOTER RE-ANCHORED  the stored body is the sent body — or its
+ *                       newline-trimmed form — followed by EXACTLY
+ *                       `PLATFORM_COMMENT_FOOTER`. Nothing was lost: the
+ *                       platform appended its own block. This is what a
+ *                       `--body` refresh hits on every seat post, where the
+ *                       CLASS stays `mutated` because the issue-body footer
+ *                       cell is unmeasured (above) — so the warning is kept
+ *                       and the exit code is 0. ⛔ This is not a second footer
+ *                       exemption sneaking into the classifier:
+ *                       `classifyReadBack` is untouched, the line still says
+ *                       MUTATED with its offset, and `--json` still reports
+ *                       `body_mutated: true`. What changed is what `$?` says.
+ *   NOT STORED          anything else — a byte this act sent is not the byte
+ *                       the platform holds at that offset, or the stored body
+ *                       stops before the sent one does. `EXIT_NOT_STORED`.
+ *
+ * ⛔ The rule is a predicate over the VERDICT's own fields — `readBack.class`
+ * and `readBack.footerReAnchored`, which is an exact-bytes measurement — and
+ * ⛔ never over the byte counts. The platform normalises blank lines around a
+ * trailing rule in BOTH directions, so a length comparison answers a different
+ * question: "stored is shorter" is neither necessary (a re-anchored footer is
+ * longer) nor sufficient (a substitution of equal length loses just as much).
+ *
+ * ⛔ And it does not need the PRE-WRITE body, which only `--body` ever holds.
+ * "The platform kept the old one" is one INSTANCE of the class, not its
+ * definition: whatever is stored, a byte that differs INSIDE the body this act
+ * sent is a byte this act did not get onto the platform. One predicate covers
+ * the filed hit, a truncation, a sanitizer substitution, and a `--comment`
+ * write the same way — `--comment` shares this verdict, so it is judged by it
+ * too, and its footer append is already clean a class earlier.
+ *
+ * What a caller does with a 4: RE-READ THE ARTEFACT. ⛔ Do not retry blindly.
+ * The measured hit was a size refusal the platform never reported, so an
+ * identical second write reproduces it exactly, and a retry loop on a body
+ * edit writes that failure into the card over and over. Read what is stored,
+ * work out what is missing, send a body that can land.
+ *
+ * ⛔ `unreadable` is deliberately NOT widened into this code. "The platform
+ * returned no readable body" is a failure to VERIFY, not a measured failure to
+ * store, and it keeps its UNVERIFIED line and its 0 until somebody measures
+ * what that cell means — the same reason the body-footer cell is not forgiven.
+ *
+ * The register in full, one of which a caller reads:
+ *
+ *   0  written, and everything sent is on the platform.
+ *   1  usage — a flag or target this tool does not take. Nothing written.
+ *   2  the body broke the stamp contract, or a refresh would have voided an
+ *      unread knock. Nothing written.
+ *   3  PREREQUISITE NOT MET — no route, no token. No act at all.
+ *   4  written, and the platform did NOT store it. Go read the artefact.
+ *
  * ## The unread-knock check on a body refresh (#17905)
  *
  * The read side of the seat-post protocol reads the body plus the comments
@@ -347,6 +426,16 @@ const TOKEN = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
 export const EXIT_OK = 0;
 export const EXIT_USAGE = 1;
 export const EXIT_REFUSED = 2;
+// 3 is EXIT_PREREQUISITE_NOT_MET, imported above: no route, no act at all.
+/**
+ * The write happened and the platform did NOT store what this act sent — the
+ * read-back caught it and the caller must not walk on. Its own value because
+ * the four outcomes tell a caller four different things to do: 1 fix the
+ * command line, 2 fix the body, 3 fix the route, 4 go READ the artefact. See
+ * the header's exit-register section for what a caller does with this one, and
+ * for why a retry is the wrong move.
+ */
+export const EXIT_NOT_STORED = 4;
 
 /**
  * The re-exec guard, per script rather than shared with its neighbours: two
@@ -823,6 +912,49 @@ function byteWindowFrom(text, from, limit = SPAN_BYTES) {
 }
 
 /**
+ * Whether the stored body is the sent body — or its newline-trimmed form —
+ * followed by EXACTLY `PLATFORM_COMMENT_FOOTER`, and which of the two it is.
+ * `null` when it is neither, which is every shape where a byte this act sent
+ * is missing or different from the byte stored in its place.
+ *
+ * ONE spelling of "the platform re-anchored its footer and took nothing away",
+ * read by two callers: `classifyReadBack`, which turns it into the
+ * comment-only `footer-appended` CLASS, and `sentBodyLanded`, which forgives
+ * the same append in `--body` mode without touching that class. Two places
+ * deciding what a footer is would be two spellings of one decision, which is
+ * the defect this file spends its length avoiding.
+ *
+ * ⛔ Exact bytes, ⛔ never a pattern and ⛔ never a length: a regex matching "a
+ * footer, roughly" forgives a footer the sanitizer has chewed, and a 58-byte
+ * delta is satisfied by 58 bytes of anything at all.
+ */
+export function footerReAnchoring(sent, stored) {
+  if (typeof stored !== 'string') return null;
+  const sentText = String(sent ?? '');
+  if (stored === `${sentText}${PLATFORM_COMMENT_FOOTER}`) return { strippedNewlines: 0 };
+  const trimmed = sentText.replace(/\n+$/u, '');
+  const strippedNewlines = sentText.length - trimmed.length;
+  if (strippedNewlines > 0 && stored === `${trimmed}${PLATFORM_COMMENT_FOOTER}`) return { strippedNewlines };
+  return null;
+}
+
+/**
+ * Whether every byte this act sent is on the platform — the question `$?`
+ * answers — read off the verdict's own fields and nothing else.
+ *
+ * Every declared normalisation keeps the sent body whole, so only `mutated`
+ * can answer no; inside it, a re-anchored footer took nothing away and
+ * everything else did. ⛔ `unreadable` answers YES on purpose: nothing was
+ * measured there, which is a different verdict carrying a different line, and
+ * this rule does not widen into it. The header's exit-register section is the
+ * authority on both halves.
+ */
+export function sentBodyLanded(readBack) {
+  if (!readBack || readBack.class !== 'mutated') return true;
+  return readBack.footerReAnchored === true;
+}
+
+/**
  * Which of the platform's KNOWN normalisations the stored body shows, judged
  * exactly — the whole vocabulary is `READ_BACK_CLASSES` and the reasoning is
  * the header's read-back section.
@@ -845,20 +977,20 @@ export function classifyReadBack({ sent, stored, mode = 'body' } = {}) {
   if (strippedNewlines > 0 && stored === trimmed) {
     return { class: 'trailing-newline-stripped', offset: null, strippedNewlines };
   }
-  if (mode === 'comment') {
-    if (stored === `${sentText}${PLATFORM_COMMENT_FOOTER}`) {
-      return { class: 'footer-appended', offset: null, strippedNewlines: 0 };
-    }
-    if (strippedNewlines > 0 && stored === `${trimmed}${PLATFORM_COMMENT_FOOTER}`) {
-      return { class: 'footer-appended', offset: null, strippedNewlines };
-    }
+  const footer = footerReAnchoring(sentText, stored);
+  if (mode === 'comment' && footer) {
+    return { class: 'footer-appended', offset: null, strippedNewlines: footer.strippedNewlines };
   }
 
+  // `footerReAnchored` is a MEASUREMENT of the difference, never a class: the
+  // body-mode cell stays `mutated` and keeps its warning, and `sentBodyLanded`
+  // reads this field to decide whether the caller may walk on.
   const offset = firstDifferingByte(sentText, stored);
   return {
     class: 'mutated',
     offset,
     strippedNewlines: 0,
+    footerReAnchored: footer !== null,
     sentContext: byteWindowFrom(sentText, offset),
     storedContext: byteWindowFrom(stored, offset),
   };
@@ -909,8 +1041,40 @@ export function readBackVerdict({ stamp, writtenAt, sent, stored, substituted = 
         'MUTATED the body. Read the artefact before trusting it: the sanitizer eats tag-shaped fragments.',
     );
     lines.push(`     first difference at byte ${readBack.offset}: sent ${readBack.sentContext} | stored ${readBack.storedContext}`);
+    lines.push(
+      readBack.footerReAnchored
+        ? `     …and that difference is EXACTLY the platform's footer, appended: every byte sent IS stored. Exit ${EXIT_OK}.`
+        : `     ⛔ a byte this act sent is NOT the byte stored at that offset — the write did NOT land. Exit ${EXIT_NOT_STORED}.`,
+    );
   }
-  return { lines, drift, mutated: readBack.class === 'mutated', readBack };
+  // The exit code lives ON the verdict so exactly one place decides it: a
+  // caller that reads the lines and a caller that reads `$?` cannot come to
+  // disagree about the same write.
+  const landed = sentBodyLanded(readBack);
+  return { lines, drift, mutated: readBack.class === 'mutated', landed, exit: landed ? EXIT_OK : EXIT_NOT_STORED, readBack };
+}
+
+/**
+ * What a caller is told when the read-back proves the platform did not store
+ * what was sent — printed to stderr beside the verdict lines, because the
+ * decision it is asking for is "stop and go read", not "look at a warning".
+ */
+export function notStoredText(verdict, repo, target, mode = 'body') {
+  const offset = verdict?.readBack?.offset;
+  return (
+    `\npost-stamped: NOT STORED — the platform kept something other than the bytes this act sent.\n\n` +
+    `  The ${mode === 'comment' ? 'comment' : 'body'} was written to ${repo}#${target} and read back, and the stored bytes differ from the\n` +
+    `  sent ones at byte ${offset}, INSIDE the body this act sent. That is not the platform's footer\n` +
+    '  re-anchoring, which appends and takes nothing away — something this act sent is not there.\n' +
+    '  The verdict lines above carry both sides at that offset.\n\n' +
+    '  Fix:  READ THE ARTEFACT before writing anything that depends on it having landed.\n' +
+    '        ⛔ Do not retry blindly: the one measured hit of this shape was a size refusal the\n' +
+    '        platform never reported, so an identical second write reproduces it exactly. Work out\n' +
+    '        what is missing from what IS stored, then send a body that can land.\n' +
+    `\n  (Exit code ${EXIT_NOT_STORED}, distinct from ${EXIT_REFUSED}'s "the body broke the stamp contract" and\n` +
+    `  ${EXIT_PREREQUISITE_NOT_MET}'s "no act at all" — this write HAPPENED. Capture it BEFORE any pipe:\n` +
+    '  `node scripts/pm/post-stamped.mjs … > /tmp/p.log 2>&1; echo "EXIT=$?"`.)'
+  );
 }
 
 /**
@@ -1260,6 +1424,10 @@ const USAGE = [
   '  A body refresh is REFUSED while comments newer than the body\'s last write stamp exist and',
   '  --ack-through=ID does not name the newest of them — a refresh must not void an unread knock.',
   '  The attribution footer is the caller\'s: its form differs by channel and act, so this tool adds none.',
+  '',
+  `  Exit: 0 written and stored · ${EXIT_USAGE} usage · ${EXIT_REFUSED} refused, nothing written ·`,
+  `  ${EXIT_PREREQUISITE_NOT_MET} no route, no act at all · ${EXIT_NOT_STORED} WRITTEN BUT NOT STORED — go read the artefact,`,
+  '  ⛔ do not retry blindly. Capture the code BEFORE any pipe.',
 ].join('\n');
 
 async function main(argv) {
@@ -1359,7 +1527,12 @@ async function main(argv) {
           written_at: written.writtenAt,
           drift_minutes: verdict.drift,
           body_mutated: verdict.mutated,
-          read_back: { class: verdict.readBack.class, first_difference_byte: verdict.readBack.offset },
+          body_landed: verdict.landed,
+          read_back: {
+            class: verdict.readBack.class,
+            first_difference_byte: verdict.readBack.offset,
+            footer_re_anchored: verdict.readBack.footerReAnchored ?? null,
+          },
           ...(unread
             ? {
                 unread_check: {
@@ -1375,19 +1548,24 @@ async function main(argv) {
         2,
       ),
     );
-    return EXIT_OK;
+  } else {
+    console.log(
+      [
+        `post-stamped: ${options.mode === 'comment' ? 'comment posted on' : 'body rewritten on'} ${repoRes.repo}#${options.number}`,
+        `  ${options.mode === 'comment' ? 'comment' : 'card'}: ${written.id} ${written.url ?? '(no url returned)'}`,
+        ...verdict.lines,
+        ...(unread ? [unreadPassText(unread)] : []),
+        `  substitutions: ${rendered.substituted} ${STAMP_TOKEN}, ${rendered.quoted} quoted`,
+      ].join('\n'),
+    );
   }
 
-  console.log(
-    [
-      `post-stamped: ${options.mode === 'comment' ? 'comment posted on' : 'body rewritten on'} ${repoRes.repo}#${options.number}`,
-      `  ${options.mode === 'comment' ? 'comment' : 'card'}: ${written.id} ${written.url ?? '(no url returned)'}`,
-      ...verdict.lines,
-      ...(unread ? [unreadPassText(unread)] : []),
-      `  substitutions: ${rendered.substituted} ${STAMP_TOKEN}, ${rendered.quoted} quoted`,
-    ].join('\n'),
-  );
-  return EXIT_OK;
+  // ⛔ The one thing a caller cannot be left to read out of prose: the write
+  // happened and the platform did not keep it. Reported after the lines above
+  // — they carry the offset this text sends the reader to — and on BOTH
+  // output shapes, because `--json` is the one a script reads.
+  if (!verdict.landed) console.error(notStoredText(verdict, repoRes.repo, options.number, options.mode));
+  return verdict.exit;
 }
 
 // ---------------------------------------------------------------------------
@@ -1408,11 +1586,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the direction check: a stamp no act can have read': 22,
   'the substitution: one clock, read once, written everywhere': 9,
   'the read-back: what the transcript can actually prove': 33,
+  'the exit code: the read-back reaches `$?`, or it reaches nobody': 24,
   'the CLI: the one decision a typo must never make': 16,
   'the unread-knock check: a refresh cannot void what nobody read': 49,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
 });
-const SELF_TEST_BATTERY_FLOOR = 10;
+const SELF_TEST_BATTERY_FLOOR = 11;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 let selfTestReachedVerdict = false;
@@ -1679,6 +1858,46 @@ export function selfTest() {
   t('two identical bodies have no first differing byte at all', firstDifferingByte('x', 'x') === -1);
   t('…and where one is a PREFIX of the other the seam is the shorter one\'s end', firstDifferingByte('abc', 'ab') === 2);
   t('an unreadable stored body reports no offset to chase', rb({ sent: SENT, stored: undefined }).readBack.offset === null);
+
+  // The filed hit: a seat-post refresh sent 263,533 bytes and the platform
+  // stored 257,945 — the byte count of the version BEFORE that write — with
+  // the first difference at byte 6792, where the new block began. The old body
+  // was kept whole, the MUTATED line said exactly that, and the tool exited 0.
+  // These cases pin the SPLIT inside `mutated`: the append that lost nothing
+  // keeps its 0, everything else reaches `$?`.
+  battery('the exit code: the read-back reaches `$?`, or it reaches nobody');
+  const PREVIOUS_BODY = '**Seat post.**\n\nR+271 · the board as it stood.\n';
+  const REFRESH_SENT = '**Seat post.**\n\nR+272 · the board as it stands now.\n';
+  const KEPT_OLD = rb({ sent: REFRESH_SENT, stored: PREVIOUS_BODY, mode: 'body' });
+  t('⭐ THE FILED SHAPE: the platform kept the PREVIOUS body, so the sent bytes did NOT land', KEPT_OLD.landed === false);
+  t('⭐ …and the exit code is the not-stored one, never OK', KEPT_OLD.exit === EXIT_NOT_STORED);
+  t('⛔ …while the CLASS is untouched — still MUTATED with its offset, exactly as pinned above', KEPT_OLD.mutated === true && KEPT_OLD.readBack.class === 'mutated');
+  t('…the first difference sits INSIDE the body this act sent, not at its end', KEPT_OLD.readBack.offset < Buffer.byteLength(REFRESH_SENT, 'utf8'), `offset=${KEPT_OLD.readBack.offset}`);
+  t('…and the verdict says the write did not land, in the same breath as the offset', KEPT_OLD.lines[3].includes('did NOT land'), KEPT_OLD.lines[3]);
+  t('the report names the offset a reader has to go look at', notStoredText(KEPT_OLD, 'o/n', 6015).includes(`byte ${KEPT_OLD.readBack.offset}`));
+  t('…and tells the caller to READ the artefact', notStoredText(KEPT_OLD, 'o/n', 6015).includes('READ THE ARTEFACT'));
+  t('⛔ …not to retry, because an identical second write reproduces it', notStoredText(KEPT_OLD, 'o/n', 6015).includes('Do not retry blindly'));
+  t('⭐ the exit register carries five distinct values — a caller reads exactly one', new Set([EXIT_OK, EXIT_USAGE, EXIT_REFUSED, EXIT_PREREQUISITE_NOT_MET, EXIT_NOT_STORED]).size === 5);
+  t('⛔ …and the new one stands apart from BOTH the contract refusal and the transport failure', EXIT_NOT_STORED !== EXIT_REFUSED && EXIT_NOT_STORED !== EXIT_PREREQUISITE_NOT_MET);
+
+  // The shape the seat hits on EVERY seat-post refresh: sent N, stored N+58,
+  // class MUTATED because the issue-body footer cell is unmeasured. It must
+  // keep exiting 0 — the platform appended, and took nothing away.
+  const REANCHORED = rb({ sent: SENT, stored: `${SENT}${PLATFORM_COMMENT_FOOTER}`, mode: 'body' });
+  t('⭐ THE CONTROL: a body-mode footer re-anchoring is still MUTATED…', REANCHORED.mutated === true && REANCHORED.readBack.class === 'mutated');
+  t('⭐ …and still exits 0 — every byte this act sent is on the platform', REANCHORED.landed === true && REANCHORED.exit === EXIT_OK);
+  t('⛔ …measured as EXACTLY the declared footer, never as a 58-byte delta', REANCHORED.readBack.footerReAnchored === true && footerReAnchoring(SENT, `${SENT}${'x'.repeat(58)}`) === null);
+  t('…and the line says which of the two it is, rather than leaving a bare warning', REANCHORED.lines[3].includes("EXACTLY the platform's footer"), REANCHORED.lines[3]);
+  t('⭐ …over a stripped trailing newline too, which is the shape a seat post actually sends', rb({ sent: STRIPPED_SENT, stored: `${SENT}${PLATFORM_COMMENT_FOOTER}`, mode: 'body' }).exit === EXIT_OK);
+  t('⭐ THE CONTROL: a trailing-newline strip was never MUTATED and still exits 0', STRIPPED.landed === true && STRIPPED.exit === EXIT_OK);
+  t('⭐ …and an IDENTICAL read-back likewise', ON_TIME.landed === true && ON_TIME.exit === EXIT_OK);
+  t('⭐ a real mutation UNDERNEATH an appended footer still exits non-zero — a footer masks no loss', UNDER.landed === false && UNDER.exit === EXIT_NOT_STORED);
+  t('⭐ the `--comment` read-back SHARES this verdict and is judged by it: a chewed comment does not exit 0', rb({ sent: 'a [b] c', stored: 'a b c', mode: 'comment' }).exit === EXIT_NOT_STORED);
+  t('⭐ …while the comment footer append it forgives a class earlier still exits 0', APPENDED.landed === true && APPENDED.exit === EXIT_OK);
+  t('⛔ an UNREADABLE read-back is NOT widened into this code — UNVERIFIED is a different question', rb({ sent: SENT, stored: undefined }).exit === EXIT_OK);
+  t('⭐ the rule is a predicate over the verdict\'s own fields, never over the byte counts', sentBodyLanded({ class: 'mutated', footerReAnchored: true }) === true && sentBodyLanded({ class: 'mutated', footerReAnchored: false }) === false);
+  t('…and every non-mutated class lands by construction, whatever its byte counts say', ['unreadable', 'identical', 'trailing-newline-stripped', 'footer-appended'].every((c) => sentBodyLanded({ class: c }) === true));
+  t('⛔ a TRUNCATION is a loss too: a stored body that stops short of the sent one does not exit 0', rb({ sent: `${SENT} and more`, stored: SENT, mode: 'body' }).exit === EXIT_NOT_STORED);
 
   battery('the CLI: the one decision a typo must never make');
   t('a comment target parses', parseOptions(['--comment=17314']).options.mode === 'comment');
