@@ -259,15 +259,29 @@ describe('#15811 — every evaluated slot refuses the two shapes no engine can r
     },
   );
 
-  it.each(POSITIONS.map(([key, get]) => [key, get] as const))(
-    '%s refuses with the ONE published sentence',
-    (_key, get) => {
-      const r = get().safeParse(AST_ONLY);
-      expect(r.success).toBe(false);
-      const messages = r.success ? [] : r.error.issues.map((i) => i.message);
-      expect(messages).toContain(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
-    },
-  );
+  // All THREE refused spellings, not just one. The sentence reaching an author
+  // is what makes the refusal actionable, and the three spellings surface it by
+  // three different routes — an aborted union's error map, a surviving arm's
+  // `custom` refine at `source`, the string arm's own refine — so a pin on one
+  // of them says nothing about the other two. #15811's own tracing slot is the
+  // proof: it carried the sentence for `AST_ONLY` while answering a bare
+  // `Invalid input` for `BLANK_SOURCE`.
+  const REFUSED_SPELLINGS = [
+    ['an `ast`-only envelope', AST_ONLY],
+    ['a blank `source`', BLANK_SOURCE],
+    ['a blank bare string', BLANK_STRING],
+  ] as const;
+
+  it.each(
+    POSITIONS.flatMap(([key, get]) => REFUSED_SPELLINGS.map(
+      ([label, value]) => [`${key} — ${label}`, get, value] as const,
+    )),
+  )('%s refuses with the ONE published sentence', (_key, get, value) => {
+    const r = get().safeParse(value);
+    expect(r.success).toBe(false);
+    const messages = r.success ? [] : r.error.issues.map((i) => i.message);
+    expect(messages).toContain(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+  });
 
   it('CONTROL — the persistence contract is NOT narrowed and still accepts both shapes', () => {
     // This is what makes the 36 `false`s above a reading. Ruling item 2:

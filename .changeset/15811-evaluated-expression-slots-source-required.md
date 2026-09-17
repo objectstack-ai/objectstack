@@ -40,8 +40,36 @@ file-local alias consts (`ui/action.zod.ts` `ActionConditionInputSchema`,
 `system/settings-manifest.zod.ts` `SettingsVisibilityInputSchema`) that mount two
 slots each, giving **36 declaring positions**. Three of them reach the schema as a
 union member rather than head-of-declaration (`RecordAlertProps.visible`,
-`ServiceLevelIndicator.successCriteria`, `TraceSamplingConfig.composite[].condition`);
-on those the boolean / object / record arms are untouched.
+`ServiceLevelIndicator.successCriteria`, `TraceSamplingConfig.composite[].condition`).
+
+On **two of those three the sibling arm is untouched**: `RecordAlertProps.visible`
+still takes a boolean literal, and `ServiceLevelIndicator.successCriteria` still
+takes its structured `{ threshold, operator, percentile? }` object — including one
+that happens to carry a `dialect` key.
+
+⚠️ **On the third, `TraceSamplingConfig.composite[].condition`, the sibling arm
+narrows too, and deliberately.** Its structured-filter arm is a bare
+`z.record(z.string(), z.unknown())`, which accepted `{ dialect: 'cel', ast }` as an
+ordinary filter — so swapping the expression arm changed nothing at all there. That
+arm now declines any object carrying a `dialect` key, and six shapes the base
+accepted THROUGH THAT ARM ALONE (measured: the base's `ExpressionInputSchema`
+refused every one of them) are refused at this slot:
+
+| authored `condition` | base | now |
+|---|---|---|
+| `{ dialect: 'cel' }` | accepted | refused |
+| `{ dialect: 'js', source: 'x' }` | accepted | refused |
+| `{ dialect: 'nope', source: 'x' }` | accepted | refused |
+| `{ dialect: 'cel', source: 5 }` | accepted | refused |
+| `{ dialect: 'cel', source: 'x', meta: { rationale: 5 } }` | accepted | refused |
+| `{ dialect: 'zzz', foo: 1 }` | accepted | refused |
+
+FROM → TO at that slot: if the value really is a **structured filter**, drop the
+`dialect` key (`{ dialect: 'cel', service: 'api' }` → `{ service: 'api' }`); if it is
+an **expression**, give it a dialect this platform evaluates and a non-blank `source`
+(`{ dialect: 'js', source: 'x' }` → `{ dialect: 'cel', source: 'x' }`). A structured
+filter that carries no `dialect` key — `{}`, `{ service: 'api' }`,
+`{ attributes: { 'http.route': '/v1/orders' } }` — is accepted exactly as before.
 
 **Why an authoring-time refusal and not a run-time one.** Measured at the
 chokepoint, `celEngine.evaluate` never silently succeeds on either shape — it
