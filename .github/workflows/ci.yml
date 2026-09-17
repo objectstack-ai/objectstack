@@ -2380,3 +2380,5 @@ jobs:
         with:
           path: packages/console/dist
           key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}
+
+# scope-probe (throwaway; this branch is deleted immediately)
