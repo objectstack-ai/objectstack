@@ -1,10 +1,21 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { describe, it, expect, vi } from 'vitest';
 import {
   bootstrapDeclaredPermissions,
   upsertPackagePermissionSet,
 } from './bootstrap-declared-permissions.js';
+import {
+  PERMISSION_SET_DECLARATION_UNOWNED,
+  PERMISSION_SET_ROWS_UNREADABLE,
+} from './seed-refusal-diagnostics.js';
+
+/** [#18091] Seeded from this file, for the class pin at the bottom. */
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 /** Minimal in-memory ql + registry for sys_permission_set seeding. */
 function makeQl(declared: any[] = []) {
@@ -195,3 +206,192 @@ describe('upsertPackagePermissionSet (ADR-0086 P2 — publish materialization)',
 
 // The environment door (env-scope saves, the data-door write-through, boot
 // reconciliation) moved to permission-set-projection.test.ts (ADR-0094).
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#18091] The two refusals #17516 left behind in this seeder. Measured mute on
+// the pre-fix tree with no logger injected — author-visible lines = 0 at both,
+// while the already-repaired collision path in the same harness read 1.
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Capture EVERY console channel — "author-visible output" is not
+ * channel-specific, and a pin watching only `warn` could be satisfied by a
+ * change that merely MOVED the silence.
+ */
+function captureAllConsole() {
+  const seen: string[] = [];
+  const spies = (['log', 'info', 'warn', 'error', 'debug'] as const).map((m) =>
+    vi.spyOn(console, m).mockImplementation((...args: unknown[]) => {
+      seen.push(`${m}: ${args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')}`);
+    }),
+  );
+  return { seen, restore: () => spies.forEach((s) => s.mockRestore()) };
+}
+
+/** `makeQl` with a read that cannot answer — the `unreadable` branch's only entry. */
+function unreadableQl(declared: any[]) {
+  const ql = makeQl(declared);
+  (ql as any).find = async () => { throw new Error('sys_permission_set is unreachable'); };
+  return ql;
+}
+
+describe('[#18091] the two remaining permission-set refusals reach the author', () => {
+  it('UNOWNED DECLARATION: prints with NO LOGGER INJECTED, and names the RECORD as what is lost', async () => {
+    const ql = makeQl([declaredSet({ _packageId: undefined })]);
+
+    const cap = captureAllConsole();
+    let r: Awaited<ReturnType<typeof bootstrapDeclaredPermissions>>;
+    try {
+      r = await bootstrapDeclaredPermissions(ql, undefined);
+    } finally {
+      cap.restore();
+    }
+
+    // ── The reading this card moves: 0 → 1 ──────────────────────────────────
+    expect(cap.seen).toHaveLength(1);
+    expect(cap.seen[0]!.startsWith('warn: ')).toBe(true);
+    expect(cap.seen[0]).toContain(PERMISSION_SET_DECLARATION_UNOWNED);
+    expect(cap.seen[0]).toContain('crm_sales_rep');
+    expect(cap.seen[0]).toContain('has no owning package');
+    // ── THIS site's consequence. ⛔ NOT the capability axis': the evaluator
+    //    resolves declared sets through the metadata registry, so every grant
+    //    keeps working and only the RECORD is missing. An author told merely
+    //    "not materialized" goes looking for a denied user who does not exist.
+    expect(cap.seen[0]).toContain('keep working');
+    expect(cap.seen[0]).toContain('Setup admin surface');
+    expect(cap.seen[0]).toContain('ADR-0086 D3');
+
+    // ── ⛔ The refusal itself is UNCHANGED ───────────────────────────────────
+    expect(r.seeded).toBe(0);
+    expect(ql.rows).toHaveLength(0);
+  });
+
+  it('UNOWNED DECLARATION reaches the author through the ADR-0086 P2 PUBLISH door too', async () => {
+    // ⚠️ The second door onto the same branch: the publish materializer upserts
+    // ONE set and passes no collector, so a fix that only lit the boot loop
+    // would leave this caller exactly as mute as before.
+    const ql = makeQl();
+
+    const cap = captureAllConsole();
+    let r: Awaited<ReturnType<typeof upsertPackagePermissionSet>>;
+    try {
+      r = await upsertPackagePermissionSet(ql, declaredSet({ _packageId: undefined }), null);
+    } finally {
+      cap.restore();
+    }
+
+    expect(cap.seen).toHaveLength(1);
+    expect(cap.seen[0]).toContain(PERMISSION_SET_DECLARATION_UNOWNED);
+    expect(r.seeded).toBe(0);
+    expect(ql.rows).toHaveLength(0);
+  });
+
+  it('UNREADABLE ROWS: prints with NO LOGGER INJECTED, with the count and the consequence', async () => {
+    const ql = unreadableQl([declaredSet(), declaredSet({ name: 'crm_manager' })]);
+
+    const cap = captureAllConsole();
+    let r: Awaited<ReturnType<typeof bootstrapDeclaredPermissions>>;
+    try {
+      r = await bootstrapDeclaredPermissions(ql, undefined);
+    } finally {
+      cap.restore();
+    }
+
+    expect(r.unreadable).toBe(2);
+    const line = cap.seen.find((l) => l.includes(PERMISSION_SET_ROWS_UNREADABLE));
+    expect(line).toBeDefined();
+    expect(line!.startsWith('warn: ')).toBe(true);
+    expect(line).toContain('2 of 2');
+    // Silence here reads exactly like "everything was already in order", so the
+    // line has to say what did NOT happen — and that no grant is denied by it.
+    expect(line).toContain('neither seeded nor reconciled');
+    expect(line).toContain('no grant is');
+    // ⛔ Unchanged: an unreadable read writes nothing.
+    expect(ql.rows).toHaveLength(0);
+  });
+
+  it('⭐ each site keeps its OWN sentence — ⛔ never one generic refusal line', async () => {
+    const cap = captureAllConsole();
+    try {
+      await bootstrapDeclaredPermissions(makeQl([declaredSet({ _packageId: undefined })]), undefined);
+      await bootstrapDeclaredPermissions(unreadableQl([declaredSet()]), undefined);
+    } finally {
+      cap.restore();
+    }
+
+    const unowned = cap.seen.find((l) => l.includes(PERMISSION_SET_DECLARATION_UNOWNED));
+    const unreadable = cap.seen.find((l) => l.includes(PERMISSION_SET_ROWS_UNREADABLE));
+    expect(unowned).toBeDefined();
+    expect(unreadable).toBeDefined();
+    // Each names a phrase only its own site can produce.
+    expect(unowned).toContain('Setup admin surface');
+    expect(unowned).not.toContain('could not be read');
+    expect(unreadable).toContain('could not be read');
+    expect(unreadable).not.toContain('ADR-0086 D3');
+  });
+
+  it('an INJECTED logger takes both, and the console stays clean', async () => {
+    const warn = vi.fn();
+    const cap = captureAllConsole();
+    try {
+      await bootstrapDeclaredPermissions(makeQl([declaredSet({ _packageId: undefined })]), undefined, { logger: { warn } });
+      await bootstrapDeclaredPermissions(unreadableQl([declaredSet()]), undefined, { logger: { warn } });
+    } finally {
+      cap.restore();
+    }
+
+    // ⚠️ The second pass also trips the batched existence oracle's own
+    // read-failure line — a different diagnostic in `seed-name-lookup.ts`,
+    // outside this card — so filter by this card's tokens rather than counting.
+    const events = warn.mock.calls.map((c) => (c[1] as any)?.event).filter(Boolean);
+    expect(events).toEqual([PERMISSION_SET_DECLARATION_UNOWNED, PERMISSION_SET_ROWS_UNREADABLE]);
+    expect(cap.seen).toEqual([]);
+  });
+
+  it('CONTROL: a pass that really seeds and refuses nothing is SILENT on all five channels', async () => {
+    // ⛔ The discriminating half. Without it, a seeder that warned on every
+    // declaration would satisfy every assertion above.
+    const ql = makeQl([declaredSet()]);
+
+    const cap = captureAllConsole();
+    let r: Awaited<ReturnType<typeof bootstrapDeclaredPermissions>>;
+    try {
+      r = await bootstrapDeclaredPermissions(ql, undefined);
+    } finally {
+      cap.restore();
+    }
+
+    expect(r.seeded).toBe(1);
+    expect(cap.seen).toEqual([]);
+  });
+
+  it('a HOST SINK THAT LIES about its shape is reported to the console, never thrown at', async () => {
+    // The old `logger?.warn?.()` bought safety against a plain-JS embedder with
+    // silence; a bare `logger.warn()` would buy noise with a throw inside the
+    // seeding pass. The `typeof` guard in `reportThroughSink` buys neither.
+    const liar = { info: () => {} } as any;
+    const cap = captureAllConsole();
+    let r: Awaited<ReturnType<typeof bootstrapDeclaredPermissions>>;
+    try {
+      r = await bootstrapDeclaredPermissions(makeQl([declaredSet({ _packageId: undefined })]), undefined, { logger: liar });
+    } finally {
+      cap.restore();
+    }
+    expect(r.seeded).toBe(0);
+    expect(cap.seen).toHaveLength(1);
+    expect(cap.seen[0]).toContain(PERMISSION_SET_DECLARATION_UNOWNED);
+  });
+
+  it('⛔ CLASS PIN: the doubly-optional warn survives in this seeder only as PROSE', async () => {
+    const source = readFileSync(resolve(HERE, 'bootstrap-declared-permissions.ts'), 'utf8');
+    // Positive control — the pin is reading the file it thinks it is.
+    expect(source).toContain('export async function bootstrapDeclaredPermissions');
+    const hits = source.split('\n').filter((line) => line.includes('logger?.warn?.('));
+    for (const line of hits) {
+      expect(line.trimStart().startsWith('//') || line.trimStart().startsWith('*')).toBe(true);
+    }
+    // ⚠️ The INFO channel keeps its outer `?.` deliberately — a healthy pass
+    // must stay silent on every console channel, per the CONTROL above.
+    expect(source).toContain("options.logger?.info?.(");
+  });
+});
