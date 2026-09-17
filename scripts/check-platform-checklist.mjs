@@ -47,14 +47,16 @@
 //     Both directions together are what the trap vocabulary beside them has
 //     always had — used implies documented, documented implies used.
 //   - every SYMBOL ANCHOR (`<dir>/<file>.ts#<symbol>`, the spelling
-//     `scripts/symbol-anchors.mjs#ANCHOR_GRAMMAR` defines) resolves — and it is
-//     `scripts/symbol-anchors.mjs#symbolResolutionClass` that says so, the ONE
-//     resolver the #13556 ruling allows. This gate detects anchors and owns no
-//     rule about what "the symbol is in that file" means (#16898); the 56
-//     anchors that stopped resolving when the private permissive rule was
-//     withdrawn are a named, closed, grow-never residual. A shrink-never floor
-//     per family file keeps the population from being emptied one deleted
-//     `#symbol` at a time (see the symbol-anchor block below);
+//     `scripts/symbol-anchors.mjs#ANCHOR_GRAMMAR` defines) resolves — and this
+//     gate neither detects nor resolves one itself. It is a REGISTERED CORPUS
+//     (`CORPUS` below, a `scripts/symbol-anchors.mjs#defineCorpus` call swept by
+//     `scripts/symbol-anchors.mjs#sweepCorpus`), which is the one shape the
+//     #13556 ruling allows a second body of documents to join in: #16898 bound
+//     the verdict, #18107 the grammar and the sweep. The 56 anchors that stopped
+//     resolving when the private permissive rule was withdrawn are a named,
+//     closed, grow-never residual. A shrink-never floor per family file keeps
+//     the population from being emptied one deleted `#symbol` at a time (see the
+//     symbol-anchor block below);
 //   - and no `call` string — the one field in this ledger a runner REPLAYS —
 //     instructs a `/meta/<plural>` URL spelling the boundary merely folds.
 //     `call` ONLY: the fields beside it legitimately quote plural spellings to
@@ -64,15 +66,41 @@
 // It does NOT judge whether an item is testable or its oracle sufficient — no
 // static check can. It guarantees the *structure* a run can be trusted against.
 //
+// ## Honest limitations, stated up front rather than discovered later
+//
+//   1. **An anchor whose file extension is outside the shared anchorable
+//      vocabulary is NOT REPORTED — it is simply not swept.** Detection is the
+//      registered corpus's, and the shared extractor matches only a path ending
+//      in one of `scripts/symbol-anchors.mjs#ANCHORABLE_EXTENSIONS`, so a
+//      `#symbol` on any other extension matches nothing and produces no finding
+//      at all — where the pre-registration detector raised a hard
+//      `UNRESOLVABLE ANCHOR` red telling the author to cite that file bare.
+//      The silent class is recorded here rather than compensated: the shared
+//      vocabulary is 23 extensions against the private 8, so what it can hide
+//      is strictly smaller than what the private set refused, and MEASURED on
+//      today's population it is ZERO — every anchor-shaped token in this family
+//      names `.ts` (622), `.json` (9) or `.mjs` (3), all three inside the
+//      vocabulary. ⚠️ Read that zero with the cadence beside it: this gate is
+//      NOT wired into per-PR CI (the maintainer decision recorded in
+//      `.github/workflows/lint.yml` — it runs by hand before a release or after
+//      a large platform surface lands, with
+//      `.github/workflows/platform-checklist-watchdog.yml` sweeping `main`
+//      daily as its only standing caller), so a future out-of-vocabulary anchor
+//      sits unreported until somebody runs this gate. The exit is the ruling's
+//      own: widen the shared vocabulary in `scripts/symbol-anchors.mjs`, and
+//      ⛔ never re-fork a private extension set here.
+//
 // Usage: node scripts/check-platform-checklist.mjs   (pnpm check:platform-checklist)
 
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { maskComments } from './js-comment-mask.mjs';
-import { symbolResolutionClass } from './symbol-anchors.mjs';
-import { join, basename } from 'node:path';
+import * as symbolAnchorsModule from './symbol-anchors.mjs';
+import { ANCHORABLE_EXTENSIONS, defineCorpus, sweepCorpus, symbolSegmentResolution } from './symbol-anchors.mjs';
+import { join, basename, relative } from 'node:path';
 
 const ROOT = new URL('..', import.meta.url).pathname;
-const CHECKLIST_DIR = join(ROOT, 'docs/qa/platform-checklist');
+const CHECKLIST_REL = 'docs/qa/platform-checklist';
+const CHECKLIST_DIR = join(ROOT, CHECKLIST_REL);
 const AREAS_DIR = join(CHECKLIST_DIR, 'areas');
 
 /**
@@ -776,7 +804,7 @@ const BATTERY_PROVISIONING_USE = 'selfTestProvisioningUse: both `use` spellings 
 const BATTERY_UNREFERENCED_RECIPES = 'selfTestUnreferencedRecipes: the reverse direction';
 const BATTERY_META_CALL_SPELLING = 'selfTestMetaCallSpelling: the folded `/meta` plural, read from the live contract';
 const BATTERY_SOURCE_LINE_CITATIONS = 'selfTestSourceLineCitations: the `:NNN` refusal and its silent neighbours';
-const BATTERY_SYMBOL_ANCHORS = 'selfTestSymbolAnchors: the anchor detector, the resolver and the floor';
+const BATTERY_SYMBOL_ANCHORS = 'selfTestSymbolAnchors: the corpus registration, the binding to the shared resolver, the residual and the floor';
 
 const SELF_TEST_BATTERIES = Object.freeze({
   [BATTERY_TRAP_VOCABULARY]: 22,
@@ -784,7 +812,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   [BATTERY_UNREFERENCED_RECIPES]: 19,
   [BATTERY_META_CALL_SPELLING]: 53,
   [BATTERY_SOURCE_LINE_CITATIONS]: 19,
-  [BATTERY_SYMBOL_ANCHORS]: 40,
+  // 40 → 42 at #18107, and the SHAPE of the battery changed under it: the 25
+  // detector/resolver cases that pinned this file's own forked grammar moved
+  // into `scripts/symbol-anchors.mjs`'s battery (93 → 122 there) and 27 took
+  // their place — the registration, the ONE-vocabulary pin, the live `runs/`
+  // exclusion in both directions, and every re-judged #16898 case, which
+  // ⛔ survives the transplant unchanged in verdict.
+  [BATTERY_SYMBOL_ANCHORS]: 42,
 });
 const SELF_TEST_BATTERY_FLOOR = 6;
 
@@ -1436,65 +1470,67 @@ function selfTestSourceLineCitations() {
 //
 // ## Why anchors are not authored on every citation
 //
-// Only extensions this gate can read are anchorable (`ANCHORABLE_EXTENSIONS`);
-// an anchor on anything else is an ERROR rather than a silent skip, because a
-// spelling that resolves nowhere is exactly the false pointer above. Citations
-// that name a sibling repo (`objectui …`), a document, or a file with no symbol
-// worth naming stay BARE — a bare citation is honest, and this check is not the
-// place to force one into a shape it does not have. The floor below is what
+// Citations that name a sibling repo, a document, or a file with no symbol
+// worth naming stay BARE — a bare citation is honest, and this check is not
+// the place to force one into a shape it does not have. The floor below is what
 // keeps that door from swinging the other way.
-const ANCHORABLE_EXTENSIONS = new Set(['ts', 'tsx', 'mts', 'cts', 'js', 'mjs', 'cjs', 'json']);
-
-// The path half is required — that is what separates an anchor from the two
-// `#` shapes this ledger is full of and must never read as one: a GitHub issue
-// reference (`#13788`, `objectui#2563`) and a URL fragment. A path here must
-// carry a slash and an extension, and the symbol half must open with an
-// identifier character, so `schema.json#/$defs/x` is a fragment, not an anchor.
-const SYMBOL_ANCHOR =
-  /(?<![A-Za-z0-9_$@\-/])((?:[A-Za-z0-9_.\-]+\/)+[A-Za-z0-9_.\-]+\.([A-Za-z]{1,4}))#([A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*)/g;
-
-/**
- * @param {string} text
- * @returns {Array<{file: string, ext: string, symbol: string, anchor: string}>}
- */
-function findSymbolAnchors(text) {
-  const out = [];
-  for (const m of text.matchAll(SYMBOL_ANCHOR)) {
-    out.push({ file: m[1], ext: m[2].toLowerCase(), symbol: m[3], anchor: m[0] });
-  }
-  return out;
-}
-
-/**
- * Which segments of a (possibly dotted) anchor symbol are NOT in the source.
- * Every segment must be present: `Foo.bar` naming a member that was dropped is
- * the same rot as `Foo` being dropped, and reporting the whole anchor as
- * present because its first half survived is the fail-open one level down.
- *
- * ⛔ THE VERDICT IS NOT TAKEN HERE. Each segment goes to
- * `scripts/symbol-anchors.mjs#symbolResolutionClass`, which owns the rule for
- * every anchor corpus in this tree; the per-segment split above it is this
- * corpus's anchor GRAMMAR (the shared grammar's `#symbol` carries no dot), not
- * a rule about what "present" means. A matcher of any kind inside this body is
- * the fork the ruling forbids, and `selfTestSymbolAnchors`'s N5 reads this
- * source to say so.
- *
- * The target extension is derived by the shared module from `filePath`, so the
- * `.json`-is-not-masked special case this function used to carry is gone with
- * the rest of the private rule: JSON resolves against KEYS there.
- *
- * @param {string} source raw file text
- * @param {string} filePath repo-relative path of the cited file
- * @param {string} symbol the anchor's symbol, dots allowed
- * @returns {string[]}
- */
-function absentAnchorSegments(source, filePath, symbol) {
-  const absent = [];
-  for (const seg of symbol.split('.')) {
-    if (!symbolResolutionClass(source, filePath, seg)) absent.push(seg);
-  }
-  return absent;
-}
+//
+// ⭐ THE CORPUS REGISTRATION (#18107) — and why this file now holds no
+// grammar of its own.
+//
+// #16898 (PR #18100) bound the VERDICT to the shared resolver. It left the
+// DETECTOR forked, and the 2026-09-01 ruling this gate's resolver reproduces is
+// explicit that the two halves travel together: a corpus joins by REGISTRATION,
+// and 「if a corpus needs behaviour this core lacks, **widen the core**」.
+//
+// The fork was not inert. Measured on `main` at `4bd2c60e81`, two constants
+// named `ANCHORABLE_EXTENSIONS` existed in this tree, one module importing the
+// other, with different contents: the shared one carried 23 extensions and the
+// private one 8 — a strict subset. And an extension outside the private set was
+// not SKIPPED here, it was a hard ERROR, so the same anchor spelling was a
+// resolved anchor in one governed corpus and a refusal in another. That is
+// precisely 「each gate stays green on its own corpus while meaning something
+// different by "resolves"」. The detector had drifted a second way too: the
+// shared extractor skips code fences and honours `anchor-exempt` markers, and
+// the private `matchAll` did neither.
+//
+// ⚠️ Registering needed the core widened, which is the ruling's own exit and
+// ⛔ NOT a widening of the RESOLUTION RULE — the thing #18100's error text
+// forbids widening, and still forbids. Two different surfaces:
+//
+//   * what counts as the symbol being PRESENT in the cited file — unchanged,
+//     and ⛔ nothing here may loosen it to clear a red;
+//   * how a citation is WRITTEN and which documents are swept — corpus data,
+//     and that is what was widened.
+//
+// Two declarations this corpus needed and the core did not have:
+//
+//   `unspannedAnchors: true`  Every citation here lives inside a JSON string
+//       value, where a backtick is payload rather than a code span. Measured
+//       before registration: the private detector found 634 anchors where the
+//       spanned grammar found 8. That 626-anchor gap — not the `runs/` walker —
+//       is what had kept this corpus forked.
+//   `excludeDirs: ['runs']`   `docPattern` is a regex on the BASENAME and
+//       cannot see a directory, so "the family MINUS `runs/`" had no spelling.
+//       Run records are outputs; see `familyFiles` above.
+//
+// The dotted `#Outer.member` form this ledger's grammar carried is now the
+// shared grammar's, and `sweepCorpus` requires EVERY segment to resolve — the
+// capability moved into the core rather than being dropped with the fork.
+/* ⛔ NOT exported, and that is `scripts/check-entry-guard.mjs`'s rule rather
+ * than a style choice: this file's top level RUNS the gate, so a single export
+ * would make it importable for that binding and run the whole gate — including
+ * its `process.exit` — inside the importer. The sibling corpus gates export
+ * their `CORPUS` because their dispatch sits behind `isEntrypoint`; this one's
+ * does not, and nothing outside reads this corpus. */
+const CORPUS = defineCorpus({
+  id: 'platform-checklist',
+  label: 'the standing platform test checklist (docs/qa/platform-checklist)',
+  docRoots: [CHECKLIST_REL],
+  docPattern: /\.(json|md)$/,
+  excludeDirs: ['runs'],
+  unspannedAnchors: true,
+});
 
 // ── The residual the binding measured (#16898) ────────────────────────
 //
@@ -1701,34 +1737,116 @@ function selfTestSymbolAnchors() {
     checked++;
     if (!ok) failures.push(`${what}${note ? ` — ${note}` : ''}`);
   };
-  const a = (s) => findSymbolAnchors(s);
+  const OWN_SOURCE = readFileSync(new URL(import.meta.url).pathname, 'utf8');
 
-  // ── the detector FIRES on every spelling an author will write ─────────────
-  const one = a('see packages/core/src/security/platform-admin.ts#parsePlatformAdminEmails for the refusal');
-  t('A1 a bare anchor is found, split into file and symbol',
-    one.length === 1 && one[0].file === 'packages/core/src/security/platform-admin.ts' && one[0].symbol === 'parsePlatformAdminEmails');
-  t('A2 trailing punctuation is not part of the symbol',
-    a('(packages/rest/src/rest-server.ts#buildRouter).').length === 1 && a('(packages/rest/src/rest-server.ts#buildRouter).')[0].symbol === 'buildRouter');
-  const dotted = a('packages/spec/src/data/object.zod.ts#ObjectSchema.shape');
-  t('A3 a dotted member anchor keeps both segments', dotted.length === 1 && dotted[0].symbol === 'ObjectSchema.shape');
-  t('A4 two anchors in one citation are both found',
-    a('a/b/x.ts#alpha + a/b/y.tsx#beta').length === 2);
-  t('A5 every anchorable extension is recognised',
-    ['ts', 'tsx', 'mts', 'cts', 'js', 'mjs', 'cjs', 'json'].every((e) => a(`p/q/f.${e}#sym`).length === 1));
-  t('A6 the extension is reported lower-cased, so the anchorable test cannot be dodged by case', a('p/q/F.TS#sym')[0]?.ext === 'ts');
+  // ── the REGISTRATION is what this gate claims it is (#18107) ─────────────
+  //
+  // ⛔ The detector cases that used to live here are GONE, and their absence is
+  // the deliverable: they pinned a second implementation of a grammar the
+  // 2026-09-01 ruling says has exactly one. Every one of them was transplanted
+  // into `scripts/symbol-anchors.mjs`'s own battery — the unspanned form and
+  // each `#`-shaped neighbour it must refuse (an issue reference, a JSON-pointer
+  // fragment, a scoped package specifier, a hyphenated word with a tail, a bare
+  // filename with no directory), the dotted segments, the trailing punctuation.
+  // ⭐ A case is not deleted by moving; it is deleted by stopping. What this
+  // battery owes now is that THIS corpus reaches that one grammar and carries
+  // none of its own.
+  t('G1 the corpus sweeps this family and nothing else',
+    CORPUS.docRoots.length === 1 && CORPUS.docRoots[0] === CHECKLIST_REL,
+    JSON.stringify(CORPUS.docRoots));
+  t('G2 the corpus reads both authored shapes of this family and no third one',
+    CORPUS.docPattern.test('areas/x.json'.split('/').pop()) && CORPUS.docPattern.test('README.md')
+      && !CORPUS.docPattern.test('page.mdx') && !CORPUS.docPattern.test('notes.txt'));
+  t('G3 the corpus EXCLUDES `runs/` — run records are outputs, and holding a past record to today’s authoring rules would make the rule unfixable',
+    CORPUS.excludeDirs.length === 1 && CORPUS.excludeDirs[0] === 'runs');
+  t('G4 the corpus declares its citations UNSPANNED — every one of them lives inside a JSON string value, where a backtick is payload and not a code span',
+    CORPUS.unspannedAnchors === true);
+  t('G5 the corpus does NOT check bare paths — a citation with no `#symbol` is honest here, and turning them into reds is a corpus-wide cleanup nobody ruled on',
+    CORPUS.checkBarePaths === false);
+  t('G6 the corpus sweeps its documents RAW — these files ARE the citations, so a comment projection (which a `scripts/**` corpus needs) would blank the whole ledger away',
+    CORPUS.docProjection === null);
 
-  // ── and STAYS SILENT on the `#` shapes this ledger is full of ─────────────
-  t('S1 a cross-repo issue reference is not an anchor', a('the objectui#2563 regression').length === 0);
-  t('S2 a bare issue reference is not an anchor', a('closed by #13786 and #13482').length === 0);
-  t('S3 a JSON-pointer URL fragment is not an anchor', a('https://example.com/schema.json#/$defs/Item').length === 0);
-  t('S4 an ADR section reference is not an anchor', a('ADR-0025 §3.3, ADR-0090 D4').length === 0);
-  t('S5 a BARE citation — the shape most of this ledger still carries — is not an anchor',
-    a('packages/objectql/src/search-filter.ts (each latin term ORs $contains)').length === 0);
-  t('S6 a dotted machine name with no path is not an anchor', a('sys_user.name and showcase.export_data').length === 0);
-  t('S7 an anchor-shaped tail on a word with no slash is not an anchor', a('release-15.1#B2').length === 0);
-  t('S8 an email-ish `@`-prefixed path is not read as an anchor', a('@objectstack/spec/src/x.ts#Y').length === 0);
+  // ── ONE extension vocabulary, and one grammar (#18107) ───────────────────
+  //
+  // Before registration two constants named `ANCHORABLE_EXTENSIONS` existed in
+  // this tree, one module importing the other, with different contents — 23
+  // shared against 8 private, a strict subset — and NOTHING asserted they were
+  // the same. That is the whole reason the drift was invisible. V1 holds the
+  // name this file uses to the shared OBJECT (identity, not a value compare: a
+  // copied array would satisfy an equality and drift again the next day), and
+  // V2 reads this file's own source to say it defines no vocabulary and no
+  // matcher of its own.
+  t('V1 the anchorable-extension vocabulary this gate names IS the shared object — a second definition is the drift this card closes',
+    ANCHORABLE_EXTENSIONS === symbolAnchorsModule.ANCHORABLE_EXTENSIONS && ANCHORABLE_EXTENSIONS.length > 8,
+    `${ANCHORABLE_EXTENSIONS?.length} extension(s)`);
+  /* ⚠️ NAME-BASED, and the names are matched as a PREFIX with any suffix
+   * allowed — not as an equality, which is what this pin was first written as
+   * and what let a `…_SHADOW` redefinition of the same vocabulary straight
+   * through when it was ablated. A fork under a nearby name is a fork.
+   *
+   * ⛔ The residual gap is stated rather than papered over: a fork under a name
+   * sharing none of these tokens is invisible here, and no regex over a
+   * source file will close that. V3 beside it is what keeps the READ honest
+   * (a read that returned nothing would pass V2 forever), and the pin claims
+   * exactly this much and no more. */
+  const noLocal = (name) => !new RegExp(`\\b(?:const|let|var)\\s+${name}\\w*\\s*=`).test(OWN_SOURCE);
+  t('V2 this gate defines NO anchor grammar of its own — no local extension set, no anchor regex, no detector',
+    noLocal('ANCHORABLE_EXTENSIONS') && noLocal('SYMBOL_ANCHOR')
+      && !/\bfunction\s+findSymbolAnchors\w*\b/.test(OWN_SOURCE)
+      && !/\bfunction\s+absentAnchorSegments\w*\b/.test(OWN_SOURCE));
+  t('V3 CONTROL for V2 — the same source read DOES find the registration, so a green above is "no fork" and not "the read returned nothing"',
+    /defineCorpus\(\{/.test(OWN_SOURCE) && /sweepCorpus\(CORPUS, ROOT\)/.test(OWN_SOURCE));
 
-  // ── the resolver FIRES ────────────────────────────────────────────────────
+  // ── the `runs/` exclusion, BOTH DIRECTIONS on the LIVE corpus ────────────
+  //
+  // The core's own battery proves the mechanism on a synthetic fixture, with
+  // the SAME unresolvable anchor in an excluded and an included subtree. This
+  // pair proves it HERE, against the real tree, which is the half a fixture
+  // cannot cover: that this corpus's declaration actually lands on this
+  // corpus's `runs/`. X1 is worthless without X0 — an exclusion that excludes
+  // nothing would pass X1 forever.
+  const runsDir = join(CHECKLIST_DIR, 'runs');
+  const runsFiles = existsSync(runsDir)
+    ? readdirSync(runsDir).filter((n) => n.endsWith('.json') || n.endsWith('.md'))
+    : [];
+  t('X0 PRECONDITION — `runs/` really holds authored-shaped files, so excluding it is a reading and not a no-op',
+    runsFiles.length > 0, `${runsFiles.length} file(s)`);
+  /* ⛔ ITS OWN SWEEP, deliberately. This battery is also the positive control
+   * that runs before the module-level sweep is trusted, so it cannot read that
+   * sweep's result — and a case that silently skipped because a binding was not
+   * initialised yet is the "green that never ran" this file is built around. */
+  const liveSweep = sweepCorpus(CORPUS, ROOT);
+  const sweptDocs = [...liveSweep.byDoc.keys()];
+  t('X1 no document under `runs/` is swept',
+    sweptDocs.every((d) => !relative(CHECKLIST_REL, d).startsWith('runs/')),
+    sweptDocs.filter((d) => relative(CHECKLIST_REL, d).startsWith('runs/')).join(', '));
+  t('X2 CONTROL — the SAME sweeper does reach the areas beside it, so X1 is an exclusion and not an empty walk',
+    sweptDocs.filter((d) => relative(CHECKLIST_REL, d).startsWith('areas/')).length > 0,
+    `${sweptDocs.length} document(s) swept`);
+  const unexcluded = sweepCorpus(
+    defineCorpus({ ...CORPUS, id: 'platform-checklist-unexcluded', excludeDirs: [] }),
+    ROOT,
+  );
+  t('X3 CONTROL — dropping `excludeDirs` puts those same `runs/` documents back, which is what makes X1 a measurement of the exclusion itself',
+    unexcluded.counts.docs === liveSweep.counts.docs + runsFiles.length,
+    `${unexcluded.counts.docs} unexcluded vs ${liveSweep.counts.docs} excluded, ${runsFiles.length} under runs/`);
+
+  // ── the sweep is BOUND to the shared verdict, both directions ────────────
+  //
+  // #16898's N-block, re-taken through the registered path. The four shapes the
+  // withdrawn permissive rule accepted must still read ABSENT, and N4 is the
+  // positive control without which a green here cannot tell "bound correctly"
+  // from "nothing resolves any more".
+  /* ⭐ THE RE-JUDGED CASES, carried through the registration UNCHANGED in
+   * verdict and only re-spelled in call. #16898 wrote the rule for them and it
+   * still binds: 「keeping the case with its verdict inverted is what pins the
+   * narrowing, where deleting it would leave the tree unable to say the
+   * narrowing ever happened」. Deleting the FORKED DETECTOR is this card's
+   * deliverable; deleting the record of a previous card's narrowing is not, so
+   * every one of these survives the transplant. `absentAnchorSegments` was this
+   * file's per-segment split and is gone with the fork — the split is the
+   * GRAMMAR's, and it now lives beside the grammar as
+   * `scripts/symbol-anchors.mjs#symbolSegmentResolution`. */
   const src = [
     '// parsePlatformAdminEmails used to live here; renamed in #9999.',
     "export const RESOLVED = { mode: 'strict' };",
@@ -1737,83 +1855,62 @@ function selfTestSymbolAnchors() {
   ].join('\n');
   /* The same shape with the member at the START OF A LINE, which is where the
    * shared rule reads one. Kept as a second fixture rather than folded into
-   * `src`, because `src`'s inline member is exactly what P3 now pins. */
-  const blockSrc = [
-    'export const PolicyShape = {',
-    "  mode: 'strict',",
-    '};',
-  ].join('\n');
+   * `src`, because `src`'s inline member is exactly what P3 pins. */
+  const blockSrc = ['export const PolicyShape = {', "  mode: 'strict',", '};'].join('\n');
+  const absent = (source, path, sym) => symbolSegmentResolution(source, path, sym).absent;
   t('R1 a symbol that is gone from the file is reported absent',
-    absentAnchorSegments(src, 'x.ts', 'parsePlatformAdminEmails').length === 1);
+    absent(src, 'x.ts', 'parsePlatformAdminEmails').length === 1);
   t('R2 a symbol surviving ONLY in a comment is ABSENT — prose about a symbol is not a symbol',
-    absentAnchorSegments(src, 'x.ts', 'renamed').length === 1);
+    absent(src, 'x.ts', 'renamed').length === 1);
   t('R3 a dotted anchor whose SECOND segment is gone is reported, not passed on the first',
-    absentAnchorSegments(src, 'x.ts', 'RESOLVED.strictness').join(',') === 'strictness');
+    absent(src, 'x.ts', 'RESOLVED.strictness').join(',') === 'strictness');
   t('R4 a substring of a present identifier does not count as present',
-    absentAnchorSegments(src, 'x.ts', 'PlatformAdmin').length === 1);
-
-  // ── and STAYS SILENT ──────────────────────────────────────────────────────
-  t('P1 a declared export resolves', absentAnchorSegments(src, 'x.ts', 'hasPlatformAdminStanding').length === 0);
-  t('P2 a const resolves', absentAnchorSegments(src, 'x.ts', 'RESOLVED').length === 0);
-  /* P3 and P5 are RE-JUDGED IN PLACE (#16898), ⛔ not deleted. Both asserted a
-   * resolution only the permissive token match this gate used to carry could
-   * produce, so both had to be re-read once the verdict moved to
-   * `scripts/symbol-anchors.mjs#symbolResolutionClass` — and keeping the case
-   * with its verdict inverted is what pins the narrowing, where deleting it
-   * would leave the tree unable to say the narrowing ever happened.
-   *
-   *   P3 asserted `RESOLVED.mode` resolves. `{ mode: 'strict' }` is an
-   *      object-literal key written INLINE; the shared rule admits a member or
-   *      object-literal key written at the START OF A LINE. Six of the ledger's
-   *      own residual rows are this exact shape, and whether the shared accept
-   *      set should reach an inline key is a card against that module — ⛔ never
-   *      a widening made here. The direction P3 used to cover (both segments of
-   *      a live dotted anchor resolving) is P3b, on a member the rule accepts.
-   *   P5 asserted a `.json` VALUE resolves, because this gate used to scan JSON
-   *      unmasked and ask only whether the token appeared. The shared rule reads
-   *      JSON KEYS, which is what keeps a value of the same spelling out. The
-   *      half P5 really cared about — that a `//`-carrying string value is never
-   *      blanked away — is P5b, which resolves a key while such a value sits
-   *      beside it.
-   */
-  t('P3 a dotted anchor whose member is written INLINE is now ABSENT — the shared rule takes a member key at the start of a line (re-judged, #16898)',
-    absentAnchorSegments(src, 'x.ts', 'RESOLVED.mode').join(',') === 'mode');
+    absent(src, 'x.ts', 'PlatformAdmin').length === 1);
+  t('P1 a declared export resolves', absent(src, 'x.ts', 'hasPlatformAdminStanding').length === 0);
+  t('P2 a const resolves', absent(src, 'x.ts', 'RESOLVED').length === 0);
+  t('P3 a dotted anchor whose member is written INLINE is ABSENT — the shared rule takes a member key at the start of a line (re-judged, #16898; the shape #18101 owns)',
+    absent(src, 'x.ts', 'RESOLVED.mode').join(',') === 'mode');
   t('P3b both segments of a live dotted anchor resolve when the member IS at the start of a line',
-    absentAnchorSegments(blockSrc, 'x.ts', 'PolicyShape.mode').length === 0);
+    absent(blockSrc, 'x.ts', 'PolicyShape.mode').length === 0);
   t('P4 a symbol that is a COMPLETE quoted token counts as present — this ledger cites machine names, not only exports',
-    absentAnchorSegments(src, 'x.ts', 'strict').length === 0);
-  t('P5 a `.json` VALUE is ABSENT — the shared rule resolves JSON KEYS (re-judged, #16898)',
-    absentAnchorSegments('{ "route": "https://x/y", "kind": "live" }', 'x.json', 'live').join(',') === 'live');
-  t('P5b a `.json` KEY resolves, and a `//`-carrying string value beside it is never blanked away',
-    absentAnchorSegments('{ "route": "https://x/y", "live": true }', 'x.json', 'live').length === 0);
+    absent(src, 'x.ts', 'strict').length === 0);
 
-  // ── the BINDING itself (#16898) ───────────────────────────────────────────
-  //
-  // The four shapes the withdrawn rule accepted and the shared resolver
-  // refuses, measured on one fixture — and, in the same fixture, the POSITIVE
-  // CONTROL that says the binding narrowed rather than simply broke. Without
-  // N4 a green here cannot tell "bound correctly" from "everything stopped
-  // resolving", which is the only way a resolver swap can look fine and be
-  // worthless.
   const bindSrc = [
     "import { importedOnly } from './elsewhere.js';",
     'export function declaredHere(paramOnly) { return importedOnly(paramOnly); }',
     "export const HOST = { list: ['whole_token', 'dotted_head.actions.go'] };",
   ].join('\n');
   t('N1 a CALL SITE / IMPORT only is ABSENT — the file uses the symbol, it does not declare it',
-    absentAnchorSegments(bindSrc, 'x.ts', 'importedOnly').length === 1);
-  t('N2 a LOCAL PARAMETER only is ABSENT',
-    absentAnchorSegments(bindSrc, 'x.ts', 'paramOnly').length === 1);
+    absent(bindSrc, 'x.ts', 'importedOnly').length === 1);
+  t('N2 a LOCAL PARAMETER only is ABSENT', absent(bindSrc, 'x.ts', 'paramOnly').length === 1);
   t('N3 a SUBSTRING of a longer string token is ABSENT — `literal` is a COMPLETE quoted token',
-    absentAnchorSegments(bindSrc, 'x.ts', 'dotted_head').length === 1);
+    absent(bindSrc, 'x.ts', 'dotted_head').length === 1);
   t('N4 POSITIVE CONTROL — a declaration and a complete quoted token BOTH still resolve, so a green above is a narrowing and not a dead resolver',
-    absentAnchorSegments(bindSrc, 'x.ts', 'declaredHere').length === 0
-      && absentAnchorSegments(bindSrc, 'x.ts', 'whole_token').length === 0);
-  const ownResolverBody = /function absentAnchorSegments\([^)]*\)\s*\{[\s\S]*?\n\}/
-    .exec(readFileSync(new URL(import.meta.url).pathname, 'utf8'))?.[0] ?? '';
-  t('N5 this gate carries NO resolution rule of its own — the body delegates and holds no matcher, which is the fork the #13556 ruling forbids',
-    ownResolverBody.includes('symbolResolutionClass(')
-      && !/new RegExp|RegExp\(|\.test\(|maskComments|indexOf\(/.test(ownResolverBody));
+    absent(bindSrc, 'x.ts', 'declaredHere').length === 0 && absent(bindSrc, 'x.ts', 'whole_token').length === 0);
+  t('N5 a `.json` VALUE is ABSENT where a `.json` KEY resolves (re-judged, #16898) — the shared rule reads JSON keys',
+    absent('{ "route": "https://x/y", "kind": "live" }', 'x.json', 'live').join(',') === 'live'
+      && absent('{ "route": "https://x/y", "live": true }', 'x.json', 'live').length === 0);
+  t('N6 a dotted anchor whose SECOND segment is gone names that segment — ⛔ it is not passed on the first',
+    absent('export const PolicyShape = {\n  mode: 1,\n};', 'x.ts', 'PolicyShape.strictness').join(',') === 'strictness');
+
+  // ── the live sweep actually ran ──────────────────────────────────────────
+  //
+  // A registration that reached nothing reports zero problems, which is the
+  // same green a clean corpus prints. L1/L2 make the console line's numbers
+  // load-bearing rather than decorative.
+  const liveResolved = liveSweep.counts.declaration + liveSweep.counts.literal;
+  t('L1 the live sweep resolved anchors through the shared resolver — a registration that reached nothing prints the same green a clean corpus does',
+    liveResolved > 0 && liveSweep.counts.symbol >= liveResolved,
+    `${liveResolved}/${liveSweep.counts.symbol}`);
+  t('L2 the sweep and `familyFiles` agree on the population — two walkers over one corpus is the drift this card closes one level up',
+    liveSweep.counts.docs === familyFiles(CHECKLIST_DIR).length,
+    `${liveSweep.counts.docs} swept vs ${familyFiles(CHECKLIST_DIR).length} walked`);
+  t('X4 every residual row names a document the sweep actually reaches — a row filed against a doc outside the registered corpus could never fire, and would read as a standing excuse rather than the STALE RESIDUAL ROW red it is',
+    SHARED_RESOLVER_RESIDUAL.every((r) => sweptDocs.includes(join(CHECKLIST_REL, r.doc))),
+    SHARED_RESOLVER_RESIDUAL.filter((r) => !sweptDocs.includes(join(CHECKLIST_REL, r.doc))).map((r) => r.doc).join(', '));
+  t('L3 the per-document counts sum to the corpus-wide ones — a per-file floor read off a total could never see one file emptied while another grew',
+    [...liveSweep.byDoc.values()].reduce((n, c) => n + c.symbol, 0) === liveSweep.counts.symbol
+      && [...liveSweep.byDoc.values()].reduce((n, c) => n + c.declaration + c.literal, 0) === liveResolved);
 
   // ── the residual ledger, both directions ─────────────────────────────────
   t('D1 the residual is a CLOSED ledger — every row carries a doc, an anchor, a shape and one of exactly two verdicts',
@@ -1876,7 +1973,7 @@ if (process.argv.slice(2).includes('--self-test')) {
         ' the unreferenced-recipe direction fires on a recipe nobody uses while leaving a cross-area consumer, a retired consumer and a `$`-annotation alone;' +
         ' and the `/meta` call-spelling refusal reads its vocabulary out of the live generated contract, fires on every folded spelling a `call` can instruct, and stays silent on the canonical singular, on parameter placeholders, and on the `why`/`expect`/`source`/`requires` prose that narrates the fold;' +
         ' and the source-line-citation refusal fires on every spelling this ledger carried (file-anchored, range, bare continuation, parenthesised, `~:`, comma/slash-chained) while staying silent on HTTP status, config literals, URL ports, clock times, JSON quoted in prose and the README placeholder that documents the ban;' +
-        ' and the symbol-anchor limb finds every anchor spelling an author writes while reading no issue reference, URL fragment, ADR section or bare citation as one, and then RESOLVES NOTHING ITSELF: the verdict is `scripts/symbol-anchors.mjs#symbolResolutionClass` (#16898), pinned here by a body that holds no matcher, by a call site / import / local parameter / string-substring all reading ABSENT, by the positive control that a declaration and a complete quoted token still resolve, by a `.json` key resolving where a `.json` value no longer does, and by the closed, grow-never residual that names what the binding withdrew — with the per-file anchor floor held in both directions beside it.',
+        ' and the symbol-anchor limb DETECTS NOTHING AND RESOLVES NOTHING ITSELF: it is a registered corpus (#18107), so the grammar, the walk and the verdict are all `scripts/symbol-anchors.mjs`\'s, pinned here by a source read that finds no local extension set, no anchor regex and no detector while the same read DOES find the registration, by the anchorable-extension vocabulary being the shared OBJECT rather than a copy of it, by the `runs/` exclusion driven three ways on the live corpus (the subtree holds files, none is swept, the areas beside it still are, and dropping the exclusion puts them back), and by the #16898 binding re-taken through the registration — a call site / import / local parameter / string-substring all reading ABSENT, the positive control that a declaration and a complete quoted token still resolve, a `.json` key resolving where a `.json` value does not, an INLINE object-literal key reading absent where one at the start of a line resolves — with the closed, grow-never residual and the per-file anchor floor held in both directions beside it.',
     );
     process.exit(0);
   }
@@ -2323,14 +2420,31 @@ for (const rel of familyFiles(CHECKLIST_DIR)) {
   }
 }
 
-// ── The symbol-anchor sweep, over the same family the citation sweep reads ──
-// Cached per cited file: the ledger points many citations at the same hot
-// sources, and re-reading + re-masking each one per anchor is the difference
-// between a gate that costs milliseconds and one nobody runs.
-const anchorSourceCache = new Map();
-function anchorSource(absPath) {
-  if (!anchorSourceCache.has(absPath)) anchorSourceCache.set(absPath, readFileSync(absPath, 'utf8'));
-  return anchorSourceCache.get(absPath);
+// ── The symbol-anchor sweep ─ ONE call into the registered corpus ───────
+//
+// ⛔ There is no loop over family files here any more, and no detector: the
+// walk, the extraction and the verdict are all `scripts/symbol-anchors.mjs`'s,
+// reached through the `CORPUS` registration above. What stays local is what is
+// genuinely this corpus's own — the closed #16898 residual, and the per-file
+// shrink-never floor — and both are keyed off what the sweep reports.
+const sweep = sweepCorpus(CORPUS, ROOT);
+
+// The population the sweep walked, held against the one `familyFiles` walks.
+// ⚠️ They are TWO walkers over one corpus while the source-line-citation limb
+// beside this one still owns its own detector (#18101 / #18104 own that half),
+// and two walkers that silently disagree is the drift this card exists to
+// close, one level up. So they are compared on every run rather than assumed
+// equal: a `docPattern` or an `excludeDirs` that stops matching shows up here
+// as a number, not as a quietly smaller sweep.
+const familyPopulation = familyFiles(CHECKLIST_DIR);
+if (sweep.counts.docs !== familyPopulation.length) {
+  err(
+    'docs/qa/platform-checklist',
+    null,
+    `CORPUS POPULATION DISAGREES — the registered corpus swept ${sweep.counts.docs} document(s) but \`familyFiles\` walks ${familyPopulation.length}.`
+      + ' One of the two stopped reaching part of the family, and a sweep that reads fewer files than it did yesterday reports fewer problems for exactly the wrong reason.'
+      + ' Reconcile `CORPUS` (`docRoots` / `docPattern` / `excludeDirs`) with `familyFiles`.',
+  );
 }
 
 const anchorCounts = new Map();
@@ -2338,46 +2452,48 @@ let anchorsScanned = 0;
 let anchorsResolved = 0;
 let anchorsResidual = 0;
 const residualFired = new Set();
-for (const rel of familyFiles(CHECKLIST_DIR)) {
-  const text = readFileSync(join(CHECKLIST_DIR, rel), 'utf8');
-  let resolved = 0;
-  let residual = 0;
-  for (const anchor of findSymbolAnchors(text)) {
-    anchorsScanned++;
-    if (!ANCHORABLE_EXTENSIONS.has(anchor.ext)) {
-      err(rel, null, `UNRESOLVABLE ANCHOR — \`${anchor.anchor}\`: this gate reads symbols out of ${[...ANCHORABLE_EXTENSIONS].join('/')} only, so a \`#symbol\` on a .${anchor.ext} resolves nowhere and would read as verified while pointing at nothing. Cite that file BARE (path, no \`#\`) and put the symbol in the prose beside it.`);
+const relToChecklist = (doc) => relative(CHECKLIST_REL, doc);
+
+// Resolved, per family file, straight out of the sweep's per-document counts.
+for (const [doc, c] of sweep.byDoc) {
+  const rel = relToChecklist(doc);
+  anchorsScanned += c.symbol;
+  anchorsResolved += c.declaration + c.literal;
+  anchorCounts.set(rel, c.declaration + c.literal);
+}
+
+for (const f of sweep.findings) {
+  const rel = relToChecklist(f.doc);
+  if (f.kind === 'unresolved-symbol') {
+    const anchor = `${f.path}#${f.symbol}`;
+    // On the measured residual? Then this is one of the 56 the binding
+    // withdrew (#16898) — recorded, counted apart from `resolved`, and NOT a
+    // red. Anything else that fails to resolve is an ordinary red, which is
+    // what keeps the ledger closed instead of permissive.
+    if (SHARED_RESOLVER_RESIDUAL_INDEX.has(residualKey(rel, anchor))) {
+      residualFired.add(residualKey(rel, anchor));
+      anchorsResidual += 1;
+      // The floor's population is every anchor this gate holds BOUND — resolved
+      // plus the named residual. ⛔ That is deliberately not the same number as
+      // `resolved`, and the console line prints both so the coverage claim stays
+      // honest: folding the residual in silently is the exact move this card
+      // exists to undo, and no floor in the maintainer-only baseline is touched.
+      anchorCounts.set(rel, (anchorCounts.get(rel) ?? 0) + 1);
       continue;
     }
-    const abs = join(ROOT, anchor.file);
-    if (!existsSync(abs)) {
-      err(rel, null, `ANCHOR FILE NOT FOUND — \`${anchor.anchor}\`: ${anchor.file} is not in this repo. A path this gate cannot open is not an anchor; a sibling-repo citation (objectui/cloud) stays BARE, and a moved file needs the pin re-pointed.`);
-      continue;
-    }
-    const absent = absentAnchorSegments(anchorSource(abs), anchor.file, anchor.symbol);
-    if (absent.length) {
-      // On the measured residual? Then this is one of the 56 the binding
-      // withdrew (#16898) — recorded, counted apart from `resolved`, and NOT a
-      // red. Anything else that fails to resolve is an ordinary red, which is
-      // what keeps the ledger closed instead of permissive.
-      const known = SHARED_RESOLVER_RESIDUAL_INDEX.get(residualKey(rel, anchor.anchor));
-      if (known) {
-        residualFired.add(residualKey(rel, anchor.anchor));
-        residual++;
-        anchorsResidual++;
-        continue;
-      }
-      err(rel, null, `ABSENT SYMBOL — \`${anchor.anchor}\`: ${absent.map((s) => `\`${s}\``).join(' and ')} ${absent.length > 1 ? 'are' : 'is'} not declared in ${anchor.file} by \`scripts/symbol-anchors.mjs#symbolResolutionClass\` — no declaration site and no complete quoted string token, comments stripped. A call site, an import, a member access or a substring of a longer string is NOT resolution. Re-point the anchor at what the file declares now, or drop the \`#symbol\` half and cite the file bare. ⛔ Do not widen \`scripts/symbol-anchors.mjs\` to make this green: it is shared with four other corpora.`);
-      continue;
-    }
-    resolved++;
-    anchorsResolved++;
+    err(rel, null, `ABSENT SYMBOL — \`${anchor}\`: ${(f.absent ?? []).map((x) => `\`${x}\``).join(' and ')} ${(f.absent ?? []).length > 1 ? 'are' : 'is'} not declared in ${f.path} by \`scripts/symbol-anchors.mjs#symbolResolutionClass\` — no declaration site and no complete quoted string token, comments stripped. A call site, an import, a member access or a substring of a longer string is NOT resolution. Re-point the anchor at what the file declares now, or drop the \`#symbol\` half and cite the file bare. ⛔ Do not widen the RESOLUTION RULE in \`scripts/symbol-anchors.mjs\` to make this green: it is shared with four other corpora.`);
+    continue;
   }
-  // The floor's population is every anchor this gate holds BOUND — resolved
-  // plus the named residual. ⛔ That is deliberately not the same number as
-  // `resolved`, and the console line prints both so the coverage claim stays
-  // honest: folding the residual in silently is the exact move this card
-  // exists to undo, and no floor in the maintainer-only baseline is touched.
-  anchorCounts.set(rel, resolved + residual);
+  if (f.kind === 'unresolved-path') {
+    err(rel, null, `ANCHOR FILE NOT FOUND — \`${f.raw}\`: ${f.path} is not a tracked file in this repo. A path this gate cannot open is not an anchor; a sibling-repo citation stays BARE or carries its \`<repo>:\` prefix, and a moved file needs the pin re-pointed.`);
+    continue;
+  }
+  if (f.kind === 'line-anchor' || f.kind === 'bad-exemption') {
+    err(rel, null, `${f.kind === 'bad-exemption' ? 'BAD ANCHOR EXEMPTION' : 'LINE ANCHOR'} — \`${f.raw}\` at line ${f.line}: ${f.detail}`);
+    continue;
+  }
+  if (f.soft) continue; // cross-repo with no checkout — reported by the sweep, never red
+  err(rel, null, `${f.kind} — \`${f.raw}\` at line ${f.line}: ${f.detail}`);
 }
 
 // A residual row that did not fire has been repaired, re-authored or removed —
@@ -2448,7 +2564,7 @@ console.log(
     ` provisioning: ${recipeTotal} area recipes, ${recipeRefs} item references resolved (${qualifiedRefs} area-qualified), ${recipesReferenced}/${recipeTotal} recipes referenced;` +
     ` meta-URL spelling: ${metaCallsScanned} \`call\` strings scanned against ${FOLDED_META_SPELLINGS.size} folded spellings;` +
     ` source citations: ${citationsScanned} family files carry no \`file:line\` pin;` +
-    ` symbol anchors: ${anchorsResolved}/${anchorsScanned} resolved by \`symbol-anchors.mjs\` (the ONE resolver) against ${anchorSourceCache.size} cited sources` +
+    ` symbol anchors: ${anchorsResolved}/${anchorsScanned} resolved by \`symbol-anchors.mjs\` (the ONE resolver, reached as a REGISTERED corpus) across ${sweep.counts.docs} swept documents against ${sweep.counts.citedSources} cited sources` +
     `, ${anchorsResidual} on the named #16898 residual, ${Object.keys(anchorFloors).length} file floors held;` +
     ` (self-checks: ${trapControl.checked} trap-vocabulary + ${provisioningControl.checked} provisioning-resolve + ${unreferencedControl.checked} unreferenced-recipe + ${metaCallControl.checked} meta-call-spelling + ${citationControl.checked} source-line-citation + ${symbolAnchorControl.checked} symbol-anchor assertions).`,
 );
