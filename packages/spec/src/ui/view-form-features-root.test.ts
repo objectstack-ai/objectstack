@@ -205,10 +205,20 @@ describe('positive controls — the scanner narrows exactly as far as the ruling
     accept(formWithFieldPredicate('record.tag == "features"'));
   });
 
-  it('an AST-only envelope is opaque at this layer and passes (documented boundary)', () => {
-    // The authoring shape is the source string; build emits ASTs from sources
-    // this gate already accepted. An AST-only envelope has nothing to scan.
-    accept(formWithFieldPredicate({ dialect: 'cel', ast: { kind: 'ident', name: 'record' } }));
+  it('an AST-only envelope no longer reaches this scanner — #15811 refuses it one layer up', () => {
+    // It used to pass here, and the reason was sound as far as it went: the
+    // authoring shape is the source string, and an AST-only envelope has
+    // nothing to scan. What that boundary left open is that the slot admitted
+    // an envelope the engine cannot run at all. Since #15811 the form-field
+    // predicate composes `EvaluatedExpressionInputSchema`, so the refusal is
+    // the evaluated-slot rule — NOT the features-root rule this file is about,
+    // which is why the message is asserted rather than just the failure.
+    const r = FormViewSchema.safeParse(
+      formWithFieldPredicate({ dialect: 'cel', ast: { kind: 'ident', name: 'record' } }),
+    );
+    expect(r.success).toBe(false);
+    const messages = r.success ? [] : JSON.stringify(r.error.issues);
+    expect(messages).toContain('cannot evaluate `ast` alone');
   });
 });
 

@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema, evaluatedExpressionUnionRefusal } from '../shared/expression.zod';
 
 /**
  * Metrics Protocol - Performance and Operational Metrics
@@ -475,7 +475,8 @@ export const ServiceLevelIndicatorSchema = lazySchema(() => z.object({
       percentile: z.number().min(0).max(1).optional().describe('Percentile (0-1)'),
     }),
     EvaluatedExpressionInputSchema,
-  ]).describe('Success criteria — structured or CEL predicate'),
+  ], { error: (issue) => evaluatedExpressionUnionRefusal(issue.input) })
+    .describe('Success criteria — structured or CEL predicate'),
 
   /**
    * Measurement window

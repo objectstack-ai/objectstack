@@ -6,7 +6,7 @@ import { InlineActionSchema, ActionLocationSchema } from './action.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 import { lazySchema } from '../shared/lazy-schema';
-import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema, evaluatedExpressionUnionRefusal } from '../shared/expression.zod';
 import { retiredKey } from '../shared/retired-key';
 // The retired page-component TYPES' prescriptions — one string per type, three
 // doors (#14159): the enum's error map and the `PageComponentSchema.type` check
@@ -1591,7 +1591,9 @@ export const RecordAlertProps = strictObject({
   severity: z.enum(['info', 'warning', 'error', 'success']).optional().describe('Banner severity — styling, default icon, and the a11y role (`error` renders `role="alert"`/assertive; the rest `role="status"`/polite). Renderer default: `info`.'),
   title: I18nLabelSchema.optional().describe('Banner title — a string or an inline locale map ({ en, "zh-CN", … }), resolved to the current language at render (pickLocalized).'),
   body: I18nLabelSchema.optional().describe('Banner body — a string or an inline locale map, resolved like `title`.'),
-  visible: z.union([z.boolean(), EvaluatedExpressionInputSchema]).optional().describe('Visibility predicate evaluated against the record page scope (`record`, `user` + `ctx.*` mirror, `objectName`, `features`) — a boolean literal, a CEL string, or a `{ dialect, source }` envelope. Omit for always-visible; the banner is hidden while the record is still loading either way.'),
+  visible: z.union([z.boolean(), EvaluatedExpressionInputSchema], {
+    error: (issue) => evaluatedExpressionUnionRefusal(issue.input),
+  }).optional().describe('Visibility predicate evaluated against the record page scope (`record`, `user` + `ctx.*` mirror, `objectName`, `features`) — a boolean literal, a CEL string, or a `{ dialect, source }` envelope. Omit for always-visible; the banner is hidden while the record is still loading either way.'),
   icon: z.string().optional().describe('Lucide icon name (renderer default: the severity\'s own icon). Read on this component — contrast the rail\'s refused `icon`, which no render path reads.'),
   action: RecordAlertActionSchema.optional().describe('Optional call-to-action button rendered under the body — `{ actionName, label?, variant? }`, resolved from the object\'s declared actions.'),
   dismissible: z.boolean().optional().describe('Render an X control; dismissal is remembered per object/record in localStorage (renderer default: off).'),

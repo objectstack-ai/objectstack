@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
+import { EVALUATED_EXPRESSION_SOURCE_REQUIRED, EvaluatedExpressionInputSchema, evaluatedExpressionUnionRefusal } from '../shared/expression.zod';
 
 /**
  * Tracing Protocol - Distributed Tracing & Observability
@@ -345,9 +345,17 @@ export const TraceSamplingConfigSchema = lazySchema(() => z.object({
     strategy: SamplingStrategyType.describe('Strategy type'),
     ratio: z.number().min(0).max(1).optional(),
     condition: z.union([
-      z.record(z.string(), z.unknown()),
+      // ⚠️ The structured-filter arm must refuse an EXPRESSION-shaped object or
+      // it swallows the one this union's other arm exists to judge: a bare
+      // `z.record(z.string(), z.unknown())` accepts `{ dialect: 'cel', ast }`
+      // as an ordinary record, so #15811's narrowing was inert here until this
+      // arm learned to decline. An object carrying `dialect` is an expression
+      // attempt and belongs to the arm below, whatever it got wrong.
+      z.record(z.string(), z.unknown())
+        .refine((value) => !('dialect' in value), { message: EVALUATED_EXPRESSION_SOURCE_REQUIRED }),
       EvaluatedExpressionInputSchema,
-    ]).optional().describe('Condition for this strategy — structured filter or CEL predicate'),
+    ], { error: (issue) => evaluatedExpressionUnionRefusal(issue.input) })
+      .optional().describe('Condition for this strategy — structured filter or CEL predicate'),
   })).optional(),
 
   /**

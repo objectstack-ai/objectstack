@@ -21,7 +21,7 @@ import { isActionParamValuePresent } from './action-params.zod';
 // reaches only `shared/` + `data/`, so it cannot close a cycle back to `ui/`.
 import { BulkActionExecutionSchema } from './bulk-action.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
-import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema, evaluatedExpressionUnionRefusal } from '../shared/expression.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { HookBodySchema } from '../data/hook-body.zod';
 // Imported file-directly (not via the kernel barrel): the module is
@@ -829,7 +829,9 @@ export type ActionAiParsed = z.infer<typeof ActionAiSchema>;
  * source:'true'}`: a literal survives as a literal, so a renderer can branch on
  * it without standing up an evaluator, and `false` stays statically greppable.
  */
-const ActionConditionInputSchema = z.union([z.boolean(), EvaluatedExpressionInputSchema]);
+const ActionConditionInputSchema = z.union([z.boolean(), EvaluatedExpressionInputSchema], {
+  error: (issue) => evaluatedExpressionUnionRefusal(issue.input),
+});
 
 /**
  * The object half of {@link ActionSchema}, before its refinements.
