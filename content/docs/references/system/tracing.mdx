@@ -424,7 +424,7 @@ Trace sampling configuration
 | :--- | :--- | :--- | :--- |
 | **strategy** | `Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>` | ✅ | Strategy type |
 | **ratio** | `number` | optional |  |
-| **condition** | `Record<string, any> \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Condition for this strategy — a structured filter object, or a CEL predicate an engine evaluates. ⚠️ The two are told apart by the `dialect` key: a structured filter must NOT carry one, and an object that does is judged as an expression — so it needs a dialect this platform evaluates and a non-blank `source` (`{ dialect: 'cel', source: 'record.amount > 10' }`). `{ dialect: 'cel', ast: … }` with no `source` is refused here (#15811). |
+| **condition** | `Record<string, any> \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Condition for this strategy — a structured filter object, or a CEL predicate an engine evaluates. ⚠️ The two are told apart by the `dialect` key: a structured filter must NOT carry one, and an object that does is judged as an expression — so it needs a dialect this platform evaluates and a non-blank `source` (`{ dialect: 'cel', source: 'record.amount > 10' }`). `{ dialect: 'cel', ast: … }` with no `source` is refused here. |
 
 ### Nested Shape: `TraceSamplingConfig.rules[number]`
 

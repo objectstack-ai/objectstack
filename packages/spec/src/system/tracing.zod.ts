@@ -392,7 +392,7 @@ export const TraceSamplingConfigSchema = lazySchema(() => z.object({
         }),
       EvaluatedExpressionInputSchema,
     ], { error: (issue) => evaluatedExpressionUnionRefusal(issue.input) })
-      .optional().describe('Condition for this strategy — a structured filter object, or a CEL predicate an engine evaluates. ⚠️ The two are told apart by the `dialect` key: a structured filter must NOT carry one, and an object that does is judged as an expression — so it needs a dialect this platform evaluates and a non-blank `source` (`{ dialect: \'cel\', source: \'record.amount > 10\' }`). `{ dialect: \'cel\', ast: … }` with no `source` is refused here (#15811).'),
+      .optional().describe('Condition for this strategy — a structured filter object, or a CEL predicate an engine evaluates. ⚠️ The two are told apart by the `dialect` key: a structured filter must NOT carry one, and an object that does is judged as an expression — so it needs a dialect this platform evaluates and a non-blank `source` (`{ dialect: \'cel\', source: \'record.amount > 10\' }`). `{ dialect: \'cel\', ast: … }` with no `source` is refused here.'),
   })).optional(),
 
   /**
