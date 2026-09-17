@@ -4298,9 +4298,23 @@ describe('audience-anchor bindings read the stack\'s declared capabilities (#185
       registerMiddleware: () => {},
       find: async (object: string, opts?: any) => {
         const where = opts?.where ?? {};
-        return (tables[object] ?? []).filter((r: any) =>
-          Object.entries(where).every(([k, v]) => r[k] === v),
+        const matched = (tables[object] ?? []).filter((r: any) =>
+          // The matcher REFUSES what it does not implement rather than
+          // answering as if it had: a `$or` key compared as a field name
+          // matches no row and reports that as "no rows"
+          // (`check:where-matcher` — refusal is the conforming cheap answer for
+          // a double that only ever sees scalar equality).
+          Object.entries(where).every(([k, v]) => {
+            if (k.startsWith('$')) {
+              throw new Error(`test double: unsupported WHERE combinator '${k}' — implement it or narrow the fixture`);
+            }
+            return r[k] === v;
+          }),
         );
+        // The caller's bound, applied BY PRESENCE and after the filter — the
+        // plugin reads `limit: 5` here to tell an organization-less row from
+        // this organization's own (`check:objectql-double-limit`).
+        return typeof opts?.limit === 'number' ? matched.slice(0, opts.limit) : matched;
       },
       findOne: async (object: string, query?: EngineFindOneQueryInput) => {
         assertEngineFindOnePredicate(object, query);
