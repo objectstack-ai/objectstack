@@ -476,7 +476,7 @@ Sort field and direction pair
 | **typeField** | `string` | optional | Field whose value maps to task/summary/milestone |
 | **baselineStartField** | `string` | optional | Baseline (planned) start field |
 | **baselineEndField** | `string` | optional | Baseline (planned) end field |
-| **groupByField** | `string` | optional | Field to group leaf tasks by (synthesized summary rows) |
+| **groupByField** | `string` | optional | Field to group leaf tasks by (synthesized summary rows). NO leading or trailing whitespace: the group accessor reads this name off every task verbatim, so a padded spelling drops every task into one ungrouped bucket. |
 | **resourceView** | `boolean` | optional | Render a per-resource workload histogram instead of the timeline |
 | **assigneeField** | `string` | optional | Resource field to bucket load by (resource view) |
 | **effortField** | `string` | optional | Per-task load units (resource view; default 1) |

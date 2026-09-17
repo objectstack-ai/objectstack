@@ -2422,6 +2422,153 @@ describe('TimelineConfigSchema', () => {
   });
 });
 
+// ============================================================================
+// [#17499] `groupByField` refuses a padded field name — kanban / gantt / timeline
+// ============================================================================
+//
+// The sibling axis of #17360 / PR #17498 (`grouping.fields[].field`, landed as
+// `f8e5790593`), which scoped this one out by name. All three keys were bare
+// `z.string()`, so `' stage'` was valid authored metadata handed to a consumer
+// that looks the name up on every row: objectui (`dda8f3815`) resolves the
+// kanban lane as `groupByField || groupField || detectStatusField(objectDef)`
+// and buckets cards by `card[laneField]`; `ObjectGantt`'s `groupByAccessor`
+// splits the name on `.` and walks the backing record. The server answers
+// under the unpadded name, so the padded spelling reads `undefined` on every
+// row and the board shows one `Uncategorized` lane / the gantt and timeline
+// one ungrouped bucket holding every record — a wrong answer that reads as a
+// true statement about the data.
+//
+// `KanbanConfigSchema.groupByField` is the site that makes this its own card:
+// it is REQUIRED, so the padded value cannot be withdrawn by omitting the key.
+describe('groupByField — a padded field name is refused (#17499)', () => {
+  /**
+   * Per schema: the minimal valid block MINUS `groupByField`, and the sibling
+   * `z.string()` keys on that same schema the DARK control probes.
+   */
+  const SCHEMAS: Array<[string, z.ZodTypeAny, Record<string, unknown>, string[]]> = [
+    ['kanban', KanbanConfigSchema as unknown as z.ZodTypeAny,
+      { columns: ['name'] }, ['summarizeField', 'titleField']],
+    ['gantt', GanttConfigSchema as unknown as z.ZodTypeAny,
+      { startDateField: 'starts_at', endDateField: 'ends_at', titleField: 'name' },
+      ['startDateField', 'endDateField', 'titleField', 'progressField']],
+    ['timeline', TimelineConfigSchema as unknown as z.ZodTypeAny,
+      { startDateField: 'starts_at', titleField: 'name' },
+      ['startDateField', 'titleField', 'endDateField', 'colorField']],
+  ];
+
+  const PADDED: Array<[string, string]> = [
+    ['leading', ' stage'],
+    ['trailing', 'stage '],
+    ['both', '  stage  '],
+    ['a tab', '\tstage'],
+    ['a newline', 'stage\n'],
+    ['whitespace only', ' '],
+  ];
+
+  // Every DISTINCT `groupByField` spelling this repo carries, harvested from
+  // every `.ts` / `.tsx` / `.mdx` / `.json` / `.mjs` outside `node_modules`
+  // (14 distinct literals; `'warning'` / `'error'` are severity-map VALUES in
+  // `packages/lint` and `'<select_or_status_field>'` is prose inside a
+  // completeness hint, so neither is an authored name and neither is listed).
+  // `owner.name` is the load-bearing member: these keys hold a field
+  // REFERENCE, and a dotted relationship path is an in-tree spelling of one —
+  // which is why this is NOT the snake_case machine-name grammar
+  // `/^[a-z_][a-z0-9_]*$/` (`owner.name` measured `false` against it, while
+  // `packages/lint`'s `validate-list-view-field-refs.test.ts` carries
+  // `kanban: { groupByField: 'owner.name' }` in a case asserting no findings).
+  const IN_TREE_GROUP_BY_FIELD_SPELLINGS = [
+    'status', 'stage', 'team', 'workshop', 'due_date', 'owner', 'owner.name',
+    'business_unit', 'A9_no_such_field', 'statuss', 'zzzzzzzzzzzzzzzz',
+  ];
+
+  describe.each(SCHEMAS)('%s.groupByField', (view, schema, rest, siblings) => {
+    it.each(PADDED)('refuses %s whitespace', (_label, spelling) => {
+      expect(schema.safeParse({ ...rest, groupByField: spelling }).success).toBe(false);
+    });
+
+    it('addresses the refusal to `groupByField` BY NAME and quotes the spelling', () => {
+      const result = schema.safeParse({ ...rest, groupByField: ' stage' });
+      expect(result.success).toBe(false);
+
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'groupByField');
+      expect(issue).toBeDefined();
+      // The whitespace an author cannot see in an editor is visible here...
+      expect(issue!.message).toContain('" stage"');
+      // ...next to the name to write instead, and the key that is wrong.
+      expect(issue!.message).toContain('Write "stage".');
+      expect(issue!.message).toContain(`\`${view}.groupByField\``);
+    });
+
+    // ⛔ NOT a `.trim()`. A trimming schema would make `' stage'` and `'stage'`
+    // silently equivalent — the consumer-tolerance direction AGENTS.md #0.1
+    // refuses, and on the REQUIRED kanban key the author cannot withdraw the
+    // value instead. This arm is what tells the two designs apart: it pins
+    // that an accepted name arrives byte-identical, so a schema that
+    // normalised on the way through would fail here even though it would also
+    // stop the silent miss.
+    it('does not trim — an accepted name arrives byte-identical', () => {
+      const parsed = schema.parse({ ...rest, groupByField: 'stage' }) as { groupByField?: string };
+      expect(parsed.groupByField).toBe('stage');
+    });
+
+    // LIT — the narrowing must not over-reach: every in-tree spelling is still
+    // accepted, on all three schemas.
+    it.each(IN_TREE_GROUP_BY_FIELD_SPELLINGS)('still accepts the in-tree spelling %s', (spelling) => {
+      expect(schema.safeParse({ ...rest, groupByField: spelling }).success).toBe(true);
+    });
+
+    // DARK — must read 0. The narrowing lands on `groupByField` and on nothing
+    // else: every sibling `z.string()` key on the SAME schema still accepts a
+    // padded value. A leak into a neighbour shows up here as a refusal.
+    it('leaves every sibling string key on the same schema untouched', () => {
+      expect(siblings.length).toBeGreaterThan(0); // non-vacuous: the table is populated
+
+      for (const key of siblings) {
+        const probe = { ...rest, groupByField: 'stage', [key]: ' padded_sibling ' };
+        expect(schema.safeParse(probe).success).toBe(true);
+      }
+    });
+  });
+
+  // The kanban key is REQUIRED — the difference from the precedent that earns
+  // this card. Omitting it is refused for absence (as before); supplying it
+  // padded is refused for the padding (new). Both doors, one call shape.
+  it('kanban.groupByField is required AND non-padded — both doors refuse', () => {
+    expect(KanbanConfigSchema.safeParse({ columns: ['name'] }).success).toBe(false);
+    expect(KanbanConfigSchema.safeParse({ columns: ['name'], groupByField: ' stage' }).success).toBe(false);
+    expect(KanbanConfigSchema.safeParse({ columns: ['name'], groupByField: 'stage' }).success).toBe(true);
+  });
+
+  // The refusal survives nesting: a padded name inside a whole list view is
+  // addressed to the block's own key, not to the view.
+  it('refuses a padded name through ListViewSchema, addressed to `kanban.groupByField`', () => {
+    const result = ListViewSchema.safeParse({
+      type: 'kanban',
+      columns: ['name'],
+      kanban: { groupByField: ' stage', columns: ['name'] },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((i) => i.path.join('.'))).toContain('kanban.groupByField');
+  });
+
+  // The empty string is deliberately NOT narrowed here — the precedent decided
+  // that for the sibling axis and nothing about these three keys changes it.
+  // Widening the pattern to catch `''` would be a second, undeclared narrowing
+  // riding on this card.
+  it('still accepts the empty string — this card narrows padding only', () => {
+    expect(KanbanConfigSchema.safeParse({ columns: ['name'], groupByField: '' }).success).toBe(true);
+  });
+
+  // The whole block is a reading only if this schema is genuinely NARROWER
+  // than the one it replaces: every accepting arm above would pass just as
+  // well against the old bare `z.string()`.
+  it('is a narrowing — the discriminator the old schema would fail', () => {
+    expect(z.string().safeParse(' stage').success).toBe(true);
+    expect(KanbanConfigSchema.safeParse({ columns: ['name'], groupByField: ' stage' }).success).toBe(false);
+  });
+});
+
 describe('ViewSharingSchema', () => {
   it('should default to collaborative', () => {
     const sharing = {};
