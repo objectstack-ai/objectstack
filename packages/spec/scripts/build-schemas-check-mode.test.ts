@@ -1477,23 +1477,23 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       expect(eager.output).toMatch(
         rx(DELETED_GUIDANCE_UNNAMED, 'def reachable from the metadata-type roots; .*was LIVE'),
       );
-      expect(eager.output).not.toMatch(rx(DELETED_GUIDANCE_UNNAMED, 'is REFUSED as an unrecognized key'));
+      expect(eager.output).not.toMatch(rx(DELETED_GUIDANCE_UNNAMED, 'def .*is REFUSED as an unrecognized key'));
       // …and not the "declared but not delivered" verdict either: nothing NAMES
       // this key, so its reader is not sent looking for a `guidance` entry that
       // was never written.
-      expect(eager.output).not.toMatch(rx(DELETED_GUIDANCE_UNNAMED, 'declaration NAMES'));
+      expect(eager.output).not.toMatch(rx(DELETED_GUIDANCE_UNNAMED, 'def .*declaration NAMES'));
 
       // Direction 3 — the withheld tombstone stays withheld. Nothing prescribes
       // for `schedule`, so proof 4 has no route to it and the deletion is still
       // refused, on the same verdict it was refused on before this card.
       expect(eager.output).toMatch(rx(WITHHELD_TOMBSTONE, 'def .*was LIVE \\(never tombstoned\\)'));
-      expect(eager.output).not.toMatch(rx(WITHHELD_TOMBSTONE, 'is REFUSED as an unrecognized key'));
+      expect(eager.output).not.toMatch(rx(WITHHELD_TOMBSTONE, 'def .*is REFUSED as an unrecognized key'));
 
       // Direction 4 — proof 2's repaired conservatism is untouched: a def no
       // metadata document is ever parsed against still reads `null` and is still
       // waived by proof 2, with proof 2's words and not proof 4's.
       expect(eager.output).toMatch(rx(DELETED_UNREACHABLE, 'def not reachable from the \\d+ metadata-type roots'));
-      expect(eager.output).not.toMatch(rx(DELETED_UNREACHABLE, 'is REFUSED as an unrecognized key'));
+      expect(eager.output).not.toMatch(rx(DELETED_UNREACHABLE, 'def .*is REFUSED as an unrecognized key'));
 
       // Direction 5 — the two proofs are DISJOINT, not merely different. This key
       // satisfies every OTHER condition proof 4 tests: reachable def, closed
@@ -1503,7 +1503,7 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       // RETIRED_KEYS_BY_MAJOR declaration, exactly as before this card.
       const agedKey = DELETED_AGED.replace(RETIRED_MARK, '');
       expect(eager.output).toMatch(rx(agedKey, 'def .*tombstoned, but no entry in RETIRED_KEYS_BY_MAJOR'));
-      expect(eager.output).not.toMatch(rx(agedKey, 'is REFUSED as an unrecognized key'));
+      expect(eager.output).not.toMatch(rx(agedKey, 'def .*is REFUSED as an unrecognized key'));
 
       // The same five verdicts under the lazy-Proxy graph, where every def
       // resolves through `zodShapeOf`'s lazy getter rather than by identity. The
@@ -1515,7 +1515,7 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       expect(lazy.output).toMatch(rx(DELETED_GUIDANCE_UNNAMED, 'def .*was LIVE \\(never tombstoned\\)'));
       expect(lazy.output).toMatch(rx(WITHHELD_TOMBSTONE, 'def .*was LIVE \\(never tombstoned\\)'));
       expect(lazy.output).toMatch(rx(DELETED_UNREACHABLE, 'def not reachable from the \\d+ metadata-type roots'));
-      expect(lazy.output).not.toMatch(rx(agedKey, 'is REFUSED as an unrecognized key'));
+      expect(lazy.output).not.toMatch(rx(agedKey, 'def .*is REFUSED as an unrecognized key'));
 
       expect(readSurface()).toBe(canonical);
     },
@@ -1567,9 +1567,9 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       expect(eager.status).toBe(1);
       expect(eager.output).toContain('authorable baseline line(s) were deleted without proof (#4650)');
       expect(eager.output).toMatch(
-        rx(DELETED_OPEN_TWIN, `a \`strictObject\` declaration NAMES '${TWIN_LEAF}', but writing it`),
+        rx(DELETED_OPEN_TWIN, `def .*; a \`strictObject\` declaration NAMES '${TWIN_LEAF}', but writing it`),
       );
-      expect(eager.output).not.toMatch(rx(DELETED_OPEN_TWIN, 'is REFUSED as an unrecognized key'));
+      expect(eager.output).not.toMatch(rx(DELETED_OPEN_TWIN, 'def .*is REFUSED as an unrecognized key'));
       // …and it is not being waived by some OTHER proof either. The def is
       // root-reachable, so proof 2 must not answer for it — without this leg the
       // case would pass on a gate that had simply stopped emitting proof 4 at all.
