@@ -190,11 +190,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'census guard: sibling-config discovery going quiet is INVISIBLE': 14,
   'the import clause is bounded to ONE statement (#12555)': 8,
   'the declaration must still BE the workspace (#11510)': 22,
+  "a bare-directory `include` is tsc's implicit glob (#18373)": 7,
+  '`--list` carries the provenance annotation too (#18373)': 5,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 11;
+const SELF_TEST_BATTERY_FLOOR = 13;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1240,6 +1242,50 @@ function globToRegExp(glob) {
   return new RegExp('^' + re + '$');
 }
 
+// TS's IMPLICIT GLOB, applied to an `include` entry before it becomes a RegExp.
+//
+// `globToRegExp` anchors `^…$`, so an entry naming a bare directory compiles to
+// a pattern that can only match a FILE of that name: `"src"` becomes `/^src$/`,
+// which never matches `src/engine.ts`. tsc does not read it that way. In
+// `commandLineParser.ts` every include spec goes through
+// `getSubPatternFromSpec`, which tests the spec's LAST path component with
+// `isImplicitGlob` — `!/[.*?]/.test(lastComponent)` — and, when it holds, pushes
+// `**` and `*` onto the components before building the pattern. So `"src"` IS
+// the recursive-wildcard spelling to tsc, and `"include": ["src"]` is a
+// spelling this repo really ships.
+//
+// Read as a literal instead, the program's file set comes back EMPTY, and an
+// empty program is silent in every direction that matters here: it contributes
+// no imports, so the package's exposure is attributed to whichever OTHER program
+// did have files — and the `(via …)` provenance annotation then names a sibling
+// config as the only route to a dep the build config reaches too. That
+// annotation is the doc-block's own test for the re-baseline limb over
+// `KNOWN_DIST_RESOLVED_TYPE_IMPORTS`, so a false one steers an author onto the
+// limb that doc-block forbids.
+//
+// ⛔ The `.` in that character class is not incidental and is NOT simplified to
+// "has no wildcard": tsc does not expand a last component containing a dot, so
+// `"src/index.ts"` stays the single file it names, and a directory that happens
+// to be called `v1.2` is likewise left literal — tsc's own quirk, reproduced
+// deliberately, because a gate that reads a program differently from tsc is the
+// defect it exists to find.
+//
+// Extension filtering needs nothing here: `programFiles` admits only
+// `SOURCE_FILE` paths before any include is consulted, which is the same
+// restriction tsc applies to a spec that names no extension.
+//
+// ⚠️ Includes ONLY. Excludes reach their directory case through `isExcluded`'s
+// own bare-prefix branch, which is already tsc's exclude behaviour; routing them
+// through here as well would change what `re.test()` answers for the directory
+// entry itself.
+function expandImplicitGlob(spec) {
+  const g = spec.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
+  if (g === '') return spec;
+  const lastComponent = g.slice(g.lastIndexOf('/') + 1);
+  if (/[.*?]/.test(lastComponent)) return g;
+  return `${g}/**/*`;
+}
+
 const DEFAULT_EXCLUDES = ['node_modules', 'bower_components', 'jspm_packages'];
 
 function walkFiles(dir, acc = []) {
@@ -1304,7 +1350,10 @@ function programFiles(pkgDir, config) {
   // `files` alone, with no `include`, means exactly those files.
   if (filesSpec?.value?.length > 0 && includeSpec === undefined) return [...out];
 
-  const includes = (includeSpec?.value ?? ['**/*']).map((g) => globToRegExp(g));
+  // `expandImplicitGlob` first: tsc turns a bare-directory entry into
+  // `dir/**/*` before it ever becomes a pattern, and reading it literally leaves
+  // the program EMPTY (see that function's header).
+  const includes = (includeSpec?.value ?? ['**/*']).map((g) => globToRegExp(expandImplicitGlob(g)));
   const includeDir = includeSpec?.dir ?? pkgDir;
   for (const abs of walkFiles(includeDir)) {
     if (!SOURCE_FILE.test(abs)) continue;
@@ -1629,6 +1678,28 @@ function scan(root) {
 
 // ── the gate ────────────────────────────────────────────────────────────────
 
+/**
+ * A dep list annotated with the program that reaches it, when that is not the
+ * build config (#11490). Without it the widening produces a diagnostic an
+ * author cannot act on: they open `tsconfig.json`, find no such import, and
+ * conclude the gate is wrong. Plain names are kept in the copy-paste snippets
+ * in the failure text — those are `paths` keys and a parenthetical would be
+ * pasted in.
+ *
+ * ⛔ ONE implementation, at module scope, because BOTH reporting surfaces owe
+ * the same annotation: `KNOWN_DIST_RESOLVED_TYPE_IMPORTS`'s doc-block says it
+ * appears "in `--list` and in the failure text", and makes it the test for
+ * telling a re-baseline from a plain refusal. Two copies would let the two
+ * surfaces disagree about which program reaches a dep, and the surface an
+ * author takes their before/after numbers from is `--list`.
+ */
+const withProvenance = (pkg, deps) =>
+  deps.map((dep) => {
+    const via = pkg.distResolvedBy.get(dep) ?? [];
+    const siblings = via.filter((file) => file !== 'tsconfig.json');
+    return siblings.length > 0 && !via.includes('tsconfig.json') ? `${dep} (via ${siblings.join(', ')})` : dep;
+  });
+
 function check(root, registry) {
   const failures = [];
   const { packages, artifactPackages, totalPackages, totalPrograms } = scan(root);
@@ -1688,20 +1759,6 @@ function check(root, registry) {
       }
     }
   }
-
-  /**
-   * A dep list annotated with the program that reaches it, when that is not the
-   * build config (#11490). Without it the widening produces a diagnostic an
-   * author cannot act on: they open `tsconfig.json`, find no such import, and
-   * conclude the gate is wrong. Plain names are kept in the copy-paste snippets
-   * below — those are `paths` keys and a parenthetical would be pasted in.
-   */
-  const withProvenance = (pkg, deps) =>
-    deps.map((dep) => {
-      const via = pkg.distResolvedBy.get(dep) ?? [];
-      const siblings = via.filter((file) => file !== 'tsconfig.json');
-      return siblings.length > 0 && !via.includes('tsconfig.json') ? `${dep} (via ${siblings.join(', ')})` : dep;
-    });
 
   for (const [name, deps] of measured) {
     const registered = registry[name];
@@ -1795,14 +1852,36 @@ function check(root, registry) {
 
 // ── reporting ───────────────────────────────────────────────────────────────
 
+/**
+ * The registry-shaped body of `--list`, as an array of lines, so the parity this
+ * gate's doc-block promises can be ASSERTED rather than eyeballed — a `--list`
+ * that stopped annotating is invisible from inside a printer.
+ *
+ * Each row stays paste-able: the dep names inside the array literal are the
+ * registry's own values and carry no parenthetical, and the provenance rides in
+ * a trailing `//` comment. That is the only shape that can satisfy both halves
+ * at once — the doc-block asks for the annotation HERE, and this output's whole
+ * purpose is to be pasted over `KNOWN_DIST_RESOLVED_TYPE_IMPORTS`.
+ *
+ * The annotation itself comes from `withProvenance`, the same call the failure
+ * text makes, so the two surfaces cannot drift apart on which program reaches
+ * which dep.
+ */
+function listLines(offenders) {
+  const lines = ['const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {'];
+  for (const pkg of offenders) {
+    const annotated = withProvenance(pkg, pkg.distResolved).filter((dep) => dep.includes(' (via '));
+    const trailer = annotated.length > 0 ? `  // ${annotated.join('; ')}` : '';
+    lines.push(`  '${pkg.name}': [${pkg.distResolved.map((d) => `'${d}'`).join(', ')}],${trailer}`);
+  }
+  lines.push('};');
+  return lines;
+}
+
 function printList(root) {
   const { packages, totalPrograms: programs } = scan(root);
   const offenders = packages.filter((p) => p.distResolved.length > 0).sort((a, b) => a.name.localeCompare(b.name));
-  console.log('const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {');
-  for (const pkg of offenders) {
-    console.log(`  '${pkg.name}': [${pkg.distResolved.map((d) => `'${d}'`).join(', ')}],`);
-  }
-  console.log('};');
+  for (const line of listLines(offenders)) console.log(line);
   console.error(
     `\n${offenders.length} of ${packages.length} packages (${programs} tsc program(s)) have >=1 workspace type import ` +
       `resolving through \`dist/\` (${offenders.reduce((n, p) => n + p.distResolved.length, 0)} package-dependency pairs); ` +
@@ -2148,6 +2227,53 @@ function buildFixtureTree() {
     ...testLayerFiles,
   });
 
+  // (20) THE BARE-DIRECTORY `include` (#18373). `"include": ["src"]` is legal
+  // TypeScript and 22 of this repo's tsconfigs ship it. tsc expands it to the
+  // recursive wildcard; a reader that anchors the literal compiles it to a
+  // pattern matching only a FILE named `src`, and the program's file set comes
+  // back EMPTY — which is silent, because an empty program reports nothing.
+  fixture(root, 'packages/bare-include', {
+    'package.json': ARTIFACT_MANIFEST('@fx/bare-include'),
+    'tsconfig.json': JSON.stringify({ include: ['src'] }, null, 2),
+    'src/thing.ts': "import { alive } from '@fx/spec';\nexport const t = alive;\n",
+    'src/nested/deep.ts': "export const d = 1;\n",
+  });
+
+  // (21) THE TWIN, and the two-sided acceptance test — the same shape (18) uses
+  // for the per-program widening. Byte-identical files, the include spelled the
+  // explicit way. "The gate still passes" is NOT the test: what has to hold is
+  // that the two spellings report the SAME THING, because to tsc they ARE the
+  // same program.
+  fixture(root, 'packages/bare-include-twin', {
+    'package.json': ARTIFACT_MANIFEST('@fx/bare-include-twin'),
+    'tsconfig.json': JSON.stringify({ include: ['src/**/*'] }, null, 2),
+    'src/thing.ts': "import { alive } from '@fx/spec';\nexport const t = alive;\n",
+    'src/nested/deep.ts': "export const d = 1;\n",
+  });
+
+  // (22) THE FALSE-POSITIVE GUARD ON THE EXPANSION. `"src"` must become
+  // `src` + recursive wildcard, NOT a blanket "everything in the package": the
+  // sibling directory here imports a DIFFERENT artifact package, so an
+  // over-broad expansion shows up as an extra dep rather than as a silence.
+  fixture(root, 'packages/bare-include-scope', {
+    'package.json': ARTIFACT_MANIFEST('@fx/bare-include-scope'),
+    'tsconfig.json': JSON.stringify({ include: ['src'] }, null, 2),
+    'src/thing.ts': "import { alive } from '@fx/spec';\nexport const t = alive;\n",
+    'outside/tool.ts': "import { tools } from '@fx/spec-tools';\nexport const s = tools;\n",
+  });
+
+  // (23) THE DOT HALF of tsc's `isImplicitGlob`, which is `!/[.*?]/` on the
+  // LAST path component and not "has no wildcard". An entry naming a FILE must
+  // stay the one file it names — expanding it would silently pull in every
+  // sibling, and here that sibling imports a different artifact package so the
+  // over-expansion is measurable rather than invisible.
+  fixture(root, 'packages/dotted-include', {
+    'package.json': ARTIFACT_MANIFEST('@fx/dotted-include'),
+    'tsconfig.json': JSON.stringify({ include: ['src/index.ts'] }, null, 2),
+    'src/index.ts': "import { alive } from '@fx/spec';\nexport const t = alive;\n",
+    'src/other.ts': "import { tools } from '@fx/spec-tools';\nexport const s = tools;\n",
+  });
+
   return root;
 }
 
@@ -2275,6 +2401,92 @@ function selfTest() {
       'the diagnostic did not name the program the exposure was reached through',
     );
 
+    // ── a bare-directory `include` is tsc's implicit glob (#18373) ────────
+    //
+    // The two-sided shape again, for the same reason: what fails without the
+    // expansion is not a loud wrong answer but a SILENCE — the program's file
+    // set comes back empty and the package drops out of the scan. So the twin
+    // is the assertion that carries the finding, and the two scope guards below
+    // are what stop the repair from being "match everything".
+  battery("a bare-directory `include` is tsc's implicit glob (#18373)");
+    expect(
+      reported(bare, 'packages/bare-include'),
+      '`"include": ["src"]` was read as a literal — the program came back EMPTY, and an empty program '
+        + 'reports nothing, so the package went silent instead of red',
+    );
+    expect(
+      reported(bare, 'packages/bare-include-twin'),
+      'the explicit-wildcard twin of the identical files was not reported',
+    );
+    expect(
+      JSON.stringify(bare.measured.get('@fx/bare-include')) ===
+        JSON.stringify(bare.measured.get('@fx/bare-include-twin')),
+      'the bare-directory spelling and the explicit-wildcard spelling of the SAME files reported '
+        + `differently: ${JSON.stringify(bare.measured.get('@fx/bare-include'))} vs `
+        + `${JSON.stringify(bare.measured.get('@fx/bare-include-twin'))}`,
+    );
+    expect(
+      JSON.stringify(bare.measured.get('@fx/bare-include-scope')) === JSON.stringify(['@fx/spec']),
+      'the expansion escaped the directory the entry names — a sibling directory outside `src` entered the '
+        + `program: ${JSON.stringify(bare.measured.get('@fx/bare-include-scope'))}`,
+    );
+    expect(
+      JSON.stringify(bare.measured.get('@fx/dotted-include')) === JSON.stringify(['@fx/spec']),
+      "an `include` entry naming a FILE was expanded as if it were a directory — tsc's `isImplicitGlob` "
+        + `excludes a last component containing a dot: ${JSON.stringify(bare.measured.get('@fx/dotted-include'))}`,
+    );
+    // The unit pinned directly: every case above reads it through a whole scan,
+    // and a scan can agree for the wrong reason.
+    expect(
+      expandImplicitGlob('src') === 'src/**/*' &&
+        expandImplicitGlob('src/') === 'src/**/*' &&
+        expandImplicitGlob('./src') === 'src/**/*',
+      '`expandImplicitGlob` stopped expanding a bare directory (plain, trailing-slash and `./`-prefixed)',
+    );
+    expect(
+      expandImplicitGlob('src/**/*') === 'src/**/*' &&
+        expandImplicitGlob('src/*') === 'src/*' &&
+        expandImplicitGlob('src/index.ts') === 'src/index.ts',
+      '`expandImplicitGlob` rewrote a spec that already carries a wildcard or an extension',
+    );
+
+    // ── `--list` carries the provenance annotation too (#18373) ───────────
+    //
+    // `KNOWN_DIST_RESOLVED_TYPE_IMPORTS`'s doc-block says the annotation appears
+    // "in `--list` and in the failure text", and makes it the test for telling
+    // the re-baseline limb from the plain refusal. `--list` is also the surface
+    // a re-baseline takes its before/after numbers from, so an unannotated
+    // listing is exactly where that test cannot be applied.
+  battery('`--list` carries the provenance annotation too (#18373)');
+    const listed = listLines(
+      scan(root)
+        .packages.filter((p) => p.distResolved.length > 0)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    );
+    const siblingRow = listed.find((line) => line.startsWith("  '@fx/sibling-config':")) ?? '';
+    const twinRow = listed.find((line) => line.startsWith("  '@fx/build-config-twin':")) ?? '';
+    expect(siblingRow !== '' && twinRow !== '', '`--list` stopped emitting a row for the #11490 fixtures');
+    expect(
+      siblingRow.includes('(via tsconfig.test.json)'),
+      '`--list` emitted NO `(via …)` annotation for an exposure reached only through the sibling config — '
+        + "the doc-block's own test for the re-baseline limb cannot be applied to the output it is applied to",
+    );
+    expect(
+      has(bare.failures, '(via tsconfig.test.json)') && siblingRow.includes('(via tsconfig.test.json)'),
+      'the two reporting surfaces disagree about the provenance of the same dep — one annotated it and the '
+        + 'other did not',
+    );
+    expect(
+      !twinRow.includes('(via '),
+      'a dep the BUILD config itself reaches was annotated anyway — the annotation means "NOT via '
+        + 'tsconfig.json", so one on every row carries no information',
+    );
+    expect(
+      !siblingRow.slice(0, siblingRow.indexOf('],') + 2).includes('(via '),
+      'the annotation moved INSIDE the array literal — `--list` output is pasted over the registry, whose '
+        + 'values are bare package names',
+    );
+
     // ── the registry, audited in BOTH directions ──────────────────────────
   battery('the registry, audited in BOTH directions');
     const measuredNames = {
@@ -2287,6 +2499,12 @@ function selfTest() {
       // #11490 — both spellings of the same exposure, registered identically.
       '@fx/sibling-config': ['@fx/spec'],
       '@fx/build-config-twin': ['@fx/spec'],
+      // #18373 — the bare-directory `include` and its explicit-wildcard twin,
+      // plus the two scope guards, all measuring the one dep `src/` imports.
+      '@fx/bare-include': ['@fx/spec'],
+      '@fx/bare-include-twin': ['@fx/spec'],
+      '@fx/bare-include-scope': ['@fx/spec'],
+      '@fx/dotted-include': ['@fx/spec'],
     };
     const registered = check(root, measuredNames);
     expect(
