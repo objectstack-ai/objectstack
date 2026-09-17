@@ -539,7 +539,14 @@
  * ## The request budget, per run
  *
  * `--pair N`: one open-PR listing page (100 PRs per page) plus 2 reads per card
- * the PR delivers (the card, its comment thread). A C3 candidate adds its two
+ * the PR delivers (the card, its comment thread). ⚠️ The thread is a LADDER
+ * rather than a request (#18683): one page per 100 comments up to
+ * `COMMENT_PAGE_CAP`, so a thread of 99 comments or fewer is the one read this
+ * paragraph has always described, a thread of exactly 100 costs two (a full
+ * page is indistinguishable from a finished one), and the longest thread on
+ * this board on 2026-09-17 — 895 comments — would cost nine. No card in the
+ * clause-② population reached 15 that day, so the totals below are measured
+ * ones rather than upper bounds. A C3 candidate adds its two
  * carriers' event streams (one page each on this board) and — only once both
  * read cleared — one commit: ≤5 reads for a candidate pair, 2 for every other.
  * A pair whose card declares `Clause-②: no` adds ONE more — its changed-file
@@ -549,7 +556,8 @@
  * and on the `--pair` path by EVERY pair, because C7 judges the record wherever
  * one exists (#18174). The sweep pays the listing once and the same
  * per-pair cost for every pair it derives. ⇒ a `--pair` run costs 4–9 requests,
- * while a 29-PR sweep costs about 60 — which is exactly GitHub's documented
+ * while a 29-PR sweep costs about 60 — measured at 64 on 2026-09-17, 28 pairs,
+ * with and without the comment ladder alike — which is about GitHub's documented
  * anonymous hourly budget, one more reason the run prints the remaining count
  * instead of assuming it.
  *
@@ -772,6 +780,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18456: the `--pair` input record — the same block on every exit, so two runs that disagree can be diffed': 38,
   '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 16,
   '#18719: a RETRACTED claim leaves the pool — a withdrawn claim never governs': 36,
+  '#18683: the card-comment read pages to a cap — past 100 is UNJUDGED, ⛔ never a truncated pool': 27,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -783,8 +792,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // one #17915 adds, by the one #17959 adds, by the one #18042 adds, and by the
 // one #18174 adds, and by the one #18141 adds, and by the one #17919 adds, and
 // by the one #16833 adds, and by the one #18456 adds, and by the one #18719
-// adds.
-const SELF_TEST_BATTERY_FLOOR = 29;
+// adds, and by the one #18683 adds.
+const SELF_TEST_BATTERY_FLOOR = 30;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -4761,6 +4770,121 @@ async function listOpenPulls(repo) {
 }
 
 /**
+ * The sentence a CAPPED read files, written ONCE for every ladder in this file.
+ *
+ * ⭐ What was measured (#18683) was not a missing sentence: it was two reads in
+ * ONE file giving OPPOSITE defaults on "I did not read everything" — the two
+ * that page answered `null` (UNJUDGED, fail-CLOSED), and the un-paged one
+ * judged the claim pool from whatever the first page happened to contain
+ * (fail-OPEN, on the read that arbitrates OWNERSHIP). A shared sentence is the
+ * half of that a reader can check by sight; the shared LADDER below is the half
+ * that cannot drift at all.
+ */
+export function pageCapNote(cap, noun) {
+  return `${cap} page(s) of 100 ${noun} each, all of them full — the tail is past this file's `
+    + 'page cap and therefore unread';
+}
+
+/**
+ * What ONE paged read DID — the pages it issued, the cap it was allowed, and
+ * whether it hit it. Keyed by the same `readDiagnosisKey` the diagnosis is,
+ * written by `pagedListRead`, drained by `gather` for the input record.
+ *
+ * ⛔ Never consulted by a predicate: a ladder record is provenance, exactly as
+ * the request ledger is.
+ */
+const readLadders = new Map();
+
+/** The ladder one resource's read took, or `null` when no ladder ran for it. */
+export function readLadderRecord(key) {
+  return readLadders.get(key) ?? null;
+}
+
+/**
+ * File the ladder a DOCUMENT-backed read did not take: one read, no cap, and
+ * the field says so rather than rendering as a page count the document never
+ * paid for.
+ */
+function noteDocumentRead(key) {
+  readLadders.set(key, { pages: 1, cap: null, capped: false, complete: true });
+}
+
+/**
+ * ONE list endpoint, paged to exhaustion — or `null`.
+ *
+ * ⛔ Never a partial array, and that is the whole property: a caller cannot
+ * tell a short read from a quiet carrier, so a read that did not finish answers
+ * UNJUDGED rather than handing back the part that arrived. All three of this
+ * file's list reads go through here, so ⛔ no two of them can disagree again
+ * about what an unfinished read defaults to (#18683).
+ *
+ * `readPage` answers one page's rows or `null`. The ladder stops on the FIRST
+ * short page — ⛔ no wasted request — and refuses on the cap.
+ */
+async function pagedListRead({ key, cap, noun, readPage }) {
+  const out = [];
+  for (let page = 1; page <= cap; page++) {
+    const batch = await readPage(page);
+    if (!Array.isArray(batch)) {
+      readLadders.set(key, { pages: page, cap, capped: false, complete: false });
+      return null;
+    }
+    out.push(...batch);
+    if (batch.length < 100) {
+      readLadders.set(key, { pages: page, cap, capped: false, complete: true });
+      return out;
+    }
+  }
+  // ⛔ Not a refusal: every page ANSWERED and the resource is still unread, so
+  // the diagnosis names the channel that served and says what went short rather
+  // than reporting a channel nobody tried (#16833).
+  noteAttempt(readPathState.lastServed ?? READ_PATH_PUBLIC, pageCapNote(cap, noun));
+  readLadders.set(key, { pages: cap, cap, capped: true, complete: false });
+  return null; // cap hit: the tail is unread, so the resource is unread.
+}
+
+/**
+ * The page cap on ONE card's — or one PR's — COMMENT thread.
+ *
+ * ⭐ This is the read that arbitrates OWNERSHIP: the governing claim, the pool
+ * its membership is resolved over, and the `Clause-②` line the declaration limb
+ * reads all come out of these rows. Read short, it does not merely lose detail
+ * — it loses a NEWER claim, so a superseded carrier governs and its declaration
+ * is read as though it were the live one. Measured on the 101-row fixture
+ * (#18683): the un-paged read answered `absent` on a thread whose 101st comment
+ * was the only claim, and `DECLARED \`yes\`` on a thread whose 101st comment
+ * withdrew that value.
+ *
+ * Ten pages is 1,000 comments. Sized on this board, 2026-09-17: the longest
+ * open thread of any kind is seat post #6015 at 895 comments (nine pages), the
+ * next four are #12708 at 365, #6023 at 241, #6017 at 206 and #6024 at 187, the
+ * longest thread carrying a queue label is #13799 at 117, and the longest card
+ * in the clause-② population — the 28 pairs the sweep derived that day — is
+ * #17534 at 14. So the cap clears the whole board today with a page to spare,
+ * and it is the SAME ten `EVENT_PAGE_CAP` uses, because a reader comparing two
+ * caps in one file should have to remember one number. A thread that exceeds it
+ * is answered `null` → UNJUDGED, never clean (#4690).
+ */
+export const COMMENT_PAGE_CAP = 10;
+
+/**
+ * One carrier's comment thread, paged to exhaustion — or `null`.
+ *
+ * ⛔ Never the first page alone: that is what this function exists to stop
+ * being. A truncated pool is a pool, and nothing downstream can tell it from a
+ * complete one.
+ */
+async function readCardComments(repo, number) {
+  const key = readDiagnosisKey('comments', number);
+  return diagnosedRead(key, () => pagedListRead({
+    key,
+    cap: COMMENT_PAGE_CAP,
+    noun: 'comments',
+    readPage: (page) => restOrNull(`/repos/${repo}/issues/${number}/comments?per_page=100&page=${page}`),
+  }));
+}
+
+/**
  * The page cap on ONE carrier's label event stream.
  *
  * Events arrive OLDEST FIRST, so the reading needs the LAST page, not the
@@ -4779,24 +4903,13 @@ export const EVENT_PAGE_CAP = 10;
  * "hang I did not read".
  */
 async function readCarrierEvents(repo, number) {
-  return diagnosedRead(readDiagnosisKey('events', number), async () => {
-    const out = [];
-    for (let page = 1; page <= EVENT_PAGE_CAP; page++) {
-      const batch = await restOrNull(`/repos/${repo}/issues/${number}/events?per_page=100&page=${page}`);
-      if (!Array.isArray(batch)) return null;
-      out.push(...batch);
-      if (batch.length < 100) return out;
-    }
-    // ⛔ Not a refusal: every page ANSWERED and the stream is still unread, so
-    // the diagnosis names the channel that served and says what went short
-    // rather than reporting a channel nobody tried (#16833).
-    noteAttempt(
-      readPathState.lastServed ?? READ_PATH_PUBLIC,
-      `${EVENT_PAGE_CAP} page(s) of 100 events each, all of them full — the tail is past this ` +
-        'file\'s page cap and therefore unread',
-    );
-    return null; // cap hit: the tail is unread, so the history is unread.
-  });
+  const key = readDiagnosisKey('events', number);
+  return diagnosedRead(key, () => pagedListRead({
+    key,
+    cap: EVENT_PAGE_CAP,
+    noun: 'events',
+    readPage: (page) => restOrNull(`/repos/${repo}/issues/${number}/events?per_page=100&page=${page}`),
+  }));
 }
 
 /**
@@ -4842,21 +4955,13 @@ export const FILE_PAGE_CAP = 3;
  * function over: a caller cannot tell a short read from a narrow diff.
  */
 async function readPullFiles(repo, number) {
-  return diagnosedRead(readDiagnosisKey('files', number), async () => {
-    const out = [];
-    for (let page = 1; page <= FILE_PAGE_CAP; page++) {
-      const batch = await restOrNull(`/repos/${repo}/pulls/${number}/files?per_page=100&page=${page}`);
-      if (!Array.isArray(batch)) return null;
-      out.push(...batch);
-      if (batch.length < 100) return out;
-    }
-    noteAttempt(
-      readPathState.lastServed ?? READ_PATH_PUBLIC,
-      `${FILE_PAGE_CAP} page(s) of 100 files each, all of them full — the tail is past this file's ` +
-        'page cap and therefore unread',
-    );
-    return null; // cap hit: the tail is unread, so the diff is unread.
-  });
+  const key = readDiagnosisKey('files', number);
+  return diagnosedRead(key, () => pagedListRead({
+    key,
+    cap: FILE_PAGE_CAP,
+    noun: 'files',
+    readPage: (page) => restOrNull(`/repos/${repo}/pulls/${number}/files?per_page=100&page=${page}`),
+  }));
 }
 
 /**
@@ -4883,8 +4988,7 @@ const NETWORK_READER = Object.freeze({
   repo: null,
   listOpenPulls: (repo) => listOpenPulls(repo),
   readCard: (repo, n) => diagnosedRead(readDiagnosisKey('card', n), () => restOrNull(`/repos/${repo}/issues/${n}`)),
-  readCardComments: (repo, n) =>
-    diagnosedRead(readDiagnosisKey('comments', n), () => restOrNull(`/repos/${repo}/issues/${n}/comments?per_page=100`)),
+  readCardComments: (repo, n) => readCardComments(repo, n),
   readCarrierEvents: (repo, n) => readCarrierEvents(repo, n),
   readHeadCommitDate: (repo, sha) => readHeadCommitDate(repo, sha),
   readPullFiles: (repo, n) => readPullFiles(repo, n),
@@ -4954,6 +5058,9 @@ export function pairJsonReader(doc, { source = 'the --pair-json document' } = {}
     readCard: (_repo, n) => served(readDiagnosisKey('card', n), 'cards', n, fromDocument(doc.cards, n)),
     readCardComments: (_repo, n) => {
       const rows = fromDocument(doc.comments, n);
+      // The document serves the thread whole, so the ladder field states THAT
+      // rather than rendering unset beside a reading that really was complete.
+      if (Array.isArray(rows)) noteDocumentRead(readDiagnosisKey('comments', n));
       return served(readDiagnosisKey('comments', n), 'comments', n, Array.isArray(rows) ? rows : null);
     },
     readCarrierEvents: (_repo, n) => {
@@ -5028,6 +5135,10 @@ async function gather(repo, prFilter = null, reader = NETWORK_READER, { landingR
         prLabels: Array.isArray(pr.labels) ? labelNames(pr) : null,
         cardLabels: card && Array.isArray(card.labels) ? labelNames(card) : null,
         cardComments: Array.isArray(comments) ? comments : null,
+        // ⭐ The LADDER the thread was read down (#18683), carried for the
+        // input record and read by nothing else: two runs that disagree about
+        // a pool can now be diffed on how much of the thread each one saw.
+        cardCommentRead: readLadderRecord(readDiagnosisKey('comments', n)),
       };
       // ⭐ The channel diagnosis rides on the pair (#16833), attached under the
       // SAME words the gap that reports it uses, and only where the read came
@@ -5109,6 +5220,7 @@ async function gather(repo, prFilter = null, reader = NETWORK_READER, { landingR
     if (!prThreads.has(pair.pr)) prThreads.set(pair.pr, await reader.readCardComments(repo, pair.pr));
     const rows = prThreads.get(pair.pr);
     pair.prComments = Array.isArray(rows) ? rows : null;
+    pair.prCommentRead = readLadderRecord(readDiagnosisKey('comments', pair.pr));
     if (pair.prComments === null) {
       attachReadDiagnosis(pair, readDiagnosisKey('comments', pair.pr), `PR #${pair.pr}'s comment thread`);
     }
@@ -5231,9 +5343,11 @@ export const INPUT_RECORD_PAIR_FIELDS = Object.freeze([
   'derivation',
   'head-sha',
   'card-comments',
+  'card-comment-pages',
   'card-comment-ids',
   'card-comment-newest',
   'pr-comments',
+  'pr-comment-pages',
   'pr-comment-ids',
   'pr-comment-newest',
   'claim.rule',
@@ -5345,6 +5459,33 @@ function namedRow(row) {
   return `${String(row?.id ?? '(no id)')} at ${row?.created_at ?? '(no readable date)'} by ${by}`;
 }
 
+/**
+ * ONE paged read, stated as an INPUT: the pages it issued, the cap it was
+ * allowed, and which of the four ways it ended.
+ *
+ * ⭐ The field the asymmetry closed with (#18683). A thread of exactly 100 rows
+ * and a thread whose tail was dropped are the same `100 row(s)` in every other
+ * line this block prints; they differ HERE, because the complete one stopped on
+ * a short page and the truncated one did not stop at all.
+ */
+export function ladderReading(ladder, noun) {
+  if (!ladder) return '(no paged read of this thread was taken on this path)';
+  if (ladder.cap === null) {
+    return '1 read, served whole from the pre-fetched document — ⛔ no page ladder applies to it';
+  }
+  if (ladder.capped) {
+    return `CAPPED — ${ladder.pages} of ${ladder.cap} page(s) of 100 ${noun} each were requested and `
+      + 'EVERY ONE came back full, so the tail is past the cap and the thread is UNREAD (UNJUDGED) '
+      + '— ⛔ never a truncated pool, ⛔ never a clean reading';
+  }
+  if (!ladder.complete) {
+    return `${ladder.pages} of ${ladder.cap} page(s) requested; page ${ladder.pages} came back UNREAD, `
+      + 'so the thread is unread — the cap was ⛔ not what stopped it';
+  }
+  return `${ladder.pages} of ${ladder.cap} page(s) requested — the ladder stopped on a SHORT page, so `
+    + 'the thread is COMPLETE';
+}
+
 /** What `readClause2Line` read out of one body, stated as an INPUT. */
 function clause2Reading(body) {
   const read = readClause2Line(body);
@@ -5387,6 +5528,7 @@ export function pairInputRecord(pair) {
     'card-comments': Array.isArray(pair?.cardComments)
       ? `${pair.cardComments.length} row(s)`
       : 'UNREAD — the thread could not be read, so this pair is UNJUDGED',
+    'card-comment-pages': ladderReading(pair?.cardCommentRead ?? null, 'comments'),
     'card-comment-ids': Array.isArray(pair?.cardComments) ? renderIdList(pair.cardComments) : '(unread)',
     'card-comment-newest': Array.isArray(pair?.cardComments) ? namedRow(newestRow(pair.cardComments)) : '(unread)',
     'pr-comments':
@@ -5395,6 +5537,9 @@ export function pairInputRecord(pair) {
         : Array.isArray(pair.prComments)
           ? `${pair.prComments.length} row(s)`
           : 'UNREAD — the PR thread could not be read',
+    'pr-comment-pages': pair?.prComments === undefined
+      ? '(not read on this path — the sweep buys the PR thread only for a pair that owes a record)'
+      : ladderReading(pair?.prCommentRead ?? null, 'comments'),
     'pr-comment-ids': Array.isArray(pair?.prComments)
       ? renderIdList(pair.prComments)
       : pair?.prComments === undefined ? '(not read on this path)' : '(unread)',
@@ -7873,6 +8018,95 @@ export async function selfTest() {
   t('ONE derivation: the map the selection rejects from is the map `claimRetractions` returns', (() => { const rows = [RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]; const sel = claimCarrierSelection(rows); return sel.retracted.size === 1 && sel.retracted.get(RTX_B)?.id === '6000000013' && claimRetractions(rows).get(RTX_B)?.id === '6000000013'; })());
   t('⛔ an unreadable thread retracts nothing and carries the empty halves', claimRetractions(null).size === 0 && claimCarrierSelection(null).live.length === 0 && claimCarrierSelection(null).retracted.size === 0);
   t('the anchor roster is CLOSED, and bare `release` is not on it — a version release is not a retraction', RETRACTION_PROSE_ANCHORS.length === 5 && !RETRACTION_PROSE_ANCHORS.includes('release') && RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', 'release 阻塞在 `6000000012` 上,等维护者')]) === '6000000012');
+
+  // -- #18683: the card-comment read pages like its two siblings -------------
+  //
+  // What the card measured was an ASYMMETRY inside ONE file, not a missing
+  // feature: two list reads paged to a cap and answered `null` on it
+  // (fail-CLOSED), and the third — the one the governing-claim POOL is built
+  // from — issued one `per_page=100` request and judged from whatever came back
+  // (fail-OPEN, on the read that arbitrates ownership). The pins below are
+  // about that DEFAULT rather than about any one verdict: a thread read short
+  // is UNJUDGED, a thread read whole carries its newest claim, and the input
+  // record says which of the two happened.
+  battery('#18683: the card-comment read pages to a cap — past 100 is UNJUDGED, ⛔ never a truncated pool');
+  const L83_FILLER = (i) => ({
+    id: 6000000000 + i,
+    created_at: `2026-09-01T00:00:${String(i % 60).padStart(2, '0')}Z`,
+    user: { login: 'os-filler' },
+    body: `ordinary comment ${i} — nothing on this line begins with the claim key`,
+  });
+  const L83_CLAIM = (id, at, value) => ({
+    id,
+    created_at: at,
+    user: { login: 'os-justin' },
+    body: `Claim: PM loop round\nBranch: \`claude/issue-77001-x\`\nClause-②: ${value}`,
+  });
+  // The 101st row, past the first page in both fixtures below.
+  const L83_NEW = L83_CLAIM(6000000101, '2026-09-17T23:59:59Z', 'no');
+  // The 1st row of the second fixture: an OLDER claim, inside the first page,
+  // declaring the OPPOSITE value.
+  const L83_OLD = L83_CLAIM(6000000001, '2026-09-01T00:00:00Z', 'yes');
+  const L83_PAD = (n, from = 1) => Array.from({ length: n }, (_, i) => L83_FILLER(i + from));
+  const L83_THREAD = [...L83_PAD(100), L83_NEW];
+  const L83_SUPERSEDING = [L83_OLD, ...L83_PAD(99, 2), L83_NEW];
+  // A page server with GitHub's own semantics AND a request counter: what the
+  // ladder COSTS is a pin here, not an implementation detail — a ladder that
+  // kept asking after a short page would be a correct reading bought at ten
+  // times the budget the header paragraph promises.
+  const L83_READ = async (rows, key, { cap = COMMENT_PAGE_CAP, refuseFrom = null } = {}) => {
+    const calls = [];
+    const out = await pagedListRead({
+      key,
+      cap,
+      noun: 'comments',
+      readPage: (page) => {
+        calls.push(page);
+        if (refuseFrom !== null && page >= refuseFrom) return null;
+        return rows.slice((page - 1) * 100, page * 100);
+      },
+    });
+    return { out, calls: calls.join(','), ladder: readLadderRecord(key) };
+  };
+
+  t('the comment read has a DECLARED cap, exactly as the two reads that always paged do', Number.isInteger(COMMENT_PAGE_CAP) && COMMENT_PAGE_CAP > 0);
+  const L83_FULL = await L83_READ(L83_THREAD, readDiagnosisKey('comments', 770011));
+  t('⭐ the 101st comment REACHES the reader — the thread is read whole, ⛔ not to the end of page one', L83_FULL.out?.length === 101 && L83_FULL.out.at(-1) === L83_NEW);
+  t('⭐ …so a claim past row 100 ENTERS the pool, and GOVERNS it', (() => { const sel = claimCarrierSelection(L83_FULL.out); return sel.pool.length === 1 && sel.pool[0] === L83_NEW; })());
+  t('⭐ …and the declaration limb reads ITS line', cardDeclaration(L83_FULL.out).state === 'declared' && cardDeclaration(L83_FULL.out).value === 'no');
+  t('⛔ CONTROL: the same thread cut at row 100 reads `absent` — the reading the un-paged read produced', cardDeclaration(L83_THREAD.slice(0, 100)).state === 'absent' && claimCarrierSelection(L83_THREAD.slice(0, 100)).pool.length === 0);
+  const L83_SUP = await L83_READ(L83_SUPERSEDING, readDiagnosisKey('comments', 770012));
+  t('⭐ a NEWER claim past the page boundary supersedes the one inside it, and the older one is LISTED', (() => { const sel = claimCarrierSelection(L83_SUP.out); return sel.pool.length === 1 && sel.pool[0] === L83_NEW && sel.rejected.some((r) => r.row === L83_OLD); })());
+  t('⛔ CONTROL: cut at row 100 the SUPERSEDED carrier governs and its `yes` is what the limb reads — the fail-OPEN direction', (() => { const cut = L83_SUPERSEDING.slice(0, 100); const sel = claimCarrierSelection(cut); return sel.pool[0] === L83_OLD && cardDeclaration(cut).value === 'yes'; })());
+  t('⭐ …so the two readings of ONE thread DISAGREE on the declaration — the defect stated as one comparison', cardDeclaration(L83_SUP.out).value === 'no' && cardDeclaration(L83_SUPERSEDING.slice(0, 100)).value === 'yes');
+  const L83_CAPPED = await L83_READ(L83_PAD(COMMENT_PAGE_CAP * 100 + 1), readDiagnosisKey('comments', 770013));
+  t('⭐ a thread past the cap answers `null` — UNJUDGED, ⛔ never the pages that did arrive', L83_CAPPED.out === null);
+  t('⭐ …and `null` is neither `missing` nor `absent` nor a carrier: it is `unreadable`', cardDeclaration(L83_CAPPED.out).state === 'unreadable' && claimCarrierSelection(L83_CAPPED.out).readable === false);
+  t('…and the ladder records that the CAP is what stopped it', L83_CAPPED.ladder?.capped === true && L83_CAPPED.ladder.pages === COMMENT_PAGE_CAP);
+  t('⭐ the ladder stops on the first SHORT page — two requests for a 101-row thread, ⛔ not ten', L83_FULL.calls === '1,2');
+  t('…and a thread that fits inside one page costs ONE request', (await L83_READ(L83_PAD(1), readDiagnosisKey('comments', 770014))).calls === '1');
+  t('⭐ …while a thread of EXACTLY 100 rows costs two, because a full page is indistinguishable from a finished one', (await L83_READ(L83_PAD(100), readDiagnosisKey('comments', 770015))).calls === '1,2');
+  const L83_REFUSED = await L83_READ(L83_PAD(101), readDiagnosisKey('comments', 770016), { refuseFrom: 2 });
+  t('a page that came back UNREAD ends the ladder, and the thread is `null` rather than its first page', L83_REFUSED.out === null && L83_REFUSED.calls === '1,2');
+  t('…and the record says the CAP was ⛔ not what stopped it — two different facts, never one sentence', L83_REFUSED.ladder?.capped === false && L83_REFUSED.ladder.complete === false && says(ladderReading(L83_REFUSED.ladder, 'comments'), 'the cap was ⛔ not what stopped it'));
+  t('the input record DECLARES the ladder field for BOTH threads this file reads', INPUT_RECORD_PAIR_FIELDS.includes('card-comment-pages') && INPUT_RECORD_PAIR_FIELDS.includes('pr-comment-pages'));
+  t('⭐ …and it states the pages issued AND the cap, so two runs can be diffed on how much of the thread each read', says(ladderReading(L83_FULL.ladder, 'comments'), `2 of ${COMMENT_PAGE_CAP} page(s)`) && says(ladderReading(L83_FULL.ladder, 'comments'), 'COMPLETE'));
+  t('⭐ …and a CAPPED read says UNJUDGED in the field itself, ⛔ never a row count', says(ladderReading(L83_CAPPED.ladder, 'comments'), 'CAPPED') && says(ladderReading(L83_CAPPED.ladder, 'comments'), 'UNJUDGED') && !says(ladderReading(L83_CAPPED.ladder, 'comments'), 'COMPLETE'));
+  t('a path that took no ladder SAYS so, rather than rendering a page count it never paid for', says(ladderReading(null, 'comments'), 'no paged read'));
+  t('…and the `--pair-json` document says it was served whole in ONE read', (() => { const r = pairJsonReader({ pulls: [], comments: { 13476: [] } }); r.readCardComments('owner/name', 13476); return says(ladderReading(readLadderRecord(readDiagnosisKey('comments', 13476)), 'comments'), 'served whole from the pre-fetched document'); })());
+  t('⭐ the rendered block carries the ladder line beside the row count, on both threads', (() => { const lines = renderInputRecord(buildInputRecord({ pairs: [{ pr: 1, card: 2, cardComments: L83_FULL.out, cardCommentRead: L83_FULL.ladder, prComments: [], prCommentRead: L83_FULL.ladder }] })).join('\n'); return says(lines, 'pair.1.card-comment-pages:') && says(lines, 'pair.1.pr-comment-pages:') && says(lines, '101 row(s)'); })());
+  t('⛔ CONTROL: the ladder fields are DECLARED, so the block does not name them as keys nothing pins', undeclaredRecordFields(buildInputRecord({ pairs: [{ pr: 1, card: 2, cardComments: [], cardCommentRead: L83_FULL.ladder, prComments: [] }] })).length === 0);
+  t('⛔ CONTROL: the SIBLING caps are untouched by this card — ten event pages, three file pages', EVENT_PAGE_CAP === 10 && FILE_PAGE_CAP === 3);
+  t('⭐ all three list reads render ONE cap sentence, so this file can no longer hold two defaults', pageCapNote(EVENT_PAGE_CAP, 'events') === `${EVENT_PAGE_CAP} page(s) of 100 events each, all of them full — the tail is past this file's page cap and therefore unread` && pageCapNote(COMMENT_PAGE_CAP, 'comments') === `${COMMENT_PAGE_CAP} page(s) of 100 comments each, all of them full — the tail is past this file's page cap and therefore unread`);
+  t('⭐ …and a capped comment read FILES that sentence under its own diagnosis key, the way its siblings do', await (async () => {
+    const key = readDiagnosisKey('comments', 770017);
+    const rows = L83_PAD(100);
+    const value = await diagnosedRead(key, () => pagedListRead({ key, cap: 2, noun: 'comments', readPage: () => rows }));
+    const hung = {};
+    attachReadDiagnosis(hung, key, 'card #770017\'s comment thread');
+    return value === null && says(JSON.stringify(hung.reads ?? []), 'page cap and therefore unread');
+  })());
+  t('⛔ CONTROL: the diagnosis KEY is unchanged, so every sentence already keyed to `comments` still finds it', readDiagnosisKey('comments', 770017) === 'comments:770017');
 
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //

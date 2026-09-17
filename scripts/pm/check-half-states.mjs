@@ -17138,15 +17138,78 @@ export function h67QueuedCardWithMergedDelivery(issue, timeline, repo) {
 export const OUTPUT_FORMATS = ['plain', 'markdown'];
 
 /**
- * GitHub's hard cap on an issue body, and the budget the markdown renderer
- * keeps under it. A body that exceeds the cap is REJECTED by the API — the
- * whole run's report would vanish over one long row — so the renderer trims
- * and SAYS it trimmed. Silent truncation is the #4690 shape (an unreadable
- * result must not read as a clean one), so the omission notice is part of the
- * rendered body, never a log line the anchor's reader never sees.
+ * GitHub's cap on an issue body, in UTF-8 BYTES, and the budget the markdown
+ * renderer keeps under it.
+ *
+ * ## The number is MEASURED now, and it replaces one that was false twice over
+ *
+ * This constant read 65,536 and carried no provenance — no unit, no reading,
+ * no date. It was wrong in BOTH directions at once, which is what got it filed
+ * (#18664):
+ *
+ *   TOO STRICT WHERE IT CUTS   far larger bodies store fine. The filing seat
+ *     read objectstack#6015 at 150,507 chars / 257,945 bytes, byte-complete on
+ *     read-back; re-read on 2026-09-17 after that card had been compacted it
+ *     was still 72,754 chars / 125,561 bytes — past 65,536 in EITHER unit, so
+ *     no reading of the old number survives its own re-measurement.
+ *   BLIND WHERE THE REFUSAL LIVES   a real boundary sits four times higher and
+ *     nothing was watching that band. And crossing it is SILENT: the platform
+ *     keeps the OLD body, answers 200, and reports nothing
+ *     (`post-stamped.mjs`'s `EXIT_NOT_STORED` exists for exactly this).
+ *
+ * So it was bisected rather than guessed — 17 measurement writes on
+ * 2026-09-17, on a throwaway issue opened for the purpose and closed
+ * `completed` with the bisection table as its body (objectstack#18793), every
+ * write read back byte-exact:
+ *
+ *   262,144 bytes  STORED   (read-back class `identical`)
+ *   262,145 bytes  REFUSED  (old body kept, nothing reported)
+ *
+ * ⭐ One value, bracketed on BOTH sides — 256 KiB exactly. ⛔ It is not this
+ * number because 256 KiB is a good-looking guess; the filing card refused that
+ * guess by name. The bisection LANDED here, and one byte more was measured
+ * refused.
+ *
+ * ⛔ And the unit is BYTES, measured rather than assumed. A body of 262,145
+ * bytes carrying only 222,145 characters (a run of 3-byte U+4E2D plus ASCII
+ * padding) was REFUSED — a cap counted in characters, or in UTF-16 code units,
+ * would have taken it with 40,000 to spare. The same multi-byte shape at
+ * 262,144 bytes / 222,144 characters STORED, so what refused it is the one
+ * extra byte and not the content. That control is why `renderMarkdown` counts
+ * `bodyBytes` and never `.length`: these reports are largely CJK prose, where
+ * the two numbers differ by 3×, in the direction that loses the body.
+ *
+ * ## The budget is not the cap, and it did NOT move with it
+ *
+ * `MARKDOWN_BODY_BUDGET` is the renderer's own working budget, in the same
+ * unit. It stays 60,000 BYTES: a cap that was mis-measured is a correction to
+ * a reading, never a licence to print more, and how much the anchor issue
+ * prints is a fold decision nobody has taken. The margin is stated so it can
+ * be checked instead of recalled — the budget sits 202,144 bytes below the
+ * measured cap, which is 22.9% of it.
+ *
+ * A body over the CAP does not land at all — the whole run's report would
+ * vanish over one long row — so the renderer trims and SAYS it trimmed. Silent
+ * truncation is the #4690 shape (an unreadable result must not read as a clean
+ * one), so the omission notice is part of the rendered body, never a log line
+ * the anchor's reader never sees.
  */
-export const ISSUE_BODY_LIMIT = 65536;
+export const ISSUE_BODY_LIMIT = 262144;
 export const MARKDOWN_BODY_BUDGET = 60000;
+
+/**
+ * A body's size as the PLATFORM counts it: UTF-8 bytes.
+ *
+ * ⛔ Never `.length` for anything judged against `ISSUE_BODY_LIMIT` or
+ * `MARKDOWN_BODY_BUDGET`. A JS string's `.length` is UTF-16 code units, the
+ * refusal above is measured to be in bytes, and this file's rows are largely
+ * CJK prose: a body a character count calls 60,000 can be 180,000 bytes. H6
+ * next door has counted bytes since it was written (`h6SeatBodyOversized`);
+ * this makes the renderer agree with it and with the platform.
+ */
+export function bodyBytes(text) {
+  return Buffer.byteLength(String(text ?? ''), 'utf8');
+}
 
 /** Is this finding one of H13's louder self-declared-P0 rows? */
 export function isLoudFinding(message) {
@@ -19063,8 +19126,13 @@ export const FAMILY_LEDGER_CALLOUT_CAP = 12;
  * 3,754 B with enough unregistered
  * codes on top to reach `FAMILY_LEDGER_ROW_CAP`. 6,000 is the declared ceiling
  * above both, and it is under an EIGHTH of `MARKDOWN_BODY_BUDGET` (60,000) —
- * and reserved out of that budget, so the 5,536-byte headroom between the
- * budget and `ISSUE_BODY_LIMIT` (65,536) is untouched by it.
+ * and reserved out of that budget, so the headroom between the budget and
+ * `ISSUE_BODY_LIMIT` is untouched by it. ⚠️ Those two measured figures were
+ * taken with `.length` while this constant's name said BYTES; both are now
+ * measured in bytes (#18664) and the pins below take them that way, which is
+ * why they moved without the ceiling moving. The headroom they leave alone is
+ * 202,144 bytes, not the 5,536 this paragraph used to name against a cap of
+ * 65,536 that was never measured.
  *
  * ⚠️ The GUARANTEE is not this constant. `renderMarkdown` reserves the ledger's
  * own exact upper bound for the run in hand (`familyLedgerReservation`) BEFORE
@@ -19184,7 +19252,10 @@ export function familyLedgerReservation(rows, ledgerText) {
   const callout = probe.families
     .slice(0, FAMILY_LEDGER_CALLOUT_CAP)
     .reduce((s, e) => s + widen(e), 0);
-  return Math.max(ledgerText(0).length, ledgerText(rows.length).length) + table + callout;
+  // In BYTES, as this function's own header has always said and as the
+  // budget it is reserved out of now counts (#18664). The two digit-slack
+  // terms are ASCII digits, one byte each, so they are already byte-correct.
+  return Math.max(bodyBytes(ledgerText(0)), bodyBytes(ledgerText(rows.length))) + table + callout;
 }
 
 /**
@@ -19410,20 +19481,25 @@ export function renderMarkdown(findings, counts, options = {}) {
   const body = head.join('\n');
   const rendered = [];
   let shown = rows.length;
-  let used = body.length + indexText.length + ledgerReservation;
+  // ⛔ Every term here is in BYTES, because that is the unit the platform
+  // refuses in — measured, see `ISSUE_BODY_LIMIT` (#18664). `.length` would
+  // count UTF-16 code units, and these rows are largely CJK prose: a body this
+  // loop called 60,000 could be 180,000 bytes on the wire. The `+ 1` is the
+  // joining newline, one byte in UTF-8.
+  let used = bodyBytes(body) + bodyBytes(indexText) + ledgerReservation;
   for (let i = 0; i < rows.length; i++) {
     const [issue, code, msg] = rows[i];
     const line = `- **${code}** [#${issue.number}](${issue.html_url}) — ${msg}`;
     // Reserve room for the omission notice itself, so the trim can always
     // announce itself even when it fires on the very last row.
     const notice = `\n- _… ${rows.length - i} further row(s) omitted to fit GitHub's issue-body limit; the full list is in the workflow run log._`;
-    if (used + line.length + 1 + notice.length > MARKDOWN_BODY_BUDGET) {
+    if (used + bodyBytes(line) + 1 + bodyBytes(notice) > MARKDOWN_BODY_BUDGET) {
       rendered.push(notice.slice(1));
       shown = i;
       break;
     }
     rendered.push(line);
-    used += line.length + 1;
+    used += bodyBytes(line) + 1;
   }
   return `${body}${rendered.join('\n')}${ledgerText(shown)}${indexText}`;
 }
@@ -24227,10 +24303,24 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // suite is how a repair becomes a silencer, and a vocabulary nobody asserts
   // on is how the next decoration replays this card.
   'H2/H47/H66 decorated ownership marker': 94,
+  // Registered with the measured body cap (#18664); the pin sits just under
+  // the count on its neighbours' grounds. What this battery floors is a
+  // MEASUREMENT and its UNIT — `ISSUE_BODY_LIMIT` bisected to one byte on a
+  // throwaway issue, and a renderer trim that counts the bytes the platform
+  // refuses in rather than the UTF-16 units JS hands out. So the FIRING
+  // CONTROLS are inside it: the CJK report whose character count sails under a
+  // budget its bytes overrun, the non-vacuity pin proving that fixture really
+  // is multi-byte, the counterfactual row count a character-counting guard
+  // would have laid out, and the over-cap report that must still trim and SAY
+  // so. Beside them the provenance is asserted off the constant's own
+  // docblock — unit, both sides of the bracket, the date and the probe issue —
+  // because a number with no provenance is what got re-derived from memory the
+  // first time.
+  'ISSUE_BODY_LIMIT measured cap': 37,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
-export const SELF_TEST_BATTERY_FLOOR = 5;
+export const SELF_TEST_BATTERY_FLOOR = 6;
 
 async function selfTest() {
   const cases = [];
@@ -28364,10 +28454,116 @@ async function selfTest() {
   // announce itself, keep the body under the cap, and never reach a loud row.
   const many = [loudRow, ...Array.from({ length: 400 }, (_, i) => finding(1000 + i, 'H2', 'assignee set but no claim comment on the thread — '.repeat(6)))];
   const trimmed = renderMarkdown(many, counts);
-  t('markdown: an oversized report stays under GitHub\'s body cap', trimmed.length <= ISSUE_BODY_LIMIT, true);
-  t('markdown: …and under the renderer\'s own budget', trimmed.length <= MARKDOWN_BODY_BUDGET, true);
+  t('markdown: an oversized report stays under the MEASURED body cap, in bytes', bodyBytes(trimmed) <= ISSUE_BODY_LIMIT, true);
+  t('markdown: …and under the renderer\'s own budget, in the same unit', bodyBytes(trimmed) <= MARKDOWN_BODY_BUDGET, true);
   t('markdown: the trim announces itself in the body', trimmed.includes('further row(s) omitted'), true);
   t('markdown: truncation can never reach a loud row', trimmed.includes('#900'), true);
+
+  // -- #18664: the cap is MEASURED, and the trim counts the unit it refuses in
+  //
+  // `ISSUE_BODY_LIMIT` read 65,536 with no provenance — no unit, no reading,
+  // no date — and was false in both directions at once: bodies four times
+  // larger store fine, and the refusal that DOES exist sits above it and is
+  // SILENT (the platform keeps the old body and answers 200). It was bisected
+  // on a throwaway issue opened for it (objectstack#18793, 2026-09-17), every
+  // write read back byte-exact: 262,144 bytes stored, 262,145 refused.
+  //
+  // What this battery floors is a MEASUREMENT and its UNIT, so the FIRING
+  // CONTROLS live inside it: the byte/char discriminator a character count
+  // would sail through, the non-vacuity control proving the fixture really is
+  // multi-byte, the over-cap report that must still be trimmed and SAY so, and
+  // the margin arithmetic a reviewer can check by hand. A cap nobody asserts
+  // on is how the next seat re-derives 65,536 from memory, and a byte guard
+  // whose discriminator drifts out of the suite is a byte guard in name only.
+  const BATTERY18664 = 'ISSUE_BODY_LIMIT measured cap';
+
+  // The provenance is part of the deliverable, so it is pinned rather than
+  // trusted. Anchored on the docblock ATTACHED to the constant — not on the
+  // file text, where these assertion strings would satisfy themselves.
+  const selfSource = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  const capDocblock = (() => {
+    const at = selfSource.indexOf('\nexport const ISSUE_BODY_LIMIT =');
+    const open = at < 0 ? -1 : selfSource.lastIndexOf('/**', at);
+    return at < 0 || open < 0 ? '' : selfSource.slice(open, at);
+  })();
+  b(BATTERY18664, '#18664 provenance: ⭐ the extractor really found the constant\'s own docblock', capDocblock.startsWith('/**') && capDocblock.endsWith('*/'), true);
+  b(BATTERY18664, '#18664 provenance: ⛔ …and not the whole file, which would satisfy every pin below with its own text', capDocblock.includes('export const'), false);
+  b(BATTERY18664, '#18664 provenance: the docblock names the UNIT', capDocblock.includes('UTF-8 BYTES'), true);
+  b(BATTERY18664, '#18664 provenance: …the landed side of the bracket', capDocblock.includes('262,144 bytes  STORED'), true);
+  b(BATTERY18664, '#18664 provenance: …the refused side, one byte up', capDocblock.includes('262,145 bytes  REFUSED'), true);
+  b(BATTERY18664, '#18664 provenance: …the date it was taken', capDocblock.includes('2026-09-17'), true);
+  b(BATTERY18664, '#18664 provenance: …and the issue it was measured on', capDocblock.includes('objectstack#18793'), true);
+
+  // The constant itself.
+  b(BATTERY18664, '#18664 cap: the cap is the bisected value', ISSUE_BODY_LIMIT, 262144);
+  b(BATTERY18664, '#18664 cap: …which is 256 KiB exactly, checkable by hand', ISSUE_BODY_LIMIT === 256 * 1024, true);
+  b(BATTERY18664, '#18664 cap: ⛔ the retired 65,536 is gone', ISSUE_BODY_LIMIT === 65536, false);
+  b(BATTERY18664, '#18664 cap: …and the measured cap is four times it', ISSUE_BODY_LIMIT === 65536 * 4, true);
+
+  // The unit, at the primitive the guard is built on.
+  b(BATTERY18664, '#18664 unit: bodyBytes counts UTF-8 bytes', bodyBytes('\u4e2d'), 3);
+  b(BATTERY18664, '#18664 unit: …where `.length` calls the same character one', '\u4e2d'.length, 1);
+  b(BATTERY18664, '#18664 unit: on ASCII the two agree, so nothing changed there', bodyBytes('abc') === 'abc'.length, true);
+  b(BATTERY18664, '#18664 unit: an absent body is zero bytes, never a throw', bodyBytes(undefined), 0);
+
+  // ⭐ THE DISCRIMINATOR. A report whose rows are CJK prose — which is what
+  // this file's rows actually are — must be cut on its BYTES. Under the
+  // character-counting guard this replaces, the same rows would have been laid
+  // out until the CHARACTER count reached the budget, i.e. to roughly three
+  // times the budget in bytes.
+  const cjkMsg = '巡检行的汉字正文'.repeat(12);
+  const cjkRows = Array.from({ length: 4000 }, (_, i) => finding(2000 + i, 'H2', cjkMsg));
+  const cjkBody = renderMarkdown(cjkRows, counts);
+  const cjkShown = cjkBody.split('\n').filter((l) => l.startsWith('- **H2**')).length;
+  const cjkRowChars = `- **H2** [#2000](https://example.test/2000) — ${cjkMsg}`.length + 1;
+  const cjkRowBytes = bodyBytes(`- **H2** [#2000](https://example.test/2000) — ${cjkMsg}`) + 1;
+  b(BATTERY18664, '#18664 guard: a CJK report is trimmed to the BYTE budget', bodyBytes(cjkBody) <= MARKDOWN_BODY_BUDGET, true);
+  b(BATTERY18664, '#18664 guard: …and it announces the trim', cjkBody.includes('further row(s) omitted'), true);
+  b(BATTERY18664, '#18664 guard: ⭐ the row text really is multi-byte, so the bound above is not vacuous', bodyBytes(cjkMsg) === cjkMsg.length * 3, true);
+  b(BATTERY18664, '#18664 guard: …and it did lay out rows, so the counts below are a trim and not an empty body', cjkShown > 0, true);
+  b(BATTERY18664, '#18664 guard: ⭐ the block it laid out fills the budget in BYTES while its character count is under half that', cjkShown * cjkRowChars * 2 < cjkShown * cjkRowBytes, true);
+  // ⭐ THE COUNTERFACTUAL, computed from this same run rather than asserted:
+  // how many rows a CHARACTER-counting guard would have laid out from the same
+  // fixture, and what that body would have WEIGHED on the wire. ⚠️ Read the
+  // second number honestly — it overruns the renderer's BUDGET, not the
+  // platform's measured cap, which at today's budget no character count can
+  // reach. The budget is the thing that stops meaning anything when it is kept
+  // in the wrong unit, and it is the thing that would become dangerous the day
+  // anybody raises it toward the cap.
+  const cjkHeadChars = cjkBody.length - cjkShown * cjkRowChars;
+  const cjkHeadBytes = bodyBytes(cjkBody) - cjkShown * cjkRowBytes;
+  const charGuardShown = Math.floor((MARKDOWN_BODY_BUDGET - cjkHeadChars) / cjkRowChars);
+  const charGuardBytes = cjkHeadBytes + charGuardShown * cjkRowBytes;
+  b(BATTERY18664, '#18664 guard: ⭐ …so it lays out FEWER rows than a character-counting guard would have', cjkShown < charGuardShown, true);
+  b(BATTERY18664, '#18664 guard: ⭐ …whose body would have weighed half again the budget it was meant to keep', charGuardBytes > MARKDOWN_BODY_BUDGET * 1.5, true);
+  b(BATTERY18664, '#18664 guard: …and that counterfactual is a real layout, not a division by zero', charGuardShown > 0 && cjkHeadBytes > 0, true);
+
+  // ⭐ The #4690 shape against the MEASURED cap: rows that alone would overrun
+  // 262,144 bytes are trimmed, announced, and land.
+  const overCapRows = [loudRow, ...Array.from({ length: 3000 }, (_, i) => finding(4000 + i, 'H2', 'assignee set but no claim comment on the thread — '.repeat(3)))];
+  const overCapRowBytes = overCapRows.reduce((n, [card, code, msg]) => n + bodyBytes(`- **${code}** [#${card.number}](${card.html_url}) — ${msg}`) + 1, 0);
+  const overCapBody = renderMarkdown(overCapRows, counts);
+  b(BATTERY18664, '#18664 over-cap: ⭐ the fixture really would exceed the measured cap untrimmed', overCapRowBytes > ISSUE_BODY_LIMIT, true);
+  b(BATTERY18664, '#18664 over-cap: …and the rendered body is under that cap', bodyBytes(overCapBody) <= ISSUE_BODY_LIMIT, true);
+  b(BATTERY18664, '#18664 over-cap: …under the renderer\'s own budget too', bodyBytes(overCapBody) <= MARKDOWN_BODY_BUDGET, true);
+  b(BATTERY18664, '#18664 over-cap: …and it SAYS it trimmed — the #4690 shape, never a silent cut', overCapBody.includes('further row(s) omitted'), true);
+  b(BATTERY18664, '#18664 over-cap: …with the notice pointing at the run log', overCapBody.includes('the full list is in the workflow run log'), true);
+  b(BATTERY18664, '#18664 over-cap: …and the trim still never reached the loud row', overCapBody.includes('#900'), true);
+
+  // The margin, stated in the docblock and checkable here.
+  b(BATTERY18664, '#18664 margin: the budget sits under the measured cap', MARKDOWN_BODY_BUDGET < ISSUE_BODY_LIMIT, true);
+  b(BATTERY18664, '#18664 margin: …by the stated margin, to the byte', ISSUE_BODY_LIMIT - MARKDOWN_BODY_BUDGET, 202144);
+  b(BATTERY18664, '#18664 margin: …and the docblock states that margin rather than leaving it to arithmetic', capDocblock.includes('202,144 bytes below'), true);
+  b(BATTERY18664, '#18664 margin: ⛔ the budget did NOT move with the cap — a corrected reading is not a licence to print more', MARKDOWN_BODY_BUDGET, 60000);
+  b(BATTERY18664, '#18664 margin: the family ledger\'s ceiling still sits under an eighth of the budget, in bytes', FAMILY_LEDGER_WORST_CASE_BYTES * 8 <= MARKDOWN_BODY_BUDGET, true);
+
+  // The floor, in the shape every battery here keeps.
+  b(BATTERY18664, '#18664 floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY18664), true);
+  b(BATTERY18664, '#18664 floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY18664] > 0, true);
+  b(BATTERY18664, '#18664 floor: the roster is frozen', Object.isFrozen(SELF_TEST_BATTERIES), true);
+  b(BATTERY18664, '#18664 floor: the roster now declares SIX batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 6);
+  b(BATTERY18664, '#18664 floor: …including the five this battery landed BESIDE, so neither side of the base merge silently dropped one', ['H66 released queue card', 'H19 judged-set founding', 'H65 tier declaration spelling', 'H67 queued merged-delivery reading', 'H2/H47/H66 decorated ownership marker'].every((name) => Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, name)), true);
+  b(BATTERY18664, '#18664 floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
 
   // -- The UNJUDGED band and the trim (#11218) -------------------------------
   //
@@ -28389,7 +28585,7 @@ async function selfTest() {
   t('markdown: the trim can never reach an UNJUDGED row', withUnjudged.includes('#9999'), true);
   t('markdown: …even though that row sorts LAST by card number', many.every(([i]) => i.number < 9999), true);
   t('markdown: …and the trim still fired', withUnjudged.includes('further row(s) omitted'), true);
-  t('markdown: …and the body is still under budget', withUnjudged.length <= MARKDOWN_BODY_BUDGET, true);
+  t('markdown: …and the body is still under budget', bodyBytes(withUnjudged) <= MARKDOWN_BODY_BUDGET, true);
   t('markdown: an UNJUDGED row is banner-announced', withUnjudged.includes('UNJUDGED row(s) in this sweep'), true);
   t('markdown: …and the banner says a later sweep will not fix it', withUnjudged.includes('nothing in a later sweep will resolve them'), true);
   t('markdown: no banner when nothing is unjudged', renderMarkdown([quietRow], counts).includes('UNJUDGED row(s) in this sweep'), false);
@@ -28486,8 +28682,8 @@ async function selfTest() {
   // under MARKDOWN_BODY_BUDGET. Asserting only ISSUE_BODY_LIMIT would pass
   // even with the reservation removed (the index is ~1.5 KB and the two
   // numbers are 5.5 KB apart), i.e. it would pin nothing.
-  t('H17 budget: …and the whole body stays inside the render budget', crowded.length <= MARKDOWN_BODY_BUDGET, true);
-  t('H17 budget: …which the hard cap also bounds', crowded.length <= ISSUE_BODY_LIMIT, true);
+  t('H17 budget: …and the whole body stays inside the render budget', bodyBytes(crowded) <= MARKDOWN_BODY_BUDGET, true);
+  t('H17 budget: …which the measured cap also bounds', bodyBytes(crowded) <= ISSUE_BODY_LIMIT, true);
   // The index's own overflow announces itself rather than truncating silently.
   const overflow = renderTriggerIndex(
     { rows: Array.from({ length: H17_INDEX_ROW_CAP + 3 }, (_, i) => ({ issue: { number: i, html_url: 'u' }, files: ['f'] })), candidates: 1, probed: 1, tracked: 1 },
@@ -28620,7 +28816,7 @@ async function selfTest() {
   const crowdedBox = renderMarkdown(manyRows, counts, { triggerIndex: triggerIdx, decisions: { ...twoDeps, unmeasured: 3 } });
   t('④ budget: a truncated findings list still carries the section', crowdedBox.includes('### Decision-box dependency flags'), true);
   t('④ budget: …and the H17 index beside it', crowdedBox.includes('### On-hold trigger-file index'), true);
-  t('④ budget: …and the whole body stays inside the render budget', crowdedBox.length <= MARKDOWN_BODY_BUDGET, true);
+  t('④ budget: …and the whole body stays inside the render budget', bodyBytes(crowdedBox) <= MARKDOWN_BODY_BUDGET, true);
 
   // -- #13947: family legibility, and a trim that ranks by WHAT a row is ------
   //
@@ -28700,8 +28896,8 @@ async function selfTest() {
   t('#13947 order: …and is laid out FIRST, above every inventory row', ranked.indexOf('#99999') > 0 && ranked.indexOf('#99999') < ranked.indexOf('#1000'), true);
   t('#13947 order: …and the ledger records it as fully rendered', ranked.includes('| `H31` | gate | 1 | 1 |'), true);
   t('#13947 order: …while the inventory family is the one that loses rows', ranked.includes('| `H14` | inventory | 900 |'), true);
-  t('#13947 order: the body still fits the render budget', ranked.length <= MARKDOWN_BODY_BUDGET, true);
-  t('#13947 order: …and the hard cap', ranked.length <= ISSUE_BODY_LIMIT, true);
+  t('#13947 order: the body still fits the render budget', bodyBytes(ranked) <= MARKDOWN_BODY_BUDGET, true);
+  t('#13947 order: …and the measured cap', bodyBytes(ranked) <= ISSUE_BODY_LIMIT, true);
   // The loud and unjudged bands still outrank the family bands: an inventory
   // row that is UNJUDGED is a gap in what was READ, and #11218's reservation
   // must survive this change rather than be re-litigated by it.
@@ -28736,7 +28932,7 @@ async function selfTest() {
   const withIdx = renderMarkdown(loudFlood, counts, { triggerIndex: triggerIdx });
   t('#13947 reserved: …and above the other reserved sections', withIdx.indexOf('### Family ledger') < withIdx.indexOf('### On-hold trigger-file index'), true);
   t('#13947 reserved: which still render under a flooded body', withIdx.includes('### On-hold trigger-file index'), true);
-  t('#13947 reserved: …with the whole body inside the render budget', withIdx.length <= MARKDOWN_BODY_BUDGET, true);
+  t('#13947 reserved: …with the whole body inside the render budget', bodyBytes(withIdx) <= MARKDOWN_BODY_BUDGET, true);
   // Markdown only, and the asymmetry is deliberate: the terminal never trims.
   t('#13947 plain: the ledger has no terminal half', renderPlain([quietRow], counts).includes('Family ledger'), false);
   t('#13947 plain: …and the summary sentence is still the last line', renderPlain([quietRow], counts).endsWith('not a gate verdict.'), true);
@@ -28758,17 +28954,17 @@ async function selfTest() {
   };
   const bound = familyLedgerReservation(boundRows, boundText);
   let widest = 0;
-  for (let n = 0; n <= boundRows.length; n++) widest = Math.max(widest, boundText(n).length);
+  for (let n = 0; n <= boundRows.length; n++) widest = Math.max(widest, bodyBytes(boundText(n)));
   t('#13947 budget: ⭐ the reservation bounds EVERY trim outcome', widest <= bound, true);
   t('#13947 budget: …and is tight, not vacuously large', bound - widest <= 64, true);
   t('#13947 budget: the run-in-hand bound is under the declared ceiling', bound <= FAMILY_LEDGER_WORST_CASE_BYTES, true);
   // The declared ceiling, built rather than claimed: every registered family
   // computing 999 rows at once, then unregistered codes on top to the row cap.
   const everyFamily = Object.keys(HALF_STATE_FAMILY_BAND).flatMap((code) => Array.from({ length: 999 }, (_, i) => finding(60000 + i, code, 'row')));
-  t('#13947 budget: a ledger over EVERY registered family fits the ceiling', renderFamilyLedger(familyLedger(everyFamily, 1)).join('\n').length <= FAMILY_LEDGER_WORST_CASE_BYTES, true);
+  t('#13947 budget: a ledger over EVERY registered family fits the ceiling', bodyBytes(renderFamilyLedger(familyLedger(everyFamily, 1)).join('\n')) <= FAMILY_LEDGER_WORST_CASE_BYTES, true);
   const overCap = [...everyFamily, ...Array.from({ length: FAMILY_LEDGER_ROW_CAP + 5 - Object.keys(HALF_STATE_FAMILY_BAND).length }, (_, k) => k).flatMap((k) => Array.from({ length: 999 }, (_, i) => finding(70000 + i, `H${900 + k}`, 'row')))];
   const overCapLedger = renderFamilyLedger(familyLedger(overCap, 1)).join('\n');
-  t('#13947 budget: …and one crowded to the row cap fits it too', overCapLedger.length <= FAMILY_LEDGER_WORST_CASE_BYTES, true);
+  t('#13947 budget: …and one crowded to the row cap fits it too', bodyBytes(overCapLedger) <= FAMILY_LEDGER_WORST_CASE_BYTES, true);
   t('#13947 budget: the ceiling is a small fraction of the render budget', FAMILY_LEDGER_WORST_CASE_BYTES * 8 <= MARKDOWN_BODY_BUDGET, true);
 
   // ⑨ The ledger's own overflow announces itself — the in-family-cap tradition
@@ -31168,7 +31364,7 @@ async function selfTest() {
   t('#13947: the flood really does trigger the row trim', floodedBody.includes('further row(s) omitted'), true);
   t('#13947: ⭐ …and the H40 section is STILL rendered', floodedBody.includes('### Dangling references (H40)'), true);
   t('#13947: …naming the dangling number itself, not just the heading', floodedBody.includes('**#13398** — HTTP 404'), true);
-  t('#13947: the body still fits the renderer budget it was trimmed for', floodedBody.length <= MARKDOWN_BODY_BUDGET, true);
+  t('#13947: the body still fits the renderer budget it was trimmed for', bodyBytes(floodedBody) <= MARKDOWN_BODY_BUDGET, true);
   t('#13947: a clean H40 section is rendered on a flooded body too', renderMarkdown(flood40, { repo: 'o/r', issues: 900, unscoped: 0, prs: 0, merged: 0 }, { references: clean40 }).includes('No reference in the corpus failed to resolve'), true);
   // …and the SECTION is absent when no reference pass ran, so every existing
   // caller of the two renderers keeps its byte-identical output. ⚠️ Asserted on
@@ -34738,7 +34934,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // THE ROSTER — a floor that cannot be satisfied by a zero.
   b(BATTERY67, 'H67 floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY67), true);
   b(BATTERY67, 'H67 floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY67] > 0, true);
-  b(BATTERY67, 'H67 floor: the roster grew again with #18680\'s battery, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 5);
+  b(BATTERY67, 'H67 floor: the roster grew again with #18664\'s battery, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 6);
   b(BATTERY67, 'H67 floor: …including the two batteries this row landed BESIDE, so neither side of the base merge silently dropped one', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, 'H65 tier declaration spelling') && Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, 'H19 judged-set founding'), true);
   b(BATTERY67, 'H67 floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
 
@@ -34900,8 +35096,8 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // FLOOR — this battery is declared, pinned, and the roster grew with it.
   b(BATTERY68, 'floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY68), true);
   b(BATTERY68, 'floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY68] > 0, true);
-  b(BATTERY68, 'floor: the roster now declares FIVE batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 5);
-  b(BATTERY68, 'floor: …including the four this battery landed BESIDE, so neither side of the base merge silently dropped one', ['H66 released queue card', 'H19 judged-set founding', 'H65 tier declaration spelling', 'H67 queued merged-delivery reading'].every((name) => Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, name)), true);
+  b(BATTERY68, 'floor: the roster now declares SIX batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR, 6);
+  b(BATTERY68, 'floor: …including the four this battery landed BESIDE and the one that landed after it, so neither side of the base merge silently dropped one', ['H66 released queue card', 'H19 judged-set founding', 'H65 tier declaration spelling', 'H67 queued merged-delivery reading', 'ISSUE_BODY_LIMIT measured cap'].every((name) => Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, name)), true);
   b(BATTERY68, 'floor: …and the roster really carries at least that many', Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
