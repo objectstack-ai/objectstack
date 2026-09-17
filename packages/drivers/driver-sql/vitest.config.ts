@@ -22,6 +22,21 @@ export default defineConfig({
     // `beforeEach`, and the testkit module is cached per WORKER, not per file.
     // This runs once, before any worker, and is a no-op without a live URL.
     globalSetup: ['./src/live-dialect-matrix.globalsetup.ts'],
+    // #18200: name the dialects this run did NOT exercise, underneath the
+    // summary counts a round would otherwise read as coverage. ORDER IS THE
+    // POINT — the default reporter prints those counts from its own
+    // `onTestRunEnd` and reporters are invoked in list order, so this one comes
+    // second to land below them. What it prints, and how the two states differ:
+    // `src/live-dialect-coverage.reporter.ts`.
+    //
+    // `github-actions` is re-added by hand because vitest appends it only
+    // `if (!resolved.reporters.length)` — naming ANY reporter here would drop
+    // the annotations CI gets today. Same condition vitest itself uses, so CI's
+    // output is unchanged (vitest 4.1.11, `dist/chunks/coverage.*.js`).
+    reporters:
+      process.env.GITHUB_ACTIONS === 'true'
+        ? ['default', 'github-actions', './src/live-dialect-coverage.reporter.ts']
+        : ['default', './src/live-dialect-coverage.reporter.ts'],
   },
   resolve: {
     alias: [
