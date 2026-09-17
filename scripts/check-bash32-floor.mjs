@@ -174,6 +174,35 @@
  * Discovery reads the git index, so an ignored or generated file is never
  * scanned and a newly tracked script is scanned the moment it is staged.
  * An empty population is a REFUSAL, not a quiet pass (#4690).
+ *
+ * ## The census is enumerated from the INDEX and judged from the DISK (#18465)
+ *
+ * Those are two different trees, and the gap between them is a HOLE in the
+ * census rather than a smaller population. A sparse checkout, a partially
+ * materialised worktree, a `--root` pointed at one, or a deletion that is not
+ * staged yet all leave paths the index lists and the disk cannot supply.
+ * Skipping one is CORRECT — a deleted-but-indexed path is genuinely not a
+ * script to judge — so the skip stays. What is not correct is doing it
+ * quietly.
+ *
+ * The green line prints the census as a VERDICT, so a silently shrunken count
+ * is an assertion a reader acts on, and it is strictly more dangerous than the
+ * empty population the paragraph above refuses: an empty census is visibly
+ * absurd, a plausible smaller one reads as a fact. Measured on a 7-file
+ * fixture with four paths removed from the disk alone, the gate printed
+ * `3 tracked shell file(s) ... census: 2 by .sh extension, 1 by shebang alone`
+ * at exit 0 while `git ls-files` still listed 7. It has already cost time: a
+ * 33 to 29 to 33 swing sat unreconciled for six days, because the run that
+ * read 29 had no way to say what it had not read.
+ *
+ * So an unreadable indexed path is a REFUSAL carrying its reason, PER PATH —
+ * the same disposition `unsupportedConstructs` takes toward a skip above, and
+ * ⛔ never a count, which is the silent skip with a number attached.
+ *
+ * ⚠️ Refusing rather than merely warning is safe because the skip is
+ * measurably ZERO on a complete checkout: every path the index lists under
+ * these roots is a regular blob — no symlink, no gitlink, and this repo
+ * declares no submodule — so nothing but an incomplete tree produces one.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -790,7 +819,29 @@ export function unsupportedConstructs(label, text, caps) {
 }
 
 /**
+ * Why one indexed path could not be read, in the terms the OS gave.
+ *
+ * Node's `fs` message already opens with the errno and ends with the path
+ * (`ENOENT: no such file or directory, open '...'`), which is the whole reason
+ * this is carried rather than summarised: the shapes a reader must tell apart
+ * — absent (a sparse checkout or an unstaged deletion), a directory here, a
+ * mode this process cannot read — differ only in that code.
+ *
+ * @param {unknown} err
+ */
+function unreadableReason(err) {
+  const code = err && typeof err === 'object' && 'code' in err ? String(err.code) : null;
+  const reason = err instanceof Error && err.message ? err.message : String(err);
+  return { code, reason };
+}
+
+/**
  * The population, read from the git index under the derived walk roots.
+ *
+ * Also returns `unreadable`: the paths the index listed and the disk could not
+ * supply, each with its reason (#18465). The skip is kept — a deleted-but-
+ * indexed path is not a script to judge — but it leaves a hole in the census,
+ * so the caller can refuse instead of printing a shrunken number as a verdict.
  *
  * @param {string} root
  */
@@ -803,14 +854,20 @@ export function listPopulation(root) {
     throw new Error(`git ls-files failed under ${root}: ${(out.stderr || '').trim()}`);
   }
   const population = [];
+  /** @type {{ rel: string, code: string|null, reason: string }[]} */
+  const unreadable = [];
   let byExtension = 0;
   let byShebang = 0;
   for (const rel of out.stdout.split('\0').filter(Boolean)) {
     let text;
     try {
       text = readFileSync(join(root, rel), 'utf8');
-    } catch {
-      continue; // a deleted-but-indexed path is not a script to judge
+    } catch (err) {
+      // Still skipped: a deleted-but-indexed path is not a script to judge.
+      // But RECORDED, because the population was enumerated from the index and
+      // this path is in it — the silence, not the skip, was the defect (#18465).
+      unreadable.push({ rel, ...unreadableReason(err) });
+      continue;
     }
     const verdict = isShell(rel, text);
     if (!verdict.shell) continue;
@@ -818,15 +875,15 @@ export function listPopulation(root) {
     else byShebang += 1;
     population.push({ rel, text, by: verdict.by });
   }
-  return { population, byExtension, byShebang };
+  return { population, byExtension, byShebang, unreadable };
 }
 
 /** Scan a whole tree. Returns findings plus the census the green line prints. */
 export function scanTree(root) {
-  const { population, byExtension, byShebang } = listPopulation(root);
+  const { population, byExtension, byShebang, unreadable } = listPopulation(root);
   const findings = [];
   for (const { rel, text } of population) findings.push(...scanText(rel, text));
-  return { findings, population, byExtension, byShebang };
+  return { findings, population, byExtension, byShebang, unreadable };
 }
 
 function report(findings) {
@@ -844,6 +901,48 @@ function report(findings) {
     + 'comment, read the variable through a `${NAME:-}` guard, or keep the token out of command\n'
     + 'position. ⛔ There is no filename allowlist, deliberately: that is how this class survived.',
   );
+}
+
+/**
+ * The census has a HOLE in it: name every path, and why each one (#18465).
+ *
+ * ⛔ Per path with its reason, never a count. A count is the silent skip with
+ * a number attached, and the defect was precisely that the number was
+ * plausible — `report()` above names a file, a line and a spelling for the
+ * same reason.
+ *
+ * @param {{ rel: string, code: string|null, reason: string }[]} unreadable
+ * @param {{ rel: string }[]} population what the readable remainder came to
+ * @param {{ file: string }[]} findings the remainder's findings, if any
+ */
+function reportUnreadable(unreadable, population, findings) {
+  console.error(
+    '✗ check-bash32-floor: ' + unreadable.length + ' path(s) under ' + POPULATION_ROOTS.join(', ')
+    + ' are listed in the\n  git index but could not be read from disk, so this census has a hole in '
+    + 'it and is not a verdict.\n',
+  );
+  for (const u of unreadable) {
+    console.error('  ' + u.rel);
+    console.error('      ' + u.reason + '\n');
+  }
+  console.error(
+    'The population is enumerated from the INDEX and judged from the DISK. Skipping a path that\n'
+    + 'cannot be read is correct — a deleted-but-indexed path is not a script to judge — but doing it\n'
+    + 'quietly would have printed "' + population.length + ' tracked shell file(s)" as a verdict while '
+    + unreadable.length + ' path(s) the index\nlists were never read at all; an unread path cannot even be '
+    + 'classified as shell, so the census\ncannot say whether it belonged in the count. A plausible smaller '
+    + 'number reads as a fact where\nan empty one would read as absurd — this is the neighbouring refusal '
+    + 'completed (#4690).\n\n'
+    + 'Usual causes, in the order they occur: a deletion that is not staged yet (git add -A, or\n'
+    + 'git rm), a sparse or partially materialised checkout (git sparse-checkout disable), or a\n'
+    + '--root pointed at one. Re-run against a complete tree.',
+  );
+  if (findings.length > 0) {
+    console.error(
+      '\nThe readable remainder also carries ' + findings.length + ' finding(s), reported below. That is a\n'
+      + 'reading of the REMAINDER, never of the population.\n',
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -902,6 +1001,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'population membership': 5,
   '⭐ the declaration, and the two obligations it makes unreachable': 5,
   '⭐ end to end, through the real discovery path': 5,
+  '⭐ an indexed path the DISK cannot supply is a REFUSAL': 11,
   '⭐ the bash-4 capability reading, pinned in BOTH directions': 12,
   '⭐ the instrument is real: the flagged construct really does break': 5,
   'the real tree': 2,
@@ -909,7 +1009,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 18;
+const SELF_TEST_BATTERY_FLOOR = 19;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1276,6 +1376,112 @@ function selfTest() {
     `${emptyRun.stdout}${emptyRun.stderr}`.slice(0, 300),
   );
 
+  // --- ⭐ an indexed path the DISK cannot supply is a REFUSAL (#18465) -----
+  //
+  // The population is enumerated from the INDEX and judged from the DISK, so a
+  // path the index lists and the disk cannot supply is a HOLE in the census
+  // rather than a smaller population. Before this battery the gate dropped it
+  // in a silent `continue` and printed the shrunken number as its verdict at
+  // exit 0 — measured on a 7-file fixture with four paths removed from the disk
+  // alone: `3 tracked shell file(s) ... census: 2 by .sh extension, 1 by
+  // shebang alone`, while `git ls-files` still listed 7.
+  //
+  // ⚠️ Both directions are pinned and the DARK half is the load-bearing one: a
+  // refusal that also fired on a COMPLETE checkout would redden every normal
+  // run, and it would pass every lit case below while doing it.
+  battery('⭐ an indexed path the DISK cannot supply is a REFUSAL');
+  const holed = {
+    'scripts/present.sh': '#!/usr/bin/env bash\necho present\n',
+    'scripts/absent.sh': '#!/usr/bin/env bash\necho absent\n',
+    '.githooks/pre-push': '#!/bin/sh\nnow="${EPOCHSECONDS:-$(date +%s)}"\n',
+  };
+  const completeRepo = fixtureRepo(holed);
+  const partialRepo = fixtureRepo(holed);
+  // Removed from the DISK only. The index is never touched, which is the whole
+  // shape — and the first case proves the fixture really is that shape, because
+  // a fixture whose index also lost the path would make every case below pass
+  // by testing nothing.
+  rmSync(join(partialRepo, 'scripts/absent.sh'));
+  const stillIndexed = spawnSync('git', ['-C', partialRepo, 'ls-files', '--', ...WALK_ROOTS], { encoding: 'utf8' });
+  t(
+    'the fixture really is INDEX-vs-DISK: the index still lists the removed path',
+    stillIndexed.stdout.includes('scripts/absent.sh'),
+    stillIndexed.stdout.trim(),
+  );
+  const partial = listPopulation(partialRepo);
+  // ⛔ Read through an optional binding, never `partial.unreadable[0].code`
+  // directly. An assertion that THROWS instead of returning false takes every
+  // later case in this battery with it — including both DARK legs, which are
+  // the load-bearing half — and it dies before the battery floor and the
+  // verdict handshake can speak. Measured: ablating the reporting half crashed
+  // this battery at its third case, so the remaining eight never ran.
+  const hole = partial.unreadable[0] ?? null;
+  t(
+    'an unreadable indexed path is REPORTED, not dropped in silence',
+    partial.unreadable.length === 1 && hole?.rel === 'scripts/absent.sh',
+    JSON.stringify(partial.unreadable),
+  );
+  t(
+    'and it carries its REASON — a count is the silent skip with a number attached',
+    hole?.code === 'ENOENT' && /no such file/i.test(hole?.reason ?? ''),
+    JSON.stringify(hole),
+  );
+  t(
+    'the SKIP itself is kept: a deleted-but-indexed path is still not a script to judge',
+    partial.population.every((p) => p.rel !== 'scripts/absent.sh') && partial.population.length === 2,
+    JSON.stringify(partial.population.map((p) => p.rel)),
+  );
+  const partialRun = spawnSync(process.execPath, [SELF, '--root', partialRepo], { encoding: 'utf8' });
+  const partialOut = `${partialRun.stdout}${partialRun.stderr}`;
+  t(
+    'end to end, the gate REFUSES rather than printing a shrunken census at exit 0',
+    partialRun.status === 1,
+    partialOut.slice(0, 400),
+  );
+  t(
+    'and the refusal NAMES the path it could not read',
+    partialOut.includes('scripts/absent.sh'),
+    partialOut.slice(0, 400),
+  );
+  t(
+    '⛔ and the green census line is never printed — that line IS the shrunken verdict',
+    !/tracked shell file\(s\) under/.test(partialRun.stdout),
+    JSON.stringify(partialRun.stdout.slice(0, 300)),
+  );
+  // A tree whose whole population is unreadable found PLENTY and read NONE, so
+  // #4690's "the walk found nothing" would be a false sentence about it. The
+  // two refusals are different answers with different remedies.
+  const allAbsentRepo = fixtureRepo(holed);
+  for (const rel of Object.keys(holed)) rmSync(join(allAbsentRepo, rel));
+  const allAbsentRun = spawnSync(process.execPath, [SELF, '--root', allAbsentRepo], { encoding: 'utf8' });
+  const allAbsentOut = `${allAbsentRun.stdout}${allAbsentRun.stderr}`;
+  t(
+    'a wholly unreadable population refuses AS UNREADABLE, not as empty',
+    allAbsentRun.status === 1
+      && /could not be read from disk/.test(allAbsentOut)
+      && !/found no shell files/.test(allAbsentOut),
+    allAbsentOut.slice(0, 400),
+  );
+  // ⭐ DARK. Everything above would pass just as well if the refusal fired on
+  // every tree; these three are what say it does not.
+  const completeRun = spawnSync(process.execPath, [SELF, '--root', completeRepo], { encoding: 'utf8' });
+  const completeOut = `${completeRun.stdout}${completeRun.stderr}`;
+  t(
+    '⭐ DARK: the SAME fixture, complete on disk, stays GREEN',
+    completeRun.status === 0,
+    completeOut.slice(0, 400),
+  );
+  t(
+    '⭐ DARK: …and reads ZERO unreadable paths, so the new report is not decoration',
+    listPopulation(completeRepo).unreadable.length === 0,
+    JSON.stringify(listPopulation(completeRepo).unreadable),
+  );
+  t(
+    '⭐ DARK: …and its census is the FULL one the partial run shrank',
+    /3 tracked shell file\(s\)/.test(completeRun.stdout) && /census: 2 by \.sh extension, 1 by shebang alone/.test(completeRun.stdout),
+    completeRun.stdout,
+  );
+
   // --- ⭐ the capability reading, pinned in BOTH directions (#17458) ---------
   //
   // The disposition every harness takes from `probeBashCapabilities()` branches
@@ -1449,7 +1655,9 @@ function selfTest() {
     `status=${guardedSim.status} out=${guardedSim.stdout.trim()} err=${guardedSim.stderr.trim()}`,
   );
 
-  for (const d of [badRepo, cleanRepo, emptyRepo, simDir]) rmSync(d, { recursive: true, force: true });
+  for (const d of [badRepo, cleanRepo, emptyRepo, completeRepo, partialRepo, allAbsentRepo, simDir]) {
+    rmSync(d, { recursive: true, force: true });
+  }
 
   // --- the real tree -------------------------------------------------------
   battery('the real tree');
@@ -1542,7 +1750,17 @@ function main() {
   const rootFlag = process.argv.indexOf('--root');
   const root = rootFlag === -1 ? REPO_ROOT : process.argv[rootFlag + 1];
 
-  const { findings, population, byExtension, byShebang } = scanTree(root);
+  const { findings, population, byExtension, byShebang, unreadable } = scanTree(root);
+
+  // ⛔ Ordered BEFORE the empty-population refusal, deliberately: when every
+  // indexed path is unreadable the population is empty too, and #4690's message
+  // — "the walk found nothing" — would then be false. The walk found plenty and
+  // read none. Two different answers, two different remedies (#18465).
+  if (unreadable.length > 0) {
+    reportUnreadable(unreadable, population, findings);
+    if (findings.length > 0) report(findings);
+    process.exit(1);
+  }
 
   if (population.length === 0) {
     console.error(
