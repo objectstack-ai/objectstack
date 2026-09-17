@@ -821,7 +821,15 @@ function validateOne(
   // disguise — it falls through to the multi-value branch below (#2552;
   // previously an array here was stringified to "a,b" and wrongly
   // rejected as invalid_option, while a scalar slipped straight through).
-  if ((t === 'select' || t === 'radio') && def.multiple !== true) {
+  //
+  // [#18408] The gate is the NEGATION of that branch's own predicate, ⛔ not a
+  // raw `def.multiple !== true`. The two are extensionally equal only while
+  // `select` and `radio` both sit in `MULTI_CAPABLE_TYPES` and in neither
+  // multi-option set — a membership `packages/spec` owns and may move. Spelling
+  // the complement as the flag would make this dispatch answer the multi-value
+  // question from two authorities that happen to agree today, which is the
+  // drift the one-definition ruling (#17469) closes.
+  if ((t === 'select' || t === 'radio') && !isMultiValueField(def)) {
     const allowed = optionValues(def.options);
     if (allowed.length > 0 && !allowed.includes(String(value))) {
       return fail('invalid_option', { allowed: allowed.join(', ') }, 'invalid_option', allowed);

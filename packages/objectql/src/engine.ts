@@ -26,7 +26,7 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 // engine is what `metadata-protocol.validateData` returns, so letting the two
 // drift would put a translation layer between a verdict and its contract.
 import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/api';
-import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
 import {
@@ -1014,6 +1014,37 @@ function formulaRoundingScale(def: { scale?: unknown } | undefined): number | un
   const scale = def?.scale;
   if (typeof scale !== 'number' || !Number.isInteger(scale) || scale < 0) return undefined;
   return scale <= MAX_FORMULA_SCALE ? scale : undefined;
+}
+
+/**
+ * [#18408] Is this field's value MULTI-VALUED — the one question, asked of the
+ * one predicate `@objectstack/spec` publishes, and the single local seam every
+ * site in this file goes through.
+ *
+ * Maintainer ruling 2026-09-13 (decision batch #128 item 5, option 1′): there
+ * is ONE definition of "is this field multi-valued", `isMultiValueField`, and
+ * storage follows it. The sites below used to read `field.multiple` raw, which
+ * answers `true` on types the spec predicate calls single-valued (`text`,
+ * `master_detail`, `tree` …) and `false` on the inherently-multi option types
+ * (`multiselect` / `checkboxes` / `tags`) that carry no flag at all. Both
+ * directions put this engine on a different list from the storage it writes
+ * through: `driver-sql` (#17469) and `os generate migration` (#18199) both ask
+ * the predicate now.
+ *
+ * Takes the field rather than a resolved type because — unlike driver-sql and
+ * the CLI generator — no caller in this file applies a type default of its own;
+ * a non-string `type` is answered `false` here, the same verdict those two
+ * reach through their `field.type || 'string'` resolution.
+ *
+ * ⛔ The predicate is called, never re-spelled. `MULTI_CAPABLE_TYPES` /
+ * `MULTI_OPTION_TYPES` membership written out at a site would be a second
+ * answer to a question the ruling gave exactly one.
+ */
+function declaredMultiValued(field: { type?: unknown; multiple?: unknown } | null | undefined): boolean {
+  return isMultiValueField({
+    type: typeof field?.type === 'string' ? field.type : '',
+    multiple: field?.multiple === true,
+  });
 }
 
 function planFormulaProjection(
@@ -4715,12 +4746,19 @@ export class ObjectQL implements IObjectQLEngine {
    *    two sides honest BY CONSTRUCTION: there is no field the lint calls
    *    always-valued that this method leaves empty.
    *
-   *  - **`multiple: true` assembles an ARRAY.** That field stores an
-   *    Array/JSON (`FieldSchema.multiple`: "Stores as Array/JSON"), so the
-   *    shape of its default follows the field, not the number of marked
-   *    options — one marked option on a multi-select defaults to a
-   *    one-element array, never a bare scalar that the driver would then store
-   *    with the wrong shape. Refusing (throwing) was rejected: the metadata is
+   *  - **A MULTI-VALUED field assembles an ARRAY.** That field stores an
+   *    Array/JSON, so the shape of its default follows the field, not the
+   *    number of marked options — one marked option on a multi-select defaults
+   *    to a one-element array, never a bare scalar that the driver would then
+   *    store with the wrong shape. [#18408] Multi-valued is
+   *    {@link declaredMultiValued}, ⛔ not a raw `field.multiple`: the flag is
+   *    inert on a type outside the two multi sets and redundant on a
+   *    `multiselect` / `checkboxes` / `tags`, which stores an array with or
+   *    without it — so reading the flag made this method disagree with the
+   *    validator one frame later (`normalizeMultiValueFields` has asked the
+   *    predicate all along) and with the column the driver builds.
+   *
+   *    Refusing (throwing) was rejected: the metadata is
    *    spec-valid, and a runtime throw on spec-valid input is a worse answer
    *    than a well-defined value. Ignoring it was rejected too — it would
    *    preserve, for multi-selects only, precisely the inertness this change
@@ -4741,7 +4779,7 @@ export class ObjectQL implements IObjectQLEngine {
    *    make the engine honour raw shapes lint calls nullable — the two would
    *    disagree in the direction that produces a false "always-valued".
    */
-  private resolveOptionDefault(field: { options?: unknown; multiple?: unknown }): unknown {
+  private resolveOptionDefault(field: { type?: unknown; options?: unknown; multiple?: unknown }): unknown {
     const options = field.options;
     if (!Array.isArray(options)) return undefined;
     const marked: unknown[] = [];
@@ -4756,7 +4794,8 @@ export class ObjectQL implements IObjectQLEngine {
       marked.push(value);
     }
     if (marked.length === 0) return undefined;
-    return field.multiple === true ? marked : marked[0];
+    // [#18408] Was `field.multiple === true`. See {@link declaredMultiValued}.
+    return declaredMultiValued(field) ? marked : marked[0];
   }
 
   /**
@@ -13122,10 +13161,16 @@ export class ObjectQL implements IObjectQLEngine {
    * field it is aimed at.
    *
    * A single-valued `lookup` / `master_detail` stores a scalar foreign key, and
-   * bare equality is the right question about it. A field declaring
-   * `multiple: true` stores an ARRAY — "Stores as Array/JSON"
-   * (`FieldSchema.multiple`) — and every SQL backend in this repo puts that
-   * array in a JSON TEXT column. Aiming bare equality at THAT column compares
+   * bare equality is the right question about it. A MULTI-VALUED reference
+   * field stores an ARRAY, and every SQL backend in this repo puts that array
+   * in a JSON TEXT column. [#18408] Which of the two a field is, is
+   * {@link declaredMultiValued} — the one predicate the storage side asks
+   * (#17469) — ⛔ never a raw `field.multiple`: `master_detail` and `tree` are
+   * outside `MULTI_CAPABLE_TYPES`, so the flag on one of those buys a JSON
+   * column from nobody, and aiming `$contains` at the scalar column the driver
+   * really built is the mirror image of the defect below.
+   *
+   * Aiming bare equality at a multi-valued column compares
    * the whole serialization (`["a","b"]`) against one id, which can never hold;
    * `driver-sql` refuses the spelling outright (`INVALID_FILTER` / 400, #7398),
    * and that refusal is correct and stays. Until this method existed the probe
@@ -13162,10 +13207,11 @@ export class ObjectQL implements IObjectQLEngine {
    */
   private referenceProbeFilter(
     fieldName: string,
-    fdef: { multiple?: unknown },
+    fdef: { type?: unknown; multiple?: unknown },
     id: string | number,
   ): Record<string, unknown> {
-    if (fdef?.multiple !== true) return { [fieldName]: id };
+    // [#18408] Was `fdef?.multiple !== true`. See {@link declaredMultiValued}.
+    if (!declaredMultiValued(fdef)) return { [fieldName]: id };
     const raw = String(id);
     // The BODY of the JSON string form — `JSON.stringify('a"b')` is `"a\"b"`,
     // and the quotes are the serialization's, not the id's.
@@ -13436,9 +13482,11 @@ export class ObjectQL implements IObjectQLEngine {
    * or `lookup` field referencing `object`, honor the field's `deleteBehavior`:
    *   - `cascade`  → delete the dependent rows (recursively, so grandchildren
    *                  are handled by each child's own delete),
-   *   - `set_null` → clear the foreign key. On a `multiple: true` field the
-   *                  FK is a SET, so "clear" means remove the deleted MEMBER
-   *                  and keep the rest; an emptied set is written as `[]`,
+   *   - `set_null` → clear the foreign key. On a MULTI-VALUED field
+   *                  ([#18408] {@link declaredMultiValued}, ⛔ not the raw
+   *                  flag) the FK is a SET, so "clear" means remove the
+   *                  deleted MEMBER and keep the rest; an emptied set is
+   *                  written as `[]`,
    *                  never `null` — the representation `FieldSchema` pins
    *                  (`packages/spec/src/data/field.zod.ts`, the `multiple`
    *                  doc block, #9447 maintainer ruling 2026-08-18),
@@ -13599,7 +13647,8 @@ export class ObjectQL implements IObjectQLEngine {
         // [#9362] `multiValued` is declared here rather than at the probe
         // because the probe's filter spelling, the set_null write below and
         // — since #9688 — this escalation all turn on it.
-        const multiValued = fdef.multiple === true;
+        // [#18408] Was `fdef.multiple === true`. See {@link declaredMultiValued}.
+        const multiValued = declaredMultiValued(fdef);
         const requiredSetNull = behavior === 'set_null' && fdef.required === true;
         if (requiredSetNull && !multiValued) {
           behavior = 'restrict';
