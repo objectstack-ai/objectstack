@@ -460,7 +460,8 @@ Even inside your own worktree, operate defensively:
    straight to `main`.** Name the branch after the issue it fixes: `claude/issue-<n>-<slug>`.
    The issue number is what makes in-flight work *discoverable* — `git ls-remote --heads
    origin | grep issue-<n>` is a one-command pre-check, and the Duplicate Fix Guard
-   workflow warns on fix PRs whose branch names no declared issue.
+   workflow warns on fix PRs whose branch names no declared issue. A hit is a hint, not a
+   claim — most heads carry no PR: ⛔ never skip a card on one, the `Claim:` comment decides.
 
    ⛔ **Off `main` is literal — a stacked series, each PR branched off the one below, is NOT a supported form.** No
    tooling represents it: squash landing destroys the ancestry link, so every descendant rewinds behind what landed and
@@ -796,8 +797,7 @@ working in its domain — browse the directory, never a hand-written list here:
 - `.claude/skills/` — repo-internal agent playbooks; every entry must carry
   `metadata.internal: true`.
 
-⛔ **Both roots are governed surfaces** — human-merge only, or queued under **Prime Directive #14**'s pinned-approval
-path; no per-PR check holds it: the queue guard refuses an unpinned governed diff at queue time.
+⛔ **Both roots are governed surfaces** — human-merge only, or **Prime Directive #14**'s pinned-approval path.
 
 ---
 
