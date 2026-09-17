@@ -3,6 +3,9 @@
 import { describe, it, expect } from 'vitest';
 import { createSmsChannel } from './sms-channel.js';
 import { NotificationTemplateStore } from './template-renderer.js';
+import { MessagingService } from './messaging-service.js';
+import { MemoryNotificationOutbox } from './memory-outbox.js';
+import { NotificationDispatcher } from './dispatcher.js';
 import type { Delivery } from './channel.js';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
@@ -84,11 +87,87 @@ describe('sms channel', () => {
         expect(ch.id).toBe('sms');
     });
 
-    it('no-ops (success) when no sms service is registered', async () => {
-        const ch = channel(() => undefined, fakeData());
-        const r = await ch.send(silentCtx(), delivery());
-        expect(r.ok).toBe(true);
-        expect(r.externalId).toBeUndefined();
+    describe('no sms service registered — REFUSED, ⛔ never reported as delivered (#18424)', () => {
+        // `send()` used to answer this condition `{ ok: true }`: the delivery
+        // row reached `status: 'success'` with nothing sent, so a deployment
+        // with no SMS transport reported every notification as delivered. The
+        // facts below are pinned together because each alone is satisfied by an
+        // implementation broken in another direction — see the same block in
+        // `email-channel.test.ts` for the enumeration.
+        //
+        // ⚠️ This channel declares no `isAvailable()`, so fan-out cannot suppress
+        // it and `send()` is reached on the ORDINARY path, not only on the
+        // durable residue: the silent success needed no special composition.
+        it('refuses with the declared transport_not_configured reason', async () => {
+            const ch = channel(() => undefined, fakeData());
+            const r = await ch.send(silentCtx(), delivery());
+
+            expect(r.ok).toBe(false);
+            expect(r.externalId).toBeUndefined();
+            // The same closed-vocabulary token the email channel's
+            // `isAvailable()` returns and `sys_notification.suppressed_channels`
+            // stores — one condition, one name, aggregatable by an operator.
+            expect(r.error?.startsWith('transport_not_configured:')).toBe(true);
+            expect(r.error).toContain('user_1');
+        });
+
+        it('grades that refusal permanent, so the row dead-letters on attempt one', () => {
+            const ch = channel(() => undefined, fakeData());
+            expect(ch.classifyError?.('transport_not_configured: no \'sms\' service is registered; nothing was sent to \'user_1\''))
+                .toBe('permanent');
+        });
+
+        it('THE CONTROL: a registered transport still delivers, and a hiccup is still retryable', async () => {
+            const sms = fakeSms();
+            const ch = channel(() => sms.service, fakeData());
+            const r = await ch.send(silentCtx(), delivery());
+            expect(r.ok).toBe(true);
+            expect(sms.sent).toHaveLength(1);
+            expect(ch.classifyError?.('sms send failed: gateway timeout')).toBe('retryable');
+            // ...and the quota refusal keeps its own grade — the new arm did not
+            // swallow the one that was already here.
+            expect(ch.classifyError?.('sms send failed: TOO_MANY_REQUESTS: daily cap')).toBe('rate_limited');
+        });
+
+        it('END TO END: one emit, one outbox, one dispatcher tick — the row lands `dead`, ⛔ not `success`', async () => {
+            // What an operator reads off `sys_notification_delivery`. Before
+            // #18424 this row read `status: 'success'` — the silent half.
+            const data = fakeData();
+            const outbox = new MemoryNotificationOutbox(1);
+            const service = new MessagingService({
+                logger: { info: () => {}, warn: () => {}, error: () => {} },
+                outbox,
+                getData: () => data,
+            });
+            service.registerChannel(
+                createSmsChannel({
+                    getSms: () => undefined,
+                    getData: () => data,
+                    store: new NotificationTemplateStore({ getData: () => data }),
+                }),
+            );
+
+            await service.emit({
+                topic: 'deal.won',
+                audience: ['user_1'],
+                channels: ['sms'],
+                payload: { title: 'Deal closed', body: 'Acme signed' },
+            });
+
+            await new NotificationDispatcher({
+                nodeId: 'node-test',
+                outbox,
+                channels: service,
+                channelContext: silentCtx(),
+                intervalMs: 10_000,
+            }).tick();
+
+            const rows = await outbox.list();
+            expect(rows).toHaveLength(1);
+            expect(rows[0].status).toBe('dead');
+            expect(rows[0].attempts).toBe(1);
+            expect(rows[0].error).toContain('transport_not_configured');
+        });
     });
 
     it('resolves the recipient user id → phone_number and sends the fallback body', async () => {
