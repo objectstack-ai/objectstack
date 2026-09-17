@@ -2114,10 +2114,13 @@ policy** — a distinct reason, never "binding failed". Nothing about the flow
 needs fixing; the deployment has not asked for it. `os doctor` prints the
 effective value.
 
-Studio does **not** carry that reason today: `GET /automation/_status` reports
-each flow as `bound` or not and has no field to say why, so a policy-disabled
-flow is indistinguishable there from one whose trigger is missing. Read the
-startup summary or the audit for the reason.
+The status door carries that reason too: `GET /automation/_status` answers one
+row per flow, and an unarmed flow's row holds the same sentence in its optional
+`reason` field — read from what the engine RECORDED when it refused the bind,
+never re-derived later, so a switch flipped since cannot turn it into a binding
+failure. ⛔ Reaching the wire is not the same as being **rendered**: whether a
+console shows it as a distinct state rather than as an error is that console's
+own change. The startup summary and the audit carry the same sentence.
 
 ⛔ Platform-internal scheduled work — approvals escalation, the lifecycle
 Reaper, the messaging dispatch loop, membership backfill — is **not** gated by
