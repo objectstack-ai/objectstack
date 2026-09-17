@@ -96,3 +96,17 @@ entry's structured TODO covers.
 (`Expression | ExpressionInput` → `EvaluatedExpression | EvaluatedExpressionInput`),
 because it mirrors the two `RowCrudActionOverride` slots and a type that still
 promised an `ast`-only envelope would advertise what the schema now refuses.
+
+**So do the four expression constructors — `expression()`, `cel`, `tmpl`, `cron`
+(and therefore the `F` / `P` aliases) — which now return `EvaluatedExpression`
+instead of `Expression`.** Each one assigns a `string` to `source`
+unconditionally, so the wider return type described none of them; it was slop
+that cost nothing until an evaluated slot began requiring `source`, at which
+point ``visibleWhen: P`…` `` — the spelling the spec's own docblock teaches —
+stopped type-checking, and `@objectstack/platform-objects` failed its DTS build
+on exactly that. `EvaluatedExpression` is assignable to `Expression`, so every
+persistence-contract slot keeps accepting these values unchanged; what the
+narrower return type adds is that an evaluated slot accepts them too. An author
+who genuinely has no `source` was never calling these constructors — an
+`ast`-only envelope is an object literal, and an evaluated slot refuses it on
+purpose.
