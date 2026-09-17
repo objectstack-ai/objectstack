@@ -180,6 +180,11 @@ describe('#18110 — a refusing `subflow` child stops the parent', () => {
 
       const result = await engine.execute('parent', triggerCtx());
 
+      // ⛔ The refusal assertion belongs IN this test, not next door: without it
+      // the totals below are equally true of the unfixed engine, which rolled
+      // the same metrics up and then carried on. "The rollup survives the
+      // refusal path" is a claim about both halves at once.
+      expect(result.status).toBe('refused');
       expect(result.summary).toBeDefined();
       expect(result.summary).toMatchObject({ selected: 3, acted: 2, unmeasured: 1 });
       expect(result.summary!.nodes.find((n) => n.nodeId === 'sub')).toMatchObject({

@@ -40,8 +40,13 @@ function pluginCtx(): any {
 
 /** The parent's own completion toast — it must never ride an item's refusal. */
 const PARENT_TOAST = 'Batch complete!';
-/** The authored refusal template. `{item}` is what makes it per-item. */
-const REFUSAL_TEMPLATE = 'Refused: {item} is not eligible';
+/**
+ * The authored refusal template. `{val}` is the child's own declared INPUT
+ * variable (the mapped item, handed down as `params.val`) — what makes the
+ * rendered reason per-item. ⛔ Not the parent's `{item}` iterator: that lives in
+ * the PARENT's variable map and resolves to the empty string down here.
+ */
+const REFUSAL_TEMPLATE = 'Refused: {val} is not eligible';
 /** Per-item #4354 work, so the rollup on the refusal path is assertable. */
 const ITEM_METRICS = { selected: 2, acted: 1 } as const;
 
@@ -53,6 +58,7 @@ const ITEM_METRICS = { selected: 2, acted: 1 } as const;
 function childFlow() {
   return {
     name: 'per_item', label: 'Per item', type: 'autolaunched',
+    variables: [{ name: 'val', type: 'text', isInput: true }],
     nodes: [
       { id: 'c_start', type: 'start', label: 'Start' },
       { id: 'c_judge', type: 'judge', label: 'Judge' },
@@ -187,6 +193,10 @@ describe('#18555 — a refusing child inside a `map` stops the parent', () => {
       // refusing item before it said no — both count. Two items x {2,1}.
       const result = await runBatch();
 
+      // ⛔ The refusal assertion belongs IN this test, not next door: without it
+      // the totals below are equally true of the unfixed engine, which rolled
+      // the same metrics up and then carried on to the next item.
+      expect(result.status).toBe('refused');
       expect(result.summary).toBeDefined();
       expect(result.summary).toMatchObject({ selected: 4, acted: 2 });
       expect(result.summary!.nodes.find((n) => n.nodeId === 'each')).toMatchObject({
