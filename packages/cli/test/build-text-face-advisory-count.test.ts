@@ -91,7 +91,7 @@ function payloadOf(run: Run, label: string): Record<string, unknown> {
 }
 
 /** Drop SGR sequences so an assertion reads the words, not chalk's opinion. */
-const stripAnsi = (s: string) => s.replace(/\[[0-9;]*m/g, '');
+const stripAnsi = (s: string) => s.replace(/\u001B\[[0-9;]*m/g, '');
 
 /**
  * The summary line's integer — the number the command claims is "above".
