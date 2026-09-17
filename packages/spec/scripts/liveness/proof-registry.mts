@@ -262,8 +262,12 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     proofRef: 'packages/qa/dogfood/test/showcase-d3-d4-capabilities.dogfood.test.ts#showcase-d3-d4-capabilities',
     bound: true,
     // The same file also pins the ADR-0058 D3 compound sharing `condition`
-    // (`&&`), which silently skipped the AND before #1887 — but stack-level
-    // sharing rules are not a governed metadata type, so only `check` binds.
+    // (`&&`), which silently skipped the AND before #1887. That half is no
+    // longer un-bindable for want of a coordinate: `sharing_rule` was seeded
+    // into the ledger by #18587, so `sharing_rule.condition` is a governed
+    // entry. Only `check` binds HERE because adopting that one is a separate
+    // ADR-0054 §3 act with its own candidate question — `declarative-rbac-seeding`
+    // authors and asserts the same key end to end (#18589).
     ledgerBindings: [{ type: 'permission', path: 'rowLevelSecurity.check' }],
   },
   {
@@ -468,9 +472,15 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     bound: false,
     ledgerBindings: [],
     blockedReason:
-      'sharing rules are authored at STACK level (`sharingRules`), which is not a governed metadata '
-      + 'type — the ledger governs per-type property surfaces, and there is no `permission.*` entry '
-      + 'for the rule\'s recipient kind.',
+      'this proof never AUTHORS the spec shape. It calls `SharingRuleService.defineRule` on the booted '
+      + 'kernel with the RUNTIME column shape — `criteria` as an already-compiled FilterCondition, '
+      + '`recipientType`/`recipientId` — so `SharingRuleSchema` and `bootstrapDeclaredSharingRules` are '
+      + 'not on its path and no authorable `sharing_rule.*` key is exercised; what it pins is the '
+      + 'BU-subtree expansion inside the service. Binding `sharedWith.type` to it would be the '
+      + 'owner-anchor/allowTransfer mistake: a proof cited for a property it does not author. '
+      + 'Premise corrected 2026-09-17 (#18589): the old reason rested on this type having no ledger '
+      + 'coordinate at all, which #18587 supplied by seeding packages/spec/liveness/sharing_rule.json. '
+      + 'The blocker is the proof, not the ledger.',
   },
   {
     id: 'sharing-rule-criteria-required',
@@ -488,11 +498,15 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     bound: false,
     ledgerBindings: [],
     blockedReason:
-      'same shape as `showcase-bu-hierarchy-sharing`: the criteria is authored at STACK level '
-      + '(`sharingRules[].condition`), not as a property of a governed metadata type, so there is no '
-      + 'ledger entry to ratchet. Registered so the tag is not an orphan; it runs unconditionally in '
-      + 'the dogfood suite. The invariant itself is recorded in the empty-state registry '
-      + '(sharing `condition` → `closed`), which is the surface that CAN carry it.',
+      'the ledger coordinate now EXISTS (#18587 seeded `sharing_rule`, and `condition` is a `live` row '
+      + 'on it) — and this proof still must NOT bind it. It POSTs a RUNTIME body to '
+      + '`/api/v1/sharing/rules`, a route that reaches `SharingRuleService.defineRule` with '
+      + '`SharingRuleSchema` never on the path (the proof\'s own header records exactly that), so the '
+      + 'authorable key is never written and a binding here would fake the kind of evidence this table '
+      + 'exists to refuse. Registered so the tag is not an orphan; it runs unconditionally in the '
+      + 'dogfood suite. The invariant itself is recorded in the empty-state registry '
+      + '(sharing `condition` → `closed`), which is the surface that CAN carry it. '
+      + 'Premise corrected 2026-09-17 (#18589).',
   },
   {
     id: 'declarative-rbac-seeding',
@@ -506,8 +520,18 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     bound: false,
     ledgerBindings: [],
     blockedReason:
-      'seeding acts on STACK-level `roles`/`sharingRules` collections, not on a per-type authorable '
-      + 'property — same shape as bu-hierarchy-sharing.',
+      'NOT the bu-hierarchy shape, and no longer blocked on a missing coordinate: this proof DOES '
+      + 'author the spec shape. The showcase declares its rules through `defineSharingRule` '
+      + '(examples/app-showcase/src/security/sharing-rules.ts), `bootstrapDeclaredSharingRules` seeds '
+      + 'them, and the proof asserts the landed row — `object_name`, `recipient_type`, `recipient_id` '
+      + 'and the CEL→`criteria_json` translation — i.e. `name`/`object`/`sharedWith.type`/'
+      + '`sharedWith.value`/`condition` end to end, every one of them a `live` row on the '
+      + '`sharing_rule` ledger #18587 seeded. It is a REAL binding candidate, held back only because '
+      + 'ADR-0054 §3 adopts one class at a time and adoption is a ledger act: each cited row must carry '
+      + 'the matching `proof`, which that ledger deliberately claims on no row yet, and WHICH of the '
+      + 'five props this class owns is a decision of its own (`condition` is also exercised by '
+      + '`showcase-d3-d4-capabilities`). Left to that act rather than slipped in here; #18589 reports it '
+      + 'for filing.',
   },
   {
     id: 'permission-model-zoo',
@@ -719,9 +743,14 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     bound: false,
     ledgerBindings: [],
     blockedReason:
-      'same shape as `showcase-bu-hierarchy-sharing` and `sharing-rule-criteria-required`: the rules '
-      + 'are authored at STACK level (`sharingRules`), which is not a governed metadata type, and what '
-      + 'this file pins is a read-scope filter inside SharingRuleService. No ledger entry to ratchet.',
+      'the fixtures are created over the REST admin route (`POST /sharing/rules`), which reaches '
+      + '`SharingRuleService.defineRule` without `SharingRuleSchema` — the `sharing-rule-criteria-required` '
+      + 'shape, not the `declarative-rbac-seeding` one — so no authorable key is written; and what this '
+      + 'file pins is a READ-SCOPE filter inside SharingRuleService (which org-less rows an org-bound '
+      + 'admin may list), which is not the behaviour of any `sharing_rule.*` property. '
+      + 'Premise corrected 2026-09-17 (#18589): the old reason rested on the absence of a ledger '
+      + 'coordinate, which #18587 supplied. The coordinate exists — this proof is simply not evidence '
+      + 'for it.',
   },
   {
     id: 'sharing-rule-org-less-caller',
