@@ -722,3 +722,67 @@ describe('metrics JSDoc-only durations carry their unit (#15939, #14478)', () =>
     }).period.durationSeconds).toBe(2592000);
   });
 });
+// #18124 — step 3 of ruling A on #18115. Two metrics rows declare their unit
+// through `DurationSeconds`:
+//
+//   - `MetricAggregationConfig.window.slideInterval` — seconds, from the
+//     `durationSeconds` sibling it slides across in the same object literal.
+//   - `MetricsConfig.retention.downsampling[].resolution` — seconds, stated in its
+//     JSDoc and by its `afterSeconds` sibling, and in NEITHER published channel
+//     until now (the #14519 shape: the reader of the reference page could not
+//     reach the unit at all).
+//
+// Both keep the `.positive()` floor they already declared, so the accepted set
+// narrows only by the integer requirement `DurationSeconds` carries.
+describe('metrics duration rows declare seconds through the type (#18124)', () => {
+  const window = { durationSeconds: 300, sliding: true };
+
+  it('slideInterval refuses a fractional second count', () => {
+    const result = MetricAggregationConfigSchema.safeParse({
+      type: 'avg',
+      window: { ...window, slideInterval: 60.5 },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'window.slideInterval');
+    expect(issue).toBeDefined();
+    expect(issue!.code).toBe('invalid_type');
+  });
+
+  it('slideInterval keeps its positive floor — zero and negatives still refused', () => {
+    for (const bad of [0, -60]) {
+      const result = MetricAggregationConfigSchema.safeParse({
+        type: 'avg',
+        window: { ...window, slideInterval: bad },
+      });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'window.slideInterval');
+      expect(issue).toBeDefined();
+      expect(issue!.code).toBe('too_small');
+    }
+  });
+
+  it('slideInterval still accepts the whole-second value it always did', () => {
+    const parsed = MetricAggregationConfigSchema.parse({
+      type: 'avg',
+      window: { ...window, slideInterval: 60 },
+    });
+    expect(parsed.window?.slideInterval).toBe(60);
+  });
+
+  it('downsampling resolution refuses a fractional second count and keeps its floor', () => {
+    const config = (resolution: number) => ({
+      name: 'test_metrics',
+      label: 'Test Metrics',
+      retention: { downsampling: [{ afterSeconds: 3600, resolution }] },
+    });
+    const fractional = MetricsConfigSchema.safeParse(config(60.5));
+    expect(fractional.success).toBe(false);
+    expect(fractional.error!.issues.some((i) => i.code === 'invalid_type')).toBe(true);
+
+    const zero = MetricsConfigSchema.safeParse(config(0));
+    expect(zero.success).toBe(false);
+    expect(zero.error!.issues.some((i) => i.code === 'too_small')).toBe(true);
+
+    expect(MetricsConfigSchema.parse(config(60)).retention?.downsampling?.[0]?.resolution).toBe(60);
+  });
+});

@@ -560,7 +560,8 @@ export const AuthConfigSchema = lazySchema(() => z.object({
     // defaults above are that library's defaults (7 days / 1 day).
     expiresIn: z.number().default(60 * 60 * 24 * 7).describe('Session duration in seconds')
       .meta({ externalVocabulary: 'better-auth `session.expiresIn`' }),
-    updateAge: z.number().default(60 * 60 * 24).describe('Session update frequency'),
+    updateAge: z.number().default(60 * 60 * 24).describe('Session update frequency in seconds')
+      .meta({ externalVocabulary: 'better-auth `session.updateAge`' }),
   }).optional(),
   trustedOrigins: z.array(z.string()).optional().describe(
     'Trusted origins for CSRF protection. Supports wildcards (e.g. "https://*.example.com"). ' +

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import {
   RuntimeConfigSchema,
   SandboxConfigSchema,
@@ -463,5 +464,45 @@ describe('RuntimeConfig.resourceLimits.timeout → timeoutMs (#15939 ruling A, #
     expect(runtimeMsg).not.toContain('`SandboxConfig.process.timeout`');
     expect(sandboxMsg).toContain('`SandboxConfig.process.timeout`');
     expect(sandboxMsg).not.toContain('`RuntimeConfig.resourceLimits.timeout`');
+  });
+});
+// #18124 — step 3 of ruling A on #18115. `KernelSecurityPolicy.cors.maxAge` is a
+// CORS `Access-Control-Max-Age` mirror, so it takes the `externalVocabulary`
+// route rather than a type or a rename: it is the SAME key as its already-declared
+// twin `CorsConfig.maxAge` (`src/shared/http.zod.ts`), which carries exactly this
+// marker and exactly this unit. The standard defines the header's value in
+// seconds; renaming it to `maxAgeSeconds` would break the one-to-one reading
+// between this policy and the header it emits.
+//
+// ⚠️ No gate can catch this key losing its marker, because a marker's absence is
+// how an undeclared key looks — the census simply stops admitting it. This pin is
+// the only guard, exactly as the twin's pin in `system/object-storage.test.ts` is.
+describe('KernelSecurityPolicy.cors.maxAge declares seconds by mirror (#18124)', () => {
+  const policy = {
+    cors: {
+      allowedOrigins: ['https://app.example.com'],
+      allowedMethods: ['GET'],
+      allowedHeaders: ['content-type'],
+      maxAge: 86400,
+    },
+  };
+
+  it('keeps the bare name and the value it always accepted', () => {
+    expect(KernelSecurityPolicySchema.parse(policy).cors?.maxAge).toBe(86400);
+  });
+
+  it('emits the externalVocabulary marker and the unit through z.toJSONSchema', () => {
+    const json = z.toJSONSchema(KernelSecurityPolicySchema, {
+      target: 'draft-2020-12',
+      io: 'input',
+      unrepresentable: 'any',
+    }) as {
+      properties?: {
+        cors?: { properties?: { maxAge?: { externalVocabulary?: unknown; description?: unknown } } };
+      };
+    };
+    const maxAge = json.properties?.cors?.properties?.maxAge;
+    expect(maxAge?.externalVocabulary).toBe('CORS `Access-Control-Max-Age` (WHATWG Fetch)');
+    expect(maxAge?.description).toBe('Preflight cache duration in seconds');
   });
 });

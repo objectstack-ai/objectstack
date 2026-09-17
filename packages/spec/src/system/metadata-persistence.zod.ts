@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { DurationMs } from '../shared/duration.zod';
 import { MetadataFormatSchema } from '../shared/metadata-types.zod';
 
 /**
@@ -256,7 +257,7 @@ export const MetadataLoadResultSchema = lazySchema(() => z.object({
   fromCache: z.boolean().optional(),
   etag: z.string().optional(),
   notModified: z.boolean().optional(),
-  loadTime: z.number().optional(),
+  loadTime: DurationMs.optional().describe('How long the load took, in milliseconds'),
 }));
 
 /**
@@ -284,7 +285,7 @@ export const MetadataSaveResultSchema = lazySchema(() => z.object({
   stats: MetadataStatsSchema.optional(),
   etag: z.string().optional(),
   size: z.number().optional(),
-  saveTime: z.number().optional(),
+  saveTime: DurationMs.optional().describe('How long the save took, in milliseconds'),
   backupPath: z.string().optional(),
 }));
 

@@ -46,6 +46,16 @@ const result = KernelSecurityPolicySchema.parse(data);
 | **encryption** | `{ dataAtRest: boolean; dataInTransit: boolean; algorithm?: string; minKeyLength?: integer }` | optional |  |
 | **auditLog** | `{ enabled: boolean; events?: string[]; retentionDays?: integer }` | optional |  |
 
+### Nested Shape: `KernelSecurityPolicy.cors`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **allowedOrigins** | `string[]` | ✅ |  |
+| **allowedMethods** | `string[]` | ✅ |  |
+| **allowedHeaders** | `string[]` | ✅ |  |
+| **allowCredentials** | `boolean` | optional (default: `false`) |  |
+| **maxAge** | `integer` | optional | Preflight cache duration in seconds (unit per CORS `Access-Control-Max-Age` (WHATWG Fetch)) |
+
 ### Nested Shape: `KernelSecurityPolicy.rateLimit`
 
 | Property | Type | Required | Description |
