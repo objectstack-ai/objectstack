@@ -402,6 +402,12 @@
         "data.titleFormat.options[1]"
       ]
     },
+    "api/PackageInstallBody": {
+      "sites": [
+        "options[1].navigationContributions.element.items.element.lazy.options[0]",
+        "options[1].navigationContributions.element.items.element.lazy.options[0].visible.options[1]"
+      ]
+    },
     "api/PackageInstallRequest": {
       "sites": [
         "manifest.navigationContributions.element.items.element.lazy.options[0]",
