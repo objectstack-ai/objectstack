@@ -447,6 +447,67 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
     ).toEqual([]);
   });
 
+  // ── [#18535] …and the ADR-0090 D5 half of that rule: 「平台系统权限;带
+  // package provenance 的应用声明 capability 令牌不计」. The predicate has taken
+  // an `AnchorBindingContext` since PR #17811; this rule passes the stack's own
+  // `capabilities:` declarations into it, which is what makes an app's
+  // "every employee holds this" set authorable at all. Three cases, because a
+  // single one of them is satisfied by both a correct rule and a rule that
+  // stopped judging `systemPermissions` altogether.
+  it('accepts an isDefault set whose systemPermissions token THIS stack declares (ADR-0090 D5)', () => {
+    expect(
+      rulesOf({
+        capabilities: [{ name: 'crm.export_pipeline', label: 'Export Pipeline' }],
+        permissions: [
+          {
+            name: 'app_default',
+            isDefault: true,
+            systemPermissions: ['crm.export_pipeline'],
+            objects: { invoice: { allowRead: true } },
+          },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it('still errors on an UNDECLARED systemPermissions token — the control for the case above', () => {
+    const findings = validateSecurityPosture({
+      // A real declaration list, naming a DIFFERENT capability: this pins that
+      // membership is what excuses a token, never the mere presence of a
+      // `capabilities:` collection on the stack.
+      capabilities: [{ name: 'crm.export_pipeline', label: 'Export Pipeline' }],
+      permissions: [
+        {
+          name: 'app_default',
+          isDefault: true,
+          systemPermissions: ['crm.settle_ledger'],
+          objects: { invoice: { allowRead: true } },
+        },
+      ],
+    }).filter((f) => f.rule === SECURITY_ANCHOR_HIGH_PRIVILEGE);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('system permissions');
+  });
+
+  it('still errors on a PLATFORM capability even when the stack declares a capability of that name', () => {
+    // The platform floor, applied inside the predicate: declaring
+    // `manage_users` must not launder it past the anchor gate. Keeping this
+    // case beside the two above is what stops the lint and the runtime gate
+    // from drifting — both read the same `PLATFORM_CAPABILITY_NAMES`.
+    const findings = validateSecurityPosture({
+      capabilities: [{ name: 'manage_users', label: 'Not Yours' }],
+      permissions: [
+        {
+          name: 'app_default',
+          isDefault: true,
+          systemPermissions: ['manage_users'],
+          objects: { invoice: { allowRead: true } },
+        },
+      ],
+    }).filter((f) => f.rule === SECURITY_ANCHOR_HIGH_PRIVILEGE);
+    expect(findings).toHaveLength(1);
+  });
+
   // ── Rule: security-role-word (ADR-0090 D3) ──────────────────────────
   // [#8310] Its own function (and registry entry) since the rest of the block
   // crossed the runtime publish surface — same file, same rule id, same
@@ -1189,7 +1250,11 @@ const NOT_SCHEMA_RECEIVERS: Record<string, string> = {
 const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: string; keys: () => string[] }> = [
   {
     receiver: 'stack',
-    expected: ['apps', 'books', 'data', 'objects', 'permissions', 'positions'],
+    // [#18535] `capabilities` joined the list when the ADR-0090 D5 anchor rule
+    // started passing the stack's own capability declarations to the predicate
+    // as `AnchorBindingContext.declaredCapabilities` — a declared token is the
+    // app's own gate, not a platform system permission.
+    expected: ['apps', 'books', 'capabilities', 'data', 'objects', 'permissions', 'positions'],
     declaredBy: 'ObjectStackSchema',
     keys: () => Object.keys(ObjectStackSchema.shape),
   },
@@ -1261,6 +1326,16 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     declaredBy: 'ObjectStackSchema.data[]',
     keys: () => shapeKeysOf(ObjectStackSchema.shape.data),
   },
+  // [#18535] The ADR-0066 D1 capability declarations the anchor rule reads: it
+  // wants their NAMES and hands the declarations themselves to the predicate,
+  // which reads `name` and ignores every other field — so nothing is
+  // transcribed here and this stays a one-key surface.
+  {
+    receiver: 'cap',
+    expected: ['name'],
+    declaredBy: 'ObjectStackSchema.capabilities[]',
+    keys: () => shapeKeysOf(ObjectStackSchema.shape.capabilities),
+  },
 ];
 
 /** The `.shape` object itself (not just its keys) of a wrapped collection. */
@@ -1304,6 +1379,7 @@ describe('validateSecurityPosture — reads only keys the spec declares (meta-te
       'declared', // #16108: one object's sorted field-name list — `.length` / `.slice` / `.join`.
       'entries', // #7503: the rule's own field list — `.find`, a JS method.
       'matched', // #14747: one tier's candidate list — `.length` / `.map`, JS methods.
+      'declaredCapabilities', // #18535: the stack's own capability list — `.length`, a JS property.
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
