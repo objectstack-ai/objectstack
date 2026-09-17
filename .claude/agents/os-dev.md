@@ -251,6 +251,7 @@ model: opus
 - 那份绿给一条可能永远失败不了的断言背书,对 CI 永久隐形(CI 构建正确,那边永远绿)。
 - 消融本就为证明新门禁能失败时,这份假绿读作门禁没触发,于是有人去弱化一条好门禁。
 - 每一腿(变异与还原)都是:改动 → 证明它真落到了磁盘 → `pnpm --filter <pkg> build`。
+- 落盘走 `node scripts/ablation-replace.mjs`,不走 `-i` 家族:锚点必须命中,写入与还原按磁盘核验。
 - 再证明它到达了 `dist/`,才读运行结果:`node scripts/ablation-dist-preflight.mjs <pkg> '<marker>'`。
 - 删守卫的消融以及每个还原腿,用 `--absent`。
 - ⛔ 还原腿不可跳过:留在 `dist/` 里的 marker 会让变异代码对该树之后的每次运行继续生效。
@@ -316,7 +317,6 @@ model: opus
 
 ## 干净收尾 —— 报告是你的终局动作
 
-- 报告落两次,GitHub 优先:卡片评论在前,终报消息在后。
 - 终报消息之前,把同一段 JSON 发成 issue 评论,首行单独一行、就是字面纯文本 `os-dev-report`。
 - 全文 ⛔ 不出现 HTML 注释:sanitizer 落库后吃短尖括号片段,连反引号里的也吃。
 - 被吃掉标记的评论对 PM 扫描不可见;HTML 注释形不是等价写法,是坏写法。
