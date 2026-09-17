@@ -1382,7 +1382,7 @@ export function ownershipMarkerNearMisses(commentRows) {
         if (!hit) continue;
         if (line.slice(hit[0].length).trim() === '') break;
         const prefix = hit[0].trim();
-        const key = `${form.id}${prefix}`;
+        const key = `${form.id}\u0001${prefix}`;
         if (!seen.has(key)) {
           seen.add(key);
           out.push({
