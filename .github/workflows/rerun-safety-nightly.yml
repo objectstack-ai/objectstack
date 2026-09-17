@@ -213,10 +213,15 @@ jobs:
       # exactly as before; what is new is that the failure now SAYS which of
       # "broken on main" and "rerun-unsafe" it is, and a broken-on-main night no
       # longer swallows the reading.
+      # ⛔ The self-test is NOT invoked here. It runs at PR time as
+      # `pnpm check:rerun-safety-verdict` in lint.yml, because this workflow
+      # declares only `schedule` and `workflow_dispatch`: a gate family reachable
+      # from here alone would be the tree's first SCHEDULED-ONLY family, which
+      # `check:pm-dispatch-gates` refuses by name. That step's comment carries
+      # the reasoning.
       - name: Rerun-safety verdict
         if: always()
         run: |
-          node scripts/rerun-safety-verdict.mjs --self-test
           node scripts/rerun-safety-verdict.mjs \
             --pass1-log "$RUNNER_TEMP/rerun-pass1.log" --pass1-exit "${PASS1_EXIT:-1}" \
             --pass2-log "$RUNNER_TEMP/rerun-pass2.log" --pass2-exit "${PASS2_EXIT:-1}"
