@@ -1543,7 +1543,8 @@ export function notStoredText(verdict, repo, target, mode = 'body') {
     `\npost-stamped: NOT STORED — the platform kept something other than the bytes this act sent.\n\n` +
     `  The ${mode === 'comment' ? 'comment' : 'body'} was written to ${repo}#${target} and read back, and the stored bytes differ from the\n` +
     `  sent ones at byte ${offset}, INSIDE the body this act sent. That is not the platform's footer\n` +
-    '  re-anchoring, which appends and takes nothing away — something this act sent is not there.\n' +
+    '  re-anchoring, which either appends its block or moves the newline around one already there,\n' +
+    '  and takes nothing away either way — something this act sent is not there.\n' +
     '  The verdict lines above carry both sides at that offset.\n\n' +
     '  Fix:  READ THE ARTEFACT before writing anything that depends on it having landed.\n' +
     '        ⛔ Do not retry blindly: the one measured hit of this shape was a size refusal the\n' +
@@ -2072,7 +2073,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the substitution: one clock, read once, written everywhere': 9,
   'the read-back: what the transcript can actually prove': 33,
   'the exit code: the read-back reaches `$?`, or it reaches nobody': 24,
-  'the re-anchored footer: a newline the platform MOVED is not a byte lost': 39,
+  'the re-anchored footer: a newline the platform MOVED is not a byte lost': 41,
   'the CLI: the one decision a typo must never make': 16,
   'the unread-knock check: a refresh cannot void what nobody read': 49,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
@@ -2546,6 +2547,13 @@ export function selfTest() {
   t('⭐ the predicate answers the SHAPE, so a caller cannot read a re-anchor as an append or the reverse',
     footerReAnchoring(RE_SENT, `${RE_HEAD}\n${PLATFORM_COMMENT_FOOTER}`)?.shape === 're-anchored' && footerReAnchoring(RE_HEAD, `${RE_HEAD}${PLATFORM_COMMENT_FOOTER}`)?.shape === 'appended');
   t('⛔ …and `null` stays the one answer for everything neither shape covers', footerReAnchoring(RE_SENT, `${RE_HEAD}\n\n${PLATFORM_COMMENT_FOOTER}`) === null);
+  // ⛔ The exit-4 report draws the boundary in prose, so it names BOTH shapes or
+  // it sends the reader who hit a real loss looking for the wrong exemption.
+  const LOST = rb({ sent: RE_SENT, stored: `${RE_HEAD.replace('this', 'that')}\n${PLATFORM_COMMENT_FOOTER}`, mode: 'comment' });
+  t('⭐ the NOT STORED report names both re-anchor shapes, not just the append it used to',
+    notStoredText(LOST, 'o/n', 18709).includes('appends its block') && notStoredText(LOST, 'o/n', 18709).includes('moves the newline around one already there'));
+  t('…and still says the thing that decides it: something this act sent is not there',
+    notStoredText(LOST, 'o/n', 18709).includes('something this act sent is not there') && notStoredText(LOST, 'o/n', 18709).includes('READ THE ARTEFACT'));
 
   battery('the CLI: the one decision a typo must never make');
   t('a comment target parses', parseOptions(['--comment=17314']).options.mode === 'comment');
