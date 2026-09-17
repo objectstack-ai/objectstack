@@ -596,6 +596,7 @@
     "ui/KanbanConfig:columns",
     "ui/KanbanConfig:groupByField",
     "ui/KanbanConfig:summarizeField",
+    "ui/KanbanConfig:titleField",
     "ui/ListChartConfig:chartType",
     "ui/ListChartConfig:dataset",
     "ui/ListChartConfig:dimensions",
