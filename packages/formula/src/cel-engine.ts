@@ -1715,9 +1715,10 @@ export const celEngine: DialectEngine = {
     const source = expr.source;
     if (typeof source !== 'string' || source.length === 0) {
       // AST-only inputs: cel-js does not currently expose a public API to
-      // re-execute a parsed AST without re-serializing. We persist `source`
-      // as the canonical form during M9.1 and revisit AST-only execution in
-      // M9.7 when we cut the spec persistence over.
+      // re-execute a parsed AST without re-serializing. `source` is the
+      // canonical persisted form and is what this engine evaluates, so an
+      // envelope carrying only `ast` has no evaluable form here and is
+      // reported as such rather than run.
       return {
         ok: false,
         error: { kind: 'parse', message: 'AST-only evaluation not yet supported; persist `source`' },
