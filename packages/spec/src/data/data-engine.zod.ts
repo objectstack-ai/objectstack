@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { FilterConditionSchema } from './filter.zod';
 import { SortNodeSchema, QuerySchema, FullTextSearchSchema, FieldNodeSchema, AggregationNodeSchema, GroupByNodeSchema, QUERY_CURSOR_REMOVED, QUERY_DISTINCT_REMOVED } from './query.zod';
+import type { QueryAST, QueryInput } from './query.zod';
 import { retiredKey } from '../shared/retired-key';
 import { ExecutionContextSchema } from '../kernel/execution-context.zod';
 
@@ -673,6 +674,204 @@ const RpcQueryOptionsSchema = EngineQueryOptionsSchema.extend({
   /** @deprecated Use `expand` */
   populate: z.array(z.string()).optional(),
 }).transform((options, ctx) => foldRpcQueryOptions(options, ctx));
+
+// ==========================================================================
+// 2c. The QUERY TRANSPORT dialect — the FLATTENED SPELLING of the QueryAST
+// ==========================================================================
+//
+// One vocabulary, two spellings, ONE semantics. Everything below is a
+// key-level alias of a canonical QueryAST slot; nothing here means anything
+// the AST cannot already say, which is the whole reason it can be declared
+// without creating the second de-facto contract Prime Directive #12 warns
+// about. ⛔ A spelling that would need its own meaning does not belong here —
+// it belongs in the AST or nowhere.
+
+/**
+ * The transport-only alias spellings, by canonical QueryAST key — the ones a
+ * transport boundary speaks that {@link RPC_QUERY_ALIAS_SLOTS} does not carry.
+ *
+ * `filters` is the documented plural of the `filter` transport parameter;
+ * `$filter` / `$expand` are the OData spellings that fold STRAIGHT onto a
+ * canonical key rather than onto a bare one, which is why they are slot
+ * aliases here and not rows in {@link QUERY_TRANSPORT_DOLLAR_ALIASES}.
+ */
+const QUERY_TRANSPORT_ONLY_SLOT_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  where: ['filters', '$filter'],
+  expand: ['$expand'],
+};
+
+/**
+ * {@link RPC_QUERY_ALIAS_SLOTS} extended with the transport-only spellings —
+ * the alias table every transport boundary folds by, declared ONCE.
+ *
+ * Before this export the extension was re-declared inside
+ * `@objectstack/metadata-protocol` as a module-private `WIRE_QUERY_ALIAS_SLOTS`,
+ * so the `findData` door accepted a vocabulary no schema named: two dialects
+ * on one slot, one of them declared. A caller speaking the transport spelling
+ * was unverifiable at build time and unrejected at runtime. The table is the
+ * single source now; the normalizer folds by THIS array.
+ */
+export const QUERY_TRANSPORT_ALIAS_SLOTS: readonly QueryAliasSlot[] = RPC_QUERY_ALIAS_SLOTS.map(
+  (slot) => ({
+    canonical: slot.canonical,
+    aliases: [...slot.aliases, ...(QUERY_TRANSPORT_ONLY_SLOT_ALIASES[slot.canonical] ?? [])],
+  }),
+);
+
+/**
+ * The OData `$`-prefixed spelling of each BARE transport parameter, as
+ * `[dollarSpelling, bareSpelling]` pairs.
+ *
+ * NOT derivable by prefixing `$`: `sort` is `$orderby`. These fold in TWO hops
+ * — `$top` lands on `top`, which {@link QUERY_TRANSPORT_ALIAS_SLOTS} then folds
+ * onto `limit` — so a reader comparing only the slot table would miss them.
+ *
+ * `count` is the one bare spelling here that is not a QueryAST slot at all: it
+ * is the response's total-count flag, read beside the query rather than inside
+ * it. It is declared here because the transport spells it `$count` and the fold
+ * has to consume it; it does not become an AST member by being named.
+ */
+export const QUERY_TRANSPORT_DOLLAR_ALIASES: readonly (readonly [string, string])[] = [
+  ['$top', 'top'],
+  ['$skip', 'skip'],
+  ['$orderby', 'orderBy'],
+  ['$select', 'select'],
+  ['$count', 'count'],
+  ['$search', 'search'],
+  ['$searchFields', 'searchFields'],
+];
+
+/**
+ * Every `$`-prefixed spelling the transport declares — the two-hop ones in
+ * table order, then the slot aliases in slot order.
+ *
+ * This is the set a boundary quotes when it refuses an UNDECLARED `$` name. A
+ * `$`-prefixed key can never be a field name, so anything outside this set is
+ * refused loudly instead of falling into the implicit-field-filter bucket,
+ * where it matched zero rows under a 200 and no caller could see it.
+ */
+export const QUERY_TRANSPORT_DOLLAR_PARAMS: readonly string[] = [
+  ...QUERY_TRANSPORT_DOLLAR_ALIASES.map(([dollar]) => dollar),
+  ...QUERY_TRANSPORT_ALIAS_SLOTS.flatMap((slot) => slot.aliases.filter((a) => a.startsWith('$'))),
+];
+
+/**
+ * The transport query parameters — the `$`-prefixed spellings and the plural
+ * `filters`, each carrying the value of the canonical slot it folds onto.
+ *
+ * ⛔ This is NOT the hint table `@objectstack/metadata-protocol` keeps for
+ * near-miss suggestions; nothing in that table is accepted as input and it
+ * stays that way. This one IS accepted — it is what the `findData` door has
+ * folded since #3795, declared at last.
+ *
+ * Every member is optional and every value type is the union of the shapes the
+ * boundary already serves on that slot: the structured form a JSON body sends
+ * and the string form a querystring sends (`?$top=50` arrives as `'50'`,
+ * `?$select=a,b` as a comma list). Declaring the narrower structured form alone
+ * would have turned live traffic into a `400`, which is the repair #15866's
+ * parent thread closed for exactly this reason.
+ */
+export const QueryTransportParamsSchema = lazySchema(() => z.object({
+  /** OData spelling of `where`. */
+  $filter: z.union([z.string(), DataEngineFilterSchema]).optional()
+    .describe('Transport spelling of `where` (OData `$filter`)'),
+  /** Documented plural of the `filter` transport parameter; folds onto `where`. */
+  filters: z.union([z.string(), DataEngineFilterSchema]).optional()
+    .describe('Transport spelling of `where` (plural of `filter`)'),
+  /** OData spelling of `limit` (two hops: `$top` to `top` to `limit`). */
+  $top: z.union([z.number(), z.string()]).optional()
+    .describe('Transport spelling of `limit` (OData `$top`)'),
+  /** OData spelling of `offset` (two hops: `$skip` to `skip` to `offset`). */
+  $skip: z.union([z.number(), z.string()]).optional()
+    .describe('Transport spelling of `offset` (OData `$skip`)'),
+  /** OData spelling of `orderBy`. */
+  $orderby: z.union([z.string(), z.array(z.string()), DataEngineSortSchema]).optional()
+    .describe('Transport spelling of `orderBy` (OData `$orderby`)'),
+  /** OData spelling of `fields` (two hops: `$select` to `select` to `fields`). */
+  $select: z.union([z.string(), z.array(FieldNodeSchema)]).optional()
+    .describe('Transport spelling of `fields` (OData `$select`)'),
+  /** OData spelling of `expand`. */
+  $expand: z.union([z.string(), z.array(z.string()), z.record(z.string(), QuerySchema)]).optional()
+    .describe('Transport spelling of `expand` (OData `$expand`)'),
+  /** OData spelling of `search`. */
+  $search: z.union([z.string(), FullTextSearchSchema]).optional()
+    .describe('Transport spelling of `search` (OData `$search`)'),
+  /** OData spelling of `searchFields`. */
+  $searchFields: z.union([z.string(), z.array(z.string())]).optional()
+    .describe('Transport spelling of `searchFields` (OData `$searchFields`)'),
+  /** OData spelling of the response total-count flag. */
+  $count: z.union([z.boolean(), z.string()]).optional()
+    .describe('Transport spelling of the response total-count flag (OData `$count`)'),
+}).describe('Transport spellings of the QueryAST slots — folded to canonical keys at the boundary'));
+
+/**
+ * Fold a transport bag onto canonical QueryAST keys, by the two tables above.
+ *
+ * The same two steps, in the same order, that the protocol normalizer runs on
+ * raw wire input: `$` spellings onto their bare parameter first (a `$` alias
+ * never overwrites a bare spelling that is already present), then every alias
+ * onto its canonical slot via {@link foldQueryAliasSlots}. Conflicting
+ * spellings of ONE slot are reported, never resolved.
+ *
+ * Deliberately a fold over the shared TABLES rather than a second copy of the
+ * normalizer: this is the parse-time application, exactly as
+ * `foldRpcQueryOptions` is the parse-time application of
+ * {@link RPC_QUERY_ALIAS_SLOTS}. Value SHAPES are moved verbatim — lowering a
+ * comma list or a `{field: direction}` record is the boundary's job, one layer
+ * down, and doing it twice is how two implementations of one rule start.
+ */
+function foldQueryTransportBag(
+  input: Record<string, unknown>,
+  onConflict: (conflict: QueryAliasConflict) => void,
+): Record<string, unknown> {
+  const bag: Record<string, unknown> = { ...input };
+  for (const [dollar, bare] of QUERY_TRANSPORT_DOLLAR_ALIASES) {
+    if (bag[dollar] != null && bag[bare] == null) bag[bare] = bag[dollar];
+    delete bag[dollar];
+  }
+  foldQueryAliasSlots(bag, QUERY_TRANSPORT_ALIAS_SLOTS, onConflict);
+  return bag;
+}
+
+/** The transport query parameters, as an input shape. */
+export type QueryTransportParams = z.input<typeof QueryTransportParamsSchema>;
+
+/**
+ * What a query slot that serves a transport boundary DECLARES as its input:
+ * the canonical QueryAST, the transport spelling, or a bag carrying both.
+ *
+ * The third arm is not generosity — it is what the door does. A boundary
+ * assembles one bag out of a caller's parameters and its own, so `where` and
+ * `$filter` can arrive together; the fold collapses them when they agree and
+ * refuses them when they do not. Declaring only the two pure arms would have
+ * re-created this card's own defect one size down: a shape the door accepts
+ * that the declaration denies.
+ */
+export type QueryWithTransportInput = QueryInput & Partial<QueryTransportParams>;
+
+/**
+ * A query slot whose declared INPUT is the canonical AST or its transport
+ * spelling, and whose declared OUTPUT is the AST.
+ *
+ * The first arm folds by {@link QUERY_TRANSPORT_ALIAS_SLOTS} /
+ * {@link QUERY_TRANSPORT_DOLLAR_ALIASES} and then validates the result as a
+ * real {@link QuerySchema}, so a transport bag parses to canonical keys. The
+ * second arm is `QuerySchema` itself, unchanged — which is what makes this
+ * widening provably unable to narrow anything: every input that parsed before
+ * still parses, by the same schema, with the same issues.
+ */
+export const QueryWithTransportSchema: z.ZodType<QueryAST, QueryWithTransportInput> = lazySchema(() =>
+  z.union([
+    z.record(z.string(), z.unknown())
+      .transform((bag, ctx) => foldQueryTransportBag(
+        bag as Record<string, unknown>,
+        (conflict) => ctx.addIssue(aliasConflictIssue(conflict)),
+      ))
+      .pipe(QuerySchema as unknown as z.ZodType<QueryAST, Record<string, unknown>>),
+    QuerySchema,
+  ]) as unknown as z.ZodType<QueryAST, QueryWithTransportInput>,
+);
+
 
 export const DataEngineFindRequestSchema = lazySchema(() => z.object({
   method: z.literal('find'),

@@ -38,6 +38,18 @@
  * the type-level half that says the canonical shapes are the ones the contract
  * actually declares.
  *
+ * ⭐ [#16066] §2 moved when the SPEC half of this pair landed. The transport
+ * spelling is declared now — `QueryTransportParamsSchema` plus the alias table
+ * in `@objectstack/spec/data`, with `FindDataRequest['query']` declaring the
+ * AST or that spelling as its input and the AST as its output — so §2 no longer
+ * asserts that `$filter` / `$top` / `filters` are refused. It asserts the
+ * BOUNDARY of the widening instead: the spellings the table names assign, and
+ * a `$` name it does not (`$sort`) still does not. ⚠️ §1 is untouched by that
+ * and must stay untouched: what `rest-server.ts` and `import-runner.ts` are
+ * allowed to BUILD is a separate question from what the contract admits, and
+ * the answer is still the canonical AST — a server-built literal has no wire to
+ * arrive from.
+ *
  * ⚠️ The FOURTH literal is the reason §1 is phrased over the whole file rather
  * than over three named sites. `loadImportJob` built `{ $filter, $top }` and
  * handed it to a `p: any` handle — type-checked by nothing, named by no card,
@@ -362,7 +374,7 @@ describe('[#16952] §1b the exported `ImportProtocolLike` declares what it is ha
 type Query = NonNullable<FindDataRequest['query']>;
 
 describe('[#16337] §2 the declared `FindDataRequest[\'query\']` contract', () => {
-    it('admits the canonical AST and refuses every wire spelling (compile-time)', () => {
+    it('admits the canonical AST and the declared transport spelling, and refuses what the table does not name (compile-time)', () => {
         const canonical: Query = {
             object: 'sys_import_job',
             where: { status: 'queued' },
@@ -374,27 +386,36 @@ describe('[#16337] §2 the declared `FindDataRequest[\'query\']` contract', () =
         };
         expect(canonical.limit).toBe(50);
 
+        // ⭐ [#16066] The transport spelling is DECLARED now — the second half
+        // of the split this file's card names. `QuerySchema` itself is
+        // untouched (nothing below is an AST member); what widened is the
+        // `FindDataRequest['query']` INPUT, which admits the canonical AST, its
+        // transport spelling, or a bag carrying both, and whose OUTPUT is still
+        // the AST. So these three are assignments, not `@ts-expect-error`s.
+        const dollarTop: Query = { object: 'x', $top: 5 };
+        const dollarFilter: Query = { object: 'x', $filter: { id: '1' } };
+        const wireFilters: Query = { object: 'x', filters: '{"id":"1"}' };
+        // ⭐ …and a bag mixing the two spellings, which is what a boundary that
+        // merges a caller's parameters with its own actually assembles.
+        const mixed: Query = { object: 'x', where: { status: 'queued' }, $top: 5 };
+
         // Each directive below is LIVE: `tsconfig.test.json` compiles this
         // layer, and an unused `@ts-expect-error` is TS2578 there. So these are
-        // assertions, not decoration — if the wire dialect were ever declared
-        // on `QuerySchema`, this block reds rather than going quiet.
-        // @ts-expect-error `$top` is not a declared QueryAST key
-        const dollarTop: Query = { object: 'x', $top: 5 };
-        // @ts-expect-error [#16638] `$filter` is not a declared QueryAST key
-        const dollarFilter: Query = { object: 'x', $filter: { id: '1' } };
-        // @ts-expect-error `filters` is not a declared QueryAST key
-        const wireFilters: Query = { object: 'x', filters: [] };
-        // @ts-expect-error `select` is the alias; the declared key is `fields`
+        // assertions, not decoration — and they are the boundary of the
+        // widening: what the transport alias table does NOT name stays refused.
+        // @ts-expect-error `select` is an RPC alias, not a transport spelling; the declared key is `fields`
         const wireSelect: Query = { object: 'x', select: ['id'] };
-        // @ts-expect-error `sort` is the alias; the declared key is `orderBy`
+        // @ts-expect-error `sort` is an RPC alias, not a transport spelling; the declared key is `orderBy`
         const wireSort: Query = { object: 'x', sort: [{ field: 'a', order: 'asc' }] };
-        // @ts-expect-error the `{field: direction}` record is not `SortNode[]`
+        // @ts-expect-error the `{field: direction}` record is not `SortNode[]` — `$orderby` is the slot that takes it
         const recordSort: Query = { object: 'x', orderBy: { created_at: 'desc' } };
-        // @ts-expect-error a comma list is not `Record<string, QueryAST>`
+        // @ts-expect-error a comma list is not `Record<string, QueryAST>` — `$expand` is the slot that takes it
         const commaExpand: Query = { object: 'x', expand: 'owner_id' };
-        // @ts-expect-error `object` is REQUIRED on the declared query
+        // @ts-expect-error `object` is REQUIRED on the declared query, in either spelling
         const noObject: Query = { limit: 1 };
-        expect([dollarTop, dollarFilter, wireFilters, wireSelect, wireSort, recordSort, commaExpand, noObject]).toHaveLength(8);
+        // @ts-expect-error `$sort` is not a spelling the transport table names — declaring the dialect did not open `$*`
+        const unnamedDollar: Query = { object: 'x', $sort: 'name' };
+        expect([dollarTop, dollarFilter, wireFilters, mixed, wireSelect, wireSort, recordSort, commaExpand, noObject, unnamedDollar]).toHaveLength(10);
     });
 });
 
@@ -412,7 +433,7 @@ type CreateArgs = Parameters<ImportProtocolLike['createData']>[0];
 type UpdateArgs = Parameters<ImportProtocolLike['updateData']>[0];
 
 describe('[#16952] §2 the declared `ImportProtocolLike` parameter contract', () => {
-    it('admits what the runner sends, and refuses the wire dialect (compile-time)', () => {
+    it('admits what the runner sends and the declared transport spelling, and refuses what the table does not name (compile-time)', () => {
         // Exactly the three literals `import-runner.ts` builds, envelope included.
         const find: FindArgs = {
             object: 'sys_user',
@@ -424,20 +445,25 @@ describe('[#16952] §2 the declared `ImportProtocolLike` parameter contract', ()
         const update: UpdateArgs = { object: 'task', id: 'id_1', data: { name: 'r0' }, context: {} };
         expect([find.object, create.object, update.id]).toEqual(['sys_user', 'task', 'id_1']);
 
-        // ⭐ The dialect an implementor used to freeze on, now refused at the
-        // extension point rather than observed from it. Each directive is LIVE
-        // — an unused `@ts-expect-error` is TS2578 under `tsconfig.test.json`.
-        // @ts-expect-error `$filter` is the wire spelling; the declared key is `where`
+        // ⭐ [#16066] The dialect an implementor used to freeze on reaches the
+        // extension point DECLARED: it inherits `FindDataRequest['query']`, so
+        // the transport spelling type-checks here for the same reason it does
+        // on the request itself. The extension point is not restating the
+        // dialect — it is reading the one declaration.
         const wireFilter: FindArgs = { object: 'sys_user', query: { object: 'sys_user', $filter: { email: 'a@b.c' } } };
-        // @ts-expect-error `$top` is the wire spelling; the declared key is `limit`
         const wireTop: FindArgs = { object: 'sys_user', query: { object: 'sys_user', $top: 2 } };
+
+        // Each directive below is LIVE — an unused `@ts-expect-error` is TS2578
+        // under `tsconfig.test.json`.
+        // @ts-expect-error a spelling the transport table does not name stays refused at the extension point too
+        const unnamedDollar: FindArgs = { object: 'sys_user', query: { object: 'sys_user', $sort: 'email' } };
         // @ts-expect-error `object` is REQUIRED on every declared request
         const noObject: FindArgs = { query: { object: 'sys_user', where: {} } };
         // @ts-expect-error `data` is REQUIRED on a create
         const noData: CreateArgs = { object: 'task' };
         // @ts-expect-error `id` is REQUIRED on an update
         const noId: UpdateArgs = { object: 'task', data: { name: 'r0' } };
-        expect([wireFilter, wireTop, noObject, noData, noId]).toHaveLength(5);
+        expect([wireFilter, wireTop, unnamedDollar, noObject, noData, noId]).toHaveLength(6);
     });
 
     it('an implementor written against the declaration needs no annotation of its own', () => {
