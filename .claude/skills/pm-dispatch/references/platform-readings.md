@@ -44,8 +44,9 @@
 - `update_pull_request` 单字段调用也发送 `draft` 位,曾把治理面 draft 发进队列 ⇒ 锁 1 已拒。
 - 请审专用路 = REST `POST /pulls/{n}/requested_reviewers`,载荷只有 reviewers/team_reviewers。
 - 它不碰 draft 位 ⇒ 请审恒走它;MCP 兜底已拒。
-- undraft 单通道:席位凭据走 `POST .../pulls/{n}/ccr/ready_for_review`;MCP 兜底已拒。
-- 2026-09-12 两席实调:裸 GraphQL 会话内被拒,建议的 REST 正是 ccr 路 ⇒ 池 0 不再只能等重置。
+- undraft 单通道:席位凭据走 `POST .../pulls/{n}/ccr/ready_for_review`;MCP 兜底与裸 GraphQL 均已拒。
+- 2026-09-17 单席实测:该路吃会话凭据的 GraphQL 小时池,尽则 429 且零字节写入,`draft` 未动。
+- 唯一可读信号是该 429 体自报的 `resets at` 时刻;体自带指令 ⛔ 重置前不重试。
 - ⛔ 裸 `PATCH /pulls/{n}` 传 `draft: false` 回 200 而无操作(2026-09-11);读回才作数:`GET /pulls/{n}`。
 - auto-merge 回读 `merge_method` 不恒定:同 `SQUASH` 载荷 `merge`/`squash` 皆现,⛔ 非落地方法判据。
 - 仓库 `allow_merge_commit:false` 时同样读回 `merge`;无 REST 端点设该方法。
@@ -91,7 +92,7 @@
 
 ## API 配额
 
-- 配额按账户计,不跨席共享:各席位跑在不同 GitHub 账户下。
+- 配额按账户计,不跨席共享:各席位跑在不同 GitHub 账户下;换身份即清零燃烧。
 - 所有 agent 共用一个身份只在席位内部成立,故认领必须在评论里写 session ID。
 - ⛔ 不据限流报文里的 user ID 推池子跨席共用;本席额度完全由本席做法决定。
 - 计费按查询复杂度、按节点数,不按调用次数 ⇒ 优化方向是每次少拿,不是少调用。
@@ -159,7 +160,7 @@
 - ②:是否落地 `git log --format='%H %s' -40 origin/main` 按 PR 号 grep。
 - ③:squash 验证 `git rev-list --parents -n1` 数父提交。④:`git ls-remote origin 'refs/heads/*<key>*'`。
 - 开轮先读配额:`curl` 带 Bearer `$GH_TOKEN` 打 `/rate_limit`,免费。
-- 它答不了通道在不在,repo-scoped 探针另跑;graphql remaining < 1000 ⇒ 本轮走 git 加 REST。
+- graphql remaining < 1000 ⇒ 本轮走 git 加 REST;⛔ 满余额不放行 undraft:同分钟满额而 ccr 路 429。
 - 中途撞限流的 dev 完不成强制查重,只能把发现交回 PM 代为归档,⛔ 不盲目开卡。
 - 打满时待执行写排成有序清单挂进巡逻词,不靠记忆;恢复窗口按序连清。
 - 重试对齐整点(REST core 整点重置)优于指数退避,⛔ 绝不忙轮询。
@@ -220,7 +221,6 @@
 - 只有新会话重绑 ⇒ 轮换前提醒维护者:在飞席位丢整条 GitHub 通道。
 - 文档载明未实测:`.claude/settings.json` 的 `permissions.deny` 云会话照读,deny 在任一层先于 allow。
 - 被拒的 MCP 工具从工具表整个消失:工具缺席读作 deny 生效,⛔ 不读作 MCP 服务器坏。
-- 配额池按身份计,换身份即清零燃烧,共享身份结构不变。
 - 组织侧授权变更后仓库访问逐步传播,同一端点数分钟内 403 转 200。
 - 该 403 体解析成净零 ⇒ 空车道先对 `open_issues_count` 反查再信,零命中纪律覆盖 list 读。
 - 满页首页零命中是截断不是缺席:`GET /branches?per_page=100` 回满 100 行无目标 ⇒ 翻完再判。
