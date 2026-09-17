@@ -220,7 +220,7 @@ regions:
   **"12 columns" describes the renderer's internal grid, not an authorable span
   vocabulary.** What an author declares is much narrower, and both keys are
   strict: a section's `columns` is a scalar `1`–`4`, and a field's width is
-  `span: auto | full` (or the legacy absolute `colSpan`, also `1`–`4`). There is
+  `span: auto | full` (or the absolute `colSpan`, also `1`–`4`). There is
   **no** `span: 6` and no twelfth of anything in the metadata. The examples below
   are written in the vocabulary the schemas accept.
 </Callout>
@@ -254,9 +254,13 @@ section:
 ### Custom Span Widths
 
 A field's width is set on the field itself, inside the section's own `fields`
-list — there is no section-level `layout:` block. `span: full` takes the whole
-row at any column count; omitting `span` (`auto`) lets the renderer size the
-field from its widget type and the current column count.
+list — there is no section-level `layout:` block. `span: full` resolves to the
+form grid's full column count (the explicit form `columns`, else the widest
+section's `columns`, else inferred from field count). Which container-query
+tiers emit that span is the renderer's: widest tier only at objectui
+`53ded82bf7` (objectstack#17328), one clamped class per tier since
+objectui#9253. Omitting `span` (`auto`) lets the renderer size the field from
+its widget type and the current column count.
 
 {/* os:check-yaml FormSectionSchema key=section */}
 ```yaml

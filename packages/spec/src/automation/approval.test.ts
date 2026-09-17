@@ -83,6 +83,33 @@ describe('ApproverType', () => {
 // `delegated_admin` tier (ADR-0105 D8) could not be authored as an approver.
 // The list is now DERIVED from `BUILTIN_MEMBERSHIP_ROLES`; these pins keep the
 // derivation from ever being silently replaced by a copy again.
+// The enum's `.describe()` reaches authors twice over: `os lint` is not its only
+// reader, the generated reference renders it verbatim ONCE PER SHAPE that reuses
+// the approver entry — so a stale sentence there multiplies rather than sits
+// still. It is a POINTER at the remedy by design; what it must never do is make
+// a claim of its own that the platform contradicts.
+describe('ApproverType.describe() points at the remedy without asserting a stale fact', () => {
+  const doc = () => ApproverType.description ?? '';
+
+  it('⛔ does not deny a write surface that exists', () => {
+    // `sys_user.manager_id` gained a dedicated admin operation. An author who
+    // reads "no product write surface" stops looking for it.
+    expect(doc()).not.toContain('no product write surface');
+    expect(doc()).not.toContain('from outside the product');
+  });
+
+  it('still routes the reader to the one authoritative remedy', () => {
+    expect(doc()).toContain('approval-approvers-may-resolve-empty');
+    expect(doc()).toContain('os lint');
+    // ⛔ And still does not restate it — one copy, in the lint rule.
+    expect(doc()).not.toContain('/api/v1/auth/admin/set-user-manager');
+  });
+
+  it('names the node-level escape this widening added', () => {
+    expect(doc()).toContain('onEmptyApprovers');
+  });
+});
+
 describe('ORG_MEMBERSHIP_LEVELS derives from BUILTIN_MEMBERSHIP_ROLES', () => {
   it('is the same list, in the same display order, as the sys_member.role vocabulary', () => {
     expect([...ORG_MEMBERSHIP_LEVELS]).toEqual([...BUILTIN_MEMBERSHIP_ROLES]);
@@ -315,6 +342,135 @@ describe('ApprovalNodeConfigSchema', () => {
     expect(doc).toContain('all resolvable approvers for quorum');
     expect(doc).toContain('1 per group for per_group');
     expect(doc).not.toContain('Default 1');
+  });
+});
+
+// The node-level empty-slate policy that NAMES people. `manager` is the card's
+// proving rung, but nothing here is manager-specific: all five graph approver
+// types fall back to the same `type:value` literal when their lookup finds
+// nobody, and the node is where that is decided.
+describe("ApprovalNodeConfigSchema — onEmptyApprovers: 'fallback' + fallbackApprovers", () => {
+  const minimal = { approvers: [{ type: 'manager' }] };
+  const owner = { type: 'org_membership_level', value: 'owner' };
+
+  const issuesOf = (input: unknown) => {
+    const r = ApprovalNodeConfigSchema.safeParse(input);
+    expect(r.success, 'expected this config to be REFUSED').toBe(false);
+    return r.error!.issues;
+  };
+
+  it("accepts 'fallback' with a sibling fallbackApprovers, and keeps the list verbatim", () => {
+    const cfg = ApprovalNodeConfigSchema.parse({
+      ...minimal,
+      onEmptyApprovers: 'fallback',
+      fallbackApprovers: [owner, { type: 'user', value: 'u_backstop', group: 'backstop' }],
+    });
+    expect(cfg.onEmptyApprovers).toBe('fallback');
+    expect(cfg.fallbackApprovers).toEqual([
+      { type: 'org_membership_level', value: 'owner' },
+      { type: 'user', value: 'u_backstop', group: 'backstop' },
+    ]);
+  });
+
+  // The whole point of reusing ApprovalNodeApproverSchema rather than declaring
+  // a second approver shape: the fallback is not a dialect. An entry that the
+  // primary list would refuse is refused here too, by the SAME surface error.
+  it('resolves entries through the approver shape `approvers` uses, not a second one', () => {
+    expect(ApprovalNodeConfigSchema.shape.fallbackApprovers).toBeDefined();
+    const bad = issuesOf({
+      ...minimal,
+      onEmptyApprovers: 'fallback',
+      fallbackApprovers: [{ type: 'not_a_type', value: 'x' }],
+    });
+    expect(bad.some((i) => i.path.join('.') === 'fallbackApprovers.0.type')).toBe(true);
+
+    // …and an unknown KEY inside an entry is rejected by the approver surface's
+    // own strict error, the same one an `approvers` entry would raise.
+    const unknownKey = issuesOf({
+      ...minimal,
+      onEmptyApprovers: 'fallback',
+      fallbackApprovers: [{ type: 'user', value: 'u1', escalateTo: 'u2' }],
+    });
+    expect(unknownKey.some((i) => i.code === 'unrecognized_keys')).toBe(true);
+  });
+
+  it("refuses 'fallback' with no fallbackApprovers, naming BOTH keys", () => {
+    const issues = issuesOf({ ...minimal, onEmptyApprovers: 'fallback' });
+    const hit = issues.find((i) => i.path.join('.') === 'fallbackApprovers');
+    expect(hit, 'no issue on fallbackApprovers').toBeTruthy();
+    expect(hit!.message).toContain('onEmptyApprovers');
+    expect(hit!.message).toContain('fallbackApprovers');
+    // The remedy offers both edits, because only the author knows which
+    // they meant.
+    expect(hit!.message).toContain('admin_rescue');
+  });
+
+  it('refuses an empty fallbackApprovers array — a named slate that names nobody', () => {
+    const issues = issuesOf({ ...minimal, onEmptyApprovers: 'fallback', fallbackApprovers: [] });
+    expect(issues.some((i) => i.path.join('.').startsWith('fallbackApprovers'))).toBe(true);
+  });
+
+  // The reverse arm, and the one that earns its place: `admin_rescue` is the
+  // DEFAULT, so "added the list, forgot the policy" is the likeliest slip and
+  // the one that would otherwise ship a node silently ignoring half its config.
+  it('refuses fallbackApprovers under the DEFAULT policy, and says the key is omitted', () => {
+    const issues = issuesOf({ ...minimal, fallbackApprovers: [owner] });
+    const hit = issues.find((i) => i.path.join('.') === 'onEmptyApprovers');
+    expect(hit, 'no issue on onEmptyApprovers').toBeTruthy();
+    expect(hit!.message).toContain('fallbackApprovers');
+    expect(hit!.message).toContain("'fallback'");
+    expect(hit!.message).toContain('admin_rescue');
+    expect(hit!.message).toContain('default');
+  });
+
+  it.each(['admin_rescue', 'fail', 'auto_approve'])(
+    "refuses fallbackApprovers under '%s', naming that policy",
+    (policy) => {
+      const issues = issuesOf({ ...minimal, onEmptyApprovers: policy, fallbackApprovers: [owner] });
+      const hit = issues.find((i) => i.path.join('.') === 'onEmptyApprovers');
+      expect(hit, `no issue on onEmptyApprovers for ${policy}`).toBeTruthy();
+      expect(hit!.message).toContain(`'${policy}'`);
+      expect(hit!.message).toContain('fallbackApprovers');
+    },
+  );
+
+  // Negative controls: the three pre-existing policies are untouched by this
+  // widening — they still parse with no sibling key, and the default still
+  // resolves to admin_rescue.
+  it.each(['admin_rescue', 'fail', 'auto_approve'])('leaves %s parsing exactly as before', (policy) => {
+    const cfg = ApprovalNodeConfigSchema.parse({ ...minimal, onEmptyApprovers: policy });
+    expect(cfg.onEmptyApprovers).toBe(policy);
+    expect(cfg.fallbackApprovers).toBeUndefined();
+  });
+
+  it('leaves the omitted policy defaulting to admin_rescue', () => {
+    expect(ApprovalNodeConfigSchema.parse(minimal).onEmptyApprovers).toBe('admin_rescue');
+  });
+
+  // The refinement must not cost the shape its strictness or its class: a
+  // ZodEffects wrapper would silently drop `.shape`, `additionalProperties:
+  // false` on the published JSON schema, and the whole #4001 unknown-key error.
+  it('keeps the strict unknown-key contract the refinement is attached to', () => {
+    const issues = issuesOf({ ...minimal, onEmptyApprover: 'fallback' });
+    expect(issues.some((i) => i.code === 'unrecognized_keys')).toBe(true);
+  });
+
+  // The designer renders the property form from this JSON schema, so a member
+  // that never reaches it is a member no author can pick.
+  it('publishes the fourth member and the sibling key on the JSON schema the designer reads', () => {
+    const js = getApprovalNodeConfigJsonSchema() as any;
+    expect(js.properties.onEmptyApprovers.enum).toEqual(
+      ['admin_rescue', 'fail', 'auto_approve', 'fallback'],
+    );
+    expect(js.properties.fallbackApprovers).toBeDefined();
+    expect(js.properties.fallbackApprovers.type).toBe('array');
+    expect(js.additionalProperties).toBe(false);
+  });
+
+  it("documents the sibling key on the policy's own description", () => {
+    const doc = ApprovalNodeConfigSchema.shape.onEmptyApprovers.description ?? '';
+    expect(doc).toContain('fallbackApprovers');
+    expect(doc).toContain("'fallback'");
   });
 });
 

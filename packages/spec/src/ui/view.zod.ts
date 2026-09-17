@@ -1349,6 +1349,25 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
 }, {
   groupByField: z.string().describe('Field to group columns by (usually status/select)'),
   summarizeField: z.string().optional().describe('Field to sum at top of column (e.g. amount)'),
+  /**
+   * [#16894] The one item-titled view config of the family that omitted this
+   * key. `GalleryConfigSchema`, `TimelineConfigSchema`, `CalendarConfigSchema`,
+   * `GanttConfigSchema` and `ListMapConfigSchema` all declare `titleField`
+   * under the same name and the same `z.string()`; this schema is a
+   * `strictObject`, so an author writing the key the board actually reads was
+   * refused BY NAME while the renderer honoured it. Declared here under the
+   * director seat's decision batch #87 (objectstack-ai/objectui#8367).
+   *
+   * OPTIONAL, deliberately — the shape `CalendarConfigSchema` already writes
+   * down for this exact key. Absence resolves through the ADR-0079 record
+   * display-name chain (`titleFormat` -> `displayNameField` -> type-aware
+   * derivation -> `'Untitled'`), so requiring it would demand more than the
+   * renderer reads, the exact shape the #13748 ruling forbids
+   * (「不要求超过渲染器真正需要的」). `TimelineConfigSchema` and
+   * `GanttConfigSchema` spell it required; they are the two siblings this
+   * declaration does NOT copy.
+   */
+  titleField: z.string().optional().describe('Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain)'),
   columns: z.array(z.string()).describe('Fields to show on cards'),
 }));
 
@@ -2607,12 +2626,19 @@ const FormFieldBaseSchema = lazySchema(() => {
   immutable: z.boolean().optional().describe('Editable on create, locked once the record exists (e.g. machine names).'),
   required: z.boolean().optional().describe('Required override'),
   hidden: z.boolean().optional().describe('Hidden override'),
-  colSpan: z.number().int().min(1).max(4).optional().describe('[legacy — prefer `span`] Absolute column span (1-4). Fragile when the column count is derived per surface (mobile 1 / modal 2 / page 3-4): a fixed span only lines up at the width the author imagined. The renderer clamps it to the current column count. Prefer `span`.'),
+  colSpan: z.number().int().min(1).max(4).optional().describe("Absolute column span (1-4). The renderer clamps it to the form grid's current column count, so the cell starts at a real column boundary at every surface width and never overflows (`colSpan: 4` in a 3-column grid renders as 3); a `colSpan` within the column count renders as authored, and `colSpan: 1` emits no span class at all."),
   /**
-   * [#2578] Relative field width — decoupled from the (often auto-derived)
-   * column count, so it stays correct at 1/2/3/4 columns.
+   * [#2578] Relative field width. 'full' resolves to the form grid's full
+   * column count (`plugin-form` `resolveColSpan`); which container-query tiers
+   * receive the span class is the form renderer's, not this key's.
+   * At the `.objectui-sha` pin `53ded82bf7` the renderer emits the widest
+   * tier's class only, so at intermediate widths the field takes a single
+   * cell, not the row (objectstack#17328: one cell of two at 720px). objectui#9253 (objectui
+   * `bd09957380`, 2026-09-12, ahead of that pin) emits one clamped class per
+   * multi-column tier, making 'full' the whole row at every multi-column tier
+   * — re-read this block at the pin bump that absorbs it.
    */
-  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count (wide widgets like textarea/richtext/json/file/subform take the whole row). 'full': whole row at any column count. Prefer this over the absolute `colSpan`."),
+  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count (wide widgets like textarea/richtext/json/file/subform take the whole row). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at the `.objectui-sha` pin `53ded82bf7` only the widest tier's class is emitted (`@2xl:col-span-3` for a 3-column grid), so at intermediate widths the field took a single cell, not the row (one of two at the 720px modal width; measured in Chromium at viewport widths 390, 720 and 1700)."),
 
   /** Custom widget override — only needed when auto-inference is insufficient */
   widget: z.string().optional().describe('Custom widget/component name (overrides type-based inference)'),
