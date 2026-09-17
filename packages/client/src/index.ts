@@ -1471,10 +1471,22 @@ const SET_AUTH_TOKEN_HEADER = 'set-auth-token';
  *
  * ```
  * GET  /api/v1/auth/get-session   (signed in) -> 200 {"user":{…},"session":{…,"token":"…"}}
- * GET  /api/v1/auth/get-session   (anonymous) -> 200 null
  * POST /api/v1/auth/sign-up/email             -> 200 {"token":"…","user":{…}}
  * POST /api/v1/auth/sign-in/email             -> 200 {"redirect":false,"token":"…","user":{…}}
  * ```
+ *
+ * ⚠️ The ANONYMOUS `/get-session` answer is not a fourth body this helper is
+ * handed, and has not been since #17881 (`374d9d3afa`). `plugin-auth`'s
+ * `refuseAnonymousSession` converts better-auth's `200` + literal `null` into
+ * the declared ADR-0112 refusal on the way out (#17238):
+ *
+ * ```
+ * GET  /api/v1/auth/get-session   (anonymous) -> 401 {"success":false,"error":{"code":"UNAUTHENTICATED",…}}
+ * ```
+ *
+ * The SDK's shared `fetch` wrapper throws on any non-2xx, so that answer
+ * reaches a caller as a REJECTION carrying `code: 'UNAUTHENTICATED'` and
+ * `httpStatus: 401` and never arrives at this lift at all.
  *
  * The two families carry DISJOINT payload members — `/get-session` has the
  * session and no top-level token, the two credential routes have the token and
@@ -1518,11 +1530,14 @@ const SET_AUTH_TOKEN_HEADER = 'set-auth-token';
  * body's own `token` already carried, not a second credential, and
  * `data.token` is still never synthesized FROM a session.
  *
- * The `!body` guard is what carries the anonymous answer: `null` is falsy and
- * is returned untouched rather than wrapped into a signed-in-looking envelope
- * that no session backs. That answer stays outside `SessionResponse`, and
- * closing it needs the published return annotation to widen, which is a
- * different card.
+ * The `!body` guard no longer carries the anonymous answer — since #17881 that
+ * answer is a rejection and never reaches this lift. The guard stays as the
+ * defensive branch it always was: a 2xx body that is `null`, or not an object,
+ * is handed back untouched rather than wrapped into a signed-in-looking
+ * envelope that no session backs. The anonymous case is closed at the
+ * PRODUCER, which is what #17238 ruled — `SessionResponseSchema` and every
+ * published return annotation in this family are UNTOUCHED, rather than
+ * widened to grow an arm meaning "nobody is signed in".
  */
 const normalizeSessionResponse = (raw: unknown): SessionResponse => {
   const body = raw as
@@ -4437,9 +4452,14 @@ export class ObjectStackClient {
      * `.user` / `.session` keys are kept alongside for callers written against
      * the wire while the declared shape was unreachable.
      *
-     * ⚠️ Anonymous is the one answer still outside the declared type: the route
-     * serves the literal `null` at 200 and it is returned as-is, because there
-     * is no `SessionResponse` value that means "nobody is signed in".
+     * ⚠️ Anonymous REJECTS — it does not resolve. There is no `SessionResponse`
+     * value that means "nobody is signed in", so since #17881 (`374d9d3afa`)
+     * the route answers an anonymous caller the declared ADR-0112 envelope at
+     * `401` instead of the literal `null` at 200, and the shared `fetch`
+     * wrapper turns that into a thrown error carrying `code: 'UNAUTHENTICATED'`
+     * and `httpStatus: 401`. Every value this method RESOLVES with is inside
+     * its declared type; a logged-out caller is a `catch`, not a `null` check
+     * (#17238).
      */
     me: async (): Promise<SessionResponse> => {
         const route = this.getRoute('auth');
