@@ -83,7 +83,11 @@ import { defineStack } from '@objectstack/spec';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 
 export default defineStack({
-  manifest: { name: 'my-app', version: '1.0.0' },
+  manifest: {
+    name: 'my-app',
+    version: '1.0.0',
+    /* …full ObjectStackManifest… */
+  },
   plugins: [
     new AuditPlugin({ readAudit: { objects: ['contact', 'account'] } }),
   ],

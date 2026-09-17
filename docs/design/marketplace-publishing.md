@@ -395,7 +395,13 @@ set of namespaces its plugins use.
 ```typescript
 // objectstack.config.ts
 export default defineStack({
-  manifest: { id: 'com.hotcrm', type: 'app', namespace: 'hotcrm', version: '2.0.0' },
+  manifest: {
+    id: 'com.hotcrm',
+    type: 'app',
+    namespace: 'hotcrm',
+    version: '2.0.0',
+    /* …full ObjectStackManifest… */
+  },
   plugins: [crmPlugin, financePlugin, marketingPlugin, /* … */], // invisible internals
   apps: [hotcrmApp], // exactly one consumer app surface (multiple tabs), not a suite
 });
