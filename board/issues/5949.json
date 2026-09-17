@@ -1,0 +1,32 @@
+{
+  "number": 5949,
+  "kind": "issue",
+  "title": "[finding] ADR-0076 D11 的第二半从未落地:`packages/rest/src/rest-server.ts` 已 8593 行(ADR 记录约 5.1k),且无 issue 承接",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:45:58Z",
+  "updated_at": "2026-08-19T22:30:26Z",
+  "closed_at": "2026-08-16T06:47:27Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 23,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5949",
+  "body": "observation-class:今天没有用户会踩到,纯结构性欠账 + 记录承接问题。由 #5357(D11 锚点入账,PR #5940)派生登记 —— 该 issue 随 PR 关闭后,这条观察的唯一书面记录就没了。\n\n## 事实\n\nADR-0076 D11 点名了**两个**中心路由生成器要拆:\n\n1. `packages/runtime/src/http-dispatcher.ts`(ADR 记录约 3.8k 行)—— **已拆**:14 个域体迁至 `packages/runtime/src/domains/*`,路由走 `DomainHandlerRegistry`,dispatcher 收缩到约 1.9k 行,多适配器由 `packages/qa/http-conformance` 验证。\n2. `packages/rest/src/rest-server.ts`(ADR 记录约 5.1k 行)—— **未动**,而且在长大:\n\n| 时点 | 行数 | 出处 |\n|---|---|---|\n| ADR-0076 rev.9 记录 | 约 5100 | `docs/adr/0076-objectql-core-tiering.md` D11 决定正文 |\n| 2026-08-05 | 7693 | #5357 正文顺带记录 |\n| 2026-08-06(本次实测,`origin/main` a6b3ee7a1) | **8593** | `wc -l packages/rest/src/rest-server.ts` |\n\n即一天内 +900 行。ADR 的状态行本身已如实记录这一半(「D11 — substantially implemented; **the rest-server half is untouched**. … is now ~7.7k LOC, i.e. larger than the ~5.1k figure below, not smaller」),所以决定与现状之间没有隐瞒 —— 缺的是**承接**:实测当前 open issue 里没有任何一条跟踪这半边(按 open issue 全量扫描 title/body 关键字 `rest-server`,仅 #5936 命中且是另一件事:`/discovery` 第二生产者的 environment 广播)。\n\n## 为什么单独登记而不是并进锚点 PR\n\n#5357 的分诊评论明令「正文末段顺带记的 `rest-server.ts` 7693 行问题不属本单验收,勿顺手带」,PR #5940 因此严格只做锚点 + 注释。但 #5357 关闭时这条观察会随之消失,所以按 Prime Directive #10 单独落一条不指派的 finding。\n\n## 建议(留给分诊,不在此裁决)\n\n拆解本身是**实现工作**,而且是 ADR 明说的 \"Incremental(both mechanisms already coexist — migrate one domain at a time)\" —— 与 dispatcher 那半走过的路径相同(注册表先行,再一域一 PR 搬运)。可选处置:\n\n- **A** 按 dispatcher 的同一套路径排一条增量拆解线(先接缝、再逐域),晋级为可派工作项;\n- **B** 判定 rest-server 的中心生成形状是**刻意**的(它与 dispatcher 按域分区、不重复;OQ#9 的结论是「delineate, do not merge」),则应在 ADR-0076 D11 上写一条修订说明「第二半不拆」的理由,让状态行从\"未落地\"变成\"已裁决\",这条欠账才算真正关掉;\n- **C** 什么都不做,但至少让本 issue 承接住记录,避免下一轮 ADR 校准时再重新发现一次。\n\n倾向 B 优先于 A:D11 对 rest-server 的判断写在 2026-06-28,而 #2462 的审计结论(OQ#9)已经把两者定为按域分区而非重复,所以\"拆不拆\"更像是一个待复核的决定,而不是一件待做的工。这需要维护者裁决,不是开发能自行选的。\n\n参考:#5357、PR #5940、#5063(D1–D12 状态行逐条校准)、ADR-0076 D11 / OQ#9。\n"
+}

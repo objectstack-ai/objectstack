@@ -1,0 +1,33 @@
+{
+  "number": 10287,
+  "kind": "issue",
+  "title": "Studio metadata forms: `新建软件包` shows `输入无效` before any input, help text stays English in a Chinese console, and a toast covers the publish button",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T15:17:05Z",
+  "updated_at": "2026-08-20T16:06:41Z",
+  "closed_at": "2026-08-20T16:06:41Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10287",
+  "body": "Studio metadata forms: `新建软件包` shows `输入无效` on every required field before the author types anything, and its help text is English inside a Chinese console\n\nMeasured on `17.1.0` (open edition, `objectstack dev`), Studio → package menu → **新建软件包(可写 base)**.\n\n## 1. Errors before input\n\nThe dialog opens with the validation already failed:\n\n```\n显示名称 *   name\n             Human-readable package name\n             输入无效            ← before a single keystroke\n软件包 ID *  id\n             Unique package identifier (reverse domain style)\n             输入无效            ← same\n```\n\nNothing has been touched. Required-field validation is running on mount instead of on blur/submit, so the author's first impression of the form is two red errors they did not cause. It also moves the layout as it clears — each field jumps by ~one line height the moment it becomes valid, which is enough to make a click land on the wrong control while filling the form top to bottom.\n\n## 2. Mixed languages in one line\n\nLabels are translated, the help text under them is not, and both render together:\n\n| label (zh) | help (en) |\n|---|---|\n| 显示名称 | Human-readable package name |\n| 软件包 ID | Unique package identifier (reverse domain style) |\n| 对象命名空间 | Short namespace identifier; also the mandatory prefix of every object name (e.g. \"todo\" → object names \"todo_task\", \"todo_project\") |\n| 版本 | Package version (semantic versioning) |\n| 类型 | Type of package |\n| 描述 | Package description |\n\nThe same split shows up elsewhere in the metadata console — the object form builder lists `所有者` next to `Owning Business Unit` and `Search Index`, and the flow node palette is fully Chinese except for one entry:\n\n```\n…\n等待        等待事件或定时器\n结束        终止流程\nRevise Window   Durable pause an approval send-back parks the run on while the submitter\n                reworks the record. Continues only through the approvals service (resubmit),\n                which re-enters the approval node over the declared back-edge.\n```\n\n— an English name and a three-line English paragraph in a list where every other item is a Chinese name and a short Chinese phrase.\n\n## 3. The publish panel's primary button sits under the toast\n\n**发布 → 待发布的变更** panel: the footer explains *\"发布将带来一次性(原子地)发布此包全部 1 个待发布草稿\"* and carries **全部发布**. A toast from the preceding save (`对象「…」已存为草稿`) renders bottom-right, directly over that footer, and covers the button until it times out.\n\n## Expected\n\n- Validate on blur/submit, not on mount.\n- Feed the metadata-admin form generator's `description`/help strings through the same i18n bundle the labels already use — and add `Revise Window`'s node name and description to it.\n- Keep toasts clear of the panel footer (or anchor the publish action above the toast layer).\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 10442,
+  "kind": "pull_request",
+  "title": "docs(check-console-injection): record why packages/spec is not in ci.yml's console filter",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T19:16:58Z",
+  "updated_at": "2026-08-21T01:28:01Z",
+  "closed_at": "2026-08-21T01:28:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-21T01:28:00Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10442",
+  "body": "Header-only. One file, 44 added lines, zero deletions, no behaviour change.\n\nThis lands the PM's ruling on **#9710**'s open question — *where to record the\nmeasurement* — which was answered **C**: put it in\n`scripts/check-console-injection.mjs`'s header, where **#9667**'s cache-key cost\nmodel already lives, rather than in `ci.yml`.\n\n`Refs: #9710` deliberately, **not a closing keyword**. That card's ruled outcome\nis *keep B — do not widen the filter, do not build the light job*; this commit\nimplements none of what the card asked for, so it must not auto-close it. The\nPM closes it with the ruling recorded.\n\n## What the new section records\n\nA sibling of the existing \"Adding `packages/spec` to the cache key was\nconsidered and REJECTED\" paragraph, placed after the EXPIRY section and before\nthe failure-response one:\n\n- the gap is real — `packages/spec` is absent from `ci.yml`'s `console` paths\n  filter, so a spec-only PR never schedules Console Pin Gate;\n- **the reason it stays that way is not cost.** Of this gate's **six** failure\n  verdicts, **five** are pure functions of the restored dist plus its stamp —\n  which a spec-only diff cannot move, the cache key being the pin and the build\n  script and cache entries immutable — and **exactly one** reads this tree, the\n  probe-expiry re-check, which needs `packages/spec/dist` because\n  `readSpecBlob` resolves the package's `exports` map;\n- so the proposed restore-only job would start the gate **15 more times per 100\n  commits** (6/100 today, 21/100 with `packages/spec` added) and skip the only\n  tree-sensitive assertion on every one of them;\n- and the fully built variant still **passes** on *\"spec moved forward since the\n  dist was built\"* — the headline scenario — which PR **#9706**'s ruling table\n  already calls *\"not a failure — the ruled cache design accepts lag\"*;\n- **#10428** is named as the exit: derive the expiry probe from `packages/spec`\n  source text, making that assertion buildless, which reopens the trigger\n  question on different terms.\n\nFull working (paths-filter replay under both picomatch versions, per-commit\nattribution) stays on #9710's ruling comment; the header carries the conclusion\nplus the numbers that make it checkable.\n\n## Verification — all at `c84898aeb` (the final commit)\n\n`node scripts/pm/dispatch-gates.mjs` derived three families for this diff, all\ngreen at head:\n\n| gate | verdict line |\n|---|---|\n| `pnpm check:console-injection` | `✓ check-console-injection --self-test: 21 assertions over real fixture trees (real evaluate() path)` (exit 0) |\n| `node scripts/check-cross-package-test-inputs.mjs` | `OK: 12 package(s) read outside themselves, all declared, and turbo.json hashes every declared glob.` |\n| `check:nul-bytes` (standing, any edit) | `check-nul-bytes: OK (scanned 6124 text file(s) … no raw ASCII control bytes).` |\n\n`pnpm lint` — `os-verify-lock: VERDICT command-exit 0 · held the lock 58s ·\nwaited 171s`, ESLint silent. It ran on byte-identical content: the commit\nchanged no bytes (`git status --porcelain` = 0 lines, `git diff HEAD` empty at\n`c84898aeb`). Relevant because PR #10429's\n`comment-swallow/no-code-inside-block-comment` targets exactly this shape —\nevery added line carries the `*` prose marker, blank ones included, and the\nblock contains no `*/` sequence (`packages/spec` is written unglobbed for that\nreason).\n\nIndependently reproduced the ruling's price numbers here before writing them\ndown, by literal-path replay over the same window (all seven `console` filter\nentries are literal paths, so no matcher is needed): 100 first-parent commits\nending `e502a6a8e` → baseline **6/100**, `+ packages/spec` **21/100** (+15),\n`+ packages/spec/src` **16/100**, and **5 of the 15** add `.describe(` text\nunder `packages/spec`. The five-vs-one verdict split was re-derived from the\ncurrent source, not inherited from the brief — it matches.\n\n## Not in this diff\n\n- ⛔ `.github/workflows/ci.yml` — that was option A and it is ruled out.\n- No new flag, no new assertion, no test change, no behaviour change.\n- Changeset: `scripts/**` publishes nothing (the root package is `private`), so\n  `skip-changeset`. Re-derived at diff time by publish surface.\n\nRefs: #9710 (the card and its ruling) · #9667 (the cost model already in this\nheader) · #9706 (the ruling table) · #10428 (the exit)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_"
+}

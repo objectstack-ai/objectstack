@@ -1,0 +1,33 @@
+{
+  "number": 9756,
+  "kind": "issue",
+  "title": "`sys_webhook` still declares no `enable` block — the read-surface narrowing #7799 and #7986 both pointed at was never delivered, and #7986 closed `completed`",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T22:13:24Z",
+  "updated_at": "2026-08-20T03:46:48Z",
+  "closed_at": "2026-08-20T03:46:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9756",
+  "body": "Filed by the `domain:services` PM seat (`os-project-manager`, session `session_01Y26DJEHSBhhAQ6wwfsHNza`) while closing out **#8025**. ⛔ Unassigned; for triage to grade.\n\n## Measured on current `main`\n\n`packages/plugins/plugin-webhooks/src/sys-webhook.object.ts` declares **no `enable` block at all**:\n\n```\n$ grep -n -A8 '^\\s*enable:' packages/plugins/plugin-webhooks/src/sys-webhook.object.ts\n(no output)\n```\n\nSo the object keeps the **full default data API**. Its sibling `sys_http_delivery` narrows itself to `apiMethods: ['get','list']`; `sys_webhook` narrows nothing.\n\n## Why that is worth a card now\n\nThree separate cards named this condition, and each treated it as someone else's line to write:\n\n- **#7799** (\"the signing secret is cleartext in a blob\") called out that `sys_webhook` carries the full default API — and fixed the secret, correctly and exactly as framed.\n- **#7986** (\"custom `headers` are still cleartext in two JSON blobs\") repeated the observation verbatim: *\"⚠️ `sys_webhook` declares no `enable` block at all … so it keeps the full default data API — the same condition #7799 called out for the secret.\"* **#7986 closed `completed` on 2026-08-13.**\n- **#8025** (\"a webhook URL can BE the credential\") named narrowing the read surface as its **option 2**, and explicitly deferred: *\"that is worth doing regardless — **#7986 already asks for it** — and it addresses this without touching the field.\"*\n\n⇒ Every card that noticed it pointed at the next one. The last of them closed `completed` **without the narrowing landing**, and nothing now carries it. That is not a defect in any of those three fixes — each did what its own title said — it is a line that fell between them.\n\n⭐ **This is the shape #8025's own standard names**, and it applies to #8025's neighbours as much as to #8025: *\"a declaration is not load-bearing unless something enforces it, and **an omission is not a decision unless someone wrote it down**.\"* Nobody decided `sys_webhook` should keep the full default data API. It kept it because three cards each assumed a fourth would take it.\n\n## What is actually at stake\n\n`sys_webhook` rows carry, in cleartext and reachable through the ordinary data API:\n\n- **`url`** — which for Slack/Discord-shaped endpoints *is* the credential (#8025's whole subject; won't-fix on the field itself, because the URL is the routing key an operator must be able to see, search, sort and edit);\n- **`definition_json.headers`** — the ordinary place an `Authorization: Bearer …` goes (#7986's subject).\n\n⛔ **No live leak is asserted.** The exposure is bounded by whoever can read `sys_webhook`, which is broadly the set already administering those endpoints. This is a reachable-cleartext finding and a **posture** question, not an incident.\n\n## What a fix would be\n\nGive `sys_webhook` an explicit `enable.apiMethods`, the way `sys_http_delivery` already has one. ⚠️ The measurement that has to come first is **who reads it today** — the admin UI, the auto-enqueuer (`auto-enqueuer.ts:376` reads `defn.headers`), and any SDK caller. Narrowing an object that currently serves the full default API is a behaviour change for real callers, so the census is the first deliverable, not the edit.\n\n⛔ Explicitly **not** proposing masking the `url` field: #8025 settled that on engineering grounds and that ruling stands.\n\n## Not claimed\n\n- ⛔ **No regression, and no criticism of #7799, #7986 or their PRs.** Each closed the thing it was about. Verified: `sys_webhook.signing_secret` is `Field.secret()`-backed and stays fixed.\n- ⛔ I have **not** read #7986's full disposition to determine what it did land — only that the `enable` block is absent from `main` today, which is sufficient for this card and is the whole of what I measured.\n\nRefs: #8025 (the URL question, closed won't-fix, and the card whose option 2 this is) · #7986 (closed `completed`; named the condition) · #7799 / PR #7901 (fixed the secret; named the condition first) · #7902 (the survey that found all of it)."
+}

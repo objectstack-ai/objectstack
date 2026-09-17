@@ -1,0 +1,36 @@
+{
+  "number": 10595,
+  "kind": "issue",
+  "title": "`check:console-injection --require-stamp` still passes on a stamp with an empty `packages` array",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T04:31:44Z",
+  "updated_at": "2026-08-21T06:59:15Z",
+  "closed_at": "2026-08-21T06:55:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10595",
+  "body": "Observation found while implementing #10428 (fixing the spec-blob vacuity path). Filed rather than fixed there: it is a different input — the stamp's shape, not the tree's spec — and whether it should fail is a judgement call rather than something existing evidence pins, so it did not qualify for an in-scope fix.\n\n## What I measured\n\n`readStamp()` in `scripts/console-spec-probes.mjs` shape-checks `parsed.packages` with `Array.isArray(...)`, which accepts `[]`. A dist stamped `{\"stampVersion\": 1, \"packages\": []}` then reaches the end of `evaluate()` with `asserted === 0`, prints\n\n```\nℹ Nothing assertable in this stamp; the dist was not contradicted.\n```\n\nand exits **0** — including under `--require-stamp`.\n\nThat is structurally the same shape #10428 closed one input over: a run that satisfies `--require-stamp` while making no assertion at all about the artifact it is guarding. `--require-stamp` currently proves a stamp *exists* and is well-formed, not that it *says anything*.\n\n## Why it is not urgent\n\nNot reachable from the real producer. `scripts/assert-console-spec-injection.mjs` calls `writeStamp(distDir, [...])` at exactly one site (line 119) with a single hard-coded `@objectstack/spec` entry, and both of its exit paths (skew and no-skew) go through it. So an empty `packages` array today means a hand-assembled, truncated, or corrupted stamp — not any output this repo produces. The no-skew case is a *populated* entry with `skew: false`, which is handled separately and honestly.\n\nThat also makes it cheap to keep as-is deliberately, which is why this is a `finding` and not a queued bug: someone should decide whether \"a stamp that asserts nothing\" is a state `--require-stamp` ought to refuse, or one it is right to tolerate on the same reasoning that lets a no-skew stamp pass.\n\n## Shape if it is taken\n\nUnder `--require-stamp` only, treat `stamp.packages.length === 0` as a refusal with the same remedy block the other `--require-stamp` failures print. The bare invocation should keep its `ℹ`, matching how #10428 left the unbuilt-spec notice in place for a bare checkout.\n\nRefs: #10428 (the sibling vacuity path, fixed) · #9706 · #9667\n"
+}

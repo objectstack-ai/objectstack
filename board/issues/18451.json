@@ -2,8 +2,8 @@
   "number": 18451,
   "kind": "issue",
   "title": "spec(ai): declare the build-progress PHASE vocabulary the cloud agent loop emits during post-apply verification (cloud#2172 ruling A)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "hotlong",
@@ -21,9 +21,13 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-09-16T11:31:50Z",
-  "updated_at": "2026-09-17T00:55:37Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-17T08:06:24Z",
+  "closed_at": "2026-09-17T08:06:24Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

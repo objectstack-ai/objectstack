@@ -1,0 +1,35 @@
+{
+  "number": 10606,
+  "kind": "issue",
+  "title": "The 28 TypeScript parses outside `scripts/**` need a shape decision, not a copy of ts-parse.mjs — now counted by check:parse-guard, governed by nothing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T05:46:01Z",
+  "updated_at": "2026-08-21T07:56:28Z",
+  "closed_at": "2026-08-21T07:56:28Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10606",
+  "body": "Filed from the PR that closes #10574 / #10575. Nothing is red, and nothing here is a request to copy a helper.\n\n#10575's Axis 1 (`ts.createProgram`, `ts.transpileModule`, both inside `scripts/**`) is **done** in that PR: both now route through `ts-parse.mjs` (`createProgramChecked` / `transpileChecked`) and `check-parse-guard.mjs` fails on all three raw spellings. Axis 2 — the parses **outside** `scripts/**` — is deliberately left, because it needs a decision about *shape* first. This card carries the decision and a re-measurement.\n\n## What is actually out there — re-measured on `main` at `d5e7b9f5a1`\n\n`check:parse-guard` now prints this population on every run, so the number moves when somebody adds one. **28 parses in 20 files** — 13 in shipped/gate code, 15 in tests:\n\n| file | sites | api | note |\n|---|---|---|---|\n| `packages/lint/src/validate-react-page-props.ts` | 1 | `createSourceFile` | wrapped in `try { … } catch { continue; }` |\n| `packages/lint/src/lint-startup-registry-verdict.ts` | 1 | `createSourceFile` | wrapped in `try { … } catch { return []; }` |\n| `packages/lint/src/validate-hook-body-writes.ts` | 1 | `createSourceFile` | the only site anywhere passing `setParentNodes: false`, and it parses a synthesised `async function __body(ctx) { … }` wrapper |\n| `packages/lint/scripts/check-doc-formula-expressions.mjs` | 3 | `createSourceFile` | a gate |\n| `packages/spec/scripts/check-skill-examples.ts` | 1 | `createSourceFile` | a gate |\n| `packages/spec/scripts/lib/strictness-ledger.ts` | 1 | `createSourceFile` | generator/gate library |\n| `packages/cli/src/utils/detect-free-identifiers.ts` | 1 | `createSourceFile` | runtime, not a gate |\n| `packages/spec/scripts/build-api-surface.ts` | 1 | `createProgram` | generator |\n| `packages/spec/scripts/build-export-origins.ts` | 1 | `createProgram` | generator |\n| `packages/spec/scripts/check-dual-source-exports.ts` | 1 | `createProgram` | a gate |\n| `packages/spec/scripts/check-exported-any.ts` | 1 | `createProgram` | a gate |\n| 9 test files | 15 | mixed | listed by the gate, marked `[test]` |\n\n**Two corrections to #10575's table, both measured:**\n\n* it said `check-skill-examples.ts` has **2** sites; it has **1** (`:308`). The second was `:692`, a *comment* naming `ts.createProgram` — masked by the gate, which is the whole reason the gate masks prose.\n* it missed the four `ts.createProgram` sites in `packages/spec/scripts/**` entirely. Two of them (`check-dual-source-exports.ts`, `check-exported-any.ts`) are **gates**, and a Program parks syntax errors behind `getSyntacticDiagnostics()` — a call none of the four makes. Same class as the `scripts/**` half, one tree over.\n\n## Why this is not \"copy `ts-parse.mjs` into `packages/`\"\n\nThe reason `invoked-as.mjs` gives for its own `packages/cli` sibling: `scripts/` runs as plain `.mjs` against a possibly unbuilt tree, and making a **published package** depend on repo tooling to answer \"did this parse?\" trades one bug for a worse one.\n\nMore importantly the *contract* may genuinely differ per row. A `scripts/**` gate audits a tree its author controls, so ending the process is right. A publish-time lint validator in `packages/lint` is handed metadata by somebody else and may legitimately want to **report** an unparseable source as a finding rather than abort. Those are different answers and the rows above do not all want the same one.\n\n## The trap any Axis-2 shape has to survive\n\n`validate-react-page-props.ts` and `lint-startup-registry-verdict.ts` wrap their parse in `try { … } catch { continue; }` / `catch { return []; }`. Both are **dead code today** — `createSourceFile` cannot throw — but they are written as a skip, so the moment a parse *did* throw they become a **silent skip**, which is this defect class pre-installed one layer up. That is exactly why `ts-parse.mjs` exits `3` instead of throwing: an exit cannot be downgraded by a caller that meant well.\n\nSo a package-side answer that throws is not equivalent to the `scripts/**` one. It has to either return a finding the caller must handle, or the two `catch` blocks have to go first. `validate-react-page-props.ts`'s own comment says \"the syntax gate reports unparseable sources\" — a claim worth verifying rather than inheriting.\n\n## The options, so the decision is a decision\n\n1. **A `packages/lint`-local checked parse that RETURNS a finding.** Publish-time validators report rather than abort; the two `catch` blocks are deleted as part of it. Costs: a second refusal shape in the repo; buys: a contract that fits how a validator is actually called.\n2. **A shared package (`@objectstack/…`) both trees import.** One shape everywhere; costs a published dependency for repo tooling, which is what `invoked-as.mjs` argued against.\n3. **Per-row, no shared shape.** The four `packages/spec/scripts/**` Programs are gates over a controlled tree and could simply call `getSyntacticDiagnostics()` and fail; the `packages/lint/src/**` validators get option 1; `detect-free-identifiers.ts` is runtime and needs its own answer.\n4. **Ratchet the census `check:parse-guard` already prints**, so a *new* out-of-tree parse cannot land unnoticed while the shape question is open. Cheap, orthogonal to 1–3, and deliberately NOT done in the closing PR: a ratchet forces an answer by making the next unrelated PR red.\n\n**Recommendation: 3 + 4.** The rows do not share a contract, so a single shape would be invented rather than found; the four `packages/spec/scripts/**` gates are the cheapest and least arguable half and can move first. 4 keeps the population from growing while 1–3 are decided.\n\nRefs: #10133 (the class) · #10573 (the `scripts/**` implementation) · #10574 / #10575 (wiring and widening; where Axis 1 landed)\n\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_"
+}

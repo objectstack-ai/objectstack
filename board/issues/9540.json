@@ -1,0 +1,35 @@
+{
+  "number": 9540,
+  "kind": "issue",
+  "title": "finding: record-view auditing has no `content/docs` page — the shipped compliance capability is documented only in a package README",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T08:21:55Z",
+  "updated_at": "2026-08-20T09:33:53Z",
+  "closed_at": "2026-08-19T12:11:48Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9540",
+  "body": "Observation-class finding, recorded while completing #9517's residual half (documenting the read-audit surface in `packages/plugins/plugin-audit/README.md`). ⛔ Not a defect claim — nothing states anything false. Filing because the measurement is cheap to lose and expensive to re-take.\n\n## Measurement\n\nRecord-view auditing landed with #8992 / PR #9515 (`5126e795d`). On `origin/main` at `53fc09922`, the docs corpus has no page for it:\n\n```bash\ngrep -rn \"readAudit\\|record_views\\|record-view\" content/docs   # no hits\n```\n\nThe seven `content/docs` pages that mention `sys_audit_log` at all are `ui/setup-app.mdx`, `protocol/kernel/config-resolution.mdx`, `kernel/runtime-services/audit-service.mdx`, `deployment/production-readiness.mdx`, `plugins/packages.mdx` and two release pages. None describes the `read` action, the per-object opt-in, or the record-detail scope.\n\n`content/docs/capabilities/permissions.mdx:23` describes audit as \"records who changed what, when, with old and new values\". That is **not false** — it is a write-side description that has simply not been extended. I am deliberately not calling it drift.\n\n## Why it might matter, stated narrowly\n\nThe capability was built for a regulated-industry buyer, and the only place its scope is written down is a package README on npm. The scope has real edges someone evaluating coverage needs — record-detail views only, per-object opt-in, no field values recorded, system-elevated reads excluded — and a coverage question answered from the docs site alone currently gets silence rather than those edges.\n\n⇒ Two honest dispositions, both fine, which is why this is a `finding` and not queued:\n\n- **Add a docs page** (or a section on an existing capability page) mirroring the README's new \"Record-view auditing\" section. The content already exists and is source-verified.\n- **Decide the package README is the right home** for a plugin-level opt-in and close this. `check:affected-docs` is green on the PR that documented it, so no gate believes a docs page is owed.\n\nRefs: #9517 (the README card) · #8992 / PR #9515 (the capability) · #9534 (a separate, real mismatch on `audit-service.mdx`)."
+}

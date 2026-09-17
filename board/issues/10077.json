@@ -1,0 +1,36 @@
+{
+  "number": 10077,
+  "kind": "issue",
+  "title": "Retire the plural `/meta/objects/:name/state/:field` registration: SDK moves to the singular twin, the collision's registration-order pin is deleted (step ② of the #9180 ruling)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:blocking",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T00:31:06Z",
+  "updated_at": "2026-08-20T15:00:25Z",
+  "closed_at": "2026-08-20T15:00:25Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10077",
+  "body": "Step ② of the #9180 ruling (`/meta` type segment is ALWAYS singular), carved by the spec seat under the maintainer's direct reassignment (2026-08-19, verbatim: 「改派给 spec 席,现在就拆」; audit comment objectstack-ai/objectstack#9180 comment 5349687344).\n\n## The ruling being implemented (⛔ not re-litigable)\n\nMaintainer re-weigh, 2026-08-17 (#9180 comment 5311434183), verbatim, untranslated:\n\n> 「② 照原样做；只需要修正 objectstack objectui cloud 中错误的写法。」\n\nOperative text from the ruling record: **point `meta.getLegalNextStates` at the singular twin, delete the plural registration, delete the registration-order pin the collision required.**\n\n## Measured anchors (2026-08-19, `origin/main` — re-verify at your branch point)\n\n- `packages/rest/src/rest-route-ledger.ts:195` — `GET /api/v1/meta/objects/:name/state/:field`, `disposition: 'sdk'`, `client: 'meta.getLegalNextStates'` (the plural row)\n- `packages/rest/src/rest-route-ledger.ts:197` — `GET /api/v1/meta/object/:name/state/:field`, `disposition: 'server-only'` (the singular twin — already mounted)\n- `packages/rest/src/rest-server.ts:6016-6040` — the mount (`${metaPath}/${objectsSegment}/:name/state/:field`)\n- `packages/client/src/index.ts:873` — the SDK method whose route string moves (one string in our own SDK)\n- `packages/rest/src/meta-route-registration-order.test.ts` — the order pin that exists only to manage the collision; deleted with it\n- `packages/runtime/src/route-ledger.ts:352` — the dispatcher-ledger mirror row for the plural spelling; measure whether it moves in the same stroke (ledgers must stay honest to what is mounted)\n\n## Constraints that ride verbatim\n\n- **`model: claude-fable-5` floor, no downward discretion** — standing note on the ruling anchor (#9180 comment 5310450985): every step of this ruling is a contract accept/reject or published-surface change; ⛔ do not dispatch or execute below the floor.\n- **⛔ NOT in scope** (re-weigh item 3): the boundary fold (`META_URL_TO_SINGULAR`) stays as a compatibility tolerance for external callers; **no new refusals beyond what step ① (PR #9191) already shipped**. This card moves a registration and an SDK string; it does not widen the refusal set. If your measurement shows the plural registration's deletion would newly refuse a spelling the fold currently accepts, STOP and report the fork — do not pick a side.\n- Docs whose prose names the plural state route (release pages are read-only) follow the docs card, not this one.\n\nDedup checked 2026-08-19: no existing step-② card (search: getLegalNextStates plural/singular registration — zero open or closed matches beyond the anchor).\n\nPart of #9180.\n\n---\n\n## Hold state\n\n⚠️ *Appended 2026-08-20 by the `domain:cli` seat (session `session_019bmVFqoQPq63zhKrxdYG1r`) — everything above is the filing seat's text, unmodified. This section is the machine-readable exit for the `pm:on-hold` **I** applied, and belongs in the body: the H9 predicate reads `issue.body` only, so the `Restart-when:` I first wrote in comment `5349822290` could never fire. Rationale and full context stay in that comment.*\n\nRestart-when: `claude-fable-5` capacity is available again — re-tested by the `domain:cli` seat every patrol (~60 min)\n\n⛔ Do **not** dispatch this below the `claude-fable-5` floor while held. The 2026-08-13 general quota accommodation (「fable 如果用完了，可以用 opus」) does not reach a floor set by a later card-specific ruling; if fable is unavailable, the card waits."
+}

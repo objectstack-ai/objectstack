@@ -1,0 +1,36 @@
+{
+  "number": 9539,
+  "kind": "issue",
+  "title": "`record_views` lists an `ip_address` column that no read-path writer ever stamps — a declared-but-unwritten column on a shipped compliance view",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "auto-adjudicated",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T08:21:39Z",
+  "updated_at": "2026-08-19T11:07:45Z",
+  "closed_at": "2026-08-19T11:07:45Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9539",
+  "body": "Found while documenting the record-view audit surface for #9517 (PR pending on branch `claude/issue-9517-readme-read-audit`). Not fixed there — that PR is docs-only and this is a code change to a landed feature, so it does not meet the in-place bar.\n\n## What is wrong\n\n`packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts` declares the `record_views` list view with these columns:\n\n```\ncolumns: ['created_at', 'user_id', 'object_name', 'record_id', 'ip_address'],\nfilter:  [{ field: 'action', operator: 'in', value: ['read'] }],\n```\n\nThe view is filtered to `action: 'read'` rows only. But the writer that produces those rows — `buildRow` in `packages/plugins/plugin-audit/src/read-audit.ts` — sets exactly:\n\n`action`, `created_at`, `user_id`, `object_name`, `record_id`, `old_value`, `new_value`, `tenant_id`, and conditionally `organization_id` and `actor`.\n\n`ip_address` is not among them, and no other writer emits a `read` row. ⇒ **The last column of this view is empty on every row it can ever show.**\n\nReproduce without running anything:\n\n```bash\ngit grep -n \"ip_address\" -- packages/plugins/plugin-audit/src/read-audit.ts   # no hits\ngit grep -n \"'ip_address'\" -- packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts\n```\n\nThe second prints the `record_views` column list. The first prints nothing.\n\n## Why it is worth a card\n\nThis is the same defect class #7675 / #8147 / #8315 spent three cards closing on this exact object, one layer down: those retired **enum values** with no writer; this is a **column** with no writer, on the view shipped to surface the newest audit action. The stated principle there was 审计面宁窄勿谎 — a compliance surface should be narrow rather than untruthful — and an always-blank `IP Address` column on the \"who viewed this record\" screen reads to an auditor as \"we captured the client fingerprint and this request had none\", which is a stronger and wrong claim.\n\nIt is also live on the same screen `plugin-audit` contributes into the Setup app's `group_diagnostics` navigation.\n\n## Note on the existing field semantics\n\n`ip_address` / `user_agent` on `sys_audit_log` are populated on **auth events only** — the record-level CRUD writer does not stamp them either. So the column is not \"broken for reads\"; it was never a column a non-auth row carries. The `record_views` view is the only place a non-auth-filtered view puts it in the column list.\n\n## Options (not deciding)\n\n1. **Drop `ip_address` from the `record_views` columns.** Smallest change; makes the view show only what the row carries. Candidate replacement column: `actor`, which the read writer *does* stamp and which is the one that attributes a service principal.\n2. **Stamp it in the read writer.** The `afterFind` hook has `ctx.session`; whether a client fingerprint is reachable there — and whether an audit ledger of *views* should carry one — is a product call, not a mechanical fix. ⚠️ Note the read writer is deliberately allocation-only on the request path, so anything added there is on the read's critical section.\n\n⇒ Option 1 unless someone wants the capability; the point of this card is that the current state claims a capability neither option has delivered yet.\n\nRefs: #9517 (the README card that surfaced it) · #8992 / PR #9515 (the read-audit MVP) · #7675 / #8147 / #8315 (the same defect class on the enum)."
+}

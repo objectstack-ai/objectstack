@@ -1,0 +1,34 @@
+{
+  "number": 10285,
+  "kind": "issue",
+  "title": "Studio's `新建对象` produces an object that cannot be published: `sharingModel` is required, never asked for at creation, and the refusal arrives only at publish as a paragraph of ADR prose",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T15:16:35Z",
+  "updated_at": "2026-08-20T16:06:45Z",
+  "closed_at": "2026-08-20T16:06:45Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10285",
+  "body": "Studio's `新建对象` produces an object that cannot be published: `sharingModel` is required, is not asked for at creation, and the refusal only appears at publish as a paragraph of ADR prose\n\nMeasured on `17.1.0` (open edition, `objectstack dev`), Studio metadata console, first-run path a new author actually walks.\n\n## The walk\n\n1. Package menu → **新建软件包(可写 base)** → create `com.test.crmext` (namespace `crmext`). ✔\n2. **数据 / Data** → **新建对象** → the dialog asks for exactly two things: **对象名称** and **标识**. Fill them (`客户拜访` / `crmext_visit`) → **创建(存为草稿)**. ✔\n3. **表单 / Form** → **添加字段** → rename to `visit_date`, pick **日期/时间 · 日期** in the type picker. ✔ (this part is genuinely good — live canvas, 46 typed field kinds, all translated)\n4. **保存草稿** → toast `对象「客户拜访」已存为草稿`. ✔\n5. **发布 → 全部发布** → ✘\n\n```\nobject/crmext_visit: [invalid_metadata] object/crmext_visit failed author-time validation:\nobjects[71].sharingModel: [security-owd-unset] custom object \"crmext_visit\" declares no\nsharingModel (OWD). The runtime fails CLOSED to 'private' (ADR-0090 D1), but the baseline\nmust be an authored decision, not an accident — this is the exact shape of the leave_request\nincident (objectui#2348). • objects[71].sharingModel — custom object \"crmext_visit\" declares\nno sharingModel (OWD). …\n```\n\nThe rule itself is right, and the reasoning behind it is sound. The delivery is the problem:\n\n- **It is only reachable by failing.** Nothing between step 2 and step 5 hints that the object is unpublishable. The draft saves happily, twice.\n- **It arrives as a toast** — a wall of English ADR prose (the same sentence twice, once as a summary and once as a bullet), in an otherwise Chinese console, in a surface that disappears on a timer. The one actionable word in it, `sharingModel`, is not linked to the control that sets it.\n- **The fix lives three clicks away** under **设置 → 记录共享模型(OWD)**, and that page is excellent — four options, each with a plain-language gloss and the fail-closed default spelled out. An author who found it would have chosen correctly in five seconds. Nothing routes them there.\n\nSetting it there and republishing works, and the object goes live end to end (table created, `POST /api/v1/data/crmext_visit` → `201`). So the pipeline is sound; the gate is just placed where it teaches nothing.\n\n## Suggested\n\nAny of these closes it, cheapest first:\n\n1. **Ask in the create dialog.** `新建对象` collects two fields; a third — OWD, defaulted to `private` with the same one-line gloss the 设置 page uses — makes the object publishable by construction and makes the baseline an authored decision at the moment the author is thinking about the object.\n2. **Fail early, not at publish.** Surface it as a persistent problem badge on the draft (Studio already has a `问题` affordance in the flow editor), not as a transient toast at the end.\n3. **Make the message navigable.** Whatever the surface, `sharingModel` should be a link to 设置 → 记录共享模型, and the prose should be one sentence with the ADR reference behind a \"详情\" link rather than inlined twice.\n\nRelated: #10265 (`spec/ai`: BlueprintObjectSchema has no `sharingModel` slot, so the propose-stage LLM cannot author an OWD choice) is the same gap on the AI-authoring path — an object gets created by a surface that has no way to express the one property that makes it publishable.\n"
+}

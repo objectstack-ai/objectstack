@@ -1,0 +1,35 @@
+{
+  "number": 10414,
+  "kind": "issue",
+  "title": "[finding] `MetricSchema.filters` is an authorable per-metric filter with zero consumers — a hand-authored cube's `filters: [{ sql }]` is parsed and dropped",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T18:24:55Z",
+  "updated_at": "2026-08-21T03:42:34Z",
+  "closed_at": "2026-08-21T03:42:34Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10414",
+  "body": "Noticed while implementing #10298 (PR #10411). Recorded, not acted on — deciding it is ADR-0049 enforce-or-remove work, not this card's.\n\n## The declaration\n\n`packages/spec/src/data/analytics.zod.ts`, `MetricSchema`:\n\n```ts\n/** Filtering for this specific metric (e.g. \"Revenue from Premium Users\") */\nfilters: z.array(strictObject(\n  { surface: 'this metric filter',\n    history: 'Until #4001 batch D an undeclared key beside `sql` was silently dropped.' },\n  { sql: z.string() },\n)).optional(),\n```\n\nIt is a real authoring surface: `defineCube()` parses an author literal and `defineStack({ analyticsCubes })` carries every cube through `StackSchema.parse`, so an author writing `filters` on a metric gets a clean parse. `packages/spec/src/data/analytics.test.ts` pins that the key survives the parse (`expect(metric.filters).toHaveLength(1)`).\n\n## Nothing reads it\n\nMeasured on `origin/main` at `801296050`:\n\n```\n$ git grep -n \"\\.filters\" -- 'packages/services/service-analytics/src/**' 'packages/drivers/**' \\\n    | grep -v '\\.test\\.ts'\n(no output)\n```\n\nZero is a finding here only because the same search shape finds a neighbouring metric key that IS consumed — the positive control:\n\n```\n$ git grep -c \"\\.format\" -- 'packages/services/service-analytics/src/**'\npackages/services/service-analytics/src/__tests__/dataset-compiler.test.ts:1\npackages/services/service-analytics/src/__tests__/dataset-dimension-field-descriptors.test.ts:2\npackages/services/service-analytics/src/__tests__/query-dataset.test.ts:1\npackages/services/service-analytics/src/analytics-service.ts:1\npackages/services/service-analytics/src/dataset-compiler.ts:1\n```\n\n`format` is read; `filters` is read nowhere outside the spec's own parse test. `NativeSQLStrategy.resolveMeasureSql` wraps `measure.sql` in the aggregate for `measure.type` and never looks at `measure.filters`; `ObjectQLStrategy.resolveMeasureAggregation` does the same.\n\n## Why this is the #10298 shape, one level up\n\n#10298 was a dataset measure whose `filter` was declared and dropped, producing a 200 with different arithmetic than the author wrote. This is the identical failure for a **hand-authored cube**: `filters: [{ sql: \"stage = 'closed_won'\" }]` parses, registers, and returns the unfiltered aggregate under the author's metric name. The dataset path is now repaired (#10411) through a separate channel — the compiled dataset's own registry entry — so `MetricSchema.filters` remains inert with the dataset half fixed around it.\n\n## The decision this needs\n\n`filters[].sql` is a **raw SQL string**, which is why #10411 did not adopt it as the carrier and reached for a structured `FilterCondition` sidecar instead. Enforcing it would mean answering:\n\n- Does the platform want a raw-SQL authoring surface on a metric at all? Every other filter surface in the tree is a structured `FilterCondition` that the strategies lower and parameterize; a raw fragment cannot be bound, cannot be re-targeted per driver dialect, and cannot be inspected by the lint rules that walk filters (`packages/lint/src/filter-walk.ts` enumerates \"widget filters, list-view filters, dataset and measure filters\" — not this one).\n- If not, ADR-0049's remove leg applies, and the retirement route is the `spec-property-retirement` playbook.\n- If yes, the consumer has to be written, and the injection surface argued.\n\nEither way it is a `packages/spec` decision, which #10298's lane holds as a zero-ownership boundary.\n\nRelated: #10298 · PR #10411 · #10413."
+}

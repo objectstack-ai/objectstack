@@ -1,0 +1,34 @@
+{
+  "number": 10138,
+  "kind": "issue",
+  "title": "[finding] `pnpm sdui:manifest` dies with ENOENT when `packages/console/dist/` does not exist — the ratchet's only trigger cannot run before a successful console build",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T08:01:14Z",
+  "updated_at": "2026-08-20T13:12:09Z",
+  "closed_at": "2026-08-20T13:11:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10138",
+  "body": "Measured while running the pin-bump procedure for #10129.\n\n`scripts/gen-sdui-manifest.sh` computes its output location and hands it straight to objectui's dumper:\n\n```bash\nTARGET=\"${FRAMEWORK_ROOT}/packages/console/dist\"\n...\nBASE_URL=\"http://localhost:${DUMP_PORT}\" OUT=\"${TARGET}/sdui.manifest.json\" node scripts/dump-public-manifest.mjs\n```\n\nNeither side creates `TARGET`. `dump-public-manifest.mjs` calls `writeFileSync` directly, so when the directory is absent the whole run dies **after** it has already paid for a vite dev server and a Playwright chromium launch:\n\n```\nError: ENOENT: no such file or directory, open '.../packages/console/dist/sdui.manifest.json'\n    at writeFileSync (node:fs:2430:20)\n    at .../scripts/dump-public-manifest.mjs:39:3\n✗ manifest generation failed (exit 1).\n  If Playwright reported a missing browser, install it and retry:\n    pnpm exec playwright install chromium-headless-shell\n```\n\nTwo things make this worth a card rather than a shrug:\n\n1. **The diagnosis the script offers is wrong for this failure.** Every failure branch here points at Playwright, so the printed remedy is `playwright install` — which is both useless and, in a dispatch container, forbidden (`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`, per `docs/releases-maintenance.md`). The browser had in fact launched and the dump had succeeded; only the write failed. A reader following the printed advice chases the wrong layer.\n2. **It fires exactly when the ratchet is most needed.** `packages/console/dist/` is gitignored and only exists after a successful `scripts/build-console.sh`. So a tree where the console build is broken — which is precisely when someone wants an independent read on the registry — cannot run the ADR-0082 D4 ratchet at all, even though the ratchet does not need the built dist: `gen-sdui-manifest.sh` drives a vite **dev** server over `.cache/objectui-*`, not the vendored `dist/`. That is the state #10136 leaves the tree in today, and it is how this was found.\n\n`mkdir -p \"$TARGET\"` before the dump makes it a non-event; the workaround while it stands is exactly that, by hand. The fix belongs on this side (the objectstack script owns `TARGET`), not in objectui's dumper.\n\nNot a blocker for anything today — recording it so the next seat does not spend the round on the Playwright trail. Found while working #10129; unrelated to that card's own scope.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 10289,
+  "kind": "issue",
+  "title": "`scripts/pm/os-verify-lock.sh` spins forever on bash 3.2 (macOS): `mapfile`/`EPOCHSECONDS` are bash 4+/5+, so the lock is never acquired and the command never runs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T15:18:03Z",
+  "updated_at": "2026-08-21T06:33:03Z",
+  "closed_at": "2026-08-21T06:32:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10289",
+  "body": "`scripts/pm/os-verify-lock.sh` — the single entry point for the shared heavy-verify lock —\nuses bash-4-only builtins behind a `#!/usr/bin/env bash` shebang. On macOS, where\n`/usr/bin/env bash` is bash 3.2.57, it never acquires the lock and never runs the command\nit was given: it enters an unbounded retry loop, emitting\n\n```\nscripts/pm/os-verify-lock.sh: line 334: mapfile: command not found\nscripts/pm/os-verify-lock.sh: line 177: /tmp/os-heavy-verify.lock.q/<ticket>: No such file or directory\nscripts/pm/os-verify-lock.sh: line 122: EPOCHSECONDS: unbound variable\n```\n\nforever, at a few iterations per second, while re-minting a queue ticket each pass.\n\n## Why this matters more than a broken helper\n\nThe wrapper is the one mechanism that serializes heavy verification, and every dev agent is\ninstructed to route every build and test through it. When it degrades this way the failure\nis doubly bad:\n\n- **It never times out.** There is no acquisition budget being exceeded — the acquire path\n  itself is what is broken — so the caller sits in it until something external kills it.\n  Nothing is built, nothing is tested, and the wrapper prints no verdict line, so a caller\n  reading `VERDICT` finds none.\n- **It burns the very resource it exists to protect.** Several spinning waiters compete for\n  CPU with whatever real build is running.\n\nMeasured 2026-08-20 on the macOS host: **all three** dev sessions of one dispatch round were\nstuck in it simultaneously (`ps` showed two live `os-verify-lock.sh` processes spinning after\nthe third was killed), none having started its build. It is not intermittent and not\nload-dependent — the first `mapfile` call fails on every invocation.\n\n## Where\n\n- `mapfile` — `scripts/pm/os-verify-lock.sh:334` (bash 4.0+)\n- `EPOCHSECONDS` — `scripts/pm/os-verify-lock.sh:122` (bash 5.0+), fatal under `set -u`\n\n## Fix shape (author's call)\n\nTwo honest options, and the second is the one worth arguing for:\n\n1. Replace the two builtins with portable equivalents (a `while read` loop for `mapfile`;\n   `date +%s` for `EPOCHSECONDS`), keeping bash 3.2 support.\n2. **Keep using them and add a version guard at the top** — `if ((BASH_VERSINFO[0] < 4)); then`\n   print what is required, how to get it (`brew install bash`), and **exit non-zero**. A\n   dev agent is told to trust this entry point's verdict; refusing loudly is a verdict, and\n   an unbounded silent spin is the one outcome the wrapper must never produce. A guard also\n   protects whatever bash-4 idiom the next edit reaches for.\n\nEither way the guard in (2) is the load-bearing half: a portability fix alone leaves the\nnext `mapfile` free to reintroduce this exact failure mode.\n\nFound while working #10219; the verification for that card was run without the lock (declared\nin its PR).\n"
+}

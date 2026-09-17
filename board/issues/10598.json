@@ -1,0 +1,33 @@
+{
+  "number": 10598,
+  "kind": "pull_request",
+  "title": "fix(scripts): the fatal-guard adoption check reads a docblock mention as an import — mask the source and assert the guard is called",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T04:35:57Z",
+  "updated_at": "2026-08-21T05:07:56Z",
+  "closed_at": "2026-08-21T05:07:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-21T05:07:55Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10598",
+  "body": "Fixes #10458\n\n`checkGuardAdoption()` decided both of its questions by regex over the **raw**\ngate source, comments included. Both guarded gates name\n`scripts/eslint-fatal-guard.mjs` in their own docblocks, so the import test was\nsatisfied by **prose**.\n\n## The reproduction (re-run on this branch, at `493e62957a`)\n\nDelete `check-slot-lookup-ratchet.mjs`'s real `import { lintFilesStrict } …`\nline, leave its line-27 docblock exactly as it is. Confirmed on disk by anchor\ncount, never by an editor's exit code:\n\n**Before the fix** — `origin/main` @ `1f4a93e`:\n\n```\nON-DISK: real import lines=0 ; docblock mentions=1\n$ node scripts/check-query-options-erasure-ratchet.mjs --self-test\n✓ self-test: … fatal-parse guard proved both ways over real ESLint output, both gates still routed through it, …\nexit=0\n```\n\nGreen, and the sentence it printed is false — on the one check whose whole job\nis noticing that a gate went quiet.\n\n**After the fix**, same ablation:\n\n```\nON-DISK: real import lines=0 ; docblock mentions=1\nexit=1\n✗ self-test (1 failure(s)):\n  • scripts/check-slot-lookup-ratchet.mjs: does not import scripts/eslint-fatal-guard.mjs.\n    A gate that counts ESLint messages scores an unparseable file as clean without it (#10123).\n```\n\n**Reverse ablation** — import kept, the real call renamed away (`await\nlintFilesStrict(` → `await lintFilesStrictRenamed(`), i.e. the source-level\nshape of \"imports it and never uses it\":\n\n```\nON-DISK: real import lines=1 ; docblock mentions=1 ; real calls=0\nexit=1\n✗ self-test (1 failure(s)):\n  • scripts/check-slot-lookup-ratchet.mjs: imports scripts/eslint-fatal-guard.mjs but never\n    calls lintFilesStrict(). Importing the guard does not arm it: a gate measuring around it\n    still scores an unparseable file as clean (#10123).\n```\n\n**Positive control** — the unmodified tree still passes, so this is not merely\nan inversion. `check-slot-lookup-ratchet.mjs` was restored byte-identically\nafter each leg (`git diff --quiet` → clean); its line 48 is untouched in this\ndiff.\n\n## What changed\n\n1. **Comments no longer count as code.** The source is read through\n   `stripComments()` from `scripts/js-comment-mask.mjs` — #9367's ONE answer to\n   \"comment or code\". `stripComments` rather than `maskComments` because this\n   check reports gate **names**, never a line or an offset into the original\n   text. Measured over both gates: `/eslint-fatal-guard\\.mjs/` raw=2 →\n   stripped=1 (the real import), every `import` statement surviving, line counts\n   preserved.\n2. **The guard must be CALLED.** \"A guard imported once is not a guard still\n   called\" is the docblock's own thesis and nothing asserted it. The\n   pre-existing `.lintFiles(` test cannot cover that gap: a gate that stopped\n   calling anything has no direct call left to catch.\n\nThe per-gate verdict moves into a pure `guardAdoptionProblems(gate, source)` so\nthe self-test can drive it over synthetic sources in **both** directions — the\nlive-tree assertion can only ever confirm the direction this tree is already in,\nand both gates are adopted today. Six fixtures: import+call clean (the positive\ncontrol), docblock-mention-only, imports-never-calls, commented-out call,\nunguarded ESLint, and a commented-out raw call that must **not** be reported\n(the mask's other failure direction, #9367).\n\n### One trap worth naming\n\nBoth call shapes in those fixtures are spelled with a `+`.\n`checkGuardAdoption()` reads that file, and `stripComments` deliberately keeps\nstring literals — so a contiguous `lintFilesStrict(` or `.lintFiles(` inside a\nfixture would be a **decoy in the gate's own source**, the same hole one layer\nup. A case *label* carrying the raw call shape reddened the gate once while this\nwas being written, which is why the labels avoid it too. There is a comment on\nthe fixtures saying so.\n\n## Deliberately not closed here\n\nA gate that counted messages from `lintText()` instead would still clear every\ntest. Banning `.lintText(` is not available: `check-query-options-erasure-ratchet.mjs`\nlegitimately calls `eslint.lintText()` throughout its own self-test, so that\ntest would false-positive on `main` today.\n\n## #10427\n\nMeasured on these two files rather than assumed: no `scanSource` desync. Every\nimport statement survives the mask, line counts are preserved (294→294,\n714→714), and the stripped mention count is exactly the real import. Not fixed\nhere.\n\n## Gates\n\nUnion re-derived with `node scripts/pm/dispatch-gates.mjs` after the final\ncommit and run at `493e62957a` — no families beyond the dispatched list:\n\n- `pnpm check:query-options-erasure` — exit 0, both the self-test and the gate\n- `pnpm check:cross-package-test-inputs` — exit 0, `All 60 self-test cases passed.`\n- `pnpm check:slot-lookup` — exit 0, `✓ slot-lookup ratchet holds: 107 unswept site(s) in 25 file(s)`\n- `pnpm check:nul-bytes` — exit 0, `check-nul-bytes: OK (scanned 6187 text file(s) …)`\n- `eslint` on both changed files — exit 0\n\n## No changeset\n\nThis PR touches only `scripts/**` and publishes nothing, so it carries\n`skip-changeset` rather than a changeset. The dispatch brief expected a\n`.changeset/*.md` entry; naming a package here would attach a CHANGELOG entry to\na release the change is not part of, and an empty-frontmatter changeset is\nrejected outright by `scripts/check-empty-changeset.mjs` (#5471, #4898).\n\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_"
+}

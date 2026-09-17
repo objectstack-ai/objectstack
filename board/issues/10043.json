@@ -1,0 +1,34 @@
+{
+  "number": 10043,
+  "kind": "issue",
+  "title": "skills: adopt the Restart-touch: hold channel + rewrite the pre-dispatch must-check section to the H17 anchor index (governed follow-up to #10034)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T18:26:47Z",
+  "updated_at": "2026-08-20T00:41:46Z",
+  "closed_at": "2026-08-20T00:28:49Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10043",
+  "body": "治理面后续卡,承接 #10034 复核裁定(2026-08-19,两处 open question 均裁 A;PR #10041 已把机制侧全部备好,本卡是纯协议/文本半)。\n\n## Scope —— `.claude/skills/pm-dispatch/SKILL.md`(治理面,人合)+ 座位贴协议 reference\n\n1. **状态模型 `pm:on-hold` 行加正典通道**:hold 的机器可读行家族在 `Restart-when:` 之外加 **`Restart-touch: <repo-relative path>`**(一行一路径,大小写敏感、行锚定,与 `Blocked-by:`/`Restart-when:` 同一正文单通道纪律)—— 巡逻 H17 的抽取器已实现该通道(PR #10041,含反引号/bullet 容忍与 tracked-file 校验),采用即零代码。存量 79 张 hold **不迁移**、不产 finding(⛔ 拒绝 #10034 报告里的选项 C —— 给存量制造告警恰是该卡度量出的病的复刻);散文锚词抽取继续兜底旧卡。\n2. **座位贴「派发前必查」节改写**(所在 reference 文件,`seat-post-protocol.md` 或现行归属处):内容收敛为一句 —— 派发/折叠检查时读锚 #9857 的 **H17 on-hold 触发文件索引**并与本次派发的文件面交集,命中 ⇒ 按 hold 评论的 rider/restart 条款处置。与 lanes/*.md 已落地的「每枪先读锚」第一判据(PR #9988)同向,不重复展开。\n3. 行数付账照棘轮纪律(SKILL.md 现值以 PR #10010 合并后为准;真去重支付,⛔ re-wrap)。\n\n## Serial\n\n**SKILL.md 热文件被 PR #10010(四维中文化,等人合)占用 —— 本卡串行在其合并之后**,派发前重测文件现状。治理面终态:draft + review request os-zhuang,人合。模型档:clause ① fable-mandatory。\n\nGraded `pm:queue`, S(skills 座,own-lane,session `ae0d8bd1-5667-5f58-8ff8-fa22ec154325`)。"
+}

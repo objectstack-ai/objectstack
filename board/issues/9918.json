@@ -1,0 +1,33 @@
+{
+  "number": 9918,
+  "kind": "pull_request",
+  "title": "fix(service-messaging): correct sys_notification_subscription index comment to name sys_member/sys_team_member",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T07:46:08Z",
+  "updated_at": "2026-08-19T08:34:50Z",
+  "closed_at": "2026-08-19T08:34:48Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-08-19T08:34:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9918",
+  "body": "Fixes #9722\n\n## What was wrong\n\n`packages/services/service-messaging/src/objects/notification-subscription.object.ts`'s\n`(topic, principal)` index comment justified the per-organization scope by claiming\n`role:x` / `team:x` resolve against `sys_permission_set` / `sys_position` (citing #8461\nand #8556). Those two PRs scope `sys_user_preference`/`sys_capability`/`sys_position`'s\nown uniqueness per organization — the general index-scoping precedent this object's\nindex also follows — but say nothing about what a notification `role:`/`team:` selector\nresolves against.\n\n`RecipientResolver` (`recipient-resolver.ts`, the sole reader of this selector)\ndisagrees on both halves: `resolveRole` reads `sys_member` (tenant-scoped via\n`organization_id`) and `resolveTeam` reads `sys_team_member` (tenant-scoped via its\n`team_id` lookup into `sys_team`) — pinned by `recipient-resolver.test.ts`'s\n`\"expands role: via sys_member (tenant-scoped) and de-dups\"` case. The comment's own\nworked example (`role:sales_manager`) is not even a reachable `sys_member.role` value —\nthat field's closed vocabulary is `owner`/`admin`/`delegated_admin`/`member`\n(`BUILTIN_MEMBERSHIP_ROLE_OPTIONS`); `sales_manager` is `sys_position`'s canonical\nexample name, a different object this selector does not read at all.\n\n## Stop-condition check (before editing)\n\nPer the card's hard stop-condition, searched for evidence the comment recorded a\nRULED/intended semantics (role: → positions) rather than being simply wrong: grepped\n`docs/adr/` for `sys_permission_set`/`sys_position`/notification-principal language and\nread #8461 and #8556 in full. Both are exclusively about scoping *other* objects' own\ndeclared-index uniqueness per organization (the `unique: 'organization'` pattern this\nobject's own index already follows) — neither states or implies anything about what a\nnotification principal selector resolves against. ADR-0090 D3 independently confirms\n`sys_member.role` (the org-administration tier) is the *sole* permitted \"role\" spelling\nplatform-wide — consistent with, not contradicting, what the resolver actually reads.\nNo ruling found → stop-condition cleared, proceeded with the comment fix.\n\n## What changed\n\nRewrote the flagged comment (`notification-subscription.object.ts:75-92`) to name\n`sys_member` / `sys_team_member` as the objects `RecipientResolver` actually reads,\nkept the tenancy argument load-bearing (both objects are tenant-scoped, so `role:x` /\n`team:x` still denote different rows per organization — the same reason the\n`(topic, principal)` index has to be `unique: 'organization'`), and replaced the\nunreachable `role:sales_manager` example with the reachable `role:admin`. Comment-only —\nno schema field, index declaration, or runtime behavior changed. Declared file surface\nonly; `recipient-resolver.ts` and its test were read-only references, untouched.\n\n## Gates (comment-only change; local scope per AGENTS.md; final HEAD `99521a51c`)\n\n- `pnpm check:slot-lookup` — PASS (107 unswept sites in 25 files, none new; baseline\n  key set unchanged vs `b030055`)\n- `pnpm check:test-source-alias` — PASS (72 packages with tests scanned)\n- `pnpm check:type-source-resolution` (`--self-test` + full) — PASS (76 packages\n  scanned)\n- `node scripts/docs-audit/check-affected-docs.mjs` — PASS (262 self-test cases)\n- `pnpm check:nul-bytes` (`--self-test` + full) — PASS (6298 text files scanned, no raw\n  control bytes)\n- `node scripts/pm/dispatch-gates.mjs` (no paths — self-derived from the actual diff, 1\n  changed path) — same 4 named families, plus one convention-triggered addition:\n  `pnpm check:i18n`, because the package owns an `i18n-extract.config.ts`. Diff review\n  confirmed no `label`/`description`/authorable string changed (comment-only), so the\n  extractor had nothing to pick up — ran it to completion anyway (built the CLI per its\n  own PREREQUISITE-NOT-MET message): **PASS**, 9 packages, all bundles in sync, no\n  undeclared authoring keys.\n- `pnpm --filter @objectstack/service-messaging test -- --maxWorkers=2` — unchanged\n  from `main`, as expected for a comment-only diff: **242 passed / 22 files, 0\n  failed.**\n\nAll gates run against the committed tree at `99521a51c` (working tree was clean before\nand after commit — no drift between the runs above and the final diff).\n\n## Changeset\n\n`skip-changeset` applied (this repo's real mechanism — confirmed against\n`.github/workflows/pr-automation.yml`'s `changeset-check` job and the repo-conditional\nconvention `pm-dispatch`/`os-dev` PR #9100 settled: this repo uses the label, objectui\nuses an empty-frontmatter changeset instead). Rationale: comment-only prose change, zero\nuser-visible or runtime behavior change, nothing to release.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PnJHU45vPJj5UQrxe946Bx)_"
+}

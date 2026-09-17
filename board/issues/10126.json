@@ -1,0 +1,35 @@
+{
+  "number": 10126,
+  "kind": "issue",
+  "title": "Gate: a test using a dist-resolved workspace dependency must pay its first load at module top — extend `check:test-source-alias` (2026-08-20 queue-incident layer ①)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p0"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T06:35:10Z",
+  "updated_at": "2026-08-20T09:34:33Z",
+  "closed_at": "2026-08-20T09:03:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10126",
+  "body": "Filed by the spec seat on the maintainer's instruction (2026-08-20 live chat, verbatim: 「立卡」, accepting layers ①+④ of the queue-incident remediation menu). Provenance thread: #10115 (root cause) · PR #10120 (the instance fix) · #10112 (the mis-diagnosis record, re-scoped).\n\n## The incident this closes the class of\n\n`dev-plugin-security-enforcement-warning.test.ts` (merged 01:53Z via PR #10092) deliberately boots the real, unmocked `@objectstack/plugin-security` chain and paid its cold vite transform **inside a clocked window** (first `it()` body → later a `beforeAll`). Measured: 3.1–3.6s idle on 4 vCPU (~70% of vitest's 5000ms default), ballooning to **20.26s** on a starved core — past every clock, including a hypothetical 30s. The result was `Test timed out in 5000ms` only under merge-queue full-suite load: **30 failed queue builds in 24h, main frozen 2h+, three innocent PRs ejected** (#10105, #10003, #10008), and even the first fix PR (beforeAll warm-up — hooks are clocked too, `hookTimeout` 10s) was ejected twice by the very test it fixed. The landed fix (PR #10120 head `7ef8159b7`) is a **module-top static import** — the cost moved OUT of every clocked window, verified immune at `--hookTimeout=1 --testTimeout=1000`.\n\n## The mechanical rule\n\nFor every entry in `KNOWN_UNALIASED_TEST_IMPORTS` (the registry `scripts/check-test-source-alias.mjs` already keeps — workspace deps that test files resolve through `dist`): any test file importing that dependency must reference it in a **top-level static import**, so the first paid load is at module scope, never inside `it()`/`beforeAll`/dynamic-import-in-body. A violation is exactly tonight's shape, caught at the offending PR's own CI instead of in the queue.\n\nImplementation shape (lead, not spec): one new check limb + self-test in the existing gate, matching its registry-plus-gate idiom. Detection: for each unaliased specifier, scan the package's test files — a dynamic `import()`/`require` of that specifier inside a function body with no top-level static import of the same specifier is a finding, reported against the test file with the incident-derived remedy (\"add a module-top `import '<specifier>'` so the transform is unclocked\").\n\n## Rider (layer ④, one prose line)\n\nAdd the convention sentence to the testing-conventions doc the gate's header points at: **clocked windows measure behaviour, never loading — a test that boots a real plugin chain pays its first load at module top.**\n\nDedup: #10112's re-scoped surviving half (shrink the unaliased registry by source-aliasing) is the adjacent, complementary card — aliasing removes entries from this gate's input; this gate covers whatever remains. Cross-linked, not duplicated. No other card names this rule (searched: test-source-alias / static import / clocked window).\n\nSuggested size/model: S–M, `opus`."
+}

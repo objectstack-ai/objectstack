@@ -1,0 +1,35 @@
+{
+  "number": 9925,
+  "kind": "issue",
+  "title": "[decision] `InlineLocaleMap`'s BCP-47 key regex is erased from the emitted type, so `{ key, defaultValue }` type-checks on every `I18nLabel` surface in both repos — narrow the key type, or accept publish-time-only refusal?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T08:13:04Z",
+  "updated_at": "2026-08-19T14:22:54Z",
+  "closed_at": "2026-08-19T14:22:54Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9925",
+  "body": "出处:objectui#5264(PR objectstack-ai/objectui#5303)实施途中,由 dev 用 tsc 实测发现并升级;由 `repo:objectui` 执行座位转入 spec 车道 —— 触 `packages/spec` 一律归 spec 座位(唯一所有者),且属契约变更,人工地板。**未实施,不在该 PR 处理。**\n\n## The mechanism\n\n`InlineLocaleMapSchema` is `z.record(z.string().regex(BCP47), z.string())`. The **key regex is a Zod runtime refinement and does not survive into the emitted type** — `I18nLabel`'s object half erases to `Record<string, string>` in the `.d.ts`.\n\nConsequence: **every string key type-checks**. The retired `{ key, defaultValue }` form remains structurally assignable to `I18nLabel` on *every* `I18nLabel` surface in *both* repos. TypeScript cannot express its rejection anywhere.\n\nThe runtime schema does refuse it — `I18nLabelSchema` rejects `{ key, defaultValue }` at authoring time in **both property orders** (measured, pinned in objectui#5303's tests). So the contract is enforced, but only at publish time.\n\n## Why this reached the decision box rather than being fixed\n\nThis is `declared ≠ enforced` on the *type* axis, and closing it changes a published contract's emitted shape — a protocol change, human floor. It is also cross-cutting: it is not one interface's problem, it is every `I18nLabel` surface at once.\n\n## The measured harm that motivates it\n\nobjectui#5264 is the concrete instance, and it survived a **full release**: `ObjectMetricWidgetProps` declared the retired `{ key, defaultValue }` form, so a TS consumer writing the declared shape rendered **the raw dotted i18n key as the visible KPI label**. The wrong shape compiled, which is precisely why nobody caught it. Worse, the same widget's `drawerTitle` read `title?.defaultValue` — a limb the correct inline-map form does not have — so an authored drill-down title resolved to `''` and silently fell back to the literal word \"Details\".\n\n## 四棱卡面(four-facet block)\n\n1. **平台长远合理性 / long-term coherence.** The constraint already exists in the schema; the type boundary throws it away. Option B is contract-first — it stops discarding information the spec already holds — rather than adding a second, independent statement of the rule.\n2. **实际业务需求 / measured business pull.** Justified by a shipped, measured defect rather than a speculative surface. Publish-time-only refusal catches the author *after* they have written and shipped; the harm class here (a raw dotted key painted as a KPI label, and property-order-dependent behaviour) is exactly the kind that survives review.\n3. **避免 AI 写代码犯错 / AI-agent error-resistance.** This is the strongest axis and the dev's own reasoning: the defect existed for a full release **because the wrong shape compiled**. Agents write metadata against declared types; a declared type that accepts the retired vocabulary is an active instruction to keep writing it. B fixes it once for every surface in both repos instead of per-interface, per-round.\n4. **创业阶段不扩散需求 / startup scope discipline.** B adds no new key and no new surface — it narrows an existing one. The cost is complexity, not scope: a template-literal key type is harder to read and **may need an escape hatch for computed keys**. That cost is the reason this is the maintainer's call and not the dev's.\n\n## Options\n\n- **A — leave as-is.** The runtime schema rejects it at authoring time in both orders (verified), publish-time refusal is treated as the contract boundary, and the emitted type stays simple. Accepts that `declared ≠ enforced` persists on the type axis, and that the objectui#5264 failure class can recur on any other `I18nLabel` surface.\n- **B — narrow `InlineLocaleMap`'s key** to a template-literal / branded locale-tag type in `@objectstack/spec`, making `{ key, defaultValue }` a compile error on every `I18nLabel` surface at once. **(dev's recommendation)** Cost: type complexity; likely needs an escape hatch for computed keys.\n- **C — keep `Record<string, string>`** and add a repo gate that greps for `{ key, defaultValue }` object literals in label position. Cheapest to land, but it is a second de-facto contract maintained separately from the schema — the shape this codebase has repeatedly paid for.\n\n## Exit condition\n\nAny of A/B/C ruled explicitly. If A, the trade should be written into `I18nLabel`'s doc comment where authors look (spec is the sole judge of these values, and the type deliberately does not express it) — the same disposition objectui#5006 took for its own coarse-arm ceiling."
+}

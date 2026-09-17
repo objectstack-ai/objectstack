@@ -1,0 +1,34 @@
+{
+  "number": 9982,
+  "kind": "pull_request",
+  "title": "skills(pm-dispatch): notification handover — review-request and assign os-zhuang, retire the decision digest",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T11:52:04Z",
+  "updated_at": "2026-08-19T12:19:27Z",
+  "closed_at": "2026-08-19T12:19:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-19T12:19:25Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9982",
+  "body": "Fixes #9976\n\nImplements the 2026-08-19 maintainer rulings: every waiting-on-maintainer state must be a GitHub-native, push-notifying state, not a line of prose in a seat post or a generated view. Governed surface (`.claude/skills/pm-dispatch/SKILL.md`) — this PR stays **draft** and is human-merge-only; this PR is also the mechanism's own bootstrap (review requested from os-zhuang on this draft).\n\n## The three edits\n\n1. **ACCEPT path-fork clause (governed-surface PRs)** — the draft-forever rule and the three prohibitions (never flip ready / never queue / never arm auto-merge) are unchanged verbatim; the set grows from three steps to four: new step requests review from `os-zhuang` on the draft PR. Grounded in the measured fact (2026-08-19): a draft PR accepts a review request and it pushes to the maintainer's phone — maintainer confirmed 「推送到了」. The awaiting-a-human-merge list thereby lives in GitHub's Review-requested queue and self-clears on merge.\n2. **`needs-user-decision` flow** — the stroke that flips the label also assigns `os-zhuang`; the ruling-transcription / auto-adjudication stroke that exits the state unassigns in the same stroke (recorded in the state-model row, the escalation flow step 2, and the atomic four-piece ruling-record step 3). The decision inbox = the maintainer's Assigned queue. The row states the assignment is inbox routing, not a claim — it does not enter stale-claim reclaim.\n3. **Decision digest retired** — the per-round refreshed digest duty in the triage-seat section and the digest/batch-adjudication standing paragraph (2026-08-18 「同意」, superseded by 2026-08-19 「之前定期生成的决策汇总 issue没什么用」) are deleted. Kept unchanged: the per-card decision-facets block (marker text spelled `os-decision-facets`), its validation duty, and the transcription duty (survives as escalation-flow step 3, the atomic four-piece record). The superseding ruling is recorded with date and verbatim quote at the facets-block provenance line. Closing the digest issue itself is left to the PM at landing accounting, deliberately not referenced from operational text (id-lint).\n\n## Line budget (682-ceiling shrink-only ratchet, headroom was 0)\n\n- Before: 682 · After: **678** · Ceiling: 682 · headroom now 4.\n- Payment: the retired digest text (−7 lines) plus the digest-duty compaction in the triage section (−1) covers the additions (+3 in the ACCEPT fork, +1 at the facets provenance; the state-model row and the two flow-step edits are single-line appends, zero line cost). No re-wrapping of pre-existing lines was used as payment; no other content was cut.\n\n## Gates (all run at HEAD `6649fc405`, exit codes captured before any pipe)\n\n- `check:pm-skill-ratchet` — \"✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/SKILL.md is 678 lines (ceiling 682; headroom 4).\"\n- `check:pm-governed-prose` — \"✓ check-governed-prose: 2 instruction surface(s) name all 5 registered governed surfaces (docs/adr/** · .claude/** · skills/** · AGENTS.md · CLAUDE.md) and claim no others.\" (self-test 24 cases pass; the edit sits inside the pinned region and preserves every register code span)\n- `check:pm-skill-id-lint` — \"✓ check-skill-id-lint: 15 file(s) clean (pattern matches 3+ digit issue ids).\"\n- `check:skill-frame-sync` — \"✓ check-skill-frame-sync: 4 copies of the decision frame are structurally isomorphic across 3 files\"\n- `check:skill-compatibility` — \"✓ check-skill-compatibility-version: 11 SKILL.md file(s) reconciled against 77 workspace packages\"\n- `check:doc-authoring` — \"✓ doc authoring guard: 377 files clean — no bare metadata literals.\"\n- `check:pm-governed-merges --self-test` — \"✓ check-governed-merges --self-test: 77 assertions\"\n- `check:doc-formula-expressions` — \"✓ check:doc-formula-expressions: 22 record-scoped formula example(s) across 402 files / 1413 TS blocks judged clean\"\n- Family list derived by `node scripts/pm/dispatch-gates.mjs` (no args, real diff vs merge base `8fa4e2a76`): all 7 named families run, all green. Tier line: \"Model tier — MANDATORY: claude-fable-5\" (clause ①, this card ran on it).\n\n## Reverse verification (direction predicted in writing before running)\n\nPredicted: appending 5 filler lines (683 lines) turns the ratchet RED naming the file and ceiling. Observed: \"✗ check-skill-line-ratchet: .claude/skills/pm-dispatch/SKILL.md is 683 lines; the ratchet ceiling is 682.\" (exit 1). Restored from the committed state via `git checkout` of the branch path; re-run green at 678 (exit 0), worktree clean.\n\nNo changeset: instruction-file-only PR, nothing published ships (`skip-changeset`).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AeA3nU1B5Q2pgxqxgUrexd)_"
+}

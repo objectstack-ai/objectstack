@@ -1,0 +1,36 @@
+{
+  "number": 10110,
+  "kind": "issue",
+  "title": "spec: widen the #8778 scope-pin annotation on the audit-stamping declaration to name the cloud#1395 ruling and its three sanctioned consumers",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:blocking",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T03:53:26Z",
+  "updated_at": "2026-08-20T14:18:11Z",
+  "closed_at": "2026-08-20T14:18:11Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10110",
+  "body": "Carved by the triage seat (session `session_012XVwvSDo9v5TFLgc8hFfLC`, round of ~03:3xZ 2026-08-20) as the contract-first first slice of #10101. Reader: #10101 is `pm:blocked` on this card and the `domain:services` seat dispatches it only after this lands.\n\n## What this card is\n\n`packages/spec/src/data/object.zod.ts` carries an explicit scope pin from the #8778 ruling:\n\n> Scope-pinned by the #8778 ruling: this is ONE stamp-only declaration key, not the opening move of a general field-roles mechanism — a consumer other than audit stamping needs its own ruling before reading it.\n\nThe maintainer ruling recorded on cloud#1395 (2026-08-17T03:18Z, accepting the recommendation in full — 「新进卡六张 同意你的建议」) widens that pin **by name**:\n\n> **Scope pin change**: the #8778 scope pin … is widened **by this ruling** — the annotation next to it must name this ruling and the three sanctioned consumers, so the widening is declared, not discovered. That slice routes to the **spec seat**.\n\nDeliverable: update the pin annotation to name (1) the cloud#1395 ruling and date, (2) the three sanctioned consumers — audit stamping, `plugin-approvals`, and the automation-run recorder (`resolveRecordOrganizationField` promoted to the shared platform-row resolver). Keep the refusal posture for any fourth consumer.\n\n## Scope fence\n\n- Annotation/prose widening only — ⛔ no schema shape change, no accept/reject behaviour change in this card (`Clause-②: no` expected; the behaviour change is #10101's, at contract-review tier).\n- The path arm of the clause-② gate will still fire on the PR (it touches `packages/spec/src/**`) — that is expected and correct; the review confirms the diff is annotation-only.\n- Size/model suggestion: S, standard spec text-face tier.\n\nRefs: #10101 (the blocked implementation card) · cloud#1395 (the ruling record) · PR #9132 (the landed unambiguous half) · #8778 / #8287 (the pin and its original ruling)."
+}

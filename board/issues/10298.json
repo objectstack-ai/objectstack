@@ -1,0 +1,37 @@
+{
+  "number": 10298,
+  "kind": "issue",
+  "title": "Measure definitions are not fully compiled: `aggregate: 'count'` ignores `field`, and `/api/v1/analytics/query` drops every per-measure `filter` — the SQL is `COUNT(*)` for all of them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T15:29:32Z",
+  "updated_at": "2026-08-20T19:10:03Z",
+  "closed_at": "2026-08-20T19:10:03Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10298",
+  "body": "Measure definitions are not fully compiled: `aggregate: 'count'` ignores `field`, and `/api/v1/analytics/query` drops every per-measure `filter` — the generated SQL is `COUNT(*)` for all of them\n\nMeasured on `17.1.0` (open edition, `objectstack dev`), HotCRM's `case_metrics` / `opportunity_metrics` cubes. The response includes the compiled SQL, so both defects are visible without guessing.\n\n## 1. `aggregate: 'count'` with a `field` counts rows, not non-null values — a rate reads 100% when it is 12.5%\n\n```ts\n// src/datasets/case.dataset.ts\n{ name: 'closed_count',      label: 'Closed Cases',   aggregate: 'count', filter: { is_closed: true } },\n{ name: 'kb_resolved_count', label: 'Resolved by KB', aggregate: 'count',\n  field: 'resolved_by_article', filter: { is_closed: true } },\n{ name: 'kb_deflection_rate', derived: { op: 'ratio', of: ['kb_resolved_count','closed_count'] }, format: '0%' },\n```\n\nGround truth in that org: **8** closed cases, of which **1** carries a `resolved_by_article`. So the deflection rate is 12.5%.\n\nThe service dashboard renders:\n\n```\n知识库转移率   100%          ← kb_deflection_rate\n知识库解决数   8             ← kb_resolved_count   (should be 1)\n已关闭工单     8             ← closed_count        (correct)\n\n解决工单最多的文章\n  Resolving Article    Resolved by KB\n  —                    7        ← 7 of the 8 have no article at all\n  API Rate Limits      1\n```\n\nThe pivot immediately below the tile contradicts it: seven of the eight \"KB-resolved\" cases group under a null article. `field: 'resolved_by_article'` is dropped, so the measure is `COUNT(*)` over the filtered rows.\n\nThe dataset author anticipated exactly this metric being fragile — there is a hook (`case_resolution_article_normalize`) whose only job is to normalise `''` to NULL so the count is honest, and a comment explaining that every widget shows the numerator and denominator beside the rate \"so a reader can check the arithmetic\". A reader who checks it finds 8 = 8 and a pivot saying otherwise.\n\nExpected: `COUNT(\"resolved_by_article\")`, or an author-time rejection saying `count` does not take a `field` (and pointing at `count_distinct`).\n\n## 2. `/api/v1/analytics/query` drops per-measure `filter` **and** `field`\n\n```\nPOST /api/v1/analytics/query\n{\"cube\":\"opportunity_metrics\",\"measures\":[\"opp_count\",\"won_count\",\"lost_count\",\"won_amount\"]}\n\n→ 200\n{\"rows\":[{\"opp_count\":24,\"won_count\":24,\"lost_count\":24,\"won_amount\":5632500}],\n \"sql\":\"SELECT COUNT(*) AS \\\"opp_count\\\", COUNT(*) AS \\\"won_count\\\", COUNT(*) AS \\\"lost_count\\\",\n         SUM(\\\"crm_opportunity\\\".\\\"amount\\\") AS \\\"won_amount\\\" FROM \\\"crm_opportunity\\\"\"}\n```\n\nThe measures declare filters:\n\n```ts\n{ name: 'won_count',  label: 'Won Deals',   aggregate: 'count', filter: { stage: 'closed_won' } },\n{ name: 'lost_count', label: 'Lost Deals',  aggregate: 'count', filter: { stage: 'closed_lost' } },\n{ name: 'won_amount', label: 'Won Revenue', aggregate: 'sum', field: 'amount',\n  filter: { stage: 'closed_won' } },\n```\n\nGround truth: 24 opportunities, **8** won, **5** lost, won revenue **1,290,000**. The endpoint answers 24 / 24 / 24 / 5,632,500 — every filter silently gone, no `FILTER (WHERE …)` and no `CASE WHEN` in the SQL. `case_metrics` behaves the same way (`closed_count` → 39, i.e. all cases).\n\nThe dashboard path *does* apply these filters — the sales dashboard shows 赢单数 8, 丢单数 5, 已成交收入 1,290,000 correctly. So the same cube and the same measure names answer two different numbers depending on which door you come in, and the API door is the one that silently answers wrong. Anything reading metrics over the API — an agent tool, an export, a downstream report — gets unfiltered aggregates while the UI shows filtered ones.\n\n## Why this pair is worth one card\n\nBoth are the same gap: a measure carries `aggregate` + `field` + `filter`, and the compiler that produced the SQL above used only `aggregate`. Fixing the compiler in one place fixes the dashboard's `count(field)` and the API's dropped filters together, and the returned `sql` field makes both testable — a regression test can assert the compiled SQL contains `COUNT(\"resolved_by_article\")` and a `FILTER`/`CASE WHEN` per filtered measure.\n\nIf per-measure `filter` is deliberately unsupported on the strict `/analytics/query` wrapper, it should be a 400 naming the measure, not a 200 with different arithmetic.\n"
+}

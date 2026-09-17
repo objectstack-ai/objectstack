@@ -1,0 +1,34 @@
+{
+  "number": 10203,
+  "kind": "issue",
+  "title": "[finding] #10032 option 2 (preserve a failing task's output as an artifact) — what it would and would not buy, measured",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T13:50:22Z",
+  "updated_at": "2026-08-20T16:36:40Z",
+  "closed_at": "2026-08-20T16:36:40Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10203",
+  "body": "Filed unassigned, observation class, while implementing **option 1** of #10032 (shard-aware test-completeness guard). #10032's triage ruling asked for option 1 and left option 2 to the implementer's judgement, with the instruction to file it if not done. Not done — and the measurements below change what it is worth, so they belong on a card rather than in a report.\n\n## What option 2 was\n\nFrom #10032:\n\n> 2. **Preserve the failing task's output regardless of turbo's streaming** — e.g. per-package vitest output files uploaded as artifacts on failure, the way stall reports already are. Helps every future \"no details above\" triage, not just this class.\n\n## Why it was not bundled into the option-1 PR\n\n**It would not have captured anything in the incident that motivated it.** #10032's failing `@objectstack/example-showcase#test` produced *no output at all* — the complete 5083-line job log mentions the package exactly twice, both in turbo's error summary, with no vitest summary, no `FAIL`, and no test name. A per-package output file collects what the process wrote; the process wrote nothing, so the artifact would be an empty file. Option 2 addresses a different class — output that EXISTS but is lost, truncated, or interleaved beyond reading — which is a real class, just not this one.\n\n**The cheap in-surface version is near-zero value.** `run-with-stall-guard.mjs` already tees combined stdout+stderr to `$RUNNER_TEMP/test-core.log`, and that file is byte-for-byte what the job log already shows. Uploading it as an artifact duplicates a log that is already retained and already reachable — including from an agent seat, per #10141. The value in option 2 is entirely in the *per-package* split, which `test-core.log` does not have.\n\n**The version with real value is out of the option-1 PR's declared file surface.** Getting genuinely per-package output means each package's vitest writing its own file — a reporter configured across 60+ per-package vitest configs, or a root-level reporter injection. `check-test-completeness.mjs` was deliberately built to read a saved turbo log precisely so it would need no change to those configs; option 2 is the change that reverses that decision, and it deserves its own card and its own review rather than riding along.\n\n## What option 1 already covers, so this card is not urgent\n\nThe guard now takes the shard's scheduled package list and turbo's `Failed:` roster, so the #10032 signature — a task turbo reports as failed with no vitest summary in the log — is a **named red** identifying the package. CI can now *say* that a package went silent. Option 2 would additionally let you *read what it said*, in the cases where it said anything.\n\n## Design notes for whoever picks this up\n\nTwo things measured on this tree (2026-08-20, turbo 2.10.10) that constrain the design:\n\n- **A cache hit REPLAYS stored output.** Verified: a second `turbo run test --filter=@objectstack/types` printed `cache hit, replaying logs 07765db4f3648082` followed by both summary lines, `>>> FULL TURBO`. So per-package artifacts must be written by the reporter into turbo's declared `outputs` for the `test` task (currently `outputs: []`) or a cached leg produces no file while the log still shows the summary — an artifact set that silently disagrees with the log.\n- **turbo stops scheduling on the first failure.** Verified: one failing task in a 4-task run printed `Tasks: 1 successful, 4 total`, and the two cancelled packages produced no output. Any \"one artifact per scheduled package\" expectation has to tolerate that, the same way the completeness guard now does.\n\n## Prior art (searched before filing)\n\nSearched open issues for per-package output / artifact-on-failure / turbo streaming / \"no details above\" phrasings across `domain:devx`; no open issue covers this. Related but distinct: #10032 (the parent observation), #10141 (raw job logs are reachable from an agent seat, which is what makes the whole-log variant redundant), #10057 (an empty affected-set is indistinguishable from a failed computation — same family of \"CI cannot say what happened\", different input).\n\nBacklinks: #10032.\n"
+}

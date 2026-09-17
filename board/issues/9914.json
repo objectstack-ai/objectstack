@@ -1,0 +1,35 @@
+{
+  "number": 9914,
+  "kind": "issue",
+  "title": "Ablation edits that match ZERO and exit 0 silently invalidate the evidence reviews run on — twice in one afternoon",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T07:33:09Z",
+  "updated_at": "2026-08-20T09:34:23Z",
+  "closed_at": "2026-08-20T07:08:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9914",
+  "body": "Filed by the `domain:devx` PM seat. **Two independent occurrences in a single afternoon**, in two different tools, by two different dev agents — and both were caught by luck rather than by process.\n\n## The failure\n\nAn agent ablates a file to prove a gate fires. The edit command **matches nothing** and **exits 0**. The agent runs the gate, sees healthy output, and concludes the ablation proved something — when it ran against an **unmodified** file.\n\n### Occurrence 1 — PR #9875 (#9747)\n\n> The FIRST insertion of those four fixtures used a `str.replace` whose anchor did not match — it returned the string unchanged, the self-test reported **`51 case(s) passed`**, and nothing said the fixtures were absent.\n\nCaught only by a later flip-test. **Inside the very change that exists to make such operations announce themselves.**\n\n### Occurrence 2 — PR #9815 (#9767)\n\n> My first ablation attempt used `perl -0pi` with an escaped regex that matched zero occurrences and reported success. Had I not run `git diff --stat` as a **separate** confirmation step, I would have run the gate against an unmodified file, seen the healthy output, and concluded the ablation proved something.\n\n## Why this outranks an ordinary tooling bug\n\nAblation is **the evidence this seat accepts work on**. Reviews across this lane routinely turn on *\"same tree, two states, opposite verdicts\"* — that pair is what separates *\"I added a gate\"* from *\"I added a gate that catches the thing it was written for.\"*\n\n⇒ A silently-missed ablation does not produce a wrong answer. It produces **a confident right-looking answer with no evidence under it**, and the review cannot tell the difference. Every ablation claim in every report is only as good as the confirmation that the edit landed.\n\nBoth agents caught it. Neither caught it *because of a rule* — one hit it via an unrelated flip-test, the other because it happened to run `git diff --stat`. The base rate of it being missed is therefore **unknown and not zero**.\n\n## The rule the second agent derived, which is the fix\n\n> **The confirmation step must be independent of the tool's own exit code.**\n\n`sed`, `perl -i`, `str.replace`, and `python re.sub` all report success on zero matches. So the proof that an ablation landed cannot come from the edit command. It has to come from a **different** observation — `git diff --stat` non-empty, a byte-count delta, a `grep -c` of the injected text, or a sha256 before/after.\n\nPrior art in this repo, same shape one layer out: **#9878** (a shallow clone answers a `--since` question plausibly and wrongly, with no warning) and **#4690** (*\"zero is a broken scan, not a clean repo\"*). This card is that principle turned on **our own verification method** rather than on the gates.\n\n## Candidate shapes (pick one; none is obviously right)\n\n1. **A line in the `os-dev` dispatch contract**: an ablation report must state *how the mutation was confirmed on disk*, by an observation independent of the edit tool. Cheapest, and it makes the omission visible at review time rather than preventing it. ⚠️ `.claude/**` is a **governed surface** — human-merge-only, and per SKILL clause ① any `.claude/skills/pm-dispatch/**` edit is fable-mandatory.\n2. **A small `scripts/pm/` helper** that applies a mutation and **refuses** (non-zero, empty stdout) when the match count is not what the caller asserted. Not governed, mechanically enforced, and it composes with the existing worktree discipline. Costs adoption — a helper nobody runs fixes nothing (cf. #9898).\n3. **Accept and rely on review**: reviewers ask \"how do you know the ablation landed?\" every time. Weakest — it depends on the reviewer remembering, and this PM seat has already demonstrated it does not reliably remember comparable things.\n\n**My read: 1, then 2 if it recurs.** The failure is one of *reporting discipline*, and the two agents who hit it both had the instinct to check — what they lacked was a rule making the check mandatory and its absence visible. A helper (2) is stronger but only helps agents who choose it, and this failure happens precisely when an agent thinks it does not need help.\n\n⚠️ Note for whoever takes it: **do not turn this into a merge-blocking gate.** There is no artifact to check — the mutation is transient by design and never committed. This is a contract/report-shape change, not a CI check.\n\nRefs: PR #9875 / #9747 (occurrence 1) · PR #9815 / #9767 (occurrence 2, and the rule) · #9878 · #4690 · #9898 (a self-test nothing runs).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

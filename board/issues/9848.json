@@ -1,0 +1,35 @@
+{
+  "number": 9848,
+  "kind": "pull_request",
+  "title": "fix(runtime): endpoint-route 401 arm writes the shared anonymous-deny body — code key included",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T04:44:51Z",
+  "updated_at": "2026-08-19T08:39:19Z",
+  "closed_at": "2026-08-19T08:39:18Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-19T08:39:18Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9848",
+  "body": "Fixes #9823\n\nPart of the #9487 acceptance property (\"one documented key identifies the machine code on every error family, 401 included\") — no closing keyword for #9487 by design; whether that card can now close is the PM's call. #9559 / ADR-0112 D5 (envelope convergence) is deliberately not touched: this arm stays in the flat family, additive key only, per the #9487 maintainer ruling.\n\n## What\n\n`mountRouteOnServer` in `packages/runtime/src/dispatcher-plugin.ts` (the `if (route.auth !== false && !user)` arm) wrote an inline `{ error, message }` copy of the flat anonymous-deny body, so #9487's additive `code` key (landed in `@objectstack/core`'s `ANONYMOUS_DENY_BODY` via PR #9824) never reached it. The arm now writes `ANONYMOUS_DENY_BODY` / `ANONYMOUS_DENY_STATUS` verbatim. Wire effect: hook-emitted endpoint routes answer anonymous callers `401 { error, code, message }` — additive only, no key removed or moved, message byte-identical.\n\nFiles: the 401 arm + one import line in `dispatcher-plugin.ts`; a new pin `dispatcher-plugin.route-auth-deny-body.test.ts`; a changeset (`@objectstack/runtime` minor). Sibling card #9813's two discovery bodies in the same file are untouched — that card is held serial behind this one. #9813 is not addressed here; #9559 remains open.\n\n## Measurements (the dispatch's Zone-2 assumptions)\n\n- **Swap is exactly additive** — verified before swapping: `ANONYMOUS_DENY_STATUS` is 401 (matches the arm's hardcoded status), `ANONYMOUS_DENY_MESSAGE` is byte-identical to the inline message, the constant carries no header behaviour (the arm's securityHeaders loop is untouched), and `@objectstack/core` already exports all of it on this file's existing import path. The only wire delta is the `code` key.\n- **This arm was the last producer.** Sweep on the merged ref (`152bff8fcd`, merge-base of this branch): exact-message grep → 2 non-test producers (the core constant + this inline copy); tolerant prefix grep (\"Authentication is required\") → the same 2; `error: 'UNAUTHENTICATED'` literal producers → 1 (this arm; the other hit is a core docstring line, not a producer). Control (typo'd message) → 0, proving the grep shape distinguishes. No third producer.\n- **Pin path re-derived, not assumed.** `dispatcher-plugin.endpoint-fallback.integration.test.ts` asserts a nested `body.error.code` — that is the http-dispatcher wildcard path, a different 401 producer in the wrapped family. No existing test pinned this arm's flat body. The new pin exercises the concrete hook-route mount (`__aiRoutes` recovery path) and spells the exact body literally.\n- **Reachability sharpened while re-deriving:** `registerAIRoutes` mounts `/ai/*` wildcards for get/post/delete/put only, so a PATCH `RouteDefinition` under `/ai/*` (a legal method per the interface) reaches these concrete mounts unshadowed, as does any emitted path outside `/ai/*`. The arm is live on the wire; the issue's premise holds.\n\n## Tests — union run at `7dffa23303` (the final commit; no push since)\n\n- New pin: 4/4 green (anonymous → 401 + exact literal body + handler never called; body equals the shared constant; session → served; `auth: false` → open).\n- **Reverse verification, from the committed state, predicted direction: red.** `git restore --source=origin/main` on the source file → exactly the 2 body pins fail (`AssertionError: expected { error: 'UNAUTHENTICATED', …(1) } to deeply equal { …(2) }` — the missing `code`), the 2 behaviour tests stay green (2 failed | 2 passed). Restored from HEAD, clean porcelain, 4/4 green again. No ablation-rebuild caveat: the pin imports `./dispatcher-plugin.js` as a same-package sibling source, compiled by vitest directly — the mutation never had to reach a `dist/`.\n- Full `@objectstack/runtime` suite: 176 files / 2621 tests green. `pnpm --filter @objectstack/runtime typecheck` green.\n- Derived gates (`node scripts/pm/dispatch-gates.mjs`, no hand-fed paths): all 13 green — changeset family (adr-0087, no-major, empty, gate-self-tests, objectui-changeset), cross-package-test-inputs (both spellings), affected-docs, and the convention-triggered test-file set (query-options-erasure, type-check-coverage, type-check-debt `--re-measure` after a full packages-closure build — \"none above its recorded number\", engine-double-contract, where-matcher). Plus `pnpm lint` (mandated regardless of derivation) and `check:nul-bytes` — both green.\n\n## Out of scope, reported\n\n- Core's `anonymous-deny.ts` docstring says \"Exactly one consumer writes it\" — true today, false once this lands (this arm becomes the second writer). Outside the declared file surface; filed as a finding issue rather than a rider.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WeN7F6jQFpcqW2BN56RdPa)_"
+}

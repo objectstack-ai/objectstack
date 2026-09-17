@@ -1,0 +1,33 @@
+{
+  "number": 9988,
+  "kind": "pull_request",
+  "title": "lanes: every seat's patrol gains \"read the half-state anchor's own-lane rows first\"",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T12:04:14Z",
+  "updated_at": "2026-08-19T18:41:52Z",
+  "closed_at": "2026-08-19T18:41:50Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-08-19T18:41:50Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9988",
+  "body": "Fixes #9981\n\n**GOVERNED surface — draft, human-merge-only. Never flip ready, never enqueue, never arm auto-merge.**\n\n## What\n\nEach of the six lane job descriptions (`.claude/skills/pm-dispatch/references/lanes/{engine,services,cli,devx,skills,spec}.md`) gains ONE identically-worded line, first bullet of its 常设承诺 section:\n\n```\n- **每轮巡检第一判据**:先读半状态巡查锚(`half-state-patrol.yml` 置顶 issue)点名本道卡/PR/座位贴的 H 行,逐行认领或处置,再做其余判据;锚行未处置 ⛔ 不开新派发。\n```\n\nIncident grounding (card): two landed-but-still-dispatched cards sat on the board for 18h/2h — the H8 predicate had already surfaced them on the pinned anchor, but no seat read the anchor per patrol. The rule now lives at the decision point, in every seat's standing commitments.\n\nWording notes: the anchor is named as 半状态巡查锚 + `half-state-patrol.yml` (the workflow's `ANCHOR_ISSUE` names the pinned issue) rather than by issue number, because `check:pm-skill-ratchet`'s sibling gate `check:pm-skill-id-lint` mechanically rejects 3+-digit issue-ID citations across the whole pm-dispatch surface, lanes included. \"每轮巡检\" follows SKILL.md's patrol register. The line is deliberately one physical line: the ratchet counts physical lines and the card budgets exactly +1 per file.\n\n## Line budget — payment audit (ceilings untouched, headroom-0 ratchet)\n\n| file | before | after | ceiling | cut paid with |\n|---|---|---|---|---|\n| engine.md | 41 | 41 | 41 | header parentheticals `(范围 / 常设承诺 / 席内判断)` — duplicated the file's own three section headings — and `(当前 PM、继承台账、热文件串行队)` — duplicated seat-post-protocol.md's four-segment enumeration (`当前 PM \\| 继承台账 \\| 热文件串行队 \\| 说明`); `三车道…而成` trimmed, the three merged lane names stay. Survivors: same file's headings; seat-post-protocol.md; SKILL.md 域车道表 engine row (merger ruling verbatim). |\n| services.md | 31 | 31 | 31 | `(2026-08-19 并入)` on the 身份侧 bullet — literal duplication of the same file's header (`本车道 2026-08-19 并入原 identity 车道的四个插件`) and of SKILL.md 域车道表 services row. |\n| cli.md | 37 | 36 | 37 | the `git ls-remote … gh-readonly-queue` command and the \"入队瞬间滞后\" caveat — both survive verbatim in platform-readings.md 「队列成员资格与 auto-merge」(command at its first bullet; the lag as「队列满载时 PR 已入队而分支尚未建出」); replaced by a pointer. cli-only detail kept: entry-name shape, parent-sha queue order, ref lingering after dequeue. Net −2 then +1 → headroom 1. |\n| devx.md | 38 | 38 | 38 | two clauses of the 边界 bullet — the SUBJECT exception (`SUBJECT 是 governed 面本身的门禁/审计除外,归 skills`) and the spec three-plane split (`与 spec 相交的三面按「是否围着 spec 契约转」切分`) — both survive verbatim in SKILL.md 域车道表 devx row (which also states the skills/devx SUBJECT boundary); compressed to one pointer at the same spot. |\n| skills.md | 36 | 36 | 36 | `判定命令 node scripts/pm/check-governed-merges.mjs --test 带路径` cut from the 范围 bullet — survivors: the same file's 常设承诺 bullet (`flip/arm 前跑 check-governed-merges --test`, now carrying the `(带路径)` detail) and SKILL.md 域车道表 skills row + 守卫索引, both naming the full script path. |\n| spec.md | 44 | 44 | 44 | `(那是状态,不是岗位说明)` — restates the same file's own header rule (`现值状态恒在座位贴,⛔ 不迁入本文件`) and seat-post-protocol.md (`范围与常设承诺是岗位说明,版本化在 lanes/…;段段皆现值`); plus grammar particle `的` for width. |\n\nNo re-wrapping without a content cut; every reflow above follows a named removal. Ceilings map in `check-skill-line-ratchet.mjs` untouched.\n\n## Gates (all at 41e742528, run after the final commit)\n\n- `check:pm-skill-ratchet` EXIT=0 — verdict lines: `✓ check-skill-line-ratchet: …lanes/engine.md is 41 lines (ceiling 41; headroom 0)`, services 31/31, cli 36/37 (headroom 1), devx 38/38, skills 36/36, spec 44/44; all other covered files green.\n- `check:pm-skill-id-lint` EXIT=0 — `✓ check-skill-id-lint: 15 file(s) clean (pattern /#[0-9]{3,}/g).`\n- `check:doc-authoring` EXIT=0 — `✓ doc authoring guard: 377 files clean — no bare metadata literals.`\n- `check:pm-governed-merges` EXIT=0 — `✓ check-governed-merges --self-test: 77 assertions …`\n- `check:skill-frame-sync` EXIT=0 — `✓ check-skill-frame-sync: 4 copies of the decision frame are structurally isomorphic across 3 files`\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` EXIT=0 — `✓ check:doc-formula-expressions: 22 record-scoped formula example(s) across 402 files / 1413 TS blocks judged clean` (after building the lint dependency closure; first run failed on unbuilt `@objectstack/formula` dist, a worktree-freshness artifact, not a change defect).\n- Derivation: `node scripts/pm/dispatch-gates.mjs` (no args, real diff, 6 paths vs merge base 8fa4e2a76) named exactly the six families above; exit codes captured before any pipe.\n\n## Reverse verification (direction predicted in writing)\n\nPredicted: one extra line appended to skills.md (at ceiling, 36) turns `check:pm-skill-ratchet` red naming that file at 37 vs ceiling 36. Observed: EXIT=1, `✗ check-skill-line-ratchet: …lanes/skills.md is 37 lines; the ratchet ceiling is 36.` Restored via `git checkout` from the committed state — sha256 byte-identical before/after (`f54ab092…9723`), gate green again (EXIT=0, headroom 0).\n\n## Out of scope\n\nNo overlap with the in-flight SKILL.md card (different file, same governed tree). `skip-changeset`: instruction files only, nothing published.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AeA3nU1B5Q2pgxqxgUrexd)_"
+}

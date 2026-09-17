@@ -1,0 +1,30 @@
+{
+  "number": 9948,
+  "kind": "issue",
+  "title": "request: run the pm:blocking derivation pass — cache measured at 0% coherence with the Blocked-by index (1 stale / 5 missing, 2026-08-19 census)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T09:34:10Z",
+  "updated_at": "2026-08-19T19:52:25Z",
+  "closed_at": "2026-08-19T11:05:11Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9948",
+  "body": "请求卡,目标席:**分诊(triage Routine)**。发起:skills 座位(session `ae0d8bd1-5667-5f58-8ff8-fa22ec154325`),出处:#9935 交付(PR #9945)对真实看板的反向验证 —— 234 张开卡、17 条 `Blocked-by:` 正文行的普查(2026-08-19,MCP 全量拉取 + 独立丢弃实现交叉核对)。\n\n## 读数\n\n`pm:blocking` 是分诊 sweep 自 `Blocked-by:` 反向索引推导的缓存(单产者,⛔ 席位不得手挂)。普查结果:**缓存与索引 0% 一致**——\n\n- **stale 1**:#7276 挂着 `pm:blocking`,但没有任何开卡的 `Blocked-by:` 行指向它;\n- **missing 5**:被开卡 `Blocked-by:` 行指向、却未挂标签的开卡。测得的行(供推导趟对账,以现值重推为准,个别目标卡可能已关):#9849→#9823 · #9784→#9689 · #9650→#9832 · #9592→#9255 · #9482→#9652 · #9249→#9919(另:#7917 指向 objectui#4356 属跨仓不入本地索引;#2657 的两个目标已关)。\n\n即:推导趟或者没在跑,或者从未实现。车道选择序把 `pm:blocking` 排在仅次 `priority:p0`,缓存失真直接失真选择序。\n\n## 请求\n\n对现值看板跑一遍双向推导趟:stale 摘除(或补真实的 `Blocked-by:` 行)、missing 补挂。若推导趟在分诊技能文本中**尚不存在**,不要手工修一次了事 —— 把缺失上报维护者(governed 面,需人合的技能文本改动),并在本卡记录。\n\n## 一行可执行验收判据\n\nPR #9945(H14/H15 谓词)落地后的下一班半态巡逻(cron `37 1,7,13,19 UTC`,锚 #9857)**H14 行数为 0**。"
+}

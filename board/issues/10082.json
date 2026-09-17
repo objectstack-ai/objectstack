@@ -1,0 +1,35 @@
+{
+  "number": 10082,
+  "kind": "issue",
+  "title": "patrol: H-next — pm:retriage aged past threshold is a triage debt row",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T00:35:39Z",
+  "updated_at": "2026-08-20T13:35:18Z",
+  "closed_at": "2026-08-20T13:35:18Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10082",
+  "body": "与 `pm:retriage` 状态模型卡(同批,治理面)配套的巡逻谓词 —— 没有年龄兜底,这个标签自己就会变成下一个「没人看的状态」。Maintainer ruling 同源(2026-08-19/20 「同意 并存」)。\n\n## Scope —— `scripts/pm/check-half-states.mjs`\n\n新报告项(编号顺延现行 Hn):开放卡携带 `pm:retriage` 超过阈值(命名常量 + rationale;建议 ~2h,对齐分诊 hourly fire 的「一个周期未处理即欠账」口径,参照 `DOMAIN_HALF_STATE_STALE_HOURS` 先例)→ 锚上一行,点名卡与其现行 `pm:*` 并存标签。Report-only、双渲染器普通行、不 loud、自测正负形状齐(超阈/未超阈/无并存标? —— 并存缺失本身值得一句:`pm:retriage` 单独存在 = 异议对象不明,行文注明)。\n\n## Serial\n\n热文件 `check-half-states.mjs` 被 PR **#10075**(评论级回落读,在队)占用 —— 串行在其合并之后,派发前重测(自测基线届时 469)。非治理面。Graded `pm:queue`, S(skills 座,own-lane,session `ae0d8bd1-5667-5f58-8ff8-fa22ec154325`;认领于派发时同笔)。"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 10100,
+  "kind": "pull_request",
+  "title": "fix(pm): add pm:retriage to the four-repo pm label vocabulary loop",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T01:51:35Z",
+  "updated_at": "2026-08-20T02:29:10Z",
+  "closed_at": "2026-08-20T02:29:08Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-08-20T02:29:08Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10100",
+  "body": "Fixes #10090\n\n`scripts/pm/ensure-pm-labels.sh` claims in its header that \"The label set IS the PM state machine (.claude/skills/pm-dispatch/SKILL.md, 'State model')\". The `pm:retriage` row landed in that state model via #10089 without a matching entry here, so the identity claim drifted. One `gh label create` line inside the existing four-repo loop, following the file's idiom.\n\n## The line\n\n- **Placement** — inside the four-repo loop (objectstack, objectui, cloud, objectos), between `pm:blocking` and `finding`, which is where the row sits in SKILL.md's state-model table. The state-model row makes four-repo existence explicit: 「标签须四仓存在(分诊四仓统一职责,首次应用时创建)」.\n- **Description** — 96 characters, inside the header's documented 100-character hard cap. The cap is the one thing in this file that fails *silently*: over-cap descriptions 422 and the idempotency `|| true` swallows it, so the label is never created and a rerun cannot repair it. Measured in characters, not bytes — `needs:contract-review` is 97 chars / 101 bytes and lives.\n- **Colour `d4c5f9`** — unused by every other label in the file, and adjacent to `pm:blocking`'s purple. Distinctness is load-bearing rather than cosmetic here: the state-model row's stated purpose for coexistence is 「并存让「排队但有异议」在列表上可见」, and a grey label is the least visible choice available.\n- **Comment block** — follows the `pm:blocking` / `needs:contract-review` idiom (why the label exists, who sets it, who removes it, its named consumers), citing the maintainer ruling verbatim and untranslated per AGENTS.md Communication.\n\n## Idempotency over the label object that already exists\n\nThe `pm:retriage` object already exists on **objectstack** — auto-created when it was first applied (#9756 / #9705), colour `ededed`, empty description. Creation here is create-if-missing, exactly as the `target:` block documents for the same situation: running the script is a **no-op** on objectstack and leaves that object's colour and description exactly as they are. This PR's durable contribution is the other three repos, where the object does not exist yet and today's creation depends on the applying seat remembering to do it by hand.\n\n⚠️ Consequence worth stating rather than hiding: the objectstack object therefore stays grey with no description until someone runs `gh label edit` by hand. Re-colouring an existing object is not this script's job — the file deliberately never calls `label edit` — so this is left as a visible PM landing step, not smuggled in.\n\n## Verification\n\nGates re-derived from the **real diff** at the final commit `88abe7588`, via `node scripts/pm/dispatch-gates.mjs` with no path arguments (`change set derived from git — 1 path(s) vs merge base 907c11d2c`, `committed 1, working tree 0, untracked 0`). Verdict lines, exit codes captured before any pipe:\n\n- `pnpm check:cross-package-test-inputs` — EXIT=0 — `OK: 12 package(s) read outside themselves, all declared, and turbo.json hashes every declared glob.`\n- `pnpm check:nul-bytes` — EXIT=0 — `check-nul-bytes: OK (scanned 6367 text file(s) -- 6367 tracked, 0 untracked-not-ignored; skipped 5 binary; no raw ASCII control bytes).`\n- `bash -n scripts/pm/ensure-pm-labels.sh` — EXIT=0.\n\n**Dry-run harness.** The script has no dry-run or self-test mode, so verification used an out-of-tree harness that puts a fake `gh` on PATH recording every `label create` invocation. With the fix: 48 create calls, `pm:retriage d4c5f9 96c` present once per repo on all four; `DESC-CAP: PASS (every -d <= 100 chars)` across all 48.\n\n**Reverse verification**, direction predicted in writing before running. Prediction: deleting the added line makes the listing lose exactly 4 rows, `TOTAL 48 → 44`, `DESC-CAP` stays PASS, and **no gate reddens** — the drift is silent. Observed exactly that; the diff of the two listings is the four `pm:retriage` rows plus the total. That silence is the point of the card: no mechanical check couples the SKILL.md state model to this script, which is why the drift could land unnoticed in the first place. Restored from the commit and confirmed byte-identical (`sha256 376359c1…`, matching the pre-ablation hash, clean `git diff --exit-code`), and the restored listing is identical to the pre-ablation one.\n\n**What could NOT be verified from this container**, stated plainly: the script's live half. There is no `gh` CLI installed here and no label-write credentials for the four repos, so no label object was created, edited, or read-modified by this run — the only live read was confirming the existing objectstack object's colour and description through the GitHub API. Actually running the script remains a PM landing step, as the header already says for objectos.\n\n## Scope\n\n`scripts/**` only — no changeset (nothing published), hence `skip-changeset`. Not a governed surface.\n\nOut-of-scope findings filed unassigned rather than ridden in here:\n\n- #10098 — `pm:seat` and `priority:p0` are state-model rows with no entry in the loop. Same drift class, deliberately not fixed in this PR: the correct shape (which loop each belongs in, and whether the absence is deliberate) is a judgment no existing evidence pins.\n- #10099 — the 100-character description cap is a documented silent-failure mode with no mechanical guard; live headroom is one character on `repo:objectui`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AeA3nU1B5Q2pgxqxgUrexd)_"
+}

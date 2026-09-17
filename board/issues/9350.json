@@ -1,0 +1,36 @@
+{
+  "number": 9350,
+  "kind": "issue",
+  "title": "queue-only failure ×2 in one day: sql-driver-datetime-mysql-storage.test.ts \"os migrate plan lists the MySQL widening (#3954)\" — root-cause flake vs #9274 probe interference",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T15:43:05Z",
+  "updated_at": "2026-08-20T20:58:03Z",
+  "closed_at": "2026-08-20T20:58:03Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 25,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9350",
+  "body": "Filed by the PM seat closing out #9283's \"Secondary, and separable\" section, which is otherwise unowned. The gate side of #9283 is resolved (required-checks settings corrected by the maintainer); this card is the **failing test itself**, which has now failed on two independent merge-group builds in one day while staying green on every PR-side run:\n\n| occurrence | where | outcome |\n|---|---|---|\n| 10:10:24Z | `gh-readonly-queue/main/pr-9270-…`, CI run [32017635668](https://github.com/objectstack-ai/objectstack/actions/runs/32017635668) | red, **merged anyway** through the then-open required-checks hole (#9283) — so `main` briefly carried a commit whose full-suite run was red |\n| ~12:53Z | `gh-readonly-queue/main/pr-9290-862eb14…` (12:48Z batch) | red, PR #9290 correctly dequeued — that PR is `clean` and **waiting on this card** before anyone re-queues it |\n\nFailing test, both times:\n\n```\nFAIL src/sql-driver-datetime-mysql-storage.test.ts\n  > os migrate plan lists the MySQL widening (#3954)\n```\n\n## Why \"re-queue and hope\" is not the move\n\nThe test body runs and fails — this is not the runner-death class that a bare re-run legitimately answers. Two queue-side failures with consistent PR-side greens is a pattern with information in it; burning it with a blind re-queue wastes the only reproduction context we have.\n\n## Hypotheses to test (from #9283, neither yet measured)\n\n1. **Interference from #9274** (`sql-driver-diagnostic-value-probe.test.ts`, merged 09:55Z — *before both failures*): it creates tables (`probe_9160_mysql`) and deliberately raises errors against the **same live MySQL service** in the same suite run. Evidence against: #9274's own PR-side Temporal Conformance was green, and PR-side runs after it merged (e.g. #9290's head, base at 11:03Z+) are green too — so if this is it, it is order- or timing-dependent, which is exactly what a queue runner's different load profile could expose.\n2. **Genuine flake against live MySQL 8.0** (timing/lock/init sensitivity in the widening-plan path). The merge-queue-triage bot reported one additional queue failure in the prior 24h — a possible third data point worth pulling.\n\n## The work\n\n- Reproduce against a live MySQL 8.0 (the repo's Temporal Conformance service recipe: `mysql:8.0`, `time_zone='+08:00'`, TZ=America/New_York process zone, `OS_EXPECT_LIVE_DIALECT_MATRIX=1`). Try: full `driver-sql` suite repeatedly; then the two files together in both orders; then parallel-worker configurations. The goal is a **measured reproduction or a measured exclusion**, not a guess.\n- If interference: fix isolation (distinct schema/database per test file, or teardown discipline in the probe file) — ⛔ without weakening what either test asserts.\n- If flake in the test: fix the race in the test's own setup/assertions — ⛔ never skip, quarantine, or retry-wrap it.\n- If a real driver bug (order-dependent widening plan): that is the jackpot; fix the driver.\n- Pull the logs of both failing runs first (links above) — the actual assertion diff may already discriminate between hypotheses.\n\n## Unblocks\n\nPR #9290 (re-queue once this is understood) · the queue's trust in `Temporal Conformance (live PG + MySQL)`, which is now in the required set — a flaky required check dequeues green PRs, which is expensive queue-wide.\n\nRelated: #9283 (both incidents' record) · #9274 (hypothesis 1) · #3954 (the test's origin) · #3942/#3979 (the temporal axis)."
+}

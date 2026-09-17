@@ -1,0 +1,35 @@
+{
+  "number": 10220,
+  "kind": "issue",
+  "title": "time-relative sweep 非幂等：每次扫描对同一记录重复铸行（5s interval 下 70 秒 15 条重复提醒），需要落库幂等键",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T13:59:24Z",
+  "updated_at": "2026-08-20T17:02:41Z",
+  "closed_at": "2026-08-20T17:02:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10220",
+  "body": "## 现象（P1：time-relative 扫描非幂等——每次扫描对同一记录重复铸行）\n\n2026-08-20 rig 实测（objectstack `4389fe932`，#8362 的重绑修复已验证 OK）：`contract_expiry_reminder`（`timeRelative:{object:'contract', dateField:'due_date', offsetDays:[3]}` → create_record 建提醒）在把 start 节点 schedule 改为 5 秒 interval 后：\n\n- 第一次扫描：精确命中 T+3 的那份合同，创建 1 条提醒 ✅（匹配语义、模板插值、lookup 全对）\n- 之后**每次扫描再铸一条一模一样的**：~70 秒内同一份合同累计 **15 条重复提醒**。\n\n扫描本身没有任何\"本窗口已处理过该记录\"的记忆。5s interval 是放大镜，不是前提——日频 cron 下同样会重复：\n\n1. kernel 被驱逐重建后当天再次扫描（云环境驱逐是常态：freshness probe ~10s，每次 AI auto-publish 都 bump）；\n2. flow 声明了更密的 schedule（spec 允许 start 节点自带 schedule/interval）；\n3. 未来若做\"错过窗口的 catch-up sweep\"（cloud#1288 的方向），没有幂等键就根本不敢做。\n\n对用户可见的后果：提醒列表被同一合同刷屏；若 flow 动作是发通知/邮件则是重复打扰。2026-08-13 的运行同样观察到（16→20 行），当时随 #8362 口头提及、未单独立案。\n\n## 修复要求\n\n1. 给 time-relative sweep 引入幂等键：`(flowName, recordId, dateField 值所在窗口日, offset)` 唯一——已为该键执行过就跳过。落点可以是 `sys_automation_run` 查询或专用去重表；\n2. 幂等记录要能在 kernel 重建后存活（进程内 Set 不够，必须落库）；\n3. 回归测试：同一窗口内连续两次 sweep，断言目标动作只执行一次；kernel 重建后同窗口再 sweep，仍不重复。\n\n关联：#8362（重绑修复，已验证）；cloud#1288（云端定时任务架构——catch-up sweep 依赖本 issue）。\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 10500,
+  "kind": "issue",
+  "title": "docs-audit: a route-ledger row whose `route:` is not a string literal is invisible to BOTH the row recognizer and the new partial-read counter",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T01:15:13Z",
+  "updated_at": "2026-08-21T07:30:45Z",
+  "closed_at": "2026-08-21T07:30:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10500",
+  "body": "Filed unassigned by the `os-dev` seat implementing #9896 (session `session_01DdCnBGcHeufjrq7drTD3wt`, PR for #9896). Recording, not fixing — deliberately out of that card's scope, and the boundary is pinned in `--self-test` rather than left to be discovered.\n\n## What\n\n#9896 makes a PARTIAL ledger read loud: `parseLedgerSource` in `scripts/docs-audit/affected-docs.mjs` now reports every `route:` / `client:` **string literal** it declined to read (double-quoted or backtick-quoted), and `bridgeCoverageFrom` turns that into a `brokenScan` verdict naming the file, the line and the literal.\n\nThat counter is exact for string literals and **blind to everything else**. A row written as\n\n```ts\n{ route: ROUTES.health, family: 'ops', disposition: 'server-only' },\n{ route: META_BASE + '/types', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },\n```\n\nis read by neither half: the recognizer needs an opening `'`, and the counter counts only values that open with one of the three quotes. The row leaves the population with no verdict — the same silence #9896 closed for the quote spellings, one spelling further out.\n\n## Why it was not closed in #9896\n\nThe only **exact** discriminator between a row value and the `route: string;` member that every ledger's own entry interface declares is the opening quote. Measured on `a718ee3dd` across all seven ledgers:\n\n| ledger | `route:` total | quoted | non-quoted |\n| --- | --- | --- | --- |\n| `plugin-auth/src/auth-route-ledger.ts` | 57 | 56 | 1 |\n| `rest/src/rest-route-ledger.ts` | 97 | 96 | 1 |\n| `runtime/src/route-ledger.ts` | 81 | 79 | 2 |\n| `service-datasource/.../datasource-route-ledger.ts` | 12 | 11 | 1 |\n| `service-i18n/.../i18n-route-ledger.ts` | 4 | 3 | 1 |\n| `service-settings/.../settings-route-ledger.ts` | 5 | 4 | 1 |\n| `service-storage/.../storage-route-ledger.ts` | 11 | 10 | 1 |\n\nEvery non-quoted occurrence is accounted for: **7 are the `route: string;` interface member** (one per ledger) and **1 is an English sentence in a comment** in `runtime/src/route-ledger.ts:182` (\"It never named a mounted route: the branch\"). So a naive \"count every `route:`\" check would red on all seven ledgers today — a false red on accurate files — and every heuristic that separates the two (trailing `,` vs `;`, an uppercase-initial value, a type-name allowlist) is a guess that will be wrong on the first row that does not fit it. #9896 chose to state the boundary rather than paper over it with one.\n\n## How likely is this spelling?\n\nLower than the template literal #9896 addressed, but not zero. These modules are deliberately **import-free** (see the header of `i18n-route-ledger.ts`: \"It must stay import-free — the client-side guard imports it as a relative SOURCE file\"), so a cross-module constant cannot land. A **file-local** `const BASE = '/api/v1/i18n'` above the table can, and is the natural first move the moment a ledger's rows get long. Today: 0 occurrences.\n\n## Direction, not a prescription\n\n1. **Leave it, keep the boundary declared.** It is pinned in `affected-docs.mjs --self-test` (\"a non-literal `route:` is out of scope for the counter, and so is `route: string;`\") and stated in `scripts/docs-audit/README.md`, so the next reader meets it rather than discovering it. Cost: the gap stays real.\n2. **Give the ledgers a lint rule instead of the scanner a heuristic** — an ESLint rule over `**/*route-ledger.ts` requiring every `route:` / `client:` value inside the exported table to be a single-quoted literal. This turns the scanner's narrowness into an *authoring* constraint, which is where it can be enforced exactly, and would subsume the #9896 verdict as a second line of defence rather than duplicate it.\n3. **Parse the ledgers as TypeScript.** Exact, and rejected on the same ground the whole scanner rests on: `affected-docs.mjs` is a dependency-free source scan precisely so it cannot fail to resolve in CI.\n\n(2) looks like the shape worth costing: it is enforcement at the point of writing, and it makes the scanner's assumption a declared rule instead of an implicit one.\n\nRefs: #9896, #9572, #9433, #4690.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_\n"
+}

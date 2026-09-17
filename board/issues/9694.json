@@ -1,0 +1,36 @@
+{
+  "number": 9694,
+  "kind": "issue",
+  "title": "[finding] managed-extension-fields.test.ts seeds its source scan from import.meta, costing plugin-auth's TEST_DEBT its only TS1470 — the package already has an idiom that avoids it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T15:37:54Z",
+  "updated_at": "2026-08-19T16:38:30Z",
+  "closed_at": "2026-08-19T16:38:30Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9694",
+  "body": "Observation-class finding, measured while implementing #8122 (PR #9693). **Nothing is broken and no gate is red** — this is one frozen error in a shrink-only ledger that the package's own established idiom would remove. Filed unassigned, no `pm:queue`.\n\n## Measured\n\n`packages/plugins/plugin-auth` excludes `**/*.test.ts` from its `tsconfig.json`, so its test layer is accounted for by a `TEST_DEBT` entry in `scripts/check-type-check-coverage.mjs` — **111 frozen raw errors**, shrink-only.\n\nReproducing that measurement on `main` (an equivalent tsc project over the package with the test exclusion lifted, which returns exactly the ledger's recorded 111), **one** of those 111 errors is a TS1470:\n\n```\nsrc/managed-extension-fields.test.ts(281,36): error TS1470: The 'import.meta'\n  meta-property is not allowed in files which will build into CommonJS output.\n```\n\nIt comes from the seed on line 281:\n\n```\nconst HERE = dirname(fileURLToPath(import.meta.url));\n```\n\n## Why it is a finding rather than nothing\n\nThe package documents this exact hazard and already carries the fix, in two sibling test files (`rate-limit-storage-isolation.test.ts:53`, `member-role-canonical.test.ts:66`), with the reason written out:\n\n> plugin-auth is CJS-typed (no `\"type\": \"module\"`, it publishes `dist/index.js` as CommonJS), so under `module: NodeNext` `import.meta` is a TS1470 in this package however well it runs under vitest.\n\nThey seed from a `findUp` walk to the package root instead. So the repo has already decided which spelling this package uses; one file predates or missed that decision.\n\nThis was not noticed abstractly: PR #9693 needed the same source-scan seed in a second test file, and using `import.meta.url` there moved the ledger **111 to 112** — the ratchet doing its job. That PR uses the `findUp` idiom, so it lands at 111. The D7 file's copy stays as the only TS1470 in the package.\n\n## Suggested direction (not a decision)\n\nConvert `managed-extension-fields.test.ts:281` to the same `findUp` idiom and lower the `@objectstack/plugin-auth` TEST_DEBT entry 111 to 110, rewriting the entry's `note` in the same edit (its composition line names `TS2493 x42, TS18048 x24, ...` and would otherwise describe a tally that no longer holds — the shape #7038 was filed for).\n\n⚠️ Two things worth checking before treating it as a one-liner:\n\n1. Whether the number is still 111 at that moment. This ledger's own history (#5278, and the note on this entry) is a run of \"a ledger number is a number about a moment\" races — re-measure at the ref the PR lands on, not at the ref it was written on.\n2. Whether the wider fix is preferable: a sibling `tsconfig.test.json` carrying its own *module* semantics (the `packages/spec` pattern AGENTS.md describes) would make `import.meta` legal in this package's tests and retire the class rather than one instance. That is a larger change — it graduates the package's whole test layer into a tsc program and interacts with the 111 debt entry wholesale — and is a triage call, not a drive-by.\n\nThe narrow fix is worth roughly one error; the reason to file it at all is that the package currently teaches both spellings, and the wrong one is in the file most likely to be copied from — it is the sibling gate that #8122 and #7820 both point at as the pattern to follow.\n\nBacklinks: #8122 / PR #9693 (where it was measured), #7820 (the file's tripwire), #8612 (the same ledger shape in `@objectstack/cli`)."
+}

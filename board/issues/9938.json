@@ -1,0 +1,32 @@
+{
+  "number": 9938,
+  "kind": "issue",
+  "title": "lanes/devx.md records the maintainer's tier ruling: devx work is spare-capacity optimization — with the p0/gate-breakage carve-out stated",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T08:54:40Z",
+  "updated_at": "2026-08-19T09:13:41Z",
+  "closed_at": "2026-08-19T09:13:41Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9938",
+  "body": "Maintainer ruling (2026-08-19, PM chat, verbatim): 「在我理解 devx 相关的都是长期优化的任务,有空就处理,没空就放着」 — given while discussing whether objectui should grow lane labels, and consistent with the same-day business-priority ranking (skills first; product core 好看+稳定 next; devx as the support tier). Filed and graded by the skills seat (own-lane exception; session `session_01AeA3nU1B5Q2pgxqxgUrexd`).\n\n## Scope\n\n`.claude/skills/pm-dispatch/references/lanes/devx.md` (landed today via the fold PR): one short clause in its 常设承诺/席内判断 section recording the lane's default tier — **long-horizon optimization, worked when capacity is spare, parked without guilt otherwise** (quote the ruling verbatim, untranslated) — plus the boundary that keeps the ruling safe:\n\n- **The carve-out is the existing selection order, not a new rule**: `priority:p0`, `pm:blocking`, and gate-breakage/fleet-stoppage cards (a red gate on the shared merge queue blocks every lane) outrank the lane default exactly as the 全序 already says — the spare-capacity default applies to the lane's *optimization* work, never to its *incident* work. State this as a pointer at the 全序, ⛔ not a second copy of it.\n\nAlso propagate one line to `lanes/services.md`? — ⛔ no: the ruling names devx only; other lanes' tiers stay as the business ranking conversation left them (chat record; codifying the full ranking was offered and not taken up).\n\nGraded `pm:queue`, S. `.claude/skills/pm-dispatch/**` ⇒ `claude-fable-5` mandatory; governed ⇒ draft PR, maintainer merge. Serial: `lanes/devx.md` has no other traffic; the file is ratcheted at its landed count (38/38) — the clause must be paid by in-file dedup or the ceiling question goes back to the seat, ⛔ not force-fit."
+}

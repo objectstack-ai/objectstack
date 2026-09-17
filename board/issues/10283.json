@@ -1,0 +1,33 @@
+{
+  "number": 10283,
+  "kind": "issue",
+  "title": "Studio's record grid does not clamp text cells: one row with a long `description` renders 457px tall against its neighbours' 41px",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T15:15:45Z",
+  "updated_at": "2026-08-20T16:06:38Z",
+  "closed_at": "2026-08-20T16:06:38Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10283",
+  "body": "Studio's record grid does not clamp text cells: one row with a long `description` renders 457px tall against its neighbours' 41px\n\nMeasured on `17.1.0` (open edition, `objectstack dev`), Studio → **数据 / Data** → `crm_account` → **记录 / Records**, 10 rows.\n\nRow heights, read off the DOM (`tbody tr` bounding boxes):\n\n```\n250 / h41   1  ACC-000010  Skyline Media\n291 / h41   2  ACC-000008  Lattice Education\n332 / h41   3  ACC-000002  Globex Industries\n373 / h41   4  ACC-000005  Wayne Enterprises\n414 / h41   5  ACC-000009  Apex Logistics\n455 / h457  6  ACC-000001  Acme Corporation      ← 11× its neighbours\n911 / h41   7  …\n```\n\nRow 6's `描述 / description` holds a multi-line markdown blurb (`\"Strategic Customer · Enterprise Tier\\nAcme Corporation is a S…\"`). The cell renders the whole thing, the row grows to fit, and every cell in that row is stretched to 457px — so the grid shows five rows, a screen-height band of empty cells, and then row 6. Rows 7-10 are pushed below the fold entirely.\n\nThe console's *app-side* list views truncate the same field to one line, so this is specific to the Studio metadata console's record grid.\n\n## Expected\n\nA tabular row should be one line tall regardless of cell content: `truncate` / `line-clamp-1` on text cells with the full value in a title/tooltip or the row's detail panel, the way the app-side grids already do it. The current behaviour makes any object with a long-text field unusable in Studio's record tab — and long text on a business object is the common case, not the exception.\n"
+}

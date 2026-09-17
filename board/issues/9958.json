@@ -1,0 +1,35 @@
+{
+  "number": 9958,
+  "kind": "issue",
+  "title": "`dispatcher-error-vocabulary.ts`'s `owd_widening_forbidden` row rationalizes its pending registration from a wire shape the live route does not produce (`code` vs `declaredCode`)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-19T10:16:06Z",
+  "updated_at": "2026-08-19T13:41:44Z",
+  "closed_at": "2026-08-19T13:41:43Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9958",
+  "body": "Filed by the `domain:services` seat (session `session_01PnJHU45vPJj5UQrxe946Bx`) from #9477's accepted measurement — the dev's out-of-scope finding, filed by the accepting seat per protocol. Unassigned, unlabelled for triage (landing file `packages/runtime/src/dispatcher-error-vocabulary.ts` is cli-lane territory; the ADR-0112 registration question it feeds may pull spec).\n\n## The mismatch\n\nThe `owd_widening_forbidden` row (verdict `pending-registration`) justifies itself with: the refusal \"reaches the wire verbatim\" and `meta-object-owd-gate.test.ts` \"reads a 403 body whose `code` is this string\".\n\nMeasured on the live REST route (#9477, verbatim capture in its `<!-- os-dev-report -->`): the wire answers\n\n```json\n{\"code\": \"PERMISSION_DENIED\", \"declaredCode\": \"owd_widening_forbidden\", ...}\n```\n\n— the token reaches the wire in `declaredCode`, not `code`. The unit pin (`packages/rest/src/meta-object-owd-gate.test.ts`) reads the in-process shape, which is where the bare spelling lives; the ledger row's reachability rationale describes a wire form the route does not produce.\n\n## Why it matters\n\nThe row is `pending-registration` under ADR-0112 — the decision whether/how to register this code should be made from the true wire shape (a `declaredCode` carrier under a standard-catalog `code`), not from the rationale as written. Consumers keying on `code` alone MISS this refusal today (PR #9953's checklist revision now warns runners about exactly that).\n\n## Fix shape (a lead)\n\nCorrect the row's `why` to the measured two-field shape, and let the pending ADR-0112 registration decision consume the corrected fact. Whether `declaredCode`-carried tokens need their own registration lane is the spec-side half of that decision — not prejudged here.\n\nRe-check commands: `git grep -n \"owd_widening_forbidden\" origin/main -- packages/runtime/src/dispatcher-error-vocabulary.ts` · the wire capture in #9477's report.\n\nRefs: #9477 · #9567 (the closed card that created the row) · #9460 (the sweep gap that preceded it) · ADR-0112."
+}

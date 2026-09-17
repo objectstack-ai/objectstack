@@ -1,0 +1,30 @@
+{
+  "number": 10571,
+  "kind": "issue",
+  "title": "Console 内联 lookup 下拉的副标题/悬浮提示不经字段渲染器:lookup 显裸 ID、date 显 ISO 原文、select 显枚举码(同一份 lookupColumns 在「浏览全部记录」选择器中渲染正常)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T03:44:57Z",
+  "updated_at": "2026-08-21T05:20:59Z",
+  "closed_at": "2026-08-21T05:20:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10571",
+  "body": "## 环境\n\n- @objectstack/* 17.1.0,Console 端,SQLite dev 实例(`--fresh --seed-admin`)\n\n## 现象\n\n对象 A 有 lookup 字段指向对象 B(B 的 highlightFields 含 lookup 字段,或引用侧声明了含 lookup 的 lookupColumns)。在 A 的新建/编辑表单展开该字段的**内联下拉**时:\n\n| 位置 | 实际行为 |\n|---|---|\n| 选项副标题(第 2 展示列原值) | lookup 字段显示**裸外键 ID**(如 `T5MsMCuwP4t_yUHq`) |\n| 选项悬浮提示(title 属性,各列「标签: String(原值)」拼接) | lookup → 裸 ID;date → ISO 原文(`2026-08-20T00:00:00.000Z`);select → 枚举码(`pending`) |\n| 同一字段「浏览全部记录」田字格选择器(同一份列声明) | **渲染正常**——lookup 解析为名称、date/select 均格式化 |\n\n根因面:内联下拉的数据请求 `GET /api/v1/data/<B>?top=50&filter=[...]` 不带 populate/expand,且副标题/提示为纯字符串拼接、不经 cellRenderer;田字格选择器走 cellRenderer 所以正常。**同一份列声明、两个渲染器、口径不一致。**\n\n## 项目侧绕行路径也均不可用(且都是静默失败)\n\n1. **lookupColumns 点路径**(`{field:'work_step.name'}`):被静默忽略——编译零警告、运行零 4xx,点路径未被翻译成任何 populate/expand 查询,前端取 `record['work_step.name']` 得 undefined;副标题消失,连田字格该列也变空(比不写还差)。@objectstack/spec 17.1.0 中 lookupColumns 条目 `field` 为裸 string,无关联展开语义。\n2. **公式字段跨 lookup 取名**(`F\\`record.work_step.display_name\\``):公式在 populate **之前**对原始记录求值,`record.work_step` 是裸外键字符串,`.display_name` 静默得 null;对照组 `F\\`record.work_step\\`` 能取到裸 ID,但 formula 类型不走 lookup 的 cellRenderer,田字格也不解析——「公式取 ID 靠渲染器解析」的迂回同样不通。\n\n## 期望\n\n- 内联下拉的副标题/悬浮提示与田字格选择器**同渲染口径**:lookup 解析显示值、date/select 走格式化(理想解);\n- 或 lookupColumns 支持点路径/populate 声明(次优解);\n- 上述两条绕行路径若不支持,建议编译期或运行期给出**显式告警**而非静默空值——现状写错零报警,只会悄悄变成空白列。\n\n## 业务影响与完整实测记录\n\n终端用户在业务表单(零星派工申请单关联排班计划)看到大量不可读 ID。三轮探针实测(含截图、类型签名核对、请求抓包、API 直读对照)见项目仓库 steedos-labs/os-project-titanwind-ehr#1651 的三条评论。项目侧暂以名称快照字段绕行,平台修复后可回退。"
+}

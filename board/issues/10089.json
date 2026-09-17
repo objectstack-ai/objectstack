@@ -1,0 +1,34 @@
+{
+  "number": 10089,
+  "kind": "pull_request",
+  "title": "docs(pm): add pm:retriage — the awaiting-regrade label coexisting with the standing pm:* state",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T00:55:39Z",
+  "updated_at": "2026-08-20T01:10:20Z",
+  "closed_at": "2026-08-20T01:10:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-20T01:10:19Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10089",
+  "body": "Fixes #10081\n\n## What\n\nAdds the `pm:retriage` awaiting-regrade state to the PM dispatch skill's state model (maintainer ruling 2026-08-19/20, quoted verbatim in the row: 「同意 并存」), as one table row carrying the ruled four parts, plus the matching selection carve-outs and the triage-seat duty sentence.\n\n- **State-model row `pm:retriage`** — the four parts, in the file's table idiom:\n  1. Coexistence — carried alongside the standing `pm:*` label, never removes it; the standing grade stays authoritative until triage re-rules; coexistence is what makes \"queued but contested\" visible on a list.\n  2. Producer — the objecting seat; the label write and the objection comment (evidence + proposed grade) are the same stroke; a bare label with no evidence comment is illegal.\n  3. Reader + discharge — the triage Routine handles it as a high-priority item each fire and removes the label after re-ruling; producer and discharger are different parties on disjoint transitions (stated in the row as its safety property).\n  4. Dispatch discipline — a `pm:queue` card also carrying `pm:retriage` is skipped by selection (contested grades are not dispatched).\n- **Dispatchable-row carve-out**: the 「open + 队列标签 + 无 assignee ⇒ 可派发」 row now excepts cards carrying `pm:retriage`.\n- **Candidate definition** in 候选与批次 gains the same exclusion (无 `pm:retriage`) — that line is the filter execution seats actually run.\n- **分诊座位职责**: one sentence — `pm:retriage` re-ruling is high-priority each fire; the triage seat removes the label in the same stroke as the re-ruling.\n- **Cross-repo clause** (in the row): the label must exist in all four repos, created on first application (triage's cross-repo duty). The companion age predicate is another card and is deliberately NOT implemented here; the row points at the half-state patrol generically (no issue numbers — id-lint).\n\n## Line budget (ratchet)\n\nCeiling 682. Before: 681 (headroom 1). After: 681 (headroom 1) — net 0.\n\nPayment audit: +2 lines (the new table row; the triage-duty sentence) paid by a genuine dedup of −2 lines: the standalone 「一次性建标签」 paragraph duplicated the 机械守卫索引 row for `scripts/pm/ensure-pm-labels.sh`. Each cut fact's surviving home: the script pointer and idempotence → the index row; \"retired lanes deliberately absent, never re-add, rationale in the script header\" → folded into that same index row. No re-wrap: no prose lines were merged to fund lines.\n\n## Gates (all run at head 4c41ff27, after the final commit; exit codes captured via redirect-then-`$?`, never through a pipe)\n\n- `node scripts/pm/dispatch-gates.mjs` (no args, real diff from merge base): 1 path, 7 local families derived; tier line \"Model tier — MANDATORY: claude-fable-5\" (clause ①, honored).\n- `pnpm check:pm-skill-ratchet` — exit 0 — \"✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/SKILL.md is 681 lines (ceiling 682; headroom 1).\"\n- `pnpm check:pm-skill-id-lint` — exit 0 — \"✓ check-skill-id-lint: 15 file(s) clean (pattern /#[0-9]{3,}/g).\"\n- `pnpm check:pm-governed-prose` — exit 0 — \"✓ check-governed-prose: 2 instruction surface(s) name all 5 registered governed surfaces (docs/adr/** · .claude/** · skills/** · AGENTS.md · CLAUDE.md) and claim no others.\"\n- `pnpm check:pm-governed-merges` — exit 0 — \"✓ check-governed-merges --self-test: 81 assertions …\" (self-test + run).\n- `pnpm check:skill-frame-sync` — exit 0 — \"✓ check-skill-frame-sync: 4 copies of the decision frame are structurally isomorphic across 3 files\".\n- `pnpm check:doc-authoring` — exit 0 — \"✓ doc authoring guard: 379 files clean — no bare metadata literals.\"\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` — exit 0 — \"✓ check:doc-formula-expressions: 22 record-scoped formula example(s) across 404 files / 1414 TS blocks judged clean by @objectstack/formula.\" (Required building the dependency closure first: `pnpm --workspace-concurrency=2 --filter '@objectstack/lint^...' build`.)\n- `node scripts/check-nul-bytes.mjs` — exit 0 — \"check-nul-bytes: OK (scanned 6367 text file(s) … no raw ASCII control bytes).\"\n- `node scripts/check-skill-compatibility-version.mjs` — exit 0 — \"11 pinned major(s) all match the workspace\" (named as-applicable; population unaffected by this diff).\n\n## Reverse verification (direction predicted in writing before running)\n\nPredicted: appending 2 filler lines (681 → 683, over ceiling 682) turns `check-skill-line-ratchet` RED with a verdict line naming this file; restoring from the committed branch is byte-identical and turns it green. Observed exactly that: \"✗ check-skill-line-ratchet: .claude/skills/pm-dispatch/SKILL.md is 683 lines; the ratchet ceiling is 682. …\" (exit 1); sha256 identical before mutation and after restore (82b74df4a42b5966…); green at 681 (exit 0). `check:pm-skill-id-lint` stayed green throughout. The gate reads the .md directly via readFileSync — no dist/export resolution is involved, so no rebuild leg applies to this ablation.\n\n## Housekeeping\n\nDocs/protocol-only change to a `.claude/` internal skill — nothing user-visible is published, so `skip-changeset` is applied (union label write with read-back). GOVERNED surface: draft PR, review requested from os-zhuang, left visibly hanging for a human merge — never flipped ready, never queued, never auto-merged.\n\nKnown CI flake note: `Lint & Repo Gates` intermittently dies parsing packages/spec/src/migrations/registry.ts on unrelated PRs today; local dispatch-gates families do not run eslint over spec and are unaffected. If that job reds here with the same signature, it is the known flake, not this diff.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AeA3nU1B5Q2pgxqxgUrexd)_"
+}

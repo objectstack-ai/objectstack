@@ -1,0 +1,36 @@
+{
+  "number": 10232,
+  "kind": "issue",
+  "title": "[finding] 17.1.0 published on 2026-08-20 with a 69-package train and no release notes — the v17 page and the releases index both still end at 17.0.0",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p0"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T14:10:16Z",
+  "updated_at": "2026-08-20T15:51:17Z",
+  "closed_at": "2026-08-20T15:47:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10232",
+  "body": "Filed unassigned by the `repo:objectos` execution seat, found while discharging objectos#94 against the fresh publish. No `domain:*` and no type — an execution seat does not grade first touch. Sibling of #10229, which came out of the same sweep but is a different defect class (unguarded prose pins) and should not be folded together.\n\nMeasured against `origin/main` at `04096f17e`, **not** the shared working checkout — it is stale at `9ff11921a` with `packages/cli` still 17.0.0, which will mislead anyone reproducing this locally.\n\n## What is true\n\n```\nnpm view @objectstack/cli dist-tags     →  { rc: '17.0.0-rc.6', latest: '17.1.0' }\nnpm view @objectstack/cli time.17.1.0   →  2026-08-20T11:21:17.400Z\n```\n\n`packages/cli/package.json` on `origin/main` is `17.1.0`, and **69 package `CHANGELOG.md` files carry a `## 17.1.0` section** — the version-locked train published in full. `packages/cli`'s section alone is 866 lines.\n\nThe curated docs did not move with it.\n\n## What the docs say instead\n\n**`content/docs/releases/v17.mdx`** — title `v17.0.0`; description ends *\"Backend and Console notes for 17.0.0.\"* Its heading spine:\n\n```\n## Highlights — 17.0.0\n## Breaking changes & migration\n## New capabilities in 17.0.0\n## New in Console (Studio) — bundled objectui 17.0\n## Landed since 17.0.0-rc.0\n## Landed since 17.0.0-rc.1\n## Landed since 17.0.0-rc.2\n## Landed since 17.0.0-rc.4\n## Landed since 17.0.0-rc.5\n## Landed since 17.0.0-rc.6\n## Upgrade checklist\n## References\n```\n\nNothing for 17.1.0. The page's status blockquote still reads:\n\n> **Release status: 17.0.0 is released.** It was published to the `latest` tag on 2026-08-14…\n\nTrue but no longer the whole truth: `latest` has been 17.1.0 since 2026-08-20.\n\n**`content/docs/releases/index.mdx:21`** ends the v17 entry with:\n\n> (current series: **17.0.0, released 2026-08-14**)\n\nThat parenthetical is a live claim about what is current, and it is now wrong.\n\n## The repo's own convention says minors belong here\n\nThis is not an invented expectation — the line directly below it is the v16 entry, and it documents its minor:\n\n> `content/docs/releases/index.mdx:22` — …**16.1 adds** a `requires` capability-provider preflight, two more dashboard build gates, and `runAs:'user'` automations that run with the triggering user's real grants (**final release: 16.1.0**).\n\nSo the established shape is: the per-major page and its index entry both carry the minors, and the index parenthetical tracks the current/final release of the series. v17 is one minor in and has neither.\n\n## Second occurrence of this class\n\n#8882 was *\"v17.0.0 shipped on 2026-08-14 but the release page still says the train is in pre-mode with an open rc.6 window\"* — the same defect, one release earlier, closed 2026-08-15. That one was the GA; this one is the first minor after it. The publish moves, the curated page does not, and it is noticed by whoever next reads the page rather than by anything in the pipeline.\n\n`check:docs-image-tag`'s own header states the repo's threshold for this:\n\n> Two occurrences of an identical drift is where a mechanical guard beats fixing the third one by hand.\n\nWhether that argument transfers from mechanical tag pins to *curated narrative* is a real question and I am not asserting it does — release notes cannot be generated from changesets without losing the thing that makes them curated. But the **detectable** half plausibly can be: a publish whose version has no corresponding section on its per-major page, and an index parenthetical naming a version that is no longer `latest`, are both checkable without writing any prose.\n\n## Why this matters downstream, concretely\n\nobjectos mirrors this content. `objectstack-ai/objectos:content/docs/resources/changelog.mdx` has a *\"Recent highlights\"* section whose newest entry is `### 17.0` — *\"`@objectstack` **17.0.0** (released 2026-08-14)\"* — and it links readers to `/docs/releases/v17` for the full notes. That page is the source of truth for the mirror, so the objectos card is blocked on this one: there is nothing authored to mirror. Two doc sites now tell readers 17.0.0 is current, six days after it stopped being.\n\n## Not claimed\n\n- I have not read the 69 changelog sections and I am **not** asserting what 17.1.0 should say. Two of its changes I happen to have verified in the published tarball, because objectos#94 depended on them — objectstack#9736 (`init` scaffolds declare `sharingModel`; `scaffold-validate` runs the same rule set `dev` reaches) and objectstack#9347/#8978 (the ready banner's `Config:`/`Artifact:` row names what actually booted). Both are user-facing and neither appears in any curated page. That is two data points, not a survey.\n- I have not checked whether a release-notes step exists in the release runbook and was skipped, or does not exist. `docs/releases-maintenance.md` is the place to look and I did not open it.\n- No open PR mentions 17.1.0 release notes (searched `is:open 17.1.0 release notes`), so this is not a duplicate of work already in flight — but a search is not proof of absence.\n\n## Suggested shape\n\n1. Author the 17.1.0 section on `content/docs/releases/v17.mdx`, following the v16 page's treatment of 16.1.\n2. Update the page's *\"Release status\"* blockquote so it names the current `latest`.\n3. Update `releases/index.mdx:21`'s parenthetical, matching the v16 entry's form.\n4. Separately decide whether the *\"a published version has no section\"* check is worth mechanising — the curated prose is not generatable, but its absence is detectable.\n\nItem 4 is the only part with an open question in it; 1-3 are mechanical against the convention already on the page.\n\nCross-links: #8882 (same class, previous release). Found from objectstack-ai/objectos#94; blocks the objectos changelog mirror."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 9991,
+  "kind": "issue",
+  "title": "#9872 residue: 6 non-comment sites still date the #3290 removal to v11 — split governed / spec surface",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T12:13:12Z",
+  "updated_at": "2026-08-21T02:11:11Z",
+  "closed_at": "2026-08-21T02:11:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9991",
+  "body": "Follow-on from **PR #9990 (#9872)**, filed by the `domain:devx` PM seat under that card's Q1 → **B**. PR #9990 fixed **20 of 26** sites and used `Part of #9872` rather than a closing keyword, so #9872 stays open until these land.\n\n## Why these 6 could not ride in #9990\n\nThat PR was scoped **comment text only** and declared `Clause-②: no` on that basis. These six are not comment text, and each carries a different review path — a mixed diff would fork the whole PR under AGENTS.md #14 and hold 20 correct fixes hostage.\n\n## Split A — governed surface, its own PR\n\n- `skills/objectstack-ui/SKILL.md:1934`\n\n⚠️ `skills/**` is a **governed surface**: human-merge-only, ⛔ never armed, never flipped out of draft. One file, one PR.\n\n## Split B — spec surface, its own PR (and it owes a changeset)\n\n- `packages/spec/src/ui/action-params.zod.ts:376` and `:409` — **`.describe()` strings**\n- `packages/spec/src/migrations/registry.ts:1555` — migration rationale\n- `packages/spec/src/migrations/entries/semantic/17.action-session-roles-to-positions.ts:23`\n\nThese are **runtime data, not prose**. They regenerate:\n\n- `content/docs/references/ui/action-params.mdx:58,59` — marked **AUTO-GENERATED DO NOT EDIT**\n- `spec-changes.json`\n- `docs/protocol-upgrade-guide.md:317`\n\n⇒ the wrong version string is **published**, not merely commented, which is why it outranks the 20 already fixed. A changeset **is** owed here (PR #9990's ruling 6 forbade one because nothing it touched published).\n\n⚠️ `.changeset/**` is inside the **#9465 epic fence**: add only your own new file; never edit existing changesets, the changeset scripts, or the release workflows.\n\n## ⛔ Two sites that look like they belong here and DO NOT — leave them\n\nPR #9990's dev flagged both and correctly did not touch them. Ruled: **they stay as they are.**\n\n- `packages/plugins/plugin-audit/src/audit-writers.test.ts:1653` — a **test title** (`does not resolve the v11-removed tenantId alias`)\n- `scripts/check-org-identifier.mjs:596,600,602,640` — the gate's **own self-test fixture corpus**\n\nBoth are behaviourally inert (the detector never reads version tokens; expected counts stay 0). That inertness is the *reason* to leave them: the fixture corpus is deliberately a museum of the removed dialect, and the test title describes the fixture rather than the release. **Editing them would be changing evidence to match prose.** Recorded here so nobody re-opens it as an oversight.\n\n## The correct version, and how it was established\n\n**v16**, on two positive legs (PR #9990 replaced the card's original third leg, which was **false** — see below):\n\n1. `6c270a6: **BREAKING: remove the deprecated ctx.session.tenantId …` sits under `## 16.0.0` in the `packages/spec`, `packages/runtime` **and** `packages/objectql` CHANGELOGs;\n2. `docs/upgrading-to-11.md` — the **complete** 10.x→11.x breaking-change guide — contains no `tenantId`, no #3280 and no #3290 at all.\n\nCorroborated by `skills/objectstack-data/references/data-hooks.md:627`, the one site that was always right (governed — read, never edited).\n\n⛔ **Do not repeat the card's original leg 3** (*\"there is no `v11.mdx`, so v11 is not a real major\"*). It is **false**: v11 is a real major (`docs/upgrading-to-11.md`, `@objectstack/*@11.0.0`), and its release page is absent **by policy** — `scripts/check-release-notes.mjs:39`, `const KNOWN_MISSING = new Set([10, 11])`.\n\n## ⛔ Do not run a mechanical v11 → v16 sweep\n\nPR #9990 found **two sites that date a DIFFERENT removal to v11 correctly** — `content/docs/kernel/contracts/metadata-service.mdx:311` (`IUIService`) and `docs/audits/2026-07-security-props-liveness-recheck.md:26` (`PolicySchema`) — both listed as their own items in `docs/upgrading-to-11.md`. A blanket sweep corrupts both. `objectui#3290` is also a **different repo's** issue and is not in the population.\n\n## Also out of scope\n\n`content/docs/releases/**` (release-owned; evidence only), published CHANGELOG history, and the two pending changesets inside the #9465 fence.\n\nRefs: PR #9990 / #9872 (source, method, and the falsified leg) · #9465 (changeset fence) · AGENTS.md #14 (mixed-surface fork).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

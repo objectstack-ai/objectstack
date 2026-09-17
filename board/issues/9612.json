@@ -1,0 +1,35 @@
+{
+  "number": 9612,
+  "kind": "issue",
+  "title": "runtime gate: full runtime-safe rule snapshot for the publish door — the expensive half split out of the object-gating card",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T13:08:23Z",
+  "updated_at": "2026-08-20T07:58:08Z",
+  "closed_at": "2026-08-20T07:58:08Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9612",
+  "body": "Split from the object-gating P2 card by maintainer ruling (2026-08-18, verbatim: 「objectstack cloud 还没有正式上线,简化开发。」→「同意」on the simplification package; adjudication record: objectstack-ai/objectstack#4716 comment 5328603673). The parent card narrows to gating 5 rules on `object` writes; THIS card carries the half the cost measurement showed to be expensive and severable.\n\n## Scope (was the parent card's second bullet)\n\n- `RUNTIME_NEEDS_FULL_SNAPSHOT` rule batch: construct the full registry snapshot (option (a) from the P1 design) so rules reading whole-stack collections (pages / dashboards / nav / translations / seeds) can run at the runtime write door.\n- The measured pricing this card must answer to (all `origin/main` @ `66beee0f3`, thread comment 5309105113): option (a) per-save p50 = **201 ms at 306 items, 822 ms at 1530, 1.8 s at 3060**; snapshot **construction** is free (0.001–0.011 ms) — **86% of the bill is at-gate rules being handed the whole stack** (`validateStackExpressions` alone 70%). Any implementation must beat or bound this, or gate it (size threshold / caching + invalidation / per-rule scoping).\n- Known lazy-dep hazard: an object-write snapshot carrying a `json_schema` validation loads `ajv` + `ajv-formats` on the kernel path; the tripwire test's object leg landed via PR #9295 and must stay red-capable for any type this card widens onto.\n- Inherited constraint from the parent body: upgrading `validateCapabilityReferences`-class advisories to gating is a severity change — **its own PR, never a rider here**.\n\n## Not in this card\n\n- Gating the 5 `RUNTIME_OBJECT_WRITES_P2` rules on object writes (the narrowed parent card).\n- The pre-existing linear cost of the shipped gate (506 ms per flow publish at 420 objects) — filed as its own finding today.\n\nTriage note: lands where the parent lands (`packages/metadata-protocol` gate + `packages/lint` snapshot machinery) — suggested `domain:metadata`, triage decides; pm vocabulary intentionally only `pm:queue` here pending triage."
+}

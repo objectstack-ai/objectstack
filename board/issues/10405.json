@@ -1,0 +1,36 @@
+{
+  "number": 10405,
+  "kind": "issue",
+  "title": "`objectstack init` scaffolds a project whose `pnpm install` exits 1 on pnpm 11 — its rendered pnpm-workspace.yaml omits `allowBuilds`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T18:15:20Z",
+  "updated_at": "2026-08-21T03:17:22Z",
+  "closed_at": "2026-08-21T03:17:22Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10405",
+  "body": "Found while working #10326 (the two unmet-peer lines on a clean first install). Unrelated to that card's defect class, so filed rather than ridden.\n\n## What happens\n\n`renderPnpmWorkspaceYaml()` in `packages/cli/src/commands/init.ts` writes a `pnpm-workspace.yaml` carrying **only** `onlyBuiltDependencies`. pnpm 11 reads **only** `allowBuilds`, and it turned an unapproved dependency build script from a warning into a hard error — so the scaffolded project's first `pnpm install` exits 1.\n\nMeasured on published `@objectstack/cli@17.1.0`, pnpm 11.22.0, Node 22.22.2:\n\n```\n$ npx @objectstack/cli@17.1.0 init my-init-app -t app --no-install\n$ cd my-init-app && pnpm install\n...\n[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: better-sqlite3@13.0.3, esbuild@0.28.2\ninstall EXIT=1\n```\n\nThe file it wrote:\n\n```yaml\n# Allowlist native dependency build scripts so `pnpm install` compiles\n# them (pnpm 10+ blocks build scripts by default). Without this,\n# better-sqlite3 ships uncompiled and `objectstack serve` fails with\n# \"Could not locate the bindings file\".\nonlyBuiltDependencies:\n  - better-sqlite3\n  - esbuild\n```\n\n## Why this is already a settled question elsewhere\n\nThis is the *same* defect the `create-objectstack` blank template fixed for itself, and that template's own comment states the rule verbatim:\n\n> Both keys are needed; they are read by different pnpm versions:\n>   `allowBuilds` — pnpm >= 10.31 and pnpm 11+. pnpm 11 reads ONLY this one — `onlyBuiltDependencies` alone still errors.\n>   `onlyBuiltDependencies` — pnpm 10.0–10.30, which do not understand `allowBuilds`.\n\n`packages/create-objectstack/src/templates/blank/pnpm-workspace.yaml` carries both keys and `template-consistency.test.ts` ratchets both. The CLI's renderer has neither the key nor a test for it, so nothing noticed that one of the two scaffold paths still ships the pre-fix shape.\n\n## Suggested landing (hint, not a routing decision)\n\n`renderPnpmWorkspaceYaml()` emits an `allowBuilds:` mapping alongside the existing list, from the same `SCAFFOLD_BUILT_DEPENDENCIES` source, plus a ratchet in `packages/cli/test/init.test.ts` mirroring the two the blank template already has. Worth confirming as part of that whether the two scaffold paths should keep rendering this file independently at all.\n\nNot graded or routed; filed unassigned.\n"
+}

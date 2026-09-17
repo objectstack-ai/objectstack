@@ -1,0 +1,33 @@
+{
+  "number": 10026,
+  "kind": "issue",
+  "title": "A source label/description edit leaves the TRANSLATED locale bundles stale, and neither i18n gate can see it (measured on the #9807 diff)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T15:56:31Z",
+  "updated_at": "2026-08-20T00:45:32Z",
+  "closed_at": "2026-08-20T00:45:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10026",
+  "body": "Filed unassigned, observation class, found while implementing #9807 (annotating `sys_notification_subscription` and correcting its `principal` field description). Deliberately **not** fixed there — #9807's ruling fixes that card to an annotation, and hand-authoring translations in three locales is a different job with a different reviewer. ⛔ Nothing here is addressed by PR for #9807, by design.\n\n## The shape\n\nWhen a source `description`/`label` changes, `node scripts/check-i18n-bundles.mjs --write` rewrites **only the default (`en`) bundle** — it is a copy of the source, rewritten on every run (#8543). The translated locales are merged in gap-fill mode, so a leaf that already holds a string is left alone. This is documented, in the generated bundles' own header:\n\n> Merge only fills gaps: correcting a source label/description does not push the correction into a leaf here that already holds a translation — a present-but-stale string is not a gap, so it is left as-is.\n\nWhat is **not** written down anywhere is that nothing then reports the resulting staleness.\n\n## Measured instance (this is what makes it concrete rather than a re-reading of that header)\n\nThe #9807 diff widened `sys_notification_subscription.principal`'s description from four accepted selector forms to six. After `--write`, `packages/services/service-messaging/src/translations/`:\n\n| locale | `principal.help` after the regen | state |\n|:--|:--|:--|\n| `en` | the new six-form string | correct (rewritten from source) |\n| `zh-CN` | `\"订阅者选择器:'role:x' \\| 'team:x' \\| 'user:id' \\| 裸用户 ID。\"` | a **real human translation**, now stale — under-describes by two forms |\n| `ja-JP` | `\"Subscriber selector: 'role:x' \\| 'team:x' \\| 'user:id' \\| bare user id.\"` | a **default fill** holding the OLD English |\n| `es-ES` | same as `ja-JP` | same |\n\n`check:i18n` is green on all four after the regen (`services/service-messaging in sync (4 bundle(s))`).\n\nThe `ja-JP`/`es-ES` case is the more interesting half: those leaves are English default fills, so after a source edit they hold **English that no longer matches the English source**, and there is no translator waiting on them because nothing says a gap exists.\n\n## Why no gate catches it — checked, not assumed\n\n- `scripts/check-i18n-bundles.mjs` (`check:i18n`) compares the **default-locale** bundle against what the schema extracts. Translated leaves are outside its drift comparison by construction. Its `stale-*` classifier is `stale-workspace-dist` — a prerequisite check about an unbuilt/outdated `dist`, unrelated to translation content.\n- `scripts/check-i18n-coverage.mjs` (`check:i18n-coverage`) is a ratchet over **untranslated declared strings** — it counts what is *missing*, so a leaf that is present-but-stale is invisible to it, and a present leaf is exactly what staleness looks like.\n\nSo a stale translation is unreachable from both directions: one gate does not look at translated locales, the other looks only for absence.\n\n⚠️ There is a second-order effect worth grading rather than assuming: a default-filled leaf (`ja-JP`/`es-ES` above) is identical to the source English *until* the source changes, at which point it silently differs. Any heuristic that infers \"untranslated\" from \"equals the source string\" would score such a leaf as **translated** after a source edit — an apparent coverage improvement produced by a source edit alone. I did not measure whether `check:i18n-coverage` uses that heuristic on package bundles (it lints example stack configs), so this is flagged as a question, not a claim.\n\n## Severity\n\nNo user-visible break is measured. The blast radius is admin/Setup help text in three locales, and today's known instance is one field. It matters because the mechanism is generic — every source description correction that has ever landed has silently created the same condition — and because it degrades in the direction of *confident wrong text* rather than missing text: a stale translation reads as authoritative.\n\n## Options (not chosen here — this is triage's call)\n\n1. **Report, do not fix**: have `check:i18n` emit a non-fatal list of translated leaves whose source string changed since the leaf was last written. Needs a per-leaf provenance stamp the bundles do not carry today — that is the real cost, and it is the reason this is a card and not a patch.\n2. **Re-fill the default-filled leaves**: when a translated leaf is byte-identical to the *previous* source string, rewrite it to the new source string. Fixes the `ja-JP`/`es-ES` class exactly (they are copies, not translations) and never touches a real translation like the `zh-CN` one. Cheapest sound option; still needs the previous source string, i.e. the same provenance question in a weaker form.\n3. **Accept and document at the authoring site**: state in the object-authoring guidance that changing a shipped `description` obliges a translation pass, and leave enforcement out.\n4. **Leave as-is** — status quo; recorded so the next reader does not re-derive it from scratch.\n\nOption 2 looks like the best value-to-cost, but all three of the first options hinge on the same missing datum (what the source said when the leaf was written), so the decision is really \"is that stamp worth carrying?\".\n\n## Prior art (searched before filing)\n\nSearched this repo's open issues for translation/i18n/locale/bundle staleness phrasings; **no open issue covers this**. Nearest neighbours, both distinct: #8827 (`check:app-nav-i18n` does not demand a `pages.*` entry for a NEW contributed page — about *arrival* of keys, not staleness of existing ones), and the `check:i18n` undeclared-authoring-key verdict added by #4804 (about keys the schema does not declare).\n\nBacklink: #9807.\n"
+}

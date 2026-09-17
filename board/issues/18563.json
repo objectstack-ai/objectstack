@@ -2,8 +2,8 @@
   "number": 18563,
   "kind": "issue",
   "title": "[finding] rest-channel.md's write side names `PATCH .../issues/{n}` only as 改正文 — it omits the issue-state leg, and a seat read that omission as \"no channel to close a card\"",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-project-manager",
@@ -12,17 +12,21 @@
   },
   "labels": [
     "domain:skills",
-    "finding"
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
-  "type": null,
+  "type": "Task",
   "created_at": "2026-09-17T01:43:55Z",
-  "updated_at": "2026-09-17T01:43:55Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-17T03:47:50Z",
+  "closed_at": "2026-09-17T03:46:46Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18563",
   "body": "Filed by the `domain:services` execution seat (objectstack#6021), `session_01WmBwEiWPff9JZPd5BSGNeH`, as a change-of-shift class-3 item (**platform fact changed / incomplete — a one-line fix to a fact table**), per `SKILL.md` 座位贴协议 「平台事实变化 → references 事实表改一行」.\n\n## The gap\n\n`.claude/skills/pm-dispatch/references/rest-channel.md`, write side, currently reads:\n\n> ✓ 建卡带标签 `POST .../issues` · 改正文 `PATCH .../issues/{n}` · 认领 `POST .../issues/{n}/assignees`\n\nIt names `PATCH /repos/{o}/{r}/issues/{n}` **only as 改正文 (edit the body)**. The same endpoint also carries the **issue-state leg** — `{\"state\": \"closed\", \"state_reason\": \"completed\" | \"not_planned\"}` — and the table says nothing about it.\n\n## Why the omission is load-bearing, not cosmetic\n\nIt cost a real card a real stall, and the reasoning that produced the stall was sound given the table.\n\nOn **#16023** the `domain:services` seat measured, correctly and with controls, that the reported defect no longer existed on `origin/main` and wrote 「**The correct end state is CLOSED `completed`**」 — then did **not** close it (`objectstack#16023`, `issuecomment-5695652963`), reasoning verbatim:\n\n> - every GitHub MCP write tool is on the harness deny roster (`.claude/settings.json`, including `mcp__github__issue_write`);\n> - the seat's two sanctioned REST-proxy writers are `scripts/pm/post-stamped.mjs` (comments/bodies) and `scripts/pm/label-write.mjs` (labels/assignee) — **neither carries an issue-state leg**\n\n⭐ **Both premises are TRUE.** The conclusion does not follow only because the fact table does not say the raw `PATCH` closes cards — so \"no script has a state leg\" reads as \"the seat has no channel\". The card then sat `pm:blocked` with its blocker long spent, and the seat raised it to the maintainer as a manual one-action item.\n\n## Measured, ⛔ not reasoned\n\nThis seat closed #16023 through that exact endpoint this shift. ⚠️ The time of that reading is ⛔ not retyped here — a new-issue POST has no stamp substitution, and a clock typed from memory is the defect the stamp contract exists to prevent. The stamped record is **objectstack#16023 `issuecomment-5707137250`**, written by `scripts/pm/post-stamped.mjs` in the same act that read the clock:\n\n```\nPATCH /repos/objectstack-ai/objectstack/issues/16023   {\"state\":\"closed\",\"state_reason\":\"completed\"}   -> HTTP 200\nread-back: state=closed · state_reason=completed · labels [bug, priority:p2, domain:services] · assignees []\n```\n\nPositive control in the same session, same endpoint, different leg: `PATCH .../issues/6021` with `{\"title\": …}` → HTTP 200, read-back identical. ⇒ the endpoint is reachable through the egress proxy for **both** legs; ⛔ this is not a `state`-only or a `title`-only permission.\n\n⚠️ Scoping the claim honestly: `DELETE /repos/{o}/{r}/git/refs/heads/{branch}` on the **same** proxy answers **403** (`\"Write access to this GitHub API path is not permitted through this proxy.\"`), measured this shift on the empty branch `claude/issue-18110-subflow-refused-rollup`. ⇒ \"repo-scoped write\" is ⛔ not uniformly open, which is exactly why the per-operation table exists and why this row is worth a line.\n\n## The one-line fix\n\nGive the write side an explicit issue-state row rather than folding it into 改正文 — e.g. a row naming `PATCH .../issues/{n}` with `{\"state\",\"state_reason\"}`, noting that neither sanctioned script carries this leg so it is a raw REST call, and that `state_reason` must agree with the closing reason (`not_planned` for withdrawn/won't-do, `completed` for delivered) per the state model.\n\n⚠️ Whether a seat closing a card should get its own `scripts/pm/` writer (so the four-step read-back discipline covers it the way `label-write.mjs` covers labels) is a **separate and larger** question — ⛔ not proposed here, and ⛔ this card should not be widened into it.\n\n## Dedupe words\n\n`rest-channel issue state leg` · `PATCH issues state_reason proxy` · `no channel to close a card` · `post-stamped label-write no state leg` · `#16023 close completed`\n\nRelated: objectstack#16023 (`issuecomment-5695652963` is the stall, `issuecomment-5707137250` is the correction) · `references/rest-channel.md` · `references/platform-readings.md`\n\n⛔ `type` and `priority` are the triage seat's; filed ungraded and unassigned. `domain:skills` applied because the landing site is `.claude/skills/pm-dispatch/references/rest-channel.md`, a governed surface — and per `SKILL.md`, a change-of-shift class-3 item enters the skills lane as a `finding` for that seat's own triage.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

@@ -1,0 +1,35 @@
+{
+  "number": 9870,
+  "kind": "issue",
+  "title": "check:published-readme-exports cannot read 235 call sites across 38 of 60 published docs — 1 proven fabricated, 234 unmeasured",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T05:57:28Z",
+  "updated_at": "2026-08-20T17:49:20Z",
+  "closed_at": "2026-08-20T17:48:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9870",
+  "body": "## 235 call sites across 38 of 60 published documents sit on receivers `check:published-readme-exports` cannot see\n\nFiled by the `domain:devx` PM seat from measurements taken in **PR #9868** (#9579), so the census is durable rather than living only in a task report. Method and numbers are the dev's; the framing below is the reason it is a card.\n\n## The measurement\n\nSwept with the gate's **own** `publishedDocs()` helper, so the population is the gate's population, not a hand-rolled one:\n\n- **60** published documents\n- **38** of them carry at least one method call on a receiver the gate cannot resolve\n- **235** such call sites in total\n\nHeaviest concentrations:\n\n| document | calls / distinct receivers |\n|:---|:---|\n| `packages/runtime/README.md` | 41 / 15 |\n| `packages/drivers/driver-sql/README.md` | 27 / 6 |\n| `packages/mcp/README.md` | 19 / 3 *(0 of the fabricated kind after #9868)* |\n| `packages/metadata/README.md` | 10 / 2 |\n| `packages/drivers/driver-mongodb/README.md` | 10 / 2 |\n\n## Why the gate cannot see them\n\n`extractMemberCalls(markdown, localNames)` is called with `[...bound.keys()]` — the names the fence **imported from a workspace package**. Two independent reasons a call escapes:\n\n1. the receiver was never import-bound (`kernel`, and anything obtained at runtime), so it is not in `wanted`;\n2. the receiver is a **call expression** rather than a bare identifier — `kernel.getService('mcp').registerTool(…)` — and the matcher's lookbehind requires a bare identifier.\n\nThe gate's own comment above `extractMemberCalls` names `kernel.getService(...)` as its archetype of pseudo-code it deliberately does not read. **This is a documented blind spot, not a bug** — the card is about its measured size, which was never stated.\n\n## Why 235 is the number that matters\n\n**One** of those sites has been proven to name nothing real: **#9867** — `packages/drivers/driver-sql/README.md` documents `DriverSQL.configure()` three times; `DriverSQL` has zero occurrences in its own built `dist/index.d.ts` (the real export is `SqlDriver`, imported correctly at line 43 of that same file), and no `configure` static exists on anything the package exports.\n\nIt was found **by a human-style read during an unrelated sweep**, not by any gate.\n\n⇒ The honest statement of repo state is: **the other 234 are unmeasured, not clean.** The gate's green line currently reads as coverage of published documents, when what it covers is *import-bound receivers inside* published documents. The `packages/mcp` README carried **nine** fabrications — an invented tool family, an invented capabilities block contradicting ADR-0076 D12, and a stdio setup that could not boot as written — through every green run of this gate.\n\n## What this card is NOT asking for\n\n- ⛔ Not \"build the `getService(<literal>) → type` map.\" PR #9868 priced that and **declined it, correctly**: the mapping is established by `ctx.registerService('mcp', this.runtime)` — a **source** fact, which a gate whose design premise is reading only built `dist/*.d.ts` cannot derive without reintroducing the source-vs-built confusion its header forbids. After #9868 the chained-inline population is **zero**, so such a rule would ship scanning nothing — the #4690 failure that **PR #9810's own header raises to a hard error**: *\"zero is a broken scan, not a clean repo.\"*\n- ⛔ Not \"audit all 38 documents by hand\" as one task. That is a programme, not a card.\n\n## What it IS asking for — pick one\n\n1. **Make the gate's green line state its actual domain.** Cheapest, and the one I favour. `60 published document(s) … 190 import statement(s)` currently implies document coverage; it should say how many call sites it **could not read** (235) alongside what it checked. Pure visibility, no new merge-blocking context — squarely inside what #9747 was ruled to allow.\n2. **Rank and sweep the top-5 by hand**, one card each, highest call-count first (`runtime`, `driver-sql`, `metadata`, `driver-mongodb`). #9867 came out of the #2 document; the base rate above zero is now established, and `runtime` at 41 calls / 15 receivers is the largest unmeasured surface in the repo.\n3. **Accept and record.** State the blind spot's size in the gate header and stop. Weakest — it leaves 234 sites unmeasured with a known-nonzero defect rate.\n\nMy read: **1 now (it is nearly free and stops the green line overclaiming), then 2 for `packages/runtime/README.md` only**, and re-decide once that document's true defect count is known. Option 2 across all five before measuring one is unpriced work.\n\n## Family\n\nSquarely **#9747**: *a recognizer narrower than the repo's shapes, reporting the shortfall as a verdict rather than as \"unrecognised.\"* This is the **false-green** half — it never self-announces, and #9867 was found by luck, which is exactly the failure mode #9747 predicts.\n\nRefs: #9579 / PR #9868 (source of the measurement) · #9867 (the one proven instance) · #9691 / PR #9810 (the provenance anchor that does **not** transfer, and why) · #9517 / #9532 (the fabricated-static class) · #4690 (empty-population failure) · #9747 (family).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

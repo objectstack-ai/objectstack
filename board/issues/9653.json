@@ -1,0 +1,35 @@
+{
+  "number": 9653,
+  "kind": "issue",
+  "title": "finding: the four /admin/sso/* bridges carry no ObjectStack-side admin gate, and their delegated authorization is unprovable on a stock boot",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T14:22:09Z",
+  "updated_at": "2026-08-19T15:21:00Z",
+  "closed_at": "2026-08-19T15:21:00Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9653",
+  "body": "Observed 2026-08-18 while deriving the full `/admin/` surface for #9482. Filed unassigned, `finding` — this records a measurement and a coverage hole, not a demonstrated hole in access control.\n\n## What was measured\n\nNine ObjectStack raw mounts sit under `/api/v1/auth/admin/`. Five carry the ADR-0068 platform-admin gate inline and behave identically and correctly:\n\n```\nPOST /admin/unlock-user            anon 401 UNAUTHENTICATED | member 403 PERMISSION_DENIED | admin 200\nPOST /admin/oauth2/toggle-disabled anon 401 UNAUTHENTICATED | member 403 PERMISSION_DENIED | admin 404 RESOURCE_NOT_FOUND\n(same shape: create-user, set-user-password, import-users)\n```\n\nThe other four — the SSO bridges — carry **no session check and no admin gate of their own**. `auth-plugin.ts` hands the raw request straight to a bridge function, which re-dispatches it into better-auth \"so all of its gates run\" (`register-sso-provider.ts`). Measured, with fully valid payloads:\n\n```\nPOST /admin/sso/register                     anon 404 SSO_REGISTER_FAILED        | member 404 (same) | admin 404 (same)\nPOST /admin/sso/register-saml                anon 404 SAML_REGISTER_FAILED       | member 404 (same) | admin 404 (same)\nPOST /admin/sso/request-domain-verification  anon 400 DOMAIN_VERIFICATION_DISABLED | member 400 (same) | admin 400 (same)\nPOST /admin/sso/verify-domain                anon 404 verify_domain_failed       | member 404 (same) | admin 404 (same)\n```\n\nAll three callers get byte-identical answers because the SSO capability is off in a stock environment (`DOMAIN_VERIFICATION_DISABLED` names the switch: `OS_SSO_DOMAIN_VERIFICATION`).\n\n## Why it is worth recording\n\n1. **The delegated gate is unproven, and unprovable here.** Nothing in this repo demonstrates that a plain member cannot register an SSO provider on a deployment where SSO **is** enabled — the capability error masks the authorization answer on every stock boot. Whether better-auth's SSO plugin refuses a non-admin, and with what, is untested. Registering an identity provider is a high-value operation, so \"we delegate and assume\" deserves one real assertion on an SSO-enabled fixture.\n2. **The refusal is unlabelled.** An anonymous caller gets `404 SSO_REGISTER_FAILED`, not `401 UNAUTHENTICATED` — inconsistent with the five siblings on the same path prefix, and it collapses \"not signed in\" into \"registration failed\".\n\nNeither is a demonstrated hole: the #9482 pin asserts, over all 31 derived `/admin/` routes, that no anonymous or member call ever receives a 2xx, and that assertion passes — including these four.\n\n## What the #9482 pin does with them\n\nThey are classified `capability-disabled` and carry only a tripwire: member and admin must receive the **same** answer. The day SSO is enabled in that fixture the answers diverge, the test goes red, and whoever enabled it has to move the routes into a bucket that actually checks their gate — rather than inheriting a green that had stopped meaning anything.\n\nClosing this properly means an SSO-enabled fixture, which is why it is a separate card."
+}

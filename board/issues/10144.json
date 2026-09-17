@@ -1,0 +1,35 @@
+{
+  "number": 10144,
+  "kind": "issue",
+  "title": "spec: the object document's client-facing type is spec's to own — declare (or explicitly rule out) `titleFormat`, `list_views`/`listViews`, `icon`, which shipped objectui runtime reads today",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-20T09:21:38Z",
+  "updated_at": "2026-08-20T17:43:09Z",
+  "closed_at": "2026-08-20T17:43:09Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10144",
+  "body": "Carved by the triage seat from the **maintainer ruling on objectstack-ai/objectui#5362** (2026-08-20, decision-inbox session, session `session_01PjAP6vbcsg2yMtvySPv1Qo`): of the three readings that card offered, the maintainer accepted **reading 3 — the object document belongs to `@objectstack/spec`; objectui re-exports/aligns rather than maintaining a hand-written second copy** (the same layer split objectui#3074 applied to `PageNodeSchema`). This is the contract-first slice that must land before the objectui half; ui#5362 is `Blocked-by:` this card.\n\n## The measured gap (from ui#5362, verified on objectui `origin/main` = `bdf8cf76e`)\n\nobjectui's `ObjectSchemaMetadata` hand-declares a subset of the object document. Three keys a real object definition carries are absent from it **and from `@objectstack/spec` 17.0.0's `dist/`**, while shipped objectui runtime reads all three:\n\n| key | read at (objectui) |\n| --- | --- |\n| `list_views` / `listViews` — **both spellings accepted at every read site** | `ObjectView.tsx:1178,1194,1208` · `InterfaceListPage.tsx:56` · `AppHeader.tsx:501` · `useElementDataSource.ts:104` · `MetadataProvider.tsx:420` |\n| `titleFormat` | the ADR-0079 object-level display-name resolver (`ObjectKanban.tsx:275,295` names the order `objectDef.titleFormat` → `displayNameField` → …) |\n| `icon` | authored on objects; edited by the metadata-admin object inspector (`ObjectDefaultInspector.tsx:94`) |\n\nThe gap is invisible at the boundary because `DataSource.getObjectSchema()` returns `Promise<any>`.\n\n## Scope of this card (spec side)\n\n1. For each of the three keys: **declare it on the spec's object schema with the semantics the runtime already implements, or explicitly rule it out** (with the runtime read then owed a fix on the objectui side). \"Declared by the type the consumer is told to use, silently read anyway\" is the shape being ended — either direction is acceptable, silence is not.\n2. `list_views` vs `listViews`: pick **one canonical spelling** in the declaration; the consumer-side dual-read becomes a deprecation question for the objectui follow-up, not a spec blessing of both.\n3. Whatever ships, objectui's follow-up (ui#5362) derives its client type from the spec export instead of hand-copying — the derivation guard pattern applies.\n\nTier: contract accept-surface widening ⇒ `Clause-②: yes`, `claude-fable-5`.\n\nRefs: objectstack-ai/objectui#5362 (the ruled card, with the full measurement) · objectui#3074 (the PageNodeSchema layer-split precedent) · ADR-0079 (titleFormat resolver order)."
+}

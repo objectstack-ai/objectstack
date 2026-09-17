@@ -1,0 +1,34 @@
+{
+  "number": 9935,
+  "kind": "issue",
+  "title": "patrol: two report-only predicates for the pm:blocking machinery — cache coherence both directions, and oldest-unclaimed-blocking age",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T08:43:03Z",
+  "updated_at": "2026-08-19T10:18:57Z",
+  "closed_at": "2026-08-19T09:41:42Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9935",
+  "body": "Maintainer ruling (2026-08-19, PM chat): the proposal was approved verbatim — 「同意」 — following two prompts in the same thread: 「当一个任务被更新为 blocked 的时候,阻塞他的issue 是不是应该同步更新为 blocking」 and 「然后车道项目经理应该优先处理 blocking」. The standing design stays (`pm:blocking` is a triage-sweep-derived cache off the `Blocked-by:` body index, single producer, ⛔ never hand-applied; the selection order already ranks it second only to p0). What this card adds is the **always-on eyes** on both halves of that design. Filed and graded by the skills seat (own-lane exception; session `session_01AeA3nU1B5Q2pgxqxgUrexd`).\n\n## Scope — `scripts/pm/check-half-states.mjs`, two new report-only predicates (anchor rows via the existing patrol)\n\n1. **`pm:blocking` cache coherence, both directions**, derived from the same body reads the sweep already performs:\n   - a card carrying `pm:blocking` with **no open card's `Blocked-by:` line targeting it** → stale cache row (the label is boosting a card nothing depends on — worse than absent, it lies with authority);\n   - an open card **targeted by ≥1 open card's body `Blocked-by:` line but not carrying `pm:blocking`** → missing cache row (a real unblocker invisible to the selection order).\n   Report-only: the fix stays the triage sweep's derivation pass, never this script.\n2. **Oldest unclaimed `pm:blocking` age**: one summary row naming the oldest open, unassigned `pm:blocking` card and its age — selection-order compliance made visible (a lane that keeps letting blocking cards age past fresher picks now shows up on the anchor by name; nothing reddens, the maintainer and seats simply see it).\n\nConventions as established: exit-0 on completed sweep, findings are patrol input never gate verdicts, self-test cases per predicate (positive/negative shapes for each direction), thresholds as named constants with rationale comments.\n\n## Serial\n\n`check-half-states.mjs` hot file: **queues behind PR #9929** (H5 extraction fix, in the merge path) — dispatch after it lands and re-measure the file. Not a governed path. Graded `pm:queue`, S/M mechanical."
+}

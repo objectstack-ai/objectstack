@@ -2,7 +2,7 @@
   "number": 18492,
   "kind": "pull_request",
   "title": "docs(spec,ui): colSpan and span state their measured behaviour — the two claims #17328 falsified are gone",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-16T15:49:03Z",
-  "updated_at": "2026-09-17T00:55:57Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-17T08:05:49Z",
+  "closed_at": "2026-09-17T08:05:47Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": "2026-09-17T08:05:47Z",
   "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/18492",

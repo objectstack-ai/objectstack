@@ -1,0 +1,35 @@
+{
+  "number": 10427,
+  "kind": "issue",
+  "title": "js-comment-mask's scanSource desyncs on a nested template literal, and 16 files pay for it — 12 in the FABRICATES direction its own header calls the worse one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T18:43:48Z",
+  "updated_at": "2026-08-21T07:30:44Z",
+  "closed_at": "2026-08-21T07:30:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10427",
+  "body": "Found while re-deriving the sweep for #9758, which uses `scanSource` as its instrument. Filed unassigned, no `pm:queue`.\n\n## The shape\n\n`scanSource` (`scripts/js-comment-mask.mjs`) treats a template literal's `${...}` interior as plain literal content and stops the span at the next backtick. That is stated in its docblock and is right for depth counting — but a **nested template inside an interpolation** puts a real backtick there, so the scanner reads the nested opener as the outer template's *closer* and every backtick after it flips parity.\n\nThe shape is ordinary in this tree, and is exactly how it formats a list of names:\n\n```js\n`${missing.map((g) => `\\`${g}\\``).join(', ')} — the register governs ${missing.length} `\n```\n\n(verbatim, `scripts/pm/check-governed-prose.mjs:219`)\n\nTraced through the scanner: the outer template opens; the **nested** opener closes it; the escaped-backtick pair opens and closes a phantom template; the nested closer opens another; and the outer template's real closer at end of line opens a phantom span that runs to the next backtick anywhere in the file.\n\n## What it costs, measured\n\nCompared `scanSource`'s comment mask against `@typescript-eslint/parser`'s comment ranges over the same corpus the #9758 sweep walks — 4,679 files, `node_modules`/`dist`/`.next`/`build`/`.turbo`/`coverage` excluded. **16 files disagree**, in both directions:\n\n```text\ndirection                                       files   worst file\ncomment bytes read as CODE   (FABRICATES)         15    packages/spec/src/ui/view.zod.ts          9,405 bytes\ncode bytes read as COMMENT   (BLINDS)              2    scripts/pm/check-governed-prose.mjs       4,277 bytes\n```\n\nRanked by comment-bytes-lost: `view.zod.ts` 9,405 · `check-durability-degradation-log-level.mjs` 8,455 · `runtime/src/domains/automation.ts` 7,226 · `check-runtime-services-index.mjs` 4,728 · `check-half-states.mjs` 2,892 · `check-i18n-coverage.mjs` 2,795 · `spec/src/data/object.zod.ts` 1,857 · then a tail down to 55.\n\nThe nested-template shape is present in most of them (`check-half-states.mjs` 18 lines, `automation.ts` 4, `view.zod.ts` 4, `check-i18n-coverage.mjs` 4). At least one file (`packages/cli/src/utils/collect-docs.ts`) desyncs from a template carrying an escaped backtick without a nested template, so the trigger is the escaped-backtick/nesting family rather than that one line shape.\n\n## Why this is the direction that matters\n\nThe module's own header names the two failure families and says which is worse:\n\n> **String-aware scanner, regex-blind** … the gate reads genuinely commented-out text as live code: it FABRICATES a hit rather than missing one.\n\nThat is the direction 15 of the 16 files sit in. `packages/runtime/src/domains/automation.ts` hands every masker-based gate 7,226 bytes of prose to read as code, starting at the docblock on line 1074. The header goes on to claim the opposite as a design guarantee:\n\n> A shape this scan gets wrong fails toward masking MORE than it should, which costs recall … and **cannot fabricate a lead**.\n\nMeasured, it can, and does, on this tree today.\n\nThe other direction is not free either: in `scripts/pm/check-governed-prose.mjs` the parity flip lands on a `/**` and opens a phantom **block comment** spanning lines 254-339, so ~85 lines of live code are blanked out of `maskComments` for every gate that reads that file.\n\n## Reproduce\n\n```js\n// scripts/js-comment-mask.mjs, current main\nimport { scanSource } from './scripts/js-comment-mask.mjs';\nconst src = [\n  \"`${xs.map((g) => `\\\\`${g}\\\\``).join(', ')} tail`\",   // the line above, reduced\n  \"err.code = 'REAL';\",\n  '/** a docblock far below */',\n].join('\\n');\nlet n = 0; for (const b of scanSource(src).comment) n += b;\n// n === 0 — the docblock is not seen as a comment at all.\n// A correct scan flags its 27 bytes.\n```\n\n## Why the self-test does not hold it\n\n`selfTest()` in that module pins 15 shapes, and every one of them is a *flat* literal — a string with a `/*` in it, a regex with a quote in it, a template with a `/*` in it. **No case nests a template inside `${...}`, and none carries an escaped backtick**, which is why a scanner that gets both wrong reports 15 of 15 passing. The self-test's own preamble says these cases ARE the contract; this is a hole in the contract, not a regression against it.\n\n## Not a duplicate\n\n`search_issues` for the masker's history returns #9367 (six gates using the naive regex — the reason this module exists), #9444 (a gate truncating at the first `//`), #8604 and #9651/#9977 (stale prose about comment handling). All closed, all about the copies this module replaced. Nothing open names `scanSource`'s own literal scanner.\n\n## Suggested shape of a fix\n\nTrack template depth: on `` ` `` inside a template interior, only close if not inside a `${...}`; count `${` / `}` nesting while scanning a template. The self-test needs the two missing cases either way — a `GHOST`/`REAL` pair on a nested template, and one on an escaped backtick — since the fix is unverifiable without them.\n\nFound while working #9758; not fixed there, which builds an ESLint rule on the parser's comment nodes and does not touch this module."
+}

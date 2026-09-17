@@ -1,0 +1,33 @@
+{
+  "number": 10391,
+  "kind": "issue",
+  "title": "The three closing-keyword parsers still disagree on two separator spellings that nothing has measured against GitHub",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T17:48:01Z",
+  "updated_at": "2026-08-21T00:27:12Z",
+  "closed_at": "2026-08-21T00:26:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10391",
+  "body": "Filed unassigned by the `domain:devx` os-dev seat while landing #9755. Recording, not claiming. #9755 made the three parsers agree on the two separator spellings that **are** measured; these two are the residue, and they were deliberately left out of that PR because pinning an unmeasured spelling would launder a guess into a contract.\n\nDedup-searched over the open issues (`closing keyword`, `partof-closing-keyword`, `separator colon`, `parser colon`): no card covers this.\n\n## The three parsers\n\n| id | file | reference scope |\n|---|---|---|\n| `cross-repo-issue-closer` | `.github/workflows/cross-repo-issue-closer.yml` | qualified `owner/repo#N` only |\n| `duplicate-fix-guard` | `.github/workflows/duplicate-fix-guard.yml` | bare `#N` and qualified |\n| `h7-partof-closing-keyword` | `closingKeywordRe()` in `scripts/pm/check-half-states.mjs` | bare `#N` only |\n\n`scripts/check-closing-keyword-parity.mjs` (added by #9755) now holds them to one keyword set and one separator, for the two spellings measured against GitHub's real parser: `KEYWORD <ref>` and `KEYWORD: <ref>`.\n\n## The residue — measured on the shipped regexes, 2026-08-20\n\n```\nbody                                    closer   guard    h7\n\"Fixes:#4500\"        (colon, no space)  false    false    true\n\"Closes\\n#4500\"      (newline)          false    true     false\n\"Fixes\\nobjectstack-ai/objectui#456\"    true     true     false\n```\n\nTwo independent divergences:\n\n1. **Zero-space colon.** H7 binds it (`[ \\t]*:?[ \\t]*`), both workflows require whitespace after the colon (`:?\\s+`). So a body written that way is a `Part of` contradiction to H7 and not a duplicate claim to the guard.\n2. **Newline separator.** The workflows use `\\s+`, which crosses a line break; H7 uses `[ \\t]` and its docblock argues the narrowing deliberately — `stripMarkdownCode` blanks code lines rather than deleting them, so `\\s*` lets a keyword before a fenced block splice onto a `#N` after it and produce a finding for two tokens that were never adjacent. **The guard strips code the same way** (fenced blocks become a single space) and does use `\\s+`, so the splice H7 reasons about is reachable there and is not reasoned about.\n\n## Why it is filed rather than fixed\n\nNeither spelling has a **measurement** against GitHub's own parser, and the whole method of #9755 was that the direction of a parity fix is decided by what GitHub actually does, not by which of our regexes is more permissive. #9755 settled the ordinary colon with an in-repo reference (a merged PR closed a card through it). There is no such reference for either spelling here — the corpus scan found the zero-space form in **0 of 1000** PR bodies — so settling them needs a deliberate live experiment, which is a maintainer call, not a dev-seat guess.\n\n## What the fix needs\n\n1. Measure both spellings against GitHub, the way #8476 step 1 did it: one throwaway PR carrying each spelling bound to its own throwaway issue, read `closed_by_pull_requests` seconds after opening (the closing link is created at PR-open time, not at merge, so nothing has to be merged). The prose arm is the positive control.\n2. Then make the three agree, and extend the parity gate's separator table — it is a list of measured spellings by construction, so a new row is where the answer lands.\n3. Decide the splice question for `duplicate-fix-guard.yml` on its own merits: a false positive there is a spurious red on a PR accused of claiming another PR's issue.\n\nRef: #9755 · #8476 · #8293\n"
+}

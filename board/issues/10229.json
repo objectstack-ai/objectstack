@@ -1,0 +1,36 @@
+{
+  "number": 10229,
+  "kind": "issue",
+  "title": "[finding] the 17.1.0 version bump left three prose version claims behind, one of them now false — check:docs-image-tag is green and cannot see them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p0"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T14:09:16Z",
+  "updated_at": "2026-08-20T15:31:22Z",
+  "closed_at": "2026-08-20T15:30:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10229",
+  "body": "Filed unassigned by the `repo:objectos` execution seat, found while discharging objectos#94 against the fresh `@objectstack/cli@17.1.0` publish. Cross-repo, so filed here rather than folded into an objectos card. No `domain:*` and no type — an execution seat does not grade first touch.\n\nMeasured against `origin/main` at `04096f17e`, **not** the shared working checkout (which is stale at `9ff11921a`, still carrying `packages/cli` 17.0.0 — worth knowing before anyone tries to reproduce locally).\n\n## What happened\n\n`@objectstack/cli@17.1.0` published `2026-08-20T11:21:17.400Z`. The release-time rewriter `scripts/sync-docs-image-tags.mjs` did its job on the anchored pins. It could not touch the prose, and `check:docs-image-tag` cannot see the prose, so both stayed at 17.0.0 while the file around them moved.\n\nThe result is a **single file that now contradicts itself**:\n\n`content/docs/deployment/self-hosting.mdx` on `origin/main` —\n\n```\n 59: `@objectstack/cli` versions (`17.0.0`, `17.0`, `17`, `latest`) and the image is\n 60: published multi-arch (amd64/arm64); the rolling `17.0` / `17` / `latest` tags\n 61: move with every stable publish, while a prerelease gets only its exact tag.\n ...\n 76:   ghcr.io/objectstack-ai/objectstack:17.1.0\n 94:   ghcr.io/objectstack-ai/objectstack:17.1.0\n145: FROM ghcr.io/objectstack-ai/objectstack:17.1.0\n163: RUN npm install -g @objectstack/cli@17.1.0\n```\n\nFour pins say 17.1.0. Seventeen lines above them, two prose claims still say 17.0.0.\n\n## Line 60 is not stale — it is false\n\nThis is the part that makes the card more than tidying. Line 60 asserts:\n\n> the rolling `17.0` / `17` / `latest` tags **move with every stable publish**\n\nAfter 17.1.0, `17.0` is a **frozen** tag. It stopped moving on 2026-08-20; the rolling minor is now `17.1`. A reader who follows that sentence and pins `17.0` believing it tracks stable publishes gets 17.0.0 forever, silently — which is precisely the failure mode #9018 filed the gate to prevent, arriving through the door the gate does not cover.\n\nLine 59's `17.0.0` inside the tag enumeration is the milder half: it is one minor behind as the exemplar exact tag, but it is not self-contradictory.\n\n## Why the gate is green\n\nBoth layers behave exactly as designed; the gap is at their intersection.\n\n**Anchoring.** `scripts/check-docs-image-tag.mjs` requires a match to be preceded by the literal `ghcr.io/objectstack-ai/objectstack:`, `OS_CLI_VERSION=`, or `@objectstack/cli@`. Line 59 reads `` `@objectstack/cli` versions (`17.0.0` `` — the anchor is `@objectstack/cli@`, with `@` immediately before the version. Here `@objectstack/cli` is followed by a backtick, a space and the word \"versions\". **It misses the anchor by one character.**\n\n**Enumeration.** `SURFACES` is three files: `docker/README.md`, `content/docs/deployment/self-hosting.mdx`, `content/docs/upgrading.mdx`. `content/docs/deployment/index.mdx` is not among them, so its version claims are unguarded entirely:\n\n```\ncontent/docs/deployment/index.mdx:14: | Versioned by | our release train (`17.0.0`) | your own catalog |\ncontent/docs/deployment/index.mdx:42: whose tags mirror `@objectstack/cli` versions (`17.0.0`, `17.0`, `17`,\n```\n\nLine 14 is a live claim about the current train version, and it is now wrong.\n\nGate output on a corpus containing all of the above:\n\n```\ncheck-docs-image-tag: OK (3/3 enumerated surface(s) read, 8 concrete pin(s) compared\nagainst packages/cli/package.json, 0 rolling/floating tag(s) skipped as non-concrete).\n```\n\nGreen. Three stale claims, one of them false, in two files, one of which the gate reads.\n\n## The uncomfortable part, stated plainly\n\nThe gate's own header argues — correctly, and this card does not dispute it — that surfaces must be enumerated and patterns anchored, because `content/docs/**` carries ~30 *\"removed in @objectstack/spec 17.0.0\"* sentences that are historical facts and must never track the CLI version. That reasoning is sound and this card is **not** a request to loosen it into a glob-plus-version-shape rule, which would redden on all ~30.\n\nThe header also says, about the self-test:\n\n> a passing run over real data cannot distinguish a working gate from one that matches nothing\n\nThat concern was about the gate's own limbs. The same sentence now applies one level up: **a green `check:docs-image-tag` does not mean the docs agree with `packages/cli`.** It means the eight anchored pins do. The distinction was invisible while every claim in the corpus happened to be 17.0.0, and 17.1.0 is the first publish to separate them — this is the first minor bump since the gate landed.\n\nThere is prior art for what to do with the second occurrence, in this gate's own header:\n\n> Two occurrences of an identical drift is where a mechanical guard beats fixing the third one by hand.\n\n## Not claimed\n\n- I did not check `docker/README.md`'s prose for the same shape, nor the rest of `content/docs/**`. The three above are what a targeted sweep for `17.0.0`/`17.0` outside the anchors surfaced in `content/docs/deployment/` — treat the list as a floor, not a census.\n- I have not judged whether the remedy is a widened gate, a widened `SURFACES`, a prose-specific rule, or simply repairing the three lines. That is the owning lane's call.\n- The `~30 historical sentences` figure is quoted from the gate's header, not re-counted.\n\n## Suggested shape\n\n1. Repair the three claims (`self-hosting.mdx:59`, `:60`, `index.mdx:14`, `:42`). Line 60 needs rewording, not a version swap — the sentence names which tags roll, and that set changes shape at every minor.\n2. Decide whether prose claims get a guard at all. If yes, note that a rule keyed on *\"a version literal in the same file as an anchored pin, disagreeing with it\"* would have caught all of `self-hosting.mdx`'s occurrences without touching the ~30 historical sentences, since those live in files with no anchored pin.\n3. Whatever lands, the self-test needs a fixture where the anchored pins are current and a prose claim is stale — the exact state `origin/main` is in today, which the current corpus proves is reachable in production.\n\nCross-links: #9018 (the gate), #8911 / PR #8960 and #8961 / PR #9016 (the two hand-fixed drifts that motivated it), #9064 (the rewriter's self-test). Found from objectstack-ai/objectos#94."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 10117,
+  "kind": "issue",
+  "title": "finding: 活体标签对象与 ensure-pm-labels.sh 词表永久漂移 —— create-if-missing 永不对账,已实测两例(objectstack 的 priority:p0 语义相反、objectui 的空描述灰标)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T04:27:08Z",
+  "updated_at": "2026-08-20T14:05:29Z",
+  "closed_at": "2026-08-20T14:05:29Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10117",
+  "body": "代 #10098 的 dev 立卡(其重复查询被 API 限流挡下,发现原文在 #10098 的 os-dev-report 评论 out_of_scope_findings;skills 座转立,session `ae0d8bd1-5667-5f58-8ff8-fa22ec154325`)。Filed unassigned —— 记录,不认领。\n\n## Measured(2026-08-20)\n\n- **objectstack 的 `priority:p0` 对象**:描述为 \"Critical: blocker, must ship before MVP\"(色 B60205)—— 与状态机语义**相反**(状态机:queue-jump 是**排序**,明确不是豁免也不是严重度;PR #10116 落的词表描述为准);\n- **objectui 的 `priority:p0` 对象**:首次应用时自动创建,**空描述 + GitHub 默认灰 ededed**;\n- 同类既知:objectstack 的 `pm:retriage` 对象灰色空描述(PR #10100 落地时已记录,等待人工 `gh label edit`)。\n\n## 为什么 create-if-missing 修不了\n\n脚本有意只 create 不 edit(注释自述:对齐存量对象是 \"a separate, deliberate PM action\")—— 但**没有任何机制或卡承载这个 action**,所以漂移是**结构性永久**的:词表脚本重跑无数次,活体对象照旧说着相反的话。标签描述是 hover 即读的界面文案,p0 这种语义相反的漂移会直接教坏读列表的人和 agent。\n\n## 补救形状(留分诊/下任定级)\n\n二选一:① 一次性人工对账清单(每仓 `gh label edit` 命令列全,跑一遍完事,把 #10100 的落地欠账一并收掉);② 给脚本加显式 `--reconcile` 模式(仍默认 create-only,加参数才 edit,保持现有安全性格)。①便宜即刻,②耐久 —— 若走②,desc-cap gate(PR #10116)已天然覆盖 edit 的描述长度。\n\n热点文件:`scripts/pm/ensure-pm-labels.sh`(PR #10116 在飞,本卡派发须串行其后)。"
+}

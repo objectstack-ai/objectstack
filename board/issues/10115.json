@@ -1,0 +1,32 @@
+{
+  "number": 10115,
+  "kind": "issue",
+  "title": "dev-plugin-security-enforcement-warning bail #1 spends ~70% of the default 5000ms timeout on an in-test module transform, so any PR that cache-misses plugin-dev starves it red",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T04:21:19Z",
+  "updated_at": "2026-08-20T07:53:27Z",
+  "closed_at": "2026-08-20T06:44:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10115",
+  "body": "Discovered while driving PR #10109 (card #10069) to green. That PR's diff is confined to `packages/plugins/plugin-auth/**`; this failure is **not** its defect, established by a control that holds the load constant and removes the diff. Filed unassigned as a finding; the services PM seat is picking it up immediately because it blocks #10109.\n\n## Symptom\n\n`Test Core (2/3)` fails on `packages/plugins/plugin-dev/src/dev-plugin-security-enforcement-warning.test.ts`:\n\n```\n× bail #1 (no objectql/metadata service): …  → Error: Test timed out in 5000ms.   (line 79)\n× bail #2 (engine cannot take middleware): … → Error: Test timed out in 5000ms.   (line 103)\n```\n\nObserved on PR #10109 head `b293081c2` twice — run `32329090453`, jobs `96306174446` (5018ms / 6268ms) and `96308505284` (5027ms / 5495ms). Identical signature both times, so it is not noise.\n\n## Measurements\n\nReproduced locally on a 4-vCPU container (same size as a CI runner), every run pinned to an explicit sha, vitest invoked directly with `--reporter=verbose` so the per-test timings prove real execution rather than a cache hit:\n\n| condition | bail #1 | outcome |\n|---|---|---|\n| head `b293081c2`, idle | 3428 / 3581 ms | 4/4 pass |\n| **base `1800ffac2`, diff fully held out**, idle | 3614 ms | 4/4 pass |\n| head, 1 concurrent tsup DTS build | 4129 ms | pass |\n| head, 2 concurrent DTS builds | **5006 ms** | ❌ timeout @ line 79 |\n| **base, diff held out, same 2-build load** | **5007 ms** | ❌ **same signature** @ line 79 |\n| base, same load, `--testTimeout=30000` (CLI only, nothing committed) | **7487 ms** | ✅ passes, all assertions green |\n\nThe base condition used a fresh detached worktree (`git diff --stat` vs head = 0 lines), a fresh `pnpm install`, no `.turbo` directory, and `plugin-security/dist` absent before the build.\n\n## Reading\n\n1. **Not a hang.** Given 30s under the same failing load, bail #1 completes and passes. Every assertion holds; only the clock was short.\n2. **Not caused by any diff.** Removing the diff while holding the load constant reproduces the failure identically.\n3. **The test is intrinsically at 70% of its budget before any load.** bail #1 pays the cold vite transform/import of the deliberately-unmocked real `@objectstack/plugin-security` chain **inside the test body**, via `DevPlugin.start()`'s dynamic import. ~3.5s of a 5000ms default, on an idle machine. Any concurrent build spends the remaining 30%.\n4. **bail #2 is collateral.** With a warm module graph it costs 5ms. When bail #1 is aborted mid-import, bail #2 inherits the still-cold import (2676 / 3142 ms locally; over 5000ms on the busier CI shard) — which is why CI shows both red while the file's other two tests pass in 31ms / 10ms.\n5. **Why main looks green.** `@objectstack/plugin-dev#test` is turbo-cached on main and only re-executes when an upstream dependency changes. It last ran and passed at `7552e0337` (#10092, which authored this file) — run `32322640369`, shard tests step 20s, with every other package restored from cache and therefore no competing build. PR runs never restore a saved turbo cache (`Save Turbo cache (main only)`), so a PR that dirties a `plugin-dev` dependency both makes the test run *and* makes it run beside a cold rebuild.\n\n**This will hit any PR touching a `plugin-dev` dependency** (`@objectstack/plugin-auth`, `core`, `objectql`, `plugin-security`, `rest`, `runtime`, …), intermittently and with an error message that names neither the real cause nor the offending PR. It reads as \"your change broke security enforcement\" when nothing of the sort happened.\n\n## Fix direction (not ruled — the card's dev decides with measurements)\n\nThe cost belongs outside the measured window, not the window outside the cost:\n\n- **Preferred**: pay the `@objectstack/plugin-security` import once in a `beforeAll` (or warm the module graph before the first `it`), so each test measures the behaviour it is about rather than a one-off transform.\n- **Acceptable**: a per-test `testTimeout` on this file, *if* the dev can show the import cost is irreducible — with the number that justifies it.\n\n⛔ **Do not** `skip`, quarantine, or weaken any assertion in this file. The four tests are the pins for #10036's \"nothing is enforced\" warning and they all pass on an idle machine; the assertions are not in question. ⛔ Do not mock `@objectstack/plugin-security` — the file's header explains at length that the real plugin's `init()`/`start()` phase split is exactly the state under test, and mocking it would delete the subject.\n\n## Blocking\n\nBlocks PR #10109 (#10069) reaching green. Its diff cannot avoid the cache miss.\n\nRefs: #10092 (`7552e0337`, authored the file), #10036 (the warning under test), #3060 (the \"unmocked transforms alone can blow the timeout\" precedent the file's own header cites), #10030 (a separate, unrelated lint transient seen on the same head).\n\n⚠️ `domain:services` assigned by the discovering (services) lane; retriage if `plugin-dev` belongs elsewhere."
+}

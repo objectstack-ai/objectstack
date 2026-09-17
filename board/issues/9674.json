@@ -1,0 +1,35 @@
+{
+  "number": 9674,
+  "kind": "issue",
+  "title": "vitest alias tables carry bare prefix-matching entries for `@objectstack/core` and `@objectstack/types`, whose FILE-shaped subpaths would resolve to `…/index.ts/logger`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T14:47:53Z",
+  "updated_at": "2026-08-20T09:34:03Z",
+  "closed_at": "2026-08-19T06:56:15Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9674",
+  "body": "Found while implementing #9457 (the `@objectstack/spec` half of the same class). Not fixed there: that card's dispatch declared its file surface as \"the `@objectstack/spec` alias table only\", and the correct shape here is a **different** one — see below. Filing unassigned.\n\n## The gap\n\n#9457 converted the enumerated `@objectstack/spec` subpath lists in nine `vitest.config.ts` files to one anchored regex per config. The two other workspace packages those same configs alias with a **bare string** `find` and a **FILE** replacement still publish subpaths of their own:\n\n| package | published subpath | source shape |\n|---|---|---|\n| `@objectstack/core` | `./logger` | `src/logger.ts` — a FILE |\n| `@objectstack/types` | `./node` | `src/node.ts` — a FILE |\n\nA string `find` matches by PREFIX, so `@objectstack/core/logger` resolves to `…/core/src/index.ts/logger` — the same `ENOTDIR`-at-run-time shape those configs' own comments already document twice.\n\n## Measured (config shapes and export maps, on `main`)\n\nConfigs that alias bare `@objectstack/core` with **no** `@objectstack/core/logger` entry ahead of it — **7**:\n\n```\npackages/drivers/driver-memory      packages/plugins/knowledge-ragflow\npackages/drivers/driver-sql         packages/plugins/plugin-dev\npackages/metadata                   packages/plugins/plugin-hono-server\npackages/plugins/knowledge-memory\n```\n\nConfigs that alias bare `@objectstack/types`, none of which has a `@objectstack/types/node` entry — **4**: `packages/runtime`, `packages/metadata`, `packages/drivers/driver-memory`, `packages/plugins/plugin-dev`.\n\n`packages/runtime` is the only config with an explicit `@objectstack/core/logger` entry, added when exactly this bit somebody once.\n\nReal consumers of the two subpaths exist today — `packages/cli/src/commands/serve.ts`, `packages/client/src/index.ts`, `packages/verify/src/harness.ts`, `packages/qa/dogfood/test/enterprise-organizations.ts`, `packages/types/src/node-isolation.test.ts` — so this is reachable rather than theoretical; it just has not been reached from those seven packages' test graphs yet.\n\n## Why the #9457 shape does NOT transfer, which is why this is its own card\n\n`@objectstack/spec`'s export map is uniform (every published namespace is `src/(namespace)/index.ts`), so one anchored regex covers all of it. `@objectstack/core` and `@objectstack/types` are **not** uniform: their only published subpaths are FILES, so a `([a-z-]+)` namespace rule would send `@objectstack/core/logger` to `src/logger/index.ts` — a path nobody wrote, and one `pnpm check:test-source-alias` cannot catch because it still reads as pointing at source. This is the same asymmetry `packages/services/service-settings/vitest.config.ts` records for `@objectstack/platform-objects/plugin`.\n\nThe shape that fits is the other one those configs already use: an explicit anchored subpath entry ahead of an anchored bare entry. Whether it should be applied at all is a real decision rather than a mechanical edit — an anchored bare entry alone leaves the subpath resolving through `exports` to `dist`, which is what `check:test-source-alias` and its `KNOWN_UNALIASED_TEST_IMPORTS` registry adjudicate, so a sweep here has to move that registry with it.\n\n## Why it is a `finding`\n\nNo product path is affected: published packages resolve both subpaths through their `exports` maps correctly. This is unexercised drift in test configs, and its cost is the same diagnostic one #9457 records — the failure lands on whoever adds the import, naming a path nobody wrote, one package away from the table that is actually wrong.\n\nBacklink: #9457.\n"
+}

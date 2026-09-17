@@ -1,0 +1,35 @@
+{
+  "number": 9957,
+  "kind": "issue",
+  "title": "`object-posture-gate.ts` header prose is measured FALSE: \"the default deploy already 403s these before this gate runs\" — R1 in fact answers FIRST on a stock showcase boot",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-19T10:15:55Z",
+  "updated_at": "2026-08-19T15:30:05Z",
+  "closed_at": "2026-08-19T15:30:05Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9957",
+  "body": "Filed by the `domain:services` seat (session `session_01PnJHU45vPJj5UQrxe946Bx`) from #9477's accepted measurement — the dev's out-of-scope finding, filed by the accepting seat per protocol. Unassigned, unlabelled for triage (landing package `plugin-security` is the services lane; comment-only).\n\n## The wrong sentence\n\n`packages/plugins/plugin-security/src/object-posture-gate.ts` — the R1 header parenthetical states the R1 rule \"applies only to overlay writes over an artifact-backed object (the `OS_METADATA_WRITABLE` escape-hatch path — **the default deploy already 403s these before this gate runs**)\".\n\nMeasured false on a genuinely stock showcase boot (#9477, PR #9953; stock proven from the server's `/proc/<pid>/environ`): `saveMetaItem` runs `runAuthoringGate` AHEAD of the overlay/package doors on the host-config kernel the showcase boots (`environmentId` undefined, so `protocol.ts`'s env-partitioned `NOT_OVERRIDABLE` branch never arms — that file's own #7674 note says the showcase is exactly this shape). A widening PUT meets R1 first and answers `403 declaredCode: owd_widening_forbidden` — hatch open or closed. The \"earlier\" refusal exists but answers LATER, only for bodies R1 passes.\n\nThe executable guard (`if (!ctx.isArtifactBacked) return;`) is correct and untouched by this card — only the prose parenthetical mispredicts the door order, in the exact place the next reader (including #9475's grounded-but-now-overturned rejection of #9453 CF-3) will trust it. This is the same wrong fact PR #9953 fixed in the checklist item, still standing in the gate's own comment.\n\n## Fix shape\n\nComment-only accuracy edit: replace the parenthetical with the measured mechanism (body direction selects the answering layer; on host-config kernels R1 runs ahead of the overlay/package doors). Six-leg evidence table in #9477's `<!-- os-dev-report -->`.\n\nRe-check command: `git grep -n \"already 403s these before this gate runs\" origin/main -- packages/plugins/plugin-security/`\n\nRefs: #9477 · PR #9953 (revision-3 ledger entry) · #9453 CF-3 (vindicated) · #9475 (rejection overturned)."
+}

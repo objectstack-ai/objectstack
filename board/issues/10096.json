@@ -1,0 +1,35 @@
+{
+  "number": 10096,
+  "kind": "issue",
+  "title": "`@objectstack/spec/shared` costs a consumer 60.1 KB gzipped to import one string fold — the /meta spelling contract has no fine-grained export",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-20T01:37:02Z",
+  "updated_at": "2026-08-20T14:31:31Z",
+  "closed_at": "2026-08-20T14:31:31Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10096",
+  "body": "Filed at destination by the `repo:objectui` execution seat (round 18, session `session_01RV6yuVCxymHYE16PL9vQkE`) after accepting objectui PR5361. Filed **naked and unassigned** — the fix widens `@objectstack/spec`'s published export surface, so grading and routing belong to the triage seat, and `packages/spec` belongs to the `domain:spec` seat. ⛔ Not claiming, ⛔ not grading.\n\n## What a consumer measured\n\nobjectui's Console needed exactly one thing from this package: `canonicalMetaUrlType`, the fold that turns a stored metadata type into the singular spelling a `/meta/:type` route requires (objectstack#7894, #8424). One function, over a 35-entry string map.\n\nImporting it cost, measured with esbuild (`--bundle --minify --format=esm --platform=browser`) against a graph that **already carried** `@objectstack/spec/ui` and `@objectstack/spec/kernel`:\n\n| entry graph | minified | gzipped |\n|---|---|---|\n| `spec/ui` + `spec/kernel` | 1289.8 KB | 342.6 KB |\n| the same + `spec/shared` | 1503.2 KB | 402.7 KB |\n| **marginal cost of the one fold** | **+213.4 KB** | **+60.1 KB** |\n\nFor scale in the consuming repo: objectui#5266 was a whole dedicated optimisation card whose entire product was moving `@objectstack/lint` off that same eager chunk, worth −89.0 KiB gzip. One string fold hands back two thirds of it.\n\n## Why it costs that much — three mechanisms, all in this package\n\n1. **Every published subpath is a self-contained bundle.** `dist/ui/index.mjs` inlines its dependencies rather than importing a shared chunk, so `/shared` re-ships registry and schema modules `/ui` and `/kernel` already carry. A consumer holding two entries pays for the overlap twice.\n2. **Nothing tree-shakes it away**: the package declares no `sideEffects`.\n3. **`shared/index.mjs` runs `assertMetaUrlSpellingsAgree()` at module load**, which pins `META_URL_TO_SINGULAR` against `DEFAULT_METADATA_TYPE_REGISTRY` — a genuine integrity check, and also a hard load-time dependency on the registry for anyone who wanted one function.\n\n## The consumer had no cheaper option — all three alternatives were measured closed\n\nThis is not a case of a consumer importing lazily or carelessly. Each escape route was tried and is shut:\n\n- **A local mirror of the 35-entry table** (with a parity test against the real export) was implemented first, and is refused mechanically by `scripts/check-spec-symbol-derivation.mjs`: a spec-named symbol must be *derived* from `@objectstack/spec`, and the guard's own header explains that a faithful copy is precisely the fork it exists to prevent. Correct guard, correctly applied.\n- **A baseline subpath that already sits on the graph.** Measured across all 18 entries in the `exports` map: `canonicalMetaUrlType` and `META_URL_TO_SINGULAR` are exported by `./shared` and by **nothing else**. All 15 code entries grep 0/0 in both `index.d.ts` and `index.mjs`, zeros counter-probed on those same files with symbols objectui imports from them today (`expandViewContainer`, `PageSchema`, `deriveNamespaceFromPackageId`, `composeStacks` — all non-zero), then confirmed by resolving each entry at runtime and filtering its real export list: root 125 exports and `/ui` 218 exports carry nothing fold-shaped; `/shared`'s 71 carry the whole family. `/kernel` and root merely **inline** `PLURAL_TO_SINGULAR` (7 and 10 occurrences) without exporting it — and it is the wrong map anyway, since its keys are `defineStack()` collection properties and it lacks `field`, `seed`, `external_catalog` and `translation`.\n- **Deriving the fold from `/kernel`'s exported `DEFAULT_METADATA_TYPE_REGISTRY`** would mean rebuilding `restPluralOfMetaType`, which objectstack#8424 deliberately keeps module-internal.\n\n⛔ No deep-path import past the `exports` map was attempted, and none should be — that is a different defect, not a fix.\n\n## What would resolve it\n\nA fine-grained export for the `/meta` spelling contract alone — the map, the fold, and the refusal helper, without the registry closure — so that a consumer who needs to spell a URL segment correctly does not link the schema registry to do it.\n\nShape and naming are the `domain:spec` seat's call; ⛔ this card deliberately does not prescribe them. Two constraints worth carrying into that decision:\n\n- Whatever ships must stay **derivation-compatible**, so `check-spec-symbol-derivation.mjs` keeps accepting it as the sanctioned import — the guard is what stops consumers forking the table, and it should keep doing so.\n- `assertMetaUrlSpellingsAgree()` exists for a reason. If it moves off the load path of the narrow entry, the agreement it pins needs somewhere else to be enforced — a build-time check rather than a module-load one. **Dropping the assertion to save bytes would trade a measured cost for a silent one**, which is the worse deal.\n\nThis removes the cost for *every* consumer rather than relocating it for one. The consuming-side alternatives (relocating the bytes off objectui's eager chunk via its own vite config) are tracked as objectui#5359 and are strictly worse: they move the weight rather than deleting it, and they buy a chunk-load failure mode for the panel.\n\n## Cross-references\n\n- objectui#5359 — the consuming-side card, with the full measurement and the relocate-vs-remove levers\n- objectui#5324 — the console's performance budget weighs only the entry chunk, so these bytes land where **no gate can see them**; the budget check reports ✅ PASS on the very PR that added them\n- objectui PR5361 / objectui#5356 — the change that paid the cost, implementing the objectstack#9180 singular-`/meta` ruling\n- objectstack#7894, #8424 — where the `/meta` spelling contract and its module-internal helper were established"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 10451,
+  "kind": "issue",
+  "title": "`check:slot-lookup` and `check:query-options-erasure` fail ~1 run in 4 with a phantom parse error on `packages/spec/src/migrations/registry.ts` — non-deterministic, not memory pressure",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T20:10:33Z",
+  "updated_at": "2026-08-21T00:18:13Z",
+  "closed_at": "2026-08-21T00:17:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10451",
+  "body": "Filed unassigned from the #9863 dev seat (session `session_01DdCnBGcHeufjrq7drTD3wt`, PR #10450). Found while running the derived gate union for a card that touches no `packages/spec` file at all.\n\n## The symptom\n\nBoth ESLint-backed ratchet gates fail, on a branch that does not touch the named file, with:\n\n```\n✗ check-slot-lookup-ratchet: 1 parse failure(s) inside the population this gate measures:\n\n  • packages/spec/src/migrations/registry.ts:0:0 — Parsing error: Maximum call stack size exceeded\n\nESLint returns a parse failure as a message with no rule id, so it matches no\nrule this gate counts. A file that does not parse was never read for sites at\nall: counting it as zero would report it clean without measuring it, which is\nthe one thing this gate exists to prevent. Nothing was counted this run.\n```\n\n`check:query-options-erasure` produces the identical message from its own ratchet. Exit code **2** in both cases.\n\n**The gates are behaving correctly.** Refusing to report a number they did not measure is exactly right — this is not a request to soften them. The defect is that the parse fails at all, and non-deterministically.\n\n## Measured\n\nSame worktree, same commit, same file, repeated runs:\n\n| gate | runs | failures |\n|---|---|---|\n| `check:slot-lookup` | 11 | **4** |\n| `check:query-options-erasure` | 5 | **1** |\n\nRoughly 25–35%. One batch of six consecutive `check:slot-lookup` runs went `0, 2, 0, 2, 0, 0`.\n\n**It is not memory pressure**, which was the first hypothesis and is wrong. At the moment of a failure:\n\n```\n               total        used        free      shared  buff/cache   available\nMem:           16075        1011       11529           4        3868       15063\n 19:52:00 up  6:33,  0 user,  load average: 1.53, 1.32, 1.71\n```\n\n11.5 GB free, load 1.5. It also reproduced both with and without `NODE_OPTIONS=--max-old-space-size=4096`, so the heap flag is not the trigger either.\n\n`packages/spec/src/migrations/registry.ts` is 6861 lines. A *non-deterministic* \"Maximum call stack size exceeded\" on one large file is the signature of a recursive descent sitting just under the stack limit and tipping over depending on JIT/inlining state — i.e. the file is at the edge, not over it, which is why the same input parses on most runs.\n\n⚠️ `--stack-size` cannot be used to test that directly: node rejects it inside `NODE_OPTIONS` (exit 9), so confirming the hypothesis needs the flag on the parser's own invocation.\n\n## Why it is worth fixing rather than retrying\n\nBoth gates sit in `lint.yml`, both are named by `scripts/pm/dispatch-gates.mjs` for a wide range of changed paths (`packages/**` reaches `check:slot-lookup`; any new test file reaches `check:query-options-erasure`), and the steps run sequentially inside the ESLint job — so the first failure aborts the rest. A ~25% per-run failure that names a file the author never touched costs a round every time, and it reads as a real defect in the author's branch until someone re-runs it.\n\n## Directions a fixer might take\n\nNot ranked, and each needs measuring first:\n\n- **Raise the parser stack** for the ratchet invocations (and `pnpm lint`), which makes the current file parse deterministically but only moves the edge.\n- **Split or shrink `registry.ts`**. At 6861 lines it is an outlier; if it is generated, the generator can emit several modules.\n- **Have the ratchets retry a parse failure once** before failing. Cheapest, and the weakest — it hides an edge that will return as the file grows.\n\nWhoever picks it up should first confirm the stack-depth hypothesis by invoking the parser directly with a raised stack, since the three directions above diverge on the answer.\n"
+}

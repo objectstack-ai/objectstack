@@ -1,0 +1,35 @@
+{
+  "number": 9487,
+  "kind": "issue",
+  "title": "Every 401 answers `{error, message}` with no `code` key, while every other error family carries `{error, code}`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T04:09:08Z",
+  "updated_at": "2026-08-19T08:42:41Z",
+  "closed_at": "2026-08-19T08:42:25Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9487",
+  "body": "Blocked-by: #9823\n\n⚠️ **Status, 2026-08-19 (`domain:cli` seat, session `session_01WeN7F6jQFpcqW2BN56RdPa`):** the maintainer-ruled additive fix **landed** for the REST `enforceAuth` seam via PR #9824 (`278280586d`). This card stays **open** because its acceptance property is stated over *every* 401 and sub-issue #9823 is still a codeless 401 producer. Details in the ACCEPT comment below.\n\n⚠️ **Two placeholders in \"Observed\" now read `{message}` / `{code}`, where the original used angle-bracket form.** The body sanitizer had already eaten the message placeholder at filing time, leaving that line reading `{error: , code: …}` with a hole in it. I first tried preserving the angle-bracket form inside a fenced block; **read-back proved the fence does NOT protect it** — the angle-bracket `message` placeholder was deleted a second time, from inside the fence, while an angle-bracket `code` placeholder on the same line survived (an allowed HTML element name is kept; an unrecognised one is dropped). Brace placeholders are the form that actually survives, so the line uses those. ⛔ No other wording is changed.\n\n---\n\nQA-source: #9417 · api-backend.error-envelope-ledger · c1\n\nExtracted at close-out of the #9296 QA wave (#9480). Designated for extraction by the Tier-2A reviewer of record — *\"two API-shape observations worth their own cards rather than burial in a run record\"*. Subject sha `e4e5c6e3c608b1b807c83a0d5b734f213eb1a1dd`, stock showcase.\n\n## Observed\n\nEvery 401 across the API answers:\n\n```json\n{\"error\":\"UNAUTHENTICATED\",\"message\":\"Authentication is required to access this endpoint.\"}\n```\n\nThe code sits in `error`, and there is **no `code` key**. Every other sampled error family answers `{error: {message}, code: {code}}` — `VALIDATION_FAILED`, `PERMISSION_DENIED`, `OBJECT_NOT_FOUND`, `RECORD_NOT_FOUND`, `BATCH_NOT_ATOMIC` and `UNSUPPORTED_QUERY_PARAM` all carry both keys, with `error` holding the human message.\n\nVerified across route families in #9417: `/data/:object`, `/data/:object/:id`, `/meta/object`, `/meta/agent|tool|skill`, `/reports`.\n\n## Why it matters\n\nA client keying on `body.code` — the shape the other six families teach — reads `undefined` for every authentication failure, and a client keying on `body.error` reads a *message* everywhere else and a *code* here.\n\nIt also cost coverage: #9333 records `api-backend.error-envelope-ledger` **c0 and c3 as `partial`** precisely because the 401 sample carries no `code`, so neither its ledger membership nor its status mapping could be verified from the response.\n\n## Fix direction — not prescribed\n\nWhether the answer is to add `code: \"UNAUTHENTICATED\"` alongside the existing keys, or to declare the 401 family's shape explicitly in the error ledger, is a triage/design call. The property worth pinning either way: one documented key identifies the code on *every* error family, 401 included.\n\nNo priority and no `domain:*` label — normal triage first-touch."
+}

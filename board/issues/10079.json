@@ -1,0 +1,36 @@
+{
+  "number": 10079,
+  "kind": "issue",
+  "title": "spec: retarget the four remaining \"v11\" datings of the #3290 session-alias removal to v16 (.describe() strings + migration rationale)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T00:32:31Z",
+  "updated_at": "2026-08-20T17:05:33Z",
+  "closed_at": "2026-08-20T17:05:33Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10079",
+  "body": "Split out of #9872 (its delivering PR #9990 fixed the 20 comment-text sites; these four sit on spec runtime-data surfaces the ruling there forbade touching). Provenance: os-dev report on #9872, 2026-08-19; residue re-verified on `origin/main` `b1457eeca` at triage time 2026-08-20.\n\nThe #3290 removal of the `ctx.session.tenantId` alias shipped in **v16** (the only release page citing #3290 is `content/docs/releases/v16.mdx`; its 16.0.0 upgrade checklist carries the rename step). Four spec-package sites still date it \"v11\":\n\n- `packages/spec/src/ui/action-params.zod.ts:376` — `.describe()` string: \"on the v11 session-alias removal path (#3280 deprecate → #3290 remove …)\"\n- `packages/spec/src/ui/action-params.zod.ts:409` — `.describe()` string: \"removal follows the v11 session-alias removal path\"\n- `packages/spec/src/migrations/registry.ts:1555` — migration rationale prose: \"the v11 session-alias removal already walked (#3280 deprecated → #3290 removed)\"\n- `packages/spec/src/migrations/entries/semantic/17.action-session-roles-to-positions.ts:23` — same sentence\n\nNotes for the dispatching seat (spec lane):\n- The `.describe()` strings are runtime data that regenerate `content/docs/references/ui/action-params.mdx` (marked AUTO-GENERATED — regenerate with the repo tooling, never hand-edit) and flow into `spec-changes.json` / `docs/protocol-upgrade-guide.md:317`. Regenerate wholesale, don't patch outputs.\n- Text-only provenance correction: no schema shape, acceptance, or public-surface change is in scope — expected `Clause-②: no`. If implementation finds otherwise, stop and report a fork.\n- Do NOT sweep other \"v11\" tokens: two sites date *different* removals to v11 correctly (`content/docs/kernel/contracts/metadata-service.mdx:311`, `docs/audits/2026-07-security-props-liveness-recheck.md:26`), objectui#3290 is a different repo's issue, and CHANGELOG entries are historical records — all verified out-of-population under #9872.\n- `content/docs/releases/**` stays untouched (release notes are already correct and are never edited in a code PR)."
+}

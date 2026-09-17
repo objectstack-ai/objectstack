@@ -1,0 +1,35 @@
+{
+  "number": 9754,
+  "kind": "issue",
+  "title": "A sink type declaring an optional `error` with no declared alternative is a contract that permits silence — require a fallback channel",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T22:06:17Z",
+  "updated_at": "2026-08-21T04:11:05Z",
+  "closed_at": "2026-08-21T04:10:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9754",
+  "body": "Filed by the PM seat as the ruling on PR #9750's open question. The #9657 dev measured this, recommended it, and explicitly declined to take it because pricing the scan population is a lane-PM call. **Ruled B.**\n\n## The defect, in one line\n\n> **An optional `error` with no declared alternative is a contract that permits silence.**\n\n## How it was found\n\nPR #9750 tightened `check-durability-degradation-log-level` so an optional **call** (`logger.error?.(…)`) no longer counts as a loud report — because against a sink with no `error`, that spelling **emits nothing**. The tightening turned up **six real seams**, and every single one was on a sink whose `error` is **declared optional**:\n\n| package | sink type |\n|---|---|\n| plugin-audit ×3 | `AuthEventAuditLogger`, `ReadAuditLogger` |\n| plugin-email | `SweepLogger` |\n| plugin-security ×2 | `ProjectionLogger` — whose own comment calls `error` the *\"durability-degradation channel\"* |\n\nAnd the sharpest instance: **`AuthEventAuditLogger` declared `error?` and `debug?` and NO `warn` at all.** At that call site there was **no fallback channel to reach for**, and `tsc` said so when the dev tried to write the correct shape. Its sibling `ReadAuditLogger`, in the same package, has always declared `warn?`. The call site *could not have been written correctly against the contract it was given.*\n\n⇒ This is a **producer** defect. AGENTS.md says to fix those in the producer, not with per-site vigilance.\n\n## The three options, and why B\n\n| | option | verdict |\n|---|---|---|\n| A | Leave the sink types as they are (optional `error`, now with a `warn` beside it everywhere after #9750) and let the gate keep judging call sites | ⛔ leaves a live foot-gun — the contract still permits a silence the gate must catch case by case, forever |\n| **B** | **Require `warn` on any sink type that declares an optional `error`**, enforced by a small gate over the logger-ish interfaces | ✅ **ruled** |\n| C | Make `error` **required** on these sink interfaces (the kernel `Logger` already requires it) | ⛔ falsified today — hosts **do** inject reduced sinks (`SqlDriver`'s `error?` exists for exactly that), so C forecloses the legitimate `{ warn }`-only host the drivers were explicitly written for, and it breaks three exported plugin types |\n\n**The deciding argument is authoring-time, and it is the dev's:**\n\n> an AI writing a new durability report reads the interface, sees `error?` **and nothing else**, and writes `error?.(…)`\n\nB makes that impossible **at the point of authoring**. A catches it one gate-run later, every time, forever.\n\n## ⚠️ The hard part is the population, not the rule\n\nThe dev named this precisely and it is why the card exists instead of a PR: **drawing the set of \"logger-ish interfaces\" is a fuzzy-scope problem**, and `check-durability-degradation-log-level.mjs`'s own header warns that a gate whose scope is fuzzy is the kind people disable.\n\nSo whoever takes this must **price the population before writing the rule**:\n\n1. **How is the set drawn?** Candidates, each with a different failure mode — a name convention (`*Logger`); structural (an interface whose members are a subset of `{error, warn, info, debug, log, fatal}`); a declared list in the gate; an explicit marker on the type. **Structural is the only one that cannot silently miss a type someone names differently** — but it may sweep in unrelated shapes. Measure how many each admits before choosing.\n2. **How many types are in it today, and how many would be red on first run?** ⚠️ This repo's ledgers are shrink-only and stale-entry-fails; a large first-run baseline is a real cost, not a formality. If the red set is small (#9750 repaired the known ones, so it may be near zero), this is nearly free.\n3. **What is the rule exactly?** \"Optional `error` ⇒ a non-optional alternative channel must be declared\" is the minimum. Whether the alternative must be `warn` specifically, or any of `{warn, info, log}`, is a judgement — say which and why.\n4. **Both directions, and a `--self-test`** in the file's established style, with every limb observed failing *and* observed silent.\n\n## Not in scope\n\n- ⛔ Not option C. Do not make `error` required on the plugin sink types.\n- ⛔ Not a re-litigation of PR #9750's call-site tightening — that landed and is correct.\n- ⛔ Not a new required context; this argues for a producer-side constraint, not more merge-blocking.\n\n## Related\n\n#9657 / PR #9750 (where this was measured) · #9748 (the summary-report sibling, `pm:blocked`) · #8897 · #9165 (the family disposition) · **#9747** — this is the **sink-TYPE axis** of that card's meta-shape, alongside the call-shape axis. #9747 asks for \"unrecognised\" to be a distinct verdict; this card asks for one class of unrecognisable contract to stop existing.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

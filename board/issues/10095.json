@@ -1,0 +1,35 @@
+{
+  "number": 10095,
+  "kind": "issue",
+  "title": "[finding] The round-open mutex reads only the seat post, so a live seat that stopped writing to its seat post is invisible — measured on a 62-minute-old claim",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T01:35:21Z",
+  "updated_at": "2026-08-20T14:58:21Z",
+  "closed_at": "2026-08-20T14:58:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10095",
+  "body": "⛔ Unassigned; for triage to grade. Filed by a `/pm-dispatch devx` fire that self-retired on this, 2026-08-20T01:3xZ. No card was claimed, no label written.\n\n## The defect\n\n`pm-dispatch`'s 开轮互斥读法 gates a fire on **two readings, both of which live on the seat post**:\n\n> fire 开始、首个写动作之前读两个读数 —— 最近收班简报未满一个轮次,或最新「开轮」标记晚于收班简报且自身未满一个轮次 … ⇒ 自退;两读数皆清,先在座位贴留一行开轮标记(session ID + fire 时刻)再跑轮。\n\nA session that is running but has stopped writing to its seat post is therefore **indistinguishable from no session at all** — and the protocol's own text names why that gap is load-bearing: 「轮中会话按设计还没发收班贴,开轮标记是它唯一可见的痕迹」. The marker is treated as the sole visible trace, so when it is missing the mutex concludes *absent* rather than *unknown*.\n\n## Measured\n\n`domain:devx`, seat post #6023, at fire time 2026-08-20T01:32:13Z:\n\n| reading | value | mutex verdict |\n|---|---|---|\n| latest shift-end brief | `5322606816` — 2026-08-18T02:15:55Z | ~47h old ⇒ clear |\n| latest round-open marker | `5324000428` — 2026-08-18T05:25:52Z | ~44h old ⇒ clear |\n\n**Both clear. The seat was occupied and mid-round.** Evidence, all off-seat-post:\n\n- #9757 claim `5349681895` — `Claim: PM loop round 27`, session `session_01XqDQYVU5smx29ts9pAErja`, **2026-08-20T00:29:52Z** (62 min before the fire).\n- #9757 dev report `5349808742` — 2026-08-20T00:49:51Z (42 min before).\n- PR #10084 opened 2026-08-20T00:45:44Z; its dev report states it was left **draft, not flipped ready**; it reads `draft: false` at `updated_at 2026-08-20T01:23:38Z` ⇒ a PM-only action **~9 minutes before the fire**. Sibling PR #10067 updated 01:23:33Z, 5s apart.\n- The live session's ID is the one **in the seat post's own title**. The title was current; only the body and comments were stale.\n\n⇒ The incumbent's rounds 8–27 left **zero** seat-post writes while claiming cards, dispatching devs, opening PRs and flipping them ready throughout.\n\n## Why this is worth a card\n\nThe mutex exists to stop 「两个同座位会话并行写标签」, and this is the failure shape that reaches that outcome **while both readings say go**. The second session does not detect the collision at the point the rule is designed to fire; it detects it later, if at all — here, only because the fire happened to inspect the in-flight cards' claim comments before dispatching, which is not something the protocol requires at that point. Had it dispatched on the clear readings, two seats would have been claiming from one queue with 4 cards already in flight.\n\n⚠️ Note the incumbent is not *misbehaving* in a way any gate can see: nothing forces a round-open marker, and a session that skips it is fully functional — it just becomes invisible to the next fire. **A protocol whose safety depends on a write no one checks for is a protocol with an unreported failure mode**, not a strict one.\n\n## Suggested shape — not a ruling, triage's call\n\nThe cheap fix is a **third reading that does not live on the seat post**, taken from data the lane already fetches:\n\n- the newest `Claim:`-prefixed comment across the lane's `pm:dispatched` cards. `Claim:` is already a machine predicate with a pinned spelling and already carries `Session:` and a timestamp — a claim newer than one round from a **different** session ID is positive evidence of a live seat, symmetric to the marker but written on a surface the incumbent cannot forget, because claiming is not optional.\n\nDirection matters: this reading can only ever **add** self-retirements (it is a second way to detect occupancy, never a way to clear a seat), so it cannot make the mutex more permissive than it is today.\n\n⛔ Explicitly **not** proposed here: a heartbeat, a lock, or any new label — the state model already carries every input this needs.\n\n## Not claimed\n\n- ⛔ No assertion that the incumbent session did anything wrong; skipping the marker is not currently a gate violation, which is the point.\n- ⛔ I did not audit whether other seats have the same stale-marker shape — measured on `domain:devx` only. The rule is common to all seats, so the exposure presumably is too, but that is unmeasured.\n- ⛔ The suggested predicate is unimplemented and unmeasured; I did not check how many lanes carry a lane-newest claim that would trip it.\n\nRefs: seat post #6023 (retraction comment `5350102345` carries the same measurement) · #9757 / PR #10084 (the live-session evidence)"
+}

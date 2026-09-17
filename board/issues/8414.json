@@ -1,0 +1,35 @@
+{
+  "number": 8414,
+  "kind": "issue",
+  "title": "Background sweeps project phantom injected system columns from federated remote tables — absorbed today by the SqlDriver unknown-column retry ladder",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T12:00:52Z",
+  "updated_at": "2026-08-20T17:04:04Z",
+  "closed_at": "2026-08-20T17:02:41Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8414",
+  "body": "Restart-when: a background sweep reaches SqlDriver.count on a federated object (packages/drivers/driver-sql/src/sql-driver.ts count has no unknown-column retry ladder), or a federated remote holding CJK text makes backfillSearchCompanion attempt engine.update per boot\n\nFound during #7737's end-to-end re-verification (measured on a real `os dev` boot of `examples/app-showcase`, `origin/main` @ `b432ae472`, SQL captured at `SqlDriver.findRows` with temporary instrumentation). Filed unassigned, observation-class: no wrong user-visible answer was measured on any current dialect — the cost today is wasted work and log noise, plus two latent halves documented below.\n\n## The measurement\n\nTwo platform background sweeps interrogate federated (ADR-0015 `external`) objects about columns the platform injected into the registered schema but never provisioned on the remote table — the same phantom-anchor family #7835 closed for plugin-security's predicate injectors, but these are PROJECTION consumers, which #7835's scope did not cover.\n\n1. Pinyin search companion backfill (`backfillSearchCompanion`, `packages/plugins/plugin-pinyin-search/src/companion-projection.ts`), at every boot, stack-confirmed via `kernel` hook dispatch:\n\n```\nselect `id`, `name`, `__search` from `customers` order by `id` asc limit 1000\n```\n\n2. Lifecycle dangling-reference audit (`auditDanglingReferences`, `packages/objectql/src/integrity/dangling-reference-audit.ts`, via `LifecycleService.sweep` — first pass 60s after boot), stack-confirmed:\n\n```\nselect `id`, `organization_id`, `created_by`, `updated_by`, `owner_id`, `owning_business_unit_id` from `customers` limit 500\n```\n\nBoth against the remote table `customers` of the `showcase_external` datasource, which physically has only `id, name, email, region, lifetime_value` (plus `orders`, same shape of statement). Neither `__search` nor any of the five anchors exists remotely.\n\n## Why nothing visibly breaks today\n\nDirectly verified with better-sqlite3 13.0.2: a backtick-quoted unknown column in a SELECT projection raises `no such column` — it does NOT take SQLite's double-quote literal fallback. The failing statement is then caught by `SqlDriver.findRows`'s unknown-column retry ladder (the `isUnknownColumn` branch, `packages/drivers/driver-sql/src/sql-driver.ts`), which retries `select *`: rows come back without the phantom columns, so\n\n- the dangling-reference audit sees `undefined` anchors and reports no false dangling ids;\n- the pinyin backfill sees no blob and (on this fixture, ASCII data) no CJK source, and skips.\n\nThe retry predicate also matches Postgres/MySQL's `column ... does not exist`, so the absorption is cross-dialect.\n\n## The costs and the latent halves\n\n- Per federated object, per pass: one doomed statement plus a full-row `select *` retry (up to 500/1000 rows fetched to audit columns that cannot exist). The lifecycle sweep repeats on its interval, the pinyin backfill on every boot.\n- Each pass also emits the #4363 \"Paged read ... is NOT deterministic\" stderr warning per federated object (the retry drops nothing here — the walk itself pages a table the driver did not create).\n- Latent (a): a federated remote holding CJK text would make the pinyin backfill compute companion values and attempt `engine.update` on a read-only federated object every boot — refused by the external write gate, one warn per row.\n- Latent (b): both sweeps are protected only by the retry ladder's error-message sniffing; `SqlDriver.count` has no such ladder, so any future sweep that counts by a phantom column fails hard.\n\n## Suggested direction (not prescriptive)\n\nSweep enumerators should skip phantom columns at the source — the provenance derivations #7835 used for Layer 0 (`platformProvisionsStorage` / the `injectedSystemColumnDefs` family in `@objectstack/spec/data`) answer exactly this question — rather than any consumer-side tolerance of the failing read (Prime Directive #12).\n\n## Related\n\n- #7835 — same phantom-anchor family, predicate consumers (closed with the provenance test in `plugin-security/src/federated-phantom-anchors.ts`).\n- #7738 / PR #7833 — the engine-level `tenantId` withholding for federated objects.\n- #7737 — the verification run this fell out of; the user-facing federated read path itself measured clean (see its report comment).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RDTnVvsgA6cUZ4xFVtPZRy)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 10221,
+  "kind": "issue",
+  "title": "新环境日志被 sys_setting 'no such table' ERROR 刷屏：本地化读取先于建表，真错误被噪音淹没",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T13:59:28Z",
+  "updated_at": "2026-08-20T17:02:41Z",
+  "closed_at": "2026-08-20T17:02:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10221",
+  "body": "## 现象（P2：新环境日志被 sys_setting \"no such table\" 刷屏）\n\n2026-08-20 cloud 本地 rig（objectstack `4389fe932`），新种子环境的 objectos.log 反复打印（几分钟内数十条）：\n\n```\n[sql-driver] DATABASE_ERROR — the backend refused a read on 'sys_setting' (SQLITE_ERROR).\n… select * from `sys_setting` where `namespace` = 'localization' and `key` in\n('timezone', 'locale', 'currency') and `scope` = 'tenant' limit 10 - no such table: sys_setting\n```\n\n本地化设置读取发生在 `sys_setting` 表被创建/迁移之前（或该环境根本不会建这张表），每个请求都撞一次，ERROR 级刷屏。\n\n## 影响\n\n- 功能上大概率无害（读不到就回退默认 locale），但 ERROR 级噪音会淹没真实错误——本次测试里真正致命的 `publishPackageDrafts rolled back` 行就淹在它中间；\n- 每请求一次全失败查询也是白花的 IO。\n\n## 修复建议\n\n三选一：\n1. 本地化读取前探测表存在（或捕获 no-such-table 降级为一次性的 INFO）；\n2. 把 sys_setting 建表纳入环境首次引导迁移；\n3. 读取结果（包括\"表不存在\"）做进程内缓存，别每请求重试。\n\n## 复现\n\n新建环境（不带任何 setting 写入），任意带 kernel 的请求即触发。\n"
+}

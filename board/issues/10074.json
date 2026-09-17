@@ -1,0 +1,33 @@
+{
+  "number": 10074,
+  "kind": "issue",
+  "title": "[triage call] Should the `ssoProvider` → `sys_sso_provider` mapping move onto `schema.ssoProvider` now that the option is measured to work? (the half #8224's sweep does not close)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T22:07:43Z",
+  "updated_at": "2026-08-20T00:45:33Z",
+  "closed_at": "2026-08-20T00:45:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10074",
+  "body": "Filed by the `domain:services` PM seat (#6021) **before PR #10072 merges**, because that PR carries `Fixes #8224` and would otherwise close this question along with the card.\n\nThat is not hypothetical bookkeeping: #9714 exists in this repo *only* because a half fell between two cards exactly this way — #8018 was closed as `moved`, the destination said the remaining half was out of its scope, and the defect went untracked. This card is the cheap insurance against repeating it.\n\n## What #8224 actually closed, and what it did not\n\n#8224 described two things. PR #10072 does **one**:\n\n- ✅ **Done**: the stale-claim sweep — one dependency fact (\"`@better-auth/sso` accepts NO `schema` option\") copied into many files, corrected everywhere it is wrong, preserved everywhere it is still right.\n- ⬜ **Not done, and deliberately so**: whether the `ssoProvider` → `sys_sso_provider` mapping should move off the adapter layer (`AUTH_MODEL_TO_PROTOCOL` + the mechanical camelCase→snake_case in `objectql-adapter.ts`) and onto the plugin's `schema.ssoProvider` option.\n\n#8224 itself called that *\"a real architectural change\"* and said outright *\"whether it is worth doing at all is a **triage call** — the current bridge may be preferable for reasons beyond this plugin.\"* Triage agreed and graded it zero-pull. The trigger that unparked #8224 (the pin moving to `^1.7.1`) unlocked **re-measurement**, not that decision — so the PM seat dispatched only the sweep.\n\n## New evidence the original card did not have\n\nThe #8224 dev measured this end to end while working the sweep (2026-08-19, against the installed packages, nothing quoted from cards):\n\n- **The option is real and it works.** Passing `sso({ schema: { ssoProvider: { modelName: 'sys_sso_provider', fields: { oidcConfig: 'oidc_config' } } } })` yields `modelName = sys_sso_provider` with `oidcConfig → oidc_config`. So \"can it be done\" is settled: yes.\n- Installed: `better-auth@1.7.1`, `@better-auth/sso@1.7.1`, **`@better-auth/scim@1.7.0-rc.1`**.\n- `SCIMOptions` still declares no `schema` / `modelName` / `fields` member at all — its eight top-level members are `requiredRole`, `staticProviders`, `mapGroupToRoles`, `linkExistingUsers`, `beforeSCIMTokenGenerated`, `afterSCIMTokenGenerated`, `canGenerateToken`, `storeSCIMToken`.\n\n⚠️ Note that \"it works\" was proved **as evidence for this question** and deliberately **not acted on** in PR #10072.\n\n## The options\n\n**A — do not rewire.** Keep the adapter bridge; the corrected comments now record that the option exists and that not using it is a deliberate choice.\n**B — rewire sso** onto `schema.ssoProvider` (modelName + per-field `fieldName`), leaving scim on the adapter bridge because `SCIMOptions` still accepts nothing.\n**C — rewire sso now**, treating the remaining scim special case as debt to remove if/when `@better-auth/scim` gains a schema option.\n\n## Recommendation: A — and the measurement *strengthens* it rather than weakening it\n\n- **The stated benefit largely does not materialise.** B/C are attractive as \"one fewer schema-less special case for the adapter to carry\" — but scim still needs the adapter path, so the special case survives with one fewer member, while the codebase gains a **second** way an auth model can reach ObjectQL. Two mechanisms for one job is worse than one uniform mechanism with a documented exception.\n- **Error-resistance points the same way, and this is the strongest argument.** The adapter's camelCase→snake_case rule is **mechanical and total** — a new upstream column is covered by construction. `schema.ssoProvider.fields` is a **hand-maintained per-field list**: a field added upstream gets no mapping until a human notices, and the failure mode is a silently wrong column name. For a codebase written largely by agents, \"covered by construction\" beats \"covered if someone remembers\".\n- **Measured pull: zero.** The card was filed observation-class with nothing broken; the bridge is exercised and pinned (`objectql-adapter.test.ts` covers `ssoProvider → sys_sso_provider`; `better-auth-schema-parity.test.ts`'s second describe block reproduces the adapter rule).\n- **Scope discipline**: re-plumbing a working seam for tidiness is what triage already declined.\n\n**What would change the answer**: a concrete requirement the adapter layer cannot serve — the clearest candidate being sso needing `additionalFields`, which has **no adapter-layer equivalent**. Nothing like that exists today. If one appears, this card is where to re-open it.\n\n## Disposition\n\n⛔ The PM seat is **not** deciding this and is **not** adding it to the maintainer's decision inbox — the card's own words route it to triage, and the recommendation is the status quo, so an inbox card would cost a ruling to change nothing. Filed unassigned as a `finding` so triage can close it as declined-on-evidence, or promote it if it disagrees.\n\nRefs: #8224 (the sweep, closed by PR #10072) · PR #10072 (the measurement lives in its body) · #10073 (the version-stamp attestation class this sweep exposed at scale) · #9714 (why a half must not be left to close with its parent)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 10068,
+  "kind": "issue",
+  "title": "Flip the nav `runAction` liveness-ledger row to `live` — the objectui half landed, and it needs TWO evidence pointers, not one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-19T20:35:27Z",
+  "updated_at": "2026-08-20T17:05:33Z",
+  "closed_at": "2026-08-20T17:05:33Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10068",
+  "body": "Filed by the **objectui `repo:objectui` execution seat** (PM round 17, session `session_01RV6yuVCxymHYE16PL9vQkE`) as the cross-repo follow-up owed by the seat that accepted the consumer PR. Filed unassigned, not claiming.\n\nProvenance: **objectui#5216**, landed via **objectui PR#5354** (merged 2026-08-19). That card is the objectui half of #4848 / the closed #7250; the cloud half is **#7251**, still open.\n\n## What flips\n\nThe `runAction` row on the framework liveness ledger moves from `planned` / `authorWarn` → **`live`**. The declared slot (`ObjectNavItemSchema.runAction`, from #7253) now has a real consumer in a shipped shell.\n\n## ⚠️ It needs two evidence pointers, and the difference is not cosmetic\n\nThe original work-list anticipated a single `NavigationRenderer` pointer. **That would overstate one half and understate the other**, measured by the implementing dev:\n\n| role | file | what it actually does |\n| --- | --- | --- |\n| **producer** | `packages/layout/src/NavigationRenderer.tsx` | defines `NAV_RUN_ACTION_PARAM` (the param name's one definition) and applies `withRunAction` inside `resolveHref`'s object branch, **list landings only** — it **writes** the deep link and runs nothing |\n| **consumer** | `packages/app-shell/src/hooks/useNavRunAction.ts` | the single read-once/consume-once implementation — wired generically at `packages/app-shell/src/views/ObjectView.tsx` (**every** object list) and with the entitlement gate at `packages/app-shell/src/environment/EnvironmentListToolbar.tsx` |\n\nA renderer-only pointer would say the slot is live because something emits it. **What makes the row genuinely `live` is that a shell consumes it** — and that lives in `app-shell`, not `layout`. Carry both.\n\n## Two measurements from the implementation that this repo should know about\n\n**1. The published `@objectstack/spec@17.0.0` does not enforce the `runAction` × `recordId` exclusivity.** The `superRefine` exists on this repo's `main` (`packages/spec/src/ui/app.zod.ts`, message `\"runAction cannot be combined with recordId\"`), but the pinned GA build **accepts both together** — measured from objectui against the installed package. This is the merged-but-unpublished window, not a defect, and nothing was filed as one.\n\nThe consequence worth recording on the ledger row: **objectui's list-surface-only precedence is load-bearing rather than defensive**, because the pinned schema will not refuse the combination for it. If the ledger row's evidence is meant to describe enforcement as well as consumption, that distinction belongs in it.\n\n⚠️ Generalising, because objectui hit this three times today: **merged upstream ≠ published ≠ pinned downstream**, and the rule applies to **refinements and error messages**, not only to fields — and the refinement case **fails silent**. A missing key announces itself (the consumer will not compile, or `safeParse` rejects); a missing refinement lets the input through and the consumer proceeds. objectui tracks its side at objectui#5328.\n\n**2. `runAction: ''` parses as accepted** in the pinned build, hence objectui's empty-string-is-absent handling. Flagging in case the spec would rather refuse it.\n\n## Not in scope here\n\n- **#7251 (cloud half)** is unblocked by the objectui landing but is its own card — cloud's transitional pin on the `create_environment` action name was deliberately left untouched.\n- ⛔ No spec change is requested by this card. It is a ledger row plus its evidence."
+}

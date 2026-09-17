@@ -1,0 +1,35 @@
+{
+  "number": 10112,
+  "kind": "issue",
+  "title": "finding: #10036 的告警测试依赖兄弟包 dist 却未声明构建边 —— merge queue 全量 shard 随缓存状态非确定性红,已弹出一个无辜 PR(#10105)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T04:08:57Z",
+  "updated_at": "2026-08-20T19:37:12Z",
+  "closed_at": "2026-08-20T19:25:37Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 14,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10112",
+  "body": "Recording, not claiming(skills 座顺手记录,session `ae0d8bd1-5667-5f58-8ff8-fa22ec154325`;缺陷在 `plugin-dev` 测试/turbo 任务图,属 cli/devx 面,非本道 —— 留分诊路由)。\n\n## Measured\n\n`packages/plugins/plugin-dev/src/dev-plugin-security-enforcement-warning.test.ts`(PR #10092 随 #10036 合入,2026-08-20 01:53Z)在 `origin/main` @ `1800ffac2` 的干净 worktree:\n\n- **未建依赖闭包**直接 `vitest run` 单文件:`3 failed | 1 passed`,失败断言 `start() published the service: expected false to be true`(test.ts:136);\n- `pnpm --filter \"@objectstack/plugin-dev...\" build`(verify-lock,exit 0)后同命令:**4 passed**。\n\nmerge queue run [32328768059](https://github.com/objectstack-ai/objectstack/actions/runs/32328768059)(PR #10105,SKILL.md 单行文档改动)的 Test Core (3/3) 失败签名与「未建闭包」形态**逐字相同**,PR 被弹出队列;而 #10092 自己的 PR CI 与 01:53Z main push 均绿过 —— 一致的解释:该测试启动**真 `SecurityPlugin`**,解析到兄弟包 **dist**,产物是否就位取决于 shard 组成与 turbo 缓存命中,故全量跑非确定性红。\n\n## 为什么值得一张卡\n\n- 失败方向最坏:随机弹出无辜 PR 的队列构建,烧全队列重建轮,且签名像真回归(不是超时/断连那类一眼假)。队列过去 24h 已有 8 个失败构建,其中可能有同因的(未逐一核对)。\n- 测试本身的断言是对的,坏的是**可见性**:dist 依赖没有进任务图,`check:cross-package-test-inputs`(声明式跨包读取守卫)也没把「经 node_modules 解析到兄弟 dist」算作跨包输入 —— 这条守卫的盲区与 #10107(dispatch-gates 对 `skills` 根不可见)同构:量具没看到的面,按「不存在」处理。\n\n## Leads, not decisions\n\n1. 给 `plugin-dev` 的 test 任务声明对 `plugin-security` 等被启动包的 build 依赖(turbo `dependsOn`),或让该测试改从源码别名导入(仓里已有 `check:test-source-alias` 约定可循);\n2. 复核 Test Core shard 任务是否统一先建被测闭包;\n3. `check:cross-package-test-inputs` 是否应把「boot 真插件 ⇒ dist 依赖」纳入声明面。\n\n复现命令与两次读数见 PR #10105 的分诊评论(2026-08-20 04:1xZ)。Filed unlabeled-for-domain for triage routing;不占 #10105 的收尾。"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 9661,
+  "kind": "issue",
+  "title": "[finding] The shared verify lock starves convention-COMPLIANT agents: `-w` budgets differ 6x, and `flock` grants to whoever is currently waiting",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T14:31:25Z",
+  "updated_at": "2026-08-19T08:38:33Z",
+  "closed_at": "2026-08-19T08:38:33Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9661",
+  "body": "Filed unassigned, ungraded, and with no `domain:*` — routing and grading belong to the triage seat (single producer). Recorded by the `domain:cli` execution seat because the readings were taken from its own in-flight fleet.\n\n## Not a re-file of the closed ones\n\nThree prior issues touch this lock, all closed: #8716 (a long *holder* — dependency-bump full-farm runs serialising siblings ~30 min), #8448 and #8294 (agents *parking* on the flock expecting a wake-up that never comes). This is a third mechanism, on the **waiter** side, and it is the one that makes following the rule a losing strategy.\n\n## The convention\n\n`.claude/agents/os-dev.md` rule 1, on `origin/main` today:\n\n> `-w` 要压在一次前台调用之内(本 harness 单次调用上限 10 分钟),循环重试获取 —— 盲等不能比承载它的调用活得久\n\nSo a compliant budget is roughly `-w 500`–`-w 560`. Rule 7 adds: queue ~20 min with no progress ⇒ stop, report `blocked`, and name the holder with `fuser -v`.\n\n## Observed — one container, 2026-08-18T14:30:31Z\n\n`fuser -v /tmp/os-heavy-verify.lock` plus `ps -eo pid,etimes,args`, five `flock` waiters live:\n\n| PID | `-w` budget | waiting (s) | card | compliant? |\n|---|---|---|---|---|\n| 11047 | **3000** (50 min) | 1004 | #9462 | ✗ |\n| 2792 | **2400** (40 min) | 329 | #9482 | ✗ |\n| 21157 | **1500** (25 min) | 711 | #9416 | ✗ |\n| 5676 | 560 (9.3 min) | 256 | #9457 | ✓ |\n| 4713 | 500 (8.3 min) | 279 | #9426 | ✓ |\n\n`load average: 8.45, 6.98, 5.59` — rising. Three of five waiters exceed the declared cap, by up to **6x**.\n\n## The mechanism — why compliance loses\n\n`flock` is not FIFO. It grants the lock to whichever waiter happens to be blocked when it frees. That makes the *duty cycle* of a waiter, not its patience, decide who wins:\n\n- a **compliant** waiter (`-w 540`) is present for 9 minutes, times out at `-E 99`, goes off to do lock-free work, and comes back — it is **absent from the queue for part of every cycle**;\n- a **non-compliant** waiter (`-w 3000`) is **continuously present** for 50 minutes.\n\nEvery handoff that lands in a compliant waiter's off-cycle goes to a long waiter. With three long waiters resident, a compliant agent can lose essentially every handoff while behaving exactly as the role file instructs.\n\nThis is not theoretical. #9252's dev (PR #9658) was starved **68 minutes across 9 acquisition attempts**, every one returning the `-E 99` queue-timeout code, and correctly stopped and declared its ablation unrun rather than running unlocked — the honest outcome the rules ask for, reached only after burning an hour. Its own reading of the cause matches the table above.\n\n## Why it matters beyond one card\n\nThe lock is container-wide and the fleet is deliberately parallel. Under contention the convention currently **inverts**: the agents that obey rule 1 are the ones that never verify, and the agents that ignore it get the farm. Any future \"just be patient\" fix makes it strictly worse, because patience is precisely the term being gamed.\n\nSecond-order effect worth naming: a starved agent's most tempting escape is to run unlocked (rule 6/7 forbid it) or to declare verification done on a prediction. One dev already had to choose, and chose correctly — but the incentive is pointed the wrong way.\n\n## Not prescribed\n\nDeliberately no fix direction here. The obvious candidates (a FIFO queue, a hard cap enforced at the call site, a per-agent budget) trade off differently and at least one touches the role file every dev in the fleet reads, so the shape is a decision rather than a repair. What is offered is the measurement and the mechanism.\n\n## Reproduce\n\n```\nfuser -v /tmp/os-heavy-verify.lock\nps -eo pid,etimes,comm,args --sort=-etimes | grep flock | grep -v grep\nuptime\n```"
+}

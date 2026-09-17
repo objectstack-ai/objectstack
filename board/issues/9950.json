@@ -1,0 +1,35 @@
+{
+  "number": 9950,
+  "kind": "pull_request",
+  "title": "feat(runtime): carry the flow author's errorMessage and run summary through the /actions door via a typed refusal carrier (#9585)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T09:44:53Z",
+  "updated_at": "2026-08-19T10:29:05Z",
+  "closed_at": "2026-08-19T10:29:03Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-19T10:29:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9950",
+  "body": "Fixes #9585\n\n## What\n\nA flow dispatched through `POST /api/v1/actions/:object/:action` (a `type: 'flow'` action — the documented record-page path) that ran and failed answered `400 FLOW_FAILED` with only the raw engine error. The trigger door additionally ships two fields in `error.details` of the ADR-0112 envelope: `errorMessage` (the flow author's own failure text — the single field objectui `flowResponse.ts` reads) and `summary` (the per-node run accounting). At the action door the author's text was declared-but-never-delivered.\n\n**Maintainer ruling (2026-08-19, Option B, recorded on the issue — verbatim authorization 「接受你的所有建议。」):** a typed refusal carrier that `dispatchFlowAction` throws and the `/actions` route recognises before the generic catch, carrying exactly those two fields; the shared resolver stays untouched.\n\n## How\n\n- `packages/runtime/src/action-execution.ts` — new `FlowActionRefusal` carrier (branded via `Symbol.for`, plus the `isFlowActionRefusal` guard). The classified ran-and-failed row of the #9446 table now throws it, with `errorMessage` / `summary` read off the engine result exactly as the trigger door reads them: present when the producer wrote them, never invented. The never-dispatched rows (404 / 409 / 422) and the unclassified residual keep their plain throws — a refused dispatch has no run to report, the same no-inventing rule the trigger door states on its 400 arm.\n- `packages/runtime/src/domains/actions.ts` — recognition ahead of the generic catch: a try/catch scoped to the flow dispatch recognises the brand and answers `deps.error(message, status, { code, ...runDetails })` — the trigger door's own exit, with `details.code` promoted by the shared envelope builder. Everything else rethrows to the generic catch, which is unchanged.\n- Doc-comment updates in `flow-dispatch-status.ts` (the \"what the table does not answer\" note) and `http-dispatcher.test.ts` (a comment that described the pre-#9585 gap).\n\n## The ruling's boundaries, kept mechanically\n\n- ⛔ `packages/types/src/thrown-http-error.ts` untouched — its deliberately-narrow `details` list (#8016 / #9106) remains the rule for every other thrower. Option A (any throw declares wire payload) was rejected by name. A new pin drives `resolveThrownHttpError` over the thrown carrier and asserts `details` stays **undefined** — a future widening of the shared resolver reddens there instead of landing silently.\n- ⛔ `packages/runtime/src/dispatcher-plugin.ts` untouched (held by sibling card #9813 this round). Recognition did not need the route registration: it lands entirely in the domain handler.\n- Bounded to the one door: the MCP `run_action` bridge shares `dispatchFlowAction` and has no recognition branch — by scope. Its safety property is pinned: the carrier stamps `status` / `code` / `message` identically to the plain throw it replaces, so an unrecognising caller serves exactly the previous answer, with only the run details staying behind.\n- No new schema keys; both doors keep agreeing on `400 FLOW_FAILED` (#9446 suite re-run green).\n\n## Tests\n\nSix new pins in `actions-flow-dispatch-status.test.ts`, the paired-door file from #9446 — including the drift pin the card asked for: one failed run driven through BOTH doors, `error.details` compared door-against-door (anchored once so two `undefined`s cannot satisfy it). Also pinned: absent artefacts invent none at either door; a never-dispatched refusal carrying incidental run fields ships them at NEITHER door; brand-based recognition rejects a field-shape lookalike.\n\nReverse verification from the committed state: reverting only the recognition branch (`domains/actions.ts` to origin/main) reddened exactly the 2 predicted pins (the `/actions` details pin and the drift pin) while all 13 #9446 pins stayed green — the carrier degrades to yesterday's answer, never a different one. Restored: 19/19.\n\nAt `6a5ac829a5` (this head): targeted suite 19/19; full `@objectstack/runtime` suite 176 files / 2634 tests green; `pnpm --filter @objectstack/runtime typecheck` green. Gates (readings, not exit codes): `pnpm lint` clean; `check:dispatcher-error-vocabulary` \"OK — 17 unregistered code-stamping site(s), all classified\" (the carrier stamps only the registered `FLOW_FAILED`, no new site); `check:route-envelope` 11 modules / 8 conformant / 0 ratcheted / 3 exempt; `check:engine-double-contract` OK 321 pinned; `check:where-matcher` / `check:query-options-erasure` baselines verified, no files added; `check:type-check-coverage` OK 64/77; `check:type-check-debt --re-measure` \"none above its recorded number\"; changeset gates (adr-0087 / no-major / empty / self-tests), `check:cross-package-test-inputs`, `check:slot-lookup`, `check:nul-bytes`, `check-affected-docs` all green. Gate set derived by `node scripts/pm/dispatch-gates.mjs` (no args, script-derived change set).\n\n## Changeset\n\n`@objectstack/runtime` minor — additive envelope payload at one door; not breaking, so no ADR-0087 disposition marker is required (`check:adr-0087-registration` green).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WeN7F6jQFpcqW2BN56RdPa)_"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 10021,
+  "kind": "issue",
+  "title": "devx seat action: five pm:blocked cards carry no machine-readable Blocked-by anywhere — backfill or re-grade, they are structurally unreleasable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-19T15:25:01Z",
+  "updated_at": "2026-08-19T20:18:23Z",
+  "closed_at": "2026-08-19T20:18:23Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10021",
+  "body": "**Seat-action card for the `domain:devx` seat — not dispatchable to os-dev.** Named reader: the devx seat PM at candidate-selection time (this card sits in your queue precisely so the lane's own read-everything discipline surfaces it).\n\n## The problem\n\nFive open devx-lane cards carry `pm:blocked` with **no `Blocked-by:` line in body or comments**: **#9758, #9757, #9755, #9754, #9748**. The unlock scan greps that line; without it these cards can never be released by any upstream closure — `pm:blocked` without a machine-readable edge is a state nobody can legally exit. Triage flagged #9754 (08-18T23:14Z) and #9748 (08-18T22:08Z, label applied by the devx session of that evening) directly on the cards; two later scan rounds re-reported the full set (round briefs on #6015). This is the third escalation, now as a card per the cross-seat transfer rule.\n\n## The ask (one line each, or a re-grade)\n\nFor each of the five: either add a comment carrying the literal machine-readable line `Blocked-by: #<n>` (or `Blocked-by: <owner/repo>#<n>`), or — if the wait is not actually an issue dependency — re-grade to `pm:queue` (dispatchable) or `pm:on-hold` with a `Restart-when:` executable predicate. Note: #9748's flag comment presumes upstream #9747 but that was a guess, never confirmed by the seat — please confirm or correct rather than copying it. Close this card when all five carry a machine-readable exit; the next unlock scan is the verification.\n\nSource: unlock-scan reports of 2026-08-19 (round briefs on #6015)."
+}

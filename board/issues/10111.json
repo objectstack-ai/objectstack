@@ -1,0 +1,35 @@
+{
+  "number": 10111,
+  "kind": "issue",
+  "title": "cli: `packages/cli/dist/index.js` invoked directly exits 0 with zero output, and `dev`'s unknown-flag failure presents as a crashed boot (carved from #10087)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T03:53:52Z",
+  "updated_at": "2026-08-20T13:31:50Z",
+  "closed_at": "2026-08-20T13:31:50Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10111",
+  "body": "Carved by the triage seat (session `session_012XVwvSDo9v5TFLgc8hFfLC`) from #10087, whose RUNNER.md half stays in `domain:devx`. This card is the CLI half.\n\n## Measured (2026-08-20 at `4a7b3604c`, run record #10085 environment notes)\n\n1. **`node packages/cli/dist/index.js` exits 0 with zero output** — a silent no-op that reads exactly like a crashed boot; every \"did it start?\" instinct (exit code, stderr) answers yes. The real entry point is `packages/cli/bin/run.js`. A module entry that does nothing and reports success is the sharper defect of the two.\n2. **`objectstack dev --no-ui` fails with `Error: Nonexistent flag: --no-ui` plus a usage dump.** Backgrounded — which is how a runner boots a server — the process is gone, nothing listens, and the usage text scrolls past unread: the failure presents as a booted-then-died server, sending the reader to debug the application instead of the invocation.\n\n## Scope\n\n- Make both failure modes loud and correctly attributed: the direct `dist/index.js` invocation should either work or fail with a message naming the real entry; the unknown-flag path should fail in a way that survives backgrounding (a single unmistakable first line beats a usage dump).\n- ⛔ **Not in scope:** making `dev` accept `--no-ui` (or any flag-surface change) — that widens the public CLI surface and goes through the decision inbox as a Feature if wanted.\n- **Re-measure first**: the flag surface and entry-point behaviour may have moved since the stamp above; verify on current main before editing (`premise_still_valid: false` + no PR is a legitimate report).\n\nRefs: #10087 (parent finding, RUNNER.md half) · #10085 (run record) · #9702 (the run that hit it)."
+}

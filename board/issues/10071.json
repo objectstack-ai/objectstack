@@ -1,0 +1,35 @@
+{
+  "number": 10071,
+  "kind": "issue",
+  "title": "finding: eslint parse of packages/spec/src/migrations/registry.ts intermittently dies with \"Maximum call stack size exceeded\" — 3 red runs on 2026-08-19, file untouched by any of them",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T21:11:34Z",
+  "updated_at": "2026-08-20T04:00:04Z",
+  "closed_at": "2026-08-20T00:45:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10071",
+  "body": "Recording, not claiming(skills 座顺手记录,session `ae0d8bd1-5667-5f58-8ff8-fa22ec154325`;该文件属 spec/devx 面,非本道 —— 留分诊路由)。\n\n## Measured\n\n`Lint & Repo Gates`(`pnpm lint` = `eslint . --no-inline-config`)在 2026-08-19 至少三次以同一错误失败,且失败 run 的 diff 均不触及该文件:\n\n```\n/home/runner/work/objectstack/objectstack/packages/spec/src/migrations/registry.ts\n  0:0  error  Parsing error: Maximum call stack size exceeded\n```\n\n- PR #10041 的 pull_request run(18:21-18:23Z,job 96178489631)—— diff 仅 `scripts/pm/check-half-states.mjs`;\n- main push run 21990(19:10Z,head 20b9a9ce1,conclusion failure);\n- main push run 22006(19:52Z,head f4c2eef46,conclusion failure);\n- 而 main 22015(20:30Z)、22021(20:51Z)**又绿** —— 间歇性。\n\n## 为什么值得一张卡\n\n解析期栈溢出通常意味着该文件的 AST 递归深度贴着解析器/serializer 的递归极限(文件很可能是生成或累积型 registry,还会继续长)。间歇红的代价方向最坏:它随机弹掉无辜 PR 的 required 门禁(`Lint & Repo Gates` 在 required set 里),训练席位把红当噪音重跑。候选方向(不预裁):① 该文件加 eslint 忽略/降级解析(若它是生成物,本就不该被 lint);② 拆分 registry;③ 提高 Node 栈上限于 lint 脚本。需先确认文件性质(生成 vs 手写)与增长曲线。\n\nFiled unlabeled for triage routing."
+}

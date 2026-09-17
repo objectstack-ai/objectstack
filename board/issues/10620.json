@@ -1,0 +1,33 @@
+{
+  "number": 10620,
+  "kind": "pull_request",
+  "title": "fix(pm): render a ci-failure `fix` as the one remedy it is",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T06:33:46Z",
+  "updated_at": "2026-08-21T06:55:07Z",
+  "closed_at": "2026-08-21T06:55:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-21T06:55:06Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10620",
+  "body": "Fixes #10362\n\n`fix` arrives from `classifyTransportProbe` as the wrapped lines of **one\nsentence**, but both printers in `scripts/pm/ci-failure.mjs` prefixed every\nelement, so one remedy rendered as three.\n\n## Before / after — the real printer, `repo-scope-refused` against a stubbed transport\n\nDriven end-to-end through `scripts/pm/ci-failure.mjs` with `globalThis.fetch`\nstubbed to the measured fourth container class (`/rate_limit` → 200 with 4999\ncore requests left, every repo-scoped read → 403). Exit **3** before and after.\n\nBefore:\n\n```\n  fix: run this from a container whose egress allows repo-scoped reads (CI, or the\n  fix: Routine seat class); in a proxy-mediated seat, repo-scoped reads stay on the\n  fix: `mcp__github__*` tools, which take a different path and do work here.\n```\n\nAfter:\n\n```\n  fix: run this from a container whose egress allows repo-scoped reads (CI, or the\n       Routine seat class); in a proxy-mediated seat, repo-scoped reads stay on the\n       `mcp__github__*` tools, which take a different path and do work here.\n```\n\nBoth printers are fixed — the entry point and the mid-walk net — and both now go\nthrough one helper, so they cannot drift apart again (which is how the second one\ncame to exist: the mid-walk net matched the entry point's spelling rather than\nchanging it in an unrelated PR).\n\n## Why padded, not joined and re-wrapped\n\nThe producer's line breaks are load-bearing in one branch. Measured across every\nbranch of `classifyTransportProbe`, `bad-credential-anon-reachable` is a\ncopy-pasteable command followed by an annotation that carries **its own**\nindentation, with an arrow pointing back at the command:\n\n```\n  fix: GITHUB_TOKEN= GH_TOKEN= node scripts/pm/check-half-states.mjs\n         ↑ anonymous is 60 req/h and that quota is per EGRESS IP, shared with every\n           other container behind it. A request-heavy run can exhaust it mid-run,\n           which then surfaces as another PREREQUISITE NOT MET, never as a short\n           finding list.\n```\n\nJoining and re-wrapping would swallow that command into the prose and leave the\narrow pointing at nothing. So continuations are padded and keep their own leading\nwhitespace; the lines are never re-flowed. This is the idiom\n`check-half-states.mjs` — the file that *produces* these verdicts — already\nprints with.\n\n## Producer census — is `fix` ever a list of independent remedies?\n\nNo. Every branch that carries a non-empty `fix` was enumerated and rendered\nthrough the real printer. None is a list of independent remedies, so nothing\nhere can merge two real remedies into one sentence:\n\n| classification | `fix` lines | shape |\n| --- | --- | --- |\n| `host-unreachable` (network error) | 3 | one wrapped sentence |\n| `host-unreachable` (403 both ways) | 3 | one wrapped sentence |\n| `rate-limited` (token present) | 1 | single line |\n| `rate-limited` (anonymous) | 1 | single line |\n| `bad-credential-anon-reachable` | 5 | command + indented annotation |\n| `bad-credential` | 1 | single line |\n| `repo-not-visible` (404) | 1 | single line |\n| `repo-scope-refused` | 3 | one wrapped sentence |\n\nAfter the change each renders with exactly **one** `fix:` marker, keeps its line\ncount, and exits 3 — unchanged in every case.\n\n## Scope\n\nPresentation only. No exit code, no verdict, no classification is touched; the\ndiff is one helper plus the two call sites that now use it. A repo-wide sweep for\nthe same shape found no third site: the other `fix` printers\n(`check-half-states.mjs`, `check-i18n-bundles.mjs`, `check-i18n-coverage.mjs`)\neither already use the first-element idiom or print a scalar `fix` string.\n\n## Tests\n\nNew assertions in `--self-test`, driven through the **real producer** rather than\na hand-written fixture (a fixture would only restate the printer's own assumption\nabout the shape — the assumption that was wrong): a multi-line remedy renders with\nexactly one `fix:` marker; continuations are padded under it rather than re-marked;\nthe copy-pasteable command keeps the marked line to itself and its annotation keeps\nthe indent that aims the arrow; empty/absent/single-line remedies render sensibly.\n\nAblation — the new rendering was replaced with the pre-fix defect, confirmed on\ndisk by anchor count (`lines.slice(1).map` → 0 occurrences, injected `ABLATION`\nmarker → 1), never by an editor's exit code:\n\n```\n✗ ci-failure --self-test (3 failure(s)):\n  • a multi-line remedy renders with exactly ONE fix: marker\n      expected 1\n      actual   3\n  • its continuations are padded under the marker rather than re-marked\n  • the annotation keeps its own indent, so its arrow still points at that command\n```\n\n`actual 3` is the reported defect itself. Restored via `git checkout HEAD --`,\nconfirmed on disk (`ABLATION` → 0, original text → 1), self-test back to exit 0.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_"
+}

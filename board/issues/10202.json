@@ -1,0 +1,36 @@
+{
+  "number": 10202,
+  "kind": "issue",
+  "title": "serve: an empty OS_AUTH_URL is treated as a real setting, producing an EMPTY trustedOrigins list that refuses every origin instead of falling back to the default",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T13:48:35Z",
+  "updated_at": "2026-08-20T18:06:02Z",
+  "closed_at": "2026-08-20T18:06:02Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10202",
+  "body": "Filed unassigned while fixing cloud#1437 (the EE compose stack's `403 INVALID_ORIGIN`). Not that card's defect — that one is a deploy-artifact fix and is handled in objectstack-ai/cloud#1459. This is the framework-side sharp edge found next to it.\n\n## Claim\n\nSetting `OS_AUTH_URL=` (or `OS_BASE_URL=`) to an **empty value** — the shape you get from `OS_AUTH_URL=` on its own line in an env file, or a templating layer that renders an unset variable to the empty string — does not fall back to the built-in default. It is taken as a real base URL of `\"\"`, and the resulting `trustedOrigins` allow-list ends up **empty**, so *every* origin is refused. That is a harder failure than an unset variable, and it is silent: the process boots, `/api/v1/health` and `/api/v1/ready` answer `200`, and only authentication is dead.\n\n## Mechanism, with file and line (pin `907c11d2`)\n\n1. `packages/types/src/env.ts:52-62` — `readEnvWithDeprecation` returns the preferred variable whenever it is **`!== undefined`**:\n   ```\n   const preferredValue = env[preferred];\n   if (preferredValue !== undefined) return preferredValue;\n   ```\n   An empty variable is present-but-empty, so this returns `''`, not `undefined`.\n\n2. `packages/cli/src/commands/serve.ts:2175-2177` — the fallback chain is `??`, which only skips `null` / `undefined`:\n   ```\n   const baseUrl = readEnvWithDeprecation('OS_AUTH_URL', 'BETTER_AUTH_URL', …)\n     ?? process.env.OS_BASE_URL\n     ?? `http://localhost:${port}`;\n   ```\n   `'' ?? x` evaluates to `''`. So neither `OS_BASE_URL` nor the `http://localhost:${port}` default is ever consulted, and `baseUrl` is `''`.\n\n3. `serve.ts:2198-2204` — the baseUrl origin is added inside a `try` whose `catch` is empty:\n   ```\n   try {\n     const u = new URL(baseUrl);\n     …push baseOrigin…\n   } catch { /* ignore malformed baseUrl */ }\n   ```\n   `new URL('')` throws, so nothing is pushed and the failure is swallowed.\n\nWith `OS_TRUSTED_ORIGINS` unset, no preview mode, `NODE_ENV=production` (so the `isDev` `http://localhost:*` convenience is off) and no `OS_ROOT_DOMAIN`, `trustedOrigins` is then `[]` — no origin is trusted at all.\n\n## Not claimed\n\n⛔ **Not measured.** This is read from the source at the pin, not observed in a running server. The reasoning is short and each step is a language semantic (`!== undefined`, `??` not catching `''`, `new URL('')` throwing), but nobody has booted a server with `OS_AUTH_URL=` and watched the allow-list come out empty. Worth confirming before acting — in particular whether better-auth has any behaviour of its own that masks an empty `baseURL`.\n\nAlso unexamined: how many other `readEnvWithDeprecation` call sites feed a `??` chain and therefore share this shape. The two named above are the ones this came from, not a survey.\n\n## Why it's worth a card\n\nThe empty-value shape is a normal thing for env plumbing to produce — a commented-out value that lost its `#`, a Helm/systemd/CI template rendering an absent key, an operator who typed the name and meant to fill it in later. In every one of those cases the operator's intent is \"I have not set this\", and the runtime's own default is the correct answer.\n\nThe cloud#1437 fix guards its own deployment against this with a compose-level `${OS_AUTH_URL:-…}` default (the `:-` form substitutes on empty, not just on unset), and documents \"never leave it set-but-empty\" in `deploy/.env.example`. That protects the shipped compose stack only. Any other way of running the image — Helm, a PaaS, plain `docker run`, a hand-written compose file — still has the sharp edge.\n\n## Possible directions (not a recommendation — needs triage)\n\n- Treat empty as unset at the read site (trim-and-`|| undefined`) so the documented precedence chain resolves as written. Changes behaviour for every caller of `readEnvWithDeprecation`, so it wants a deliberate decision rather than a drive-by.\n- Or keep the read literal but make the `catch` at `serve.ts:2204` loud instead of silent, so an unusable base URL is a boot-time complaint rather than an empty allow-list.\n\nThe second is strictly smaller and fixes the \"silent\" half without touching shared env semantics; the first fixes the class. Which one is right is a call for whoever owns this surface.\n"
+}

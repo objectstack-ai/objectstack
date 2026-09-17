@@ -1,0 +1,36 @@
+{
+  "number": 10055,
+  "kind": "pull_request",
+  "title": "docs(spec): record the live read point of `page:tabs` items[].icon (#9972)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ui",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T19:30:52Z",
+  "updated_at": "2026-08-19T20:51:46Z",
+  "closed_at": "2026-08-19T20:51:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-19T20:51:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10055",
+  "body": "Fixes #9972\n\nText face only, the exact sibling of the landed accordion record: `page:tabs` `items[].icon` parsed, rendered, and said nothing about itself — the same absence a liveness sweep reads as declared-but-unenforced, and the same absence that once cost a full dispatch cycle re-deriving a cross-repo read point before the retirement candidate was closed premise-overtaken. **Nothing about what parses changes.**\n\n## The key is live — re-measured at the pin, not taken from the card\n\nRead at `.objectui-sha` = `82a94170c` (the value at this branch point on `origin/main`), via `git show 82a94170c:` against the objectui sibling's object store:\n\n- **Reader** — `packages/components/src/renderers/layout/containers.tsx:662-665`: `PageTabsRenderer` guards on `item.icon` and renders a `LazyIcon` whose `name` prop is `item.icon`, inside the `TabsTrigger`, left of the label span (`mr-1.5 h-3.5 w-3.5 shrink-0 opacity-70`, `aria-hidden`).\n- **Registration** — `containers.tsx:721`: the `items` input of `ComponentRegistry.register('tabs', …)` publishes the key to the Studio block designer, documented as `[{ label, value?, icon?, count?, visibleWhen?, children }]`.\n\nVocabulary resolves through objectui's `LazyIcon` (`lib/lazy-icon.tsx` — kebab-case or PascalCase, normalised to kebab-case, with a fallback when the name is not a real Lucide icon).\n\n## What changed\n\n- `packages/spec/src/ui/component.zod.ts` — a `.describe()` on the tab item's `icon` naming the consumer behaviourally, plus the docblock above it carrying the file:line anchors and the measured pin, in the idiom the neighbouring split keys already use.\n- `packages/spec/src/ui/component.test.ts` — an accept-pin beside the existing `page:tabs` blocks asserting three things: the key parses and survives to the parsed output; an undeclared sibling on the same item is still refused (so the accept is not vacuous on a schema that stopped being strict); the `.describe()` still names the consumer.\n- `.changeset/tabs-item-icon-liveness.md` — `@objectstack/spec` patch.\n\nReverse verification ran from the committed state with the direction predicted first: reverting only the schema file turned exactly one pin red (`description` is `undefined`) while the accept and the strictness pin stayed green — the two do not read the description, so this is the observed direction, not the presumed one.\n\n## The remaining `icon` slots in `component.zod.ts`, per the grading's in-scope extra\n\nRe-derived at this branch point with two probes (every line starting `icon:`, plus a multi-line-declaration probe and a sweep for any `*[Ii]con*` key), because a multi-line declaration would evade a single-line grep:\n\n**There are no other bare `icon` slots** — the tab item was the last one, so nothing else qualifies for same-PR coverage under the \"same two-anchor live-reader class\" rule. Full enumeration, all out of scope here:\n\n| Slot | State | Why not in this PR |\n|:--|:--|:--|\n| `page:header.icon` | `retiredKey(…)` (ADR-0087, removed in 17.0.0) | not a live key at all |\n| reference-rail entry `icon` | refused with a guidance prescription | measured read by nothing (#8691) |\n| `record:alert.icon` | describe that already names the read point | already recorded |\n| `page:accordion` items `icon` | describe + accept-pin | landed as #9881 |\n| `record:highlights` field `icon` | describe, vocabulary only | not bare; and its liveness is itself in doubt — filed as #10054 |\n| `element:button.icon` | describe, vocabulary only | not bare; live but the read point is unrecorded — filed as #10053 |\n| `object-metric.icon` | describe, vocabulary only | not bare; live but the read point is unrecorded — filed as #10053 |\n\nThe three vocabulary-only describes are a weaker class than this card's trigger (they are declared with intent, not bare), so they are recorded as findings for triage (#10053, #10054) rather than folded in here.\n\n## Verification\n\n`pnpm --filter @objectstack/spec test` — 414 files / 11039 tests pass. `pnpm --filter @objectstack/spec typecheck` green (tsc, scripts tsconfig, and the test-layer ledger, counts unchanged). Generated artifacts: `check:generated` and `check:api-surface` green after a real DTS build; the describe regenerates nothing (`git status` clean beyond the three files, and the landed accordion describe text likewise appears in no committed artifact). Gate families were re-derived against the actual changed paths with `scripts/pm/dispatch-gates.mjs`; the run and its result are in the report on the issue.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01URCaKuNTuK3BKJvwqM74QU)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 9650,
+  "kind": "issue",
+  "title": "`http_requests_total` never sees auth routes or the REST data API — the two highest-traffic inbound surfaces are outside the only HTTP counter the docs tell operators to monitor",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T14:19:51Z",
+  "updated_at": "2026-08-19T11:01:27Z",
+  "closed_at": "2026-08-19T11:01:27Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9650",
+  "body": "Blocked-by: #9832\n\n⚠️ **Status, 2026-08-19 (`domain:cli` seat, session `session_01WeN7F6jQFpcqW2BN56RdPa`):** the maintainer-ruled Option-A transport seam **landed** via PR #9746 (`152bff8fcd`). This card stays **open** because the seam is **inert in a shipped deployment** — `objectstack serve` registers no metrics backend at all, so nothing resolves and no middleware installs. Sub-issues #9832 (the wiring), #9833 (dispatcher double-count), #9834 (duration/error metrics carry the same hole). Details in the ACCEPT comment below.\n\n---\n\nFiled by the triage seat (session `session_01XZ5gajYBe7nCthCPdaTDvq`) as the side-product of #9623's §1 measurement, which that card explicitly flagged as \"worth its own look, but it is not what this card is about\". Unassigned, `finding`, awaiting first-touch grading. The measurement is #9623's, verbatim provenance below; a claimant must re-verify on the current `origin/main` before treating it as scope.\n\n## The claim (measured in #9623 at `b057e53f4`)\n\n`http_requests_total` has exactly one emitter, `instrumentRouteHandler` (`packages/runtime/src/observability/instrument.ts:106`). It is applied by a `Proxy` that `packages/runtime/src/dispatcher-plugin.ts:700-721` builds over a **local** `server` binding from `ctx.getService('http.server')` — the proxy is never registered back as the service. Consequently:\n\n- **`plugin-auth` mounts on the raw Hono app** (`registerAuthRoutes` → `getRawApp()` → `rawApp.all(basePath + '/*')`, `packages/plugins/plugin-auth/src/auth-plugin.ts:1622,2240`) — no sign-in traffic is counted.\n- **`packages/rest` resolves `http.server` itself** (`rest-api-plugin.ts:129`) — the REST data API, i.e. the bulk of real traffic, is outside the counter too.\n\n## Why it is worth a card of its own\n\nThe docs' operator guidance (FAQ \"what metrics should I monitor\": 5xx rate, p95 latency — both derived from `http_requests_total` / `http_request_duration_ms`) is materially misleading if the counter covers neither the data API nor auth: a deployment can be melting down on `/api/v1/*` while the counters stay flat. This is a declared≠enforced shape on the observability surface — the SEMCONV registry declares the HTTP family as the stable namespace \"so hosts can wire alerts/dashboards against it\", and the wiring silently excludes the main surfaces.\n\n## What first-touch grading has to establish\n\n1. Re-verify the two mount paths on current `origin/main` (the #9623 measurement is hours old).\n2. Whether the fix is mechanical (register the instrumented proxy back as the `http.server` service, or instrument at the raw-app layer) or a design fork — if the proxy-registration order is load-bearing, this may need a decision.\n3. Producer question: who owns the proxy wiring (`dispatcher-plugin.ts`, `packages/runtime`) — likely `domain:cli` by the lane table.\n\nRefs: #9623 (provenance), objectstack-ai/objectos#96 / #87 (the docs half that keeps colliding with missing signals).\n\n## Dedup\n\n`search_issues` is currently unreliable against this repo (multiple seats report 0-hit-with-failing-control today). Checked instead against this round's full open-issue listings and #9623's own all-229 dedup pass from ~1h ago, which found no card on the counter's coverage. If a duplicate surfaces, merge there."
+}

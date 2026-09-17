@@ -1,0 +1,34 @@
+{
+  "number": 9959,
+  "kind": "pull_request",
+  "title": "refactor(rest): source package-routes getMetaItems types from the spec",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T10:19:45Z",
+  "updated_at": "2026-08-19T10:54:12Z",
+  "closed_at": "2026-08-19T10:54:10Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-19T10:54:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9959",
+  "body": "Part of #9846\n\n`PackageRoutesOptions.protocol` declared its meta-read verb as a hand-rolled\nstructural type instead of naming the shapes `packages/spec` already declares:\n\n```ts\ngetMetaItems?(req: { type: string }): Promise<{ items: any[] }>;\n```\n\nNothing was broken by it — both call sites send exactly `{ type: 'package' }`,\na valid request, and both read `result?.items` defensively. The defect is that\na locally *re-stated* request type lets the spec move underneath this module —\na narrowed `type` vocabulary, a newly required member, a renamed key — while\nthe file keeps compiling green against a shape the protocol no longer has.\n\nBoth are now sourced from `@objectstack/spec/api`:\n\n```ts\ngetMetaItems?(req: GetMetaItemsRequest): Promise< GetMetaItemsResponse >;\n```\n\nThis is the pattern landed in `rest-server.ts` (`45862a53d8`): declared types\nnamed, optional call and `typeof … === 'function'` guards and defensive result\nreads deliberately preserved.\n\n## The optionality is deliberately kept\n\n`MetadataProtocol` declares `getMetaItems` as a **required** member, while this\noption is optional and feature-detected at both call sites. Adopting\n`MetadataProtocol` whole would change what the seam tolerates — a behaviour\nquestion this change does not answer.\n\n## What naming the declared response surfaced\n\nThe spec types `items` as an array of `unknown`, because it says nothing about\nwhat a metadata item *contains*; the local shape had claimed an array of `any`.\nThe compiler reported three errors at the first call site, which read\nregistry-specific keys (`manifest.id`) that are not spec-declared.\n\nThe element read therefore stays runtime-shaped on purpose — the same\ndisposition the sibling meta-read doors take via `metaItemsArray`. The seam is\ntyped; the coercion is confined to the read and changes no behaviour. Neither\n`tsc` nor ESLint objected to the defensive `result?.items` chain.\n\n## The pin, and what it would actually catch\n\nA compile-time **exact type-equality** assertion that the option's\nrequest/response types are still the spec's. A test that only drove today's\ncall sites would not notice spec drift; this fails both when someone\nre-hand-rolls the local shape and when the spec's shape changes without this\nseam being re-read. A third pin holds the member **optional**, so a later edit\ncannot quietly adopt the required-member form.\n\nMutual assignability would not do: the old local shape and `GetMetaItemsRequest`\nare assignable in **both** directions, so an assignability check would pass on\nexactly the shape this change removes.\n\n**It lives in compiled source, not a test file.** This package's\n`tsconfig.json` excludes its test files and no sibling gate type-checks them,\nso a type-level assertion written there would be compiled by nothing — a\nphantom check that evaluates never and stays green when deleted.\n\nAblation (reverting only the seam to the hand-rolled shape) reports **2**\nerrors — the request pin and the response pin, both\n`Type 'false' does not satisfy the constraint 'true'`. The optionality pin\ncorrectly stays silent, since the ablated shape kept the member optional.\nRestoring reports **0**. Both legs read from reported counts, never a piped\nexit code. No rebuild is involved: `tsc --noEmit` reads this package's sources\ndirectly, so no `dist/` staleness can flatter either leg.\n\n## `deletePackage` is deliberately untouched\n\nThe card body says \"Both verbs are already declared in `packages/spec`\". That\nis **half false**, re-measured here on `301bf26be1`: `getMetaItems` is declared,\nbut a search for `deletePackage`, `DeletePackageRequest` and\n`DeletePackageResponse` across all of `packages/spec/src/` returns no type\ndeclaration — only prose in two semantic-migration entries. There is no\ndeclared shape to read, and minting one is a contract act for the spec seat,\nnot a typing cleanup. Its local structural type is left exactly as it was.\n\n## Verification\n\nRun against `832d973419`, the tree this PR pushes:\n\n- `pnpm --filter @objectstack/rest typecheck` — clean\n- `pnpm --filter @objectstack/rest test` — 129 files, 2106 tests passed\n- `pnpm lint` — clean\n- `pnpm check:route-envelope` — 10 route modules audited: 7 conformant, 2\n  ratcheted, 1 exempt. The two ratcheted are `rest-server.ts` and\n  `error-response.ts`, both pre-existing; this file is conformant and no\n  ratchet moved.\n- `pnpm check:cross-package-test-inputs`, `check:dispatcher-error-vocabulary`,\n  `check:slot-lookup` (107 unswept sites, none new), `check:changeset-gate-self-tests`,\n  `check:objectui-changeset`, `check-adr-0087-registration.mjs`,\n  `check-changeset-no-major.mjs`, `check-empty-changeset.mjs`,\n  `check-cross-package-test-inputs.mjs`, `docs-audit/check-affected-docs.mjs`,\n  `check-nul-bytes.mjs` — all green\n\nGates were re-derived from the actually-changed paths after the final commit.\nNo `package.json` edit was needed: `@objectstack/spec` is already a\n`workspace:*` dependency of this package.\n\nInternal typing only — `PackageRoutesOptions` is not exported from the\npackage's entrypoint, so no public surface changes and no route changes what it\naccepts or rejects.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WeN7F6jQFpcqW2BN56RdPa)_\n"
+}

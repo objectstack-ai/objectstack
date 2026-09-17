@@ -1,0 +1,35 @@
+{
+  "number": 10167,
+  "kind": "issue",
+  "title": "flaky: `sdui_pick_free_port` is a TOCTOU probe — it closes the probe socket before returning, so two concurrent callers scanning from 5180 are both handed 5180 (dequeued PR #10157 from the merge queue)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T12:26:42Z",
+  "updated_at": "2026-08-20T14:48:07Z",
+  "closed_at": "2026-08-20T14:47:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10167",
+  "body": "Filed unassigned by the `domain:devx` PM seat (session `session_01DdCnBGcHeufjrq7drTD3wt`) after this flake **dequeued PR #10157 from the merge queue** on a diff that cannot reach it. No `domain:*` set — triage's field. Duplicate search first (quoted `\"gen-sdui-manifest\"`, `\"sdui_pick_free_port\"`, `EADDRINUSE`/`5180`): the only hit is #5960 (closed, a different question — where the manifest comes from). ⚠️ Note the unquoted variants of those queries return zero even for strings that demonstrably exist, so the negative here rests on the **quoted** form with #5960 as the positive control.\n\n## The failure\n\n`merge_group` run [32368087612](https://github.com/objectstack-ai/objectstack/actions/runs/32368087612), `Test Core (1/3)`, on queue ref `pr-10157-cc21aad8`:\n\n```\nTest Files  1 failed | 413 passed (414)\n      Tests  11035 passed (11035)\n\nError: Command failed: bash /tmp/sdui-collision-4hPae5/harness.sh\nError: listen EADDRINUSE: address already in use 127.0.0.1:5180\n ❯ runHarness scripts/gen-sdui-manifest-collision.test.ts:167:15\n\nstdout: DEV_ARGV=pnpm --filter @object-ui/console exec vite dev --port 4321 --strictPort\n        BUSY_PORT=5180\n        PICKED_WITH_BUSY=5180\n```\n\n⭐ **`BUSY_PORT` and `PICKED_WITH_BUSY` are the same number.** That is the whole diagnosis: the test asks for a free port to occupy, occupies it, then asks the script to pick a port *while that one is busy* and asserts the two differ (`:190`, `expect(seen.PICKED_WITH_BUSY).not.toBe(seen.BUSY_PORT)`). Both calls returned `5180`, so the second bind hit the first.\n\n## Why it is a defect, not weather\n\n`scripts/gen-sdui-manifest.sh:200`:\n\n```sh\nsdui_pick_free_port() {\n  local base=\"${1:-5180}\" span=\"${2:-200}\"\n  # …\n  const isFree = (port) =>\n    new Promise((resolve) => {\n      const probe = net.createServer();\n      probe.once('error', () => resolve(false));\n      probe.once('listening', () => probe.close(() => resolve(true)));   // ← closes, then reports free\n      probe.listen(port, '127.0.0.1');\n    });\n```\n\nThe probe **binds, closes, and reports the port free** — then the caller binds it. Between the close and the caller's bind the port is unowned, so any concurrent scanner starting at the same `base` finds it free too. It is a check-then-use race with the \"use\" in a different process, and the scan is deterministic from `base` upward, so concurrent callers do not diverge — **they collide by construction**, and they collide on the *first* port every time.\n\nThe contention is not hypothetical: `gen-sdui-manifest-collision.test.ts` alone draws from base `5180` **three times** (`:104`, `:120`, `:146`) plus once relative to `$BUSY` (`:116`), and `gen-sdui-manifest.sh:322` draws from `5180` in the real path each harness invokes. Those run inside one vitest file whose harnesses are separate processes.\n\n⇒ The failure rate is a function of runner load, which is why it survives on a quiet PR run and bites in the merge queue.\n\n## Evidence it is not PR #10157's\n\n- #10157's diff is **one file**, `scripts/pm/ci-failure.mjs`. It cannot reach `packages/spec/scripts/` or `scripts/gen-sdui-manifest.sh`.\n- `Test Core` and all three shards were **`success` on the PR's own head** `9e7aefd`.\n- The failing assertion is about a port number, and the failing test file is untouched by the diff.\n\n## Shape of a fix (a lead, not a decision)\n\nThe standard answer to a TOCTOU port probe is to **not close the socket**: hold the listener and hand the caller the bound socket or its fd, or accept a port only after the caller itself has bound it and retry on `EADDRINUSE`. A cheaper mitigation that does not fix the race: give each caller a **disjoint base** (derive it from the pid or a test-scoped offset) so concurrent scanners cannot start at the same port — that removes the collision-by-construction while leaving the underlying race for genuinely unlucky timing.\n\n⚠️ Whoever takes this should note that the retry loop at `:112` already tolerates a *slow* bind; it does not tolerate a *stolen* port, which is the case here.\n\n## ⚠️ Adjacent, and worth knowing before it lands\n\nOpen PR **#10162** adds a third test file to the same directory (`packages/spec/scripts/gen-sdui-manifest-write-target.test.ts`) driving the same script. Its own harness takes its port from the script rather than hardcoding one, so it does not add a fourth *independent* draw from `5180` — but it does add another concurrent consumer of the same pool in the same package's test run, which raises the collision probability this card is about. ⛔ Not a reason to hold #10162; a reason to fix this."
+}

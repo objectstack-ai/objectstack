@@ -1,0 +1,34 @@
+{
+  "number": 10278,
+  "kind": "issue",
+  "title": "A screen flow's `resume` 400 is swallowed by the console: the dialog closes and the user is told nothing — and a successful run tells them nothing either",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p1",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T15:13:12Z",
+  "updated_at": "2026-08-20T16:06:43Z",
+  "closed_at": "2026-08-20T16:06:43Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10278",
+  "body": "A screen flow's `resume` 400 is swallowed by the console: the dialog closes and the user is told nothing — and a *successful* run tells them nothing either, so the two are indistinguishable\n\nMeasured on `17.1.0` (open edition, `objectstack dev`), driving HotCRM in a browser as an end user.\n\n## Failure path\n\nRecord page → header action bound to a screen flow → fill the screen → **Submit**.\n\nThe dialog closes. No toast. No inline error. Nothing on the record. The user's reasonable reading is \"it worked\".\n\nThe network says otherwise:\n\n```\nPOST /api/v1/automation/quote_generation/runs/run_0b47…/resume → 400 Bad Request\n\n{\"success\": false,\n \"error\": {\n   \"code\": \"FLOW_FAILED\",\n   \"message\": \"Node 'create_quote' failed: create_record(crm_quote) failed:\n               Total Price must have at most 2 decimal places (got 11)\",\n   \"httpStatus\": 400,\n   \"details\": {\"summary\": {\"selected\": 1, \"acted\": 0, \"skipped\": 0,\n     \"nodes\": [\n       {\"nodeId\":\"start\",\"nodeType\":\"start\",\"status\":\"success\",\"runs\":1},\n       {\"nodeId\":\"screen_1\",\"nodeType\":\"screen\",\"status\":\"success\",\"runs\":1},\n       {\"nodeId\":\"get_opportunity\",\"nodeType\":\"get_record\",\"status\":\"success\",\"runs\":1},\n       {\"nodeId\":\"create_quote\",\"nodeType\":\"create_record\",\"status\":\"failure\",\"runs\":1,\"failures\":1}\n     ]}}}}\n```\n\nThe envelope is complete: a code, a sentence a human can act on, and a per-node summary naming exactly which node failed. All of it is discarded at the client.\n\n## Success path\n\nSame action, a discount value whose arithmetic happens to land on 2 decimals. The quote **is** created (`201`, `QTE-0006`). The console still shows: no toast, no navigation to the new record, and no refresh of the related list that would now contain it — the quote does not appear on the record page until a manual reload.\n\nSo both outcomes render identically: the dialog closes and the page is unchanged. There is no gesture available to the user that distinguishes \"created\" from \"rejected\".\n\nFor contrast, the same console *does* toast for plain record writes — creating a case shows `服务案例创建成功`, and Studio toasts `对象「…」已存为草稿`. It is specifically the screen-flow resume result that is dropped.\n\n## Suggested behaviour\n\n- **On non-2xx from `…/runs/<id>/resume`:** surface `error.message` (it is already user-grade prose) in a destructive toast or inline in the dialog, and keep the dialog open so the input is not lost — the user has just retyped a form they cannot see any more.\n- **On success:** toast, and invalidate the record's related-list queries so a record the flow just created appears without a reload. Where the flow's output names a record, offering to navigate to it would close the loop.\n\n## Note\n\nAn earlier related report is worth cross-checking here: `16.1.0` was measured as sending **zero** requests on screen-flow Submit. That half is fixed — the resume now fires and the flow runs. What remains is that the client ignores the response either way.\n"
+}

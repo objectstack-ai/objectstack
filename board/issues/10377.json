@@ -1,0 +1,34 @@
+{
+  "number": 10377,
+  "kind": "issue",
+  "title": "publishPackageDrafts validation closure omits same-batch dataset drafts: a package shipping dashboard+dataset together can never publish (widget-dataset-unknown)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T17:21:31Z",
+  "updated_at": "2026-08-20T21:50:46Z",
+  "closed_at": "2026-08-20T21:50:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10377",
+  "body": "## Symptom (P0 for AI builds — blocks epic objectstack-ai/cloud#1472 acceptance)\n\nLive repro 2026-08-21, cloud local rig, all-latest mains (objectstack `0b3cf876`+, cloud `0b3cf876`). An AI-built package `app.shyx` carries `object/*`, `view/*`, `dataset/shyx_customer_ds`, `dashboard/customer_dashboard` (widget bound to that dataset), `flow/*`, `seed/*` — all drafted together. Every `publishPackageDrafts` attempt rolls back:\n\n```\n[protocol.publishPackageDrafts] batch publish of 'app.shyx' rolled back at dashboard/customer_dashboard:\n[invalid_metadata] dashboard/customer_dashboard failed author-time validation: dashboards[0].widgets[0]:\n[widget-dataset-unknown] dataset \"shyx_customer_ds\" does not resolve to a declared dataset.\n```\n\nThe dataset **exists in the same batch** (`sys_metadata` row `dataset/shyx_customer_ds`, package `app.shyx`, state draft). The build agent retried with a second dataset name (`shyx_customer` → `shyx_customer_ds`) — same refusal both times, so a package that ships a dashboard together with its dataset can NEVER publish. Downstream: the entire AI magic-flow build stays draft (post-cloud#1467 the tools now honestly report \"PUBLISH FAILED — NOT LIVE\", which is how this surfaced immediately).\n\n## Root cause (source-level read, unverified by test yet)\n\n`validateWidgetBindings` resolves `widget.dataset` against the caller-supplied `datasets` context collection (`packages/lint/src/runtime-gate.ts` — the #7529 comment says exactly that a missing collection makes every legitimate widget read as dangling). The publish gate's per-draft validation context appears to carry only ALREADY-LIVE dataset declarations, not the same batch's pending dataset drafts. The intra-batch closure works for flow→object (a flow referencing a same-batch object publishes fine — verified live on 2026-08-20), so this is a per-collection gap in the #9612/#10058 \"judge a package write against its own closure\" work: the closure includes objects but not datasets (and possibly not the other context collections — permissions, books — worth auditing in the same change).\n\n## Fix requirements\n\n1. `publishPackageDrafts`'s author-time validation context must include the batch's own pending drafts for every context collection the closure judgment carries (`objects`, `permissions`, `books`, `datasets`) — a package must be publishable as a self-consistent unit.\n2. Regression test: a batch carrying dashboard + its dataset (dashboard validated before the dataset is promoted) publishes clean; a dashboard bound to a genuinely absent dataset still rolls back with `widget-dataset-unknown`.\n3. Audit the remaining context collections for the same gap in the same change (cheapest now, one closure seam).\n\n## Repro\n\nStage a package with `dataset/x` + `dashboard/d` (widget bound to `x`) as drafts, call `publishPackageDrafts` — rolls back at the dashboard regardless of item order.\n\nRelated: #9612 / #10058 (closure judgment), #7529 (datasets context), cloud#1472 (blocked epic), cloud#1467 (honest reporting that surfaced this).\n"
+}

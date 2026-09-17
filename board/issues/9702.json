@@ -1,0 +1,36 @@
+{
+  "number": 9702,
+  "kind": "issue",
+  "title": "Follow-up run: `access-security.record-share-grant-revoke` becomes runnable for the first time when #9237 lands — it needs a dedicated run at a new sha",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T15:58:27Z",
+  "updated_at": "2026-08-20T01:15:03Z",
+  "closed_at": "2026-08-20T01:15:03Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9702",
+  "body": "Filed by the PM seat reviewing PR #9697 (#9237). ⛔ **Unassigned, and not a blocker for that PR** — recording an owed run so it does not evaporate between a merge and the next wave round.\n\n## Why this is owed\n\nPR #9697 found that `access-security.record-share-grant-revoke`'s evaluate clause **was unrunnable as written, and had been since the item was authored**: it drove `share_red_projects_with_execs`, whose `evaluate` is *refused* (`SHARING_NOT_ENABLED`) rather than returning a reconcile result, because `showcase_project` is `sharingModel: 'public_read_write'` and a share row on it would never be consulted. The PR retargets the clause and adds a step assigning the manager position so the recipient expansion is non-empty — recorded as **revision 3** on the item.\n\nSo when #9697 merges, that item is executable for the first time. **No run record in QA wave #9296 can have exercised it**, whatever verdict it carries.\n\n## The sequencing this has to respect\n\n#9308's ruling governs, and it is not this seat's to reinterpret:\n\n> ⛔ This does **not** land under the wave's pinned sha. A run record's fingerprint pins the framework sha it tested; changing seeds mid-wave would mean earlier rounds and later rounds observed different fixtures while both claim the same baseline. Ruling: rounds **R1–R3 stay pinned at `e4e5c6e3`**; this lands on `main` independently, and the items it unblocks get a **dedicated follow-up run** … at a new sha afterwards.\n\nPR #9697 changes showcase seeds (three sharing rules retired, one added on `showcase_contact`) and lands on `main` independently, exactly as that ruling directs. What it inherits is the second half: **the affected item owes a run at the new sha.**\n\n## What the run should cover\n\nAt minimum `access-security.record-share-grant-revoke` at revision 3. Worth deciding at scheduling time whether to widen it, because #9697 moved more than one item's ground:\n\n- the sharing-rule seed set changed — two rules on `sys_sharing_rule` where the stock boot previously seeded one usable rule and materialised **zero** rule-sourced `sys_record_share` rows;\n- `showcase_contact` now carries a rule-sourced grant on a stock boot, which any item reasoning about who can see which contacts may now observe differently.\n\n⛔ Not asserting those items are wrong — asserting that nobody has looked since the fixtures moved.\n\n## Explicitly not claimed\n\n- ⛔ **No defect is asserted.** The item's prior verdict was not a false pass being covered up; the clause could not run, so there was nothing to pass.\n- This is **not** #9308's own follow-up card. #9308 is still open and its ruling says its follow-up gets filed when *it* lands. If both land close together, one combined run is likely cheaper than two — that is the wave PM's call, not this seat's.\n\nRefs: PR #9697 / #9237 (the change that makes the item runnable) · #9308 (the sequencing ruling, and the sibling seed card) · #9296 (the wave) · #9698 (the platform-wide lint rule for the same defect class)."
+}

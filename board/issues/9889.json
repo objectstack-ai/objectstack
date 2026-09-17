@@ -1,0 +1,36 @@
+{
+  "number": 9889,
+  "kind": "issue",
+  "title": "bug(service-automation): node input-schema validation guards only the FIRST attempt — a retry attempt runs the nodes attempt 1 refused to run",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-19T06:17:45Z",
+  "updated_at": "2026-08-19T16:32:50Z",
+  "closed_at": "2026-08-19T16:32:50Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9889",
+  "body": "Found while implementing #9704 (the variable-environment divergence on the same two methods). Filed rather than fixed there: a different defect class — a **skipped guard**, not a divergent variable environment — and the repair changes whether a flow runs at all, which #9704's ruling does not cover.\n\n## Measured\n\n`packages/services/service-automation/src/engine.ts`, `origin/main` @ `55d29935b`.\n\n`execute()` calls the guard before traversing the DAG:\n\n```ts\nthis.validateNodeInputSchemas(flow, variables);   // execute() only\nawait this.executeNode(startNode, flow, variables, runContext, steps);\n```\n\n`executeWithoutRetry()` — the method `retryExecution` re-runs the flow through on **every** retry attempt — goes straight to `executeNode` with no such call. Only two call sites exist in the file: the definition, and `execute()`'s single invocation.\n\nThe guard is **not** a per-attempt-varying check: its signature is `validateNodeInputSchemas(flow: FlowParsed, _variables: Map&lt;string, unknown&gt;)` and the variables parameter is unused (underscore-prefixed). It reads `node.inputSchema` against the static `node.config`, so its verdict is a pure function of the flow definition — the same definition every attempt of the dispatch runs under.\n\n## Why it matters\n\nThe two facts compose into a reachable, user-visible sequence, because the retry handoff lives **inside `execute()`'s catch**:\n\n```ts\nif (flow.errorHandling?.strategy === 'retry') {\n    return this.retryExecution(flowName, context, startTime, flow.errorHandling, flow.errorMessage);\n}\n```\n\n`validateNodeInputSchemas` reports by **throwing** (`Node 'x' missing required input parameter 'y'`, `... expected type 'number' but got 'string'`). So for a flow whose node config violates its own declared `inputSchema`, under `errorHandling.strategy: 'retry'`:\n\n1. attempt 1 throws in the guard — **before any node executes**, which is the guard's whole purpose;\n2. the catch routes to `retryExecution`;\n3. attempts 2..N run through `executeWithoutRetry`, which never calls the guard — so **the nodes attempt 1 was refused permission to run are executed for real**, with the config the guard rejected.\n\nA refusal that holds only until the flow is retried is not a refusal; a `retry` strategy becomes a way to get past authoring-time validation. Any side-effecting node (a data write, an HTTP call, an email) behind a mis-declared `inputSchema` is reachable this way.\n\nThis is the same drift shape as the four cards before it — the copy that is not `execute()` is the one a repair forgets (#9378, #9415, #9414, #9510), and now #9704 for the variable seeding.\n\n## Not decided here\n\nWhether the guard belongs in `executeWithoutRetry` too (the parity reading, matching how #9704 resolved the seeding — one chokepoint both methods call), or whether a definition-level validation failure should be classified as **non-retryable** so `execute()` never hands off to `retryExecution` for it at all (arguably the stronger fix: re-running a check whose verdict cannot change wastes the whole retry budget on a certainty). The second changes retry accounting, so it wants a ruling rather than a guess.\n\n## Refs\n\n- #9704 — the variable-environment divergence on the same method pair, and where this was found\n- #9510 / #9414 / #9415 / #9378 — the prior drift cards on these two methods\n"
+}

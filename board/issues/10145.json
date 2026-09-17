@@ -1,0 +1,37 @@
+{
+  "number": 10145,
+  "kind": "issue",
+  "title": "Automation flow write routes (POST/PUT/DELETE /api/v1/automation) lack the manage_metadata gate — a plain tenant edits/deletes flows for every organization on a walled shared-database deployment",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "security",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T10:03:16Z",
+  "updated_at": "2026-08-20T16:32:06Z",
+  "closed_at": "2026-08-20T16:32:06Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10145",
+  "body": "## Summary\n\nOn the walled single-database hosted-SaaS shape (`OS_TENANCY_POSTURE=isolated`, HotCRM as composed artifact, `OS_AI_STUDIO_AGENTS=ask`), the automation-domain write routes are **not** gated by `manage_metadata`. A plain tenant org owner — holding `organization_admin` only, demonstrably without `manage_metadata` / `studio.access` — can create, modify and delete automation flows. Flow metadata is **environment-scoped, not organization-scoped**, so one tenant's write lands on the layer every organization runs on: a flow one tenant deletes vanishes for all tenants and the platform admin; a flow one tenant creates appears for all of them.\n\nThis satisfies both of the deployment's highest-severity criteria at once: **metadata is mutable by a tenant**, and the mutation **crosses the tenant wall**.\n\n## Measured over HTTP (fresh composed boot, framework `8798cd2`, hotcrm `3940736`)\n\nSame `northwind` session (org owner, no `manage_metadata`) — the control that proves the account is unprivileged:\n- `PUT /api/v1/meta/:type/:name`, `POST /api/v1/ai/tools/:tool/execute`, `POST /api/v1/packages/*` → all **403**.\n\nYet on the automation domain:\n\n```\nPOST   /api/v1/automation  {name:'probe_flow_x',label:'Probe Flow X',type:'autolaunched',nodes:[],edges:[]}\n  → 200 {success:true, data:{name:'probe_flow_x',…}}          # created\nPUT    /api/v1/automation/probe_flow_x  {…}\n  → 200 {success:true}                                        # modified\nDELETE /api/v1/automation/lead_auto_assignment\n  → 200 {success:true, data:{name:'lead_auto_assignment', deleted:true}}   # deleted a HotCRM-shipped flow\n```\n\nCross-tenant blast radius, verified by reading back as three different principals:\n\n| flow | northwind (actor) | contoso (unrelated tenant) | founder (platform admin) |\n|---|---|---|---|\n| `lead_auto_assignment` (deleted) | 404 | **404** | **404** |\n| `probe_flow_x` (injected) | 200 | **200** | **200** |\n\nSo one tenant deleted a flow out from under every other tenant, and injected a flow into the shared layer that every tenant now sees.\n\n## Root cause\n\nThe `/api/v1/automation` POST/PUT/DELETE handlers register without the `manage_metadata` authorization the parallel `/api/v1/meta/*` writes carry (route ledger: `packages/runtime/src/route-ledger.ts:317,329,330`; the `/meta/*` gate is `manage_metadata` per `packages/rest/src/rest-server.ts`). A flow is authored metadata registered at environment scope, so an ungated write is both a privilege escalation and a cross-tenant one on any multi-organization deployment.\n\n## Requested fix\n\nGate the automation-domain write routes with `manage_metadata`, identical to `/api/v1/meta/*`. On a walled posture, environment-scoped metadata writes must be refused for principals without `manage_metadata` — the same rule that already makes `/meta/*`, `/packages/*` and the AI authoring tools 403 for a tenant on this shape.\n\nFound during a hosted-SaaS lockdown test pass. Same batch as objectstack-ai/objectstack#10131 and #10132 (walled-shape org-attribution / catalog-visibility defects)."
+}

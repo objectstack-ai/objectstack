@@ -1,0 +1,34 @@
+{
+  "number": 10346,
+  "kind": "pull_request",
+  "title": "docs(qa): state the console boot flag per command in RUNNER.md",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T16:08:36Z",
+  "updated_at": "2026-08-20T17:23:03Z",
+  "closed_at": "2026-08-20T17:23:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-20T17:23:02Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10346",
+  "body": "Fixes #10087\n\n## What this changes\n\nDocs only — `docs/qa/platform-checklist/RUNNER.md`. Two edits:\n\n1. **New environment fact**: the console boot flag stated **per command**, plus the one\n   canonical checklist boot invocation, plus the check that tells a rejected flag apart\n   from a crashed boot.\n2. **`absence-inference` trap row rewritten** so it stops carrying `--no-ui` across to\n   `dev`. That row was the actual defect: its subject sentence is a bare\n   `objectstack dev`, but it explained the default-ON console through **`serve`'s** `ui`\n   flag and concluded \"so `--no-ui` is the off switch\" — which reads as a licence to type\n   `dev --no-ui`. It now names `dev`'s forwarding behaviour, says the default is decided\n   one hop downstream, and states that the off switch belongs to `serve` and `start`.\n\n## Re-measured on current `main` before editing — this was the acceptance criterion\n\nThe card's own measurement is stamped at `4a7b3604c` and was **not** copied on trust.\nBuilt `@objectstack/cli` and its dependency closure at `origin/main` = `736cfb14` and ran\nthe real binary. Verdicts are the commands' own output; exit codes were captured before\nany pipe.\n\n**The premise holds.** `dev` still rejects `--no-ui`:\n\n```\n$ node packages/cli/bin/run.js dev --no-ui        # EXIT=2\nobjectstack: INVOCATION ERROR — Nonexistent flag: --no-ui. The command never ran: nothing was started and nothing is listening. Invoked as: objectstack dev --no-ui\n ›   Error: Nonexistent flag: --no-ui\n```\n\n**Positive controls, because a zero-hit needs one.** Two paired probes, each with the\ncontrol inside the same invocation as the negative:\n\n| probe | rejected | accepted (control) |\n|---|---|---|\n| `dev --no-restart --no-ui` | `--no-ui` | `--no-restart` — negation syntax works on `dev` |\n| `serve --no-ui --artifact ./x.json` | `--artifact` | `--no-ui` — accepted by `serve` |\n\n`--help` FLAGS blocks agree, and `dev` renders `--[no-]compile` / `--[no-]restart` /\n`--[no-]seed-admin`, so the missing `--[no-]ui` is a real absence and not a rendering\nartifact. Measured surface across all three boot commands:\n\n| command | console flag | `--artifact` |\n|---|---|---|\n| `os dev` | `--ui` (no negation) | `-a, --artifact` |\n| `os serve` | `--[no-]ui` | not a flag |\n| `os start` | `--[no-]ui` | `-a, --artifact` |\n\n`dev` is the odd one out, which is why the flag gets carried across to it. The asymmetry\nruns both ways, so the doc says \"flags are not portable between the three\" rather than\njust \"serve has it\".\n\n## One thing HAS changed since the card was filed, and the doc reflects it\n\nThe card's sibling `domain:cli` half — issue #10111, now completed — landed as PR #10181,\nafter the card's stamp. Both lookalikes now announce themselves: the unknown-flag failure prints a\nsingle loud first line ahead of the usage dump, and `node packages/cli/dist/index.js` now\nrefuses by name and exits **1** where it used to exit **0** in silence (measured, both).\n\nThat does not soften this card — the flag surface is unchanged, and #10181's own docblock\nsays so deliberately: *\"Fixing (2) by teaching `dev` to accept `--no-ui` is deliberately\nNOT what this module does.\"* It changes what good documentation looks like: the counter\nto the backgrounded-boot failure mode is now actionable, so the new fact ends with **read\nthe FIRST line of the log before touching the app**, and quotes the literal line to\nrecognise.\n\n## Deliberately not done\n\n⛔ Making `dev` accept `--no-ui` is in neither card — it is a CLI surface question for the\ndecision inbox as a Feature. No CLI change here; nothing in this PR adds or removes an\naccepted input — the diff is one markdown file.\n\n## Verification\n\n- `pnpm check:nul-bytes` — `check-nul-bytes: OK (scanned 6090 text file(s) ... no raw ASCII control bytes)`\n- `pnpm check:platform-checklist` — `check-platform-checklist: OK — 15 areas, 204 items (204 active); coverage: 30 kinds mapped, 0 waived.`\n- `node scripts/pm/dispatch-gates.mjs` re-run on the final commit `24b14c81`:\n  `No check family names the given paths in its own source, and no workflow's path filter schedules one for them.` (`0 matched`)\n\n**Clause-②: no** — docs-only diff; no contract accept/reject behaviour changes and no\npublic surface widens.\n\n**Changeset:** none — `docs/qa/**` publishes nothing. Labelled `skip-changeset`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

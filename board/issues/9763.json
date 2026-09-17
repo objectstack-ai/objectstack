@@ -1,0 +1,34 @@
+{
+  "number": 9763,
+  "kind": "issue",
+  "title": "check-cross-package-test-inputs' literal collector cannot see split-segment or ascent-relative paths, so four declared radii are held by prose alone",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T22:35:12Z",
+  "updated_at": "2026-08-20T09:34:11Z",
+  "closed_at": "2026-08-19T12:11:48Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9763",
+  "body": "Found while implementing #9651 (a prose fix to the `create-objectstack` rationale in\n`scripts/check-cross-package-test-inputs.mjs`). Not fixed there — out of scope, recording only.\n\nInstance of the #9747 meta-shape, in the **fails toward FALSE GREEN** half: the recognizer is\nnarrower than the path spellings in the repo, and the shortfall reads as \"the radius is\ncovered\" rather than as \"unrecognised\".\n\n## The guarantee that does not hold\n\n`check-cross-package-test-inputs` lets a declaration be NARROW rather than repo-wide, and says\nin its own prose why that is safe:\n\n- on `repoRelativeLiterals()`: *\"a glob is only allowed to be narrow while it still covers\n  every path the tests actually name, and the moment someone adds a probe outside the declared\n  radius the gate fails naming the file.\"*\n- in `verify()`: *\"This is what keeps narrowing honest: extending a probe roster past the\n  declared radius fails here, by file name, instead of silently going ungated again.\"*\n\nThe recognizer behind both claims is one regex:\n\n```\n/(['\"`])((?:packages|apps|examples|content|scripts)\\/[A-Za-z0-9._/-]+)\\1/g\n```\n\nIt sees a path only when the WHOLE repo-relative path sits inside ONE quoted string and starts\nat a top-level directory. Three spellings in the repo today do not, so the paths those tests\nread are absent from the coverage check — silently, with exit 0.\n\n## The three spellings, each live in the tree\n\n**1. Split-segment `join`/`resolve`** — the path is real but arrives as separate arguments:\n\n| file | spelling |\n| --- | --- |\n| `packages/create-objectstack/src/template-version-stamps.test.ts:47` | `path.join(repoRoot, 'scripts', 'sync-template-versions.mjs')` |\n| `packages/spec/src/identity/position-delegatable-enforcer.pin.test.ts:57` | `join(REPO_ROOT, 'packages', 'lint', 'src')` |\n| `packages/qa/downstream-contract/test/source-resolution.pin.test.ts:87` | `resolve(PACKAGE_DIR, '..', '..', 'spec', 'src')` |\n\n**2. Ascent-relative literal** — one string, but it starts at `..`:\n\n`packages/metadata-protocol/src/sys-metadata-repository.draft-drain.test.ts:451`\nreads `new URL('../../../scripts/check-durability-degradation-log-level.mjs', import.meta.url)`.\nThis one is already KNOWN — the `@objectstack/cli` entry documents it for\n`connector-mcp-plugin.ts` — but it is documented as a fact about one entry, not as a general\nhole in the guarantee above.\n\n**3. A top-level directory missing from the alternation** — `skills/` is not in\n`packages|apps|examples|content|scripts`, so `packages/formula/src/skill-catalog-sync.test.ts:19`\nreading `resolve(here, '../../../skills/objectstack-formula/SKILL.md')` is invisible twice over.\n\n## Measured, not inferred\n\nFor `create-objectstack` the declared glob `scripts/sync-template-versions.mjs` is held by\nNOTHING mechanical. The two tests that genuinely read that script both spell it split-segment;\nwhat the collector actually picks up is the quoted mention in each test's header comment.\n\nRun against `6f40ed736`:\n\n- drop the glob only ⇒ **red**: `create-objectstack names path(s) no declared glob covers ... scripts/sync-template-versions.mjs (named in packages/create-objectstack/src/template-consistency.test.ts)`\n- drop the glob AND unquote both header-comment mentions ⇒ **`OK: 12 package(s) read outside themselves, all declared` , exit 0**\n\nSo an innocent prose edit to either test header can unforce a live declaration, after which a\nnarrowing passes in silence. A probe script over the whole table says four declared globs are\nheld by prose alone for this reason: `create-objectstack`'s `scripts/sync-template-versions.mjs`,\n`@objectstack/spec`'s `packages/lint/src/**`, `@objectstack/metadata-protocol`'s\n`scripts/check-durability-degradation-log-level.mjs`, and `@objectstack/formula`'s\n`skills/objectstack-formula/**`.\n\n## Severity: bounded, and stated\n\nThe ESCAPE detector is unaffected — it walks bindings, not literals, so every one of these\npackages is still correctly flagged as escaping and still carries a declaration. What is\nunheld is the **radius**, so the exposure is a narrowing that goes ungated, not an undeclared\npackage. That is smaller than #7802 but it is the same direction of failure, and it is the\nhalf the file's own prose promises is covered.\n\n## Shape of a fix, and its price\n\nTeach the collector the three spellings — join/resolve argument lists whose segments compose to\na repo-relative path, ascent-relative literals resolved against the file, and `skills/` in the\nalternation. The design already absorbs the risk: the file states over-collection *\"can only\nforce a WIDER declaration, never a narrower one\"*, so a false positive costs cache\ninvalidation, not correctness. Per #8995 each added spelling needs a `--self-test` case in the\nsame edit.\n\nWorth weighing against #9747's finding that \"widen each matcher\" has been separately declined\nelsewhere — the difference here is that the widening is cheap and one-directional, which is not\ntrue of the durability-log matchers.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01XqDQYVU5smx29ts9pAErja)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 9698,
+  "kind": "issue",
+  "title": "lint: a sharing rule declared on an object whose effective sharing model is `public` is statically detectable and unreported until boot",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T15:52:39Z",
+  "updated_at": "2026-08-20T09:34:06Z",
+  "closed_at": "2026-08-19T12:11:48Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9698",
+  "body": "Observation filed from #9237 (PR #9697). Not claiming — recording the class the fix there closed only for `examples/app-showcase`.\n\n## What is detectable and is not detected\n\n`SharingService.inertGrantReason` (ADR-0111 D7, `packages/plugins/plugin-sharing/src/sharing-service.ts`) refuses a grant whose row no gate could ever consult. Two of its arms are decidable from the authored metadata alone, before anything boots:\n\n- `effectiveSharingModel(schema) === 'public'` — the object declares `sharingModel: 'public_read_write'`, so sharing has nothing left to widen;\n- `sharingModel: 'controlled_by_parent'` — the detail's shares belong to its master.\n\nToday a rule in either state is accepted by `SharingRuleSchema`, accepted by `defineRule`, seeded into `sys_sharing_rule`, and only then refused, once per boot, as a WARN line inside the boot diagnostics block:\n\n```\nWARN SharingServicePlugin: boot rule backfill failed for rule {\"rule\":\"…\",\"error\":\"SHARING_NOT_ENABLED: '…' is not under record-sharing enforcement …\"}\n```\n\n## Why the boot WARN is not sufficient as the diagnostic\n\nMeasured on the stock showcase at `c07d6e8b9` while working #9237: **three** rules were in this state and only **two** warned. The third, `share_high_value_red_projects_with_managers`, had a compound condition matching no seeded row, so `SharingRuleService.reconcile` built an empty desired set, never reached `grant`, and never threw. It was exactly as dead as the other two and produced no diagnostic at all — the WARN is a function of the data, not of the declaration.\n\nSo the boot log cannot be the guard: an app whose seed data happens not to match a rule's criteria gets silence, and an app that later gains matching rows gets a WARN it did not get on the previous deploy.\n\n## Suggested shape (not prescribed)\n\nAn authoring/publish-time lint rule resolving each `sharingRules[].object` against the declared objects and refusing the two decidable arms — the same shape and the same reasoning as #7503 (`sharingModel: controlled_by_parent` with no `master_detail` relation), which is the nearest precedent for a statically-decidable sharing declaration made loud at publish time rather than at boot.\n\nDeliberately **not** in scope for such a rule: the `owner_id` arm. `owner_id` is injected by the schema registry (`packages/objectql/src/registry.ts`), so it is absent from authored metadata and present on the runtime schema; asserting it statically would fail every object that correctly does not declare it by hand.\n\n## What #9697 does and does not cover\n\n#9697 adds `inert-wirings.test.ts` section 6 in `examples/app-showcase` — a guard over that app's own declarations only, plus a second arm checking the rule's audience holds `allowRead` on the shared object. It closes the class for the reference app. It does nothing for any other app, and nothing at authoring time, which is what this card is about."
+}

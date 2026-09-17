@@ -1,0 +1,34 @@
+{
+  "number": 9600,
+  "kind": "issue",
+  "title": "[finding] Three data-model index rules put a positional config path in the finding's human-readable `where` slot, so the CLI renders the location as `objects[44].indexes[1]`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T12:48:17Z",
+  "updated_at": "2026-08-20T09:33:56Z",
+  "closed_at": "2026-08-19T07:47:19Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9600",
+  "body": "Recorded while taking the false-positive-budget measurement on #4716. Not fixed there — that dispatch changes no production file. Filed unassigned for triage.\n\n## The deviation\n\n`AuthoringFinding` declares two distinct slots (`packages/lint/src/authoring-rules.ts`):\n\n- `where` — *\"Human-readable location, e.g. `object \"leave_request\"`\"*\n- `path` — *\"Config path, e.g. `objects[3].sharingModel`\"*\n\nThree registry adapters set **both** from the config path:\n\n| rule | registry entry | adapter line |\n|---|---|---|\n| `lintUnscopedDeclaredIndexes` | `authoring-rules.ts` | `where: f.path` |\n| `lintUniqueDeclarations` | `authoring-rules.ts` | `where: f.path` |\n| `lintLegacyOrganizationComposites` | `authoring-rules.ts` | `where: f.path` |\n\nAll three implement in `packages/lint/src/data-model-rules.ts` and all three are `tier: 'advisory'`.\n\n## Measured\n\n`origin/main` @ `1c6da6eaf`, over the 45 object declarations `@objectstack/platform-objects` (44) and `@objectstack/metadata-core` (1) ship. 36 findings from these rules render their location as a bare index:\n\n```\nunique/unscoped-declared-index      where = objects[44].indexes[1]\nunique/legacy-organization-composite where = objects[44].indexes[0]\n```\n\nThe object's name is not in `where` at any point. It *is* in the message (`\"sys_account\" declares index [provider_id, account_id] with bare unique: true …`), so no information is lost — but the location column is unreadable on its own, and every other object-scoped rule in the table spells it `object \"sys_account\"`.\n\n## Why this reads differently than when it was written\n\nTwo things changed under it:\n\n1. **Advisories now reach a human.** `SaveMetaItemResponseSchema.advisories` ships (#4717) and objectui PR #4236 renders it. These strings are no longer CLI-only output beside a config file the author is looking at.\n2. **All three carry `surfaceReason: RUNTIME_OBJECT_WRITES_P2`** — they are inside the group #4716's first bullet proposes to put on the `object` write path. At that surface the index is an index into a *per-write snapshot*, not into the author's stack: their own object is `objects[0]` (or the last slot) no matter where it sits in their tenant. The number would be not merely unhelpful but wrong-looking.\n\n## A second, measured consequence\n\nAny consumer that diffs findings across two stack shapes sees one finding under two identities, because the index moves. Taking the #4716 budget, comparing the per-write gate's added findings against the whole-stack verdict reported **36 phantom findings**; normalising `[digits]` out of the fingerprint flipped all 36 to exact matches. They were the same findings at a shifted index.\n\n⚠️ To be precise about blast radius: **the runtime gate's own differential is not affected.** `buildRuntimeWriteSnapshots` derives baseline and candidate from the same filtered array, so every non-written item keeps its index across both passes and its findings cancel correctly. This bites downstream consumers and anyone measuring the gate, not the gate.\n\n## Suggested shape\n\nGive the three adapters the `where` the rest of the table builds (`object \"name\"`, derivable from the same walk that produces `f.path`), and leave `path` exactly as it is. Low risk: `where` is display text, and the only in-repo consumer that keys on it is the gate's `fingerprint`, which reads `where` **and** `path` together and would be unchanged in behaviour by making `where` more specific rather than less.\n"
+}

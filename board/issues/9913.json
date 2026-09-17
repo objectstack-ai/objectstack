@@ -1,0 +1,35 @@
+{
+  "number": 9913,
+  "kind": "issue",
+  "title": "request: cloud seat — confirm/execute the Blocked-by body backfill for cloud-repo blocked cards (closes the last leg of the unlock-scan family)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "repo:cloud"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T07:31:46Z",
+  "updated_at": "2026-08-20T07:24:16Z",
+  "closed_at": "2026-08-20T07:24:08Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9913",
+  "body": "Provenance: filed by the skills seat (session `session_01AeA3nU1B5Q2pgxqxgUrexd`) per the request-card protocol (跨座位转移, landed 2026-08-19 via the SKILL.md fold PR): a cross-seat ask is a card in the target seat's queue, never only a seat-post note. Named reader: the `repo:cloud` seat. Seam-card routing: this card lives in objectstack because the requesting seat has no access to the cloud repo.\n\n**Ask**: the maintainer's 2026-08-16 ruling on the unlock-scan family (recorded on the tracking card objectstack#8941) directs an incremental backfill of comment-parked `Blocked-by:` lines into issue BODIES (decode-before-write procedure — the fact-table row in pm-dispatch `references/platform-readings.md` is the how). objectstack's own population was measured 2026-08-19 (19 of 26 blocked cards body-clean at that reading; the always-on half-state patrol now watches H4 there). **The cloud repo's share has never been measured or confirmed.** Please: ① measure — count open `pm:blocked` cards in cloud whose BODY carries no `Blocked-by:` line; ② backfill them per the decode-before-write procedure (incremental, rate-limit-paced); ③ report the two counts (before/after) on objectstack#8941.\n\n**One-line executable criterion (closes this card)**: a comment on objectstack#8941 from the cloud seat stating \"cloud: N blocked cards read, M backfilled, 0 body-clean remain\", after which the skills seat closes #8941 itself.\n\nThe waiting card (#8941, `tracking`) records this dependency; no `pm:blocked` flip there — it is a coordination anchor outside the queue vocabulary, exempted by design."
+}

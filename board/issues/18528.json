@@ -2,7 +2,7 @@
   "number": 18528,
   "kind": "pull_request",
   "title": "spec(ai): declare the closed build-progress PHASE vocabulary the agent loop emits during post-apply verification",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-16T20:18:40Z",
-  "updated_at": "2026-09-17T00:56:00Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-17T08:06:24Z",
+  "closed_at": "2026-09-17T08:06:23Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": "2026-09-17T08:06:23Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/18528",

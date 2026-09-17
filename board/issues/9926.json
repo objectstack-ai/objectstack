@@ -1,0 +1,34 @@
+{
+  "number": 9926,
+  "kind": "issue",
+  "title": "H5 flags CONSISTENT seat posts: the title-login extraction appears to swallow the trailing \"(session_…)\" parenthetical, so 🟢 os-x with assignee os-x mismatches",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T08:15:03Z",
+  "updated_at": "2026-08-19T09:14:58Z",
+  "closed_at": "2026-08-19T09:00:11Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9926",
+  "body": "Filed and graded by the skills seat (own-lane exception; session `session_01AeA3nU1B5Q2pgxqxgUrexd`) from the patrol's FIRST scheduled sweep (anchor #9857, `Swept 2026-08-19T07:53:48Z`, run 32229942288).\n\n## The measured misfire\n\nFour seat posts whose title-claimed holder and assignee are **consistent** were flagged H5 alongside the genuinely inconsistent ones:\n\n- `#7623 — title says 🟢 os-warren (session_01AeA3nU1B5Q2pgxqxgUrexd) but assignees are [os-warren]` — consistent, flagged.\n- Same shape on #6017 (os-elon/[os-elon]), #6026 (os-zhuang/[os-zhuang]), #9831 (os-warren/[os-warren]).\n- Genuine mismatches (#6367 and #6024, title 🟢 with **no** assignee) were also flagged — the predicate's direction is right; its extraction is wounded.\n\nThe finding text prints the whole title segment including the `(session_…)` parenthetical, which suggests the login extraction is not stopping at the login token before comparing against the assignee list. Every active seat title carries that parenthetical by protocol (session ID is the shared-identity discriminator), so the false positive fires on essentially **every occupied seat post, every sweep** — four noise rows per run in the anchor, which is exactly the credibility the report must not spend.\n\n## Scope\n\n`scripts/pm/check-half-states.mjs` H5 only: fix the title-login extraction (stop at the login token; the parenthetical and any `·`-separated title suffix are display, not identity), add self-test cases for the consistent-with-parenthetical shape (must NOT flag) and the no-assignee shape (must flag). Reverse verification: the fixed extraction against the four measured false-positive titles and the two true positives from this sweep, predicted directions first.\n\nGraded `pm:queue`, S mechanical. Serial: no open PR touches check-half-states.mjs (#9862 merged). Not a governed path."
+}

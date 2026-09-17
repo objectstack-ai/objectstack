@@ -1,0 +1,35 @@
+{
+  "number": 10061,
+  "kind": "issue",
+  "title": "patrol: H4/H14/blocking-index read comment-level Blocked-by lines when the body carries none — the #8941 gauge fix",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T19:52:13Z",
+  "updated_at": "2026-08-20T07:46:03Z",
+  "closed_at": "2026-08-20T07:43:04Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10061",
+  "body": "实现卡,承接两处:#8941(追踪卡:解锁扫描/巡逻只读正文,而席位因 #8813 MCP 正文转义陷阱**有意**把 `Blocked-by:` 行停在评论里 —— 26/40 张 blocked 卡正文干净)与 #9948 的判据重校裁定(2026-08-19:残余 H14 行属量具错位,「修量具而非追假 stale」)。\n\n## Scope —— `scripts/pm/check-half-states.mjs`\n\n**H4、H14(双向)与 `buildBlockingIndex` 获得评论级回落读**:当卡正文无 `Blocked-by:` 行时,读该卡**晚于正文最后编辑**的评论中的 `Blocked-by:` 行(读闭合规则照座位贴协议既例)。要点:\n\n- **复用 PR #10041 刚落地的 `commentCache` 与候选门模式**(H2/H17 同款):评论 fetch 只对「正文无行且状态相关」的卡发起 —— `pm:blocked` 卡(H4/索引边源)与 `pm:blocking` 卡(H14 stale 判定的辩方证据)。量具口径:普查测得 ~2/3 blocked 卡正文干净,fetch 上界即此集合。\n- 解析复用 `blockedByTargets`(#9945 落地,首解析器);跨仓滤除/自引滤除照旧。\n- **H4 语义升级要诚实**:正文无行但评论有行 ⇒ 不再报 H4(机器可读义务已尽,只是通道不同);正文评论皆无 ⇒ H4 照报。H4 的 finding 文本相应改写,说明两通道。\n- **H14 双向都吃全索引**:stale 判定的「无人指向」必须先看过评论级边(#9465/#9968 假 stale 的实测形状进 fixture);missing 判定的目标集同源。\n- 单卡 fetch 失败 = 该卡按「评论不可读」处理且**不得因此判 stale**(#4690:读不到的证据不能当不存在的证据);摘要行报 `comment fallback read on X of Y`(照 H16/H17 先例)。全失败上抛 transport。\n- 自测:正文行/评论行/两者皆有(正文优先?—— 不,**并集**,两通道都是真边)/皆无/评论不可读,每形状正负钉;#9465、#9968 的实测假 stale 形状做回归钉。\n\n## 边界(不做)\n\n⛔ 不让任何席位恢复正文重写(转义陷阱 #8813 另行跟踪);⛔ 不改 `Restart-when:`/`Unlock-action:` 读法(另卡);cloud 仓回填半边归 #8941/#9913 协调线。\n\n## Serial\n\n热文件 `check-half-states.mjs` 被 PR **#10041**(H17,在队)占用 —— 串行在其合并之后,派发前重测(自测基线届时 414)。非治理面。Graded `pm:queue`, M(skills 座,own-lane,session `ae0d8bd1-5667-5f58-8ff8-fa22ec154325`)。"
+}

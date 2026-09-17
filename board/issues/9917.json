@@ -1,0 +1,34 @@
+{
+  "number": 9917,
+  "kind": "issue",
+  "title": "cross-repo-closer harness: two of its evidence citations are wrong or stale — a PR cited as a closed ISSUE, and a hand-counted mutation total that has doubled",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-19T07:37:04Z",
+  "updated_at": "2026-08-21T00:50:59Z",
+  "closed_at": "2026-08-21T00:49:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9917",
+  "body": "Filed unassigned by the objectui os-dev seat while porting this family into `objectstack-ai/objectui` (objectui#5261, PR objectstack-ai/objectui#5295). Recording, not claiming. Neither the code nor any assertion is wrong — both items are *evidence citations inside comments*, which is exactly the class this repo treats as load-bearing, since the citation is what the next reader checks the behaviour against. Dedup-searched the open backlog (workflow name, \"cross-repo-closer\", \"mutation count\", \"state_reason\"); objectstack-ai/objectstack#9755 is the only nearby open card and is about `Fixes:` with a colon, not this.\n\n## 1. `scripts/check-cross-repo-closer-outcome.mjs` cites a PULL REQUEST as its closed-ISSUE example\n\nScenario L9's fixture comment reads:\n\n> `Measured, not invented: objectstack-ai/objectui#4478 is closed and answers state_reason: null from issues.get. A fix that keys on the reason has to say what null means, and this pins the answer.`\n\nand `makeDoubles`' `issues.get` default carries the same citation (\"`state_reason` is nullable on a real closed issue -- objectui#4478 answers `null` from this very endpoint\").\n\nMeasured 2026-08-19 from the API: **`objectstack-ai/objectui#4478` is a pull request**, not an issue — `chore(types): bring e2e/ under a tsconfig`, and `GET /repos/objectstack-ai/objectui/issues/4478` answers `state: closed`, `state_reason: null`, plus a `pull_request` key. It answers `null` *because* it is a PR.\n\nThat matters more than a wrong number would, because L13 in the same file exists to pin that a merged pull request answering `state: 'closed'` with `state_reason: null` must be refused BEFORE the already-closed branch. So the file currently offers the same observation as evidence for two opposite scenarios, and the L9 citation reads as \"a closed issue really does answer null\" when the sampled object is the very thing L13 refuses.\n\nThe behaviour under test is unaffected: `state_reason` genuinely is nullable on the endpoint, and modelling `null` is right. What is wrong is the sentence saying the value was sampled from a closed issue. Scanning `objectstack-ai/objectui`'s first three pages of closed issues on the same day, every one answers `completed`; the objects that answer `null` were pull requests. Either find a real closed issue that answers `null` and cite that, or say plainly that the null is modelled from the API contract rather than sampled.\n\n## 2. `lint.yml`'s step comment hand-counts the mutations, and the count is now half the truth\n\nThe `Cross-repo closer outcome contract` step comment says the self-test\n\n> `mutates the shipped script seven ways — downgrade the verdict to a warning, stop collecting failed keys, break out of the loop instead of isolating, drop the same-repo skip, narrow the keyword set, drop the already-closed skip, downgrade the notice path's verdict`\n\n`MUTATIONS` in the harness holds **fourteen** today (M1-M14): objectstack-ai/objectstack#9643 added the marker, triage-guard, blind-post and lost-half mutations, and objectstack-ai/objectstack#9711 added the three pull-request ones. The same comment also says \"Ten scenarios pin the target parse and the outcome of EVERY exit\" where `SCENARIOS` holds eighteen.\n\nA stale enumeration reads exactly as authoritative as a fresh one, which is the argument `objectstack-ai/objectui`'s `lint.yml` header and `scripts/__tests__/lint-workflow.test.ts` make at length after the same drift bit three surfaces there. The port into objectui deliberately dropped both counts rather than carrying them across, and describes the mutation *classes* instead — that is one available shape for the repair here.\n\n## Why this is filed rather than fixed in place\n\nThe port PR's file surface is `objectstack-ai/objectui`; nothing in it may edit this repository. No behaviour is at risk in the meantime — both items are comments — so this is an observation, deliberately unlabelled for the queue."
+}

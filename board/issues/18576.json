@@ -1,0 +1,30 @@
+{
+  "number": 18576,
+  "kind": "issue",
+  "title": "[Decision] `@objectstack/spec/api` 的浏览器体积:真实调用点付的是约一倍而非 +19.4%,而台账对链 zod 的 12 个条目结构性地判不了 —— 加权重规则 / 收窄入口 / 接受现状?",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "needs-user-decision",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-17T02:33:07Z",
+  "updated_at": "2026-09-17T04:26:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18576",
+  "body": "## 维护者速读\n\n`@objectstack/spec/api` 是我们发布给浏览器消费的一个入口。一年前它很轻;PR #17517 为了让「装配后的包」有声明契约,把 datasource/driver 那棵树拉进了它的依赖图。\n\n代价刚被测出来,比原先记录的**大约严重五倍**:入口本身 gzip 后涨 19–30%,但**真实调用点涨了约一倍**。objectui 里有个文件只用了这个入口 re-export 的**两个字符串常量**,它的浏览器包就从 132 KB 涨到 261 KB(gzip,+97.7%)。越是只用一点点的调用点,涨得越狠 —— 因为 tree-shaking 能从新图里回收的比例更低。\n\n现在**没有任何规则在看这件事**。台账里 `./api` 处在 `unjudged`(未判)状态,而经实测,以这个台账现有的机制**根本无法判它** —— 它的判据是二元的(有没有顺带链上 zod),不是字节数,而 `./api` 直接链 zod。PR #18574 已经把这个「测过、且当前机制判不了」的结论落成记录,所以事实不会再丢失。剩下的是产品取舍。\n\n同一次扫描还表明:`./api` **不是最严重的**。objectui 浏览器代码触及 15 个未判条目中的 12 个,`./ui` 48 个文件、`./data` 30 个、`./kernel` 12 个,都比 `./api` 的 6 个重,而 `./kernel` 的包更大。\n\n**你要做的(一个动作)**:选 A / B / C。\n\n---\n\n## 四棱卡面\n\n### ① 实际业务需求(实测,非「读起来像有用」)\n\n- **有真实消费者**:objectui 里 6 个**浏览器发运的非测试**源文件 value-import `@objectstack/spec/api`(app-shell `clientValidation.ts`、core `column-sortability.ts`、data-objectstack `metadata-client.ts`、plugin-chatbot `usePendingActions.ts`、react `error-message.ts`、types `data.ts`)。扫描器对照组:`./contracts` 报 9 个(与台账既有条目点名的站点吻合),`./meta-spelling` 报 0。\n- **代价是真实的且不成比例**:`column-sortability.ts` 仅用两个 re-export 的字符串常量,gzip 132121 → 261221(**+97.7%**)。`metadata-client.ts` +97.2%,`clientValidation.ts` +97.8%。\n- ⚠️ **`cloud` 未测**(该仓未挂载到本会话)。⛔ 不作「无影响」计。一个没覆盖到目标总体的读数,只为它实际覆盖的那部分背书。\n- ⚠️ objectui 读数取自本会话挂载的 `dda8f3815d`,**不是** pin 的 `.objectui-sha 53ded82bf7`(浅克隆中不存在)。pin **未 bump、未 fetch**。\n\n### ② 项目长远合理性\n\n台账有 `unjudged` 这个状态,却**没有任何机制能把一个链 zod 的条目判出来** —— 这是治理机制自身的缺口,不是某一个条目的问题。12 个被浏览器触及的未判条目共享它。契约优先的做法是让「声明即被强制」,而现在 rule 1 对这 12 个条目**什么都不断言**。\n\n### ③ 防 AI 写错(尤其防写元数据)\n\n`unjudged` 字面读起来像「**没人看过**」,而真相可能是「看过、且判不了」。PR #18574 用一张 `_measuredNonPromotions` 表把这两者分开,并让「不在表里」读作第三态(未测)。⇒ 这一棱**已被该 PR 改善**,但**声明与强制的缺口仍在**:台账继续声称它在治理浏览器可达面,而对最重的 12 个条目它并不治理。\n\n### ④ 创业阶段不扩散\n\n⚠️ 这一棱**指向不扩张**:新增一道字节门禁是新增强制面,属人工地板。但对向事实是 —— 不做任何事,就是让一个**已发布**的浏览器入口上约一倍的回归**无人看管**,而它今天就有 6 个真实调用点在付账。⛔ 本席不抹平这个张力,如实呈上。\n\n---\n\n## 选项\n\n**A — 给台账加一条字节/权重规则**(让 rule 1 对链 zod 的条目也有话可说)。\n⇒ 覆盖全部 12 个条目。⚠️ **新增必需门禁,人工地板**。成本:要定阈值(阈值本身是产品判断),且要有基线与棘轮。\n\n**B — 收窄 `./api` 本身**,让浏览器消费者不再被迫拉进 datasource/driver 树(拆入口,或把装配阶段的声明挪到一个 server-only 入口)。\n⇒ 代价**不再存在**而不是**被看管**。契约收紧优于消费端宽容。⚠️ 动已发布入口的形状 = **公开契约变化,人工地板**,且需要 objectui 侧配合。\n\n**C — 接受现状,只保留 PR #18574 的记录,不加规则也不改形状。**\n⇒ 零新增面,完全符合创业阶段不扩散。代价:6 个真实调用点继续付约一倍,且没有任何东西会在它再涨一倍时出声。\n\n## 推荐\n\n**B**,但 ⛔ 本席的置信度不足以代裁,因为它落在两条人工地板上(公开契约变化 + 跨仓协调)。\n\n理由按权重:**长远合理性(≥50%)** 指向 B —— 它消除成因而不是增设看管;**防错棱**同向(收紧契约 > 消费端容忍);**业务需求棱**有实测拉动(6 个真实站点、约一倍代价),按「有实测拉动 ⇒ 荐长远形态一次付清」应一次付清而非分期。**唯一反向的是创业阶段不扩散棱**,但它反对的是 A 的新增门禁面,对 B 是中性的 —— B 是收窄,不是扩张。\n\n⚠️ 若选 A,建议阈值**不要**只对 `./api` 设:同一次扫描里 `./ui`(48)、`./data`(30)、`./kernel`(12)都比它重,只判 `./api` 会让另外 11 个看起来像已判。\n\n## 四棱卡面块(机器可寻)\n\nos-decision-facets\n① 项目长远合理性:B **缩小**特例 —— 一个已发布浏览器入口不再强拉 datasource/driver 树,代价消失而非被看管;A 反而**扩大**治理面(新增一道必须长期维护的字节门禁与阈值),C 让特例原地长大。\n② 实际业务拉动:**今天就有人撞上** —— objectui 6 个浏览器发运源文件 value-import 该入口,其中只用两个字符串常量的那个 gzip 涨 +97.7%。⛔ 不是投机性能力面,是已发生的代价;零拉动默认 defer 的条款在此**不适用**。\n③ 防 AI 犯错:现状是**静默容忍** —— 台账写着 `unjudged`,读起来像\"没人看过\",而真相是\"看过且判不了\";PR #18574 已把这两者分开,但 rule 1 对 12 个链 zod 条目仍**什么都不断言**。B 让错误形态不可能发生(树不在图里),A 让它响亮(门禁红),C 维持静默。⇒ B > A > C。\n④ 创业阶段不扩散:⚠️ **本棱是唯一反向的,且只反对 A** —— A 是 declare-and-maintain(新增门禁 + 阈值 + 基线 + 棘轮,每一项都是永久义务);B 是 **remove/收窄**,正是本棱偏好的方向;C 零新增但把已发布的债留着。⇒ 本棱 ⛔ 不反对 B。\nPrior rulings read: browser-reachable-entries,browser bundle weight,unjudged entry,spec/api bundle size → 0 hits; none\n\n**推荐:B**。自检行:只看①选 **B**;②③④ 是否翻转:**否** —— ② 提供实测拉动支持一次付清,③ 与 ① 同向,④ 反对的是 A 而非 B。\n\n**置信缺口(明说看不见什么)**:⛔ `cloud` 未测(该仓未挂载到本会话),其浏览器消费面**完全未知**;objectui 读数取自本会话挂载的 `dda8f3815d` 而**非** pin 的 `.objectui-sha 53ded82bf7`,pin 未 bump 未 fetch;⛔ 本席未测 B 的实施成本(拆入口要动哪些 export、objectui 侧要改多少),故\"B 更便宜\"**不是**本席的断言 —— 本席断言的只是 B 的**方向**更对。\n\n## Governing text\n\n- `AGENTS.md` / SKILL.md 人工地板:「新增必需门禁/hook/棘轮」与「协议/公开契约变化」。\n- ADR-0049 enforce-or-remove:声明而未兑现是实现缺口。\n- 台账自身 `_unjudgedComment`:promotion 保留给「a maintainer decision plus a passing gate」。⚠️ 与本卡分诊裁定(「既有门禁内部参数与盲区修复」)在措辞上不完全一致;PR #18574 未解决该张力,因为 route A 无论如何都会让门禁变红,⛔ 无人需要当场选边。\n\n## 出处\n\n测量由 #17535 的 dev 在交付 PR #18574 时产出并交回,⛔ 未自行立卡(写预算)。本席复核:已逐条核实台账 `browserReachable` 条目只有 `why` 散文、无数值轴;门禁脚本中唯一的 `gzip` 字样在**第 24 行的散文 docblock**(引用 #10096 的历史读数),**不是可执行判据** —— 对照组 `zod` 在同文件 56 次命中。⇒ 「没有字节轴」是读数,⛔ 不是转述。\n\nRelated: #17535 · PR #18574 · #17517(引入代价的 PR)· #11072(浏览器条件的既有裁决)\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

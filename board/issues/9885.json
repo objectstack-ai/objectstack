@@ -1,0 +1,34 @@
+{
+  "number": 9885,
+  "kind": "issue",
+  "title": "[finding] sys_position.permissions is a declared \"JSON-serialized array of permission strings\" column and nothing writes or reads it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-19T06:13:36Z",
+  "updated_at": "2026-08-20T14:05:30Z",
+  "closed_at": "2026-08-20T14:04:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9885",
+  "body": "Measured by the recurring no-verdict enumeration patrol established in the #9054 ruling (2026-08-16): \"run the no-verdict enumeration periodically … and report 'keys with zero readers' as findings — enumeration without verdicts, never a red gate, never a ledger row.\" Filed unassigned by the triage seat (session `session_01JEhkB6ShK2HHDzozy7Qwgz`); observation-class. ⛔ No verdict attached and none should be added — this card records a measurement, not a liveness claim.\n\n## The key\n\n`packages/plugins/plugin-security/src/objects/sys-position.object.ts:196` declares on `sys_position`:\n\n- `permissions` — `Field.textarea`, *\"JSON-serialized array of permission strings\"*, group Configuration.\n\n## The measurement (at origin/main `07bfd31cb`)\n\nA whole-tree word search (`git grep -lw permissions` over `packages/`, `apps/`, `examples/`, all `.ts`/`.tsx`, tests included) is inconclusive for this token by itself — 441 files, which is exactly the generic-token collision #8894's measurement documented (`ExecutionContext.permissions`, `object_permissions`, route paths, …). So the second pass is object-scoped, per that measurement's own lesson: all **97** files naming `sys_position` in code were read for a `permissions` row-column access. Result:\n\n- **No producer.** The only row writers are `bootstrap-builtin-positions.ts` (writes `label`, `description`, `managed_by`, `active`, `is_default`) and `bootstrap-declared-positions.ts` (writes `label`, `description`, `active`, `is_default`). Neither writes `permissions`.\n- **No reader.** Position→grant resolution never consults it: `packages/core/src/security/resolve-authz-context.ts` resolves position-bound sets through `sys_position_permission_set` rows (`:474-476`) and `sys_position.name` (see `packages/spec/liveness/position.json`: \"sys_position.name keys position-bound permission-set resolution\"); `delegated-admin-gate.ts` reads `name`/`delegatable`/`is_default`/`business_unit_id`; `sharing-rule-service.ts` reads `active`. Every other `permissions` occurrence in those 97 files is `ExecutionContext.permissions` (caller-context set names), a `sys_permission_set` column (`object_permissions` etc.), or route/prose text.\n- In-file references exist but originate nothing: the `clone_position` action copies it (`{ field: 'permissions', defaultFromRow: true }`, `sys-position.object.ts:118`, comment \"permissions JSON is copied wholesale\") — a copy of a value no code ever writes or evaluates.\n\n## Why this is the ADR-0049 class\n\nThe declared surface reads as a capability catalogue: a `Permissions` textarea on Position tells an admin — and an AI agent authoring against this model — that granting permission strings directly on a position is a thing the platform does. It is not: grants flow only through permission-set bindings. Same shape as `sys_permission_set.active` pre-#8613 and the #9046 D5 pair, on the same ungoverned row-column half of the ADR-0049 surface. Notably, #8894's read-oracle scored this key green for the same reason it stayed green on `sys_permission_set.active` — the token is generic — which is precisely the blind spot the no-verdict patrol exists to cover by hand.\n\n## Corroboration that this is not a search artifact\n\nSame-object positive controls under the identical search shapes: `sys_position.active` resolves to real readers (`sharing-rule-service.ts:65,92`; `row-active.ts` per #8710), `delegatable` and `is_default` to `delegated-admin-gate.ts` (`:758` for is_default), `name` to `permission-evaluator.ts:380`. Cross-object controls: `valid_until` → `delegated-admin-gate.ts:476`; `granted_by` → `sharing-plugin.ts:873`. Only `permissions` comes back empty on both sides.\n\n⚠️ Scope of the negative claim: **this repo only**, per the `evidenceScope` discipline (`packages/spec/liveness/README.md`). `objectui` was not searched; a designer preview rendering the column would count as a consumer under the 2026-08-10 ruling — though not as enforcement, and not as a producer.\n\nPatrol coverage note for the record: this round enumerated the full #8894 surface — 88 candidate keys across the 10 plugin-security/plugin-sharing platform objects; 85 live, 4 already covered by #9046 (the D5 pair ×2 tables), 1 already adjudicated (#8535, `sys_capability.active`), and this key is the only unfiled zero/zero. Dedup checked (key-name, symptom, patrol phrasing): only #8710 surfaces, which concerns `sys_position.active` — a different key.\n\nRefs: #9054 (the ruling that runs this patrol) · #8894 (the measurement + oracle) · #9046 (the D5 pair, same patrol) · #8613 · #8535 · ADR-0049 · ADR-0090."
+}

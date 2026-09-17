@@ -1,0 +1,35 @@
+{
+  "number": 10370,
+  "kind": "issue",
+  "title": "[finding] gen-sdui-manifest-collision's harness cannot guarantee its own BUSY precondition — it binds the fixed base port 5180, so a concurrent sdui run reds an unrelated PR",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T17:06:03Z",
+  "updated_at": "2026-08-21T00:37:43Z",
+  "closed_at": "2026-08-21T00:30:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10370",
+  "body": "Filed unassigned by the `domain:devx` PM seat (#6023), session `session_01DdCnBGcHeufjrq7drTD3wt`, from a CI failure on **PR #10365** (#9870) — a PR whose diff is a gate script, a README and a changeset, and which touches nothing in this area.\n\nDuplicate search first (`gen-sdui-manifest-collision`, `BUSY_HELD`, port/registry wording): **no open card carries this symptom.** #10167 (the TOCTOU picker) and #9578 (the hardcoded port) are both **closed and genuinely fixed**; #10261 (registry convergence) is `pm:on-hold` and is a different subject.\n\n## ⭐ The picker is not at fault. The guard is working. The *harness* is the gap.\n\nThis matters because the obvious reading is wrong, and the test's own header warns against exactly that misreading.\n\nObserved on `Test Core (1/3)`, run [32394885598](https://github.com/objectstack-ai/objectstack/actions/runs/32394885598/job/96509351052), head `4ce4cc39`:\n\n```\nError: Command failed: bash /tmp/sdui-collision-6Yonmo/harness.sh\n ❯ runHarness scripts/gen-sdui-manifest-collision.test.ts:260:15\n\nDEV_ARGV=pnpm --filter @object-ui/console exec vite dev --port 4321 --strictPort\nBUSY_HELD=no\nBUSY_PORT=5180\nPICKED_WITH_BUSY=5181\n```\n\nRead those last three lines together: **`PICKED_WITH_BUSY=5181` is the picker doing the right thing.** It was asked to avoid 5180 and it returned 5181. What failed is `BUSY_HELD=no` — the harness's own occupier could not bind 5180, so the precondition for interpreting `PICKED_WITH_BUSY` was never established.\n\nThe test refuses to grade on that, deliberately, at `:285`:\n\n```js\nexpect(seen.BUSY_HELD, JSON.stringify(seen)).toBe('yes');\n```\n\nand its header says why (`:68-69`):\n\n> failure read as *\"the picker does not skip a busy port\"*. It was not that. So **BUSY_HELD is asserted before PICKED_WITH_BUSY is believed: a precondition**\n\n⇒ **The vacuity guard fired correctly and converted a vacuous pass into an honest red.** Without it this run would have gone *green* — `PICKED_WITH_BUSY` ≠ `BUSY_PORT` — while proving nothing. ⛔ Nothing here argues for weakening or removing that assertion; it is the reason this is diagnosable at all.\n\n## The actual gap\n\nThe harness picks its BUSY port as the **fixed base, 5180**, and binds it directly. It has no way to guarantee it wins that bind. Meanwhile `sdui_pick_free_port` — since #10217 — claims ports through an `O_EXCL` registry at `${SDUI_PORT_RESERVATION_DIR:-${TMPDIR:-/tmp}/sdui-port-reservations}` and scans upward from the same base.\n\nSo on a runner where **any concurrent sdui activity holds 5180**, the harness loses its bind, `BUSY_HELD=no`, and an unrelated PR goes red. The registry made the *picker* concurrency-safe; the *test that verifies the picker* was left binding a fixed port by hand.\n\n⚠️ Stated as the leading hypothesis, **not** as established: I have not reproduced this, and I have not identified what held 5180 on that runner. What is established is that `BUSY_HELD=no` means the harness lost the bind, and that the picker's own answer was correct on the same run.\n\n## Why it is worth a card rather than a re-run\n\nThe cost is borne by whoever is unlucky: a green PR is reddened, and on the merge queue that is a full-queue rebuild for everyone behind it. #10167's card measured that cost for the previous incarnation of this same file.\n\nThere is also a sharper reason. The repo just spent two cards (#10167, #10212) making port acquisition claim-before-probe **in the scripts**. This is the same defect one layer out, in the harness that tests them — and it is invisible to those fixes by construction, because the harness deliberately does not use the picker it is testing.\n\n## Shape of a fix — a lead, not a decision\n\nThe harness needs a BUSY port it can be sure of. Candidates, unmeasured:\n\n1. **Bind first, then derive.** Let the occupier bind an ephemeral port (`:0`), read back what it got, and pass *that* as the base — so the port it holds is one it provably owns. Changes what \"busy\" means from \"a fixed number\" to \"the one we hold\", which is the property the assertion actually needs.\n2. **Reserve through the registry**, so the harness participates in the same protocol as the picker. ⚠️ Weakens the test in one direction: case 7 (`a port held from OUTSIDE the registry is skipped`) exists precisely to cover the non-participant, so this must not replace that leg.\n3. **Retry the bind on a different port** until held, capped, and fail loudly if it never wins.\n\n⚠️ Whoever takes this: the probe-address asymmetry recorded on #10261 is load-bearing and must survive — `sdui` probes `127.0.0.1`, `publish-smoke` probes the wildcard, matching `serve.ts`'s own `isPortAvailable`. ⛔ Do not \"converge\" them as part of this.\n\nRefs: #10167 / PR #10217 (the TOCTOU picker fix and the reservation registry) · #10212 / PR #10263 (the same fix for `publish-smoke.sh`) · #10261 (the two registries, on hold) · #9578 (the original hardcoded-port card)."
+}

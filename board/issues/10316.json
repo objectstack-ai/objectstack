@@ -1,0 +1,36 @@
+{
+  "number": 10316,
+  "kind": "pull_request",
+  "title": "fix(trigger-schedule,service-automation): persisted sys_flow_dispatch ledger makes time-relative sweeps idempotent per matched window",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "protocol:system",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T15:45:33Z",
+  "updated_at": "2026-08-20T17:02:41Z",
+  "closed_at": "2026-08-20T17:02:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-20T17:02:39Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10316",
+  "body": "Fixes #10220\n\n## What\n\nTime-relative sweeps re-dispatched the same record on every tick (measured: 15 duplicate reminders in ~70s on a 5s interval; a kernel rebuild re-dispatched the day's window even under a daily cron). This PR gives the sweep a persisted memory, per the maintainer ruling recorded 2026-08-20 on the issue (Q1 = A, Q2 = A):\n\n- **`@objectstack/service-automation`** — new platform object **`sys_flow_dispatch`**: a dispatch-claim ledger with ADR-0057 telemetry retention (`maxAge: '30d'`, per the ruling; comfortably >= any near-term catch-up horizon for objectstack-ai/cloud#1288 — this ledger is what unblocks its catch-up sweeps). Registered with the manifest alongside `sys_automation_run`; exposed to triggers as **`AutomationEngine.claim(key: string): Promise<boolean>`** on the automation service surface. `claim()` is check-and-record: the key is the row's primary id, so a concurrent duplicate insert fails on the id and the loser re-reads and returns `false` instead of erroring.\n- **`@objectstack/trigger-schedule`** — the sweep computes a dispatch key from the **matched window's identity** and claims it before launching. Offset mode keys on `(flowName, recordId, windowDay, offset)` — editing the date field moves the window day, so the flow legitimately re-fires for the new window. Range mode keys on `(flowName, recordId, sweepDay, rangeSpec)` — the spec prose for `withinDays` (\"fires every day the record stays in range\") stays true: a new day is a new key, but never twice in one day. One derivation (`computeWindowClaimScopes`) produces both the query window and the key, so the matching rule and the dedup key cannot drift. The trigger resolves the claim surface structurally from the `automation` service it already resolves; it never learns the table name.\n- **`@objectstack/spec`** — one registry line: `sys_flow_dispatch` under `service-automation` in `PLATFORM_OBJECTS_BY_PACKAGE` (the maintainer-authorized exception; the conformance test enforces it).\n\n## Trade-off: availability over strict-once (stated per issue requirement 4)\n\nA claim-store **error never blocks the dispatch**. On a ledger failure the engine logs the cause and falls back to the in-process check for that key — the dispatch proceeds unless *this process* already made it, so a store outage degrades to at-least-once instead of silently swallowing reminders. Symmetrically, when no persisted ledger can exist at all (no ObjectQL engine / object not registered / automation service without `claim()`), dedup degrades to in-process only and **says so once** at warn — a silent fallback would hide a permanently weakened guarantee (kernel rebuilds can re-dispatch until the ledger is available).\n\n## Tests\n\n- two sweeps over the same window → dispatched once (offset and range modes);\n- simulated kernel rebuild (fresh trigger/engine instances over the same surviving ledger) → still once;\n- range mode: twice in one day → once; next day → fires again (spec prose preserved);\n- offset mode: a dateField edit that moves the window → fires again for the new window;\n- claim-store failure → dispatch proceeds (and is logged); no claim surface → in-process dedup + one-time degradation warning;\n- store semantics: check-and-record, insert-race loser reads as `false`, genuine store failure propagates to the engine's fallback;\n- records without an id are dispatched unconditionally (never claimable — unchanged pre-existing behaviour).\n\nVerification (at the reported head): dependency-closure build green; `@objectstack/trigger-schedule` 57/57 and typecheck green; `@objectstack/service-automation` 998/998 green (the package has no `typecheck` script; a direct `tsc --noEmit` shows 3 pre-existing private-access errors in the untouched `nested-region-parity.test.ts`, unrelated to this diff); spec `platform-object-names` conformance 7/7 green; dispatch-gates battery green except two **pre-existing macOS-only self-test harness failures** (`check-adr-0087-registration --self-test`, `objectui-changeset-digest --self-test`) reproduced identically on the pristine checkout at a different HEAD — already filed as #10303, and #10086 names the underlying symlink-entry-guard class.\n\n_Generated by [Claude Code](https://claude.ai/code/session_3f79f27a-67a1-44c5-b9e3-f9e08b0aba46)_\n"
+}

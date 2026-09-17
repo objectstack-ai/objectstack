@@ -1,0 +1,35 @@
+{
+  "number": 9973,
+  "kind": "pull_request",
+  "title": "fix(runtime): implement the buffered-send streaming fallback on both dispatcher write-less-transport branches",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T11:13:13Z",
+  "updated_at": "2026-08-19T11:53:50Z",
+  "closed_at": "2026-08-19T11:53:48Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-19T11:53:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9973",
+  "body": "Fixes #9936\nFixes #9961\n\nFamily PR (one branch, per-member commits) implementing the option-B ruling on chain-head #9936: both write-less-transport fallbacks for streamed dispatcher results now implement the IHttpResponse streaming contract's own prescription (#3607, ADR-0076 OQ#10 — the JSDoc on `write` in `packages/spec/src/contracts/http-server.ts`): buffer the SSE frames and deliver them through `send()` under the streaming headers. `packages/spec/**` is untouched — this implements the recorded contract, it does not amend it.\n\n## Member 1 — #9936, `mountRouteOnServer`'s streaming branch\n\nThe fallback answered a bare `res.json({ events })` — an off-envelope JSON dialect of the frames that decodes to zero frames in every reader of the measured population (the client SDK's `parseEventStream` and objectui's AI-SDK transport both split raw response bytes on newlines for `data:` lines, and a JSON body contains no raw newline byte). It now drains the iterable into a buffer using the streamed branch's exact frame-encoding ternary and answers `send(buffered)` under the already-set `text/event-stream` headers.\n\n**Ratchet statement, as ruled:** the `check-route-envelope.mjs` declaration for `packages/runtime/src/dispatcher-plugin.ts` goes `unenveloped: 1` to `0` because **the unenveloped JSON literal ceased to exist** — the replacement body is not JSON at all — and not because the body moved to a spelling the scanner cannot count. Gate reading before (origin/main `5989b0de90`): \"IHttpServer express-style modules — 1 module(s) audited, 10 hand-built body/bodies: 0 conformant, **1 ratcheted** (`unenveloped 1; ticks down only`)\". After (this head `aa0d23c8fb`): \"1 module(s) audited, **9** hand-built body/bodies: **1 conformant, 0 ratcheted**, 0 exempt\", exit 0.\n\n## Member 2 — #9961, `sendResultBase`'s dispatch-result writer\n\nThe worse site: on a write-less transport it fell through to `res.json(result.result)`, serializing the stream descriptor itself — `JSON.stringify` collapses the `events` AsyncIterable to `{}`, so the caller got HTTP 200 with the payload gone and the iterable was never drained. The fix drains the frames (mirroring the streamed branch's `null` skip and trailing `event: error` frame) and answers `send(buffered)` under the descriptor's streaming headers.\n\n**No gate number moves for this half, by design:** the old body was a relayed `res.json(...)`, invisible to `check-route-envelope`'s counters. The pin is the only tripwire; what it catches: a regression back to descriptor-serialization (the `json` spy fires, `send` never does, the drained flag stays false) and any byte divergence from the streamed branch, error-frame encoding included.\n\n## The pins — the entire evidentiary basis\n\nBoth fallback branches are unreachable in every in-repo composition (both shipped `http.server` providers construct `write`/`end` unconditionally; the branches are live only for an external `Runtime({ server })` transport omitting the contract's optional streaming surface — measurement on #9936), and no other in-repo test exercises either branch. So `dispatcher-plugin.streaming-fallback.test.ts` pins the property that makes option B correct: **a buffered SSE body is byte-identical to the streamed one** — each pin drives the same route twice, once against a streaming `res` and once against a write-less one, and asserts `sent === writes.join('')`, then re-asserts it in reader terms by decoding `data:` lines from the buffered body. A pin that only asserted `res.json` is absent would stay green if the replacement emitted the wrong bytes; these fail on any byte divergence.\n\nReverse verification from the committed state, per ablation with predicted direction stated first (pins run from source via same-package relative import — no dist resolution is involved, so there is no rebuild step to owe): restoring member 1's old `res.json({ events })` body turns the #9936 pin red exactly as predicted (terminal `json` where `send` expected, 1 failed / 2 passed); neutralizing member 2's new branch (fall-through to `res.json(result.result)`) turns both #9961 pins red the same way (2 failed / 1 passed). Both legs restored and re-run green.\n\n## Verification at head `aa0d23c8fb` (final commit)\n\n- `pnpm --filter @objectstack/runtime test`: 177 files, **2632 passed** (128s)\n- `pnpm --filter @objectstack/runtime typecheck`: clean\n- Derived union (`node scripts/pm/dispatch-gates.mjs`, no paths — script-computed changeset): `check:route-envelope` · `check:objectui-changeset` · `check:slot-lookup` · `check:cross-package-test-inputs` (pnpm + ci.yml node twin) · `check-adr-0087-registration` · `check-changeset-no-major` · `check-empty-changeset` · `check-affected-docs` — all exit 0; convention-triggered for a new test file: `check:query-options-erasure` · `check:type-check-coverage` · `check:type-check-debt --re-measure` (workspace closure built first via turbo as lint.yml does; \"33 ledger entries re-measured, none above its recorded number\" — an interim +1 TS6133 drift my first test draft introduced in `@objectstack/runtime`'s TEST_DEBT was fixed by deleting the dead parameter, not by touching the ledger) · `check:engine-double-contract` · `check:where-matcher` — all exit 0. Additionally `check:nul-bytes` and `check:test-source-alias` (the new test imports no other workspace package): exit 0.\n- Changeset: `.changeset/dispatcher-streaming-fallback-buffered-send.md` (patch, `@objectstack/runtime`; non-breaking, so no ADR-0087 disposition marker is owed and `check-adr-0087-registration` confirms).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WeN7F6jQFpcqW2BN56RdPa)_"
+}

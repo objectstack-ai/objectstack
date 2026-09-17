@@ -1,0 +1,34 @@
+{
+  "number": 10212,
+  "kind": "issue",
+  "title": "`smoke_pick_free_port` in `scripts/publish-smoke.sh` is the same TOCTOU probe as #10167 — concurrent callers scanning from 3210 are all handed 3210",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T13:57:53Z",
+  "updated_at": "2026-08-20T15:44:14Z",
+  "closed_at": "2026-08-20T15:42:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10212",
+  "body": "Filed unassigned by the dev seat working #10167, which fixed the identical defect in\n`sdui_pick_free_port`. Out of that card's declared file surface, so recorded rather than\nfixed as a rider. Duplicate search first (quoted `\"smoke_pick_free_port\"`,\n`\"publish-smoke\"`, port/TOCTOU wording): the only hits are #10167 itself and #10138, both\nabout the sdui script.\n\n## The defect\n\n`scripts/publish-smoke.sh`, `smoke_pick_free_port`:\n\n```sh\nconst isFree = (port) =>\n  new Promise((resolve) => {\n    const probe = net.createServer();\n    probe.once('error', () => resolve(false));\n    probe.once('listening', () => probe.close(() => resolve(true)));   // closes, then reports free\n    probe.listen(port);\n  });\n```\n\nBind, **close**, report free — then the caller binds. The scan walks `base` upward\ndeterministically, so concurrent callers do not diverge: they are handed the same port,\nand the first one every time. This is not a probability, it is the construction. Measured\non the sibling helper before #10167 fixed it, eight concurrent callers from one base:\n\n```\nDISTINCT_PORTS=1 of 8\nBIND_OK=2  BIND_ERR=6      # Error: listen EADDRINUSE 127.0.0.1:5180\n```\n\nNothing about that measurement is specific to the sdui script; the two helpers differ\nonly in their default base (`3210` vs `5180`) and in probing the wildcard address rather\nthan `127.0.0.1`.\n\n## Why it may bite less loudly here — and why that is not a reason to leave it\n\n`smoke_wait_for_own_server` is documented as turning a lost race into a warning and a\nretargeted `BASE_URL`, rather than the loud failure the sdui path takes. So the visible\nsymptom is likely a warning rather than a dequeued PR. But the contention is real:\n`packages/spec/scripts/publish-smoke-port-collision.test.ts` draws from base `3210` four\ntimes (`:154`, `:159`, `:188`, `:221`), and `scripts/publish-smoke.sh` draws once more in\nthe real path.\n\n## Shape of a fix (a lead, not a decision)\n\n#10167 landed a claim-before-probe registry: `O_EXCL` file creation per port in a\nhost-shared directory, swept of claims whose owner process is gone, `flock` around the\nsweep, and the claim released if the probe then loses to a process outside the registry.\nPorting that is mostly mechanical — but it is a design port, not a spelling change, and\nwhoever takes it should decide deliberately whether the two helpers should share one\nregistry (they draw from disjoint bases today, which is the only reason they do not\nalready collide with each other).\n\n⚠️ It also needs its own test surface: `publish-smoke-port-collision.test.ts` asserts the\ncurrent behaviour and would need the same vacuity guards #10167 added — an occupier that\nsilently loses its own bind reads as a picker that ignores busy ports, which is how the\nsdui version accused the wrong function."
+}

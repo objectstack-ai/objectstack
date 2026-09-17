@@ -1,0 +1,35 @@
+{
+  "number": 10053,
+  "kind": "issue",
+  "title": "[finding] `element:button.icon` and `object-metric.icon` carry vocabulary-only describes — live readers measured, read point unrecorded",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-19T19:29:51Z",
+  "updated_at": "2026-08-20T17:46:58Z",
+  "closed_at": "2026-08-20T17:46:58Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10053",
+  "body": "Filed unassigned by the #9972 dev seat (session `session_01URCaKuNTuK3BKJvwqM74QU`) as an out-of-scope finding hit while enumerating the remaining `icon` slots in `packages/spec/src/ui/component.zod.ts`, which that card's first-touch grading asked for. Observation class — recorded, not queued.\n\n## Observation\n\n#9881 (accordion) and #9972 (tabs) each gave an item `icon` a `.describe()` naming its objectui read point, so a liveness sweep stops re-deriving a false retirement candidate for a key that renders. After #9972 there are **no bare `icon` slots left** in `component.zod.ts`. Two of the remaining ones sit one notch weaker: they carry a describe, but the describe states only the *vocabulary*, never a reader.\n\n- `ElementButtonPropsSchema.icon` — `describe('Icon name (Lucide icon)')`\n- `ObjectMetricPropsSchema.icon` — `describe('Icon name (Lucide)')`\n\nNeither says anything a sweep can use: \"Icon name (Lucide)\" is equally true of the reference-rail `icon`, which is refused precisely because **no render path reads it** (#8691). The prose does not separate the two verdicts, which is the separation #9881/#9972 exist to record.\n\n## Both are live — measured at the pin this repo builds against\n\nRead at `.objectui-sha` = `82a94170c` via `git show 82a94170c:`, not at the objectui checkout's HEAD:\n\n- `element:button.icon` — `packages/components/src/renderers/form/button.tsx:44-47` resolves `schema.icon` through a PascalCase normaliser plus a renamed-icon map into `icons` from `lucide-react`, and renders it at `:69` / `:71` on either side of the label per `iconPosition`. Note this is **not** the `LazyIcon` slot the container icons use — a second, older resolution path with its own rename map, which is worth stating in whatever prose lands.\n- `object-metric.icon` — `packages/plugin-dashboard/src/ObjectMetricWidget.tsx` forwards `icon` to `MetricCard`, which resolves it at `MetricCard.tsx:82-83` via `getLazyIcon(icon)`.\n\n## Why it is worth recording rather than shrugging\n\nThe measured cost of this exact absence is a full dispatch cycle (#9397, closed premise-overtaken, re-derived the accordion read point from scratch). The trigger there was a *bare* key, so these two are a weaker signal — but nothing on the spec side distinguishes them from the rail's refused `icon`, and the enumeration that produced this finding was itself asked for so the class \"does not come back a third time one component over\".\n\n## Suggested shape (no acceptance change)\n\nSame text face as #9881/#9972: extend each describe to name the consumer behaviourally, with the file:line anchors and the measured pin in a docblock above the key. `element:button` additionally deserves the note that its icon resolves through `lucide-react`'s `icons` map rather than `LazyIcon`, since the two paths accept different spellings. No key would be widened, narrowed, retired or renamed; expected `@objectstack/spec` patch.\n\nDedup checked: searched open and closed issues for these two keys, for `component.zod.ts` icon describes, and for the liveness/accept-pin phrasing — only #9881 (closed) and #9972 (open) match, and neither covers these keys.\n\nBacklink: #9972.\n"
+}

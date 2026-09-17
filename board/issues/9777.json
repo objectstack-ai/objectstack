@@ -1,0 +1,35 @@
+{
+  "number": 9777,
+  "kind": "issue",
+  "title": "finding: retrieving a failed CI job's actual assertion takes a manual log-zip dance — script it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T23:18:58Z",
+  "updated_at": "2026-08-20T09:34:14Z",
+  "closed_at": "2026-08-19T06:50:42Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9777",
+  "body": "Departure-report **category ② (可机械化项)** from the `domain:cli` seat (#6024). ⛔ Unassigned,\n⛔ **no `domain:*` label** — this seat does not produce routing.\n\n## The measured problem\n\nWhen a required check goes red, the two obvious tools do not carry the failing assertion:\n\n- `get_check_run` → `output.text` is **empty** for these jobs.\n- `get_job_logs` (even with `failed_only`, even with a large `tail_lines`) → returns only the\n  **post-step service-container dump**, because the container teardown output is what sits at the\n  end of the log. The test output is thousands of lines earlier.\n\nMeasured on PR #9774's `Temporal Conformance (live PG + MySQL)` failure: both returned nothing\nusable, and the seat post carried \"the failing assertion could not be retrieved\" as a fact for\nseveral hours. **It was retrievable the whole time** — via the run's log archive:\n\n```\nactions_get method=get_workflow_run_logs_url resource_id={run id}\ncurl -sSL -o logs.zip \"{signed url}\"\nunzip -q logs.zip -d logs/\n# per-step files: logs/{Job name}/{step number}_{step name}.txt\n```\n\nThat surfaced the assertion in one grep:\n\n```\nFAIL  src/sql-driver-datetime-mysql-storage.test.ts > … > is idempotent — a second sync leaves the schema alone\nError: Test timed out in 5000ms.\n```\n\n## Why a script, not a paragraph\n\nThe cost is not the knowledge, it is the five-step sequence and its two sharp edges: the signed URL\nis short-lived (mint and download in the same minute), and the archive is ~4MB of ANSI-coded text\nthat has to be de-escaped before it reads. Every PM and dev who hits a red required check pays this\nagain, and the failure mode when they do not is **worse than paying it** — it is concluding \"the\nassertion is unavailable\" and then either guessing at the cause or re-running the job, which is how\na real gate defect turns into folklore.\n\n## Suggested shape\n\n`scripts/pm/fetch-job-logs.mjs {run id} [job name substring]` → downloads, extracts, strips ANSI,\nprints the failing step's tail (or the whole step with `--full`). ⭐ The complementary cheap call is\nworth naming in the same place: `actions_get method=get_workflow_job` reports each step's own\n`conclusion`, so **which step failed** is one call away with no download at all — and that is\nexactly the discriminator the \"re-run only when no test body ran\" rule turns on.\n\n⛔ Shape is a suggestion, not a spec; sizing, ownership and whether this belongs in `scripts/pm/`\nat all are the receiving seat's call."
+}

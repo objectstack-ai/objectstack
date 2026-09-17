@@ -1,0 +1,36 @@
+{
+  "number": 9901,
+  "kind": "issue",
+  "title": "security(rest): the external-datasource federation family still admits any authenticated caller, while its declared admin twin now requires a capability",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-19T06:44:31Z",
+  "updated_at": "2026-08-20T16:34:01Z",
+  "closed_at": "2026-08-20T16:34:01Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9901",
+  "body": "Found while implementing #9593 (the datasource-admin capability gate). Filed rather than fixed there: it is a different registrar in a different package, and #9593's file surface was ruled to be the datasource-admin family.\n\n## Disclosure posture — inherited deliberately\n\n⛔ **No reproduction here, in any PR body, or in any commit message.** #9391 was revised on 2026-08-17 to remove its request/response table after the maintainer deleted the public reproduction, and #9686 inherited that posture for this same area. What follows is the cause, the source location, and the contract a fix would restore.\n\n## What is now true\n\n`listRemoteTables` and `generateObjectDraft` are each reachable through two mounted routes, in two packages, and the two doors no longer apply the same admission policy:\n\n| operation | admin spelling (`@objectstack/service-datasource`) | federation spelling (`@objectstack/rest`) |\n| --- | --- | --- |\n| `listRemoteTables` | `GET /api/v1/datasources/:name/remote-tables` | `GET /api/v1/datasources/:name/external/tables` |\n| `generateObjectDraft` | `POST /api/v1/datasources/:name/object-draft` | `POST /api/v1/datasources/:name/external/tables/:remote/draft` |\n| anonymous | `401` | `401` |\n| authenticated, no capability | **`403 PERMISSION_DENIED`** (#9593) | **served** |\n| authenticated + `manage_platform_settings` | served | served |\n\nSo an authenticated caller holding no platform capability is refused live remote-schema introspection at one spelling and served it at the other — same operation, same `external-datasource` service slot, same method, two doors, one gate.\n\n## Cause\n\nBoth guards are correct for what each was scoped to; the asymmetry is the residue of the two cards being deliberately split.\n\n- `registerDatasourceAdminRoutes` (`packages/services/service-datasource/src/admin-routes.ts`) applies the shared anonymous floor **and**, as of #9593, requires `manage_platform_settings` — matched to what the sibling Setup-admin families gate on.\n- `registerExternalDatasourceRoutes` (`packages/rest/src/external-datasource-routes.ts`) applies the shared anonymous floor **only**. Its own guard doc says so in as many words: *\"Authentication and nothing more: whether these routes should FURTHER require a capability is the separately-ruled question #9593 asks of the admin family, and is deliberately absent here.\"*\n\n#9686 made the same call from the other side: *\"Whether these routes should require a capability beyond authentication is a separate question of the kind #9593 answers for the admin family, and should not be folded in.\"* Both deferrals were right individually; this card is the question they both deferred to, now that #9593 has answered it for the admin half.\n\n## Why it matters beyond tidiness\n\nThis family's equivalence is a maintained invariant, not a coincidence — #4249 gave the two spellings one failure contract, #7955 one request shape, #9686 one admission answer on the anonymous axis. The capability axis is the first on which they are pinned as **disagreeing**.\n\nThe federation family is also the larger surface: it carries three routes the admin spelling has no twin for, two of which **write** (`POST .../external/tables/:remote/import` creates a live runtime-origin federated object; `POST .../external/refresh-catalog`). Those are not covered by #9593 at all and are on the same authentication-only footing.\n\nUnlike the admin spelling, this family **is** SDK-expressed (`datasources.external.*` on `ObjectStackClient`, per the REST route ledger), so any fix must be checked against those callers presenting a credential — that is the half most likely to break, and the reason this is a decision rather than a mechanical copy.\n\n## Where it is currently pinned\n\n`packages/rest/src/remote-tables-twin.equivalence.test.ts` — the twin-equivalence suite — was updated by #9593's PR to record the divergence explicitly rather than hide it, in a case labelled as a record of a known gap. ⚠️ **That case is expected to FAIL when this card is fixed**, and the fix should fold the row back into the agreement block above it rather than delete it. Read the block header there before changing it.\n\n## What a fix would look like (a lead, not a decision)\n\nThe federation registrar already receives `resolveExecutionContext` from `direct-mount-composition.ts`, and `@objectstack/rest`'s sibling `package-routes.ts` already reads `systemPermissions` off that resolved context for its own capability gate — so the seam exists and the shape is established in this package. The open questions are genuinely open and should not be answered by copying:\n\n1. **Which capability**, and whether it is the same one for read and write here. #9593 measured `manage_platform_settings` with no read/write split for the admin family; this family's write routes (`import`, `refresh-catalog`) create metadata, which is `manage_metadata` territory in this package's other gate.\n2. **The SDK callers.** `datasources.external.*` is published surface; a capability requirement is a behaviour change for anyone using it today.\n3. **Whether the two spellings should converge at all**, or whether the federation family is deliberately the lower-privilege door for a use case the admin family is not. That question is what makes this a card rather than a patch.\n\nBacklinks: #9593 (the admin half, where the capability was measured) · #9686 (this family's authentication guard, which deferred this question) · #9391 (the admin family's authentication guard) · #7955 / #4249 (the twin-equivalence invariants).\n\nUnassigned and unqueued — for the triage seat to level and route.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PnJHU45vPJj5UQrxe946Bx)_"
+}

@@ -2,7 +2,7 @@
   "number": 18503,
   "kind": "pull_request",
   "title": "Retire check-reference-carrier-shape; refuse an unreadable `reference` carrier at the reader",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-16T16:42:51Z",
-  "updated_at": "2026-09-17T00:49:44Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-17T07:39:48Z",
+  "closed_at": "2026-09-17T07:39:46Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": "2026-09-17T07:39:46Z",
   "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/18503",

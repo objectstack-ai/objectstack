@@ -1,0 +1,34 @@
+{
+  "number": 10128,
+  "kind": "issue",
+  "title": "merge-queue-triage bot: excerpt the failure REASON line, and aggregate same-signature ejections across PRs into one anchor issue (2026-08-20 queue-incident layer ③)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T06:36:00Z",
+  "updated_at": "2026-08-20T09:34:34Z",
+  "closed_at": "2026-08-20T09:11:29Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10128",
+  "body": "Filed by the spec seat on the maintainer's instruction (2026-08-20 live chat, verbatim: 「立卡」, accepting layer ③ — ranked highest-leverage of the four: it shortens the diagnosis loop for the NEXT unknown incident, whatever its cause). Provenance: the #4859 triage workflow this extends; incident thread #10115 · #10112 · PR #10120.\n\n## The two diagnosis failures this automates away, both measured tonight\n\n1. **The excerpts omitted the failure REASON.** The bot's log extraction showed `FAIL src/dev-plugin-security-enforcement-warning.test.ts` (and on earlier ejections, stale-looking assertion lines) but not the deciding line — `Test timed out in 5000ms` vs `AssertionError: …`. A first responder locally reproduced a DIFFERENT failure of the same file (unbuilt closure ⇒ assertion) that matched the excerpt's shape, and filed a confidently wrong diagnosis (#10112, \"missing build edge\"). One full dispatch was spent falsifying it — the actual CI logs contained zero assertion failures and only timeouts, a distinction one grep in the bot would have surfaced.\n2. **Nobody connects ejections across PRs automatically.** The same test file ejected three unrelated PRs (#10105 → #10003 → #10008) before a human joined the dots at 04:08Z. Each victim PR got its own bot comment; no shared record existed until hand-filed — and the hand-filed one mis-diagnosed (see 1).\n\n## The change, two limbs on the existing workflow (`scripts/` + the #4859 workflow)\n\n1. **Reason line in every excerpt**: alongside the `FAIL` line, grep the job log for the matching failure-reason line (`Test timed out in …` / `AssertionError` / `Hook timed out in …` / first `Error:` after the FAIL) and print it labeled. One extraction addition; the excerpt becomes self-triaging for the timeout-vs-assertion split that burned tonight.\n2. **Cross-PR signature aggregation**: key = failing test file path (per queue build). When the same key appears in ejections of ≥2 distinct PRs within a rolling 24h, the bot files ONE anchor issue (or refreshes the existing open one — dedup by a stable marker in the issue body, the same idempotency idiom the bot's own `<!-- merge-queue-triage:… -->` markers use) listing every affected PR/build, and links it from each subsequent victim's comment. Single anchor = single place for the fix conversation, and the victim count is visible instead of re-derived.\n\nBoundary, explicit: the bot still decides nothing — it names and aggregates; humans and seats still triage. No auto-requeue, no auto-quarantine (gate-weakening stays a human act).\n\nDedup: no existing card extends the triage bot (searched: merge-queue-triage / signature aggregation / failure reason). The bot's own workflow #4859 is its anchor and stays open for its own scope.\n\nSuggested size/model: M, `opus`."
+}

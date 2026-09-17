@@ -1,0 +1,35 @@
+{
+  "number": 10051,
+  "kind": "pull_request",
+  "title": "feat(security): explain reports a deactivated permission set/position via the shared held-state vocabulary (#8714)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T19:16:13Z",
+  "updated_at": "2026-08-19T20:51:46Z",
+  "closed_at": "2026-08-19T20:51:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-19T20:51:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10051",
+  "body": "Fixes #8714\n\n## What\n\nImplements the 2026-08-18 maintainer ruling (「其他接受你的建议」, comment 5334876108): the explain engine gains a contributor state for a **deactivated permission set / position**, sharing ONE \"held but not resolving, because X\" vocabulary with the ADR-0091 expired state — a closed enumeration of reasons (`expired`, `deactivated`), extended only deliberately, not a second per-cause shape and not a sibling array. One atomic PR spanning spec + plugin-security per the triage designation (comment 5345619143), so the contract never carries a producer-less enum member.\n\n## Contract (`packages/spec`)\n\n- `ExplainLayerSchema.contributors[].state` widens from two members (`active`, `expired`) to three (`active`, `expired`, `deactivated`), with the doc comment rewritten as the shared held-state vocabulary (ADR-0091 D2 for `expired`, ADR-0049 / #8613 for `deactivated`).\n- `explain.test.ts`: the accept pin gains a `deactivated` contributor; the reject pin **keeps `'suspended'` as a still-unknown value** (the triage-designated closure condition), so the enumeration stays provably closed rather than merely widened.\n- Accept-set widening only: every payload that parsed before parses unchanged.\n- `content/docs/references/security/explain.mdx` regenerated (`check:generated` proved exactly this artifact stale; `--fix` regenerated only it).\n\n## Producer (`packages/plugins/plugin-security`)\n\nThe ruling's cheaper sketch: the explain-only provenance pass (`collectGrantProvenance`) re-reads the grant rows it already walks, and the resolver's fail-closed dropping stays untouched.\n\n- Direct `sys_user_permission_set` grants: the existing by-id `sys_permission_set` read now serves both reasons — names for expired rows, the ADR-0049 `active` flag for held rows. A held grant whose set row is explicitly deactivated is reported `state: 'deactivated'`, `via: 'held — deactivated'`.\n- `sys_user_position` rows: window-active position names are checked against their `sys_position` catalogue rows (one additional read in the explain-by-userId path); an explicitly deactivated one is reported the same way. Both cases the ruling covers — sets and positions — are produced.\n- Deactivation is judged by the same shared `isRowActive` predicate the resolver enforces with (`@objectstack/core`) — one implementation, consulted twice, never re-derived.\n- A row both expired and deactivated reports `expired` — one reason per row, matching the resolver's drop order (window filter first).\n- The principal layer's `detail` gains a DEACTIVATED sentence beside the existing EXPIRED one.\n- Internal plumbing: the context annotation `expiredGrants` is replaced by `droppedGrants` — one array whose entries carry the closed reason enum instead of growing a per-cause sibling array. Consumer sweep (repo-wide grep): all consumers live in `explain-engine.ts` + its test; the objectui explain panel imports the spec types and renders contributors without discriminating `state`, so it degrades gracefully until the pin moves.\n\n**Deliberate boundary (documented in code + docs):** deactivation is re-read for the grants the provenance pass already walks. A deactivated position held only via role projection, or a deactivated SET reached only through an active position's `sys_position_permission_set` linkage, is not re-derived — that would replicate the resolver's aggregation, which is the design the ruling's sketch avoids.\n\n## Docs\n\n`content/docs/permissions/authorization.mdx`: the expired-state paragraph now names the shared closed vocabulary; the ADR-0049 `active`-switch section gains the deactivated-reporting paragraph, including the boundary above.\n\n## Verification\n\n- **@objectstack/spec**: full suite green — 414 files / 11036 tests. Typecheck green.\n- **@objectstack/plugin-security**: full suite green — 66 files / 1301 tests, including new cases (deactivated direct-grant set; deactivated position incl. the 0/1 storage shape; expired+deactivated precedence; absent-`active`-is-ACTIVE non-report; both states side by side). Typecheck green.\n- **qa/dogfood**: full suite green — 121 files passed, 1 skipped / 880 tests passed, 3 skipped — includes the ADR-0056 D10 authz-conformance ledger (its `permission-set-active` / `position-active` rows cite enforcement sites only; no fixture consumes the new state).\n- **Reverse verification** (fix committed first, direction predicted in advance): restoring the two-member enum from origin/main and rebuilding spec turned the producer arm RED (TS2322 at explain-engine.ts, `state` not assignable) and the spec accept pin RED (1 failed / 28 passed); restoring the fix and rebuilding returned both green (tsc exit 0; 29/29) — proving the rebuilt `.d.ts` is what was read.\n- 30+ gate families run locally, all green — including `check:generated` (after the one proved-stale regen), `check:dev-prereqs` (after a full build), `check:i18n`, `check:authz-resolver`, `check:cross-package-test-inputs`, docs-audit, spec-liveness family, engine-double-contract, where-matcher, changeset gates.\n\nThe `needs:contract-review` gate is expected to fire on the `packages/spec/src/**` path limb — that is correct behavior for this clause-② card.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01URCaKuNTuK3BKJvwqM74QU)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01URCaKuNTuK3BKJvwqM74QU)_"
+}

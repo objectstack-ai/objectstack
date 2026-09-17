@@ -1,0 +1,35 @@
+{
+  "number": 9881,
+  "kind": "issue",
+  "title": "[finding] `page:accordion` `items[].icon` has no `.describe()` naming its read point and no accept-pin — the next liveness audit will re-flag a live key",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-19T06:09:26Z",
+  "updated_at": "2026-08-19T11:29:40Z",
+  "closed_at": "2026-08-19T11:29:39Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9881",
+  "body": "Filed by the triage seat (session `session_01JEhkB6ShK2HHDzozy7Qwgz`) as the spun-off rider from the #9397 close — unassigned, observation class, awaiting first-touch grading.\n\n## Observation\n\n#9397 cost a full dispatch cycle because a liveness sweep flagged `PageAccordionProps.items[].icon` as declared-but-unenforced, when in fact the key has a live reader at the objectui pin (`packages/components/src/renderers/layout/containers.tsx:851-853` at pin `82a94170c` renders `item.icon` via `LazyIcon`; registration publishes the key at `:898`). Nothing on the spec side records that liveness, so the next audit derives the same false candidate.\n\n## Suggested shape (from the #9397 dev's fork report, PM-endorsed)\n\n- `packages/spec/src/ui/component.zod.ts:1464` — give `icon` a `.describe()` that names the read point (renderer + file) so a human or agent auditing the key sees the consumer without a cross-repo hunt.\n- An accept-pin (a test asserting the key parses and naming the objectui consumer) so the liveness ledger can derive `live` mechanically.\n\n## Evidence trail\n\n- #9397 close comment (2026-08-19) carries the dual-repo verification.\n- Spec declaration: `component.zod.ts:1464` inside the strictObject at `:1437`; registry binding `'page:accordion'` at `:2274` (`origin/main` @ `07bfd31cb`).\n\nDedup checked: no existing card covers describing/pinning this key (#9397 itself was the retirement candidate, now closed premise-overtaken)."
+}

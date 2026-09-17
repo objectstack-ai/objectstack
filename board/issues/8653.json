@@ -1,0 +1,30 @@
+{
+  "number": 8653,
+  "kind": "pull_request",
+  "title": "chore: version packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-14T08:34:01Z",
+  "updated_at": "2026-08-20T09:41:04Z",
+  "closed_at": "2026-08-20T09:41:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-20T09:41:02Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8653",
+  "body": "This PR was opened by the [Changesets release](https://github.com/changesets/action) GitHub action. When you're ready to do a release, you can merge this and publish to npm yourself or [setup this action to publish automatically](https://github.com/changesets/action#with-publishing). If you're not ready to do a release yet, that's fine, whenever you add more changesets to main, this PR will be updated.\n\n\n# Releases\n\n> The changelog information of each package has been omitted from this message, as the content exceeds the size limit.\n\n## @objectstack/hono@17.1.0\n\n\n## @objectstack/cli@17.1.0\n\n\n## @objectstack/client@17.1.0\n\n\n## @objectstack/cloud-connection@17.1.0\n\n\n## @objectstack/console@17.1.0\n\n\n## @objectstack/core@17.1.0\n\n\n## create-objectstack@17.1.0\n\n\n## @objectstack/driver-sql@17.1.0\n\n\n## @objectstack/lint@17.1.0\n\n\n## @objectstack/mcp@17.1.0\n\n\n## @objectstack/metadata-protocol@17.1.0\n\n\n## @objectstack/objectql@17.1.0\n\n\n## @objectstack/platform-objects@17.1.0\n\n\n## @objectstack/plugin-approvals@17.1.0\n\n\n## @objectstack/plugin-audit@17.1.0\n\n\n## @objectstack/plugin-auth@17.1.0\n\n\n## @objectstack/plugin-email@17.1.0\n\n\n## @objectstack/plugin-hono-server@17.1.0\n\n\n## @objectstack/plugin-security@17.1.0\n\n\n## @objectstack/plugin-sharing@17.1.0\n\n\n## @objectstack/rest@17.1.0\n\n\n## @objectstack/runtime@17.1.0\n\n\n## @objectstack/service-automation@17.1.0\n\n\n## @objectstack/service-datasource@17.1.0\n\n\n## @objectstack/service-messaging@17.1.0\n\n\n## @objectstack/spec@17.1.0\n\n\n## @objectstack/types@17.1.0\n\n\n## @objectstack/account@17.1.0\n\n\n## @objectstack/setup@17.1.0\n\n\n## @objectstack/studio@17.1.0\n\n\n## @objectstack/client-react@17.1.0\n\n\n## @objectstack/connector-mcp@17.1.0\n\n\n## @objectstack/connector-openapi@17.1.0\n\n\n## @objectstack/connector-rest@17.1.0\n\n\n## @objectstack/connector-slack@17.1.0\n\n\n## @objectstack/driver-memory@17.1.0\n\n\n## @objectstack/driver-mongodb@17.1.0\n\n\n## @objectstack/driver-sqlite-wasm@17.1.0\n\n\n## @objectstack/driver-turso@17.1.0\n\n\n## @objectstack/formula@17.1.0\n\n\n## @objectstack/metadata@17.1.0\n\n\n## @objectstack/metadata-core@17.1.0\n\n\n## @objectstack/metadata-fs@17.1.0\n\n\n## @objectstack/observability@17.1.0\n\n\n## @objectstack/embedder-openai@17.1.0\n\n\n## @objectstack/knowledge-memory@17.1.0\n\n\n## @objectstack/knowledge-ragflow@17.1.0\n\n\n## @objectstack/plugin-dev@17.1.0\n\n\n## @objectstack/plugin-pinyin-search@17.1.0\n\n\n## @objectstack/plugin-reports@17.1.0\n\n\n## @objectstack/plugin-webhooks@17.1.0\n\n\n## @objectstack/service-analytics@17.1.0\n\n\n## @objectstack/service-cache@17.1.0\n\n\n## @objectstack/service-cluster@17.1.0\n\n\n## @objectstack/service-cluster-redis@17.1.0\n\n\n## @objectstack/service-i18n@17.1.0\n\n\n## @objectstack/service-job@17.1.0\n\n\n## @objectstack/service-knowledge@17.1.0\n\n\n## @objectstack/service-package@17.1.0\n\n\n## @objectstack/service-queue@17.1.0\n\n\n## @objectstack/service-realtime@17.1.0\n\n\n## @objectstack/service-settings@17.1.0\n\n\n## @objectstack/service-sms@17.1.0\n\n\n## @objectstack/service-storage@17.1.0\n\n\n## @objectstack/trigger-api@17.1.0\n\n\n## @objectstack/trigger-record-change@17.1.0\n\n\n## @objectstack/trigger-schedule@17.1.0\n\n\n## @objectstack/verify@17.1.0\n\n\n## @objectstack/sdui-parser@17.1.0\n\n\n## @objectstack/example-crm@4.0.93\n\n\n## @objectstack/example-showcase@0.3.15\n\n\n## @objectstack/example-todo@4.0.93\n\n\n## @objectstack/example-embed-objectql@0.0.33\n\n\n## @objectstack/dogfood@0.0.41\n\n\n## @objectstack/downstream-contract@0.0.39\n\n\n## @objectstack/http-conformance@0.1.1\n\n"
+}

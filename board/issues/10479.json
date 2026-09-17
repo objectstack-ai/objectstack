@@ -1,0 +1,32 @@
+{
+  "number": 10479,
+  "kind": "issue",
+  "title": "examples: the showcase CRM workbench react page passes `limit: 200` to `adapter.find` — same dropped-option class as #10288, a second file that card's fix does not reach",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T00:29:29Z",
+  "updated_at": "2026-08-21T07:39:58Z",
+  "closed_at": "2026-08-21T07:39:20Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10479",
+  "body": "Found while re-measuring the `adapter.find` claims for objectui#5413 (the react-pages\nguide's `Live data` sample). Filing rather than fixing — `examples/**` is outside that\ncard's file surface, which is the objectui guide only.\n\nSame defect class as #10288, but a **different file**, and #10288's stated fix explicitly\ndoes not reach it (\"`top: 500` → `$top: 500` in both calls. Two characters; no other\nchange.\" — both calls being in `renewals-pipeline.page.ts`).\n\n## The call\n\n`examples/app-showcase/src/ui/pages/crm-workbench.page.ts`, in `refreshStats`:\n\n```js\nconst all = await adapter.find('showcase_project', { limit: 200 });\nconst rows = Array.isArray(all) ? all : (all && (all.data || all.records)) || [];\nsetStats({ total: rows.length, active: rows.filter((r) => r.status === 'active').length });\n```\n\n`limit` is not a query option. It is arguably worse than #10288's `top`, because there is\nno `$limit` either — the key that means this is `$top`.\n\n## Evidence\n\n`QueryParams` (objectui `packages/types/src/data.ts`) declares only `$`-prefixed keys:\n`$select`, `$filter`, `$orderby`, `$skip`, `$top`, `$expand`, `$search`, `$searchFields`,\n`$count`. `ObjectStackAdapter.find` builds its wire options in `convertQueryParams`\n(objectui `packages/data-objectstack/src/index.ts`), which reads the prefixed spellings\ninto a **fresh** options object:\n\n```js\nif (params.$top !== undefined) {\n  options.top = params.$top;\n}\n```\n\nNothing copies an unprefixed key across, so `limit` reaches no branch and is dropped\nsilently.\n\nCounter-probe — the two other `.limit` reads in that file are different methods with\ntheir own option types (`searchAll(query, options)` at :1721 and `aggregate(resource,\nparams)` at :4030), not the `find` route. `find` itself is `find → convertQueryParams →\nclient.data.find`.\n\n## The visible consequence\n\nThe KPI cards this effect feeds (\"total\" / \"active\") are computed as `rows.length` over\nthe returned page. With `limit` dropped the query returns the backend's default page\nsize, so both counts are **silently capped** and read as real numbers — the same failure\nshape #10288 describes for the renewals KPI strip.\n\nNote the page's own docstring already records one round of this bug class (reading\n`.records` instead of `.data`), which is why the defensive `Array.isArray(all) ? … `\nfallback is there. The option key was missed in that pass.\n\n## Fix\n\n`limit: 200` → `$top: 200`. One call site.\n\nWorth doing in the same sweep as #10288 so the showcase's react pages stop teaching the\nunprefixed spelling by example — a copy-paste from either page propagates it.\n"
+}

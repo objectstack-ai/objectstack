@@ -1,0 +1,35 @@
+{
+  "number": 10496,
+  "kind": "issue",
+  "title": "[finding] check:engine-double-contract's consumer-seam scan walks `packages/` only, while the double side walks SCAN_ROOTS (`packages`, `examples`) — a seam in an example app is outside the population",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T01:07:29Z",
+  "updated_at": "2026-08-21T06:43:17Z",
+  "closed_at": "2026-08-21T06:42:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10496",
+  "body": "Filed unassigned by the dev seat implementing #9708, session `session_01DdCnBGcHeufjrq7drTD3wt`. Measured on `origin/main` @ `a718ee3dd`. **Not a claim that any seam is currently invisible** — the measurement below is a controlled zero. This is about the scope of the population, one level up from what #9708 ratchets.\n\nNo `domain:*` judgement intended beyond the routing label — triage's field.\n\n## The asymmetry\n\n`scripts/check-engine-double-contract.mjs` holds two scans over two populations, and they disagree about which roots are in scope:\n\n- the TEST DOUBLE side walks `SCAN_ROOTS = ['packages', 'examples']`;\n- the CONSUMER SEAM side walks `packages/` alone — `productionFiles()` ends in a single `walkSrc(join(ROOT, 'packages'))`.\n\nNothing states the narrower scope as a decision; the header's stated scope test is \"production sources: the seams live in `src`, never in a test\", which `examples/` satisfies as much as `packages/` does. An example app that performs a by-id write on a caller-supplied id and answers a success receipt is exactly the three-conjunct seam the invariant is about, and it would be judged by nothing.\n\n## Measured (2026-08-21, `a718ee3dd`)\n\nThe gate's own `scanAllSeams`, unmodified except for the walk roots, run twice:\n\n```\nnarrow (packages only):                                 6 seams in 3 files\nwide   (+ examples, apps, skills, scripts):             6 seams in 3 files\nextra rows the wider walk finds:                        []\npositive control — the wide walk still finds all 6 narrow rows:  true\n```\n\nSo the blind spot is **empty today**, and the control is what makes that a measurement rather than a broken probe: the widened walk still returns every known row, so its zero is a real zero and not a walker that stopped working.\n\n## Why it is filed rather than fixed inside #9708\n\n#9708's declared surface is the *governance* of the discovered population (a row that leaves names itself). Widening what the scan discovers is a different act: it changes the invariant's subject, adds verification surface for every future example app, and today buys zero rows. Under startup scope discipline that is an implementation-first decision to take when there is pull for it — but it should not stay undeclared, because a seam that lands in `examples/` tomorrow is outside the population *and* outside #9708's ledger, so neither half reports it.\n\nTwo candidate shapes for whoever picks this up:\n\n- **A** — walk `SCAN_ROOTS` on the seam side too, so one constant governs both scans. Cheapest, and removes the unexplained asymmetry; cost is that an example app's handlers become gate-visible (measured cost today: zero rows).\n- **B** — leave the scope narrow and say so in the header as a decision with its reason, so the next reader does not have to re-measure to find out whether it was deliberate.\n\n## Related\n\n#9708 (the population ratchet, where this was measured) · #8194 (the card that added the seam slice) · #8999 (the census-scoped-by-the-wrong-instrument family this belongs to)"
+}

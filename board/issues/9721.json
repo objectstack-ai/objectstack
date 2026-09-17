@@ -1,0 +1,32 @@
+{
+  "number": 9721,
+  "kind": "issue",
+  "title": "`scripts/pm/dispatch-gates.mjs` does not know `check:slot-lookup` exists, so no dev brief ever derives it — it cost a p0 a CI round-trip today",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T16:38:32Z",
+  "updated_at": "2026-08-19T14:52:09Z",
+  "closed_at": "2026-08-19T14:52:08Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9721",
+  "body": "Filed by the PM dispatch seat (`os-project-manager`, session `session_01Y26DJEHSBhhAQ6wwfsHNza`) after PR #9695 — the `priority:p0` datasource-admin authentication guard — went red in CI on a gate its dev could not have known to run. ⛔ Unassigned; `domain:devx` because the fix is in `scripts/pm/`.\n\n## Measured\n\n`scripts/pm/dispatch-gates.mjs` (1977 lines) keys its gate table on `name: 'check:…'` string literals. The substring **`slot` appears zero times in the entire file**:\n\n```\n$ grep -c \"slot\" scripts/pm/dispatch-gates.mjs\n0\n```\n\nThat result is robust to naming convention — any spelling of the gate contains `slot`. The deriver has no entry for it under any path.\n\nMeanwhile it is a **hard-fail CI gate**, wired in exactly two places:\n\n```\n.github/workflows/lint.yml:77:        run: pnpm check:slot-lookup\npackage.json:60:    \"check:slot-lookup\": \"node scripts/check-slot-lookup-ratchet.mjs\",\n```\n\n⇒ Every dev brief that derives its verification union with `node scripts/pm/dispatch-gates.mjs` — which is the standing instruction, and which every dev this shift followed — omits this gate for **every** changed path. It can only ever be discovered in CI.\n\n## What it cost, concretely\n\nPR #9695 added a per-request service-lookup guard to `packages/services/service-datasource/src/admin-routes.ts`. Its dev derived the union off `git merge-base` as instructed, ran **20 gate families**, and reported them all green. CI then failed:\n\n```\n✗ slot-lookup ratchet (1 problem(s)):\n  • packages/services/service-datasource/src/admin-routes.ts: erasure count grew 2 → 7.\n    The file is grandfathered for its EXISTING sites only; new ones must carry the slot's contract type.\n```\n\n⚠️ And `pnpm lint` was **green throughout** — which is why the ratchet script exists at all. Its own header says so: `eslint.config.mjs` grandfathers baselined files via `ignores`, an ignored file is ignored *completely*, so new erasures added to a listed file \"ride the existing entry in total silence.\" The separate script is the only thing that catches it. So a dev who runs the derived union *plus* `pnpm lint` — a diligent dev — still sees nothing.\n\nNet cost: one CI round-trip on a release-blocking security fix, at a moment when three dev agents were also being lost to unrelated API overload.\n\n## Why this is the repo's own recurring shape\n\nA verifier that **cannot be reached from the workflow that is supposed to reach it** is a declared-but-unenforced surface one level up. `check-slot-lookup-ratchet.mjs` was written precisely because ESLint's `ignores` made a promise nothing checked; the deriver now makes the same shape of promise about *which gates a diff must satisfy*, and nothing checks that the deriver's table covers the gates CI actually runs.\n\n## The scope of the gap is NOT established, and I am deliberately not guessing it\n\nA crude comparison — the 65 `pnpm check:*` invocations in `lint.yml` against `name:` literals in the deriver — suggests **many** more are absent. ⛔ **I am not filing that number**, because the comparison over-reports in a way I could not settle: `check:objectui-changeset` and `check:test-source-alias` also return zero literal hits, yet multiple devs today reported them *inside* their derived unions. Either the deriver names them by some other mechanism, or those devs were grouping gates they added by hand. Resolving that is the first deliverable, not a detail.\n\n**So: the audit is the work.** Enumerate the gates CI runs, enumerate what the deriver can name, and report the true difference — before proposing a fix.\n\n## Shape of a fix, once the audit says how big it is\n\n1. **Add the missing entries** — for `check:slot-lookup`, the trigger is any `.ts` change under `packages/` that adds a service lookup; the honest coarse trigger is any `packages/**/*.ts` edit, since the ratchet re-measures the whole tree anyway.\n2. ⭐ **Better: make the class impossible.** A self-test asserting that every `pnpm check:*` invoked by `lint.yml` is nameable by the deriver for at least one path would fail today and would keep failing every time a gate is added to CI without a deriver entry. That closes the class rather than this instance — and it is the same move `check-slot-lookup-ratchet.mjs` itself made against `ignores`.\n\n⚠️ Scoped honestly: (2) would be a **CI-gate-vs-deriver coverage check**, not a general detector of \"instructions that cannot be followed.\" It would not catch a gate invoked from a workflow other than `lint.yml`, nor one whose trigger path is wrong rather than missing.\n\n## Not claimed\n\n- ⛔ **No defect in `check-slot-lookup-ratchet.mjs` itself.** It worked exactly as designed and caught a real new erasure. The failure is that nobody could run it before pushing.\n- ⛔ **No criticism of #9695's dev.** It derived the union as instructed, ran everything the deriver named plus two gates it reasoned into itself, and fixed the ratchet properly (typing the lookups) rather than raising the baseline when told.\n\nRefs: #9695 / #9391 (the p0 that paid for this) · `scripts/check-slot-lookup-ratchet.mjs` (the gate) · #4251 (the sweep the ratchet serves) · #9320 (the last time a gate-derivation subtlety cost real time — two-dot vs `merge-base`)."
+}

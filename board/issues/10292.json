@@ -1,0 +1,34 @@
+{
+  "number": 10292,
+  "kind": "issue",
+  "title": "Dashboards are bilingual by construction: dataset dimension/measure labels have no slot in `TranslationData`, and dimension members render a prettified enum instead of the picklist's translated label",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "needs-user-decision"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-20T15:19:40Z",
+  "updated_at": "2026-08-20T16:53:32Z",
+  "closed_at": "2026-08-20T16:53:03Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10292",
+  "body": "Dashboards are bilingual by construction: dataset dimension/measure labels have no slot in `TranslationData`, and dimension members render a prettified enum instead of the picklist's translated label\n\nMeasured on `17.1.0` (open edition, `objectstack dev`), HotCRM's `sales_dashboard` in a zh-CN session.\n\n## What renders\n\nThe widget titles and descriptions are Chinese — those *do* have a translation slot (`TranslationData.dashboards.<id>.widgets.<id>.title/description`) and HotCRM fills it. Everything the analytics layer supplies is English, on the same card:\n\n```\n管道总额                      本季度已成交            赢率（近 12 个月）\n所有进行中商机金额合计         本季度已赢得的收入       近 12 个月已结单商机中赢单所占的比例\n2,510,000                    755,000                62%\nTotal Amount                 Total Amount           Win Rate      ← measure label\n```\n\nPivot headers, same story:\n\n| Owner | Total Amount | Opportunities | Avg Probability |\n|---|---|---|---|\n| Dev Admin | 2,510,000 | 5 | 64% |\n\nand the dimension **members**:\n\n```\n阶段管道分布 (bar):      NeedsAnalysis · Negotiation · Proposal\n预测类别管道分布:         BestCase · Commit\n线索来源分布:            Content / Blog · Email Campaign · Event / Trade Show · Partner · Referral · Web\n丢单原因分析:            Bad Timing · Lost to Competitor · Missing Features · No Budget · Price Too High\n```\n\nEvery one of those values has a translated label already — `crm_opportunity.stage` renders as `需求分析 / 谈判 / 提案` in list views, kanban columns and the record page's stage path, from `TranslationData.objects.crm_opportunity.fields.stage.options`. The dashboard does not consult it.\n\n## Two separate defects\n\n**1. No translation surface for the semantic layer.** `TranslationDataSchema` has `objects`, `apps`, `dashboards`, `pages`, `flows`, `settings`, `globalActions`, `messages`, `metadataForms`, `settingsCommon` — and nothing for datasets. A `defineDataset()` dimension/measure carries a single English `label`:\n\n```ts\n{ name: 'stage',    label: 'Stage',        field: 'stage',  type: 'string' }\n{ name: 'win_rate', label: 'Win Rate',     derived: {...},  format: '0%' }\n```\n\nso an app author who has localised everything else has no way to localise these. It is not an omission in HotCRM's bundles; the carrier does not exist.\n\n**2. Dimension members bypass the field's option labels.** Where a dimension is backed by a picklist column, the display value should resolve through that field's translated options rather than being derived from the stored enum. And the derivation itself is not even self-consistent — the same `needs_analysis` renders two different ways in one dashboard:\n\n```\nbar chart axis:   NeedsAnalysis     ← PascalCase, no space\npivot row label:  Needs Analysis    ← spaced\npicklist label:   需求分析           ← what every other surface shows\n```\n\n## Suggested\n\n- Add a `datasets` (or `cubes`) section to `TranslationDataSchema` covering dimension and measure `label`, so the semantic layer is localisable like every other authored surface.\n- When a dimension resolves to an object field with declared options, render members through that field's options (and hence its translations); fall back to the prettified enum only for free-form columns.\n- Pick one prettifier and use it in both the chart axis and the pivot header, so a value cannot appear twice under two spellings on one dashboard.\n"
+}

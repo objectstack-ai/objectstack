@@ -1,0 +1,34 @@
+{
+  "number": 10034,
+  "kind": "issue",
+  "title": "[finding] Armed rider clauses on pm:on-hold cards are 0-for-19: no dispatching seat runs the pre-dispatch trigger-file intersection",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T17:19:31Z",
+  "updated_at": "2026-08-19T22:10:45Z",
+  "closed_at": "2026-08-19T21:34:17Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10034",
+  "body": "Found by the triage seat's on-hold rider-clause audit (2026-08-19, ~16:47Z round, session `session_014qTKTqjme5Fp5BH9iRmy6t`); measured by a read-only verification pass over 12 flagged cards against origin/main.\n\n## The measurement\n\nAcross the audited cards, \"armed rider\" holds — \"the next PR touching file X carries this card's cheap fix as a declared rider\" — observed their trigger files being touched **19 times with the rider carried 0 times**:\n\n- #8331: `.github/workflows/lint.yml` touched 3× (PRs #9869, #9990, #10005) — rider never carried\n- #8883: `packages/rest/src/rest-server.ts` touched 9× — rider never carried\n- #8656: `packages/spec/src/data/field.zod.ts` touched 8×, 2× editing the Field builder itself — rider never carried\n- #8984: 2 of 3 trigger docs touched (one PR landed ONE HOUR after the hold) — rider never carried\n- objectui#4082: `ObjectGrid.tsx` touched 5× — rider never carried\n- #9139: two dispatches intersected its trigger files without naming the card (its \"must name this card\" clause)\n\nAll six cards' riders were released to queue or re-stated this round; this card is about the MECHANISM, not those cards.\n\n## Why this is a skills-lane finding\n\nThe opportunistic-restart mechanism is a maintainer-accepted design (2026-08-11): hold comments name trigger files, and seat posts carry a \"check before dispatch\" section so a dispatching seat intersects its card's file surface with held cards' trigger lists. The measurement says that intersection is not running in any lane — the mechanism exists in SKILL.md and in hold comments, but no seat's dispatch loop executes it. A prior round's handoff (objectui #5035's trigger files never entering the repo:objectui seat post's must-check section, two rounds running) is corroborating evidence.\n\n## Directions for grading (skills seat self-triages this lane)\n\n1. Make the intersection mechanical instead of behavioral: extend `scripts/pm/dispatch-gates.mjs` (or a sibling) to grep open `pm:on-hold` cards' trigger-file lines against the dispatch's file surface, so the dispatching PM gets the hit list as tool output instead of remembering a protocol step.\n2. Or retire the rider mechanism honestly: if riders are 0-for-19, holds that depend on them should use plain Restart-when conditions the unlock scan can fire (this round already rewrote several that way).\n3. Either way, the seat-post \"派发前必查\" section's real-world compliance is the thing to fix or delete — a written protocol step nobody executes is worse than none, because holds are priced assuming it runs.\n\nRelated: #8941 (unlock scan blind to comment-level Blocked-by — the sibling visibility gap, already tracked in this lane)."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 9980,
+  "kind": "issue",
+  "title": "patrol: H16 — open non-draft PR stuck in merge-conflict (mergeable_state dirty) beyond threshold",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T11:47:00Z",
+  "updated_at": "2026-08-19T12:33:01Z",
+  "closed_at": "2026-08-19T12:29:11Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9980",
+  "body": "Maintainer ruling (2026-08-19, PM chat): 「同意你的建议」—— 批准 devx 事故复盘的两条提议之一(另一条是 lanes 读锚判据,独立卡)。事故出处:PR #9826 合并冲突挂 4 小时无人发现 —— 冲突不红、不响、不产生事件,且 auto-merge 已挂时所有代理信号都读作健康;os-steve 的私人检查器已修,但板面级仪器(H1–H15)无一条看 mergeable_state。教训原话:「一个无法表达某状态的仪器,会把它报成它能表达的最近状态。」\n\n## Scope — `scripts/pm/check-half-states.mjs`,一条新 report-only 谓词(经现有巡逻上锚)\n\n**H16**:开放、非 draft 的 PR 处于合并冲突(`mergeable_state` = `dirty`)超过阈值 → 锚上一行,点名 PR 与其 `Fixes` 卡。要点:\n\n- 阈值为命名常量 + rationale 注释(参照 `DOMAIN_HALF_STATE_STALE_HOURS` 先例;建议 ~2h —— 冲突多由 base 前进造成,给正常解决留窗口)。\n- **平台事实必须处理**:`mergeable_state` 不在列表 API 里,要逐 PR GET;且 GitHub 异步计算 mergeability,读到 `unknown`/null 时**不判**(照本文件「不能命名就不 vouch」的窄性纪律,跳过而非报告)。逐 PR GET 只对 sweep 已列出的开放 PR 发起,量小;draft 跳过。\n- Report-only:修复动作(合 base 解冲突)永远是车道 PM 的,谓词只报告。双渲染器普通行,不 loud。\n- 自测:dirty 超阈/未超阈、unknown 跳过、draft 跳过、clean 干净——每形状正负钉住;编号顺延 H16,头部枚举与 H1–Hn 范围文本同步。\n\n## Serial\n\n热文件 `check-half-states.mjs` 空闲(PR #9963 已落地;#9966 属 devx 道且目标是 `ci-failure.mjs`)。非治理面。Graded `pm:queue`, S/M(skills 座,own-lane,session `ae0d8bd1-5667-5f58-8ff8-fa22ec154325`)。"
+}

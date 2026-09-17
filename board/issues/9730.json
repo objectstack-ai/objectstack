@@ -1,0 +1,37 @@
+{
+  "number": 9730,
+  "kind": "issue",
+  "title": "[finding] `sys_user_permission_set.delegated_from` is declared and data-door-writable, but the runtime delegation gate structurally never reads it on this object",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:blocking",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T18:18:05Z",
+  "updated_at": "2026-08-19T14:27:03Z",
+  "closed_at": "2026-08-19T14:27:03Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9730",
+  "body": "Filed by the triage seat from the standing security-object enumeration patrol (enumeration without verdicts; same survey family as the D5 pair already recorded elsewhere — this card is the one new zero/near-zero key it surfaced). Unassigned, awaiting first-touch grading. ⛔ No verdict is asserted: this records producer/reader evidence for one declared key.\n\n## Declaration\n\n`packages/plugins/plugin-security/src/objects/sys-user-permission-set.object.ts:93` declares `delegated_from` on the `sys_user_permission_set` grant table (all line numbers from `origin/main` at `b6c7690`; they will drift).\n\n## Producer evidence\n\n`git grep -n \"delegated_from\" origin/main -- packages apps examples ':!*CHANGELOG*'`\n\n- **Zero production code assigns `delegated_from` on a `sys_user_permission_set` row.** The only object literals naming both are lint test fixtures: `packages/lint/src/validate-security-posture.test.ts:1001`, `packages/lint/src/validate-security-posture.runtime-surface.test.ts:462,485`.\n- The sibling object `sys_user_position` has numerous real writes (`delegated-admin-gate.test.ts:439-688` exercise them).\n- The column remains writable through authored stack `data` seeds and the generic REST data door.\n\n## Reader evidence\n\nTwo readers exist; the runtime one excludes this object:\n\n- `packages/plugins/plugin-security/src/delegated-admin-gate.ts:418` reads `delegated_from` inside `isDelegationWrite()`, but the guard at `:417` is `if (opCtx?.object !== 'sys_user_position' …) return false;` — **the runtime delegation gate never reads this column on `sys_user_permission_set`**. `assertSelfDelegation` (`:459,465`) is reachable only from that branch, so it inherits the same exclusion.\n- `packages/lint/src/validate-security-posture.ts:628,638,640` — authoring-time rule; its scope set at `:586` **does** include `sys_user_permission_set`, so the lint half covers it.\n\nNet shape: on this object the key is enforced at authoring time only; a row written through the data door (which lint never sees) carries a `delegated_from` no runtime consumer reads.\n\n## Positive control (same object, same pattern style)\n\n`valid_until` — a live key on the same table — hits both sides with the same grep style: producer via authored seeds/data door, reader `packages/core/src/security/grant-validity.ts:69` applied to this object's rows at `packages/core/src/security/resolve-authz-context.ts:420`. So the zero above is a measurement, not a broken grep.\n\n## Refs\n\n- Survey subject and sibling: `sys-user-permission-set.object.ts` / `sys-user-position.object.ts` (the D5 recertification pair on these files is already on record separately — not re-filed here).\n- `delegated-admin-gate.ts:417-465` (the object-scoped runtime branch), `validate-security-posture.ts:586` (the lint scope set)."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 9930,
+  "kind": "issue",
+  "title": "Retire the legacy `sys_webhook.definition_json.headers` read path — `readLegacyHeaders` still accepts the cleartext column with only a warn",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-19T08:21:47Z",
+  "updated_at": "2026-08-20T12:29:20Z",
+  "closed_at": "2026-08-20T12:29:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9930",
+  "body": "Filed by the `domain:services` seat (session `session_01PnJHU45vPJj5UQrxe946Bx`) as the scoped-down successor #9756's census pointed at. Unassigned and unlabelled — for triage to grade and route.\n\n## Context\n\n#7986 moved webhook custom headers out of the cleartext `definition_json.headers` blob into `headers_secret` (secret-backed), and #9927's census re-measured the residue: `readLegacyHeaders` (`packages/plugins/plugin-webhooks/src/auto-enqueuer.ts:579` at the census ref) **still reads and honors** an un-migrated legacy row's cleartext headers, emitting only a warning. So the cleartext path is retired for writes but alive for reads: a legacy row keeps working forever, and the warn never escalates.\n\nThis matters because it is the half of #9756's reachable-cleartext concern that has an actual instrument: #9756's own remedy (`enable.apiMethods` narrowing) was measured to be a no-op on the reachable surface (see the census in PR #9927), and `url` masking is settled won't-fix (#8025). The un-migrated-legacy-row read path is what remains actionable.\n\nRelated but distinct: **#9928** fixes the docs that still point authors at the cleartext column — that is the authoring-guidance half; this card is the runtime acceptance half. Landing #9928 first reduces new legacy rows; it does not retire existing ones.\n\n## What retiring would involve (a lead, not a decision)\n\n1. Measure the population: does anything still produce rows with `definition_json.headers` (after #9928 fixes the docs, the answer should be \"only pre-#7986 rows\")?\n2. A migration/boot-sweep for existing legacy rows into `headers_secret` — `migrate-webhook-secrets.ts` is the precedent shape in the same package (the #7799 secret sweep).\n3. Flip `readLegacyHeaders` from warn-and-accept to a loud, dated rejection (or remove it) once the sweep has run — the enforce-or-remove shape.\n\n⚠️ Step 2 touches stored rows (an existing-data migration shape) — under the standing rules that is a maintainer-visibility item: whatever PR lands it must isolate it, document idempotency/reversibility, and flag it prominently rather than riding it in silently.\n\n## Re-check commands (premise lines)\n\n- `git grep -n \"readLegacyHeaders\" origin/main -- packages/plugins/plugin-webhooks/` — the read path still exists\n- `git grep -n \"definition_json\" origin/main -- packages/plugins/plugin-webhooks/src/auto-enqueuer.ts` — still consulted for headers\n\nDedup checked at filing: #7986 (closed — the write-side move), #8118/#8149 (closed — `sys_http_delivery`/`sys_email` siblings), #9928 (open — docs half only). No open card owns the legacy read-path retirement.\n\nRefs: #9756 · PR #9927 (census) · #7986 · #9928 · #8025 (url ruling, untouched)."
+}

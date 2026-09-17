@@ -1,0 +1,34 @@
+{
+  "number": 10147,
+  "kind": "pull_request",
+  "title": "docs(qa): scoped coverage sweep of scan functionality (扫描功能) — 14 items, 3 revisions",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T10:33:42Z",
+  "updated_at": "2026-08-20T15:48:49Z",
+  "closed_at": "2026-08-20T15:48:47Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": "2026-08-20T15:48:47Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10147",
+  "body": "## What\n\nA scoped `checklist-author` sweep answering the maintainer's question: **does the platform's scan functionality (扫描功能) have test coverage?** Executed per `docs/qa/platform-checklist/SWEEP.md` with a scoped fleet: 3 parallel read-only gap hunters (kernel security scanner · TOTP QR enrollment · every other scan-shaped surface), then 5 parallel per-area writers. Every clause was re-grounded in source by the writers; several hunter briefs were corrected against source along the way (documented in item histories).\n\n## New checklist items (14)\n\n**identity-auth** — the TOTP \"scan the QR\" enrollment lifecycle (previously only the challenge gate was covered, as one clause of `auth-method-matrix`):\n- `two-factor-enrollment-reveal` — otpauth URI / backupCodes payload shape, resultDialog path resolution, the `get-totp-uri` re-reveal probe\n- `two-factor-verify-to-activate` — inert-until-verified, plus the `verified` defaultValue probe (observe-and-flag)\n- `two-factor-backup-codes` — single-use, regeneration invalidation, the no-resultDialog lockout path\n- `two-factor-disable-lifecycle` — server-side password gate, teardown, `mfa_required` re-gate behavior\n\n**cli**:\n- `doctor-health-report` (P1) — full `os doctor` contract incl. the false-PASS probe (`✓ Test coverage`/`✓ Deprecations` over an unexamined tree in user apps)\n- `doctor-deprecation-scan` (P2) — the 8-pattern `--scan-deprecations` scan; dead `objectstack codemod` prescription as expected-fail\n- `migrate-duplicates-inventory` (P1) — #8928 read-only duplicate-identifier scan\n- `datasource-introspect-codegen` (P2) — `list-tables` / `introspect --out` cwd jail / `validate`\n- `hook-body-extraction-gates` (P1) — forbidden-pattern refusals (`--strict-body`), capability inference matrix, #4391 regression clause\n- `lint-severity-exit-contract` (P2)\n\n**integration-system**:\n- `external-schema-introspection` (P1) — `/remote-tables` + `?schema=` narrowing (#7955 fixed behavior), object-draft codegen, twin-route equivalence\n- `external-schema-drift-gate` (P1) — boot-time drift scan; `onMismatch` fail/warn/ignore, partial-read honesty; `checkOnBoot` found declared≠enforced and encoded as a finding clause\n\n**attachments-storage**:\n- `field-accept-maxsize-server-enforced` (P1) — the server-side control the client widget guard explicitly is not; new `qa-media-constraints` area provisioning recipe; declaration-based/no-content-sniffing boundary recorded so runs don't score it as a leak\n\n**platform-core**:\n- `interrupted-migration-boot-report` (P2) — boot-time migration-journal scan, three degradation arms kept distinguishable\n\n## Revisions (3)\n\n- `identity-auth.auth-method-matrix` rev 3 — cites the 2FA lockout dogfood pin\n- `cli.migrate-plan-apply-json` rev 2 — nine migrate subcommands, not eight (`duplicates` postdated the item)\n- `integration-system.datasource-admin-lifecycle` rev 2 — stale knownGap: `ExternalDatasourceServicePlugin` is now wired unconditionally by `serve.ts`; the 503 clause re-sited onto its unit pin so a working 200 is never mis-scored as a regression\n\n## coverage.json\n\nNew items mapped into the `datasource`/`field`/`hook` kinds. Still 30 kinds mapped, 0 waived (no waivers existed to re-audit).\n\n## FOLLOW-UPS.md §7 — what is deliberately NOT a checklist item\n\n- **7a Inert scan surfaces** (ADR-0049 enforce-or-remove candidates): the `PluginSecurityScanner` family — exported dead code with a non-compiling example and an in-package doc advertising a subpath export that doesn't exist; the kernel scan spec schemas (22 authorable rows, zero authors, zero parsers); marketplace/incident scan enum vocab; the unwired MetadataPlugin/metadata-fs FS scans\n- **7b Docs drift** (PD#10): phantom `contentProcessing` virus scanning, the dead `codemod` prescription, the eager-FS-scan claim, the phantom Studio consumer comment\n- **7c Defects D9–D15** found while grounding — three auth-sensitive rows (2FA `verified` default, unreadable regenerated backup codes, `get-totp-uri` re-reveal) are captured as in-item probes and explicitly held for maintainer decision before any public issue; the rest (doctor false-PASS, `FileConstraintError` sanitized-500 wire contract, `MigrationRecoveryPlugin` composed by no boot path, hook-extractor header vs. warn-and-bundle default) are marked safe to file\n- **7d Governance hole**: `spec/kernel/**` and `spec/cloud/**` sit outside the liveness-derived coverage ratchet entirely — needs a ruling\n- **7e Checked and clean** — recorded so the next sweep doesn't re-derive (qrcode scanning keys correctly pruned, no upload content sniffing by design, etc.)\n\n## Validation\n\n- `node scripts/checklist-select.mjs --self-test` — 17/17 pass\n- `node scripts/check-platform-checklist.mjs` — OK: 15 areas, **204 items** (190 → 204), 30 kinds mapped, 0 waived\n\nNo code paths touched; checklist-ledger + follow-ups only. `content/docs/releases/` untouched; no changeset (QA ledger, not a published package).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01MjcmqkgzLbc6WyDQ6gSuU3\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01MjcmqkgzLbc6WyDQ6gSuU3)_"
+}

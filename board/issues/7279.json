@@ -1,0 +1,35 @@
+{
+  "number": 7279,
+  "kind": "issue",
+  "title": "finding: a THIRD hand-written ExecutionContext assembly survives in the stdio MCP plugin, and it drops `tabPermissions` / `accessToken`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T04:36:30Z",
+  "updated_at": "2026-08-20T14:44:37Z",
+  "closed_at": "2026-08-20T14:26:33Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 18,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7279",
+  "body": "Found while implementing #6216 (PR #7259). Filed unassigned, out of that PR's scope on purpose — converging this face would **change its output**, which #6216's ruling forbids for the faces it names, and this face was not in that card's inventory at all.\n\n## The fact\n\n#6216 inventoried three assembly sites (dispatcher, REST, share-link) and converged the two that still assemble. There is a **fourth**, and it is still hand-written after PR #7259:\n\n`packages/mcp/src/plugin.ts` — `resolveStdioExecutionContext` (roughly lines 23-45 at `0caf122f0`) builds an `ExecutionContext` from `resolveAuthzContext` by hand:\n\n- carries `positions`, `permissions`, `systemPermissions`, `isSystem`, `principalKind: 'human'`, `userId`, `tenantId`, `email`, `posture`, `org_user_ids`, `accessible_org_ids`;\n- **drops `tabPermissions`** — present on `ResolvedAuthzContext`, carried by both HTTP faces;\n- **drops `accessToken`** — carried by the runtime / MCP HTTP face, and named-as-withheld by REST after PR #7259; here it is neither, just absent;\n- resolves no localization at all (`timezone` / `locale` / `currency` absent), so a write rejected on this face renders in the engine default rather than the caller's workspace language.\n\nIts anonymous contract is the fail-closed one (`if (!authz.userId) return undefined`), i.e. exactly `assembleExecutionContext`'s default entry.\n\n## Why it is a finding rather than a fix in PR #7259\n\nThe shape is the **same defect class** that produced #6071 (field drift) and #6206 / #6551 (dropped fields, real 403s): a field exists on `ExecutionContext`, one copy carries it, another silently does not. But converging this site onto the shared assembler would make it **start** emitting `tabPermissions`, which is a behaviour change on a surface the ruling did not weigh, so it belongs in its own card with its own argument.\n\n## Impact: UNMEASURED, deliberately stated as such\n\nI could not demonstrate a consumer on the stdio surface that reads `tabPermissions` today (MCP tools do not render tabs), so I am filing this as `finding` rather than as a defect — but I also could not rule it out, and severity judged at filing time is unreliable in both directions. Please re-grade at triage rather than inheriting my label. The `accessToken` gap in particular is the one that changed meaning after PR #7259: on the two HTTP faces it is now an explicit per-face decision, and on this one it is still an omission.\n\n## Suggested shape if it is taken up\n\nAdopt `assembleExecutionContext` (the fail-closed default entry, `@objectstack/core`) here too, and decide `tabPermissions` / `accessToken` / localization explicitly rather than by omission — the assembler's input type already forces the `accessToken` and `oauth` decisions to be written down.\n\nRelated: #6216 / PR #7259, #6071, #6206 / PR #6552, #6551 / PR #6647."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 9700,
+  "kind": "issue",
+  "title": "finding: dispatch-gates never names check:slot-lookup — the #8632 convention entry stops one gate short, and a source-file card can only learn about the ratchet from CI",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T15:56:40Z",
+  "updated_at": "2026-08-20T09:34:07Z",
+  "closed_at": "2026-08-19T06:00:49Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9700",
+  "body": "Found while implementing #9391, and it cost that p0 a CI round-trip: the guard added five service lookups typed `getService` with an `any` type argument, `pnpm check:slot-lookup` failed in `Lint & Repo Gates`, and the gate had appeared nowhere in the union the dispatching seat derived for the card.\n\n## What was measured\n\n`node scripts/pm/dispatch-gates.mjs --residue <changed paths>` classifies the gate like this:\n\n```\n- pnpm check:slot-lookup   [lint.yml]   names: scripts/slot-lookup-baseline.json, origin/main\n```\n\nThose are the only two paths its source names, so for any card that edits source rather than the baseline JSON, the derivation scores it `silent` — the residue summary's own weakest verdict, and explicitly not a clearance:\n\n> A `silent` verdict is this derivation's weakest claim, not a clearance: a gate that computes its own population and names only its baseline artifact scores silent for every card in the tree.\n\nThat sentence describes this gate exactly. `check-slot-lookup-ratchet.mjs` lints `packages/**/*.{ts,tsx,mts,cts}` itself, so its real population is \"most of the repo\" and no path literal in its source will ever say so.\n\n## Why this is a gap and not just the deriver being honest\n\nThe deriver already has the channel for this class — `CHANGE_KIND_GATES` in `scripts/pm/dispatch-gates.mjs` — and two of `check:slot-lookup`'s structural siblings are wired into it. Compare their residue lines:\n\n| gate | shape | in `CHANGE_KIND_GATES`? |\n| --- | --- | --- |\n| `check:where-matcher` | whole-tree walk, shrink-only baseline, `names: ...baseline.json, origin/main` | yes — under `adds or edits a test file` |\n| `check:engine-double-contract` | whole-tree walk, shrink-only per-file baseline | yes — added by #8632 |\n| `check:slot-lookup` | whole-tree ESLint re-measure, shrink-only counted baseline | **no** |\n\n#8632 is the precedent and its title states the principle: a gate being a PM judgement call rather than a convention entry is the defect, when *a mechanical trigger for it exists*. One exists here too. The three gates differ only in which files they walk — and `check:slot-lookup`'s are source files, which is why the test-file convention that catches the other two does not catch it.\n\nThe consequence is the one the ratchet was built to prevent, displaced one level up. Its own header says ESLint `ignores` cannot express a ratchet because \"an ignored file is ignored completely, so NEW erasures added to a listed file ride the existing entry in total silence\". The ratchet closes that for the code. But if the gate is never named in a dispatch, the author does not run it, `pnpm lint` passes (the file is grandfathered, so ESLint says nothing), and the first signal is a red CI job — which for a `priority:p0` security fix is the expensive place to find out.\n\n## What a fix would look like (a lead, not a decision)\n\nAdd a `CHANGE_KIND_GATES` entry for `check:slot-lookup`. The trigger has two candidate spellings and the narrower one looks clearly better:\n\n- **broad** — \"edits a `.ts`/`.tsx`/`.mts`/`.cts` file under `packages/`\". Mechanical and complete, but fires on very nearly every card, which is the cost the residue's `silent`/`undetermined` split exists to keep down.\n- **narrow, recommended** — \"edits a file under `packages/` that contains a service lookup\". The rule's own trigger vocabulary is a three-name list in `eslint.config.mjs` (`SLOT_LOOKUPS`: `resolveService`, `getService`, `getRequestKernelService`), so a `matches` predicate can grep the changed files for those names — cheap, no type information, and it reads the same list the rule does rather than a copy. It would have fired on #9391's diff and stays quiet for cards that touch no lookup.\n\nEither way the entry needs the `why` text every other entry carries, and it should say the two things that made this one expensive: `pnpm lint` passing proves nothing for a grandfathered file, and the repair is to type the lookup, never to `--update` the baseline upward.\n\nNote for whoever picks this up: the deriver's `--self-test` pins the convention section by name (it asserts the section \"names all five convention gates\"), so an added entry needs that assertion updated in the same edit.\n\n## Scope note\n\nFiled rather than fixed: #9391 is a `priority:p0` security card whose scope is ruled to the authentication guard, and this is PM tooling in `scripts/pm/`. The immediate ratchet failure was repaired in that PR by typing the five new lookups against their slots' contracts (`IAuthService`, `IDataEngine`); the file's two pre-existing grandfathered sites were left at their recorded count.\n\nBacklinks: #8632 (the same defect for `check:engine-double-contract`, closed — the precedent), #9391 (the card that paid for this), #9320 and #8551 (other derivation gaps in the same script). Unassigned and unqueued, for the triage seat to level and route.\n"
+}

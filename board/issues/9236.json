@@ -1,0 +1,33 @@
+{
+  "number": 9236,
+  "kind": "issue",
+  "title": "[finding][drivers] driver-memory's filter switch carries a `not in` arm for a spelling the spec's AST vocabulary does not define",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T05:16:00Z",
+  "updated_at": "2026-08-20T13:41:18Z",
+  "closed_at": "2026-08-20T13:40:54Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9236",
+  "body": "Observation only — no user-visible defect measured, nothing blocked. Recorded while working #9228 (PR #9235), which needed the exact membership-spelling set and therefore had to establish this.\n\n## What was measured\n\n`packages/drivers/driver-memory/src/memory-driver.ts:820` folds four spellings onto `$nin`:\n\n```ts\ncase 'nin': case 'not_in': case 'notin': case 'not in':\n```\n\n`not in` (space-spelled) is **not** in the spec's AST vocabulary. `AST_OPERATOR_MAP` (`packages/spec/src/data/filter.zod.ts`) declares exactly `in`, `nin`, `not_in`, `notin` for the membership operators, and `VALID_AST_OPERATORS` is derived from its keys — so:\n\n- `isFilterAST(['stage', 'not in', [...]])` is `false`, and `parseFilterAST` never lowers the spelling;\n- `canonicalAstOperator('not in')` returns the input unchanged, because `astOperatorLowering` has no entry for it;\n- `metadata-protocol` answers `unrecognised operator \"not in\"` — pinned in `packages/metadata-protocol/src/protocol.malformed-filter.test.ts:128`, and `protocol.ts:866` carries a comment naming the case explicitly.\n\nSo no door lowers a filter into this arm. It is reachable only through the driver-local `{ field, operator, value }` condition-object path (`memory-driver.ts:761`), where a caller would have to hand the driver an operator string the protocol refuses.\n\n## Why it is worth a line\n\nIt is a driver accepting a spelling the shared contract rejects — the tolerant-consumer direction Prime Directive #12 rules against, in the mildest possible form (an extra `case` label). Two ways it can go wrong later: someone reads the switch as evidence that `not in` is part of the vocabulary (it is what the #9228 dispatch did, from this same arm), or someone adds `'not in'` to `AST_OPERATOR_MAP` to \"make the driver's arm reachable\", widening the authoring vocabulary for no measured demand.\n\n`driver-memory` is under the #5499 investment freeze, so this is deliberately filed rather than fixed: deleting a `case` label from a frozen driver is a decision, not a rider on an unrelated card. `driver-sql`'s `'not in'` occurrences are unrelated — those are the SQL keyword, not an authoring spelling.\n\n## Suggested disposition when someone picks it up\n\nEither delete the arm (nothing lowers into it, and the three real spellings stay), or, if the condition-object path really does receive it from somewhere, that producer is the thing to find and fix. Whichever way, the answer should come from measuring `memory-driver.ts:761`'s callers, not from the switch.\n"
+}

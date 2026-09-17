@@ -1,0 +1,35 @@
+{
+  "number": 10107,
+  "kind": "issue",
+  "title": "check-role-word.mjs 的 `skills` 根对 dispatch-gates 派生不可见 —— 每张 skills/** 卡都把该 gate 判为 silent(#9964 类,声明 `skills/**` 即闭合)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T02:29:11Z",
+  "updated_at": "2026-08-20T07:29:03Z",
+  "closed_at": "2026-08-20T07:29:03Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10107",
+  "body": "## 现象\n\n`scripts/check-role-word.mjs` 的实际扫描population是 `ROOTS = ['content/docs', 'skills']`(.md/.mdx,文件名也计数),但 `node scripts/pm/dispatch-gates.mjs --residue` 对该 gate 只抽取到 `names: content/docs, scripts/role-word-baseline.json` —— **`skills` 这一半缺失**。于是每张只动 `skills/**` 的卡,派生 union 都把 `check:role-word` 判为 `silent`,开发者按派生集跑本地 gate 就会漏掉它。\n\n**这不是假设**:PR #10038(#9907 的 skills-only 文档修正)正是这样红的 —— dev 的派生 union 全绿,推上去 CI 的 `check:role-word` 才抓到 `role-word count grew 2 → 3`,多烧一整个修复轮。\n\n## 根因(已在 dispatch-gates 文档块里写明,不是新缺陷)\n\n`hintCovers` 有意拒绝无路径分隔符的裸单段字面量(防伪造线索),对 `skills` 的判词逐字为:\n\n> `'<hint>' — the tree HAS it; the covering rule refuses the literal as too generic (no path separator)`\n\n即:树里确实有,但覆盖规则按设计拒收。**⛔ 不要放宽 extractor / hintCovers** —— 这是 #9978 量过的拒绝,放宽会重新引入伪造线索。\n\n## 补救形状(#9978 已定模式,照抄即可)\n\n在 `scripts/check-role-word.mjs` 里按 #9978 的 provenance-only 声明模式补一行子树拼法声明(`skills/**`),与 AGENTS.md 当年获得覆盖的方式相同(参照 `check-skill-line-ratchet.mjs` 里的 `ROOT_FILE_WATCH_HINTS = ['AGENTS.md/**']` 及其注释边界)。声明是纯出处常量,不改 gate 的扫描行为;完成判据 = `--residue` 里该 gate 的 names 含 `skills`,且任选一张 skills/** 路径重跑 `dispatch-gates.mjs --tier/派生` 能把 `check:role-word` 列进 union。自测(dispatch-gates 334 断言基线)需相应加 pin。\n\n## 四维分析\n\n- **项目长远合理性**:派生量具的盲区直接产生「本地全绿、CI 红」的假信号,修一处声明一劳永逸,且沿用既有模式,不新增机制。\n- **实际业务拉动**:已实付一次成本(#10038 多跑一个修复轮);skills/** 是治理面高频改动区,复发概率高。\n- **防 AI 犯错**:dev 按派生集自检是被要求的纪律,量具缺口会系统性惩罚守纪律者;闭合后纪律与结果一致。\n- **创业阶段不扩散**:单文件一行声明加自测 pin,size/xs,不触碰 gate 行为与基线。\n\n## 出处\n\n- 发现者:#9907 修复轮 dev 报告(out_of_scope_findings,原文「Deliberately NOT fixed in this PR (out of scope, different gate); noted for the PM to file」),PR #10038 正文「Verification at 8e1b43c01」节亦有同一记录。\n- 同类先例:#9964(gate population 声明缺口类)、#9978(声明模式与 measured refusal)。\n\n热点文件:`scripts/check-role-word.mjs`(当前无在飞 PR 占用)、`scripts/pm/dispatch-gates.mjs` 自测。"
+}

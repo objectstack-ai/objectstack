@@ -1,0 +1,32 @@
+{
+  "number": 10073,
+  "kind": "issue",
+  "title": "[finding] 29 version-stamped comment attestations in plugin-auth/src still name `1.7.0-rc.2` / `1.6.20` — the `^1.7.1` bump made them unverified claims",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-19T22:03:40Z",
+  "updated_at": "2026-08-20T14:05:54Z",
+  "closed_at": "2026-08-20T14:04:53Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10073",
+  "body": "Found while sweeping #8224 (PR #10072). Observation-class: **nothing is broken today** — every one of these may still be factually correct. The point is that none of them has been *checked* since the pin moved, and their wording asserts otherwise. Filed unassigned, no `pm:queue`, for the record. **Measured, not inferred.**\n\n## The premise\n\n#8224's generalizable lesson, in its own words:\n\n> Anywhere a comment says \"verified against `X`\", the pinned version drifting past `X` should be treated as an unverified claim, not a stale note.\n\n#3002 (closed today via PR #9869) moved the better-auth family from `1.7.0-rc.2` to `^1.7.1`. That bump is exactly the drift the lesson describes, and it fired on every such comment in `plugin-auth/src` at once. PR #10072 sweeps **only** the `@better-auth/sso` `schema`-option sentence that #8224 scoped; the rest are untouched and out of that card's surface.\n\n## Measured\n\nInstalled versions read from `node_modules` on **2026-08-19**: `better-auth@1.7.1`, `@better-auth/sso@1.7.1`, `@better-auth/scim@1.7.0-rc.1`.\n\n**29 lines across 21 files** in `packages/plugins/plugin-auth/src` still name `1.7.0-rc.2` or `1.6.20`, after excluding PR #10072's own corrections and the sites whose wording is explicitly historical.\n\nNot all 29 are defects — the class splits, and that split is the actual work:\n\n**(a) Live attestations about the CURRENT pin — these read false today.** The wording claims to describe the version the package pins, and it no longer does:\n\n- `session-tombstone.ts:34` — `Verified against better-auth 1.7.0-rc.2, the version this package pins` (the relative clause is now simply untrue)\n- `sso-client-secret.ts:24` — `@better-auth/sso at the pinned 1.7.0-rc.2 has NO secret-at-rest option`\n- `remove-member-permission-guard.ts:10` — `pinned vendor. better-auth 1.7.0-rc.2`\n- `register-sso-provider.ts:130` — `is a z.strictObject in @better-auth/sso@1.7.0-rc.2`\n- `revoke-session-match-guard.ts:11`, `impersonation-bearer-rotation.ts:11`, `auth-manager.ts:3582`, `session-tombstone.ts:83`, `managed-extension-fields.test.ts:186` and `:906` (`at the pinned version — better-auth 1.7.0-rc.2`)\n\n**(b) Deliberately historical, and correct as written** — leave alone. e.g. `admin-user-endpoints.ts:70` (`accountId` is the STABLE 1.7 spelling; `1.7.0-rc.2` briefly called it …) and `objectql-adapter.test.ts:92`. These contrast an old version with the current one on purpose; rewriting them would destroy the information.\n\n**(c) One that is a different claim entirely**, noted because it is the same shape: `auth-schema-config.ts:917` — `Mirrors @better-auth/sso@1.6.20's BaseSSOProvider`. That is a field-surface claim about a version two minors old; whether the mapping still mirrors `1.7.1`'s `BaseSSOProvider` was **not** measured here.\n\n## Why this might matter\n\nThe `1.6.20`-stamped `schema`-option sentence #8224 is about was not wrong when written — it decayed, silently, with every gate green, and was only caught because an unrelated card (#8193) happened to read the same file. Category (a) is that same shape, already in the same state, spread across 10+ sites. Category (b) proves a blanket find-and-replace would be the wrong fix.\n\n## Why it is NOT being changed in PR #10072\n\nOut of that card's scope and surface. #8224 scopes one dependency fact — whether `@better-auth/sso` accepts a `schema` option — across the files that carry it. Re-verifying ten unrelated behavioural claims about session GC, bearer rotation, permission guards and secret-at-rest against `1.7.1` is a different piece of work with a different verification burden: each one needs the behaviour re-measured, not the string re-typed.\n\n## Suggested shape, if this is ever picked up\n\nRe-measure each category-(a) site against the installed version and re-stamp with version **and** date (the form PR #10072 uses), or drop the version stamp where the claim does not actually depend on one. ⛔ Do not batch-rewrite: category (b) is correct as written, and category (c) needs a real measurement rather than a stamp refresh.\n\nWorth considering alongside it: a gate could make this class mechanically visible — a check that every `better-auth@<version>` mention in a comment matches the current `package.json` pin would have caught all of this the moment #9869 merged. That is a bigger proposal than the sweep and is why this is filed as an observation rather than queued.\n\nBacklink: found during #8224 / PR #10072.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PnJHU45vPJj5UQrxe946Bx)_"
+}

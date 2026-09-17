@@ -1,0 +1,33 @@
+{
+  "number": 10017,
+  "kind": "pull_request",
+  "title": "fix(plugin-security): correct R1 door-order prose in object-posture-gate.ts",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T14:54:27Z",
+  "updated_at": "2026-08-19T15:30:06Z",
+  "closed_at": "2026-08-19T15:30:04Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-08-19T15:30:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10017",
+  "body": "Fixes #9957\n\nComment-only accuracy edit: the only file touched is `packages/plugins/plugin-security/src/object-posture-gate.ts`, and the only change is the R1 header parenthetical at lines 93-94 (pre-edit). The executable guard (`if (!ctx.isArtifactBacked) return;`) is untouched.\n\n## What was wrong\n\nThe parenthetical read: \"the `OS_METADATA_WRITABLE` escape-hatch path — the default deploy already 403s these before this gate runs.\" Measured false on a genuinely stock showcase boot (#9477, landed PR #9953, checklist item revision 3): `saveMetaItem` runs `runAuthoringGate` (which is R1) *ahead of* the overlay/package doors on the host-config kernel the showcase boots (`environmentId` undefined, so `protocol.ts`'s env-partitioned `NOT_OVERRIDABLE` branch never arms — that file's own #7674 note records this is the flagship showcase's boot shape). A widening body meets R1 first on every leg, hatch open or closed, `?package=` named or not. The \"earlier\" refusal the old prose named is real, but it answers *later* — only for bodies R1 lets through.\n\n## What changed\n\nReplaced the parenthetical with the measured mechanism:\n\n- The answering layer is picked by the body's DIRECTION, not by deploy posture.\n- On the host-config kernel, R1 runs ahead of the overlay/package doors (cites the framework's own #7674 note).\n- A non-widening body passes R1 and only then meets the overlay door: `403 NOT_OVERRIDABLE` (no `?package=`) or `403 ITEM_LOCKED` (`?package=` naming the read-only base) on stock; `200` under the escape hatch.\n- `WRITABLE_PACKAGE_REQUIRED` — the code the old prose implied — appeared on none of the six measured legs.\n- One line on the wire shape: `code: PERMISSION_DENIED` with `declaredCode: owd_widening_forbidden`, so a check keyed on `code` alone misses it (#9958).\n\nRefs: #9477 (six-leg evidence table) · PR #9953 (revision-3 ledger entry) · #9958 (the `code`/`declaredCode` wire-shape finding, same evidence base).\n\n## Premise check\n\nRe-verified at branch point (`73cfddfa9`) that the parenthetical still reads as quoted — it wraps across two lines (a single-line grep for the tail alone misses it), confirmed at `object-posture-gate.ts:93-94` immediately above the `isArtifactBacked` guard. Premise valid.\n\n## Verification (comment-only diff — package suite/typecheck expected unchanged from main; final HEAD `674b0db8e`)\n\n- `pnpm --filter @objectstack/plugin-security test -- --maxWorkers=2` — **66 files / 1295 tests passed**, no change in count from the pre-edit tree.\n- `pnpm --filter @objectstack/plugin-security typecheck` — clean, exit 0.\n- `pnpm check:cross-package-test-inputs` / `node scripts/check-cross-package-test-inputs.mjs` — OK (12 packages, all declared).\n- `pnpm check:slot-lookup` — ratchet holds, 107 unswept sites in 25 files, none new.\n- `pnpm check:test-source-alias` — OK, 72 packages scanned.\n- `pnpm check:type-source-resolution` — OK, 76 packages scanned.\n- `node scripts/docs-audit/check-affected-docs.mjs` — self-test 262 cases pass; sdk route bridge output unchanged (pre-existing baseline, unrelated to this diff).\n- `node scripts/pm/dispatch-gates.mjs` (no paths, self-derived from the committed diff at `674b0db8e`) — same 6 named families as at dispatch time, plus one convention-triggered addition: `pnpm check:i18n` (the package owns an `i18n-extract.config.ts`). Ran it to completion (built `@objectstack/cli` first per its own PREREQUISITE-NOT-MET message) — **PASS**, 9 packages, all bundles in sync, no undeclared authoring keys. No diff-review needed to predict \"nothing to extract\" since it was actually run: confirmed by the OK output.\n- `pnpm check:nul-bytes` — OK, 6345 tracked text files scanned, no raw control bytes.\n\nNo ablation applies — nothing executable changed, so there is no mutation/restoration pair to test.\n\n## Changeset\n\n`skip-changeset` label applied (this repo's real mechanism — PR #9918 is the recent worked example for a comment-only diff in a published package; `objectui` uses an empty-frontmatter changeset instead, not applicable here). Rationale: comment-only prose change, zero user-visible or runtime behavior change, nothing to release.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PnJHU45vPJj5UQrxe946Bx)_"
+}

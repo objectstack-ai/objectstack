@@ -1,0 +1,34 @@
+{
+  "number": 10195,
+  "kind": "pull_request",
+  "title": "ci(lint): run scripts/pm/ci-failure.mjs --self-test in Lint & Repo Gates",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T13:36:46Z",
+  "updated_at": "2026-08-20T14:21:47Z",
+  "closed_at": "2026-08-20T14:21:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-20T14:21:44Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10195",
+  "body": "Fixes #9898\n\n`scripts/pm/ci-failure.mjs` shipped a `--self-test` that **no job ran**. Its four\nsibling PM tools all run theirs as unconditional steps in the existing\n`Lint & Repo Gates` job; this one was the odd one out, so it could rot until an\nagent reached for it mid-round and found it broken.\n\nThis adds **one step** to the existing `lint:` job. No new job, no new check\nname, no new required context.\n\n## Why this tool specifically\n\nThe rot it prevents is the exact defect the tool's own card was about. The file\nwas found near-complete but **never run live**: node 22's `fetch` ignores\n`HTTPS_PROXY`, so behind an agent container's proxy every read answered 401 and\nthe tool's own transport probe reported `PREREQUISITE NOT MET` (exit 3) — and\nlooked right doing it. A retrieval tool that has stopped working presents as a\ntool correctly declining to work.\n\nThe self-test is also materially larger than when the card was filed: #9966 /\nPR #10157 (merged today) corrected the transport probe and added nine cases,\nincluding the fourth measured container class. This card was deliberately\nordered *after* that fix — wiring a false green into a required job would have\npinned it as CI-enforced truth.\n\n## Falsification 1 — the step is in the right job (job key + line)\n\nThe card's own warning: a gate added to `typecheck:` shows green ticks while\nblocking nothing, reproducing this card's failure mode as its fix. Read from\n`.github/workflows/lint.yml`, not from the card:\n\n| | job key | line | `name:` (= check-run / required context) |\n|---|---|---|---|\n| target | `lint:` | **24** | `Lint & Repo Gates` (line **39**) |\n| trap | `typecheck:` | 1509 (was 1462) | `TypeScript Type Check` |\n\nThose are the only two jobs in the file. The trap is live: `typecheck:` really\ndoes carry self-test steps of its own, so \"this file has self-test steps\" would\nnot have identified the right job.\n\nParsed rather than grepped — all five land in `lint` / `Lint & Repo Gates`, none\ncarries an `if:`:\n\n| step | job key | job name | `if:` |\n|---|---|---|---|\n| `PM dispatch-gates self-test` | `lint` | Lint & Repo Gates | none |\n| `Part-of closing-keyword guard self-test` | `lint` | Lint & Repo Gates | none |\n| `Single-claim path guard self-test` | `lint` | Lint & Repo Gates | none |\n| `PM half-state sweeper self-test` | `lint` | Lint & Repo Gates | none |\n| **`PM ci-failure self-test`** (new) | `lint` | Lint & Repo Gates | none |\n\nThe new step is index 23 of 74 in `jobs.lint.steps`, keys `['name', 'run']`.\n\nNo required-context registry edit is needed, and none is possible by accident:\n`scripts/check-required-contexts.mjs` assertion 10 explicitly forbids a registry\nentry from embedding a step count, precisely so adding a step cannot desync it.\n\n## Falsification 2 — it needs no network (measured, not inferred)\n\nA self-test that reached GitHub would put this required context at the mercy of\nAPI availability. \"It worked here\" is not that claim, so it was measured three\nways, each with its instrument falsified against this same file's **live** path:\n\n| reading | `--self-test` | live walk (control) |\n|---|---|---|\n| `strace -f`, network available | **0** `socket()`, **0** `connect()` | 3 `socket(AF_INET)`, 3 `connect()` |\n| empty network namespace (`unshare -rn`) | **exit 0** | exit 3, `GET /rate_limit did not complete: fetch failed` |\n| in-process egress tripwire | 0 attempts | (see note) |\n\nThe `strace` reading is the load-bearing one: zero socket syscalls **with full\negress available**, following forks, so nothing is hidden in a subprocess.\n\nNote on the tripwire, recorded because it nearly produced a false reading: its\n`fetch` arm fires correctly, but its `child_process` arm is blind to a **named\nESM import binding**, which is exactly how this file imports `spawnSync`. Caught\nby falsifying the instrument rather than trusting its \"clean\". `strace` and the\nnamespace have no such blind spot.\n\nStructurally this is not accidental: the `--self-test` branch is selected before\nthe transport probe, it never re-execs, and its two readers are injected.\n\n## Falsification 3 — the step runs, rather than no-opping\n\n\"I added the step and CI is green\" does not distinguish a step that ran from one\nthat no-opped, so both no-op shapes were driven:\n\n- **Broken self-test reddens.** Mutating `isNewer` in the shipped file\n  (`return at > bt` → `at < bt`; confirmed on disk by grep count 1→0 / 0→1, not\n  by an editor exit code) makes the step's exact command exit **1** with two\n  named failures. Restored to byte-identity with `HEAD` and re-run green.\n- **A wrong path reddens** (exit 1, `ERR_MODULE_NOT_FOUND`) rather than exiting\n  0 the way a zero-match `pnpm --filter` would.\n\n## Runtime\n\n~65–170 ms, median ~0.10 s (8 runs), against a job that already runs ~70 gate\nsteps including a ~15 s one. It reads files and runs pure predicates.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs` with no path args, derived from the real\ndiff at `b3955be`: `check:node-version`, `check:required-contexts`,\n`check:shard-attestation`, `check:workflow-status-functions`,\n`check:type-check-coverage` — all green.\n\nExtra, because editing `lint.yml` moves gates no path derivation names (found by\ngrepping for readers of the file): `check:changeset-gate-self-tests` (its\nwiring half slices the `lint:` job out by anchors and asserts the slice is\nnon-empty — green, so the insertion did not stale those anchors),\n`check:filter-alias-parity`, `check-merge-queue-triage-outcome --self-test`,\n`check-cross-repo-closer-outcome --self-test`, `check:nul-bytes` — all green.\n\nDeclared narrowing: `check:type-check-debt` (`--re-measure`) was not run. It\nre-runs `tsc` across the debt ledger to re-measure error counts; this diff\ncontains no TypeScript. CI runs it regardless.\n\n`skip-changeset`: this diff is one workflow file and publishes nothing.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_"
+}

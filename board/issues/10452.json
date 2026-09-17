@@ -1,0 +1,35 @@
+{
+  "number": 10452,
+  "kind": "issue",
+  "title": "check-cross-package-test-inputs' literal collector cannot see an escaping relative IMPORT specifier, so a test that imports a module outside its package goes undeclared silently",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T20:11:01Z",
+  "updated_at": "2026-08-21T06:33:01Z",
+  "closed_at": "2026-08-21T06:32:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10452",
+  "body": "Filed unassigned from the #9863 dev seat (session `session_01DdCnBGcHeufjrq7drTD3wt`, PR #10450). Measured, not reasoned: the gate passed green over the read, and the declaration in that PR was added by hand.\n\n## The measurement\n\n`packages/cli/src/commands/serve-audit-registration.contract.test.ts` (new in PR #10450) contains:\n\n```ts\nimport { maskComments } from '../../../../scripts/js-comment-mask.mjs';\n```\n\nThat specifier climbs out of `packages/cli` and lands in `scripts/`. It is a real input: the test's verdict is a function of that module's masking behaviour. With **no** roster entry for it, `pnpm check:cross-package-test-inputs` reported:\n\n```\nOK: 12 package(s) read outside themselves, all declared, and turbo.json hashes every declared glob.\n```\n\nThe consequence is the exact failure the gate exists to close, quoted from its own text: *\"a test whose real inputs are wider than its package is invisible to BOTH the affected-subset filter and the turbo cache, so it can go red on `main` while every PR reports green.\"* An edit to `js-comment-mask.mjs` would not have re-run cli's suite.\n\n## Why the collector misses it\n\nThe gate is a deliberate source scan and publishes the spellings it recognises — all of them are **path-shaped file reads** seeded from `import.meta.url`/`__dirname`:\n\n```\nconst P = resolve(HERE, '<rel>');\nconst P = fileURLToPath(new URL('<rel>', import.meta.url));\nreadFileSync(resolve(HERE, '<rel>'))\n…\n```\n\nAn ES module specifier is none of those. It is a bare string in `import` position that the module resolver — not `node:path` — turns into a file. So the escape is invisible, and per the gate's own framing that means *no declaration, silently*.\n\n## Not the same as the neighbours\n\n- **#9763** taught the collector ascent-relative and split-segment paths. Same blind-spot family, different spelling; import specifiers were not part of it.\n- **#8698** taught it the `new URL(…, import.meta.url)` seed. Likewise.\n- **#10315** covers a *derived* path (a fixture copy), where no literal exists at all. Here a literal exists and is fully static — it is just in import position.\n- **#9955** is the adjacent one and worth reading alongside this: `dispatch-gates` cannot name `check:test-source-alias` because the trigger is a new cross-package import inside a test. That is the same underlying shape one layer up (which *gate* to run), while this is about which *inputs* get declared once the gate does run.\n\nWorth noting that `check-test-source-alias.mjs` already resolves test import specifiers for its own purpose, so the parsing work may not need to be written from scratch.\n\n## Suggested shape, and the trap in it\n\nExtend the collector to recognise static `import`/`export … from` specifiers (and `await import('…')`) that begin with `../` and resolve outside the package root, judged on the **shallowest** point reached, exactly as the path forms already are. Add a `--self-test` case per spelling in the same edit — the gate's own instruction, and the reason its recognised list is published rather than private.\n\n⚠️ The trap: a bare package specifier (`@objectstack/verify`) must NOT be collected. Those are declared dependencies resolved through `node_modules`, which the gate already excludes by design — *\"an installed dependency is not a repo source input, and no turbo glob can name it.\"* Only relative specifiers that escape the package are in scope. Getting that boundary wrong would put every package's test suite on every workspace sibling.\n\n## Interim state\n\nPR #10450 declares `scripts/js-comment-mask.mjs` for `@objectstack/cli` in `CROSS_PACKAGE_TEST_INPUTS` and adds the matching `$TURBO_ROOT$` input to `@objectstack/cli#test`, with a comment recording that the gate did not demand it. That closes the one instance; it does not close the class, and any future test importing across the boundary is silent again.\n"
+}

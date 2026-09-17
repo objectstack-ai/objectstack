@@ -1,0 +1,33 @@
+{
+  "number": 10299,
+  "kind": "issue",
+  "title": "[finding] The contract-review fuse's \"self-check the current model\" step is not self-executable — a downgraded seat cannot detect its own tier, and the round ran on believing it was at tier",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T15:31:48Z",
+  "updated_at": "2026-08-20T16:36:36Z",
+  "closed_at": "2026-08-20T16:36:36Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10299",
+  "body": "Filed unassigned, recording only. Measured live in the triage seat's ~2026-08-20T15:27Z scheduled round (session `session_01Mat7oQCqtWN9BX32hZS2TJ`), where the maintainer — not the seat — noticed the seat had been downgraded.\n\n## What the protocol assumes\n\nTwo gates in `pm-dispatch` are guarded by the seat checking its own model tier:\n\n- **Contract-review sub-round fuse**: \"子轮开场自检当前模型,非契约复审档位 ⇒ 该子轮整体跳过、标签原样留置\". Explicitly ⛔ not eligible for the quota-exhaustion downgrade exemption — the whole point of the review is to compensate for one dispatch below the floor.\n- **Triage auto-adjudication confidence gate ⑤**: the adjudication analysis must run at `claude-fable-5`.\n\nBoth read as mechanical steps. Neither is.\n\n## What was measured\n\nThe seat has **no observable signal for the tier it is actually being served**. The session is configured for `claude-fable-5` with fallbacks, and the runtime may fall back or be switched mid-session; in undercover mode the serving identity is withheld from the seat entirely. So \"自检当前模型\" resolves to the model introspecting a fact it does not have, and the honest default — \"I am the configured tier\" — is exactly the wrong answer in the case the fuse exists to catch.\n\nIn this round the seat opened normally, wrote its round-open marker, and began the contract-review sub-round believing the fuse had passed. It read #10063 (dispatched 15:22Z, no PR — label correctly retained) and #10079 (PR #10252 open, would have been reviewed next). The maintainer interrupted with 「你现在被降档了呀」. Asked whether it had noticed: it had not, and could not have.\n\n**No damage this round** — the stop landed before any write on a fable-gated path: zero `needs:contract-review` labels cleared, zero adjudications, zero claims, zero dispatches. The only writes were the round-open marker and this card. That is luck plus a live maintainer, not a mechanism.\n\n## Why the failure mode is worse than a missed check\n\nA fuse that cannot fire does not fail closed — it fails **silently open**, and its output is indistinguishable from a passing one. A downgraded seat clearing `needs:contract-review` produces the same artifact as an at-tier seat clearing it: a card with the label gone and a one-line verdict. The enqueue gate then reads that as satisfied and the PR queues. \"被剥\" and \"从未挂过\" being indistinguishable is already recognised in the label discipline (which is why gate labels are read back); the same reasoning applies one level up — \"cleared at tier\" and \"cleared below tier\" are indistinguishable on the card today.\n\nThe same hole sits under confidence gate ⑤: a downgraded triage seat auto-adjudicating cards believes itself at tier and leaves an `auto-adjudicated` marker that asserts a tier nobody measured.\n\n## Shape of a fix (⛔ not a ruling — the skills seat decides)\n\nThe load-bearing property wanted is *an externally-observable tier reading*, so the check stops being LLM introspection:\n\n- A tier probe the seat runs and records verbatim (a command whose output states the serving model), with the reading pasted into the sub-round's verdict line — same discipline as `--tier` output being quoted rather than recalled.\n- Or move the assertion to the writer: the reviewing seat records its measured tier on the card, and a report-only patrol row flags a `needs:contract-review` clear whose comment carries no tier reading.\n- Or accept that the seat cannot self-attest and make the maintainer's Routines-UI model pin the only authority, with the sub-round keyed off *which Routine fired*, not off self-inspection.\n\n⚠️ Whatever the route, note the ordering trap this round demonstrated: the seat wrote its round-open marker and started the sub-round **before** any tier question was raised, because the protocol places the fuse at sub-round open. If the reading is unavailable there, the safe default has to be *skip and retain*, not *assume configured tier*.\n\n## Related standing rule this round also establishes\n\nMaintainer ruling, 2026-08-20 (this session), 原话: **「你发现被降档就应该收工」** — on discovering a downgrade the seat closes the round out; it does ⛔ not continue with the tier-agnostic remainder (sweep / first-touch grading / unlock scan). This round was closed on that ruling. The rule belongs in the skill text alongside the fuse."
+}

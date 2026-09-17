@@ -1,0 +1,35 @@
+{
+  "number": 9477,
+  "kind": "issue",
+  "title": "Unresolved: a run observed `owd_widening_forbidden` on a stock deploy, but the gate's source says it cannot fire there",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T03:53:45Z",
+  "updated_at": "2026-08-19T11:10:11Z",
+  "closed_at": "2026-08-19T11:10:11Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9477",
+  "body": "A measurement and the source disagree, and neither has been reconciled. Filed as a `finding` rather than a bug because **which one is wrong is exactly what is unknown** — and the answer changes a checklist item either way.\n\n## The two claims\n\n**The run (#9453, correction CF-3):** a browser round recorded observing R1 `owd_widening_forbidden` answering **directly on what it recorded as a stock deploy**, and concluded that `access-security.owd-save-gate`'s `knownGap` mispredicts which layer answers.\n\n**The source (`packages/plugins/plugin-security/src/object-posture-gate.ts:95`, verified on `main`):**\n\n```ts\nif (!ctx.isArtifactBacked) return;\n```\n\nwith the accompanying prose stating R1 *\"applies only to overlay writes over an artifact-backed object (the `OS_METADATA_WRITABLE` escape-hatch path — the default deploy already 403s these before this gate runs)\"*.\n\nBoth cannot be true of the same fixture. On a default deploy the gate returns before it can answer, and an earlier 403 is what the caller should see.\n\n## Why it is filed rather than fixed\n\nThe QA wave's ledger-correction round (#9475) **rejected CF-3 and left the item unedited**, on the grounds that writing a wrong fact into a checklist item is worse than leaving the correct one standing. That is the right call: the item's existing `knownGap` and clause 4 already record whichever layer answers, so nothing is broken by waiting — but the disagreement is now recorded in a run issue and will be re-derived by the next round unless it is settled here.\n\n## What settles it — one re-measure\n\nRe-run the `owd-save-gate` R1 probe and state explicitly:\n\n1. Was `OS_METADATA_WRITABLE` set in the environment?\n2. Was the target object **artifact-backed** (`ctx.isArtifactBacked` true) at the moment of the write?\n3. Which layer produced the 403 — the posture gate, or the earlier refusal the prose says the default deploy issues first?\n\nThree outcomes, each with a different owner:\n\n- **The observation was on a non-stock fixture** (escape hatch on, or an artifact-backed target) → the run record's CF-3 is a fixture-labelling error; correct the run record, leave the item alone.\n- **The observation was genuinely stock** → the gate fires where its own source says it cannot, which is a product defect in `plugin-security` and outranks any checklist edit.\n- **Both are right about different objects** → the item's `knownGap` needs to name the distinguishing condition, which is a ledger edit.\n\nUnassigned and unlabelled for `domain:*` — routing is the triage seat's call, and the right lane depends on which of the three outcomes lands.\n\nSources: #9453 (the observation), #9475 (the grounded rejection), QA wave #9296.\n"
+}

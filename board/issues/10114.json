@@ -1,0 +1,33 @@
+{
+  "number": 10114,
+  "kind": "pull_request",
+  "title": "fix(pm): declare check-role-word's skills root for dispatch-gates derivation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T04:19:27Z",
+  "updated_at": "2026-08-20T07:29:03Z",
+  "closed_at": "2026-08-20T07:29:02Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-08-20T07:29:02Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10114",
+  "body": "Fixes #10107\n\n`scripts/check-role-word.mjs` walks `ROOTS = ['content/docs', 'skills']`, but\n`scripts/pm/dispatch-gates.mjs` builds a gate's watch hints from the path\nliterals in its own source, and a literal only \"looks pathy\" when it carries a\nseparator. `content/docs` has one; the bare word `skills` does not, so no hint\nwas ever built for it. A card touching only the skills tree derived the content\nhalf, scored this gate `silent`, and the dev who ran the derived union locally\nnever saw it. PR #10038 (a skills-only docs fix) paid one repair round for\nexactly that: a green local union, then `role-word count grew 2 to 3` in CI.\n\n## What changed\n\nOne provenance-only constant in the gate's own source, in the subtree spelling\ndispatch-gates compares in, plus the pins that keep it honest:\n\n- `scripts/check-role-word.mjs` — `ROOT_DIR_WATCH_HINTS = ['skills/**']`, with\n  a docblock stating that nothing in the gate reads it and why the glob form\n  must never appear in `ROOTS` (`walk()` sits behind `existsSync`, so the glob\n  spelling there would skip the root in silence). Four self-test cases pin the\n  coupling **derived from `ROOTS` on both sides**, so renaming or widening a\n  root cannot leave the declaration describing the old population.\n- `scripts/pm/dispatch-gates.mjs` — self-test only: 334 cases to 341, added,\n  none weakened. Positive pins read the real gate (not a fixture), so what is\n  pinned is that the tree still HAS the declaration; negative pins hold the\n  boundary the declaration must not buy.\n\n**The extractor and `hintCovers` are untouched.** That refusal of bare\nsingle-segment literals is deliberate and measured (it was priced at +139084\nfabricated gate/file pairs), and widening it would reintroduce the fabricated\nleads it exists to refuse. Scanning behaviour is unchanged — the gate reads the\nsame 216 files and reaches the same verdicts.\n\n## Measured, at 4fb58de47\n\nBefore, `node scripts/pm/dispatch-gates.mjs --residue skills/objectstack-platform/SKILL.md`:\n\n```\n  - pnpm check:role-word   [lint.yml]   names: content/docs, scripts/role-word-baseline.json\n```\n\nAfter, same command:\n\n```\n  - pnpm check:role-word   [lint.yml]   names: content/docs, scripts/role-word-baseline.json, skills/**\n```\n\nAnd the derivation over that same skills path goes from\n\n```\nLocal gates for this card (paste into the dispatch prompt):\n  - pnpm check:pm-governed-merges   [lint.yml]   matched via skills/objectstack-platform/SKILL.md ⇢ gate source 'skills/**'\n  1 matched above · 35 undetermined · 79 silent\n```\n\nto\n\n```\nLocal gates for this card (paste into the dispatch prompt):\n  - pnpm check:pm-governed-merges   [lint.yml]   matched via skills/objectstack-platform/SKILL.md ⇢ gate source 'skills/**'\n  - pnpm check:role-word   [lint.yml]   matched via skills/objectstack-platform/SKILL.md ⇢ gate source 'skills/**'\n  2 matched above · 35 undetermined · 78 silent\n```\n\nHint extraction on the gate itself, `[\"content/docs\",\"scripts/role-word-baseline.json\"]`\nto `[\"content/docs\",\"scripts/role-word-baseline.json\",\"skills/**\"]` — one hint\ngained, none lost, and `.claude/skills/pm-dispatch/SKILL.md` stays `false`\n(that tree is not in `ROOTS`, so the gate must not be named for a card editing it).\n\n## Reverse verification\n\nPredicted in writing first, then measured. Ablation: the declaration emptied to\n`[]` rather than deleted, because the self-test references the constant and a\ndeletion would red as a `ReferenceError` crash instead of as named failures.\nPredicted direction: reddening. All six predictions held exactly:\n\n| leg | predicted | measured |\n| --- | --- | --- |\n| hints on the gate | back to 2, `skills/**` gone | `[\"content/docs\",\"scripts/role-word-baseline.json\"]` |\n| `--residue` role-word names | loses the third name | `names: content/docs, scripts/role-word-baseline.json` |\n| derivation over a skills path | matched 2 to 1, silent 78 to 79 | `1 matched above · 35 undetermined · 79 silent` |\n| dispatch-gates self-test | exactly 1 of 341 fails | `✗ the role-word ratchet reaches the published skills catalog it declares` / `✗ dispatch-gates self-test: 1 of 341 case(s) failed.` exit 1 |\n| check-role-word self-test | exactly 2 fail | the ROOT-coverage case and the `skills` case, `check-role-word --self-test: 2 failure(s).` exit 1 |\n| rebuild needed? | no — both tools `readFileSync` the gate's SOURCE, no `exports`/dist in the path, so no stale build can mask either leg | confirmed, no build step exists here |\n\nRestored with `git checkout HEAD -- scripts/check-role-word.mjs`; `git status\n--short` and `git diff HEAD --stat` both empty afterwards, and both self-tests\nre-run green (341 cases, exit 0).\n\n## Gates, at 4fb58de47\n\nUnion derived by `node scripts/pm/dispatch-gates.mjs` from the real diff (no\nhand-written path list), all four run, each quoting its own verdict line:\n\n- `pnpm check:role-word` exit 0 — `check-role-word: OK, no new occurrences of the reserved word.` / `Scanned: 216 .md/.mdx file(s) read across 2 root(s) — content/docs 180, skills 36.`\n- `pnpm check:pm-dispatch-gates` exit 0 — `✓ dispatch-gates self-test: 341 cases pass.`\n- `pnpm check:cross-package-test-inputs` exit 0 — `OK: 12 package(s) read outside themselves, all declared, and turbo.json hashes every declared glob.`\n- `node scripts/check-cross-package-test-inputs.mjs` (the ci.yml half) exit 0 — same verdict line\n- `node scripts/check-nul-bytes.mjs` exit 0 — `check-nul-bytes: OK (scanned 6369 text file(s) ... no raw ASCII control bytes).`\n\nExit codes captured by redirecting to a file before any pipe, never through\n`tail`.\n\nNo changeset: `scripts/**` only, nothing published changes.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AeA3nU1B5Q2pgxqxgUrexd)_"
+}

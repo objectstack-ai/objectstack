@@ -1,0 +1,34 @@
+{
+  "number": 4706,
+  "kind": "issue",
+  "title": "`$regex` on driver-sql is not a regex — it compiles to a substring LIKE, so it both over-matches and silently matches nothing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T20:02:32Z",
+  "updated_at": "2026-08-19T18:15:06Z",
+  "closed_at": "2026-08-19T18:15:06Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4706",
+  "body": "Measured on `@objectstack/driver-sql@17.0.0-rc.1` against a real SQLite database while implementing hotcrm#626 (case-insensitive account matching). Filed from the HotCRM reference app.\n\n## What was measured\n\n`$regex` is the only case-insensitive operator ObjectQL offers, so it is what an author reaches for when they need one. On `driver-sql` it is **not executed as a regular expression**. It is compiled to `LIKE '%value%'` — a substring test.\n\nBoth failure directions were reproduced on a real SQLite database, with rows `'Acme Corp'` and `'Not Acme Corp Ltd'`:\n\n| query | expected (regex semantics) | actual |\n|---|---|---|\n| `{ name: { $regex: 'Acme Corp' } }` | `['Acme Corp']` | **`['Acme Corp', 'Not Acme Corp Ltd']`** |\n| `{ name: { $regex: '^acme\\\\s+corp$' } }` | `['Acme Corp']` (case-insensitive) | **`[]`** |\n\nThe second row is the dangerous one: a correctly written anchored pattern matches **nothing at all**, with no error. An author who tests their filter against data that happens to contain the substring gets a passing result and ships a query that silently returns the wrong set — or the empty set — in production.\n\n## Why this is worse than the \"declared but inert\" family\n\nWe have filed several issues about metadata that is declared and never enforced (#4649 validations failing open, #4697 flow variables, #4698 the general class, plus hotcrm#650 for inert `decision` conditions). Those are **inert**: the key does nothing.\n\nThis one is different and worse: **the operator's name promises one semantics and the implementation delivers another.** Nothing about `$regex` suggests \"substring\". There is no warning, no validation error, and no runtime signal — the query succeeds and returns a plausible-looking result set. An author has no reason to doubt that an operator called `$regex` is a regex, so this defect is invisible precisely to the people most likely to hit it.\n\nIt also affects a second axis the app cares about: the leading `%` wildcard makes the query unindexable, so what looks like an indexed lookup is a full scan.\n\n## What to establish\n\n1. **Decide what `$regex` means and make the implementation and the name agree.** Either implement real regex matching on the SQL drivers (SQLite `REGEXP` needs a registered function; Postgres has `~*`), or — if substring matching is the intended and only supported behaviour — **rename the operator** (`$contains` / `$like`) and reject `$regex` at query-validation time with a message that says what to use instead. A silent semantic substitution is the one option that should not survive.\n2. Whatever is chosen, make the mismatch **detectable**: a pattern containing regex metacharacters (`^`, `$`, `\\s`, `[`, `+`) passed to a substring matcher is almost certainly an author error, and the driver is the only layer that can see it.\n3. Check the other drivers for the same divergence. `driver-memory` / `driver-mongodb` may well implement true regex, which would mean **the same query returns different result sets on different drivers** — the app's test suite would then pass on the in-memory double and fail in production, which is the exact shape hotcrm#630 already burned us on.\n\nPoint 3 is the one we most want an answer to, because it decides whether app-level tests can be trusted at all for any query using this operator.\n\n## Context\n\nHotCRM did not end up depending on `$regex` — the measurement is what ruled it out, and the app now matches on a stored, hook-maintained normalized column instead (hotcrm#626 / PR #654). Filing because the next author to reach for a case-insensitive match will reach for the same operator and has no way to discover this from the outside.\n\nRelated: hotcrm#626, hotcrm#630 (driver column-completeness divergence), #4698 (the declared-≠-enforced class)."
+}

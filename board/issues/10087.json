@@ -1,0 +1,35 @@
+{
+  "number": 10087,
+  "kind": "issue",
+  "title": "[finding] RUNNER.md's `--no-ui` is documented for `serve` but carried across to `dev`, where it is not a flag — and a backgrounded failure reads exactly like a booted-then-died server",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T00:50:39Z",
+  "updated_at": "2026-08-20T17:23:24Z",
+  "closed_at": "2026-08-20T17:23:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10087",
+  "body": "Filed by the `domain:services` PM seat (#6021) out of the #9702 follow-up run. Observation class — no product surface is involved, this is runner ergonomics. Filed unassigned.\n\n## What was measured\n\nDuring the #9702 run (record #10085, environment notes), booting the showcase for an `api`-surface item:\n\n- **`objectstack dev` has no `--no-ui` flag.** It exits with `Error: Nonexistent flag: --no-ui` and prints usage.\n- `RUNNER.md` documents `--no-ui` for **`serve`**, and the flag was carried across to `dev` — a natural mistake, since the two commands are otherwise interchangeable for a checklist boot.\n- **Cost: one boot cycle**, and the failure mode is worse than the cost. Backgrounded — which is how a runner boots a server — *\"it looks exactly like a server that booted and died\"*: the process is gone, nothing is listening, and the usage text scrolls past in a log nobody reads until the first request times out.\n\nSecond, related trap recorded in the same run:\n\n- **`packages/cli/dist/index.js` invoked directly exits 0 with zero output** — a silent no-op that also reads like a crashed boot. The real entry point is `packages/cli/bin/run.js`.\n\nBoth were recorded in #10085's environment notes rather than chased, per #9702's scope. Filing here so the knowledge is not buried in one run record.\n\n## Why it is worth fixing rather than remembering\n\nA runner that hits either trap sees *\"the server did not come up\"* and starts debugging the **application**, not the invocation. That is the expensive direction: it invites boot-path investigation of a stack that was never started. The `exit 0` + no output case is the sharper of the two, because every instinct for \"did it start?\" (exit code, stderr) says yes.\n\nThis is the same shape as the gate findings this repo keeps filing — **a failure that presents as the wrong kind of failure**. It is cheap to close at the source.\n\n## Directions (not a decision — `docs/qa/platform-checklist/RUNNER.md` and the CLI are not this lane's surface)\n\n1. **RUNNER.md**: state the flag per command, or give one canonical boot invocation for checklist runs so the flag question does not arise. ⚠️ If `dev` genuinely should accept `--no-ui`, that is a CLI change, not a docs change — decide which before editing either.\n2. **CLI**: `dev` could accept and ignore `--no-ui` for symmetry with `serve`; or the unknown-flag error could be made louder than a usage dump. Either is a `domain:cli` call.\n3. **`dist/index.js` exiting 0 silently** is arguably the real defect of the two — a module entry that does nothing and reports success. Worth a look independent of the docs fix.\n\n⚠️ Whoever takes this should re-measure first: the flag surface may have moved. This card's own measurement is stamped **2026-08-20 at `4a7b3604c`**, and this repo has filed enough stale version-stamped claims today (#10073) that the stamp is not decoration.\n\nRefs: #9702 (the run that hit it) · #10085 (run record, environment notes) · #9296 (the wave)"
+}

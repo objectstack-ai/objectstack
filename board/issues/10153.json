@@ -1,0 +1,36 @@
+{
+  "number": 10153,
+  "kind": "issue",
+  "title": "approvals: the `manager` approver resolves `sys_user.manager_id` with no organization screen, while every sibling approver expansion is org-scoped",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T11:46:19Z",
+  "updated_at": "2026-08-21T01:58:15Z",
+  "closed_at": "2026-08-21T01:55:36Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10153",
+  "body": "Observed while implementing the read-only crossing-`manager_id` audit for cloud#1369 (not fixed there — that card is explicitly read-only and files no writes). Recording it here because a fix would land in `plugin-approvals`, not in cloud.\n\n## What was measured\n\nIn `packages/plugins/plugin-approvals/src/approval-service.ts`, `expandApprovers` hands the directory organization to every graph-shaped approver expansion:\n\n- `team` → `expandTeamUsers(value, directoryOrg)`\n- `department` → `expandBusinessUnitUsers(value, directoryOrg)`\n- `position` → `expandPositionUsers(value, directoryOrg)`\n- `org_membership_level` → `expandMembershipTierUsers(value, directoryOrg)`\n\nThe `manager` branch does not:\n\n```ts\n} else if (type === 'manager' && record) {\n  const subject = (record as any)[a.value] ?? (record as any).owner_id;\n  if (subject) {\n    const mgr = await this.lookupManager(String(subject));\n    if (mgr) return this.applyOooDelegation(mgr, now, organizationId, substitutions);\n  }\n}\n```\n\nand `lookupManager` (same file) reads the column directly under a system context, taking no organization argument at all:\n\n```ts\nprivate async lookupManager(userId: string): Promise<string | null> {\n  const rows = await this.engine.find('sys_user', {\n    where: { id: userId }, fields: ['id', 'manager_id'], limit: 1, context: SYSTEM_CTX,\n  } as any);\n  ...\n}\n```\n\n## Why it matters\n\n`sys_user` is a global identity table with no `organization_id` column, so nothing else in this path supplies the tenancy fact. If a `sys_user.manager_id` crosses an organization boundary, an approval step with `approverType: 'manager'` routes the submission to an approver **in another organization** — an out-of-tenant person granted approval authority over the record.\n\nThe hierarchy consumer of the same column has been screened since cloud#1195 (`HierarchyScopeResolver.screenToTenant` drops users `sys_member` proves are outside the caller's org). Approvals is a **different consumer of the same column and was not covered by that work**, so the same row behaves in opposite directions: it silently *narrows* an `own_and_reports` owner set and *widens* approval routing.\n\n## Not asserting the fix shape\n\nTwo directions exist and they are not equivalent, so this is filed for triage rather than argued:\n\n1. screen `lookupManager` the way the sibling expansions are screened (refuse / fall through when `provablyDisjointOrgs` holds), which makes the approval slot resolve to nobody and needs a story for that;\n2. treat it as an authoring-time invariant only, on the grounds that cloud#1195's write gate now refuses new crossing links — which leaves rows that predate the gate, the exact residual cloud#1369 exists to report.\n\nWhether approver routing should imply tenancy at all overlaps with the open design question in #7497.\n\n## Related\n\n- objectstack-ai/cloud#1369 — the read-only audit that surfaces crossing rows, and names this consumer per row as NOT screened\n- objectstack-ai/cloud#1195 — the write gate and the hierarchy-side read screen\n- #7497 — Design: does approver routing imply record read visibility?\n\nVerified against `907c11d2cee5fcdd420e2eedf79dc6081d08f5c3` (the SHA cloud pins today).\n"
+}

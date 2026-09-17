@@ -1,0 +1,35 @@
+{
+  "number": 9955,
+  "kind": "issue",
+  "title": "finding: dispatch-gates cannot name check:test-source-alias — the trigger is a NEW cross-package import inside a test, which no path literal describes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-19T09:53:39Z",
+  "updated_at": "2026-08-21T03:18:23Z",
+  "closed_at": "2026-08-21T03:17:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9955",
+  "body": "Observed live: a dispatched card ran its full derived gate union plus the mandated `pnpm lint`, reported everything green, and CI's `Lint & Repo Gates` came back **red** on a gate the derivation never named.\n\n## The instance\n\nPR #9951 (card #9832, `packages/cli/src/commands/serve.ts` + one new test file). The dev ran `node scripts/pm/dispatch-gates.mjs` with no paths (script-derived change set: 3 paths → 10 path-matched + 5 convention-triggered) and `pnpm lint`, reported ~15 gate readings all green. CI then failed:\n\n```\ncheck-test-source-alias FAILED\n\n  ✗ @objectstack/cli: NEW unaliased artifact import(s) since this entry was measured: @objectstack/service-cache.\n    Alias them in the package's vitest.config.* — widening the registry entry is not the fix.\n```\n\nThe finding is real and the gate is right — the new test imports `CacheServicePlugin` from `@objectstack/service-cache` with no alias, so it was a verdict about built dist rather than about source. **No complaint about the gate.** The complaint is that nothing told the dev to run it.\n\n## Why no path literal can describe this trigger\n\n`check:test-source-alias`'s population is not \"files under some glob\". It is:\n\n> *for each package with a registry entry, the set of workspace specifiers its **test files import** that no `vitest.config.*` alias resolves to source*\n\nThe trigger is therefore **a new cross-package import appearing inside a test file** — a property of the file's *content*, and specifically of an import graph that crosses package boundaries. `dispatch-gates.mjs` derives from **paths**. `packages/cli/src/commands/*.test.ts` is a perfectly ordinary path; the same path is harmless on Monday and gate-failing on Tuesday depending on what a single `import` line names.\n\nNote this is **not** the same as the existing convention trigger *\"adds or edits a test file\"* — that one fires on the path and is already handled. The gate that actually fires here depends on which package the test reaches into, which the convention trigger does not model. `check:cross-package-test-inputs` (which the derivation *did* name, and which passed) is a different gate answering a different question, and its passing is easy to misread as covering this.\n\n## This is the fourth confirmed instance of the blind spot, and a new species\n\nPrior recorded instances — #9721, #9700 — are of the form *\"dispatch-gates names neither `pnpm lint` nor `check:slot-lookup`\"*, i.e. gates that exist but are not derived. Those are handled today by a standing instruction in every dispatch brief (\"run `pnpm lint` regardless\").\n\nThis one is different in kind and the standing workaround does not catch it: `pnpm lint` was run, and it is `Lint & Repo Gates` (the CI job) that contains `check:test-source-alias`, not the local `pnpm lint` script. So the brief's compensating instruction is **not equivalent** to the CI job it is meant to compensate for — a gap worth stating on its own, independent of this gate.\n\nCompare #9873, which records a structurally similar case from the other direction: `check:type-check-debt` cannot be named for a `scripts/**` card because the root package's tsc scope is defined by **exclusion**, so no path literal will ever describe it. Same root shape: a gate whose population is defined by something other than a path set.\n\n## Not asserted\n\nNo claim about which fix is right. Candidates, none measured here:\n\n- teach the convention-trigger machinery a *content*-derived kind (a test file that gains an import of another workspace package), which is a real change in what the script is allowed to read;\n- have dispatch briefs name the **CI job** (`Lint & Repo Gates`) rather than the local script `pnpm lint`, since the two are not the same population — cheap, and it fixes the general case rather than this gate;\n- have the script state, in its residue block, that the `undetermined` bucket includes gates whose population is not a path set at all — today's residue text says their *sources* name no path, which is true but reads as \"probably irrelevant\".\n\nThe middle option looks cheapest and broadest, but the judgement is the devx seat's, not this one's.\n\nRepo: `objectstack`. Related: #9721, #9700 (prior instances of the naming gap), #9873 (a gate undescribable by paths, for a different structural reason), #9914 (piped-exit-code reading, the other way a gate run is believed when it should not be). Seen on PR #9951 / card #9832."
+}

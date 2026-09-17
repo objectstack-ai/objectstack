@@ -1,0 +1,35 @@
+{
+  "number": 9949,
+  "kind": "pull_request",
+  "title": "feat(runtime): envelope the dispatcher's two discovery bodies (#9813)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T09:37:29Z",
+  "updated_at": "2026-08-19T10:10:40Z",
+  "closed_at": "2026-08-19T10:10:39Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-19T10:10:39Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9949",
+  "body": "Fixes #9813\n\nImplements the inherited #9436 maintainer ruling (2026-08-18, option A — envelope machine-read discovery bodies, because they are the envelope's core constituency and the migration is one additive key), applied to the runtime dispatcher's two discovery bodies in `packages/runtime/src/dispatcher-plugin.ts`. All readings below at head `f78a83e0cc`.\n\n## The flip (additive only)\n\nBoth bodies located by text (the card's ~738/~765 and the claim's :775/:801 were both stale spellings of the same two sites):\n\n- `GET /.well-known/objectstack` (unconditionally dispatcher-owned) — `{ data }` → `{ success: true, data }`.\n- `GET {prefix}/discovery` — same flip. Its registration condition re-verified live, not assumed: `kernel.hasPlugin('com.objectstack.rest.api')` still gates it, so the route is the fallback owner in REST-less compositions, not dead.\n\nNo key removed or moved. Reader tolerance re-measured, not inherited (population stated per sweep):\n\n- SDK `connect()` (`packages/client/src/index.ts` :532/:557): `body.data || body` — unaffected.\n- QA http-adapter (`packages/core/src/qa/http-adapter.ts` :140): discriminates `'routes' in body`, else unwraps `body.data` — unaffected. (Its comment describing the dispatcher wrap as `{ data }` stays literally true of the unwrap logic it explains — the `data` key is still what carries the document — so it was deliberately left untouched rather than widening this PR into `packages/core`.)\n- objectui at `97fba31` (control: 156 `fetch(` sites): readers discriminate on `typeof body.success === 'boolean' && 'data' in body` — today's bare shape fails that predicate; the flip makes these routes unwrap correctly, the same measurement #9436 reported.\n- Repo-wide code sweep for `well-known/objectstack`: 38 hits across 4457 non-dist `.ts` files, all tests/route tables/comments/redirects — no intolerant reader. **The single reopening condition (a reader that chokes) did not fire.**\n\nPinned in `dispatcher-plugin.routes.test.ts`: both handlers answer exactly the top-level key set `['data', 'success']` with `success === true`.\n\n## The gate half — rode the PR, judged small\n\n`scripts/check-route-envelope.mjs` grew a fourth scan population for express-style `res.json(...)` writes on an `IHttpServer` — **enumerated, not discovered**: the scanner's receiver set is now a parameter (Hono pair stays the default), and `IHTTP_ROUTE_MODULES` names `dispatcher-plugin.ts`, audited through the same `auditPluginRouteModule` grammar. No `exempt` entry anywhere (the rejected option B), and no existing counter weakened — the gate before/after readings are in the issue report. A discovery walk for the dialect is real gate-architecture work (fetch's zero-arg `res.json()` READ shares the receiver spelling; 20 candidate files measured) and is filed as follow-up #9937 per the dispatch instruction — #9937 is not addressed here.\n\nThe new population's scan found one genuinely off-envelope literal body beyond the card's two: the SSE-fallback `res.json({ events })`. That is a different consumer population, so the inherited ruling does not reach it — filed as #9936 (which remains open) and pinned as `unenveloped: 1, ratchet: #9936`, the first-registration path the gate's own NOT-DECLARED text prescribes.\n\n## Docs\n\nComplete documented set re-swept with a control (12 `well-known/objectstack` hits across 393 mdx files): the two pages the card named are the set, but with three wrap-documenting spots, not two — `content/docs/api/index.mdx` (the wrap sentence) and `content/docs/protocol/kernel/http-protocol.mdx` (the wrap sentence + JSON example, and the REST-less callout's envelope parenthetical at ~:224, which the card missed). All three updated. `realtime-protocol.mdx` :110 shows inner fields with no envelope at all (pre-existing elision, equally true after an additive key) and `client-sdk.mdx` :82 documents probing, not shape — both left.\n\n## Changeset\n\n`minor` on `@objectstack/runtime`, ADR-0087 marker `not-required (no-migration-prescription)` with the measured-reader reasoning inline — mirrors the accepted #9814 pattern.\n\n## Verification\n\n- `check:route-envelope` before: 3 populations, exit 0; after: 4 populations, exit 0, self-test green (new pins: same source reads 0 bodies under Hono receivers and `unenveloped 1` under express receivers; relayed bodies counted, never judged).\n- Ablation from the committed state, no dist in either chain (gate reads source text; the pin test imports `./dispatcher-plugin.js` relatively through vitest): de-enveloping one body → gate exit 1 with `unenveloped: found 2, declared 1` and exactly the mutated route's pin red (1 failed / 15 passed); restored via checkout from the branch → gate exit 0, 16/16 green.\n- `@objectstack/runtime`: 176 test files / 2629 tests pass, `tsc --noEmit` exit 0. Downstream integration: `@objectstack/http-conformance` (boots a real composition and fetches these routes) 86/86 pass against the rebuilt runtime.\n- Full derived union from `node scripts/pm/dispatch-gates.mjs` (no hand-fed paths) plus mandated `pnpm lint`: all exit 0, details in the issue report.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WeN7F6jQFpcqW2BN56RdPa)_"
+}

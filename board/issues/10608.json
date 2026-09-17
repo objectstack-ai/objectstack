@@ -1,0 +1,35 @@
+{
+  "number": 10608,
+  "kind": "issue",
+  "title": "[finding] The same \"self-test runs nowhere\" class in root `scripts/**`: 6 unwired, including ts-parse.mjs — whose unrun pin is what check:parse-guard's design argument rests on",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T05:47:10Z",
+  "updated_at": "2026-08-21T07:53:59Z",
+  "closed_at": "2026-08-21T07:53:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10608",
+  "body": "Filed from the PR that closes #10574 / #10575, which is itself instance N of this class one tree over: `scripts/check-parse-guard.mjs` landed in #10573 with a 13-case `--self-test` and **nothing ran it**, and that took a separately filed card plus a dispatch round for a human to notice.\n\nSub-issue of #10196, which measured this class in `scripts/pm/**` and proposed the detector. This card is the same detector pointed at root `scripts/**`, with the measurement done.\n\n## The measurement — `main` at `d5e7b9f5a1`\n\nDerived by resolving `pnpm check:*` aliases rather than grepping workflows for filenames, exactly as #10196 argues: **87** root `scripts/*.mjs` ship a `--self-test`, and **6** are not reachable from any workflow, directly or through an alias a workflow runs.\n\n| script | root alias exists | reached by a workflow |\n|---|---|---|\n| `scripts/ts-parse.mjs` | no | **no** |\n| `scripts/js-comment-mask.mjs` | no | **no** |\n| `scripts/check-optional-error-sink-contract.mjs` | **yes** (`check:optional-error-sink`) | **no** |\n| `scripts/setup-git-hooks.mjs` | yes (`setup:git-hooks`) | no |\n| `scripts/ablation-dist-preflight.mjs` | no | no |\n| `scripts/measure-test-shard-timings.mjs` | no | no |\n\nThree of those are worth separating out; the bottom three are developer tools where \"nobody runs the self-test in CI\" may well be the right answer, and are listed for completeness rather than as a claim.\n\n### 1. `check:optional-error-sink` is #10574's defect, second instance, live now\n\nThe alias is in root `package.json`. **No workflow invokes it.** The gate landed 2026-08-21 in PR #10555 (for #9754) and has never run in CI — the same shape as the card this was found from, five hours apart. It is a working gate (`pnpm check:optional-error-sink` is green locally: 13 self-test cases, 36 sink types, 15 baselined) that enforces nothing.\n\nNot fixed in the closing PR: its own file surface was already claimed there for a different reason (two raw `ts.createSourceFile` calls, converted), and wiring a second gate into `lint.yml` is a different acceptance with a different blast radius.\n\n### 2. `ts-parse.mjs --self-test` runs nowhere — and it is the pin the parse-guard's DESIGN rests on\n\nThis is the one that is more than bookkeeping. `check-parse-guard.mjs` is a **spelling** gate, and its header argues explicitly why that is enough:\n\n> The behavioural evidence lives once, at the module: `ts-parse.mjs --self-test` spawns real children and pins that every measured wreck refuses, names its file, and cannot be swallowed by a caller's `try/catch`. Pinning the refusal once and enforcing that everyone routes through it covers the same ground for fifteen callers.\n\nThat argument is sound and the rejected alternative (a gate that RUNS every entry point) is correctly rejected. But the pin it delegates to **runs in no workflow**. So CI enforces *\"everybody calls `parseSourceFile`\"* and never once checks that `parseSourceFile` still refuses. A regression inside `ts-parse.mjs` — someone downgrading `process.exit` to a `throw`, or dropping the `parseDiagnostics` read — is caught by nothing, and its symptom is the same green line this whole family exists to distrust.\n\nIt is now 28 cases (grown in the closing PR to cover `createProgramChecked` and `transpileChecked`), spawns real child processes, and takes ~4s.\n\n### 3. `js-comment-mask.mjs --self-test` runs nowhere\n\nThe masker both `check:parse-guard` and `check:entry-guard` depend on to tell code from prose. Its own header records that it exists because two private `stripComments` families drifted apart in two different directions. A mask that silently stops masking makes both gates fabricate findings out of their own documentation — loud — but a mask that starts over-masking makes both go quietly green, which is the direction that hides.\n\n## Shape\n\n#10196's proposal already covers it: one gate asserting that every `scripts/**` tool shipping a `--self-test` is reachable from some workflow, directly or through a `package.json` alias, with a reasoned opt-out list for the deliberate exclusions (the bottom three rows above are candidates). The alias-resolution detector is the ~25 lines used to produce the table here.\n\n⚠️ Worth measuring before building, same caveat as #10196: CI affordability per self-test. `ts-parse.mjs --self-test` spawns ~20 node children; that is a real cost, though small next to the ~70 steps already in `Lint & Repo Gates`.\n\nRefs: #10196 (the parent, `scripts/pm/**` half) · #10574 (the instance this was found from) · #10573 / #10133 (the family) · #8110, #8170, #8162, #8528, #9348 (the five prior one-at-a-time fixes #10196 counts)\n\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_"
+}

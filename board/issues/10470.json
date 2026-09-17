@@ -1,0 +1,32 @@
+{
+  "number": 10470,
+  "kind": "issue",
+  "title": "[objectui] four live `adapter.find` calls pass an unprefixed query option — and `no-query-params-under-options` gates only the sibling half of the class",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T00:07:32Z",
+  "updated_at": "2026-08-21T00:18:56Z",
+  "closed_at": "2026-08-21T00:18:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10470",
+  "body": "Filed, not fixed: the sites are in `objectstack-ai/objectui`, outside #10288's file\nsurface. Census taken at objectui `c40f3b8ca21ddc19e05682f1719fcf16d4ce7fba`\n(objectstack pins `9a3daf8d37ad973a621e5edd276fe32467f90684`; re-confirm at the pin\nbefore acting).\n\n## The class\n\n`QueryParams` (`packages/types/src/data.ts`) declares only `$`-prefixed keys, and\n`ObjectStackAdapter.convertQueryParams` (`packages/data-objectstack/src/index.ts`)\nbuilds its outgoing options by copying exactly those. Any other key reaches no branch\nand is dropped — no throw, no warning. `QueryParams` also carries an index signature, so\nthe type system accepts both spellings equally.\n\nThe consequence is an **unbounded read**, not a truncated one: the platform's GET list\nroute has no default page size (objectstack `packages/client/src/index.ts`, pinned in\nits `client.test.ts`), so an absent `top` returns the entire match set. A dropped cap is\ntherefore invisible until the object is large.\n\n## The four live sites\n\n| file | call | dropped key |\n|---|---|---|\n| `apps/console/src/sdui-workbench-preview.tsx:65` | `find(objectName, { top: 200 })` | `top` |\n| `packages/app-shell/src/views/ObjectView.tsx:1561` | `find(…, { limit: 0 })` | `limit` |\n| `packages/app-shell/src/views/metadata-admin/AssignedUsersSection.tsx:109` | `find('sys_permission_set', { $filter: {…}, limit: 1 })` | `limit` |\n| `content/docs/guide/react-pages.md:129` | `find(…, { filters: [['status','=','open']] })` | `filters` |\n\n`ObjectView.tsx:1561`'s `limit: 0` is worth reading twice: `$top: 0` is honoured end to\nend as \"no records\" (objectstack #6485 pinned it), so if that call means what it says,\ndropping the key inverts it from *no rows* to *every row*.\n\n`AssignedUsersSection.tsx:109` is a one-line-away neighbour of three correct calls\n(`$top: 500`, `$top: 200`, `$top: 1000` on L124/131/136) — the shape a reviewer's eye\nslides over.\n\n`sdui-workbench-preview.tsx:66` also reads `all.records` off the result, with no `.data`\narm. `find()` resolves to a `QueryResult` (`data`, never `records`), so that preview\nlists nothing regardless of the cap. `skills/objectui/guides/data-integration.md:268`\npublishes the same `return result.records;` to skill consumers.\n\n## Why a rule, and which one\n\n`eslint-rules/no-query-params-under-options.js` already gates the **sibling** shape —\n`find(obj, { options: { $top: 100 } })` — and its own header makes the argument for\nmechanising this family: the mistake type-checks, it publishes, the symptom looks like a\ndata problem rather than a code problem, \"so a review catches it once and then misses the\nnext one.\" It cites two live instances by two authors (`object-timeline`,\nobjectui#4009 / objectstack#7137; `object-kanban`, objectui#4025).\n\nThe rule bans a `$`-prefixed key **under `options`**. It does not look at a bare key at\nthe top level, which is the other half of the same class — and the half with four live\nsites. Extending it (or adding a sibling rule) is the cheap move: the AST walk already\nlands on the params object literal of a `find`/`findOne` call, the fix is a second\npredicate, and the contract lives in the same repo as the rule.\n\nSuggested shape, narrow on purpose: flag a **static** key that is a known query-option\nname without its `$` (`top`, `skip`, `filter`, `filters`, `select`, `orderby`, `sort`,\n`expand`, `search`, `count`, `limit`, `offset`) in the second argument of an\n`adapter.find` / `dataSource.find` / `…findOne` call. Not \"any unprefixed key\" — adapters\nlegitimately take adapter-specific params, which is why the index signature exists.\n\nAn objectstack-side gate was considered for #10288 and rejected: `QueryParams` is\nobjectui's contract, so a checker there would have to hard-code another repo's key list\nand become a second source of truth for it. The rule belongs next to the type it\nenforces.\n\n## Related\n\n- objectstack#10288 — the same two defects in `examples/app-showcase`, fixed there.\n- objectstack#10469 — the same `.records` misread in objectstack's own react-pages guide.\n- objectui#4734 / objectstack#7147 — the `options: { $top }` half, already gated.\n"
+}

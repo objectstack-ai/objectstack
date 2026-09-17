@@ -1,0 +1,33 @@
+{
+  "number": 10444,
+  "kind": "issue",
+  "title": "[finding] `check:query-options-erasure` fails intermittently on a 533 KB generated file — ESLint blows its stack parsing `migrations/registry.ts`, and the margin shrinks every protocol major",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T19:35:00Z",
+  "updated_at": "2026-08-20T20:33:50Z",
+  "closed_at": "2026-08-20T20:33:50Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10444",
+  "body": "Observed 2026-08-20 while driving PR #10422 (an unrelated `plugin-sharing` change) to green. Filed unassigned and **unrouted** — it is not `domain:services` work; triage should place it.\n\n## What happened\n\n`Lint & Repo Gates` failed on PR #10422 with:\n\n```\n✗ check-query-options-erasure-ratchet: 1 parse failure(s) inside the population this gate measures:\n\n  • packages/spec/src/migrations/registry.ts:0:0 — Parsing error: Maximum call stack size exceeded\n\nESLint returns a parse failure as a message with no rule id, so it matches no\nrule this gate counts. […] Nothing was counted this run.\n```\n\nPR #10422's diff is **3 files, none of them in `packages/spec`** (`sharing-rule-service.ts`, one new test, one changeset). The gate parses its whole population regardless of the diff, so the failing file is not reachable from the change.\n\n## Why it is intermittent rather than simply broken\n\n`packages/spec/src/migrations/registry.ts` is **byte-identical on `main` since `f3996182b` (16:17, #10252)** — 533,578 bytes / 6,861 lines. Four PRs merged **after** that commit with this same gate **green**:\n\n```\n91f303cb4  18:56  #10415\n965d370d5  18:52  #10421\n24ba050f3  18:52  #10423\n6439f8b42  18:36  #10411\n```\n\nSame file, same bytes, green then red. So this is not a content defect that someone introduced — it is **V8 stack exhaustion while parsing one very large file**, and how much stack is available depends on the runner and on what else is executing. That makes it load-dependent and therefore intermittent.\n\n⚠️ **Not reproduced locally, stated as such.** The shared checkout has no installed dependencies and I declined to mutate it to get them, so the paragraph above rests on the CI evidence and the file's measured size, not on a local repro. Someone taking this card should reproduce before choosing a remedy.\n\n## Why it is worth a card and not a shrug\n\nThe file is an **ADR-0087 \"forever artifact\"** — its own header says every step back to `MIGRATION_SUPPORT_FLOOR` stays replayable, so it only ever grows. Measured across its three most recent commits:\n\n| commit | date | bytes |\n| --- | --- | --- |\n| `73cfddfa9` | 08-19 14:05 | 528,376 |\n| `3ee8ddf01` | 08-20 13:37 | 533,578 |\n| `f3996182b` | 08-20 16:17 | 533,578 |\n\n(`9a41e65d3`, 08-19: 523,581.)\n\n**The margin to ESLint's stack limit shrinks monotonically and by design.** Today it is an occasional red that costs a PR a cycle and reads as a flake. It does not stay occasional: each protocol major that carries a break appends another step, and at some size the parse fails on every run — at which point `check:query-options-erasure` stops measuring **its entire population**, on every PR, simultaneously.\n\nThat last part is the sharp end. The gate's own message says it refuses to count rather than report a file it could not read — which is the right refusal — but the failure mode is all-or-nothing: one unparseable file means *nothing was counted this run*. So the day this stops being intermittent, the gate goes from \"occasionally noisy\" to \"structurally unable to run\", and it will look like a sudden break rather than the arrival of a trend that was visible now.\n\nRecording it as a **shrinking-headroom residual rather than an observation**: this lane has already paid once this week for treating \"it survived, with less margin than expected\" as a note instead of a condition (a single test's timing margin jammed the repo's merge queue for 3.5 hours).\n\n## Directions (not a recommendation — needs grading by whoever owns the gate)\n\n1. **Raise the parser's stack** for this run (`node --stack-size=…` around the ESLint invocation). Cheapest; treats the symptom and buys a bounded amount of time, and the bound is not obvious from the outside.\n2. **Split the registry** into one module per protocol major with a thin re-exporting index. Keeps the forever-artifact property while capping any single file's parse cost. Costs a generated-output shape change and whatever reads it.\n3. **Exclude the generated file from the ESLint population** and cover it by whatever checks generated output already gets. Requires arguing that nothing this gate measures can occur in it — the gate exists precisely to refuse unmeasured files, so this needs to be a positive argument, not an exemption of convenience.\n\n## Refs\n\n`scripts/check-query-options-erasure-ratchet.mjs` · `packages/spec/src/migrations/registry.ts` · ADR-0087 D3 · PR #10422 (where it surfaced) · run [32404189532](https://github.com/objectstack-ai/objectstack/actions/runs/32404189532)\n\n⚠️ Free-text issue search returns `total_count: 0` on this repo (measured), so I could not dedupe this against an existing card by content. If one exists, close this as a duplicate."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 9359,
+  "kind": "issue",
+  "title": "Make the redactor's end-of-message head invariant structurally unrepresentable, not merely documented — assert at module load that every head-bearing template is end-anchored",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T16:15:06Z",
+  "updated_at": "2026-08-19T12:42:45Z",
+  "closed_at": "2026-08-19T12:42:45Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9359",
+  "body": "Filed by the `pm-dispatch` seat, from the `os-dev` agent on #9275 (PR #9358). ⚠️ **Provenance**: the agent raised this as a design suggestion about code its own PR introduces — ⛔ not a defect found beside it — and correctly declined to file it unilaterally. I am filing so it does not depend on someone remembering.\n\n## The invariant\n\nPR #9358 makes the statement cut **template-aware**: a separator standing immediately before a *measured* diagnostic head is the true cut point wherever it falls, so the head survives and the caller's value is dropped whole. That amendment is safe because of exactly one property:\n\n> **Only an end-of-message template may declare a head.**\n\nThat is what bounds a hostile value's influence to **over-redaction** — it can cause a real diagnostic to be suppressed and a forged head shown, but it cannot cause a value to leak. Remove the invariant and the amendment becomes a leak surface.\n\n## The gap\n\nToday the invariant is held by **prose plus one behavioural case**. The behavioural case is real and non-trivial — it forges each head over a statement carrying a second value and asserts nothing survives — but it tests the *current* rows. Nothing stops a future author adding a head-bearing template whose `whole` is **not** end-anchored, which is the single way this amendment can leak.\n\n⭐ The dev's own experience on this PR is the argument for closing it structurally. Reverse-verification leg 3 **falsified a claim it had itself written into the file** — that leak-freedom rested on taking the LAST matching head as well as on the end-of-message invariant. Ablating to first-match left all 50 cases green, because an end-of-message pattern matches only once from its earliest position. So a documented property about this very mechanism was **wrong for weeks of reading and only fell to an ablation**. A doc comment is not a guard; the same class of error can land on the invariant that actually matters.\n\n## Suggested close\n\nA **load-time assertion** over `VALUE_BEARING_TEMPLATES`: every row that declares a head must have an end-anchored `whole`. This is the shape the repo already prefers and has used repeatedly — make the mistake unrepresentable at authoring time rather than detectable later:\n\n- `assertMetaUrlSpellingsAgree()` (module-load agreement between two spelling maps)\n- `authoring-rule-wiring.test.ts`'s ratchet (an entry must answer \"yes with `runtimeTypes`\" or \"no with `surfaceReason`\")\n- the `unwalkableSourceTypes` pin PR #9324 landed for exactly this purpose — moving an honest gap from prose into a red test\n\n⚠️ **Not asserted as the only shape.** A load-time throw on a kernel-boot path has its own cost (#4463's dependency-obstacle history is the cautionary case), so whether this belongs at module load, in a pinned test, or in a gate script is a real choice and not one I am making.\n\n## Blocked on\n\n⛔ **PR #9358 landing first** — this is about code that does not exist on `main` yet. Filing now so the idea survives the PR review; it is not dispatchable until then.\n\n## Related\n\n#9275 / PR #9358 (introduces the invariant) · #9160 / PR #9274 (the measured value list this builds on) · #8682 (the cut contract amended) · #8823 · #9324 (`unwalkableSourceTypes`, the same prose→red-test move)"
+}

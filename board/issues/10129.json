@@ -1,0 +1,34 @@
+{
+  "number": 10129,
+  "kind": "issue",
+  "title": "Bump the objectui pin to current main — 149 commits of frontend are outside the release record",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T07:27:28Z",
+  "updated_at": "2026-08-20T09:35:26Z",
+  "closed_at": "2026-08-20T09:34:30Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10129",
+  "body": "Measured on `origin/main`, not recalled:\n\n| | |\n| --- | --- |\n| `.objectui-sha` (objectstack) | `82a94170c4058d45` — objectui, 2026-08-17 21:51 |\n| objectui `origin/main` | `0fd11444a89e5711` — 2026-08-20 04:51 |\n| commits in between | **149** |\n\n## Why this matters beyond \"it's old\"\n\nThe platform ships as one version-locked train and the frontend enters the changesets pipeline **exactly once**: when `.objectui-sha` moves and `bump-objectui.sh` writes the `@objectstack/console` changeset for the range it crossed. Everything objectui merged after the pin is, by construction, in no changeset, no CHANGELOG and no release page. That is the failure `scripts/check-objectui-pin-fresh.mjs` exists for (#3340) — cutting v16 that way lost four frontend changes, two of them `minor` features.\n\nThat gate is **enforcing on the Version Packages / release PR**. So this is not cosmetic staleness: at the next GA cut it is red, and 149 commits of frontend are missing from the record.\n\n## Procedure — use the script, do not hand-edit the pin\n\n```\nscripts/bump-objectui.sh              # bumps .objectui-sha to ../objectui HEAD + writes the changeset\npnpm sdui:manifest                    # the other half (ADR-0082 D4 parity ratchet)\n```\n\n`scripts/bump-objectui.sh --help` prints the full contract. Two things it does that a manual edit does not: it derives the `@objectstack/console` changeset from **objectui's own declared changesets** over the range (package names decide inclusion, declared level decides the bump — nothing inferred from commit subjects, #4731), and it refuses to pretend a truncated walk is a complete one.\n\n## The trap that is live right now\n\n**The local objectui checkout is shallow** — `git -C ../objectui rev-parse --is-shallow-repository` returns `true`. This is exactly the shape of objectstack#9408: a walk that stops inside the range still *answers*, and the oldest visible commit (shown as parentless, diffed against the empty tree) absorbs a whole batch. On the bump that produced the **current** pin's changeset, that credited 36 of 119 entries to a single commit that adds exactly one.\n\nSo:\n\n- **Do NOT set `OBJECTUI_NO_DEEPEN=1`.** Let the script deepen (`git fetch --unshallow`, measured ~6 s / ~4 MB on objectui).\n- After the bump, **verify the changeset is not the degraded one**. The degraded path labels itself — `⚠️ Degraded list` — and names only the tip subject. A degraded entry becomes permanent published CHANGELOG text. If you get one, deepen and re-run rather than editing the table by hand.\n- The range is long enough that `CONSOLE_CHANGES_MAX` (default 100) may fire. If it caps, the script says so with the real count — carry that number into the PR body rather than letting it read as a complete list.\n\n## A free correctness check on the digest\n\nThe range contains objectui's `@changesets/cli` v3 migration (objectui `e7c3b3e91`, PR objectui#5307). That PR ships a changeset with **empty frontmatter** — changesets' own \"releases nothing\". So it must **not** appear in the `@objectstack/console` list. If it does, the digest is reading commit subjects instead of declarations and the whole list is suspect.\n\n## Acceptance\n\n- `.objectui-sha` equals objectui's `main` tip at bump time; record which SHA and its date in the PR body.\n- Exactly one `@objectstack/console` changeset, **derived** (no `⚠️ Degraded list` banner), with the resolved bump level and why it resolved that way.\n- `pnpm sdui:manifest` actually run — Playwright chromium is pre-installed in this environment at `/opt/pw-browsers` and `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` is set, so **do not run `playwright install`**. If it produces parity changes, include them; if it cannot run, say so explicitly rather than skipping in silence (the gate exits 1 on a missing manifest since #4690, so \"it passed\" without running it is not a thing).\n- CI's Console Pin Gate green (does the pinned SHA still *build*) — note this is a different question from freshness; both must be green.\n\n## Non-goals\n\n- **No release.** No publish, no version tag, no release-workflow dispatch, no merging of a Version Packages PR.\n- Do not touch `.github/workflows/cut-rc.yml` — it has its own pin handling and its own gate.\n- Do not edit `content/docs/releases/**`. The changeset is this PR's input to the release notes; release notes are written centrally at release time.\n- objectui's own version PR (objectui#4655, would cut 17.6.0) is **open and unmerged** and is none of this card's business — the pin is a SHA, not an npm version.\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 9886,
+  "kind": "issue",
+  "title": "pm: decision-digest extraction has hit its scripted-escalation trigger (42 open inbox cards) — freeze the facet-block rollup into a scripts/pm/ script",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T06:14:18Z",
+  "updated_at": "2026-08-19T17:59:49Z",
+  "closed_at": "2026-08-19T17:59:49Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9886",
+  "body": "Filed by the triage seat (session `session_01JEhkB6ShK2HHDzozy7Qwgz`, 2026-08-19) under the recorded exit in the pm-dispatch skill's escalation section: \"收件箱持续 >20 张 open,或刷新节奏到达每日 ⇒ 把提取冻结进 `scripts/pm/` rollup 脚本\" — the trigger is met, so this card records it rather than redesigning anything in-session.\n\n## Measured trigger (2026-08-19 ~06:1xZ)\n\n- objectstack `needs-user-decision` open: **8**\n- objectui: **29**\n- objectos: **5**\n- Total: **42** — persistently above the 20-card line (it was ~33 two rounds ago and has only grown).\n\nThe digest (#9822) is currently refreshed by hand each triage round: label queries per repo + literal grep for the `os-decision-facets` marker + verbatim transcription into the pinned body. At 42 cards the manual transcription no longer fits a round's budget — 23 objectui legacy cards have been queued for transcription across four consecutive rounds without being absorbed.\n\n## Scope\n\nA `scripts/pm/` rollup script that: queries `needs-user-decision` across the in-scope repos; extracts each card's facet block by the literal `os-decision-facets` marker text (grep for the escaped spelling too — sanitizer variants exist, see the platform-readings notes); emits the digest body (blocks verbatim, zero paraphrase; cards without a block listed in an \"awaiting backfill\" section); the triage seat then pastes/PUTs the generated body into #9822. One-board rule holds: the script generates a view, authority stays on the cards.\n\nConstraints from standing rulings: blocks are transcribed verbatim (2026-08-18 「同意」— standardized block + batch channel); the digest is a generated view, never a second tracker; the batch-adjudication instructions in the header must spell pairs as `#9807 B` (no angle-bracket placeholders — sanitizer eats them).\n\n`domain:skills` (SUBJECT is the PM decision-digest protocol; the script is its mechanical half). Unassigned — dispatch via the skills lane."
+}

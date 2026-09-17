@@ -1,0 +1,34 @@
+{
+  "number": 9976,
+  "kind": "issue",
+  "title": "notification handover: decision cards assign os-zhuang, governed PRs review-request os-zhuang; retire the decision digest (#9822)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T11:41:44Z",
+  "updated_at": "2026-08-19T12:39:32Z",
+  "closed_at": "2026-08-19T12:19:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9976",
+  "body": "Maintainer rulings (2026-08-19, PM chat, verbatim, in order): 「现在出现另外一个问题,需要我审核的清单我不知道,还是应该在 pr 的审核流程,发给 os-zhuang 审核。我的手机github 应该会收到推送消息吧」→ 实测(PR #9940 review request)→ 「推送到了,」→ 「之前定期生成的决策汇总 issue没什么用」「就是这个 [#9822]」。\n\n裁定含义:**「在等维护者」必须是 GitHub 原生可推送状态,不是座位贴/生成视图里的一段文字。** 2026-08-18 的决策汇总 standing 裁定被取代。\n\n## Scope — `.claude/skills/pm-dispatch/SKILL.md`(治理面,人合;682/682 棘轮天花板)\n\n1. **ACCEPT 路径分叉 clause ②(治理面 PR)加一步**:留 draft 不变、⛔ 三禁不变,新增「**review request `os-zhuang`**」——draft 可点名审核且推送到手机,2026-08-19 以 PR #9940 实测(推送到达,维护者确认)。「等人合」清单从此 = GitHub Review-requested 队列,合并自动消项。\n2. **`needs-user-decision` 流程加一步**:翻标签的同一笔「**assign `os-zhuang`**」;裁定誊录回卡时摘指派。决策收件箱 = Assigned 队列。存量三张(#9617/#9900/#9965)已按此执行,四仓收件箱余量由分诊下轮 sweep 补指派(#9822 上已留交接评论)。\n3. **退役决策汇总视图**:删除分诊座位职责中「逐轮刷新 decision digest / 批量裁决通道」的 standing 文本(2026-08-18 「同意」被本裁定取代);各卡 `os-decision-facets` 块与分诊誊录职责**不变**(视图本就抽取自卡,无信息丢失)。落地后关闭 #9822(edit history 即归档)。\n4. **行数付账**:天花板 682 不动 —— 第 3 条删除的 digest 文本就是第 1/2 条新增的支付来源;若不足,按棘轮纪律找真去重,⛔ 禁 re-wrap。\n\n## 验收\n\n- `pnpm check:pm-skill-ratchet` 682/682 绿;`check:pm-governed-prose` 绿;frame-sync/兼容门按 dispatch-gates 派生集跑。\n- PR 本身即机制自举:治理面 ⇒ draft + **review request os-zhuang**。\n- 模型档:clause ① fable-mandatory(`--tier` 实跑输出记录在案)。\n\nGraded `pm:queue`, S, own-lane(skills 座,session `ae0d8bd1-5667-5f58-8ff8-fa22ec154325`)。热文件:SKILL.md 空闲(上一单 #9899 已落地)。"
+}

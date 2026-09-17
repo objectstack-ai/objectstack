@@ -1,0 +1,34 @@
+{
+  "number": 10081,
+  "kind": "issue",
+  "title": "skills: pm:retriage — the awaiting-regrade label, coexisting with the current pm:* state",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T00:35:30Z",
+  "updated_at": "2026-08-20T01:43:58Z",
+  "closed_at": "2026-08-20T01:10:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10081",
+  "body": "Maintainer ruling (2026-08-19/20, PM chat):席位对现行定级有异议、等分诊改判的卡在列表上不可见(「都在等 triage 定级,但是是不是应该加一个等待定级的标签。否则我在列表上看不出任何变化」)→ 座位提案 `pm:retriage` 四件套 → **「同意 并存」**。今天已补齐的三类可见等待(等维护者 = review request、等上游 = `pm:blocked`+`Blocked-by:`、等触发文件 = `Restart-touch:`)之外的最后一块;services 道 #9756、#9705 为首批实例。\n\n## Scope —— `.claude/skills/pm-dispatch/SKILL.md`(治理面,人合)\n\n状态模型新行 **`pm:retriage`**,四件套逐条成文:\n\n1. **语义(并存,维护者定)**:与现行 `pm:*` 标签**并存、⛔ 不摘原标** —— 原定级在改判前仍是权威;并存使列表可见「queue 但有异议」。\n2. **挂标者**:提出异议的席位;挂标与**异议评论同笔**(证据 + 建议定级),无证据的挂标不合法。\n3. **读者与摘标**:分诊 Routine 每 fire 高优先处理(职责段加一句);重判后由分诊摘标 —— 挂/摘分属两方,转换不冲突。\n4. **派发纪律**:带 `pm:retriage` 的 `pm:queue` 卡**跳过派发**(异议未决不派 —— #9756 类「照争议定级派空活」的直接堵点),入选择序说明。\n\n另:标签需在四仓存在(分诊四仓统一职责,首次应用时创建);巡逻年龄谓词另卡(同批立案)。行数付账照棘轮(现值以 PR #10066 合并后为准,headroom 1,超出部分真去重支付,⛔ re-wrap)。\n\n## Serial\n\n**SKILL.md 被 PR #10066(Restart-touch 采用,等人合)占用 —— 串行在其合并之后**,派发前重测。治理面终态:draft + review request os-zhuang。模型档:clause ① fable-mandatory。\n\nGraded `pm:queue`, S(skills 座,own-lane,session `ae0d8bd1-5667-5f58-8ff8-fa22ec154325`;认领于派发时同笔)。"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 10030,
+  "kind": "issue",
+  "title": "[finding] `Lint & Repo Gates` flips red/green on IDENTICAL content — the generated `migrations/registry.ts` sits at the ESLint parser's stack limit, and it only grows",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-19T16:09:58Z",
+  "updated_at": "2026-08-20T09:34:28Z",
+  "closed_at": "2026-08-20T07:09:33Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10030",
+  "body": "Observation-class finding, measured while driving PR #10024 (an unrelated `service-automation` change) to green. Filed unassigned. **Nothing is currently broken on `main`** — which is exactly the problem: this gate is nondeterministic today and will become deterministically red later.\n\n## Measured — three runs, one unchanged file\n\n`packages/spec/src/migrations/registry.ts` was last modified at `73cfddfa9` (#9998) and did **not** change during any of the following. All three runs are `pnpm lint` → `eslint . --no-inline-config` inside the `Lint & Repo Gates` job:\n\n| When | PR / run | Result |\n|---|---|---|\n| 15:26–15:31Z | #10022, job `96123922115` | ✅ success |\n| 15:50–15:54Z | #10024, job `96131901501` (run `32272453318`) | ❌ **failure** |\n| ~16:02–16:07Z | #10024, job `96135545590` — re-run of the same job, same head `194ab77db` | ✅ success |\n\nThe failure, in full:\n\n```\n/home/runner/work/objectstack/objectstack/packages/spec/src/migrations/registry.ts\n  0:0  error  Parsing error: Maximum call stack size exceeded\n\n✖ 1 problem (1 error, 0 warnings)\n```\n\nSame commit, same file, same command: red, then green. The PR that hit it touches `packages/services/service-automation/**` and a changeset — **nothing under `packages/spec`**.\n\n## Why it happens, and why it gets worse\n\n`registry.ts` is **6795 lines** and is machine-generated (`pnpm --filter @objectstack/spec gen:migration-registry`), assembled by concatenating one file per entry from `./entries/` into `<os-generated …>` regions. `Maximum call stack size exceeded` at `0:0` is the **parser** blowing its recursion depth building the AST — not a lint rule firing. A file at that boundary passes or fails depending on how much stack the runner happens to leave, which is why identical content gives opposite verdicts minutes apart.\n\nThe registry is documented as a **forever artifact**: every step back to `MIGRATION_SUPPORT_FLOOR` stays replayable, and entries are only ever added — the file's own header describes retirement cards appending to it as routine. So the input to this parser grows monotonically and never shrinks. Today it straddles the limit; each added entry pushes it further past.\n\n## Why it is worth a card rather than a shrug\n\n1. **It is a false red on innocent PRs.** It cost one PR a full diagnosis round: base-green comparison, log pull, attribution reasoning, and the one permitted re-run. Every future PR that draws the unlucky side pays that again, and the failure names a file the author has never touched — the most confusing possible signal.\n2. **A \"flaky lint\" trains the wrong reflex.** The correct response to a red gate is to diagnose it; a gate that is sometimes wrong teaches people to re-run first, which is precisely how a real lint failure gets waved through.\n3. **The trend is one-directional.** This does not stay a flake. It becomes a hard, permanent red on the whole repo's lint at some future entry count, at which point it blocks everything rather than one PR.\n\n## Directions (not decisions — this is not the services lane's call)\n\n- Raise the parser's available stack for the lint step (e.g. `NODE_OPTIONS=--stack-size=…`), which is the cheapest unblock but only moves the boundary.\n- Split the generated output across several files (the generator already works one-entry-file-in; it is the concatenation into a single module that builds the oversized AST).\n- Exempt the generated regions from parsing at all — nothing in a `<os-generated …>` block is hand-authored, so linting it buys little.\n\n⚠️ Whatever is chosen should come with a **measurement of the current margin** (how close the file is to the limit now), or the fix is unfalsifiable and the same card gets re-filed in three months.\n\n## Provenance\n\nFound by the `domain:services` PM seat (#6021) while adjudicating whether #10024's red was its own. It is not — filed here rather than fixed, since `scripts/`, `ci.yml` and the spec generator are all outside this lane.\n\nRefs: PR #10024 (where it surfaced) · #10022 (the green control on identical content) · #9998 (last change to the file) · #7297 (the generation mechanism)"
+}

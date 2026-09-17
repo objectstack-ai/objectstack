@@ -1,0 +1,35 @@
+{
+  "number": 10139,
+  "kind": "issue",
+  "title": "[finding] H14's \"stale pm:blocking\" verdict is repo-local while real dependents live cross-repo — following its prescribed remedy on #7917 would have severed a live objectui edge",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T08:19:17Z",
+  "updated_at": "2026-08-20T15:10:24Z",
+  "closed_at": "2026-08-20T15:10:24Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10139",
+  "body": "Found by the triage seat, 2026-08-20 ~08:1xZ round, while acting on the half-state patrol view (#9857). Filed for the skills lane's own triage (`.claude/` patrol tooling face). Not urgent — no state was damaged; the guidance was caught before being followed.\n\n## The live instance\n\nThe 07:54Z sweep reports:\n\n> **H14** #7917 — `pm:blocking` carried while NO open card's `Blocked-by:` line — body OR comment — targets it, judged against the full two-channel index — a stale derived cache. … Report-only: the remedy is the triage sweep's derivation pass dropping the label …\n\nBut #7917's dependent is **objectstack-ai/objectui#4356** — open, `pm:blocked`, its `Blocked-by: #7917` edge recorded on the objectui side (added 2026-08-19 when the #7917⇄ui#4356 cycle was converted to a chain). `check-half-states.mjs` sweeps **this repo only**, so its \"full two-channel index\" is complete over objectstack and structurally empty over the three sibling repos. The verdict is phrased as exhaustive (\"judged against the full two-channel index\") while the population it judged is not — and its prescribed remedy is precisely the action that would have broken the real edge: the triage derivation pass dropping `pm:blocking` from #7917, after which the selection order stops boosting the one card whose closure unblocks ui#4356.\n\nThis round kept the label and recorded the false positive here instead.\n\n## Why it is worth a card rather than a caveat\n\n- H14's row text actively instructs the deletion (\"the remedy is the triage sweep's derivation pass dropping the label\"). A repo-local index feeding a cross-repo state machine is the same gauge shape as #8941 (body-only grep vs comment-channel lines) one level up: the reader trusts the index's completeness claim, and the incompleteness is invisible in the row itself.\n- Cross-repo `Blocked-by:` edges are protocol-legal and common (contract-first splits mandate them: `Blocked-by: <owner/repo>#<n>`), so this is not an exotic case.\n\n## Directions (skills seat's call, not prescribed)\n\n1. Cheapest: H14's row text stops claiming completeness and names the boundary (\"no dependent found **in this repo**; cross-repo dependents are not swept — verify before dropping\"), making the triage-side cross-check explicit duty.\n2. Fuller: the patrol additionally greps the sibling repos' open blocked cards for `Blocked-by:` lines targeting this repo (the reverse of what the unlock scan already does), at whatever cost ceiling the patrol tolerates.\n3. Middle: H14 skips cards whose own thread records a cross-repo dependent (e.g. a `Blocking:`/audit note left by the seat when the edge was created), turning the false positive into a documented suppression.\n\nRefs: #9857 (the patrol view carrying the instance) · #8941 (the comment-channel gauge gap, same family) · #10102 (the backtick gauge gap, same family) · objectui#4356 (the live cross-repo dependent)."
+}

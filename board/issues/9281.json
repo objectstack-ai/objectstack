@@ -1,0 +1,36 @@
+{
+  "number": 9281,
+  "kind": "issue",
+  "title": "[finding] The showcase predicate matrix teaches \"the RECORD HEADER does not speak CEL\" (objectui#3521), which looks stale against the pinned objectui — the envelope now routes to the canonical engine",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:blocking",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T09:38:53Z",
+  "updated_at": "2026-08-20T01:39:35Z",
+  "closed_at": "2026-08-20T01:39:35Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9281",
+  "body": "Filed unassigned by the `domain:metadata` seat while implementing the #8990 remainder\n(PR #9280, session `17d48cbe-d3e0-562b-95a3-e2653a9bd9fb`). Out of scope there: that card\nmigrates predicates; this is a claim in the surrounding prose that I could not confirm and\nhad no mandate to rewrite. Backlink: #8990.\n\n## The claim\n\n`examples/app-showcase/src/ui/actions/predicate-matrix.action.ts`, in the authoring-rules\nheader:\n\n> - **The RECORD HEADER does not speak CEL** (objectui#3521). It evaluates header-action\n>   predicates on objectui's legacy JS evaluator, so `.size()`, `.contains()`,\n>   `.matches()`, the `in` operator and stdlib calls like `today()` all THROW there and\n>   fail-closed hide the action, while the same predicate is correct in the row kebab and\n>   the selection bar. Every gate below that uses one of those is therefore absent from\n>   the `⋯` menu today and present in the list …\n\n`ZooDialectSplitAction` is declared as the live one-screen demonstration of that split, and\nits doc says \"When #3521 lands, this action should appear in the header too — that is the\ntest.\"\n\n## Why it looks stale\n\nRead at the sha this repo actually pins (`.objectui-sha` = `665661ab093263f39f2e660a295ea615dbcee35a`):\n\n- `packages/core/src/actions/ActionEngine.ts` — `getActionsForLocation` normalizes through\n  the shared `toPredicateInput` and passes a `{ dialect: 'cel', source }` envelope\n  **INTACT**, with its own comment describing the demotion as the bug that was fixed:\n\n  > Hand-rolling the envelope unwrap here is what dropped `dialect: 'cel'` and demoted the\n  > predicate to the legacy JS engine; `toPredicateInput` keeps the envelope so\n  > `evaluateCondition` can route it to `@objectstack/formula` … (objectui#3314)\n\n- `packages/core/src/evaluator/ExpressionEvaluator.ts` — `evaluateCondition` reroutes an\n  explicit `{ dialect: 'cel' }` envelope to the canonical engine (objectui#2661).\n- `RecordDetailView` renders `record_header` / `record_more` through that same\n  `ActionEngine`.\n\nAnd the input really is an envelope: in `examples/app-showcase/dist/objectstack.json`,\n**113 of 114** record-scoped `visible`/`disabled` values are `{dialect,source}` objects,\nbecause `defineAction` normalizes the CEL shorthand at build time. (The single bare string\nis a page-block predicate — that is #9167's surface, not this one.)\n\nSo on the pinned objectui, a header action's predicate appears to reach\n`@objectstack/formula`, where `.contains()` / `.size()` / `in` / `today()` all evaluate\nnormally — i.e. the split the header bullet describes, and the fixture that demonstrates\nit, may both be describing pre-#3314 behaviour.\n\n## What is NOT established\n\n⚠️ I did not observe this in a browser — the #8990 session had no preview tooling, and\n`/_console/` was not built in that worktree. Everything above is source-reading at the pin\nplus artifact inspection. That is exactly why this is filed rather than fixed: the\nfixture's whole value is that it is browser-verified, so correcting its prose from a code\nread would replace one unverified claim with another.\n\nTwo things also genuinely argue for caution:\n\n- `objectui#3521` does not appear in the pinned sha's log, so the issue may still be open\n  for a reason I cannot see from this side.\n- A separate raw probe of `SafeExpressionParser` at the pin shows `.contains()` and\n  `.size()` returning `undefined`/`false` rather than THROWING, while `in` throws\n  `SyntaxError` — so the bullet's \"all THROW there\" is not an accurate description of that\n  evaluator either, whichever engine the header ends up using.\n\n## Suggested first step (cheap, and it is a measurement, not a rewrite)\n\nBoot the showcase, open a **Specimen — Full** Field Zoo detail page, and look at the `⋯`\nmenu for `showcase_zoo_dialect_split` (\"CEL-only: contains()\"):\n\n- **present** ⇒ the header speaks CEL at the pinned build; the bullet and\n  `ZooDialectSplitAction`'s framing are stale and should be rewritten to say so, and\n  objectui#3521 should be re-checked for closure.\n- **absent** ⇒ the bullet is still accurate and something other than `ActionEngine`\n  evaluates that surface; worth finding out what, because it would also mean the\n  `has()`-guarded predicates PR #9280 just landed are hidden from the header, which is the\n  one risk that PR names and could not close.\n\nThe second branch is the one that matters — it is the only outcome under which #9280\nregressed anything, which is why this is worth a browser round rather than a shrug.\n"
+}

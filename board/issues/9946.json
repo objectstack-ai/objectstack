@@ -1,0 +1,34 @@
+{
+  "number": 9946,
+  "kind": "issue",
+  "title": "check-half-states' transport probe greens a container where every real endpoint 403s — the agent proxy answers /rate_limit itself with a 14871 quota",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T09:29:41Z",
+  "updated_at": "2026-08-19T11:26:04Z",
+  "closed_at": "2026-08-19T10:54:11Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9946",
+  "body": "Filed unassigned by the #9935 dev seat (session `ae0d8bd1-5667-5f58-8ff8-fa22ec154325`), out of that card's scope: #9935 adds two report-only predicates, this is the transport classifier one layer down. Not addressed in PR #9945. Duplicate search first: keyword sweep over open issues for the probe / rate_limit / proxy-placeholder shapes, plus a semantic search — no hit. Adjacent but distinct: #9902 (seat tools with no shallow guard), #9878 (shallow-clone measurements).\n\n## Measured, 2026-08-19, in a cloud dev container\n\n`scripts/pm/check-half-states.mjs --probe` reports the prerequisite MET:\n\n```\n✓ check-half-states: transport prerequisite met — api.github.com is reachable and the token authenticates.\n```\n\nThe sweep it green-lights then 403s on its first listing page. Both readings, same container, seconds apart:\n\n```\n/rate_limit                                    200   remaining=14871\n/repos/objectstack-ai/objectstack/issues?...   403   remaining=null\n  body: {\"message\":\"GitHub access is not enabled for this session.\n          An org admin must connect the Claude GitHub App for this organization.\"}\ntoken prefix: proxy   len 14\n```\n\n## Why the probe cannot see it\n\nThe file's header already enumerates three container classes and pins each in the self-test. This is a **fourth**, and it defeats both halves of the existing classifier at once:\n\n1. **The token is the agent proxy's 14-character placeholder** (`proxy…`, `describeToken` shape `unrecognized`) — the exact credential the header warns about. But it never earns the 401 that classification depends on.\n2. **`/rate_limit` never reaches GitHub.** The proxy answers it locally with `200` and a fat core quota, so `probeIsUsable` sees `200` with `remaining=14871` and returns true, and `classifyTransportProbe` returns `reachable`.\n\nThe header's own trap paragraph anticipated the shape one step short of this: it teaches that `/rate_limit` is *exempt from the limit it reports*, so a status-only read can green-light an exhausted quota. The new case is worse, because the endpoint is not merely exempt — it is not GitHub's answer at all, and the quota number it carries is fiction. Nothing in the observation `{ status: 200, rateLimitRemaining: 14871 }` distinguishes this container from the healthy Routine runner, so no amount of care inside `classifyTransportProbe` fixes it on the current evidence.\n\n## Why it matters more than one wasted run\n\nThe `--probe` flag exists so a seat can answer \"can live mode run HERE?\" before spending a round, and the file's whole design principle is #4690: *\"could not read the input\" must never look like \"input is clean\"*. A probe that says MET where the sweep cannot make one request is that same inversion, relocated into the thing built to prevent it. A seat that trusts it burns the round; a seat that runs the sweep gets exit 2 with a raw HTTP number, which is the pre-#7412 experience the probe replaced.\n\n## Directions, not a prescription — this wants a decision, not a patch\n\n1. **Probe a real endpoint instead of / in addition to `/rate_limit`.** A cheap authenticated read the proxy does not intercept (`GET /repos/{owner}/{repo}` costs one core call) would have answered correctly here. Cost: one quota unit per run, and it re-opens the question the exemption trick was chosen to avoid.\n2. **Classify the proxy's refusal body.** The 403 carries a distinctive non-GitHub message. Narrow and honest, but it is pattern-matching a vendor string that can change under us, and the file's classifier is deliberately narrow about what it will name.\n3. **Read the token shape as disqualifying.** A `proxy`-prefixed 14-char token is never a GitHub credential. Cheapest, but the header explicitly refuses to gate requests on token shape (\"an unknown future prefix must still be SENT, so GitHub gets to be the judge\") — so this one contradicts a recorded decision and should not be taken without revisiting it.\n\nWhichever way it goes, the fix should land with the fourth container class added to the header's enumeration and pinned in the self-test alongside the other three, since that is how this file has recorded every previous transport surprise.\n\n## Repro\n\nAny container where `GITHUB_TOKEN` is the proxy placeholder:\n\n```\nNODE_OPTIONS=--use-env-proxy node scripts/pm/check-half-states.mjs --probe   # says MET\nNODE_OPTIONS=--use-env-proxy node scripts/pm/check-half-states.mjs           # exit 2, 403 on page 1\n```\n\n_Generated by [Claude Code](https://claude.ai/code)_\n"
+}

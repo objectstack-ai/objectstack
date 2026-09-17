@@ -1,0 +1,35 @@
+{
+  "number": 9974,
+  "kind": "issue",
+  "title": "Decision: should an unscoped `multi: true` UPDATE get the whole-operation dispatch that #9719 gave DELETE? (the update half split out of #9798)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-19T11:37:27Z",
+  "updated_at": "2026-08-20T07:25:03Z",
+  "closed_at": "2026-08-20T07:25:03Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9974",
+  "body": "Split out of #9798 as its triage note and the unblock comment both instructed — \"extending whole-operation dispatch to `beforeUpdate`'s predicate path is flagged by the engine's own design as a decision, not drift; split it out and escalate that half rather than implementing it as a rider\". #9798's PR implements the DELETE half only; this card carries the UPDATE half.\n\nThis is a **decision card**, not a ready-to-implement bug: the engine deliberately refuses the mechanism on this event, so wiring it is a product-behaviour choice.\n\n## What is declared\n\n`resolveTargetRows` in `packages/plugins/plugin-audit/src/comment-access-hooks.ts` (declared at #4630) refuses a multi-write carrying **no id and no `where`** on BOTH verbs:\n\n> Refusing an unscoped multi-{update|delete} of comments — scope the write to the rows you mean\n\nThe identical shape exists on `sys_attachment` for delete only (#4757).\n\n## What was measured (wired engine, on #9798's branch)\n\nMeasured through a real `ObjectQL` + in-memory driver + the production installer — the new wired-path pins in `comment-access-hooks.test.ts`, describe block `unscoped multi-UPDATE (no id, no where) — the still-unreachable half`:\n\n| Case | `ql.update('sys_comment', data, { multi: true })` — no `where` | Result |\n| --- | --- | --- |\n| Caller authored every row | not refused | **whole table rewritten** |\n| Empty table (zero match) | not refused | resolves; nothing ran at all |\n| A row the caller may not touch is swept | refused | **per-row** message (`Cannot update comment c2: …`), not the unscoped one |\n\nSo the update half is a **partial, row-dependent** guard, not a total fail-open: the unscoped shape is caught only when it happens to sweep a row the caller lacks rights to. The declared refusal — which is about the SHAPE, regardless of what the rows say — never fires. Note the third row is why this is narrower than the delete hole #9719 fixed, and the first two are why it is still a hole.\n\nThe corresponding DELETE limbs were all restored in #9798's PR via `dispatchUnscopedMultiDelete`.\n\n## Why it cannot just be wired\n\n`dispatchUnscopedMultiDelete` is valid on `beforeDelete` registrations only. `assertValidUnscopedMultiDeleteFlag` in `packages/objectql/src/engine.ts` throws at registration time on any other event, and its own comment names this card's question as the reason:\n\n> (Extending the whole-operation dispatch to `beforeUpdate`'s predicate path would be a product-behaviour decision of its own, not a widening to make this assert quieter.)\n\n## The decision\n\n**A. Extend the whole-operation dispatch to `beforeUpdate`'s predicate path** (a `dispatchUnscopedMultiUpdate` sibling, or generalizing the existing flag to both events).\n- *Real business need*: the declared refusal exists because an unscoped `multi: true` write is a mistake shape, not a use case. An unscoped multi-update is data **corruption** (silent, no tombstone, no pre-image to restore from) where delete is data loss — arguably the worse outcome to leave open. Against that: no measured caller is asking for it; the pull is a declared guard that does not hold, not a feature request.\n- *Long-term soundness*: symmetric with delete, and keeps declared = enforced. The mechanism already exists and is tested; the delta is one dispatch site plus the event validity rule.\n- *AI-authored metadata safety*: this is the axis that most favours A. An unscoped `multi: true` update is exactly what generated code emits when a `where` is forgotten, and today it half-works — which is the worst teaching signal. A loud refusal at the door is structurally hard to get wrong.\n- *Startup scope discipline*: modest — reuses a landed mechanism on one more event rather than adding surface. But it IS engine-core behaviour change on the update path, which carries more blast radius than delete did (updates are far more common), so it needs the ruling it was split out for.\n\n**B. Leave update as-is and narrow the declaration to match** — i.e. accept that the refusal is delete-only, and change `resolveTargetRows` so the update path no longer claims a refusal it cannot deliver.\n- Honest (ADR-0049 enforce-or-remove: a declared-but-unenforceable branch is the failure mode the declaration exists to prevent), and zero engine risk. But it removes a guard on the corruption verb while keeping it on the loss verb, which is hard to justify on the AI-safety axis, and it leaves the first two measured rows above as accepted behaviour.\n\n**C. Do nothing.** Not recommended: the current state is a declared refusal that is silently partial, which is the exact \"declared ≠ enforced\" shape #9798 was filed about. If C is chosen it should still be C-plus-comment, so the next reader is not misled by the branch.\n\n**Recommendation: A**, primarily on the AI-authored-metadata axis — a forgotten `where` on an update is the most common generated-code mistake this guard could catch, and it currently catches it only by accident. The engine work is a near-copy of #9719's, and the pins that must go red when it lands already exist and say so. If A is judged too much engine-core churn for the current stage, B is the acceptable second — but C is not, because it keeps a guard that reads as enforcement and is not.\n\n## What lands with whichever option is chosen\n\nThe three `MEASURED GAP` / partial-guard pins added in #9798's PR document today's behaviour deliberately and are annotated to go **RED** when this card lands. Closing this card means replacing them with refusal assertions (option A) or with the narrowed declaration's pins (option B) — not relaxing them.\n\nBacklink: #9798 (the delete half, implemented), #9719 / PR #9797 (the mechanism), #4630 (the guard's declaration), #5038 / #5574 (the per-row dispatch contract that makes the shape invisible)."
+}

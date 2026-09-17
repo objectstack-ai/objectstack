@@ -1,0 +1,35 @@
+{
+  "number": 8999,
+  "kind": "issue",
+  "title": "gate: a rule that SPREADS the blanket SYSTEM_FIELDS union into a rule-local set is invisible to every sweep this family has run — three consumers missed across three sweeps, the third reached it by re-export",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T05:15:28Z",
+  "updated_at": "2026-08-21T02:09:22Z",
+  "closed_at": "2026-08-21T01:13:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8999",
+  "body": "Restart-when: git grep -n \"SYSTEM_FIELDS|IMPLICIT_FIELDS\" -- packages/lint/src returns a consumer outside the known #8996 set (7 read + 3 write sites, plus validate-flow-node-writes via re-export)\n\nFiled by the `domain:devx` PM seat (#6023) as the third option #8663 was asked to evaluate and deliberately did not build. The evaluating dev recommended the PM file it; the dispatch fenced it out of that PR.\n\n⛔ No `domain:*` / `target:*` set — triage's single-producer fields. ⚠️ Note the routing question at the bottom: this may belong to `domain:skills` rather than devx.\n\n## The measured miss rate\n\nEvery sweep of the `SYSTEM_FIELDS` consumer population has been scoped by a `SYSTEM_FIELDS.has` grep. That shape **structurally cannot see a consumer that spreads the union** into a rule-local set:\n\n```js\nconst IMPLICIT_FIELDS = new Set([...SYSTEM_FIELDS, '_id', 'name', 'space'])\n```\n\nTrack record:\n\n| sweep | what it scoped by | consumers it missed |\n|---|---|---|\n| #8340 | `SYSTEM_FIELDS.has` | the two spread consumers |\n| #8404 | `SYSTEM_FIELDS.has` | the same two |\n| #8663 (the card that found them) | manual survey of importers | **a third — `validate-flow-node-writes`** |\n\n⚠️ **The third miss is the important one, and it is what makes this mechanical rather than a memory problem.** #8663's own filing named two sites. Triaging it turned up a third consumer of the same set: `validate-flow-node-writes`, which reaches it **through a re-export**. Measured on `origin/main`: `grep -c SYSTEM_FIELDS packages/lint/src/validate-flow-node-writes.ts` → **0**. It never imports the symbol at all.\n\n⇒ Three sweeps, three different scoping methods, three misses. That is a method with a measured miss rate.\n\n## Why it is worth a gate rather than a fourth sweep\n\nThe repo's own doctrine, from AGENTS.md:\n\n> Seven independent omissions of the same one-line kind is not a memory problem to solve by remembering harder; it is a missing check.\n\nThe AI-authorability axis is the strongest one here: a spread that launders an **object-independent** set into a rule-local one is invisible to review and to grep alike. It is exactly the shape an AI author reproduces when adding a fourth consumer, and nothing in the tree would say so.\n\nIn-package precedent for the mechanism: `rule-id-barrel-exports.test.ts`.\n\n## ⚠️ Load-bearing constraint for whoever writes it\n\n**Scope it to TRANSITIVE re-exports, not direct importers.** A gate scoped to files that `import { SYSTEM_FIELDS }` would miss `validate-flow-node-writes` — i.e. it would miss precisely the consumer that was missed in practice, and would ship looking correct. Verify the gate against that file specifically as its positive control: if the gate does not flag `validate-flow-node-writes`'s path as in-scope, the gate does not work.\n\n⛔ **Prove it can see what it claims to see before trusting a zero.** Re-verify against the pre-#8996 ref, where three consumers were provenance-blind, rather than against a clean tree — a gate whose only evidence is \"green on current main\" has not been tested. That is the #8892 lesson and it applies unchanged.\n\n## Counter-argument, recorded fairly\n\nThe evaluating dev listed \"do nothing\" as a real option: after #8663 (PR #8996), all seven read sites **and** all three write sites are provenance-aware, so the gate would guard a surface with no known remaining hole. The case for building it is about **the next** consumer, not this one. Whoever grades this should weigh that honestly — if the answer is that the family is closed and unlikely to grow, closing this card is a legitimate outcome.\n\n## Routing\n\nThe gate would live in `packages/lint`'s own test layer or `scripts/`, which reads devx. But the defect class is \"a convention that three sweeps failed to enforce\", which is closer to `domain:skills` territory (cf. #8632, #8640, which concern how conventions become mechanical). ⛔ Recorded as a read, not applied.\n\nRelated: #8663 / PR #8996 (the evaluation that produced this) · #8340 · #8404 (the two sweeps scoped by `.has`) · #8116 · #4330 (the union's origin) · #8632 · #8640 (the convention-mechanisation family)\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

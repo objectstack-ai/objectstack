@@ -1,0 +1,35 @@
+{
+  "number": 9255,
+  "kind": "issue",
+  "title": "[finding] `ADR-0057 D10` (\"server enforces, client is courtesy\") names no decision in either ADR-0057 — ~20 sites plus an `adr-anchors/` invariant ride the anchor",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:blocking"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T07:58:28Z",
+  "updated_at": "2026-08-19T11:28:26Z",
+  "closed_at": "2026-08-19T11:28:26Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9255",
+  "body": "越界发现,来自 objectui#3888 的实施(objectui ADR-0036 收窄服务端 fault 策略那一句)。按 PD #10 立案,**未认领、未定级**。观察类:今天没有用户会撞到它,而且被引用的**规则本身是真的** —— 不成立的只是那个**决策锚点**。\n\n## 事实\n\n`server enforces, client is courtesy` 这条规则在本仓被稳定地引作 **ADR-0057 D10**。但本仓 `ADR-0057` 有两份文档(#5992 已记录这个撞号),两份里都没有一个内容对得上的 D10:\n\nobjectstack `origin/main` @ `23abe2782`:\n\n| 事实 | 位置 |\n|---|---|\n| `0057-erp-authorization-core-business-units-and-scope-depth.md` 有 D1–D12,其 **D10 = \"Setup-nav surfacing follows the capability (ADR-0029 K2); the object stays open\"** | `docs/adr/0057-erp-authorization-core-business-units-and-scope-depth.md:422` |\n| 同文件 D9 / D11 / D12 分别是 edition tiering、`team` 命名撞号、`primary_business_unit_id`,均非本条 | `:404`、`:444`、`:460` |\n| `0057-system-data-lifecycle-and-retention.md` **没有任何 D 编号决策**(它的决策是 P0–P4) | 全文 `^#{2,3} (D|P)[0-9]+` 零命中 |\n\n而引用它的地方(部分):\n\n| 引用点 | 位置 |\n|---|---|\n| `ADR-0057 D10 (server enforces, client is courtesy) is why` | `packages/objectql/src/validation/rule-validator.ts:115` |\n| `ADR-0057 D10 puts enforcement on the server` | 同文件 `:575` |\n| `ADR-0057 D10 (\"server enforces, client is courtesy\") resolves the disagreement` | `packages/lint/src/validate-expressions.ts:702` |\n| 作者可见诊断文案 `Per ADR-0057 D10 the server is the one that decides` | 同文件 `:766` |\n| `UI absence alone is a client courtesy; the server is the authority (ADR-0057 D10)` | `docs/qa/platform-checklist/RUNNER.md:66` |\n| anchor 记录的 invariant 正文:`A declared field lock is the SERVER's to enforce (ADR-0057 D10 — the client grid is courtesy)`,而 `adrs` 只声明裸 `ADR-0057` | `scripts/adr-anchors/packages__objectql__src__validation__rule-validator.ts.json:7` / `:3-6` |\n\n`git grep -l \"ADR-0057 D10\" origin/main` 共 20 个文件(含 dogfood skill、`docs/qa/platform-checklist/areas/*.json` 六份、objectql/lint/formula/platform-objects 的 CHANGELOG 与测试)。\n\n## 为什么 `check-adr-anchors` 没有看见\n\n`scripts/check-adr-anchors.mjs` 检查的是**编号**层:文件存在、编号不指向两个决策(#5992 那一条)、tombstone 不可锚定(#7329)。它不校验 invariant / 注释里写的**决策字母**是否真的是被引 ADR 的一个标题。所以 `ADR-0057 D10` 在编号层是绿的(`adrs: [\"ADR-0057\", \"ADR-0058\"]`),D 锚点错到别的决策上没有任何门会红 —— 这正是 #8386(`ADR-0066` 把 D5 的内容记错)那一族的失败模式,只是这次错在 D 号本身而非 D 号的内容。\n\n顺带:同一 anchor 的 `adrs` 里写的是裸 `ADR-0057`。按 #5992 的结论,裸编号在这个号上无法消歧,而这条 invariant 讲的是**权限/enforcement 归属**,两份 0057 里更接近的是 ERP authorization 那份 —— 但那份的 D10 恰好是 Setup-nav,所以\"猜哪一份\"这一步也解不出来。\n\n## 影响与不影响\n\n**不影响**规则的正确性:`server enforces, client is courtesy` 在本仓 prose 里被独立表述过(`RUNNER.md:66` 就是完整的一句),`rule-validator.ts:606-612` 的 fail-CLOSED 行为也自证。**影响**的是可追溯性:读者按 D10 去 ADR-0057 会读到 Setup-nav 那条,与手上的代码毫无关系,于是要么以为自己找错了 ADR,要么以为代码引错了 —— 两条路都到不了那条规则真正被决定的地方(如果它确实在某份 ADR 里被决定过)。\n\n它还在**外扩**:objectui 已经继承了这个引用两次(objectui#3828 / PR objectui#3887 的 `packages/core/src/evaluator/fieldRules.ts` 模块头,以及 objectui#3888 的 ADR-0036)。objectui#3888 这一版把它写成了**归属式**表述(\"the rule the framework cites … as ADR-0057 D10\")而不是断言 D 锚点可解,并在本单落地后不再进一步扩散 —— 但下一个复制它的人不会知道要这么小心。\n\n## 建议修法(留给分诊,不自选)\n\n1. **定位真正的决策并改引用**:确认 `server enforces, client is courtesy` 落在哪份 ADR 的哪个决策(可能需要新记一条),然后把 20 处引用与 anchor invariant 一次改到那个可解的锚点上,顺带把 anchor 的 `adrs` 从裸 `ADR-0057` 改成消歧后的写法。\n2. **只修 anchor 与两处代码注释**,QA / CHANGELOG / skill 里的引用留待自然衰减。\n3. **把门下移一层**:让 `check-adr-anchors` 校验 invariant 与被锚定文件注释里出现的 `ADR-NNNN Dk` 中的 `Dk` 确实是该 ADR 的一个标题。能一次性防住这一族(#8386 是同族的另一个实例),但会先红出一批既有引用。\n4. 不动,记录为已知边界。\n\n倾向 1 + 3:1 是这一条的修法,3 是让它不再复发的那半 —— 但 3 会立刻红出一批,拆单更稳。\n\n## 查重\n\n仓内四次检索:`ADR-0057 D10 citation does not resolve`、`ADR-0057 D10 server enforces client is courtesy numbering collision`、`git grep \"ADR-0057 D10\"`(20 文件,全部是引用方,无立案)、以及 ADR 引用族既有单核对 —— #5992(0010/0019/0057 撞号,已关)记的是**编号**层,不含 D 锚点;#8386(已关)是 D5 内容记错、非 D 号错;#8531 / #9072(开)是 `ADR-0081` 跨仓标签;#8811(开)是 ADR-0056 D10 矩阵缺行,与本条同名不同事。无同题单。\n\nRefs: #5992(编号撞号)、#8386(同族:D 引用与 ADR 正文不符)、#7329(anchor 层的 tombstone 检查)、objectui#3888、objectui#3828。\n"
+}

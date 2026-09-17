@@ -1,0 +1,35 @@
+{
+  "number": 10031,
+  "kind": "issue",
+  "title": "spec: importing one function from a `@objectstack/spec` subpath pulls its whole module graph — measured +237 KB minified, nothing tree-shakes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-19T16:15:44Z",
+  "updated_at": "2026-08-20T14:31:31Z",
+  "closed_at": "2026-08-20T14:31:31Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10031",
+  "body": "Measured while implementing objectstack-ai/objectui#5287 (console top bar); filed unassigned, out of scope for that PR.\n\n## What was measured\n\nThe console needed exactly one three-value predicate — `postureEnforcesWall` from `@objectstack/spec/security`, a pure function over a string union. Bundling it costs a quarter of a megabyte, and it costs that **even when the consumer's graph already holds the entire spec root entry**.\n\nMeasured on `@objectstack/spec@17.0.0` as resolved in objectui, with that repo's own esbuild (`--bundle --format=esm --minify --tree-shaking=true`), an entry importing nothing else:\n\n| entry | minified |\n| --- | --- |\n| `import * as spec from '@objectstack/spec'` | 1271.8 KB |\n| the same **plus** `import { postureEnforcesWall } from '@objectstack/spec/security'` | 1509.1 KB (**+237.3 KB**) |\n| `@objectstack/spec/ui` alone | 630.1 KB |\n| `/ui` **plus** `/security` | 867.4 KB (**+237.3 KB**) |\n\nThe delta is identical in both directions, so the subpath entries do not share their bundled schema modules with each other or with the root entry — each import materializes its own copy of what it reaches.\n\n## Why nothing shakes it out\n\n`@objectstack/spec`'s `package.json` declares no `sideEffects` field. Both esbuild and rollup then have to assume every module in the package may have side effects on evaluation, and the schema entries do evaluate at module scope. So the retained bytes are not \"what you imported\" but \"every module the entry file reaches\", regardless of which export the consumer named.\n\n## Why this matters beyond one call site\n\nDownstream consumers pay it on page load. objectui already runs a dedicated build-time guard for exactly this class — `apps/console/vite.config.ts`'s `assertLazyLinterStaysLazy`, added over 89 KiB gzipped of `@objectstack/lint` leaking into the eager closure (objectui#5266). A protocol package whose predicates cost 237 KB each pushes consumers toward re-deriving protocol rules locally instead of importing them, which is precisely the drift ADR-0105 put the tenancy posture into the protocol to prevent. objectui#5287 took that trade deliberately and pinned the local copy with a parity test, but the trade should not have to exist.\n\n## Directions worth triaging (not a decided fix)\n\n- Declare `sideEffects: false` (or a narrow allowlist) if the schema modules are in fact evaluation-pure — the standard fix, and the one that needs a maintainer to confirm the claim rather than an agent to assume it.\n- Annotate top-level schema construction as `/*#__PURE__*/` so bundlers may drop unreached schemas.\n- Split the pure predicate/vocabulary helpers (`postureEnforcesWall`, `postureStampsOrganization`, `postureUsesUnionScope`, `normalizeTenancyPosture`, `TENANCY_POSTURES`) into a schema-free subpath consumers can import for a few hundred bytes.\n\nReproduction is two esbuild invocations against an installed `@objectstack/spec`; no objectui checkout is required."
+}

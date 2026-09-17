@@ -1,0 +1,34 @@
+{
+  "number": 9924,
+  "kind": "pull_request",
+  "title": "docs(skills): state the published heavy-verify lock as properties, not a broken recipe",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T08:08:24Z",
+  "updated_at": "2026-08-19T08:38:34Z",
+  "closed_at": "2026-08-19T08:38:32Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-08-19T08:38:32Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9924",
+  "body": "Fixes #9922\n\nThe published pm-dispatch catalog copy taught a copy-pasteable heavy-verify lock\nrecipe with two independent defects, and the serious one is silent: the lock path\nit named carried no `os-` prefix, so it is a *different file* from the container's\nshared lock. An agent following the recipe took an exclusive lock no sibling ever\ncontends on — it looks like serialization, reports like serialization, and\nserializes nothing. The second: a `-w` budget 13x the declared acquisition cap and\n12x the harness ceiling for a single foreground call, so a waiter that actually\nspent it would be killed mid-wait.\n\n## What changed\n\nExactly one file: `skills/objectstack-pm-dispatch/SKILL.md`, Resource discipline.\n\n**Item 1 — recipe replaced by property statements.** The catalog ships into\ncustomer codebases where neither this container's lock path nor this repo's\nwrapper exists, so *any* copy-pasteable literal is wrong-by-construction\nsomewhere. The item now states the invariants and defers the mechanism:\n\n- ONE shared heavy-verify lock per container, so every agent contends on the same\n  file — with the naming of why a private path is the dangerous failure (it\n  reports exactly like a lock that works).\n- The acquisition budget fits inside a SINGLE foreground tool call: waiting must\n  never outlive the call carrying it, and backgrounding a wait to escape that\n  ceiling produces the stall the lock exists to avoid.\n- A queue timeout is distinguishable from the wrapped command's own failure.\n- Hold duration is observable, so a stuck holder names itself.\n\nNo literal lock path and no literal wait number survive anywhere in the file\n(verified by rescan, below). The deferral is made structural rather than\nprose-only by a new row in the \"Adapting this loop to your project\" table, which\nis the file's existing idiom for everything the host project owns.\n\n**Item 4 — the force-first worktree removal is gone.** With dependencies already\ndeleted, a refusal to remove means something in there is uncommitted, and that\nrefusal is the container's only guard for unpushed work. Force is now named as the\nlast resort after diagnosing, not the recipe.\n\n## Deviation from the graded direction, with evidence\n\nThe adjudication permits citing this repo's `scripts/pm/os-verify-lock.sh` as *an\nexample of the shape*. I did not, because it does not exist on `main`:\n\n```\n$ ls -la scripts/pm/os-verify-lock.sh\nls: cannot access 'scripts/pm/os-verify-lock.sh': No such file or directory\n```\n\nIt lands with #9921, which is still draft-awaiting-merge. Naming it now would ship\na dangling path in the published catalog — the precise failure mode this card\nexists to remove. The permission was \"may\", not \"must\", so the shape is described\ngenerically instead. If #9921 merges and the maintainer wants the example named, it\nis a one-line follow-up.\n\n## Verification at `c3cc548a7`\n\n`node scripts/pm/dispatch-gates.mjs` (no paths — derived from the real diff vs\nmerge base `05864fb20`) matched three families, all run locally on the final\ncommit, each quoting the gate's own verdict line:\n\n| Gate | Verdict line |\n|:---|:---|\n| `check:nul-bytes` | `check-nul-bytes: OK (scanned 6304 text file(s) ... no raw ASCII control bytes).` |\n| `check:skill-frame-sync` | `check-skill-frame-sync: 4 copies of the decision frame are structurally isomorphic across 3 files` |\n| `check:skill-compatibility` | `check-skill-compatibility-version: 11 SKILL.md file(s) reconciled against 77 workspace packages` |\n| `check:pm-governed-merges` | `check-governed-merges --self-test: 77 assertions ...` |\n\nResidue derivation placed all 114 discovered families (3 matched, 35 undetermined,\n76 silent).\n\n**A measured falsification of the dispatch's mechanism assumption:** the dispatch\nasked whether `skills/**` is ratcheted. It is not. `check:pm-skill-ratchet`'s\n`CEILINGS` map covers 16 entries, all under `.claude/` plus root `AGENTS.md`, and\nzero under the published `skills/` root — so this PR pays no line budget. The file\ngoes 1,050 to 1,069 lines (+19: property statements are longer than the one broken\ncommand they replace). That gap is recorded as an unassigned observation in #9923,\nnot repaired here.\n\n## Notes\n\n- Governed surface (`skills/**`) — this PR **opens draft and stays draft**. The\n  maintainer merges; it is never queued, armed, or flipped ready.\n- No changeset: `skills/` is in no package's published file list, so this PR\n  releases nothing. `skip-changeset` applied.\n- Related: #9661, #9921 (the internal mechanization this card's prose describes the\n  shape of). Neither is addressed by this PR.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AeA3nU1B5Q2pgxqxgUrexd)_"
+}

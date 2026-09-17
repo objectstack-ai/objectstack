@@ -1,0 +1,32 @@
+{
+  "number": 10132,
+  "kind": "issue",
+  "title": "Walled posture: the position/permission catalog is org-less AND hidden by the tenant filter — sys_position / sys_permission_set / sys_sharing_rule read as 0 rows for every principal, hierarchy security inert",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T07:44:03Z",
+  "updated_at": "2026-08-20T08:12:00Z",
+  "closed_at": "2026-08-20T08:12:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10132",
+  "body": "## Summary\n\nOn a walled deployment (`OS_TENANCY_POSTURE=isolated`, single shared database), the platform's security catalog is written org-less at boot and then hidden from **every** principal — customer org owners and the platform admin alike — by the tenant read filter's strict equality. An app's declared permission profiles, positions and sharing rules are all registered, all present in the database, and all invisible over the API; with zero user→position assignments producible through the product, every hierarchy scope (`unit` / `unit_and_below` / `own_and_reports`) resolves to nothing, so `hierarchy-security` is mounted but changes no read.\n\n## Measured (2026-08-19/20, fresh composed boot, framework @ `8798cd2`, HotCRM @ `d4ddee0` — 18 positions: 12 app-declared, 6 platform anchors)\n\n- DB ground truth: all **18** `sys_position` rows carry `organization_id = NULL`; `sys_user_position`: **0** rows.\n- Over HTTP, same boot, same sessions that read org-stamped tables normally (`sys_user`, `sys_member`, `crm_account`):\n  - `GET /api/v1/data/sys_position` → 200, **0 records** — for a customer org owner AND for the platform admin, while the database holds every row.\n  - Same for `sys_permission_set`, `sys_sharing_rule`, `sys_user_position`: every org-LESS platform table reads empty; every org-STAMPED table reads fine. That contrast is what pins it on the org filter rather than a permission refusal (a permission refusal on this deployment is a 403, which is what a customer org owner gets POSTing `sys_user_position` — PERMISSION_DENIED, allowRead without allowCreate).\n  - The mechanism itself works: the platform admin CAN POST a `sys_user_position` (201, correctly stamped with the caller's org). The capability is unarmed for want of a catalog anyone can see, not for want of a working mechanism.\n\nWhy the rows are org-less: neither position seeder (`bootstrapDeclaredPositions`, `bootstrapBuiltinRoles`) writes `organization_id` at all, and the first insert lands ~1s **before** the deployment's first organization exists — so there is nothing they could stamp. One fact, one cause: the org-less graph and the zero assignments are not independent.\n\nCross-refs: objectstack-ai/cloud#1396 (the measurement), cloud's `verify-hotcrm-saas.mjs` checks `d3`/`d3b` (pinned as a MEASUREMENT, with `d3b` marked re-measure-by-hand).\n\n## Impact\n\nOn the hosted single-app SaaS shape this silently disables the app's entire declared authorization surface — for HotCRM: 6 permission profiles, 12 positions, 9 sharing rules — while the boot banner reports `hierarchy-security` mounted and every position registered. Every customer runs on the OWD baseline alone, and nothing tells the operator.\n\n## Proposed direction (needs a maintainer call)\n\nThe precedent is in-tree: `plugin-approvals` already treats `organization_id = NULL` on platform objects as \"owned by no org / visible as shared\" and reads with `$or: [{organization_id: X}, {organization_id: null}]` (`approval-service.ts:1181-1202`, delegation lookups). Options:\n\n1. **Read-side (recommended):** for platform catalog objects (`managedBy` schemas), the tenant filter admits `organization_id IS NULL` rows as the shared layer — the same shape metadata reads already use (org layer falls back to the NULL layer). Writes stay stamped with the caller's org, as the 201 above already does. One rule, matches how `sys_metadata` and the approvals delegation reads behave.\n2. **Write-side:** per-org copies of the catalog on organization creation (extend the seed replay). Rejected-by-default candidate: it forks \"the platform default\" into N drifting copies and re-raises the very donor-copy hazard cloud#1345 retired.\n3. Whatever the ruling, the boot should say when a mounted hierarchy has zero assignments AND an invisible catalog, instead of reporting the capability as armed."
+}

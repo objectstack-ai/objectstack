@@ -1,0 +1,36 @@
+{
+  "number": 10080,
+  "kind": "issue",
+  "title": "skills: correct \"removed in v11\" → v16 for the #3290 session-alias removal in skills/objectstack-ui/SKILL.md (governed one-liner)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T00:32:38Z",
+  "updated_at": "2026-08-20T13:37:09Z",
+  "closed_at": "2026-08-20T13:37:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10080",
+  "body": "Split out of #9872 (its delivering PR #9990 fixed the 20 comment-text sites; this one sits on the governed `skills/**` surface, which forks any mixed diff, so it lands alone). Provenance: os-dev report on #9872, 2026-08-19; residue re-verified on `origin/main` `b1457eeca` at triage time 2026-08-20.\n\nSingle site:\n\n- `skills/objectstack-ui/SKILL.md:1934` — \"The former `ctx.session.tenantId` alias was removed in v11 (#3290)\" → the removal shipped in **v16** (authority: `content/docs/releases/v16.mdx:132` and its 16.0.0 upgrade checklist; `skills/objectstack-data/references/data-hooks.md:627` already says v16).\n\nConstraints for the dispatching seat (skills lane):\n- `skills/**` is a governed surface: PR stays **draft**, never ready/queued/auto-merged — the maintainer merges by hand (2026-08-18 ruling: human merge is the review record). Request review from `os-zhuang` on the draft.\n- One-line text fix; no other skills edits ride along."
+}

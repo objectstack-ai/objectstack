@@ -1,0 +1,33 @@
+{
+  "number": 9962,
+  "kind": "pull_request",
+  "title": "docs(pm): state the skill line-ratchet's coverage boundary in its header",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T10:27:51Z",
+  "updated_at": "2026-08-19T10:54:12Z",
+  "closed_at": "2026-08-19T10:54:10Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-08-19T10:54:10Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9962",
+  "body": "Fixes #9923\n\nHeader honesty only. **No `CEILINGS` entry added; no enforcement behaviour changed.**\n\n## The gap\n\n`scripts/pm/check-skill-line-ratchet.mjs` ends its \"Why ceilings\" section with \"the ceiling now covers the whole surface, per file\" — which reads as a claim about the instruction surface **as a category**. Re-measured on `origin/main` at merge base `5989b0de9`:\n\n| | |\n|---|---|\n| `CEILINGS` entries | **18** |\n| under `.claude/` | 17 |\n| other | `AGENTS.md` |\n| under the published `skills/` root | **0** |\n\nThe published catalog is eleven `SKILL.md` totalling **10,443** lines, against **3,664** lines of ceiling covered here. A reader could not see the published root was outside the boundary without diffing the map against the filesystem.\n\nNote the card said 16 entries; its own enumeration (6 + 6 + 4 + 1 + 1) sums to 18, and 18 is what the map holds. The load-bearing measurement — zero published-root entries — is unaffected.\n\n## The fix, per the ruling on the card\n\nDeliberately uncovered stays uncovered. The header now states:\n\n1. The covered set is an **enumeration**, never a root glob, and names it. It also names what else carries no ceiling (`.claude/hooks/`, `.claude/settings.json`, `CLAUDE.md`) so absence reads as a fact to check rather than an oversight to infer.\n2. The published `skills/` catalog is **deliberately outside**, with both reasons: the ratchet prices a full-file token read paid per seat session and per Routine fire, and the published catalog is read by customer projects rather than this repo's seats — a different cost curve; and the published catalog is already a governed, human-merge-only surface (Prime Directive #14), so growth there passes a human eye by construction.\n3. Extending coverage to the published root is a **policy change** needing its own card and a maintainer's ruling, not a `CEILINGS` row added in passing.\n\nOne precision added while writing reason 2, because the header must not itself state something false: the governed-surface reason **does not separate the two roots on its own** — the covered files are human-merge-only too (Prime Directive #14 names `.claude/**` and `AGENTS.md`), so taken alone that reason would argue against the `AGENTS.md` ceiling that already exists. The header now says so and points at the recurring per-session read as the property that actually does the separating.\n\n## The boundary is pinned, because enforcement cannot hold it\n\nOne self-test case in the file's existing idiom asserts no `CEILINGS` key starts with the published root. This is not decoration — see the reverse verification below: a ceiling on a **real** published `SKILL.md` runs perfectly green through the enforcement path, so without the pin the header paragraph could drift from the map silently.\n\n## Reverse verification (direction predicted in writing before running)\n\n**RV-1 — the pin catches a published-root ceiling.** Mutation: add `['skills/objectstack-formula/SKILL.md', 556]`, a real path at its true line count, chosen so enforcement stays green. Predicted: enforcement GREEN, self-test RED. Observed exactly that:\n\n```\nRUN_EXIT=0\n  check-skill-line-ratchet: skills/objectstack-formula/SKILL.md is 556 lines (ceiling 556; headroom 0).\nSELFTEST_EXIT=1\n  the published skills/ catalog is deliberately uncovered      [failing case]\n  check-skill-line-ratchet self-test: 1 of 15 case(s) failed.\n```\n\nRestored with `git checkout HEAD -- ...` from the committed state; `git status --porcelain` clean afterwards (no `MM`), mutation absent.\n\n**RV-2 — header prose must not change derived watch hints.** `scripts/pm/dispatch-gates.mjs` machine-reads this file via `extractWatchHints`, which masks comments first. Predicted: hint set byte-identical before and after, since any change would silently widen the ratchet family's watch set — an enforcement/derivation change this card forbids.\n\n**This leg falsified its prediction on the first run, and the failure was real.** The initial header spelled a glob whose asterisk and slash form a **comment terminator**, closing the docblock early. Node reported `SyntaxError: Unexpected identifier 'AGENTS'`, and the orphaned prose — now parsed as module body — leaked seven phantom hints (`.claude`, `.claude/hooks`, `.claude/settings.json`, `.claude/skills`, `origin/main`, `references`, `skills`). Rewritten without the terminator; `node --check` passes and the hint set is identical to the base (17 hints, unchanged) at final head. The three `dispatch-gates` self-test cases that pin this file's hints stay green.\n\nThe generalisable trap: a path glob containing an asterisk followed by a slash cannot be written literally inside a block comment.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs` with no args, deriving from the real diff, re-run on final commit `021dfbcbb`; `scripts/**` adds `check:nul-bytes` per the dispatch. Each gate's own verdict line, from that head:\n\n- `pnpm check:pm-skill-ratchet` — `check-skill-line-ratchet self-test: 15 cases pass.` and `check-skill-line-ratchet: AGENTS.md is 958 lines (ceiling 958; headroom 0).` (whole tree still passes)\n- `pnpm check:cross-package-test-inputs` — `OK: 12 package(s) read outside themselves, all declared, and turbo.json hashes every declared glob.`\n- `pnpm check:nul-bytes` — `check-nul-bytes: OK (scanned 6314 text file(s) -- 6314 tracked, 0 untracked-not-ignored; skipped 5 binary; no raw ASCII control bytes).`\n- `pnpm check:pm-dispatch-gates` (not derived; run because it pins this file's hints) — `dispatch-gates self-test: 310 cases pass.`\n\n`skip-changeset`: internal PM tooling, nothing user-visible ships.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AeA3nU1B5Q2pgxqxgUrexd)_\n"
+}

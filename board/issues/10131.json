@@ -1,0 +1,33 @@
+{
+  "number": 10131,
+  "kind": "issue",
+  "title": "Approval/automation writers stamp the ACTING org, so flow-opened rows land org-less: records locked behind requests no inbox can surface (write-side repair #9132 deferred)",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "approvals",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T07:43:36Z",
+  "updated_at": "2026-08-20T08:12:17Z",
+  "closed_at": "2026-08-20T08:12:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10131",
+  "body": "## Summary\n\nOn the walled single-database SaaS shape (`OS_TENANCY_POSTURE=isolated`, HotCRM as composed artifact), `sys_approval_request` and `sys_automation_run` rows created by flow/trigger writers carry `organization_id = NULL` while describing records owned by specific customers. The approvals inbox scopes with strict equality against the caller's organization (`ApprovalService.buildRequestWhere`, `packages/plugins/plugin-approvals/src/approval-service.ts:3752-3753`), which `NULL` satisfies for nobody — so the requests are invisible in **every** inbox, including the owning customer's, while the record lock they hold (org-blind, reads as SYSTEM) stays fully enforced.\n\nThis is the write-side repair that PR #9132 explicitly deferred pending a maintainer ruling. #9132 landed the pins and the analysis; nothing tracks the repair itself — this issue does.\n\n## Measured (2026-08-19/20, fresh composed boot, framework @ `8798cd2`, HotCRM @ `d4ddee0`)\n\n- `sys_approval_request`: **9/9** rows `organization_id = NULL`, each about a `crm_opportunity` owned by a real org.\n- `sys_automation_run`: **12/12** rows `organization_id = NULL`, each about a customer-owned record.\n- Negative control on the same boot: `sys_audit_log` — **1469 rows, all correctly attributed** (its writer resolves the org from the subject record: `resolveRecordOrganizationField`, #8707).\n- Operational impact, over HTTP only: the 9 seeded high-value opportunities read `approval_status='pending'` and refuse edits with `409 RECORD_LOCKED`, yet `GET /api/v1/approvals/requests` returns **0** rows for the record owner, the other customer, and the platform admin alike. The records are locked behind requests that have no inbox entry, no approver, and no in-product rescue path (the record lock has no admin exemption by design; the sanctioned rescue starts from a request you can find).\n- Not a leak: the org-less rows are absent from strangers' inboxes too. Availability, not disclosure — but the data is wrong at rest, and which surfaces hide vs. show such rows is decided per-filter instead of by the data.\n\n## Root cause (from #9132's own analysis, confirmed at head)\n\n`ApprovalService.openNodeRequest` stamps `ctxOrg = context.organizationId ?? context.tenantId ?? input.organizationId ?? null` (`approval-service.ts:1563`); the automation run store stamps `ctx.tenantId`. Schedule, time-relative and api triggers set no acting tenant — correctly, a scheduled sweep has no one acting org — so the NULL is every run those triggers produce, not an edge case. Two writers read the **actor**; the audit writer reads the **subject**. The disagreement is the defect.\n\n## Requested ruling + fix\n\n1. Rule on the fork #9132 named: whether approval/automation writers may resolve the organization from the subject record the way audit does, given the #8778 scope pin on `tenancy.organizationField` (\"one stamp-only declaration key … a consumer other than audit stamping needs its own ruling\"). The `sys_api_key` divergence (`organizationField` ≠ wall column) is the case to decide explicitly.\n2. Apply the write-side repair per that ruling (fallback order actor-then-subject or subject-then-actor — but one rule for both writers, and stated).\n3. Migrate existing `organization_id IS NULL` rows that name a subject record with an organization.\n4. Promote the three pins together, per their own instructions: the PINNED test from #9132, cloud's `verify-hotcrm-saas.mjs` check `a4`, and `apps/objectos-ee/test/hotcrm-multitenant.acceptance.ts` (\"an approval opened with NO acting organization is invisible in every inbox\").\n\nCross-refs: objectstack-ai/cloud#1395 (storage fact), objectstack-ai/cloud#1404 (HTTP half), PR #9132 (pins + deferral)."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 10050,
+  "kind": "issue",
+  "title": "docs: the newly mounted `POST /organization/add-member` is undocumented — and it is the ONLY multi-org path to attach an existing user",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-19T18:55:23Z",
+  "updated_at": "2026-08-21T03:18:21Z",
+  "closed_at": "2026-08-21T03:17:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10050",
+  "body": "Follow-up filed by the `domain:services` PM seat (#6021) while landing #9941 / PR #10049. Filed unassigned, deliberately **not** ridden into that PR — a route mount and its prose are separate reviews, and #10049 is a privileged-surface change that should not carry a 43-page docs sweep.\n\n## What landed\n\n#9941 mounts `POST /api/v1/auth/organization/add-member` in `plugin-auth`, wrapping better-auth's **server-only** `auth.api.addMember` behind the shared ADR-0068 platform-admin gate. It is registered in `auth-route-ledger.ts` as `source: 'objectstack'`, `disposition: 'server-only'`.\n\nBefore it, the `sys_member` \"Add Member\" toolbar action had shipped for some time pointing at a URL the vendor never mounted — a permanent 404.\n\n## Why it needs prose, not just a ledger row\n\nThis is not one more route. On a **multi-org posture it is the only remaining way to attach an existing user to an organization**:\n\n- `admin/create-user` → `bindUserToSoleOrganization` → `reconcileMembership` resolves the org via `tenancy.defaultOrgId()`, which returns `null` under the org wall **by design** — no `sys_member` row is written.\n- Generic CRUD on `sys_member` is suppressed (`managedBy: \"better-auth\"`, ADR-0010 full lock), so an admin cannot hand-create the row.\n- The invite flow needs an email round-trip, which phone-number-only users (created through the `phoneNumber` path of `create-user`) cannot complete.\n\nAn admin who does not know this route exists concludes the product cannot do it — which is exactly what happened in the field report steedos-labs/os-project-titanwind-ehr#1615.\n\n## What the docs need to say\n\n1. The route exists, what it does, and its request shape. It accepts both spellings of the params (`userId` / `user_id`), and `organizationId` may be omitted to use the admin session's active organization.\n2. **Its admit set is platform admin ONLY.** An organization owner or admin is refused `403 PERMISSION_DENIED` — this surprises people, and it is deliberate under ADR-0068 (org roles are not platform roles). Pinned in `organization-add-member.test.ts`.\n3. The refusals, per ADR-0112 (`code` AND `status`): `401 UNAUTHENTICATED` anonymous, `403 PERMISSION_DENIED` non-platform-admin, `501 NOT_IMPLEMENTED` when the organization plugin is off, and the vendor's own `400`s forwarded verbatim (`USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION`, `USER_NOT_FOUND`, `NO_ACTIVE_ORGANIZATION`, `INVALID_REQUEST`).\n4. **It is an ObjectStack mount, not a better-auth route.** Anyone reading the vendor's docs will not find it, and anyone enumerating `BETTER_AUTH_MOUNTED_SURFACE` will not see it either — a pathless vendor endpoint never enters that enumeration. Say so, or the next person auditing the surface will file it as an orphan.\n5. The multi-org context above — this is the part that turns a route reference into a usable answer.\n\n## Scope note for whoever takes it\n\nThe drift check on PR #10049 named **43** hand-written pages touching that change's anchors, and ⛔ **6 release-owned pages** which are read-only per AGENTS.md Documentation Guardrails. This card is **not** a mandate to sweep 43 pages — it is a request for the route to be documented where auth/admin routes are documented, plus the multi-org caveat wherever \"attach an existing user\" is discussed. Re-derive the real list rather than trusting this paragraph:\n\n```sh\nnode scripts/docs-audit/affected-docs.mjs --json <base-sha>\n```\n\n⚠️ Re-derive on the tree the check actually read (the PR's merge commit, named in the drift comment), not on a worktree cut from an older `main` — a different tree legitimately returns a different list.\n\n## Refs\n\n#9941 (the card) · PR #10049 (the mount) · #10009 (open: a sibling admit set is *wider* than this one, and the difference is worth not blurring in prose) · steedos-labs/os-project-titanwind-ehr#1615 (the field report this unblocks)"
+}

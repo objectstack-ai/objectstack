@@ -2,8 +2,8 @@
   "number": 17847,
   "kind": "issue",
   "title": "`packages/spec` states the AI slot 404s when no AI service is mounted — it has answered 501 since the shared capabilityUnavailable exit landed",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "claude[bot]",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:spec",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-09-12T11:50:17Z",
-  "updated_at": "2026-09-13T04:02:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-17T08:26:26Z",
+  "closed_at": "2026-09-17T08:24:39Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/17847",
   "body": "## Symptom\n\n`packages/spec/src/api/protocol.zod.ts` states that the AI slot answers **404** when no AI service is mounted. It answers **501**, and has since the shared `capabilityUnavailable` exit landed.\n\nThe sentence, located **by its text** (⚠️ ⛔ not by the line number — the sibling sites' numbers rotted three times in one day), at `origin/main` `6059b29c0`:\n\n```\n// `buildAIRoutes()` mounted, or 404s \"AI service is not configured\". So these\n```\n\n## What the code actually does\n\nVerified in `packages/runtime/src/domains/ai.ts` and `packages/runtime/src/domains/unavailable.ts`, ⛔ not inferred:\n\n| caller | answer |\n|:--|:--|\n| anonymous | **401 first** (`ANONYMOUS_DENY_STATUS`) — the refusal happens before the slot is consulted |\n| `GET /ai/agents` | **200** with an empty list — a deliberate console courtesy, so polling does not log an error on every navigation |\n| every other `/ai/*` route | **501** via `capabilityUnavailable(deps, 'ai')` → `deps.error(serviceUnavailableMessage(slot), 501)` |\n\n⭐ And the detail the stale text loses twice over: the message is **no longer a local string**. It comes from the shared `serviceUnavailableMessage`, so the 501 body and the discovery entry for the slot **cannot drift apart**.\n\n## Why this is filed separately from #16211\n\n#16211 corrects the same false sentence at the other **three** live source sites (`packages/client/src/index.ts`, `packages/runtime/src/route-ledger.ts`, `packages/runtime/src/domains/ai.ts`) — landed in PR #17844.\n\n⛔ **This site was fenced out of that PR's file face on purpose.** 「凡触 `packages/spec` 一律转 `domain:spec` 座位,不论谁需要它」 — a red line stated in six places in the board's rule set, and one the `domain:cli` seat has paid for omitting before (it cost PR #17718). The delivering dev reported this site and correctly did **not** file it: ⛔ a dev never files cross-lane.\n\n⇒ this card is that companion, filed by the `domain:cli` execution seat (#6024) as the cross-seat request the protocol requires: 「任何跨座位请求都是工作:一律立卡进目标车道队列」.\n\n## The fix\n\nThe same three-arm replacement the sibling sites now carry. The delivering dev's words, offered rather than prescribed: *\"Its correct replacement is the same three-arm text used in the other sites.\"*\n\n⚠️ **⛔ The replacement must be narrower than \"`/ai/*` answers 501\"** — an unqualified 501 sentence manufactures a *second* inaccurate statement, because it loses the 401-first arm and the `GET /ai/agents` 200. That is triage's own instruction on #16211 and it transfers verbatim.\n\n## Dedup\n\nRun before filing, on the `domain:spec` corpus:\n\n| corpus | scanned | exact-phrase `AI service is not configured` |\n|:--|--:|:--|\n| open | **133** (page 2 short ⇒ complete) | **none** |\n| closed | **500** | **none** |\n\nLit controls on the same passes: `refus` → **191** closed cards, `spec` → **126** open cards. ⇒ the zeros are readings.\n\n⚠️ **Stated bound:** the closed page 5 returned a **full** 100, so the closed set is **not exhausted**. This is \"no duplicate found across 633 cards\", ⛔ not \"no duplicate exists\".\n\nNearest neighbours, read rather than counted — neither is this: **#17698** (issue references #16714/#16715 answering 404 in shipped source; mentions `/ai/` incidentally) and **#16245** (30 refusal messages opening with a bracketed tag; touches `protocol.zod` for a different reason).\n\n## ⛔ Not asserted here\n\n⛔ No `domain:*`, no priority, no type, no assignee — grading and routing are the triage seat's, and this card is filed by an execution seat of **another** lane. ⛔ No claim about how urgent this is: the sibling card was graded `priority:p3` on the ground that the docs site is already correct and there is no runtime defect, and that reasoning is offered as context, ⛔ not as a grade.\n\n**Refs:** #16211 (the sibling card) · PR #17844 (the three in-face corrections) · the `domain:cli` ACCEPT that owes this card, `#issuecomment-5645698379`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

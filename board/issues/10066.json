@@ -1,0 +1,34 @@
+{
+  "number": 10066,
+  "kind": "pull_request",
+  "title": "docs(pm): adopt the Restart-touch: hold channel and converge the pre-dispatch must-check to the H17 anchor index",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T20:04:56Z",
+  "updated_at": "2026-08-20T00:28:49Z",
+  "closed_at": "2026-08-20T00:28:48Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-08-20T00:28:48Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10066",
+  "body": "Fixes #10043\n\nGoverned surface (`.claude/skills/pm-dispatch/**`), text-only adoption of the two A rulings from the on-hold trigger-index card's review. The extractor half already ships in the patrol PR (`check-half-states.mjs`, in the merge queue); this card is the protocol half, so the two land in either order with no gap: the mechanism deliberately preceded the convention.\n\n## What changed (2 files, 3 lines edited, net 0 lines)\n\n1. **`.claude/skills/pm-dispatch/SKILL.md` — state model `pm:on-hold` row**: the hold's machine-readable line family gains the canonical channel `Restart-touch:` (one repo-relative path per line, case-sensitive, line-anchored, same single-channel body discipline as `Blocked-by:`/`Restart-when:`; backtick/bullet tolerated, value must be a tracked file — matching the shipped extractor exactly). States what it feeds: the patrol's H17 on-hold trigger-file index. States that existing holds are NOT migrated and produce NO finding — prose-anchor extraction covers them (so nobody \"cleans up\" the legacy holds; manufacturing warnings for them is the disease the originating card measured).\n2. **`SKILL.md` — 标签纪律, the pre-dispatch must-check clause**: rewritten to ONE obligation — write side is the state model's `Restart-touch:` line; at dispatch/fold-check time, read the half-state patrol anchor's H17 on-hold trigger-file index (anchor named structurally: `half-state-patrol.yml`'s `ANCHOR_ISSUE` pinned issue — no bare issue numbers, per the id-lint rule) and intersect it with the dispatch's file surface; a hit is handled per the hold comment's rider/restart clause. The old text told seat posts to carry a 「派发前必查」 section with per-seat trigger-file lists — a duty the seat-post four-section fixed template never actually carried; the index replaces it. The anchor-first patrol duty already in `lanes/*.md` is not restated — pointed at, not duplicated.\n3. **`references/lanes/spec.md`**: its pointer said the must-check follows the seat post's current text; now points at SKILL.md 标签纪律 (the anchor-index intersection). One line, in place.\n\nNote: `references/seat-post-protocol.md` needed no edit — the card guessed the section might live there; it does not (grep of the whole references tree: the duty lived in the SKILL.md clause plus the spec-lane pointer, both rewritten here).\n\n## Line budgets (ratchet)\n\n| file | before | after | ceiling |\n|---|---|---|---|\n| `.claude/skills/pm-dispatch/SKILL.md` | 681 | 681 | 682 |\n| `references/lanes/spec.md` | 44 | 44 | 44 |\n\nNet zero — both edited clauses were already single physical lines (a table row and an unwrapped bullet tail); no payment owed, no re-wrap performed.\n\n## Gates (all at `f6af0de41`, exit codes captured before any pipe)\n\nDerivation: `node scripts/pm/dispatch-gates.mjs` (no args, real diff vs merge base `f4c2eef46`) — 7 families matched; all run locally, all green:\n\n```\n✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/SKILL.md is 681 lines (ceiling 682; headroom 1).\n✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/references/lanes/spec.md is 44 lines (ceiling 44; headroom 0).\n✓ check-skill-id-lint: 15 file(s) clean (pattern /#[0-9]{3,}/g).\n✓ check-governed-prose: 2 instruction surface(s) name all 5 registered governed surfaces (docs/adr/** · .claude/** · skills/** · AGENTS.md · CLAUDE.md) and claim no others.\n✓ check-skill-frame-sync: 4 copies of the decision frame are structurally isomorphic across 3 files\n✓ doc authoring guard: 379 files clean — no bare metadata literals.\n✓ check:doc-formula-expressions: 22 record-scoped formula example(s) across 404 files / 1414 TS blocks judged clean by @objectstack/formula.\ncheck-nul-bytes: OK (scanned 6362 text file(s) -- 6362 tracked, 0 untracked-not-ignored; skipped 5 binary; no raw ASCII control bytes).\n```\n\n`check:pm-governed-merges` self-test green (81 assertions). Exit codes: all `0`, captured via redirect-then-`$?`, never through a pipe.\n\n## Reverse verification (both legs on the committed state; directions predicted in writing first)\n\n- **Ratchet ablation** — predicted red naming the file: appended 2 lines (681 → 683, over the 682 ceiling) ⇒ exit 1, `✗ check-skill-line-ratchet: .claude/skills/pm-dispatch/SKILL.md is 683 lines; the ratchet ceiling is 682. …` Restored via `git checkout BRANCH -- PATH` (BRANCH = this PR's branch, PATH = the file); sha256 identical before/after (`893d5169…`), `git status --porcelain` clean.\n- **id-lint mutation control** — predicted: shipped text stays green (anchor named structurally), and injecting a bare `#`-number into the new clause turns it red naming SKILL.md, proving the gate reads the exact added text ⇒ exit 1, `✗ check-skill-id-lint: .claude/skills/pm-dispatch/SKILL.md: 1 issue-ID citation(s) — …` Restored byte-identical (same sha256), same pattern.\n- Both gates read the markdown source directly from the working tree — no `dist/` in the resolution path, so no rebuild step applies to these legs.\n\nTests/docs-only for publishing purposes: `.claude/`-only diff, publishes nothing — `skip-changeset` applied (union write + read-back).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AeA3nU1B5Q2pgxqxgUrexd)_"
+}

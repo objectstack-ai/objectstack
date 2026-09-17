@@ -1,0 +1,35 @@
+{
+  "number": 9747,
+  "kind": "issue",
+  "title": "Seven gates report \"clean\" when they mean \"I saw nothing I understood\" — make unrecognised a verdict distinct from pass",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T21:53:09Z",
+  "updated_at": "2026-08-20T09:34:09Z",
+  "closed_at": "2026-08-19T06:22:35Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9747",
+  "body": "Filed by the PM seat as the **Q4 ruling on #9165**, which measured this shape rather than assuming it. This is a **design card**, not a build: the remedy below is a change to how the whole patrol family reports, and that is a maintainer act.\n\n## The meta-shape\n\n> **A gate's recognizer is narrower than the code shapes in the repo, and the shortfall is reported as a VERDICT rather than as \"unrecognised.\"**\n\nSeven measured instances, all from this repo, all found within about a day:\n\n### Fails toward FALSE RED — self-announcing, cost is a wasted branch\n\n| # | gate | the shape it cannot see |\n|---|---|---|\n| #8897 | `check-durability-degradation-log-level` | receiver name |\n| #9657 | same | parenthesized callee — `(logger.error ?? logger.warn)(…)` reads as `silent-swallow` |\n\nThese are survivable: someone hits one, files a card, and the truth surfaces. ⚠️ The exception is #9657, whose **cheapest satisfaction is actively harmful** — the spelling the matcher *does* accept (`logger.error?.(…)`) prints nothing against a sink with no `error`, so \"fixing\" the false red converts a loud site into a genuinely silent one.\n\n### Fails toward FALSE GREEN — never self-announcing, found only by luck\n\n| # | gate | the shape it cannot see |\n|---|---|---|\n| #8845 | `check-durability-log-level` | exit shape (the criterion half) |\n| #9165 A | same | `publishPackageDrafts` — in the census, reported *\"no invented answer\"*, while its catch pushed a fabricated `existedBefore: false` |\n| #9165 B | same | `getAllObjects` — never in the population at all; `DRIVER_READ_CALLEES` is `{find, findOne, count}` |\n| #9680 | `check-engine-double-contract` | **absence** — deleting a pinned double's `delete()` member took 319 → 318 with `exit 0`; discovery requires the member to exist |\n| #9708 | same | consumer seams — deleting one took `6 in 3 source file(s)` → 5 with `exit 0`; `SEAMS_DISCOVERED` fires only at **zero** |\n\n**This half is the problem.** #9165's entire complaint is that both of its instances were discovered *\"because somebody removed the swallow for an unrelated reason\"* — a discovery mechanism that fires by luck, and the luck was spent twice in one shift.\n\n## Why the obvious remedy is wrong\n\n\"Widen each matcher\" has been **separately priced and separately declined** every time:\n\n- **#8845** declined a 15-red criterion with 7 already-correct sites; PR #8898 recorded the refusal instead of taking it.\n- **#9165's 2b** (teach the read-seam rule `getAllObjects`) is not a vocabulary addition but a **scope change** — `DRIVER_READ_CALLEES` is anchored to `IDataDriver`'s read methods so those generic names mean *\"a storage seam\"*, and the header prices dropping that anchor at **91 of 314** catch clauses in the scan roots.\n- **#9708** was filed rather than fixed because choosing error-vs-ledger-vs-distinct-verdict there is itself a design act.\n\nWidening is expensive, per-gate, and leaves the next unrecognised shape in the same place.\n\n## The proposal\n\n**Make \"I could not recognise this shape\" a reportable verdict, distinct from \"clean.\"**\n\nThe germ already exists in this repo, in `check-engine-double-contract`'s `DISCOVERED` invariant, whose own comment says it best:\n\n> **Zero is not a clean repo, it is a broken scan.**\n\nThe generalisation is **from zero to delta** — and #9680's dev has now demonstrated it works in practice for one population, with the churn numbers to price it: 269 commits on `main` in a month, pinned-set membership changed in **7 commits (2.6%)**, 8 files entered per verb, **0 left**. The feared nuisance case (a legitimate decrease reddening CI and training everyone to bump a number) fired **0 times in a month**.\n\nWhat that suggests, for the maintainer to accept or reject:\n\n1. **Every gate with a discovered population declares it**, and reports a shrink as its own verdict — not silence, not necessarily red.\n2. **A third exit state** beside pass/fail: *\"N constructs in the scan roots matched no rule in this gate's vocabulary.\"* Not a failure. But printed, counted, and visible in a round report, so a recognizer falling behind the codebase is observable instead of inferable.\n3. **The distinction that matters**: a gate saying `clean` when it means `I saw nothing I understood` is the single mechanism behind every false-green row above.\n\n## What this card is NOT asking for\n\n- ⛔ Not a build. The shape above is a sketch; the design act is the maintainer's.\n- ⛔ Not a re-litigation of #8845, #9165 2b, or #9708 — each of those stays declined/open on its own terms.\n- ⛔ Not a new required context. The false-green rows argue for **visibility**, not for more merge-blocking.\n\n## Related, each an instance rather than a duplicate\n\n#8897 · #9657 · #8845 · #9165 (the disposition comment carries the full measurement) · #9680 / PR #9712 · #9708 · #8901 (on hold; its restart-when is measured **not** met — the original cohort is shrinking 25 → 19, not gaining a second)\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

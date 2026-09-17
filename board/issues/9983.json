@@ -1,0 +1,34 @@
+{
+  "number": 9983,
+  "kind": "issue",
+  "title": "language: the four-axis decision analysis (comments + os-decision-facets blocks) switches to Chinese",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T11:58:57Z",
+  "updated_at": "2026-08-19T19:50:44Z",
+  "closed_at": "2026-08-19T18:45:18Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9983",
+  "body": "Maintainer ruling (2026-08-19, PM chat, verbatim): 「要求以后issue中的四维分析也用中文写」。\n\n现行文本:SKILL.md 落卡/升级流程 ②「分析发评论 —— **英文**,模板见 references」;四棱卡面块(`os-decision-facets`)四行实践上也是英文(见退役前 #9822 里的存量块)。本卡把这一处语言例外改为中文,与轮次报告的中文例外并列。\n\n## Scope —— `.claude/skills/pm-dispatch/SKILL.md`(治理面,人合)+ references 模板\n\n1. 落卡/升级流程 ②:「英文」→「中文」,并在语言政策处记为显式例外(与轮次报告同列),带裁定日期与原话。\n2. 四棱块:**机器可寻标记 `os-decision-facets` 逐字节不动**(提取按字面 grep);四行内容改中文。**轴标签拼写先查消费者再动**:grep `scripts/` 与分诊代裁置信门对四个英文轴名(platform long-term coherence / measured business pull / AI-agent error-resistance / startup scope discipline)的依赖 —— 有消费者 ⇒ 标签保留英文、内容中文(或同 PR 更新消费者并钉自测);无 ⇒ 标签一并中文。查证结果写进报告。\n3. references 里的决策分析模板(「模板见 references」所指文件)同步改中文示例。\n4. 存量英文块**不迁移**(与 #9617 的 new-records-only 同理);分诊的存量回填勤务自本卡落地起用中文写新块。\n\n## Serial\n\n**SKILL.md 热文件被 PR #9982(通知移交,等人合)占用 —— 本卡串行在 #9982 合并之后**,派发前重测文件现状(届时应为 678/682)。治理面终态:draft + review request os-zhuang,人合。模型档:clause ① fable-mandatory。\n\nGraded `pm:queue`, S(skills 座,own-lane,session `ae0d8bd1-5667-5f58-8ff8-fa22ec154325`)。即时实践:本座今后新落的决策卡四棱块即用中文,不等成文。"
+}
