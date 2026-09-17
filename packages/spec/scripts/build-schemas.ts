@@ -1060,9 +1060,15 @@ if (surfaceDoc) {
   // is also `currentEntries`, the PUBLISHED baseline, and recursing it in place
   // measures at +14,376 lines across all 14 shards. ./lib/nested-authorable-keys
   // is the authority on the resolution rules and on what they cannot see.
+  //
+  // A dot in the name half does NOT by itself mean nested: `@odata.context` and
+  // the SCIM extension URN are TOP-LEVEL property names that carry one (4 such
+  // keys on the shipped baseline, all live). So a row whose exact key this build
+  // emits as a top-level property is judged as one, and only what is left over
+  // is read as a path — the routing record is this map's own membership.
   const nestedStates = new Map<string, NestedAuthorableKeyState>(
     [...registeredRetired.keys()]
-      .filter((k) => isNestedAuthorableKey(k))
+      .filter((k) => !currentKeys.has(k) && isNestedAuthorableKey(k))
       .map((k) => [k, nestedAuthorableKeyState(k, generatedSchemas)]),
   );
 
@@ -1074,7 +1080,7 @@ if (surfaceDoc) {
   //      steady state once a tombstone ages out and check (c) lets its baseline
   //      line go (see RETIRED_KEYS_BY_MAJOR's "Lifecycle").
   const liveButRegistered = [...registeredRetired.entries()].filter(([k]) =>
-    isNestedAuthorableKey(k) ? nestedStates.get(k) === 'live' : currentKeys.get(k) === false,
+    nestedStates.has(k) ? nestedStates.get(k) === 'live' : currentKeys.get(k) === false,
   );
   if (liveButRegistered.length > 0) {
     console.error(
@@ -1128,11 +1134,17 @@ if (surfaceDoc) {
       `   Fix the spelling against the emitted schema (json-schema/<category>/<Def>.json —\n` +
       `   an array member is spelled without its \`[]\`, as \`steps.estimatedMinutes\`), or\n` +
       `   delete the entry from packages/spec/src/migrations/registry.ts.\n\n` +
-      `   One legitimate shape this check cannot yet see: a key retired by REMOVAL from a\n` +
-      `   \`strictObject\` shape with a \`guidance\` prescription (check (c) proof 4) is\n` +
-      `   absent from the emitted schema on purpose. That proof has no nested form, and 0\n` +
-      `   of this tree's nested rows take that route. If yours is the first, teach this\n` +
-      `   check the route — ⛔ do not delete a row that is telling the truth.`,
+      `   Two legitimate shapes this check cannot yet tell apart from a wrong row, both\n` +
+      `   unreached on this tree — if yours is the first, teach this check the shape,\n` +
+      `   ⛔ do not delete a row that is telling the truth:\n` +
+      `     - a key retired by REMOVAL from a \`strictObject\` shape with a \`guidance\`\n` +
+      `       prescription (check (c) proof 4) is absent from the emitted schema on\n` +
+      `       purpose; that proof has no nested form, and 0 of this tree's nested rows\n` +
+      `       take that route;\n` +
+      `     - a TOP-LEVEL key whose own name carries a dot (\`@odata.context\`, a SCIM\n` +
+      `       extension URN — 4 on this tree, all live) that has aged out and stopped\n` +
+      `       being emitted: the row then reads as a path, and the aged-out steady state\n` +
+      `       (b2) exempts would land here instead.`,
     );
     process.exit(1);
   }

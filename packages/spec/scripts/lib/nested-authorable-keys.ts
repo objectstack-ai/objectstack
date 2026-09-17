@@ -73,6 +73,17 @@
  * writes as `foo.<someKey>.bar`, skipping a segment — a false GREEN, and the
  * only direction this module must not err in.
  *
+ * ## A dot is not the same question as a path — the CALLER routes
+ *
+ * {@link isNestedAuthorableKey} is deliberately lexical, and is not on its own a
+ * verdict that a row names a path: four keys on the shipped baseline are
+ * TOP-LEVEL property names that carry a dot — `api/ODataResponse:@odata.context`
+ * and its two siblings, and `identity/SCIMUser`'s SCIM extension URN. Routing
+ * therefore asks the emitted schema FIRST (`currentKeys.has(key)` in
+ * `build-schemas.ts`) and reads a row as a path only when this build emits no
+ * top-level property of that exact name, so a live dotted top-level key is
+ * judged by check (b2) on the map it has always been in.
+ *
  * ## What it cannot see, stated where the next author will need it
  *
  * The guidance route (check (c) proof 4, #18301) retires a key by REMOVING it

@@ -75,6 +75,10 @@ import { MetricSchema } from '../src/data/analytics.zod';
 // Read ONLY to keep the #18301 DOOR fixture honest about the tree fact it models
 // — ONE `strictObject` declaration whose shape entries two emitted defs share,
 // one of which never closed its door. Never to assert gate behaviour.
+// Read ONLY to keep the #17969 nested fixtures honest about the TREE FACTS they
+// model — one nested key still writable, one nested key tombstoned — never to
+// assert gate behaviour, which is read off the spawned run's output.
+import { SchemaLevelIsolationStrategySchema } from '../src/system/tenant.zod';
 import { RateLimitConfigSchema } from '../src/shared/http.zod';
 import { ServerRateLimitConfigSchema } from '../src/system/stack-server.zod';
 import {
@@ -4111,6 +4115,335 @@ describe('build-schemas.ts — check (c) dates a tombstone by its exact key (#58
         new RegExp(`data/Object:${DELETED_AGED_LEAF} — .*no entry in RETIRED_KEYS_BY_MAJOR`),
       );
       expect(output).not.toContain('tombstone aged out');
+    },
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #17969 — a NESTED RETIRED_KEYS_BY_MAJOR row is judged, not ignored.
+//
+// `currentKeys` is built from `schema.properties` ONE LEVEL DEEP, so a dotted
+// row — 48 of the shipped entries — matched nothing in the map check (b2)
+// consults and was silently IGNORED. Ablated on `origin/main` before the fix,
+// with controls: a fabricated nested row passed `check:authorable-surface` at
+// exit 0 with zero ❌, while a live TOP-LEVEL key was refused at exit 1. A
+// typo'd def, a typo'd path or a stale key name therefore registered silently
+// and stayed registered — and the retirement ledger is the input to the
+// ADR-0087 conversions downstream, so the error is inherited as fact.
+//
+// The fix is NOT "recurse `currentKeys`": three lines below its construction
+// that same map is `currentEntries`, the PUBLISHED authorable-surface baseline,
+// and recursing it in place measures at +14,376 lines across all 14 shards.
+// The nested view is resolved for the registered rows only, by
+// `scripts/lib/nested-authorable-keys.ts`, and reaches nothing that emits.
+//
+// The four cases below are the acceptance, and the two DARK controls are the
+// half that cannot be skipped: a check that refused every nested row would pass
+// the probe and the lit control alike, and be a new false red on 48 rows.
+//
+// This block needs its own sandbox for the reason the #4659 one gives: the
+// fixture is a claim about `src/migrations/registry.ts`, which the main sandbox
+// symlinks.
+
+/** A live NESTED key — (b2)'s own defect, one level down. */
+const NESTED_LIVE_KEY = 'system/SchemaLevelIsolationStrategy:performance.poolPerSchema';
+/** A real registered nested retirement (#15939 ruling A): the dark control. */
+const NESTED_RETIRED_KEY = 'system/SchemaLevelIsolationStrategy:performance.schemaCacheTTL';
+/** The card's probe: a path under a live nested object that no build emits. */
+const NESTED_TYPO_KEY = 'system/SchemaLevelIsolationStrategy:performance.zzNotARealKey9999';
+/** Fabricated, and under a def retired WHOLE (the change-management family) —
+ *  the second dark control: absent for a reason the manifest ratchet owns. */
+const NESTED_UNEMITTED_DEF_KEY = 'system/ChangeImpact:downtime.zzNotARealKey9999';
+/** The def both nested fixtures live on, and the def the last one does not. */
+const NESTED_FIXTURE_DEF = 'system/SchemaLevelIsolationStrategy';
+const UNEMITTED_FIXTURE_DEF = 'system/ChangeImpact';
+/**
+ * Every baseline key whose NAME half carries a dot — and every one of them is a
+ * TOP-LEVEL property name that contains one, never a nested path: the OData
+ * annotations a response envelope publishes, and a SCIM extension URN. Routing
+ * has to ask the schema rather than the spelling because of exactly these.
+ */
+const DOTTED_TOP_LEVEL_BASELINE_KEYS = [
+  'api/ODataResponse:@odata.context',
+  'api/ODataResponse:@odata.count',
+  'api/ODataResponse:@odata.nextLink',
+  'identity/SCIMUser:urn:ietf:params:scim:schemas:extension:enterprise:2.0:User',
+];
+/** …and the one of them this build still emits as LIVE — the routing fixture. */
+const DOTTED_TOP_LEVEL_LIVE_KEY = 'api/ODataResponse:@odata.context';
+
+const CHECK_B3 = 'RETIRED_KEYS_BY_MAJOR entr(ies) name a NESTED key this build does not emit';
+const CHECK_B2 = 'RETIRED_KEYS_BY_MAJOR entr(ies) name a key that is still LIVE';
+
+describe('build-schemas.ts — a nested retirement row is judged, not ignored (#17969)', () => {
+  let box: string;
+  let boxScript: string;
+  let boxRegistry: string;
+  let pristineRegistry: string;
+
+  /** Same hermetic invocation as the sandbox's `git` — this box is a fixture
+   *  repository too, and inherits nothing from the machine either (#9068). */
+  const boxGit = (...args: string[]): string => gitIn(box, ...args);
+
+  const runBox = (args: string[] = []): { status: number; output: string } => {
+    const r = spawnSync(TSX, [boxScript, ...args], {
+      cwd: box,
+      encoding: 'utf8',
+      timeout: SPAWN_TIMEOUT_MS,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: HERMETIC_ENV,
+    });
+    return { status: r.status ?? -1, output: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+  };
+
+  /** Substitute RETIRED_KEYS_BY_MAJOR in this box's own copy of the registry. */
+  const seedRetiredKeys = (table: Record<number, readonly string[]>): void => {
+    const rendered =
+      `export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> = {\n` +
+      Object.keys(table)
+        .map(Number)
+        .sort((a, b) => a - b)
+        .map((m) => `  ${m}: [\n${table[m]!.map((k) => `    '${k}',\n`).join('')}  ],\n`)
+        .join('') +
+      `};\n`;
+    const anchor = /export const RETIRED_KEYS_BY_MAJOR[\s\S]*?\n\};\n/;
+    expect(
+      anchor.test(pristineRegistry),
+      'RETIRED_KEYS_BY_MAJOR is no longer a single object literal in src/migrations/registry.ts — ' +
+        'this fixture substitutes it textually and can no longer find it',
+    ).toBe(true);
+    fs.writeFileSync(boxRegistry, pristineRegistry.replace(anchor, rendered));
+  };
+
+  beforeAll(() => {
+    // ── Fixture validity, loud ───────────────────────────────────────────
+    // The PREMISE of the whole limb: the published baseline records def
+    // TOP-LEVEL keys only, so a nested key has no baseline line, no `[RETIRED]`
+    // mark and no aging clock — which is why check (b3) can read an absent
+    // nested path as a wrong row rather than as a steady state.
+    //
+    // The baseline's dotted entries are the OTHER shape: top-level property
+    // NAMES that carry a dot. Enumerated rather than counted, because what this
+    // assertion is really watching for is a nested PATH appearing here — the
+    // published surface widened, which is the thing #17969 deliberately did not
+    // do (recursing `currentKeys` in place measures at +14,376 lines). A new
+    // dotted top-level key is a one-line update here; 14,376 of them is the
+    // finding.
+    const dotted = pristineSurface
+      .map((e) => e.replace(RETIRED_MARK, ''))
+      .filter((e) => e.slice(e.indexOf(':') + 1).includes('.'))
+      .sort();
+    expect(
+      dotted,
+      `${AUTHORABLE_SURFACE_DIR_NAME}/ carries a dotted key this roster does not name — if it is a ` +
+        'nested PATH, the published surface has been widened and check (b3) has to be re-derived',
+    ).toEqual([...DOTTED_TOP_LEVEL_BASELINE_KEYS].sort());
+
+    // The tree facts each fixture models, read from the schema source itself so
+    // a fixture cannot quietly stop being the thing it claims to be.
+    const live = SchemaLevelIsolationStrategySchema.safeParse({
+      strategy: 'isolated_schema',
+      performance: { poolPerSchema: true },
+    });
+    expect(live.success, `${NESTED_LIVE_KEY} is no longer writable — re-pick the live fixture`).toBe(true);
+    const tombstoned = SchemaLevelIsolationStrategySchema.safeParse({
+      strategy: 'isolated_schema',
+      performance: { schemaCacheTTL: 3600 },
+    });
+    expect(
+      tombstoned.success,
+      `${NESTED_RETIRED_KEY} is no longer a tombstone — re-pick the dark control`,
+    ).toBe(false);
+
+    // The def halves: one this build emits, one it does not.
+    expect(pristine, `${NESTED_FIXTURE_DEF} is no longer emitted — re-pick`).toContain(NESTED_FIXTURE_DEF);
+    expect(pristine, `${UNEMITTED_FIXTURE_DEF} is emitted now — re-pick the def-level control`).not.toContain(
+      UNEMITTED_FIXTURE_DEF,
+    );
+
+    // The registered row the dark control models is real; the fabricated ones
+    // are not registered anywhere.
+    const declared = Object.values(RETIRED_KEYS_BY_MAJOR).flat();
+    expect(declared, `${NESTED_RETIRED_KEY} is no longer registered — re-pick`).toContain(NESTED_RETIRED_KEY);
+    for (const fabricated of [NESTED_TYPO_KEY, NESTED_UNEMITTED_DEF_KEY, NESTED_LIVE_KEY]) {
+      expect(declared, `${fabricated} is registered for real — pick another fixture`).not.toContain(fabricated);
+    }
+    expect(declared, `${DOTTED_TOP_LEVEL_LIVE_KEY} is registered for real — re-pick`).not.toContain(
+      DOTTED_TOP_LEVEL_LIVE_KEY,
+    );
+    expect(
+      pristineSurface,
+      `${DOTTED_TOP_LEVEL_LIVE_KEY} is no longer a LIVE top-level key — re-pick the routing fixture`,
+    ).toContain(DOTTED_TOP_LEVEL_LIVE_KEY);
+    // The census case below is only worth its spawn while the table HAS nested
+    // rows to judge.
+    expect(declared.filter((k) => k.slice(k.indexOf(':') + 1).includes('.')).length).toBeGreaterThan(0);
+
+    box = fixtureTree('build-schemas-nested-retired-');
+    fs.cpSync(path.join(PKG, 'scripts'), path.join(box, 'scripts'), { recursive: true });
+    fs.cpSync(path.join(PKG, 'src'), path.join(box, 'src'), { recursive: true });
+    for (const entry of ['node_modules', 'package.json']) {
+      fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
+    }
+    mountUnemittedLedger(box);
+    writeManifestShards(path.join(box, SCHEMA_MANIFEST_DIR_NAME), pristine);
+    writeSurfaceShards(path.join(box, AUTHORABLE_SURFACE_DIR_NAME), pristineSurface);
+    // The #4666 default ratchet runs on every invocation, so every box needs its
+    // committed record too — otherwise a fixture fails on a missing artifact
+    // instead of on the row it is actually testing.
+    writeDefaultsShards(path.join(box, AUTHORABLE_DEFAULTS_DIR_NAME), pristineDefaults);
+    boxScript = path.join(box, 'scripts', 'build-schemas.ts');
+    boxRegistry = path.join(box, 'src', 'migrations', 'registry.ts');
+    pristineRegistry = fs.readFileSync(boxRegistry, 'utf8');
+
+    initFixtureRepo(box);
+    boxGit('add', AUTHORABLE_SURFACE_DIR_NAME, AUTHORABLE_DEFAULTS_DIR_NAME);
+    boxGit('commit', '-q', '-m', `baseline: committed ${AUTHORABLE_SURFACE_DIR_NAME}/`);
+    fs.writeFileSync(
+      path.join(box, 'authorable-surface.base.json'),
+      JSON.stringify(
+        { description: surfaceBaseDescription, baseRev: boxGit('rev-parse', 'HEAD'), keys: pristineSurface },
+        null,
+        2,
+      ) + '\n',
+    );
+    boxGit('add', 'authorable-surface.base.json');
+    boxGit('commit', '-q', '-m', 'baseline anchor');
+    boxGit('update-ref', 'refs/remotes/origin/main', 'HEAD');
+  });
+
+  afterAll(() => {
+    if (box) fs.rmSync(sandboxRoot(box), { recursive: true, force: true });
+  });
+
+  it(
+    'PROBE: a fabricated nested row is REFUSED — the run the card measured at exit 0',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      seedRetiredKeys({ [CURRENT_MAJOR]: [NESTED_TYPO_KEY] });
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain(`1 ${CHECK_B3}`);
+      expect(output).toContain(`     - ${NESTED_TYPO_KEY}  (registered at major ${CURRENT_MAJOR})`);
+      // Judged as absent, not as live: the two verdicts have different remedies.
+      expect(output).not.toContain(CHECK_B2);
+      // The refusal carries the remedy, including the one legitimate shape it
+      // cannot see — so the next author extends the check instead of deleting a
+      // row that is telling the truth.
+      expect(output).toContain('Fix the spelling against the emitted schema');
+      expect(output).toContain('check (c) proof 4');
+    },
+  );
+
+  it(
+    'LIT CONTROL: a live TOP-LEVEL key is still refused, on the same message as before',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The guard that already worked must not regress: (b2) reads `currentKeys`
+      // for a top-level row exactly as it did, and says the same thing.
+      seedRetiredKeys({ [CURRENT_MAJOR]: [STILL_LIVE_KEY] });
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain(`1 ${CHECK_B2}`);
+      expect(output).toContain(`     - ${STILL_LIVE_KEY}  (registered at major ${CURRENT_MAJOR})`);
+      expect(output).toContain('retiredKey(');
+      expect(output).not.toContain(CHECK_B3);
+    },
+  );
+
+  it(
+    'a live NESTED key is refused by (b2) too — the same defect, one level down',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // This is the row the top-level-only map could never see: the key is
+      // writable today, so the entry pre-approves a retirement nobody performed
+      // and check (b) would wave the real tombstone through later.
+      seedRetiredKeys({ [CURRENT_MAJOR]: [NESTED_LIVE_KEY] });
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain(`1 ${CHECK_B2}`);
+      expect(output).toContain(`     - ${NESTED_LIVE_KEY}  (registered at major ${CURRENT_MAJOR})`);
+      expect(output).not.toContain(CHECK_B3);
+    },
+  );
+
+  it(
+    'a live TOP-LEVEL key whose own NAME carries a dot is judged as one, not as a path',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // `@odata.context` is a property name, not `context` inside `@odata`. A
+      // gate that routed on the spelling would resolve it as a path, find
+      // nothing, and answer with (b3)'s "does not emit" — the right refusal for
+      // the wrong reason, and the wrong remedy printed under it.
+      seedRetiredKeys({ [CURRENT_MAJOR]: [DOTTED_TOP_LEVEL_LIVE_KEY] });
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain(`1 ${CHECK_B2}`);
+      expect(output).toContain(`     - ${DOTTED_TOP_LEVEL_LIVE_KEY}  (registered at major ${CURRENT_MAJOR})`);
+      expect(output).not.toContain(CHECK_B3);
+    },
+  );
+
+  it(
+    'DARK CONTROL: a real nested retirement PASSES — discrimination, not a blanket refusal',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // Without this case, a check that refused every dotted row would satisfy
+      // the probe and the lit control both, and be a new false red on 48 rows.
+      seedRetiredKeys({ [CURRENT_MAJOR]: [NESTED_RETIRED_KEY] });
+
+      const { status, output } = runBox(['--check']);
+
+      expect(output).not.toContain(CHECK_B3);
+      expect(output).not.toContain(CHECK_B2);
+      expect(output).not.toContain('deleted without proof');
+      expect(status).toBe(0);
+    },
+  );
+
+  it(
+    'DARK CONTROL: a nested row under a def this build does not emit PASSES — the steady state',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // A whole-def removal is registered in RETIRED_DEFS_BY_MAJOR and
+      // adjudicated by the json-schema.manifest/ ratchet, which subsumes the key
+      // entries under it. Three shipped nested rows are in this state; reading
+      // them as typos would be this gate's own false red. Fabricated on purpose:
+      // absence is waived by the DEF's state, never by the path being real.
+      seedRetiredKeys({ [CURRENT_MAJOR]: [NESTED_UNEMITTED_DEF_KEY] });
+
+      const { status, output } = runBox(['--check']);
+
+      expect(output).not.toContain(CHECK_B3);
+      expect(output).not.toContain(CHECK_B2);
+      expect(status).toBe(0);
+    },
+  );
+
+  it(
+    'the shipped table passes the new limb — the population the card left unmeasured',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The card measured the predicate and said so: "how many of the 36 nested
+      // rows are accurate is not measured by this card and not measured by
+      // anything else". This is that measurement, kept measured — every dotted
+      // row in the real table either resolves to a tombstone or names a def this
+      // build does not emit.
+      seedRetiredKeys({ ...RETIRED_KEYS_BY_MAJOR });
+
+      const { status, output } = runBox(['--check']);
+
+      expect(output).not.toContain(CHECK_B3);
+      expect(output).not.toContain(CHECK_B2);
+      expect(status).toBe(0);
     },
   );
 });

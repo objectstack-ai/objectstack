@@ -123,6 +123,21 @@ describe('isNestedAuthorableKey — a dotted NAME half, never a dotted def half'
     // to answer it rather than index past a `-1`.
     expect(isNestedAuthorableKey('system/Def')).toBe(false);
   });
+
+  it('is LEXICAL, and therefore not by itself a verdict that a row names a path', () => {
+    // Four keys on the shipped baseline are TOP-LEVEL property names that carry
+    // a dot. This predicate says `true` for all of them, on purpose: the caller
+    // asks the emitted schema first (`currentKeys.has(key)`) and only reads what
+    // is left over as a path. A test that expected `false` here would be
+    // pinning a disambiguation this function cannot perform — it is handed one
+    // string and no schema.
+    expect(isNestedAuthorableKey('api/ODataResponse:@odata.context')).toBe(true);
+    expect(
+      isNestedAuthorableKey(
+        'identity/SCIMUser:urn:ietf:params:scim:schemas:extension:enterprise:2.0:User',
+      ),
+    ).toBe(true);
+  });
 });
 
 describe('isRetiredJsonSchemaNode — the `{ "not": {} }` a retiredKey() renders as', () => {
