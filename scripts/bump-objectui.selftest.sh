@@ -47,13 +47,7 @@
 # the real `objectui-changeset-digest.mjs` (a byte copy, like the script under
 # test) through a throwaway objectui repo with a real changeset commit.
 #
-# dispatch-gates: no-path-population -- every path this file writes or reads
-# lives inside a disposable checkout under mktemp -d (a throwaway objectui and
-# a throwaway FRAMEWORK_ROOT, both destroyed by the EXIT trap below), so no
-# quoted literal in this file names a path this repo tracks. Case 5's fixture
-# changeset filename is assembled from CHANGESET_NAME by interpolation
-# everywhere it is used, deliberately never spelled as one bare quoted token,
-# so it does not read as a declared population here either.
+# dispatch-gates: no-path-population -- every path this file writes or reads lives inside a disposable checkout under mktemp -d (a throwaway objectui and a throwaway FRAMEWORK_ROOT, both destroyed by the EXIT trap below), so no quoted literal in this file names a path this repo tracks. Case 5's fixture changeset filename is assembled from CHANGESET_NAME by interpolation everywhere it is used, deliberately never spelled as one bare quoted token, so it does not read as a declared population here either.
 
 set -euo pipefail
 
