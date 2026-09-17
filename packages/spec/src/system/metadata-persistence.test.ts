@@ -563,3 +563,40 @@ describe('PackagePublishResultSchema', () => {
     expect(() => PackagePublishResultSchema.parse({ success: true })).toThrow();
   });
 });
+// #18124 — step 3 of ruling A on #18115. `MetadataLoadResult.loadTime` and
+// `MetadataSaveResult.saveTime` are the census's class-D rows: bare
+// `z.number().optional()` with no describe and no JSDoc, beside `size` and `etag`,
+// so their unit lived in no channel at all.
+//
+// The producers were measured and they agree: every writer in
+// `packages/metadata/src/loaders/` computes `Date.now() - startTime`
+// (`filesystem-loader.ts`, `database-loader.ts`) or writes a literal `0`
+// (`memory-loader.ts`, `remote-loader.ts`). Milliseconds, integral, non-negative
+// — which is exactly `DurationMs`.
+describe('metadata load/save result durations declare milliseconds (#18124)', () => {
+  it('loadTime refuses a fractional millisecond count and a negative span', () => {
+    const fractional = MetadataLoadResultSchema.safeParse({ data: null, loadTime: 42.5 });
+    expect(fractional.success).toBe(false);
+    expect(fractional.error!.issues.find((i) => i.path.join('.') === 'loadTime')?.code).toBe('invalid_type');
+
+    const negative = MetadataLoadResultSchema.safeParse({ data: null, loadTime: -1 });
+    expect(negative.success).toBe(false);
+    expect(negative.error!.issues.find((i) => i.path.join('.') === 'loadTime')?.code).toBe('too_small');
+  });
+
+  it('saveTime refuses a fractional millisecond count and a negative span', () => {
+    const fractional = MetadataSaveResultSchema.safeParse({ success: true, saveTime: 42.5 });
+    expect(fractional.success).toBe(false);
+    expect(fractional.error!.issues.find((i) => i.path.join('.') === 'saveTime')?.code).toBe('invalid_type');
+
+    const negative = MetadataSaveResultSchema.safeParse({ success: true, saveTime: -1 });
+    expect(negative.success).toBe(false);
+    expect(negative.error!.issues.find((i) => i.path.join('.') === 'saveTime')?.code).toBe('too_small');
+  });
+
+  it('accepts what every measured producer actually writes — an elapsed count, and zero', () => {
+    expect(MetadataLoadResultSchema.parse({ data: null, loadTime: 42 }).loadTime).toBe(42);
+    expect(MetadataLoadResultSchema.parse({ data: null, loadTime: 0 }).loadTime).toBe(0);
+    expect(MetadataSaveResultSchema.parse({ success: true, saveTime: 0 }).saveTime).toBe(0);
+  });
+});

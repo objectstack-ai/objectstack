@@ -46,7 +46,7 @@ const result = HotReloadConfigSchema.parse(data);
 | **debounceDelay** | `never` | optional | [REMOVED] `HotReloadConfig.debounceDelay` was renamed to `debounceDelayMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Its unit (milliseconds) lived in a source JSDoc only and the published describe named none, so the reference-page reader got a bare 1000. Rename the key to `debounceDelayMs`; the value (milliseconds) and the 1000 default are unchanged. |
 | **preserveState** | `boolean` | optional (default: `true`) | Keep plugin state across reloads |
 | **stateStrategy** | `Enum<'memory' \| 'none'>` | optional (default: `"memory"`) | How to preserve state during reload |
-| **shutdownTimeout** | `integer` | optional (default: `30000`) | Maximum time to wait for graceful shutdown |
+| **shutdownTimeout** | `integer` | optional (default: `30000`) | Maximum time to wait for graceful shutdown, in milliseconds |
 | **beforeReload** | `string[]` | optional | Hook names to call before reload |
 | **afterReload** | `string[]` | optional | Hook names to call after reload |
 
