@@ -5512,7 +5512,12 @@ export function selfTest() {
   const streamUnread = declaredYes({ cardEvents: null, prEvents: [] });
   const streamDiagnosed = { ...streamUnread, reads: [refused403(CARD_STREAM)] };
   const diagnosedMsg = pairUnjudged(streamDiagnosed);
-  t('the refusal names WHICH CARRIER went unread, in the gap\'s own words', says(diagnosedMsg, CARD_STREAM));
+  // ⛔ Pinned as subject-BESIDE-channel, never as "the subject appears
+  // somewhere in the message": the gap list already names the carrier, so a
+  // case that merely greps for it stays green on a message carrying no
+  // diagnosis at all — measured, by ablating the subject away and watching the
+  // weaker spelling of this very case pass.
+  t('the refusal names WHICH CARRIER went unread, beside the channel that refused it', says(diagnosedMsg, `${CARD_STREAM} — (i) token answered HTTP 403`));
   t('…WHICH CHANNEL was tried, in the path report\'s own numbering', says(diagnosedMsg, '(i) token answered'));
   t('…the FALLBACK channel too, in the order the ladder tried them', says(diagnosedMsg, ', then (ii) token-less public read answered'));
   t('…and WHAT THE PLATFORM ANSWERED — the 403 this card was filed on', says(diagnosedMsg, 'HTTP 403'));
@@ -5540,7 +5545,7 @@ export function selfTest() {
   t('⛔ CONTROL: the labels are the PATH REPORT\'s own spellings — one channel, ⛔ never two names', Object.values(READ_PATH_LABELS).every((label) => says(renderReadPathReport({ served: new Map() }), label.split(' ')[0])));
   // BOTH carriers, and the other two sentences that report an unread read.
   const bothUnread = { ...declaredYes({ cardEvents: null, prEvents: null }), reads: [refused403(CARD_STREAM), refused403(PR_STREAM)] };
-  t('two unread carriers produce two entries, each naming its own carrier', says(pairUnjudged(bothUnread), CARD_STREAM) && says(pairUnjudged(bothUnread), PR_STREAM));
+  t('two unread carriers produce two entries, each naming its own carrier beside its own answer', says(pairUnjudged(bothUnread), `${CARD_STREAM} — (i) token`) && says(pairUnjudged(bothUnread), `${PR_STREAM} — (i) token`));
   t('…in the order the reader attached them, ⛔ never merged into one reading', pairUnjudged(bothUnread).indexOf(`${CARD_STREAM} — (i)`) < pairUnjudged(bothUnread).indexOf(`${PR_STREAM} — (i)`));
   t('C5\'s own UNJUDGED sentence carries the same diagnosis, in the same words', says(String(wideningUnjudged({ ...pair({ files: null }), reads: [refused403('PR #13910\'s changed-file listing')] }, 'objectstack-ai/objectstack')), '(i) token answered HTTP 403'));
   t('…and so does the located-record one, so no refusal in this file is channel-silent', says(String(locatedRecordUnjudged({ ...pair({ prComments: null }), reads: [refused403('PR #13910\'s comment thread')] })), '(i) token answered HTTP 403'));
