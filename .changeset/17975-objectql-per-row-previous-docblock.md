@@ -1,5 +1,5 @@
 ---
-'@objectstack/objectql': patch
+'@objectstack/objectql': minor
 ---
 
 docs(objectql): the per-row `before*` docblock states the #16074 rule — a row-invariant-in-effect rewrite is ADMITTED (#17975)
@@ -28,3 +28,9 @@ shipped provenance stamps (`email-template-provenance.ts`,
 `sharing-rule-provenance.ts`, `webhook-provenance.ts`) all assign in place. The
 admitted shape's coverage already exists in
 `multi-update-hook-key-divergence.test.ts`; the test comment now points at it.
+
+Graded `minor`, not `patch`: this PR declares clause ② (the docblock it moves is
+published contract text), and `check-changeset-no-major`'s level axis refuses a
+declared clause ② whose every moved package is graded `patch`. The act itself
+adds no exported symbol, key or accepted value — the accept set moved in
+`@objectstack/spec` under PR #17249, not here.
