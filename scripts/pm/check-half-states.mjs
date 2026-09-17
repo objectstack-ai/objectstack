@@ -425,7 +425,11 @@
  *       Three target states, never two: a target that could not be resolved
  *       fires its own quieter row saying the liveness is UNJUDGED, because a
  *       silently dropped target reads as a healthy block forever — this item's
- *       own disease in a new mask (#4690). Report-only, and pointedly: the
+ *       own disease in a new mask (#4690). Both verdicts — the expiry and the
+ *       UNJUDGED — are founded on the set the row JUDGES (the body's, whenever
+ *       the body states one), so a target the body superseded cannot veto a
+ *       verdict from the comment archive; what the archive still does is
+ *       withhold, which is what #11747 paid for (#18379). Report-only, and pointedly: the
  *       release is a protocol procedure with two mechanical double-checks
  *       (state model, 「放行双查」) over the card's conversion comments and its
  *       merged-PR timeline, so this row surfaces the candidate and the unlock
@@ -4189,10 +4193,20 @@ export function h18RetriageAged(issue, nowMs = Date.now()) {
 // claims, and only the first one survived measurement. A body is rewritten in
 // place and a comment is an archive, so a target a seat superseded by
 // refreshing the body line keeps living in the thread and kept being counted
-// (#17564). The union is therefore still what is discovered and resolved, and
-// the BODY's set is what the row judges whenever the body states one — which
-// leaves the comment-channel fixture above judged exactly as before, its body
-// carrying no line at all. `h19BlockOutlivedBlocker` carries the whole of it.
+// (#17564). The union is therefore still what is discovered and resolved —
+// H26 and H28 share those resolutions and a comment-borne target is a perfectly
+// good answer to what they ask — and the BODY's set is what the row judges
+// whenever the body states one, which leaves the comment-channel fixture above
+// judged exactly as before, its body carrying no line at all.
+//
+// ⚠️ EVERY verdict is founded on that judged set, the UNJUDGED one included
+// (#18379). The unjudged branch used to be founded on the union, so a target
+// the body had superseded could still veto the verdict from the archive when
+// its number was unreadable — a row nothing the card's owner could do would
+// ever clear, because the remedy would be editing the archive the protocol
+// keeps. The archive keeps exactly one power here, and it is the one #11747
+// paid for: evidence that the wait may still be RUNNING, which can only
+// withhold. `h19BlockOutlivedBlocker` carries the whole of it.
 //
 // ## Report-only, and pointedly so
 //
@@ -4499,21 +4513,60 @@ function namedTargets(rows) {
  *
  *   CLOSED, body-borne (or comment-borne on a body-less card) -> can MAKE a row
  *   CLOSED, comment-only beside a body set  -> a spent line; makes nothing
+ *   UNRESOLVED, body-borne (or on a body-less card) -> MAKES the UNJUDGED row
+ *   UNRESOLVED, comment-only beside a body set -> a spent line nobody can even
+ *                                              read; withholds, is named, and
+ *                                              makes nothing (#18379)
  *   OPEN, either channel                    -> can only WITHHOLD a row
- *   UNRESOLVED, either channel              -> can only WITHHOLD, and says so
  *
- * So precedence decides which CLOSED target may found a finding, and nothing
- * else. Every reading that says the wait might still be running is counted
- * whichever channel carried it. Both false positives die and the error that
- * remains possible is the harmless one: a row withheld on a card that really
- * had finished waiting, which the very next sweep re-asks.
+ * So precedence decides which target may FOUND a finding — of either kind, an
+ * expiry or an UNJUDGED — and nothing else. Every reading that says the wait
+ * might still be running is counted whichever channel carried it. Both false
+ * positives die and the error that remains possible is the harmless one: a row
+ * withheld on a card that really had finished waiting, which the very next
+ * sweep re-asks.
  *
  * That is the same posture #4690 already fixed for the third target state —
  * ⛔ never resolve an ambiguity in the direction of release — applied to the
- * carrier question instead of the readability one. It is also why an
- * UNRESOLVED target is not silenced by precedence: it is by this file's own
- * vocabulary *not judged*, it only ever withholds, and dropping it would
- * re-create the silence the three-state split exists to end.
+ * carrier question instead of the readability one.
+ *
+ * ## The set this row RESOLVES OVER is the set it JUDGES (#18379)
+ *
+ * The rule above was stated in exactly these words when the carrier split
+ * landed, and the UNRESOLVED line of the table was the one the code did not
+ * keep: the unjudged branch was founded on the UNION, so a target the body had
+ * SUPERSEDED could still veto the verdict from the archive. Two conditions had
+ * to coincide, which is why it outlived #17564 — (1) the target is superseded
+ * in the body, so judging correctly ignores it, and (2) the superseded number
+ * is unreadable, so resolution cannot dismiss it either.
+ *
+ * Measured on anchor #9857, sweep 2026-09-16T01:55:47Z: #11975 carries
+ * `Blocked-by: #18336` in its body, refreshed by the triage seat ~2.7 h before
+ * that sweep, and FOUR archived comments still name `#13515` — one of them
+ * triage's own re-pointing note, which has to name the dead number in order to
+ * explain that it is dead. `#13515` answers 404 (re-probed with live controls:
+ * `#18336` 200, `#11973` 200), so the row published
+ * 「1 of 2 … could NOT be resolved … the set judged against the BODY's set」
+ * every 6 h, permanently.
+ *
+ * ⭐ That row was unclearable BY CONSTRUCTION, which is what made it worth a
+ * card rather than a disposition: its owner had already done the prescribed
+ * thing, and the only remaining lever — editing or deleting the archived
+ * comments — is the one the protocol forbids, because those comments record
+ * what an earlier seat measured and why the line was migrated. 「A row no
+ * reader can ever clear trains readers to skip the family」, and it landed in
+ * the UNJUDGED class, which the anchor names as the rows a human must judge by
+ * hand. So the cure is the rule the table already stated, actually applied:
+ * ⛔ UNJUDGED is not silenced (a body-borne unreadable target fires it exactly
+ * as before) — the archive simply cannot found it.
+ *
+ * ⛔ What the archive is STILL consulted for, and must be: an OPEN target it
+ * names WITHHOLDS a discharge, and an UNREADABLE one withholds a FULL
+ * discharge, whichever channel carries them. Narrowing that half to the body
+ * too would re-create #11747 — the mirror false positive, measured, where a
+ * card was released to `pm:queue` while its real blocker was open and
+ * dispatched. Evidence that a wait may still be RUNNING is never discarded by
+ * carrier; only the power to FOUND a verdict is.
  *
  * ## The superseded-closed clause rides the row; it never becomes one (shape 3)
  *
@@ -4533,6 +4586,11 @@ function namedTargets(rows) {
  * family」. Trading a false unlock row for an unclearable hygiene row would
  * have bought nothing.
  *
+ * Its sibling clause is the same shape one state further out: an archive-only
+ * target this sweep could not READ is named in its own appended sentence,
+ * withholds a full discharge where one was being reported, and — like the
+ * closed one — emits NOTHING where the row does not otherwise fire (#18379).
+ *
  * @param {object} issue — an OPEN issue.
  * @param {{ key: string, number: number, local: boolean,
  *   state: 'open'|'closed'|'unresolved', closedAt?: string|null,
@@ -4550,14 +4608,23 @@ export function h19BlockOutlivedBlocker(issue, resolutions, ownerRepo = OWNER_RE
   const bodyKeys = blockerChannelKeys(issue?.body, issue, ownerRepo);
   const judgedFrom = bodyKeys.size > 0 ? 'body' : 'comments';
   const carries = (r) => judgedFrom === 'comments' || bodyKeys.has(r.key);
-  // Precedence applies to the evidence that a block has ENDED and to nothing
-  // else. A CLOSED target reachable only through the comment archive is a
-  // spent line, so it cannot MAKE a finding; an OPEN or UNRESOLVED one is
-  // evidence the wait may still be running, so it is counted whichever
-  // channel carries it and can only ever WITHHOLD one.
+  // ⭐ FOUNDING is the judged set's privilege, and BOTH founding states are
+  // taken over it (#18379). A CLOSED target founds the expiry row and an
+  // UNRESOLVED one founds the UNJUDGED row; both sentences are VERDICTS ABOUT
+  // THIS CARD, so both may only be founded on the set this card's
+  // authoritative carrier names. A target reachable only through the comment
+  // archive beside a body set is a spent line either way — closed, it is
+  // hygiene; unreadable, it is hygiene nobody can even read — and neither can
+  // MAKE a finding.
+  //
+  // An OPEN target is the one reading that says the wait may still be RUNNING,
+  // and that evidence is never discarded by carrier (#11747's re-park parks the
+  // LIVE blocker in a comment while the body still names the spent one): it is
+  // counted whichever channel carries it and can only ever WITHHOLD a row.
   const closed = rows.filter((r) => r.state === 'closed' && carries(r));
   const superseded = rows.filter((r) => r.state === 'closed' && !carries(r));
-  const unresolved = rows.filter((r) => r.state === 'unresolved');
+  const unresolved = rows.filter((r) => r.state === 'unresolved' && carries(r));
+  const supersededUnreadable = rows.filter((r) => r.state === 'unresolved' && !carries(r));
   const open = rows.filter((r) => r.state === 'open');
   if (closed.length === 0 && unresolved.length === 0) return null;
   const judgedCount = closed.length + open.length + unresolved.length;
@@ -4577,6 +4644,22 @@ export function h19BlockOutlivedBlocker(issue, resolutions, ownerRepo = OWNER_RE
         'candidate and ⛔ never a reason to release. ⛔ Nothing to repair on the card either: the ' +
         'body is already correct and the comment is not rewritable, which is exactly why this is a ' +
         'clause on a row that fired for another reason rather than a row of its own.';
+  // The same clause for the same class of target, one state further out: an
+  // archive-only target this sweep could not READ (#18379). It is named, it
+  // withholds a full discharge below, and it founds nothing.
+  const supersededUnreadableNote =
+    supersededUnreadable.length === 0
+      ? ''
+      : ` ⚠️ A further ${supersededUnreadable.length} target(s) (${namedTargets(supersededUnreadable)}) ` +
+        'could NOT be read this sweep AND reach this card only through the comment archive, so they ' +
+        'found nothing here: UNJUDGED is a verdict about THIS CARD, and this card states its own ' +
+        '`Blocked-by:` set in the body. ⛔ Not silenced — they are named right here, and an unread ' +
+        'target still withholds a full discharge (#4690) — but ⛔ never a row of their own. A ' +
+        'superseded number that is ALSO unreadable used to manufacture exactly that row, and it was ' +
+        'unclearable by construction: the body was already refreshed to the live blocker, the ' +
+        'archive comments are history the protocol forbids rewriting (one of them is usually triage\'s ' +
+        'own re-pointing note, which must name the dead number to explain that it is dead), so every ' +
+        'sweep re-fired a row no correct action by the card\'s owner could ever clear.';
 
   const release =
     ' Report-only, and the release is NOT this script\'s to make: the state model gives it two ' +
@@ -4600,7 +4683,13 @@ export function h19BlockOutlivedBlocker(issue, resolutions, ownerRepo = OWNER_RE
         ? ` ${open.length} target(s) are still open (${namedTargets(open)}), so this is a PARTIAL ` +
           'discharge and the card may still be legitimately blocked — the row reports it, it does not ' +
           'decide it.'
-        : ' Every target it names is closed: nothing this card declared a wait on is still running.';
+        : supersededUnreadable.length > 0
+          ? ` No target this row JUDGED is still open, but ${supersededUnreadable.length} target(s) ` +
+            `the comment archive names (${namedTargets(supersededUnreadable)}) could not be read at ` +
+            'all, so this is ⛔ NOT reported as a full discharge: unread is not closed and it is not ' +
+            'absent either (#4690), and a RE-PARK is exactly the shape that parks a LIVE blocker in a ' +
+            'comment (#11747).'
+          : ' Every target it names is closed: nothing this card declared a wait on is still running.';
     const alsoUnresolved =
       unresolved.length === 0
         ? ''
@@ -4616,6 +4705,7 @@ export function h19BlockOutlivedBlocker(issue, resolutions, ownerRepo = OWNER_RE
       rest +
       alsoUnresolved +
       supersededNote +
+      supersededUnreadableNote +
       release
     );
   }
@@ -4644,6 +4734,7 @@ export function h19BlockOutlivedBlocker(issue, resolutions, ownerRepo = OWNER_RE
       ? ` The card's other ${open.length} target(s) did resolve, and are still open.`
       : '') +
     supersededNote +
+    supersededUnreadableNote +
     release
   );
 }
@@ -16675,7 +16766,11 @@ export function summaryLine(counts, findingCount) {
         ? ` — the ${btTargets - btResolved} unresolved target(s) are named on their own cards' rows, and ` +
           'those rows sort ABOVE the size trim so they cannot be what a truncated body drops (#11218: ' +
           'this clause used to be an unconditional promise, and on the 2026-08-25T02:08Z sweep it was ' +
-          'false — 199 rows were trimmed and not one rendered row carried an unresolved target)'
+          'false — 199 rows were trimmed and not one rendered row carried an unresolved target). ' +
+          '⚠️ One class is named only where its card already has a row: a target reaching a card ONLY ' +
+          'through the comment archive beside a body that states its own `Blocked-by:` set is outside ' +
+          'what H19 judges, so it rides a row rather than founding one (#18379) — it is a spent line, ' +
+          'and the row it used to found was unclearable by construction'
         : ''
     }` +
     // #13650: this terminator is UNCONDITIONAL, and belongs to the CLAUSE
@@ -22899,10 +22994,19 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // while a battery losing a THIRD of its cases — the 40 → 3 shape AGENTS.md
   // names — fails loudly. Raise it with the battery, never ahead of it.
   'H66 released queue card': 172,
+  // 37 registered with the judged-set repair (#18379); the pin sits just under
+  // that on the same grounds as its neighbour. What this battery floors is a
+  // NEGATIVE — a row that must not fire — plus the four controls proving the
+  // silence is scoped (UNJUDGED still fires on a body-borne unreadable target,
+  // a body-less card still judges its comments, a closed body target still
+  // reads as the ordinary row, and an OPEN archive target still withholds a
+  // discharge). A negative with no live control beside it is how a repair
+  // becomes a silencer, so the controls are inside the same floored battery.
+  'H19 judged-set founding': 34,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
-export const SELF_TEST_BATTERY_FLOOR = 1;
+export const SELF_TEST_BATTERY_FLOOR = 2;
 
 async function selfTest() {
   const cases = [];
@@ -25154,11 +25258,20 @@ async function selfTest() {
   t('H19 precedence (d): a closed body target fires even beside a comment-borne one', bodyGoverns.includes('outlived its blocker'), true);
   t('H19 precedence (d): …and an OPEN comment-borne target still withholds the full discharge', bodyGoverns.includes('PARTIAL'), true);
   t('H19 precedence (d): …⛔ never claiming every target is closed', bodyGoverns.includes('Every target it names is closed'), false);
-  // The asymmetry, stated as its own pin: precedence selects which CLOSED
-  // target may FOUND a row; every reading that says the wait may still be
-  // running counts whichever channel carried it (#4690's posture, applied to
-  // the carrier question).
-  t('H19 precedence: an UNRESOLVED comment-borne target is NOT silenced by the body', h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'open'), foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' })], REPO_OS).includes('UNJUDGED, not confirmed'), true);
+  // The asymmetry, stated as its own pin: precedence selects which target may
+  // FOUND a row — an expiry or an UNJUDGED — while every reading that says the
+  // wait may still be RUNNING counts whichever channel carried it (#4690's
+  // posture, applied to the carrier question).
+  //
+  // ⚠️ This first line used to run the other way: it asserted that an
+  // UNRESOLVED comment-only target fires the UNJUDGED row beside a body set,
+  // which is the row #18379 measured as unclearable by construction — the
+  // card's body was already refreshed to the live blocker, and the only
+  // remaining lever was editing the archive the protocol keeps. It is re-judged
+  // rather than deleted: the fixture is the same, the direction is the one the
+  // asymmetry table always declared, and every other direction of it is pinned
+  // in the battery below.
+  t('H19 precedence: an UNRESOLVED comment-only target founds NO row beside a body set', h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'open'), foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' })], REPO_OS), '');
   t('H19 precedence: …and an OPEN comment-borne target is counted in the denominator', h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed'), target(3, 'open')], REPO_OS).includes('1 of 2 `Blocked-by:` target(s)'), true);
   // The shape-3 sentence RIDES a row that fired for another reason. It never
   // becomes a row, so it is only ever readable beside an actionable finding.
@@ -25169,12 +25282,119 @@ async function selfTest() {
   t('H19 superseded: …and says there is nothing on the card to repair', withSuperseded.includes('Nothing to repair on the card either'), true);
   t('H19 superseded: ⛔ the clause is absent when nothing was superseded', bodyClosed.includes('A further 1 CLOSED target(s)'), false);
   t('H19 superseded: ⛔ and absent on a comment-judged card, where nothing can be', commentOnly.includes('reach this card ONLY through the comment archive'), false);
-  // It rides the UNJUDGED branch too — one carrier rule, both branches.
-  t('H19 superseded: the clause rides the UNJUDGED branch as well', h19row(blockedCard(1, 'Blocked-by: #2'), [foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' }), target(3, 'closed')], REPO_OS).includes('HYGIENE reading'), true);
+  // It rides the UNJUDGED branch too — one carrier rule, both branches. ⚠️ The
+  // fixture's unreadable target is the BODY's own (#18379): the row has to be
+  // founded on something the judged set carries before a hygiene clause can
+  // ride it, and an archive-only pair founds nothing at all now.
+  t('H19 superseded: the clause rides the UNJUDGED branch as well', h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'unresolved', { detail: 'HTTP 404' }), target(3, 'closed')], REPO_OS).includes('HYGIENE reading'), true);
   // ⛔ The precedence rule must not reach the DISCOVERY union that H26 and H28
   // read: both still see the comment-borne target on the live #11333 shape.
   t('H19 precedence: ⛔ H28 is unaffected on the live shape (no spent body line)', h28StaleBodyBlockerLine(live11333, live11333Targets, [LIVE_11333_COMMENT], REPO_OS), null);
   t('H19 precedence: ⛔ and H26 still reads the full union', typeof h26BlockOnIndefiniteTarget(live11333, [target(13457, 'open', { labels: ['pm:blocking'] }), target(13458, 'open', { labels: ['pm:blocked'] })]), 'string');
+
+  // -- BATTERY: H19 founds every verdict on the set it JUDGES (#18379) -------
+  //
+  // Every case here goes through `b(BATTERY19, …)` rather than `t(…)`, so
+  // deleting the block fails the roster floor instead of shrinking a total
+  // nobody reads — the H66 battery's shape, the file's second.
+  //
+  // The defect: the UNJUDGED branch was founded on the DISCOVERY union while
+  // the row judged the body, so a target superseded in the body could veto the
+  // verdict from the comment archive whenever its number was also unreadable.
+  // Two conditions had to coincide, which is why it outlived #17564, and the
+  // resulting row was unclearable BY CONSTRUCTION: the owner had already done
+  // the prescribed thing, and the only remaining lever — editing or deleting
+  // the archived comments — is the write the protocol forbids, because those
+  // comments record what an earlier seat measured and why the line was
+  // migrated.
+  //
+  // ⛔ UNJUDGED is NOT silenced by this repair, and the controls below are
+  // where that is asserted rather than asked for: a body-borne unreadable
+  // target fires it exactly as before, a body-less card still judges its
+  // comment-borne targets, and an archive-only unreadable target still
+  // WITHHOLDS a full discharge and is still named on the row it rides.
+  const BATTERY19 = 'H19 judged-set founding';
+
+  // The instance from the card, in its recorded shape: #11975 on anchor #9857,
+  // sweep 2026-09-16T01:55:47Z. The body line was refreshed to `#18336` by the
+  // triage seat ~2.7 h BEFORE that sweep; four archived comments still name
+  // `#13515` — one of them triage's own re-pointing note, which has to name the
+  // dead number to explain that it is dead — and `#13515` answers 404 (re-probed
+  // with live controls: `#18336` 200, `#11973` 200). The struck earlier pointer
+  // sits mid-sentence in prose, which is not a directive.
+  const LIVE_11975_BODY =
+    'Blocked-by: #18336\n\n' +
+    'The earlier `Blocked-by: #11974` pointer is struck rather than deleted: it records what an ' +
+    'earlier seat measured and why the line was migrated, and editing it would erase that.';
+  const LIVE_11975_COMMENT =
+    'Re-pointing note (triage): the recorded blocker is dead, so the line is migrated.\n\n' +
+    'Blocked-by: #13515';
+  const live11975 = blockedCard(11975, LIVE_11975_BODY);
+  const live11975Targets = [target(18336, 'open'), target(13515, 'unresolved', { detail: 'HTTP 404' })];
+  b(BATTERY19, 'H19 #18379: the card\'s body states ONE target, the live one', [...blockerChannelKeys(LIVE_11975_BODY, live11975, REPO_OS)].join(' '), 'objectstack-ai/objectstack#18336');
+  b(BATTERY19, 'H19 #18379: …so the unreadable number is one the body no longer names', blockerChannelKeys(LIVE_11975_BODY, live11975, REPO_OS).has('objectstack-ai/objectstack#13515'), false);
+  b(BATTERY19, 'H19 #18379: DISCOVERY is untouched — the archive still yields it', keysOf(live11975, [LIVE_11975_COMMENT]), 'objectstack-ai/objectstack#18336 objectstack-ai/objectstack#13515');
+  b(BATTERY19, 'H19 #18379: …and the unclearable row is GONE', h19BlockOutlivedBlocker(live11975, live11975Targets, REPO_OS), null);
+  b(BATTERY19, 'H19 #18379: …⛔ with no quieter row invented in its place', h19row(live11975, live11975Targets, REPO_OS), '');
+  // The generic shape of the same card, and the direction the re-judged
+  // precedence pin above now runs in.
+  const archiveOnlyUnreadable = [target(2, 'open'), foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' })];
+  b(BATTERY19, 'H19 #18379: a superseded target the archive alone names founds nothing', h19BlockOutlivedBlocker(blockedCard(1, 'Blocked-by: #2'), archiveOnlyUnreadable, REPO_OS), null);
+  b(BATTERY19, 'H19 #18379: …and that holds for a LOCAL superseded number too', h19BlockOutlivedBlocker(blockedCard(1, 'Blocked-by: #2'), [target(2, 'open'), target(3, 'unresolved', { detail: 'HTTP 404' })], REPO_OS), null);
+
+  // CONTROL ①: a body-borne unreadable target — ⛔ UNJUDGED is not silenced.
+  const bodyUnreadable19 = h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'unresolved', { detail: 'HTTP 404' })], REPO_OS);
+  b(BATTERY19, 'H19 #18379 control: a BODY-borne unreadable target still fires UNJUDGED', bodyUnreadable19.includes('UNJUDGED, not confirmed'), true);
+  b(BATTERY19, 'H19 #18379 control: …counted over the judged set', bodyUnreadable19.includes('1 of 1 `Blocked-by:` target(s)'), true);
+  b(BATTERY19, 'H19 #18379 control: …naming the body as the carrier it judged', bodyUnreadable19.includes('judged against the BODY\'s `Blocked-by:` set'), true);
+  b(BATTERY19, 'H19 #18379 control: …and still refusing to be read as a quiet row', bodyUnreadable19.includes('must not be skimmed'), true);
+  b(BATTERY19, 'H19 #18379 control: …citing the unread-is-not-absent rule', bodyUnreadable19.includes('#4690'), true);
+  // CONTROL ②: a body-LESS card judges its comment-borne targets, unchanged —
+  // this row's founding fixture is one of those.
+  const commentUnreadable19 = h19row(blockedCard(1, 'body carries no line'), [target(2, 'unresolved', { detail: 'HTTP 404' })], REPO_OS);
+  b(BATTERY19, 'H19 #18379 control: a body-LESS card still fires UNJUDGED from its comments', commentUnreadable19.includes('UNJUDGED, not confirmed'), true);
+  b(BATTERY19, 'H19 #18379 control: …and says the comment-borne set is what it judged', commentUnreadable19.includes('judged against the COMMENT-borne set'), true);
+  // CONTROL ③: a closed BODY target is H19's ordinary row, byte-unchanged.
+  const bodyClosed19 = h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed', { closedAt: '2026-08-20T07:58:08Z' })], REPO_OS);
+  b(BATTERY19, 'H19 #18379 control: a closed BODY target is the ordinary row', bodyClosed19.includes('outlived its blocker'), true);
+  b(BATTERY19, 'H19 #18379 control: …counted 1 of 1 over the judged set', bodyClosed19.includes('1 of 1 `Blocked-by:` target(s)'), true);
+  b(BATTERY19, 'H19 #18379 control: …and reads as a full discharge', bodyClosed19.includes('Every target it names is closed'), true);
+  // CONTROL ④: #11747's mirror is untouched — an OPEN target is evidence the
+  // wait may still be RUNNING and is counted whichever channel carries it, so
+  // a re-park can never be published as a full discharge.
+  const repark19 = h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed'), target(3, 'open')], REPO_OS);
+  b(BATTERY19, 'H19 #18379 control: an OPEN archive target still withholds the discharge', repark19.includes('PARTIAL'), true);
+  b(BATTERY19, 'H19 #18379 control: …⛔ never claiming every target is closed', repark19.includes('Every target it names is closed'), false);
+  b(BATTERY19, 'H19 #18379 control: …and is still counted in the denominator', repark19.includes('1 of 2 `Blocked-by:` target(s)'), true);
+
+  // WITHHOLDING: an archive-only UNREADABLE target beside a closed body target.
+  // It founds nothing, and it is neither silenced nor allowed to be read as a
+  // full discharge — unread is not closed, and not absent either.
+  const archiveUnreadableRides = h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed'), foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' })], REPO_OS);
+  b(BATTERY19, 'H19 #18379 withhold: the judged closed target still founds the row', archiveUnreadableRides.includes('outlived its blocker'), true);
+  b(BATTERY19, 'H19 #18379 withhold: …⛔ but it is NOT published as a full discharge', archiveUnreadableRides.includes('Every target it names is closed'), false);
+  b(BATTERY19, 'H19 #18379 withhold: …the withholding is stated, not implied', archiveUnreadableRides.includes('No target this row JUDGED is still open'), true);
+  b(BATTERY19, 'H19 #18379 withhold: …the unreadable archive target is NAMED', archiveUnreadableRides.includes('`objectstack-ai/cloud#88`'), true);
+  b(BATTERY19, 'H19 #18379 withhold: …in a clause saying it founds nothing', archiveUnreadableRides.includes('found nothing here'), true);
+  b(BATTERY19, 'H19 #18379 withhold: …and naming the row it used to manufacture', archiveUnreadableRides.includes('unclearable by construction'), true);
+  b(BATTERY19, 'H19 #18379 withhold: …and the count stays the judged set\'s', archiveUnreadableRides.includes('1 of 1 `Blocked-by:` target(s)'), true);
+  b(BATTERY19, 'H19 #18379 withhold: the row is still report-only', archiveUnreadableRides.includes('never a label written from this script'), true);
+  // The two archive clauses are SIBLINGS, not one clause: a card can carry a
+  // spent closed line and an unreadable one at once, and each says its own
+  // thing.
+  const bothArchiveClauses = h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed'), target(3, 'closed'), foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' })], REPO_OS);
+  b(BATTERY19, 'H19 #18379 clauses: the closed archive target keeps its HYGIENE sentence', bothArchiveClauses.includes('A further 1 CLOSED target(s)'), true);
+  b(BATTERY19, 'H19 #18379 clauses: …the unreadable one gets its own', bothArchiveClauses.includes('could NOT be read this sweep AND reach this card only through the comment archive'), true);
+  b(BATTERY19, 'H19 #18379 clauses: …and neither enters the count', bothArchiveClauses.includes('1 of 1 `Blocked-by:` target(s)'), true);
+  // The UNJUDGED denominator is the judged set's too — the row's own count was
+  // half of what made the measured sentence unreadable (「1 of 2 … judged
+  // against the BODY's set」 on a card whose body names one target).
+  b(BATTERY19, 'H19 #18379: the UNJUDGED denominator never counts an archive-only target', h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'unresolved', { detail: 'HTTP 404' }), foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' })], REPO_OS).includes('1 of 1 `Blocked-by:` target(s)'), true);
+  b(BATTERY19, 'H19 #18379: …and the archive-only one is named in its clause instead', h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'unresolved', { detail: 'HTTP 404' }), foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' })], REPO_OS).includes('`objectstack-ai/cloud#88`'), true);
+  // ⛔ And the repair must not reach DISCOVERY: H26 and H28 share these
+  // resolutions and a comment-borne target answers what they ask.
+  b(BATTERY19, 'H19 #18379: ⛔ H28 still reads the archive on a re-parked card', typeof h28StaleBodyBlockerLine(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed'), target(3, 'open')], ['Blocked-by: #3'], REPO_OS), 'string');
+  b(BATTERY19, 'H19 #18379: ⛔ and the union still discovers both channels', keysOf(blockedCard(1, 'Blocked-by: #2'), ['Blocked-by: #3']), 'objectstack-ai/objectstack#2 objectstack-ai/objectstack#3');
 
   // The summary line's fourth `read X of Y` pair. Unlike the other three a
   // shortfall here suspends nothing — the unresolved targets fire their own
@@ -25191,6 +25411,12 @@ async function selfTest() {
   // unjudged sort band). The bare "never dropped" wording was measurably false
   // on 2026-08-25T02:08Z; see `UNJUDGED_MARKER`.
   t('summary: an H19 shortfall points at the rows that carry it', saidBy('h19Blockers', summaryLine(btCounts(11, 12), 1)).includes("unresolved target(s) are named on their own cards' rows"), true);
+  // …and names the ONE class that is not named on a row of its own, because
+  // #18379 stopped it founding one. The clause was measured false once already
+  // (#11218) by promising more than the rows deliver; a repair that narrows
+  // what a row founds owes the same sentence a correction.
+  b(BATTERY19, 'summary: the H19 shortfall clause declares the archive-only class it no longer names', saidBy('h19Blockers', summaryLine(btCounts(11, 12), 1)).includes('it rides a row rather than founding one (#18379)'), true);
+  b(BATTERY19, 'summary: …and a complete pass still says none of it', saidBy('h19Blockers', summaryLine(btCounts(12, 12), 1)).includes('#18379'), false);
   t('summary: …and names the mechanism instead of promising the outcome', saidBy('h19Blockers', summaryLine(btCounts(11, 12), 1)).includes('sort ABOVE the size trim'), true);
   t('summary: a complete H19 pass adds no shortfall clause', saidBy('h19Blockers', summaryLine(btCounts(12, 12), 1)).includes('unresolved target(s) are named'), false);
   t('summary: absent H19 counts degrade to 0, never to undefined', saidBy('h19Blockers', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0)).includes('resolved on 0 of 0 distinct'), true);
