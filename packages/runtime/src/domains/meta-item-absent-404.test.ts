@@ -92,6 +92,21 @@ function protocolDouble(corpus: Record<string, unknown> = {}, extra: Record<stri
 /** The wire body, after the serialization that drops an `undefined` member. */
 const onWire = (body: any) => JSON.parse(JSON.stringify(body));
 
+type Answered = NonNullable<Awaited<ReturnType<HttpDispatcher['handleMetadata']>>['response']>;
+
+/**
+ * The dispatcher's answer, or a loud failure. The optional-chained
+ * `res.response?.` spelling is what the siblings in this directory use, but
+ * every NEGATIVE assertion below
+ * (`toBeUndefined()`, `not.toBe(200)`) passes vacuously against an unhandled
+ * result, which is the one outcome that must not read as a pass here. So this
+ * file refuses the optional rather than reaching through it.
+ */
+function answered(res: { response?: Answered }): Answered {
+    if (!res.response) throw new Error('the dispatcher did not handle the request - there is no answer to assert on');
+    return res.response;
+}
+
 describe('#18401 dispatcher /meta generic branch — an item-less envelope is a MISS, not a success', () => {
     it('§1 refuses an absent name with 404 RESOURCE_NOT_FOUND instead of the item-less 200', async () => {
         const protocol = protocolDouble();
@@ -102,11 +117,12 @@ describe('#18401 dispatcher /meta generic branch — an item-less envelope is a 
         expect(protocol.getMetaItem).toHaveBeenCalledWith(
             expect.objectContaining({ type: 'agent', name: 'no_such_agent_xyz' }),
         );
-        expect(res.response.status).toBe(404);
+        const answer = answered(res);
+        expect(answer.status).toBe(404);
         // ADR-0112 nested envelope: `code` and `status` are the minimal pin.
-        expect(res.response.body.error.code).toBe('RESOURCE_NOT_FOUND');
-        expect(res.response.body.error.httpStatus).toBe(404);
-        expect(res.response.body.success).toBe(false);
+        expect(answer.body.error.code).toBe('RESOURCE_NOT_FOUND');
+        expect(answer.body.error.httpStatus).toBe(404);
+        expect(answer.body.success).toBe(false);
     });
 
     it('§2 the item-less envelope never reaches the wire as a 200 — it does not satisfy the response contract', async () => {
@@ -121,8 +137,9 @@ describe('#18401 dispatcher /meta generic branch — an item-less envelope is a 
         expect(GetMetaItemResponseSchema.safeParse(wouldHaveShipped).success).toBe(false);
 
         // And it is not what the caller gets.
-        expect(res.response.status).not.toBe(200);
-        expect(res.response.body.data).toBeUndefined();
+        const answer = answered(res);
+        expect(answer.status).not.toBe(200);
+        expect(answer.body.data).toBeUndefined();
     });
 
     it('§3 the `object` branch and the generic branch answer absence THE SAME WAY (the finding)', async () => {
@@ -134,9 +151,11 @@ describe('#18401 dispatcher /meta generic branch — an item-less envelope is a 
         const object = await make({ protocol: protocolDouble({}, { getProjectId: () => 'env_1' }) })
             .handleMetadata('/object/nobody_home', ctx(), 'GET');
 
-        expect(generic.response.status).toBe(object.response.status);
-        expect(generic.response.body.error.code).toBe(object.response.body.error.code);
-        expect(generic.response.status).toBe(404);
+        const g = answered(generic);
+        const o = answered(object);
+        expect(g.status).toBe(o.status);
+        expect(g.body.error.code).toBe(o.body.error.code);
+        expect(g.status).toBe(404);
     });
 
     it('§4 an item-less protocol answer FALLS THROUGH to the MetadataService rather than terminating the read', async () => {
@@ -150,10 +169,11 @@ describe('#18401 dispatcher /meta generic branch — an item-less envelope is a 
 
         expect(protocol.getMetaItem).toHaveBeenCalled();
         expect(getItem).toHaveBeenCalled();
-        expect(res.response.status).toBe(200);
+        const answer = answered(res);
+        expect(answer.status).toBe(200);
         // The plural URL segment still resolves to the canonical singular.
-        expect(res.response.body.data).toMatchObject({ type: 'agent', name: 'triage_bot' });
-        expect(res.response.body.data.item).toMatchObject({ label: 'Triage Bot', model: 'claude' });
+        expect(answer.body.data).toMatchObject({ type: 'agent', name: 'triage_bot' });
+        expect(answer.body.data.item).toMatchObject({ label: 'Triage Bot', model: 'claude' });
     });
 
     it('§5 a real hit is untouched — the whole protection envelope still passes through', async () => {
@@ -163,21 +183,23 @@ describe('#18401 dispatcher /meta generic branch — an item-less envelope is a 
         const protocol = protocolDouble({ 'agent/triage_bot': AGENT });
         const res = await make({ protocol }).handleMetadata('/agent/triage_bot', ctx(), 'GET');
 
-        expect(res.response.status).toBe(200);
-        expect(res.response.body.data).toMatchObject({
+        const answer = answered(res);
+        expect(answer.status).toBe(200);
+        expect(answer.body.data).toMatchObject({
             type: 'agent', name: 'triage_bot', lock: 'none', editable: true, deletable: true,
         });
-        expect(res.response.body.data.item).toMatchObject({ label: 'Triage Bot', model: 'claude' });
+        expect(answer.body.data.item).toMatchObject({ label: 'Triage Bot', model: 'claude' });
         // And the answer this branch DOES serve satisfies the route's declared
         // response contract on the wire, `item` member included.
-        expect(GetMetaItemResponseSchema.safeParse(onWire(res.response.body.data)).success).toBe(true);
+        expect(GetMetaItemResponseSchema.safeParse(onWire(answer.body.data)).success).toBe(true);
     });
 
     it('§6 the object branch still serves its own hit — the sibling is not collateral', async () => {
         const protocol = protocolDouble({ 'object/customer': CUSTOMER }, { getProjectId: () => 'env_1' });
         const res = await make({ protocol }).handleMetadata('/object/customer', ctx(), 'GET');
 
-        expect(res.response.status).toBe(200);
-        expect(res.response.body.data.item).toMatchObject({ label: 'Customer' });
+        const answer = answered(res);
+        expect(answer.status).toBe(200);
+        expect(answer.body.data.item).toMatchObject({ label: 'Customer' });
     });
 });
