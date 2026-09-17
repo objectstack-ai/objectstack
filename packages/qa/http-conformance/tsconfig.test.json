@@ -1,0 +1,116 @@
+// The TEST-layer type-check program (#12511), adopting the mechanism #5286 set
+// for `packages/spec` and #5449 generalised, and which 31 sibling configs now
+// use. `tsconfig.json` beside this file keeps its `**/*.test.ts` exclusion: it
+// is the BUILD config, and that exclusion has a reason — ci.yml gates that no
+// test file reaches the published artifact. This sibling puts the excluded
+// layer back in front of tsc, and `package.json`'s `typecheck` script NAMES it
+// (via `check:test-typecheck --project`), because a config no script invokes is
+// exactly the phantom this whole mechanism is about.
+//
+// ⭐ THE EIGHTH AND LAST OF ITS CARD, and the only one that needed a ruling
+// before it could take this route at all. `tsconfig.json` used to extend
+// NOTHING, and it was the only one of the six such configs that also declared
+// no `skipLibCheck` — so two third-party declarations inside `node_modules`
+// were type-checked, and the per-package `TEST_DEBT` entry that recorded them
+// could not graduate by fixing any code in this repository. The director ruling
+// of 2026-09-07 (decision batch #66, maintainer verbatim: 「同意」) settled that
+// as a CONFIG-POLICY question: the build config takes one `extends` line onto
+// the repo root, the way 73 of 79 packages already do, and this file then
+// follows the family
+// unchanged. ⛔ No per-package dialect, ⛔ no ratchet keyed on `.pnpm`
+// content-hash paths, ⛔ no residual left behind in `TEST_DEBT`.
+//
+// BEFORE THIS FILE, NO tsc PROGRAM COMPILED A SINGLE TEST FILE HERE, measured
+// rather than read off the config. In ONE run on objectstack-ai/objectstack at
+// f6c2eb7c865065943a474d1e49833d6184d76e32 with the workspace closure built
+// first, same tsc binary (6.0.3) and same worktree,
+// `tsc --noEmit --listFiles -p tsconfig.json` — the only config this package's
+// `typecheck` named — puts 328 files in the program, 3 of them this package's
+// own `src/**`, and **0** of its 6 `src/**/*.test.ts`. So the zero is the
+// `exclude` line and not a probe that sees nothing. Positive controls in that
+// SAME run, same binary, same worktree, both packages whose tests are already
+// in their own programs: `packages/metadata-core`'s test program 9 of 9,
+// `packages/rest`'s 194 of 194 — without them every zero above is
+// unfalsifiable. Under this file the count is **6 of 6** (1008 files in the
+// program, all 9 of this package's own `src/**`).
+//
+// ⚠️ MODULE SEMANTICS ARE UNTOUCHED HERE, unlike `packages/rest`'s sibling and
+// most of the family — and that is this package's own judgement, not an
+// omission. `@objectstack/http-conformance` IS `"type": "module"`, so the build
+// config's inherited NodeNext already reads these files as ESM; it is also the
+// STRICTER of the two readings, since it holds the `.js` import extensions this
+// package must ship. Measured rather than assumed: this layer writes **zero**
+// `import.meta` and its only relative imports are `./adapter.js` and
+// `./node-plugin.js`, both already extension-bearing, and switching to
+// `module: esnext` / `moduleResolution: bundler` subtracts **zero** from the 27
+// below. `packages/mcp`'s sibling is the precedent for this shape;
+// `packages/rest`'s is not.
+//
+//   - `lib: ["ES2022"]` IS declared, and here it is the one departure that
+//     MOVES A NUMBER — the only sibling in the family for which it does, so
+//     ⛔ do not read the family's "measured effect: zero" line onto this file.
+//     Against the INHERITED value it is still zero: the root config declares
+//     `lib: ["ES2020"]` and this program reports the same 27 either way. The
+//     movement is against what this package had BEFORE it inherited anything —
+//     `target: ES2022` with no `lib` at all, i.e. the `lib.es2022.full` default,
+//     which carries DOM. Isolated by a single-option probe: declaring `lib` at
+//     all, in either spelling, moves this program from 2 errors to 25. What
+//     changes is where `Response.json()` is read from — DOM's `Promise<any>`
+//     against @types/node's undici `Promise<unknown>` — and every one of the 25
+//     is that one idiom, `await res.json()` bound without a narrowing.
+//     ⛔ `DOM` is NOT re-added to shrink this ledger: `vitest.config.ts` runs
+//     this package with `environment: 'node'`, so the undici reading is the one
+//     that matches the runtime and the DOM one was the fiction. Measured, so
+//     the choice is legible rather than asserted: with
+//     `lib: ["ES2022", "DOM", "DOM.Iterable"]` the same program reports 2.
+//   - `rootDir` is INHERITED (`./src`) and needs no widening, which is worth
+//     recording because `packages/cli`'s sibling had to widen its own. Every
+//     test file here lives under `src` and none reaches outside the package —
+//     measured, not reasoned: the program carries **zero** TS6059.
+//   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
+//     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`
+//     and `types: ["node"]` are inherited from `tsconfig.json` and through it
+//     the root config, and none is re-declared here. ⚠️ A child declaring its
+//     own `paths` would REPLACE the parent map rather than merge into it,
+//     silently sending a source-resolved specifier back to `dist/`, so this
+//     file declares none. Nothing here may loosen a type rule; if a test does
+//     not compile, that is the finding.
+//
+// MEASURED at f6c2eb7c865065943a474d1e49833d6184d76e32 with the dependency
+// closure built (an error count taken against an unbuilt closure is not a
+// reading — unresolved-import cascades inflate it): this layer reports **27
+// errors across 3 of its 6 files**, held per file and per signature in
+// `test-typecheck-debt.json` beside this config. ⚠️ THIS IS THE FIRST LEDGER IN
+// THE FAMILY THAT IS LARGER THAN THE `TEST_DEBT` ENTRY IT REPLACES, so read the
+// terms rather than the totals — `scripts/check-type-check-coverage.mjs` holds
+// the full attribution, which has no remainder in either direction:
+// recorded 2, raw 2 (TS2307 x1, TS2304 x1, both inside `node_modules` `.d.ts`),
+// -2 dissolved by the inherited `skipLibCheck`, +25 exposed by the declared
+// `lib` above, +2 exposed by the root config's `noUnusedParameters`
+// (TS6133 x2), ledger 27.
+//
+// Every one of the 27 is PRE-EXISTING in the sense this family means: this
+// change edits no test file and repairs none, and each would have been reported
+// on `origin/main` had this program always existed. They are ledgered EXACT and
+// shrink-only — a file that gains an error is red, one that loses one is red
+// until re-recorded, one that reaches zero is red until its entry is deleted, a
+// signature that ARRIVES or VANISHES is red even at an unchanged file total,
+// and a file NOT listed there may have no errors at all. ⛔ The 27 are NOT
+// repaired here: seeding the ledger is the deliverable, and turning an
+// onboarding into a cleanup is how it stops landing at all.
+//
+// ⚠️ 3 of the 6 files carry NO ledger entry, and that is load-bearing rather
+// than incidental: any error any one of them ever gains is red on arrival. That
+// is the half of this gate that starts working today. This layer also holds
+// ZERO `@ts-expect-error` directives (grepped with a positive control — the
+// same grep hits 49 files under `packages/spec/src`), so no pin here was
+// silently dead; what the gap cost was the other half.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "lib": ["ES2022"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
