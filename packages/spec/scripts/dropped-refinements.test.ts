@@ -32,6 +32,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { z } from 'zod';
 import {
@@ -289,6 +290,60 @@ describe('the ratchet adjudicates against the ledger', () => {
       baseline: { entries: { 'a/One': { sites: [] } } },
     });
     expect(problems.unreasoned).toEqual(['a/One']);
+  });
+});
+
+describe("the reader's refusal names the shape the reader ACCEPTS", () => {
+  // The trap (#18747): the shape diagnostic used to say the entries are
+  // `key -> { count, reason }` while the very next check in the same function
+  // requires `sites: string[]` and the shipped `DroppedRefinementsEntry` has no
+  // `count` and no `reason` at all. An author — or an AI — repairing a broken
+  // ledger by following that sentence writes a ledger the SAME function refuses
+  // again. So the pin is a closed loop, not a wording match: whatever the
+  // refusal names has to be what the reader then takes.
+  const withLedger = <T,>(json: string, fn: (pkgDir: string) => T): T => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'os-dropped-refinements-'));
+    try {
+      fs.writeFileSync(path.join(dir, DROPPED_REFINEMENTS_BASELINE_FILE), json, 'utf8');
+      return fn(dir);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  const refusalFor = (json: string): string =>
+    withLedger(json, (dir) => {
+      try {
+        readDroppedRefinementsBaseline(dir);
+      } catch (error) {
+        return (error as Error).message;
+      }
+      throw new Error('the reader accepted a ledger it should have refused');
+    });
+
+  it('the shape diagnostic names `sites`', () => {
+    // `entries` as an array is the branch that prints the shape.
+    expect(refusalFor('{ "entries": [] }')).toContain('sites');
+  });
+
+  it('a ledger written to that shape is then ACCEPTED — the loop closes', () => {
+    const accepted = withLedger('{ "entries": { "a/One": { "sites": ["x"] } } }', (dir) =>
+      readDroppedRefinementsBaseline(dir),
+    );
+    expect(accepted?.entries['a/One'].sites).toEqual(['x']);
+  });
+
+  it('LIT CONTROL — the shape the OLD diagnostic named is refused, and the refusal still says `sites`', () => {
+    // Without this leg the two assertions above pass on a reader that accepts
+    // anything: this is the ledger an author following the old sentence wrote.
+    const message = refusalFor('{ "entries": { "a/One": { "count": 1, "reason": "zod drops custom checks" } } }');
+    expect(message).toContain('sites');
+  });
+
+  it('the shape diagnostic names no key the entry shape does not have', () => {
+    const message = refusalFor('{ "entries": [] }');
+    expect(message).not.toContain('count');
+    expect(message).not.toContain('reason');
   });
 });
 
