@@ -135,8 +135,6 @@
  * either, so the assertions stay visible in the fixture that owns them.
  */
 
-import { isMissingTableError } from '@objectstack/types';
-
 /** One channel's tally, keyed by the table the withheld line named. */
 export type WithheldByTable = ReadonlyMap<string, number>;
 
@@ -207,15 +205,69 @@ export interface ExpectedReadRefusalCapture {
 }
 
 /**
+ * [#18617] The dialect's own "that relation is not there" sentence, as the
+ * fragment this capture looks for INSIDE the driver's refusal line.
+ *
+ * ## Why this became a parameter
+ *
+ * The reason half used to be the literal `no such table: <t>`, which is
+ * SQLite's phrasing and only SQLite's — every fixture here rigs
+ * `better-sqlite3`, so nothing noticed. PostgreSQL says
+ * `relation "<t>" does not exist`. Measured on a live PostgreSQL 16.13 while
+ * pinning the multi-value cascade-delete path across the driver axis (#18617):
+ * the refusal was never recognised, so this capture passed the noise it exists
+ * to withhold straight through to `console`, AND
+ * {@link ExpectedReadRefusalCapture.silentChannels} reported the channel silent
+ * — all eight cases of the live cell red, with the driver's `(42P01)` line
+ * sitting in the log immediately above the assertion saying it had never been
+ * emitted. A fixture's own pin going red for a probe that fired exactly as
+ * designed.
+ *
+ * ## Why the CALLER declares it, and why this is not a relaxation
+ *
+ * The fixture is the one thing that knows which server it rigged; a capture
+ * that guessed would be guessing per call site. Both halves of the predicate
+ * still have to hold and still have to name the same table — the envelope pins
+ * it positively, and the reason must be THIS dialect's missing-table sentence
+ * about THAT table. Nothing is widened: a permission denial, a dropped
+ * connection or a syntax fault still fails the reason half on every dialect.
+ *
+ * ⚠️ Two spellings only, and that is a measurement, not an oversight. MySQL's
+ * (`Table 'db.t' doesn't exist`) is DATABASE-QUALIFIED, so the plain fragment
+ * form below cannot express it, and no fixture in this package rigs MySQL —
+ * declaring an entry nothing exercises is the "declared but not enforced" trap
+ * this repo files cards about. Add it WITH the fixture that needs it.
+ *
+ * The canonical, error-object-shaped form of this question is
+ * `isMissingTableError` in `@objectstack/types`; it is deliberately not
+ * imported here, because this module is reached by RELATIVE path from other
+ * packages' tests (`trigger-record-change`, `plugin-approvals`), so a bare
+ * workspace specifier added here lands in THEIR resolution domain and reddens
+ * `check:test-source-alias` for them. Measured: it does.
+ */
+export type MissingTableReason = (table: string) => string;
+
+/** SQLite / libsql: `no such table: sys_organization`. */
+export const SQLITE_MISSING_TABLE_REASON: MissingTableReason = (t) => `no such table: ${t}`;
+
+/** PostgreSQL: `relation "sys_organization" does not exist`. */
+export const POSTGRES_MISSING_TABLE_REASON: MissingTableReason = (t) =>
+  `relation "${t}" does not exist`;
+
+/**
  * Build a capture for the tables a fixture deliberately does not provision.
  *
- * @param tables the object/table names whose `no such table` read failures are
+ * @param tables the object/table names whose missing-table read failures are
  *   EXPECTED here. Derive them by measurement rather than from the prober's
  *   source, so a read the fixture stops provoking shows up as a changed set
  *   rather than silently.
+ * @param reason [#18617] the dialect sentence the driver's refusal line must
+ *   also carry — see {@link MissingTableReason}. Defaults to SQLite's, which is
+ *   what every caller that predates the driver axis rigs.
  */
 export function captureExpectedReadRefusals(
   tables: readonly string[],
+  reason: MissingTableReason = SQLITE_MISSING_TABLE_REASON,
 ): ExpectedReadRefusalCapture {
   const refusals = new Map<string, number>();
   const engineFrames = new Map<string, number>();
@@ -232,31 +284,13 @@ export function captureExpectedReadRefusals(
    * permission denial, a dropped connection or a syntax fault — every one of
    * which is a real signal on a table this fixture merely also happens to miss.
    *
-   * ## [#18617] The reason half asks the SHARED predicate, not a literal
-   *
-   * `no such table:` is SQLite's phrasing and only SQLite's. PostgreSQL says
-   * `relation "sys_organization" does not exist`, MySQL says
-   * `Table 'db.t' doesn't exist` — so on any dialect but SQLite the reason half
-   * never matched, the refusal was never recognised, and this capture passed it
-   * through to `console` while `silentChannels()` reported the channel silent:
-   * the fixture's own pin going red for a probe that fired exactly as designed,
-   * and the noise it exists to withhold printed anyway. Measured on a live
-   * PostgreSQL 16.13 while pinning the multi-value cascade-delete path across
-   * the driver axis (#18617) — all eight cases of the live cell failed here,
-   * with the driver's `(42P01)` line sitting in the log immediately above the
-   * assertion that said it had never been emitted.
-   *
-   * {@link isMissingTableError} is this repo's ONE vocabulary for that question
-   * (`@objectstack/types`, the `MISSING_TABLE` signature) and it accepts a bare
-   * string. Handed the read's table it also refuses a phrase naming a DIFFERENT
-   * relation, so the "same table" half survives the widening: the envelope
-   * still pins the table positively, and the reason must be a missing-table
-   * phrase that is not about some other one. ⛔ A second per-dialect regex here
-   * is the shape AGENTS.md rejects — ask the shared predicate, never grow a
-   * parallel vocabulary.
+   * [#18617] The reason half is the CALLER'S — see {@link MissingTableReason}
+   * and the `reason` parameter. Both halves still have to hold, and both still
+   * have to name the same table; what moved is only which dialect's sentence
+   * the second half is looking for.
    */
   const expectedRefusal = (line: string): string | undefined =>
-    tables.find((t) => line.includes(`refused a read on '${t}'`) && isMissingTableError(line, t));
+    tables.find((t) => line.includes(`refused a read on '${t}'`) && line.includes(reason(t)));
 
   const sum = (m: Map<string, number>): number => {
     let n = 0;

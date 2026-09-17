@@ -111,7 +111,10 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 import { SqlDriver } from '@objectstack/driver-sql';
 import {
   captureExpectedReadRefusals,
+  POSTGRES_MISSING_TABLE_REASON,
+  SQLITE_MISSING_TABLE_REASON,
   type ExpectedReadRefusalCapture,
+  type MissingTableReason,
 } from './expected-read-refusal-noise.js';
 
 const ACCOUNT = { name: 'zz_account', fields: { name: { type: 'text' } } };
@@ -291,6 +294,17 @@ const DIALECT_CELLS: readonly DialectCell[] = [
 ];
 
 /**
+ * [#18617] Which missing-table sentence each cell's server writes. Keyed by the
+ * cell id so a new cell cannot be added without answering the question —
+ * `Record` over the id union is what makes the omission a type error rather
+ * than a silently unrecognised refusal at run time.
+ */
+const MISSING_TABLE_REASON: Record<DialectCell['id'], MissingTableReason> = {
+    sqlite: SQLITE_MISSING_TABLE_REASON,
+    pg: POSTGRES_MISSING_TABLE_REASON,
+};
+
+/**
  * Declare a cell nobody provisioned: a named skip locally, a FAILURE under
  * `OS_EXPECT_LIVE_DIALECT_MATRIX=1`.
  *
@@ -393,7 +407,12 @@ function declareCascadeDeleteCell(cell: DialectCell): void {
         const real = await newDriver();
         // [#10629] Installed before the driver runs a statement and before the
         // engine issues a read — the two sinks the expected refusal travels out on.
-        noise = captureExpectedReadRefusals([ABSENT_TENANCY_TABLE]);
+        // [#18617] The reason half is this CELL'S dialect: the refusal line the
+        // driver writes says `no such table: sys_organization` on SQLite and
+        // `relation "sys_organization" does not exist` on PostgreSQL, and a
+        // capture handed the wrong one recognises nothing — it prints the noise
+        // it exists to withhold AND reports the channel silent.
+        noise = captureExpectedReadRefusals([ABSENT_TENANCY_TABLE], MISSING_TABLE_REASON[cell.id]);
         noise.captureDriver(real);
         await real.initObjects(objects as any);
         engine = new ObjectQL();
