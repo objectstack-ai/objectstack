@@ -934,6 +934,11 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // the two directories above.
       'scripts/check-published-files.mjs',
       'scripts/check-cross-package-test-inputs.mjs',
+      // [#18650] This module itself, NAMED the same way and settled the same
+      // way: src/checklist-refusal-envelope-consistency.test.ts cites it in
+      // prose as where its own escaping read is declared, and the collector
+      // takes the quoted path without parsing. Low-churn like the two above.
+      'scripts/cross-package-test-inputs.mjs',
       'packages/types/src/node-isolation.test.ts',
       // That same test imports `stripComments` from `js-comment-mask.mjs` to
       // separate code from prose in the 423 sources it walks -- the conversion
