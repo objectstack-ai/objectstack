@@ -29,6 +29,14 @@
  * {@link runPerPackageAuthoringRules} — for the same reason one layer out: the
  * `os build` door ran it and the `os validate` door did not, and a second copy
  * of the loop is how that asymmetry would come back.
+ *
+ * ⚠️ #18778 measured that the asymmetry was 2 of 3 doors, not 1 of 2: `os lint`
+ * ran the union fold and stopped as well, and the reading that hid it is the
+ * one this module's own header invites — `lint.ts` DOES import both seams
+ * above, for its intra-package duplicate-name advisory (#17821), so a sweep
+ * that scores a door by symbol presence scores it as covered. ⛔ A count is not
+ * a reading: what matters is which loop the symbols feed. All three doors call
+ * the pass now.
  */
 
 import {
@@ -132,20 +140,23 @@ export function packageBodyAsStack(
 
 /**
  * The author-time rule table, run ONCE PER PACKAGE and de-duplicated against a
- * union run — the pass `os build` has run since #16611 and `os validate` did
- * not (#18677).
+ * union run — the pass `os build` has run since #16611, `os validate` did not
+ * (#18677) and `os lint` did not (#18778).
  *
- * ## Why it lives here and not in one of the two commands
+ * ## Why it lives here and not in one of the commands
  *
  * It is the THIRD entry to owe the shape the module header describes, and the
  * header's fence binds it: the only ways to reach `compile.ts`' loop from
- * `validate.ts` are to import one oclif command from another — pulling the
- * lowerer and the docs sweep into every `os validate` invocation — or to write
- * a second copy. ⛔ The second copy is what must not happen, and here it would
- * not be the `{index,id,body}` reading that drifted but the VERDICT: two loops
- * choosing their own de-duplication key, their own severity split or their own
- * `where` prefix is how one door comes to report a different set from the other
- * while both look right. That is the defect #18677 is, one layer down.
+ * another command are to import one oclif command from another — pulling the
+ * lowerer and the docs sweep into every `os validate` / `os lint` invocation —
+ * or to write a second copy. ⛔ The second copy is what must not happen, and
+ * here it would not be the `{index,id,body}` reading that drifted but the
+ * VERDICT: two loops choosing their own de-duplication key, their own severity
+ * split or their own `where` prefix is how one door comes to report a
+ * different set from another while both look right. That is the defect #18677
+ * is, one layer down — and #18778 is the measurement that the fence held: the
+ * third door reached the SAME pass, and nothing about the pass moved but the
+ * shape it hands back.
  *
  * ## What the asymmetry was, measured
  *
@@ -187,14 +198,30 @@ export function runPerPackageAuthoringRules(run: {
 }): {
   /** How many package entries were walked — 0 means the pass did not run. */
   packageCount: number;
+  /**
+   * Every surviving finding, `where`-prefixed, in walk order — the SAME set as
+   * `errors` ∪ `advisories`, not a second computation of it (#18778).
+   *
+   * The two doors that hold an ARTIFACT to the bar need the severity SPLIT:
+   * an `error` refuses the run and an advisory rides the warnings list, so
+   * `compile.ts` and `validate.ts` read the two arrays below. `os lint` has no
+   * such split — it maps every finding of every severity onto ONE `issues`
+   * list through its own `info` → `suggestion` face and lets `--strict` decide
+   * what fails — so re-joining the halves at that door would put all errors
+   * before all advisories and silently re-order a list the union run above it
+   * produces in rule order. This member is that door's shape, produced by the
+   * one loop rather than by a caller stitching the halves back together.
+   */
+  findings: AuthoringFinding[];
   errors: Array<{ package: string } & AuthoringFinding>;
   advisories: AuthoringFinding[];
 } {
   const artifactPackageEntries = run.parsed.packages;
   const packageEntries = artifactPackages(run.parsed);
+  const findings: AuthoringFinding[] = [];
   const errors: Array<{ package: string } & AuthoringFinding> = [];
   const advisories: AuthoringFinding[] = [];
-  if (packageEntries.length === 0) return { packageCount: 0, errors, advisories };
+  if (packageEntries.length === 0) return { packageCount: 0, findings, errors, advisories };
 
   const alreadyReported = new Set(run.unionFindings.map(findingKey));
   for (const pkg of packageEntries) {
@@ -206,13 +233,19 @@ export function runPerPackageAuthoringRules(run: {
       loweredHookRefs: run.loweredHookRefs,
     }).filter((f) => !alreadyReported.has(findingKey(f)));
     for (const f of pkgFindings) alreadyReported.add(findingKey(f));
+    // ⛔ ONE prefixer, applied to every member of all three lists. The `where`
+    // prefix is the only thing that identifies a finding as per-package on any
+    // door's face, and a second spelling of it is the drift this module exists
+    // to foreclose — one layer smaller than the second copy of the loop its
+    // header forbids, and invisible in exactly the same way.
+    const prefixed = (f: AuthoringFinding): AuthoringFinding => ({
+      ...f,
+      where: `package '${pkg.id}' — ${f.where}`,
+    });
+    findings.push(...pkgFindings.map(prefixed));
     const split = splitBySeverity(pkgFindings);
-    advisories.push(
-      ...split.advisories.map((a) => ({ ...a, where: `package '${pkg.id}' — ${a.where}` })),
-    );
-    errors.push(
-      ...split.errors.map((e) => ({ ...e, package: pkg.id, where: `package '${pkg.id}' — ${e.where}` })),
-    );
+    advisories.push(...split.advisories.map(prefixed));
+    errors.push(...split.errors.map((e) => ({ ...prefixed(e), package: pkg.id })));
   }
-  return { packageCount: packageEntries.length, errors, advisories };
+  return { packageCount: packageEntries.length, findings, errors, advisories };
 }
