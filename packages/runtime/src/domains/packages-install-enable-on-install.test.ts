@@ -257,7 +257,7 @@ describe('#18058 — a re-install persists the state it RETURNS, not just a disa
         // the door installs at the default. The durable record must follow.
         const again = await install(dispatcher, manifest(id, 'reinstallbare'));
 
-        expect(again.response?.status).toBe(409, 'the bare form reaches overwrite through the query string alone');
+        expect(again.response?.status, 'the bare form reaches overwrite through the query string alone').toBe(409);
 
         const forced = await dispatcher.handlePackages(
             '', 'POST', manifest(id, 'reinstallbare'), { overwrite: 'true' }, PKG_ADMIN(),

@@ -774,9 +774,9 @@ describe('#18058 — install contract bound to the live door', () => {
    * ⛔ The remedy is to SAY that, not to relax `ManifestSchema`.
    */
   describe('the measured bare-form senders are the RESIDUAL, not green fixtures', () => {
-    /** `packages/runtime/src/package-door-namespace-conflict-code.test.ts:83` — no `type`. */
+    /** The `manifest` helper in `packages/runtime/src/package-door-namespace-conflict-code.test.ts` — no `type`. */
     const DOOR_DRIVE_CONFLICT = { id: 'com.acme.crm', name: 'com.acme.crm', namespace: 'crm', version: '1.0.0' };
-    /** `packages/runtime/src/domain-handler-registry.test.ts:582` — no `type`, no `version`. */
+    /** The duplicate-id drive in `packages/runtime/src/domain-handler-registry.test.ts` — no `type`, no `version`. */
     const DOOR_DRIVE_REGISTRY = { id: 'pkg-a', name: 'A' };
 
     it('the namespace-conflict drive is REFUSED — it carries no `type`', () => {
