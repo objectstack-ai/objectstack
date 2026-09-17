@@ -85,5 +85,11 @@ acting organization"). Two things to check:
 'declared'`, and `requiresActingOrganization` narrows from "any walled posture"
 to `isolated` only. The two are deliberately separate axes: the boolean decides
 whether BIND refuses, `runOwnership` decides what a run that DID bind carries.
-`@objectstack/trigger-schedule` exports `describeScheduleRunOwnership` so both
-triggers describe one deployment identically.
+Inside `@objectstack/trigger-schedule`, both triggers share one bind-line
+vocabulary (`describeScheduleRunOwnership`) so they cannot describe one
+deployment differently. ⚠️ That helper is module-level, NOT a package export: it
+is not re-exported from the package barrel, whose own note says an export whose
+only consumers live inside its own package belongs in a non-barrel module. The
+new PUBLIC surface in this change is `ScheduledRunOwnership` and the
+`runOwnership` key, both on `@objectstack/types` — and those alone are what put
+`Clause-②` at `yes`.
