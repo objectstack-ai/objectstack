@@ -21,7 +21,8 @@ import { isActionParamValuePresent } from './action-params.zod';
 // reaches only `shared/` + `data/`, so it cannot close a cycle back to `ui/`.
 import { BulkActionExecutionSchema } from './bulk-action.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
-import { EvaluatedExpressionInputSchema, evaluatedExpressionUnionRefusal } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
+import { evaluatedExpressionUnionRefusal } from '../shared/evaluated-slot-union';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { HookBodySchema } from '../data/hook-body.zod';
 // Imported file-directly (not via the kernel barrel): the module is

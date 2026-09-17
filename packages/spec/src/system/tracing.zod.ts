@@ -1,7 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { EVALUATED_EXPRESSION_SOURCE_REQUIRED, EvaluatedExpressionInputSchema, evaluatedExpressionUnionRefusal } from '../shared/expression.zod';
+import { EVALUATED_EXPRESSION_SOURCE_REQUIRED, EvaluatedExpressionInputSchema } from '../shared/expression.zod';
+import { evaluatedExpressionUnionRefusal } from '../shared/evaluated-slot-union';
 
 /**
  * Tracing Protocol - Distributed Tracing & Observability

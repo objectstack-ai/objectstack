@@ -265,40 +265,6 @@ export const EvaluatedExpressionInputSchema = z.union([
 export type EvaluatedExpressionInput = z.input<typeof EvaluatedExpressionInputSchema>;
 
 /**
- * The same refusal, for an evaluated slot whose declaration wraps
- * {@link EvaluatedExpressionInputSchema} in a WIDER union — `z.boolean()` beside
- * it on `action.visible` / `action.disabled` / `RecordAlertProps.visible`, a
- * structured object beside it on `ServiceLevelIndicator.successCriteria`, a
- * structured filter beside it on `TraceSamplingConfig.composite[].condition`
- * (#15811).
- *
- * Without it those five positions refuse the two unrunnable shapes with zod's
- * bare `Invalid input`: the outer union reports `invalid_union` at the slot and
- * the inner union's sentence never surfaces. The rule is "one rule, one
- * message", so the outer union answers the same sentence the slot's own schema
- * would have.
- *
- * ⚠️ Deliberately STRICTER than {@link evaluatedExpressionInputRefusal}, which
- * it does not replace. That one is scoped to a union whose every arm IS an
- * expression, so any object input is an expression the author got wrong. Here
- * the sibling arm is something else entirely, and blaming `source` for a
- * malformed threshold object or a mistyped filter would send the author to the
- * wrong key. So it answers only for an input that is recognisably an expression
- * attempt: a blank string (a non-blank one is simply accepted), or an object
- * carrying a `dialect` key with no string `source`.
- */
-export function evaluatedExpressionUnionRefusal(input: unknown): string | undefined {
-  if (typeof input === 'string') {
-    return input.trim().length > 0 ? undefined : EVALUATED_EXPRESSION_SOURCE_REQUIRED;
-  }
-  if (input && typeof input === 'object' && !Array.isArray(input) && 'dialect' in input
-    && typeof (input as { source?: unknown }).source !== 'string') {
-    return EVALUATED_EXPRESSION_SOURCE_REQUIRED;
-  }
-  return undefined;
-}
-
-/**
  * The dialects that have a TYPED input schema below. On a typed slot the bare
  * string is shorthand for this dialect, and the envelope arm accepts this
  * dialect only.
