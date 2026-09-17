@@ -724,12 +724,12 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
                       `engine re-reads it as the run's identity. Otherwise reference the foreign-key id directly ` +
                       `('{record.${head}}'), or project the value via a formula field on '${objectName}'.`
                   : inFilter
-                    ? `A record read into a flow variable is not expanded either — config.expand (#3475) is the ` +
+                    ? `A record read into a flow variable is not expanded either — config.expand is the ` +
                       `START node's opt-in and covers the trigger record alone. Filter on the foreign-key id ` +
                       `directly ('{${rootName}.${head}}'), project the value via a formula field on ` +
                       `'${objectName}', or add a get_record node that reads the related record. This gates the ` +
                       `build rather than warning: an absent condition WIDENS the query.`
-                    : `A record read into a flow variable is not expanded either — config.expand (#3475) is the ` +
+                    : `A record read into a flow variable is not expanded either — config.expand is the ` +
                       `START node's opt-in and covers the trigger record alone. Reference the foreign-key id ` +
                       `directly ('{${rootName}.${head}}'), project the value via a formula field on ` +
                       `'${objectName}', or add a get_record node that reads the related record.`,
