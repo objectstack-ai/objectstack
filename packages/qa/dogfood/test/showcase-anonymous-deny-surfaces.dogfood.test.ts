@@ -311,8 +311,26 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     }
     const r = await stack.apiAs(adminToken, 'GET', `/meta/object/${META_PROBE_OBJECT}`);
     expect(r.status, 'the object the anonymous PUT tried to author must not exist').toBe(404);
-    const body = (await r.json()) as Record<string, unknown>;
-    expect(body.code).toBe('RESOURCE_NOT_FOUND');
+    const body = (await r.json()) as { error?: { code?: string } };
+    // [#18402] ENVELOPE, not semantics. The claim this case makes — the
+    // anonymous PUT left nothing behind, so the object is absent — is carried
+    // by the `404` above and is unchanged; only where the code is READ moved.
+    // `GET /meta/:type/:name` used to answer absence in two envelopes and
+    // `metadata.enableCache` picked one, so this line read the FLAT `body.code`
+    // and the route's own item-less arm answered the nested one. Both arms now
+    // reach the single absence emitter, and this is the ADR-0112 accessor #8013
+    // settled on.
+    //
+    // ⭐ Worth recording where this file records it: the showcase declares no
+    // `enableCache`, so it runs the DEFAULT `true` and `object` takes the
+    // CACHED arm. This case is therefore the measurement that the flat dialect
+    // was the answer a default deployment really shipped for a non-`app` type —
+    // not the minority path.
+    //
+    // ⛔ Read in its own shape, with no `??` chain across the two shells — the
+    // #5632 rule this file already enforces for the 401 bodies and for the
+    // `/actions` 404 below.
+    expect(body.error?.code).toBe('RESOURCE_NOT_FOUND');
   });
 
   it('[#12176 D3] the retired compound save routes NOWHERE — 404 for everyone, not a 401', async () => {
