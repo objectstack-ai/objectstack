@@ -1158,33 +1158,6 @@ function parseDeclaredSubConfig<T extends z.ZodType>(
 }
 
 /**
- * RestServer
- * 
- * Provides automatic REST API endpoint generation for ObjectStack.
- * Generates standard RESTful CRUD endpoints, metadata endpoints, and batch operations
- * based on the configured protocol provider.
- * 
- * Features:
- * - Automatic CRUD endpoint generation (GET, POST, PUT, PATCH, DELETE)
- * - Metadata API endpoints (/meta)
- * - Batch operation endpoints (/batch, /createMany, /updateMany, /deleteMany)
- * - Discovery endpoint
- * - Configurable path prefixes
- * 
- * @example
- * const restServer = new RestServer(httpServer, protocolProvider, {
- *   api: {
- *     version: 'v1',
- *     basePath: '/api'
- *   },
- *   crud: {
- *     dataPrefix: '/data'
- *   }
- * });
- * 
- * restServer.registerRoutes();
- */
-/**
  * Minimal env registry shape consumed by the REST server for hostname →
  * environmentId resolution and `X-Environment-Id` header validation on unscoped
  * routes. Mirrors the surface of `EnvironmentDriverRegistry` defined in
@@ -1559,6 +1532,33 @@ function sendMetaItemAbsent(res: any): void {
     });
 }
 
+/**
+ * RestServer
+ * 
+ * Provides automatic REST API endpoint generation for ObjectStack.
+ * Generates standard RESTful CRUD endpoints, metadata endpoints, and batch operations
+ * based on the configured protocol provider.
+ * 
+ * Features:
+ * - Automatic CRUD endpoint generation (GET, POST, PUT, PATCH, DELETE)
+ * - Metadata API endpoints (/meta)
+ * - Batch operation endpoints (/batch, /createMany, /updateMany, /deleteMany)
+ * - Discovery endpoint
+ * - Configurable path prefixes
+ * 
+ * @example
+ * const restServer = new RestServer(httpServer, protocolProvider, {
+ *   api: {
+ *     version: 'v1',
+ *     basePath: '/api'
+ *   },
+ *   crud: {
+ *     dataPrefix: '/data'
+ *   }
+ * });
+ * 
+ * restServer.registerRoutes();
+ */
 export class RestServer {
     private protocol: RestProtocol;
     private config: NormalizedRestServerConfig;
@@ -1824,28 +1824,6 @@ export class RestServer {
     }
 
     /**
-     * Resolve the protocol for a given request. When `environmentId` is present
-     * and a KernelManager is wired, fetch the per-project kernel's
-     * `protocol` service so metadata / data / UI reads hit the project's
-     * own registry and datastore.
-     *
-     * When `environmentId` is absent on an unscoped route and an `envRegistry`
-     * is wired (runtime mode), the resolution chain is:
-     *   1. Hostname → environmentId (`envRegistry.resolveByHostname`)
-     *   2. `X-Environment-Id` header → environmentId (`envRegistry.resolveById`)
-     *   3. Default-project fallback (`defaultEnvironmentIdProvider`, set by
-     *      `createSingleEnvironmentPlugin`)
-     *   4. Control-plane protocol captured at boot.
-     *
-     * Special case: `environmentId === 'platform'` is a reserved virtual id used
-     * by Studio to address the control plane through the regular environment
-     * URL shape (`/environments/platform/...`). It is NOT a row in the projects
-     * table, so we must never call `KernelManager.getOrCreate('platform')`.
-     * Instead, return the control-plane protocol directly. This lets Studio
-     * (and any other client) speak a single, uniform URL family without
-     * duplicating route logic for the platform surface.
-     */
-    /**
      * Cached wrapper around `envRegistry.resolveByHostname` (P1-4). Returns the
      * cached result while fresh; on a miss it queries the registry and caches the
      * outcome (positive *and* negative) for {@link hostnameCacheTtlMs}. Registry
@@ -1946,6 +1924,14 @@ export class RestServer {
      * response served against no kernel. Removing the first (wasted) window
      * shortened the wait to that 503; it did not, and must not, turn it into a
      * success.
+     *
+     * Special case: `environmentId === 'platform'` is a reserved virtual id used
+     * by Studio to address the control plane through the regular environment
+     * URL shape (`/environments/platform/...`). It is NOT a row in the projects
+     * table, so we must never call `KernelManager.getOrCreate('platform')`.
+     * Instead, return the control-plane protocol directly. This lets Studio
+     * (and any other client) speak a single, uniform URL family without
+     * duplicating route logic for the platform surface.
      */
     private async resolveProtocol(environmentId?: string, req?: any): Promise<RestProtocol> {
         if (environmentId === 'platform') return this.protocol;
@@ -11040,22 +11026,6 @@ export class RestServer {
     }
 
     /**
-     * Register record-level sharing endpoints (M11.C17).
-     *
-     * Surfaces `ISharingService` over HTTP so the UI can list, create
-     * and revoke per-record grants without going through ObjectQL. The
-     * three routes mirror the share-management drawer in Salesforce /
-     * ServiceNow:
-     *
-     *   GET    {basePath}/data/:object/:id/shares
-     *   POST   {basePath}/data/:object/:id/shares
-     *   DELETE {basePath}/data/:object/:id/shares/:shareId
-     *
-     * All three resolve via `sharingServiceProvider`; routes return 501
-     * when no sharing service is configured so a deployment without the
-     * `@objectstack/plugin-sharing` plugin fails cleanly.
-     */
-    /**
      * ADR-0021 — analytics dataset preview/query endpoint.
      *
      *   POST {basePath}/analytics/dataset/query
@@ -11775,6 +11745,22 @@ export class RestServer {
         });
     }
 
+    /**
+     * Register record-level sharing endpoints (M11.C17).
+     *
+     * Surfaces `ISharingService` over HTTP so the UI can list, create
+     * and revoke per-record grants without going through ObjectQL. The
+     * three routes mirror the share-management drawer in Salesforce /
+     * ServiceNow:
+     *
+     *   GET    {basePath}/data/:object/:id/shares
+     *   POST   {basePath}/data/:object/:id/shares
+     *   DELETE {basePath}/data/:object/:id/shares/:shareId
+     *
+     * All three resolve via `sharingServiceProvider`; routes return 501
+     * when no sharing service is configured so a deployment without the
+     * `@objectstack/plugin-sharing` plugin fails cleanly.
+     */
     private registerSharingEndpoints(basePath: string): void {
         const { crud } = this.config;
         const dataPath = `${basePath}${crud.dataPrefix}`;
