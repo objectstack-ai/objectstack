@@ -78,7 +78,7 @@ describe('UserSchema', () => {
  * serialises it present-and-null for a user who never set an avatar, so
  * `/auth/sign-up/email` and `/auth/get-session` both carry `"image": null`.
  * Measured on a real `AuthManager` over ObjectQL + driver-sqlite-wasm; the
- * evidence and its controls are in PR #18510's body.
+ * evidence and its controls are in PR #18718's body.
  *
  * The whole accept set is pinned, not just the row that moved, so that a later
  * flip to `.nullable()` (which would retire the legal absent-key shape) or a

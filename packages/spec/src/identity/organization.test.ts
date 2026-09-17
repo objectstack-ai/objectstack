@@ -124,7 +124,7 @@ describe('OrganizationSchema', () => {
  * with `notnull=0`. `/auth/organization/create`, `/auth/organization/list` and
  * `/auth/organization/get-full-organization` all serve `"logo": null` for an
  * organization created without one. Measured on a real `AuthManager` over
- * ObjectQL + driver-sqlite-wasm; evidence and controls in PR #18510's body.
+ * ObjectQL + driver-sqlite-wasm; evidence and controls in PR #18718's body.
  *
  * The whole accept set is pinned, not just the row that moved — see the sibling
  * block in `identity.test.ts` for why.
