@@ -1,0 +1,32 @@
+{
+  "number": 9562,
+  "kind": "issue",
+  "title": "A field denied by FLS (readable:false) is exactly recoverable from a readable formula that references it — measured on showcase_project.budget",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T10:41:43Z",
+  "updated_at": "2026-08-18T12:27:07Z",
+  "closed_at": "2026-08-18T12:27:07Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9562",
+  "body": "Measured while pinning the FLS read side for #9481 (the pin itself deliberately asserts nothing about this, so that a future fix does not read as a regression).\n\n## What was measured\n\nBoot: stock showcase, dogfood harness, app-default security wiring. A scratch permission set grants a fresh member exactly one thing:\n\n```json\n{ \"showcase_project.budget\": { \"readable\": false, \"editable\": false } }\n```\n\n`GET /api/v1/data/showcase_project/:id` as that member returns 200 with `budget` correctly **stripped** — the key is absent, which is the documented and now-pinned behaviour. The same payload also carries:\n\n- `spent`: 60000  (not enumerated by the set, so readable — correct)\n- `budget_remaining`: 90000\n\n`showcase_project.budget_remaining` is a formula field:\n\n```\n(record.budget == null ? 0 : record.budget) - (record.spent == null ? 0 : record.spent)\n```\n\nso the denied value is recoverable exactly: `budget = budget_remaining + spent = 150000`. Confirmed against the system-context row, which reads `budget: 150000`.\n\n## Why this is worth a card rather than a shrug\n\nThe runtime already treats **indirect** disclosure of an FLS-denied field as in scope, and says so in its own refusal text. Filtering or sorting on the stripped field answers 403 PERMISSION_DENIED with:\n\n> query on 'showcase_project' references field(s) not readable by the caller: budget. Filtering, sorting, grouping, or aggregating by a hidden field would leak its values (filter oracle) — remove these predicates or grant field read access.\n\nSo the filter oracle is closed by the product, deliberately, while a formula that arithmetically republishes the same value is served. The two are the same disclosure class; only one is guarded.\n\nThe mechanism is consistent with the documented model — `getFieldPermissions` is an allow-list over **enumerated** fields, and `budget_remaining` was not enumerated — so this may well be authoring responsibility rather than a runtime bug. That is exactly the judgement this card is asking for.\n\n## Readings\n\n1. **Authoring responsibility, enforced at author time.** A lint rule in the ADR-0049 declared-equals-enforced family: a formula (or summary) field that references field F must not be readable by a persona for whom F is `readable: false`, unless the author says so explicitly. Fits the \"make it hard to get wrong at authoring time\" direction and costs no runtime work.\n2. **Runtime derivation-closure.** Strip a formula field whenever the caller is denied any field its expression reads. Correct but expensive and possibly surprising — a rollup over a restricted column would vanish for most personas.\n3. **Documented as-is.** State in the permissions docs that FLS is per-declared-field and does not close over derivations, so authors know they must deny the derived fields too.\n\nReading 1 looks right to me on the three axes, but the call is the maintainer's, not mine.\n\n## Not covered by anything today\n\n- No checklist item covers it: `access-security.fls-mask-and-strip`'s clauses are about the field's own read/write, and its read half is now pinned by `packages/qa/dogfood/test/showcase-fls-read-mask-strip.dogfood.test.ts` for the STRIP mechanism only.\n- Not the same thing as #9127 (explain-surface reporting of partial masking), which is closed.\n- Independent of #9308 — that card lands a stock `readable:false` seed grant; this behaviour is present with or without it.\n\nFiled unassigned from the #9481 dev seat, out of that card's scope. Scope note for triage: #9481 is not fixed or changed by this, and #9308 remains open independently."
+}

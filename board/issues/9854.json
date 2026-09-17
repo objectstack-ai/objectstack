@@ -1,0 +1,35 @@
+{
+  "number": 9854,
+  "kind": "issue",
+  "title": "lane consolidation: engine-core+metadata+drivers → domain:engine; identity folds into domain:services — table first, rename trick, 44-card migration",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T05:31:46Z",
+  "updated_at": "2026-08-19T07:30:35Z",
+  "closed_at": "2026-08-19T07:08:45Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9854",
+  "body": "Maintainer ruling (2026-08-19, PM chat, verbatim): 「engine-core + metadata + drivers ->  engine, identity + services → services 怎么样?」 — proposed by the maintainer over the skills seat's measured lane-distribution report (13 seats → 10; the three engine-side lanes total ~4 active cards and are already de-facto run by one session; both identity and services seats are vacant with ~16 active cards combined). This card implements it. Lane-label merge (not a multi-lane seat): the 一座位一车道 bijection survives unchanged.\n\n## Sequencing constraint (binding)\n\n**The anchoring table lands BEFORE any new label enters circulation** — a label in circulation but not in the table is an ownerless lane. So: this card's PR (table + tooling text) merges first; the label operations follow as seat work.\n\n## Scope of the PR (this card's dispatch)\n\n`.claude/skills/pm-dispatch/SKILL.md` domain-lane table (锚定规则):\n\n- Merge the `domain:engine-core` / `domain:metadata` / `domain:drivers` rows into one **`domain:engine`** row carrying all three package families verbatim; keep the maintainer's 2026-08-05 investment-freeze note on the `driver-memory`/`driver-mongodb` family (the freeze rides the packages, not the lane).\n- Fold `domain:identity`'s four packages (`plugin-auth`, `plugin-security`, `plugin-sharing`, `plugin-audit`) into the **`domain:services`** row.\n- Mark the four retired labels as retired **in the table** (labels are NOT deleted from the repo — deleting strips closed cards and destroys the archive; the table is what stops production).\n- Sweep the skill tree for other literal mentions of the retired lane names (`grep` for `engine-core|domain:metadata|domain:drivers|domain:identity` across `.claude/skills/pm-dispatch/**`, `.claude/agents/os-dev.md`) and update or point them; report what was found.\n- Ratchet: payment owed if net lines rise — three rows collapsing into one should pay for itself.\n\n## Seat work after the PR merges (NOT the dev's; recorded here for the executing seat)\n\n1. Label rename `domain:engine-core` → `domain:engine` (GitHub rename carries all open+closed cards at zero per-card cost).\n2. Per-card migration, read-modify-write with read-back, rate-limit-paced: `domain:metadata` (12 open) and `domain:drivers` (8 open) → `domain:engine`; `domain:identity` (24 open) → `domain:services`. Closed cards keep their historical labels.\n3. Seat-post consolidation: the engine-side three posts collapse into one `domain:engine` post (edit history is the archive; the holder session is asked via a queue card per the request-card protocol, not a seat-post knock); the two vacant identity/services posts collapse into one `domain:services` post.\n4. Maintainer's remaining share: create ONE `services` seat Routine in the Routines UI; merge this card's PR when it reaches the chain head.\n\nCounts measured 2026-08-19 ~05:3xZ (open cards): engine-core 11 · metadata 12 · drivers 8 · identity 24 · services 14.\n\nGraded at filing by the skills seat (own-lane exception): `pm:queue`, S/M. `.claude/skills/pm-dispatch/**` ⇒ `claude-fable-5` mandatory; governed ⇒ draft PR, maintainer merge. Serial: SKILL.md hot-file chain — maintainer-direct channel priority: next after the in-flight hold-discharge card lands, ahead of the remaining chain queue."
+}

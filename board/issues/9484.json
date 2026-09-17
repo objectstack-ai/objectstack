@@ -1,0 +1,35 @@
+{
+  "number": 9484,
+  "kind": "issue",
+  "title": "skills(checklist-test): write the run close-out and re-test process into the skill — four-way disposition, record lifecycle, re-test triggers",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T03:59:22Z",
+  "updated_at": "2026-08-18T06:47:11Z",
+  "closed_at": "2026-08-18T06:47:11Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9484",
+  "body": "Blocked-by: #9387\n\nMaintainer authorization (2026-08-18, PM chat, skills-seat session `session_01Rn7aaamsR99FXRqLcpL99q`): 「同意你的落地动作」, approving the QA management-loop design. This card lands the process text; it is blocked on #9387 because its PR #9470 edits the same file (`checklist-test/SKILL.md`) — hard same-file serial, and the close-out text must be written against the post-#9470 section structure (tiering, completion criteria).\n\n## Content to land (design ruled in the 2026-08-18 discussion; zero new labels — every state uses existing carriers)\n\n1. **Run close-out is part of every run** (extends the #9366 extraction duty): a `qa-run` record closes only after —\n   - every `FAIL` gets a four-way disposition on the record's own evidence: product defect → independent bug card (dup-check, fix-landing repo, no pm labels, enters normal triage) / assertion defect → test-fix card in the owning repo / stale spec → re-point card / invalid pairing → blocked note, no card;\n   - `PARTIAL` coverage gaps are either filed as per-area pin-upgrade cards or parked on the wave anchor — named, never dropped;\n   - `NOT-RUN` keeps the handover list (already required);\n   - the close-out comment is machine-greppable: `Extracted: …` / `Parked-on: …` / `Superseded-by: …` / `Carried-forward: …`.\n   **Open `qa-run` count = outstanding close-out debt** — the health reading, same construction as bare `finding` count.\n2. **Extracted-card traceability**: every card extracted from a run carries a body line `QA-source: #<run> · <area.item> · <clause>` — greppable, no label.\n3. **Supersede protocol**: a re-run that re-covers an older record's ground closes the old one (not_planned + `Superseded-by:`), after carrying forward any verdict the new run did not re-derive.\n4. **Re-test triggers**, three and only three: (a) release candidate → full Tier-1 re-run; (b) a QA-sourced fix card lands → the accepting seat appends the affected items to the wave anchor's re-test checklist (mirror of the cross-repo follow-up rule); (c) maintainer names a target.\n5. **Record labels**: `qa-run` only (restate #9366; the e4e5c6e3-wave drift — `tests`/`tracking`/`bug` on records — is the counter-example).\n\nADR-class: draft PR, human merge. Chinese instruction text, English machine criteria. Watch the register of the existing file — land rows in its actual structure."
+}

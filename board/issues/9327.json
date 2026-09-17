@@ -1,0 +1,34 @@
+{
+  "number": 9327,
+  "kind": "issue",
+  "title": "[finding] The `field` metadata type can never match as a reference TARGET — items are keyed `&lt;object&gt;.&lt;field&gt;` while every reference site holds a bare field name",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-17T13:54:47Z",
+  "updated_at": "2026-08-18T13:37:12Z",
+  "closed_at": "2026-08-18T13:37:12Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9327",
+  "body": "Filed by the `pm-dispatch` seat on behalf of the `os-dev` agent that implemented #9190 (PR #9324). ⚠️ **Provenance**: the agent measured this; it could not file because the GitHub API rate limit blocked the duplicate search that filing requires, so it reported instead of filing blind. I am filing with the dedup run (bottom).\n\n⭐ **Derivation made this visible; it did not cause it.** The defect predates PR #9324 and survives it.\n\n## The measurement\n\n`field` metadata items are keyed **`<object>.<field>`** — per the #7893 comment on `DEFAULT_METADATA_TYPE_REGISTRY`, e.g. `account.owner`.\n\nBut every derived reference site that names a field holds a **bare field name**:\n\n```\nview.config.columns[].field\ndataset.dimensions[].field\nobject.validations[].field\n… and ~30 more\n```\n\nSo the two never compare equal. `GET /api/v1/meta/field/account.owner/references` scans 10 source types and answers `{references: []}` **on every deployment, regardless of content**.\n\n## Why it is filed separately rather than folded into #9190\n\n#9190's defect was that the lookup **table** was hand-curated and mostly fictional; PR #9324 closes that by deriving sites from the type schemas, taking coverage from 2 served target types to 17. This is different: for `field` the sites are now **correctly derived and still cannot match**, because the two sides use different name FORMS. It is a name-form decision, not a path or coverage problem, and no amount of further derivation fixes it.\n\nIt is nonetheless the **same harm**: an empty list rendered by the admin \"Used by\" panel as *\"Nothing in the metadata graph points at this item. Safe to delete.\"* — for one more type, silently.\n\n## The decision it needs\n\n⛔ Not chosen here. The shapes differ in blast radius:\n\n1. **Qualify at the site** — resolve a bare `field` name against its owning object at walk time, so `columns[].field: \"owner\"` inside a view bound to `account` matches `account.owner`. Most correct, and it needs the walker to know each site's object context, which it does not today.\n2. **Accept both name forms on the target side** — match `account.owner` against a bare `owner`. Cheap and **wrong in a specific way**: it would report every `owner` column on every object as a reference to `account.owner`, i.e. trade a silent empty for a silent over-report on a delete-confirmation screen.\n3. **Refuse the query** — state that `field` cannot be answered rather than answering `[]`. Consistent with the \"a miss and a fault are different facts\" line (ADR-0110 D3) and with what PR #9324 did for `external_catalog` via `unwalkableSourceTypes`, though that mechanism is build-time and this is not.\n\n⚠️ Option 2 is the one that looks cheapest and is the trap — on a screen whose whole purpose is to gate a destructive action, a false positive and a false negative are not symmetric, but both are bad and this swaps one for the other rather than fixing anything.\n\n## Related\n\n#9190 / PR #9324 (the derivation this surfaced under) · #7893 (the `<object>.<field>` keying) · #9326 (sibling: the REST route answers a missing capability with the same empty list) · #8896, ADR-0110 D3\n\n## Dedup\n\nSearched open issues for `field` + references, `<object>.<field>` keying, and `findReferencesToMeta` before filing. #9190 covers the curated-table defect (addressed by PR #9324) and #9326 covers the missing-capability limb; neither covers the name-form mismatch. No duplicate."
+}

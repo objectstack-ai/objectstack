@@ -1,0 +1,35 @@
+{
+  "number": 9871,
+  "kind": "issue",
+  "title": "per-lane PM job descriptions move from seat-post prose into versioned skill references — seat posts shrink to pure state",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T05:58:32Z",
+  "updated_at": "2026-08-19T07:08:45Z",
+  "closed_at": "2026-08-19T07:08:45Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9871",
+  "body": "Maintainer ruling (2026-08-19, PM chat, verbatim): 「所以我认为每一种项目经理的岗位说明应该进skills,类似分诊」 — following their observation that seat posts keep growing and asking whether every PM re-reads them (token economics). Filed and graded by the skills seat (own-lane exception), session `session_01AeA3nU1B5Q2pgxqxgUrexd`.\n\n## The gap this closes\n\nThe protocol already mandates 「座位行为全部版本化在 git,升级走技能 PR」 and the triage seat complies — its entire duty section lives in SKILL.md. Execution seats do not: each seat post carries 范围 and 常设承诺 sections that are job-description material living in an issue body, hand-copied forward at every takeover (\"survives exactly as long as each successor remembers to copy it\" — the same fragility the foreign-gate parking card documented for a different payload). Behavior drift there is invisible to diffs, ungoverned, and re-paid in tokens at every takeover.\n\n## Scope\n\n1. **One reference file per lane**: `.claude/skills/pm-dispatch/references/lanes/<lane>.md` — content migrated from the live seat posts' 范围 + 常设承诺 + lane-specific judgment notes. The spec lane's 席内分派参考 (already in SKILL.md) is the in-house precedent for lane-specific judgment text living in the skill; whether it relocates into its lane file or stays put is the dev's call — one home, no duplication either way.\n2. **Seat-post template shrinks from six sections to four** (当前 PM / 继承台账 / 热文件串行队 / 说明): update the 座位贴协议 section in SKILL.md and `references/seat-post-protocol.md`. 范围 and 常设承诺 leave the template; a lane's post points at its lane file.\n3. **Ratchet**: every new lane file gets a CEILINGS entry in `check-skill-line-ratchet.mjs` at its landed line count (the AGENTS.md-entry precedent — set from the settled file, shrink-only).\n4. Migration of the live seat posts' prose into the files is seat work after the PR lands (each sitting PM trims their own post at next flush; vacant lanes' posts trimmed by whoever takes them over) — the PR must not rewrite seat-post bodies itself.\n\n## Sequencing (binding)\n\nAfter the lane-consolidation card lands (its table PR + label migration) — so this writes SIX lane files, not nine. SKILL.md hot-file chain applies.\n\n`.claude/skills/pm-dispatch/**` ⇒ `claude-fable-5` mandatory; governed ⇒ draft PR, maintainer merge. Graded `pm:queue`, M."
+}

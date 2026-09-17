@@ -1,0 +1,35 @@
+{
+  "number": 9084,
+  "kind": "issue",
+  "title": "authz matrix: the `rest-server.ts` realtime tripwire matches only a `/realtime` literal — it cannot fire for `/ws` or `/api/v1/stream`, the two transports the protocol page documents",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-16T08:45:29Z",
+  "updated_at": "2026-08-18T00:36:15Z",
+  "closed_at": "2026-08-18T00:36:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9084",
+  "body": "Filed **unassigned and unlabelled for triage routing** by the dev seat on #9055 (session `session_011RB4waLuNbdruCo6X9oobm`), branch `claude/issue-9055-realtime-authz-ci-claim`. Not a claim — measured while re-deriving the tripwire population for #9055, which is fenced prose-only.\n\n## The gap\n\nThe fifth `#2992` transport tripwire in `packages/qa/dogfood/test/authz-conformance.test.ts` watches `packages/rest/src/rest-server.ts` for a route literal containing `/realtime`:\n\n```js\n{\n  file: 'packages/rest/src/rest-server.ts',\n  re: /['\"`][^'\"`]*\\/realtime[^'\"`]*['\"`]/g,\n  key: () => 'realtime:rest-server.ts:route(TRANSPORT-WIRED)',\n}\n```\n\nIts comment reasons from today's emptiness: \"packages/rest/src has ZERO realtime refs today (#2992) — a `/realtime` route literal appearing there is a subscribe endpoint.\"\n\nBut the endpoints the protocol page actually documents as the planned transports are **not** spelled `/realtime`. `content/docs/protocol/kernel/realtime-protocol.mdx:13`:\n\n> no WebSocket (`/ws`) or SSE (`/api/v1/stream`) transport is wired up yet\n\nNeither `'/ws'` nor `'/api/v1/stream'` contains `/realtime`, so mounting either in `rest-server.ts` produces no key, no UNCLASSIFIED surface, and no CI failure. The only documented path the pattern does match is `/api/v1/realtime/events` — the planned **debug/event-log** endpoint (page section \"Server-Side Events\"), i.e. the one realtime route that carries no subscription fan-out.\n\nSo the tripwire is aimed at the least dangerous of the three documented paths and blind to the two that actually deliver events to end users.\n\n## Measured on `origin/main` `2cb69c31c`\n\n`packages/rest/src/rest-server.ts` today: zero `/realtime` literals, zero `/api/v1/stream`, zero `'/ws'`, zero `text/event-stream`. (Its 31 occurrences of the substring \"stream\" are unrelated response-streaming code, none inside a route literal.) The probe matches nothing today, as intended — the defect is which future spellings it would catch.\n\n## Why it matters\n\nThe other four tripwires key off transport *mechanics* (`handleUpgrade`, `new WebSocketServer`, `text/event-stream`, `new WebSocket`, `new EventSource`) and so fire on the act of wiring regardless of naming. This one keys off a **path spelling** that the project's own documentation contradicts. A reviewer reading the tripwire list would reasonably conclude `rest-server.ts` is covered.\n\nLive the moment #8347 (WS/SSE transport, scheduled v18) mounts a route.\n\n## Possible direction (not a ruling)\n\nWiden the pattern to the transport mechanics rather than one path spelling — e.g. also match `text/event-stream`, an SSE content-type write, an upgrade handler, or the documented `/ws` and `/api/v1/stream` literals. Gate behaviour is the matrix owner's call, so filing rather than patching.\n\nRelated: #9055 (the prose claim, PR #9082) · #9083 (sibling gap: classification by the experimental row is accepted) · #8347 (transport, v18) · ADR-0096 D4 · framework#2992."
+}

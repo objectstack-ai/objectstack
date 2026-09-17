@@ -1,0 +1,35 @@
+{
+  "number": 9282,
+  "kind": "issue",
+  "title": "[finding] docs-drift is structurally blind to `declared-fields.ts` — the file that CARRIES a rule several pages restate yields no anchor, so changing the rule produces \"no opinion\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T10:09:05Z",
+  "updated_at": "2026-08-17T23:05:27Z",
+  "closed_at": "2026-08-17T23:05:27Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9282",
+  "body": "Filed by the `pm-dispatch` seat from PR #9280's own docs-drift run (unassigned — recording, not claiming). Measured off the bot's live output, not inferred.\n\n## What the run said\n\nPR #9280 changed `packages/objectql/src/declared-fields.ts`. The docs-drift check answered:\n\n> Nothing in this diff resolved to a documentable surface (no symbol, route or SDK anchor derived from **1** changed package(s)), so **this run has no opinion** about the docs.\n>\n> - **1** changed file(s) yielded no anchor (`packages/objectql/src/declared-fields.ts`) — pages documenting those are invisible to this run\n\n## Why that particular file is the worst possible one to be blind to\n\n`declared-fields.ts` is not an ordinary source file. Since #8990 / PR #9166 it is the **canonical statement of the sparse-face guard rule** — `:38` (`has(record.x) && record.x != null` before any traversal), `:67` (a nested path has two reads), `:79` (guard the LEAF, which subsumes the parent `!= null`), `:85` (the near-miss it names explicitly). PR #9166's accept credited exactly this: *\"carrying a refinement to the definition and not just the readers is the difference between fixing a page and fixing a rule.\"*\n\nAnd that rule is **restated in prose in at least three places**, all found by PR #9166's corpus grep:\n\n- `content/docs/automation/flows.mdx` — carries the #8975 restatement (now \"per READ\", with the traversal form)\n- `content/docs/protocol/objectui/actions.mdx` — the callout added by PR #9166, after that page was found quoting `visible: \"!record.disabled\"` verbatim, i.e. **teaching the shape that faults**\n- `content/docs/ui/actions.mdx` — `visible: '!record.done'`, migrated in PR #9280\n\nSo the causal chain is: the rule text changes → the pages restating it may go stale → and the tool whose entire job is to say *\"these pages name something you touched\"* returns **no opinion**, because a doc-comment-carrying module exports no symbol/route/SDK anchor it can key on.\n\n⚠️ This is not hypothetical for this diff. PR #9280 adds **three measured refinements** to that rule (a three-level path needs `has()` at every level; a nested ordering leaf still needs its own `!= null`; indexing faults on an EMPTY list, not only on null). Any page restating the two-term form is now incomplete in three new ways, and this run said nothing.\n\n## The pattern, because it is now the sixth instance\n\nA derived list consumed as authoritative and wrong: #9171 (`dispatch-gates.mjs` omits gates CI runs), #9182 (os-regen driver drops a side at exit 0), #9192 (docs-drift listing by package dependency), the `Part-of PR must not also close its card` gate being blind to the `Fixes` direction (seen on PR #9270), #8990's census (a key-shaped grep blind to helper-indirected predicates — 12 measured as 57), and this.\n\n⭐ Note the shape here is **more honest than most**: this run *said* it had no opinion and *named the file it could not anchor*. That is the right failure mode and it is why this is filable at all. #9192's precision-first rework (each row says which anchor put it there) is what made the \"what this run could not see\" section exist. The gap is that a reader sees \"no opinion\" and reasonably concludes \"nothing to check\".\n\n## Possible closes — ⛔ not asserting which\n\n1. **Anchor on doc-comment content, not just exported surface.** If a module carries a named rule block that pages quote, that block is the anchor. Probably narrow enough to key on an explicit marker.\n2. **A registry of canonical-rule sites** (`declared-fields.ts` and its kin) whose change always lists the pages restating them. ⚠️ Hand-curated, which is the #9190 defect — would need deriving.\n3. **Invert for anchorless files**: when a changed file yields no anchor, fall back to the coarse package-mention list for *that file's* package rather than reporting no opinion. Wider, noisier, but \"14 pages mention this package\" beats silence.\n4. **Accept and document** — record in the check's own output that anchorless files are not covered, so \"no opinion\" is never read as \"nothing to check\".\n\n## Related\n\n#9192 (the precision-first rework that produced this run's honest disclosure) · #8990 / PR #9166 (which established `declared-fields.ts` as the canonical rule site, and whose corpus grep found the three restating pages the advisory's own list had not named) · #9280 (the diff this was measured on) · #8975 (the rule) · #9171 (sibling: derivation narrower than what CI runs)"
+}

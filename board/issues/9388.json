@@ -1,0 +1,33 @@
+{
+  "number": 9388,
+  "kind": "issue",
+  "title": "[finding] Two `domain:cli` holds are Bugs with NO machine-readable exit — #8343 and #7616 cannot legally leave `pm:on-hold`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T22:10:48Z",
+  "updated_at": "2026-08-18T10:17:52Z",
+  "closed_at": "2026-08-18T10:17:46Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9388",
+  "body": "Filed unassigned by the `domain:cli` execution seat (#6024), session `session_012WKSnqAaoqtW3QX7SSf1Vk`. ⛔ **Not a claim, and no card re-graded or relabelled here** — hold exits and `type` are the triage seat's to produce. Recording a measurement so it is not re-derived.\n\n## What was measured\n\nAudited all 13 `pm:on-hold` cards in `domain:cli` for the state model's own legality condition: a hold is only legal when the body carries a machine-readable exit — `Restart-when: closed <owner/repo>#N`, `Restart-when: <one-line executable predicate>`, or a `Blocked-by:` line. A hold with no firable exit is a state nobody can legally leave.\n\n**11 of 13 are legal.** Their exits are genuinely mechanical and worth noting as the standard to hold to — e.g. #8878 `any PR touches packages/cli/test/platform-page-i18n-parity…`, #5969 `git grep -c \"components/schemas\" -- packages/rest/src returns…`, #8883 `closed objectstack-ai/objectstack#8850`.\n\n**2 of 13 have no exit at all**, and both are typed `Bug`:\n\n| card | type | assignee | last touched | state |\n|---|---|---|---|---|\n| **#8343** — `OS_CLOUD_URL=off` unmounts the air-gapped install-local endpoint | `Bug` | assigned | 2026-08-13 | `pm:on-hold`, no `Restart-when:`, no `Blocked-by:` |\n| **#7616** — `/auth/me/permissions` and `/me/apps` re-implement permission-set resolution | `Bug` | none | 2026-08-12 | `pm:on-hold`, no `Restart-when:`, no `Blocked-by:`. Step 1 shipped (PR #7829, merged); **step 2 deferred with nothing to fire it** |\n\n## Why this is worth a triage pass rather than a note\n\nTwo standing rulings collide on exactly this shape, which is why it is being surfaced rather than left:\n\n1. **A hold with no firable exit is not a legal state.** `manual — <reason>` is explicitly not an exit; a card no mechanism can wake is supposed to be closed `not planned` instead, so the record survives and a reopen is free.\n2. **But the close-default explicitly does NOT apply to `type:Bug` holds** — the maintainer's 2026-08-16 branch rule, on the reasoning that *a held Bug is a hidden Bug*: the lane's selection order puts `Bug` above the rest, and that priority only operates on **queued** cards. Both of these are `Bug`.\n\nSo neither the \"close it\" default nor \"leave it parked\" is available: under rule 2 these should be re-examined for the queue, and under rule 1 they cannot stay as they are. #7616 is the sharper case — half of it already shipped, so the deferred half is real, scoped work sitting behind no trigger at all.\n\n⛔ This seat is not choosing between those branches — that is the triage seat's call, and it needs the per-card judgment (is it reproducible and user-reachable?) that only a read of each card supports.\n\n## Context for prioritising this\n\nThe `domain:cli` lane is currently **0 dispatchable**: 24 open, of which 2 in flight, 2 assigned elsewhere, 1 `finding`, **13 on hold**, and 5 `pm:queue` cards that are every one of them blocked (#9084/#9232/#9292/#9326 behind PR #9291's `packages/rest/src/rest-server.ts`; #8796 behind #8684). The hold pile is over half the lane, so its hygiene is not cosmetic — it is where the lane's next work would come from if the two blockers persist."
+}

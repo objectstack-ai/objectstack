@@ -1,0 +1,33 @@
+{
+  "number": 9725,
+  "kind": "issue",
+  "title": "Public `/forms/:slug` cannot serve an org overlay of its `view` — the route is anonymous by construction, so there is no session-derived org",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-18T17:21:23Z",
+  "updated_at": "2026-08-18T19:17:13Z",
+  "closed_at": "2026-08-18T19:17:13Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9725",
+  "body": "Found while enumerating every meta read call site in `packages/rest/src/rest-server.ts` for #9454. ⛔ Not fixed there — filing rather than widening that card.\n\n## What was measured\n\n#9454 threads the caller's active organization into the REST `/meta` read doors, so an org-authored overlay of an org-overridable type is served back. The enumeration classified 18 meta read call sites in `rest-server.ts`. Seventeen classify cleanly. One does not, and it is the only out-of-scope site that names an **org-overridable** type:\n\n`resolveFormBySlug`, which backs the public `GET /forms/:slug` route, calls `getMetaItems({ type: 'view', … })` with a hardcoded `type: 'view'`. `view` is `allowOrgOverride: true`, so this door *can* be asked for an item that lives in an org partition.\n\n## Why it was left alone rather than threaded\n\nThe route is **deliberately anonymous**. Its own TSDoc records that both public-form routes bypass `enforceAuth` even when anonymous-deny is on for the deployment, delegating security to the `guest_portal` permission set. Consistent with that, nothing in the whole forms region resolves an execution context — there is no `resolveExecCtx` call anywhere in it.\n\nSo there is no session-derived active organization to state. `organizationIdForMetaRead('view', undefined)` answers `undefined` at every call, and wiring it in would:\n\n- change no behaviour for anonymous callers (the overwhelming majority on a public form), and\n- add a session resolution to a route that deliberately performs none.\n\n## The actual gap, stated plainly\n\nAn organization that authors an overlay of a view backing a public form gets the **env-wide** version served to anonymous visitors. Their override is not applied on that route.\n\nClosing that would mean deriving the organization from the **host/environment** rather than from the session — a different mechanism from the one #9454 uses, and a new resolution seam on a public path. That is a design question (which org owns an anonymous request on a multi-org deployment?), not a mechanical extension of #9454, which is why it is a separate card.\n\n## Not asserted\n\n⛔ No claim that any tenant's data leaks here. The route reads the env-wide partition, which is the same thing every caller read before #9454. This is an *unapplied override*, not a disclosure.\n\nRepo: `objectstack`. Site: `packages/rest/src/rest-server.ts`, `resolveFormBySlug` inside `registerFormEndpoints` (named by symbol — line numbers move).\n\nRelated: #9454.\n"
+}

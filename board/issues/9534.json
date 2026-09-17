@@ -1,0 +1,37 @@
+{
+  "number": 9534,
+  "kind": "issue",
+  "title": "`audit-service.mdx` documents the `audit` runtime slot as `record()` / `'set' | 'reset'`, but the registered `audit` service is `recordAuthEvent()` / `'login' | 'logout'`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T07:22:21Z",
+  "updated_at": "2026-08-18T13:20:47Z",
+  "closed_at": "2026-08-18T13:20:47Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9534",
+  "body": "Found while implementing #9517 (rewriting plugin-audit's published README). The old README linked this page as its \"See Also\" reference for the audit service; checking whether the link was safe to keep turned up a shape mismatch on the page itself. ⛔ Not fixed in PR #9531 — different file, different package, and that PR's scope was a maintainer-ruled rewrite of one published README. The link was dropped there rather than propagating a claim I had measured to be wrong.\n\n## What is wrong\n\n`content/docs/kernel/runtime-services/audit-service.mdx` presents `services.audit` as a **runtime service slot**, and documents its method as:\n\n```ts\nservices.audit.record(entry: {\n  namespace: string;\n  key: string;\n  scope: SpecifierScope;\n  ...\n  action: 'set' | 'reset';\n  ...\n}): Promise<void> | void\n```\n\nBut the kernel service slot actually named `audit` has a different shape entirely. Measured:\n\n- **Exactly one registrant.** `git grep \"registerService(\\s*'audit'\"` over `packages/**/*.ts` returns one hit — `packages/plugins/plugin-audit/src/audit-plugin.ts`, which registers `createAuthEventAuditSink(...)`. `AuditPlugin.providesServices = ['audit']` declares the same.\n- **Its surface is one method**, `recordAuthEvent(event: AuthSessionAuditEvent)`, where `AuthSessionAuditEvent.action` is the closed union `'login' | 'logout'` (`auth-event-audit.ts:68`).\n- **Exactly one consumer.** `git grep \"getService[^)]*'audit'\"` returns one non-test hit — `packages/plugins/plugin-auth/src/auth-plugin.ts:363`, typed as `AuthEventAuditSurface`.\n\nThe `record()` shape the page documents is real, but it is **`SettingsAuditSink`** (`packages/services/service-settings/src/settings-service.types.ts:163`) — a **constructor argument**, passed directly into the settings service at `settings-service-plugin.ts:213` via `buildConfigChangeAuditSink(engine, ctx.logger)`. It is never registered as, or resolved from, the kernel `audit` slot. The page's own \"Canonical source\" line points at `settings-service.types.ts`, which is consistent with it describing the sink type — but it is filed under `runtime-services/` and written as `services.audit`, which is the slot.\n\n⇒ A reader following this page and calling `getService('audit').record({...})` gets a `TypeError`: the resolved object has no `record`. The method they need is `recordAuthEvent`, and it accepts neither `'set'` nor `'reset'`.\n\n## Why it is worth a card\n\nTwo shapes share one name across a doc page and a service slot, and nothing reconciles them. The page is not stale in the ordinary sense — the API it describes exists — it is **filed against the wrong seam**, which is the harder kind to notice: every symbol in it is real, so a grep for phantom identifiers (the check that catches #9517-class drift) will not flag it.\n\n⚠️ Small scope, stated plainly so it is not over-graded: this is a `content/docs/**` page, **not** a published npm artifact, so it does not carry #9517's \"this is what the package page renders\" weight. It is a correctness bug in the docs, not a published capability claim.\n\n## Suggested fix\n\nDecide which surface the page is for, then make it say so:\n\n- if it documents the **settings sink** — retitle away from `services.audit`, move it out of `runtime-services/`, and name it as the constructor-injected `SettingsAuditSink` it is; or\n- if it documents the **runtime slot** — rewrite it around `recordAuthEvent` / `'login' | 'logout'`, and point querying readers at `sys_audit_log` as it already does.\n\nThe page's closing note (\"For querying audit history, use `services.data` against `sys_audit_log`/`sys_activity`\") is correct either way and should survive.\n\nRefs: #9517 · PR #9531 (which dropped the link rather than propagate the mismatch) · #9532 (the other published-docs drift found in the same pass)."
+}

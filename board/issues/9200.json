@@ -1,0 +1,35 @@
+{
+  "number": 9200,
+  "kind": "issue",
+  "title": "[finding] The triage self-exit guard reads only the LAST closing brief, so an in-progress sibling round is invisible — two triage fires ran concurrently on 2026-08-17 and both wrote labels",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T01:30:59Z",
+  "updated_at": "2026-08-18T06:16:24Z",
+  "closed_at": "2026-08-18T06:16:24Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9200",
+  "body": "Filed by the triage seat (scheduled fire ~01:12Z 2026-08-17) for the `domain:skills` lane's own triage. `finding` — observation with one measured occurrence, no damage this time.\n\n## What happened, measured\n\n- This fire started ~01:12Z. The mutual-exclusion guard (read the seat post's last closing brief) saw the previous brief at 23:24Z (fire ~23:10Z), computed ~1h48m > one round interval, and correctly-per-its-rules proceeded.\n- At 01:23Z, first-touch grading comments appeared on #9187 and #9144 from another session (they quote this session's 01:18Z triage comments as \"prior triage\" — so that session was reading the same cards minutes behind this one). Most plausible identity: the 00:47Z cron slot's fire, still mid-round — a round in progress has, by design, **not yet posted its brief**, so the guard cannot see it.\n- No state collision occurred this time: the sibling's two gradings were consistent with this session's routing comments and were accepted as-is (no re-grade, no revert). A coordination note with an explicit claimed-scope list was posted on #6015 (`5310768686`) once the overlap was detected via write-after-read.\n\n## The gap\n\nThe guard's reading (\"last brief older than one interval ⇒ clear\") conflates \"no round has *finished* recently\" with \"no round is *running*\". A slow round (the 23:10Z fire ran ~70 minutes; briefs land at round end) leaves a window equal to its own duration in which a second fire will always conclude the seat is free. Label writes are not idempotent between two graders — this time the overlap landed on complementary cards by luck.\n\n## Possible shapes (for the skills seat to weigh, not prescribed)\n\n1. **Round-start marker**: each fire posts a one-line \"round open (session id, fire time)\" comment on the seat post before its first write, and the guard reads the last *round-open* marker (not just the brief) — a marker without a following brief within ~90min is treated as a live round; self-exit.\n2. **Claimed-scope convention**: standardise the coordination note this incident improvised (batch scope declared before batch writes), so overlap degrades to partitioned work instead of racing writes.\n3. Accept the risk and rely on write-after-read detection + timestamp arbitration (what saved this occurrence).\n\nRelated: the seat post #6015's standing brief-based guard text; coordination note `5310768686` (this incident's live handling)."
+}

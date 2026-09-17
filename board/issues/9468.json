@@ -1,0 +1,32 @@
+{
+  "number": 9468,
+  "kind": "issue",
+  "title": "Notification deep link navigates to the app landing page instead of the record",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T03:20:57Z",
+  "updated_at": "2026-08-18T09:09:09Z",
+  "closed_at": "2026-08-18T09:09:09Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9468",
+  "body": "Extracted from the Tier-2C run record #9467 (QA wave #9296) — `i18n.notification-localized-and-clears` (P1, rev 3) clause 1. Subject sha `e4e5c6e3c608b1b807c83a0d5b734f213eb1a1dd`, stock showcase.\n\n## The defect\n\nOpening a notification from the notification centre navigates to the **app landing page**, not to the record the notification is about. The deep link is the whole point of the notification — a user who clicks one is told which record changed and then dropped somewhere else, with no path back to it except finding the record by hand.\n\n## What the same click *does* get right, and why that matters\n\n- **Mark-as-read fires correctly** from that click and is server-authoritative — so the notification is consumed, the badge clears, and the user has now lost the pointer to the record entirely.\n- **The canonical record route renders fine**, including in a `zh-CN` session. The target is reachable; the link does not point at it.\n\nThose two controls are what narrow this to link construction rather than a broken route or a rendering failure — and the mark-read behaviour is what turns \"annoying\" into \"the pointer is gone\".\n\n## What a fix has to settle\n\nWhere the deep-link target is built and why it resolves to the app root rather than the record. Pin it with a test asserting the **navigated URL**, not merely that navigation occurred — a test that only checks \"the click went somewhere and mark-read fired\" passes today.\n\nLeft unlabelled for `domain:*` and unlevelled — routing and priority are the triage seat's call. Note for routing: the notification centre is console UI, so the fix may land in `objectstack-ai/objectui` rather than here; the run record's evidence does not settle which side builds the URL, and that is the first thing to determine.\n"
+}

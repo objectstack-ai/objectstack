@@ -1,0 +1,36 @@
+{
+  "number": 9488,
+  "kind": "issue",
+  "title": "`GET /api/v1/meta/<unknown-type>` answers 200 with an empty collection while the write door refuses the same type",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T04:09:19Z",
+  "updated_at": "2026-08-18T21:40:27Z",
+  "closed_at": "2026-08-18T21:40:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9488",
+  "body": "QA-source: #9417 · platform-core.metadata-registry-serving · — (round observation; no clause of the Tier-2A lane covers it)\n\nExtracted at close-out of the #9296 QA wave (#9480). Designated for extraction by the Tier-2A reviewer of record — *\"two API-shape observations worth their own cards rather than burial in a run record\"*. Subject sha `e4e5c6e3c608b1b807c83a0d5b734f213eb1a1dd`, stock showcase.\n\n## Observed\n\n```\nGET /api/v1/meta/totally_invented_type   →  200 {\"type\":\"totally_invented_type\",\"items\":[]}\n```\n\nAn unknown metadata type is served as a real-but-empty collection. The **write** door for the same name refuses precisely — `400`, *\"'<type>' is not a metadata type\"* — so the two doors disagree about which type names exist.\n\n## Why it matters\n\nA 200-with-an-empty-collection is indistinguishable from \"this type exists and has no items\". That is the **same shape as the `?id=` trap this wave already paid for once**: `GET /api/v1/meta/app?id=<package-id>` answers `{\"items\":[]}` because the parameter keys on the app *name*, and it read to a runner exactly like \"the app metadata is gone\" (#9296 standing fact 3; #9334 checklist finding 2). A typo'd or renamed type name silently reads as an empty surface rather than as an error.\n\n## Related\n\n#8421 (closed) fixed the **write** side of the unknown-type namespace — `PUT /meta/<unknown>/x` no longer answers 200. The read door still does.\n\n## Fix direction — not prescribed\n\nEither a `404`, or a `400` naming the unknown type as the write door already does, makes the two answers distinguishable. Whatever lands should be pinned by a test asserting the read and write doors agree on which type names exist.\n\nNo priority and no `domain:*` label — normal triage first-touch.\n"
+}

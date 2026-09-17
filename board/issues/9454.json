@@ -1,0 +1,37 @@
+{
+  "number": 9454,
+  "kind": "issue",
+  "title": "Org-overridable metadata (`view`, `dashboard`) is accepted with a 200 `state:'active'` receipt but served by no read door",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T01:50:40Z",
+  "updated_at": "2026-08-18T18:05:14Z",
+  "closed_at": "2026-08-18T18:05:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9454",
+  "body": "Extracted from Tier-2B (#9453, `view`) and Tier-2C (#9467, `dashboard`) of the QA wave #9296. Subject sha `e4e5c6e3c608b1b807c83a0d5b734f213eb1a1dd`, stock showcase.\n\n**Scope widened 2026-08-18.** Filed first against `view`; the next round found the identical shape on `dashboard`, independently, with its own controls. Two metadata types, one mechanism — kept as **one card** because splitting it would invite two fixes for one defect and let the general case escape.\n\n## The defect\n\nA runtime `PUT` of an org-overridable metadata type answers **200** with a receipt reporting `state: 'active'` plus a version and sequence number — the shape that tells an author \"this is live\". Nothing then serves it:\n\n| door | result |\n|---|---|\n| direct `GET` of the item | **404** |\n| scoped listing (`?object=<object>`) | **unchanged** — the new item is absent |\n| unfiltered listing | **absent** |\n| browser | `view`: nothing renders · `dashboard`: **\"Dashboard Not Found\"** |\n\nDraft → publish behaves identically. The platform reports success in the same breath as not delivering it — declared ≠ enforced, in the direction hardest for an author to notice, because the write path says everything worked.\n\n## The acceptance half is correct — the read side is the bug\n\n`view` and `dashboard` are deliberately in the org-overridable set (`allowOrgOverride: true`, `packages/spec/src/kernel/metadata-plugin.zod.ts`), which is exactly why a runtime `PUT` against a read-only showcase package is accepted rather than refused — unlike `object`, `field`, `hook` and `seed`, which carry `allowOrgOverride: false` and are correctly locked. So the 200 is right. **The anomaly is that nothing reads the overlay back.**\n\nThe org-overridable set is `view`, `dashboard`, `report`, `translation`, `email_template`. Two of the five are now measured broken by the same shape; **the other three are untested and should be assumed affected until shown otherwise** — that is the general case the fix has to address.\n\n## Evidence — the controls are what make this stand up\n\n**`view`** (Tier-2B): 4 saves · 3 names · 2 objects · 2 independent boots.\n**`dashboard`** (Tier-2C): 5 saves · 4 names · 2 boots, **one of them a fresh DB with a different org id**.\n\nControls measured on both, and they are the reason this is a defect rather than an observation:\n\n- **Positive control** — an item of the same type that *ships with the package* reads back normally through the same doors on the same boot. The read path is not simply broken.\n- **Org-scoping confound ruled out** — one `sys_organization` row, and it is the session's active org; `dashboard` additionally re-measured against a *different* org id on a fresh DB.\n- **Storage control** (`dashboard`) — the write is observable where it lands.\n\nThat combination separates \"the write silently no-ops\" from \"the reader looks in the wrong place\".\n\n## What a fix has to settle\n\nWhere the overlay write lands and why every read door misses it — at the **overlay-resolution layer**, not per type, or the remaining three types stay broken.\n\nPin it with a **round-trip** test: author at runtime, then read back through the direct GET *and* the scoped listing, for each org-overridable type. A test asserting only the 200 receipt passes today and proves nothing — that is precisely the gap this defect lives in, and why two rounds of a browser sweep were needed to find something the write path calls a success.\n\nLeft unlabelled for `domain:*` and unlevelled — routing and priority are the triage seat's call. Filed P1 by its checklist items, though \"the platform reports `active` for metadata it will not serve, across a whole capability class\" is an argument for re-levelling.\n"
+}

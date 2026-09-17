@@ -1,0 +1,33 @@
+{
+  "number": 9106,
+  "kind": "issue",
+  "title": "[Decision] The dispatcher's `error.code` has a limb authored by TENANTS at runtime — registration cannot close it, and ADR-0112 does not say what should happen there",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-16T10:19:14Z",
+  "updated_at": "2026-08-17T16:48:08Z",
+  "closed_at": "2026-08-17T16:48:08Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9106",
+  "body": "Surfaced by #8087's implementation (PR #9099) and filed rather than decided there. ⛔ **Deliberately not held against #9099**, which delivers its ruled scope in full — this is a bound on the ruling that was measured *after* it, not a defect in it.\n\nFiled unassigned and without a `domain:*` label: the two candidate answers land in different lanes (see below), so routing is triage's call.\n\n## The measurement\n\n`SandboxError` carries a metadata app's **own** `.code` across the QuickJS boundary **on purpose**. From `sandbox/error-passthrough.test.ts` (#7867), verbatim:\n\n> \"Author-thrown structured errors get the same treatment; nothing here is objectql-specific\"\n\n`domains/actions.ts` then serves that error through `errorFromThrown`, which puts `declaredCode` — the producer's own string, un-narrowed — onto the wire. `domains/actions-validation-envelope.test.ts` pins that end to end.\n\nSo **this door's `error.code` has a limb whose vocabulary is written by tenants, at runtime.**\n\n## Why this is a decision and not a bug\n\nThe 2026-08-12 ruling on #8087 chose **option B**: keep the verbatim spelling, register the producers, delivered as a gate. That is correct and now shipped — the gate found 7 unregistered platform producers (handed to #8846) and will fail on an unswept one added later.\n\nBut registration **cannot** close this limb, by construction: `ERROR_CODE_LEDGER` would have to enumerate strings that do not exist when CI runs. No amount of sweeping reaches it.\n\n⚠️ **This is NOT an argument for option C** (declare the dispatcher's `error.code` open), and it should not be read as reopening that. Option C was rejected, correctly: the closure is load-bearing for every *platform* producer, and the 7 rows the gate just found are exactly what it catches. What is open is narrower — **what the contract should say about the author-authored limb specifically**, which nobody has ruled on because nobody had measured it.\n\n⭐ `DUPLICATE` is the pinned witness to this limb and was deliberately **not** re-spelled in #9099 — re-spelling it would have deleted the only evidence in the repo that the limb is open. It should stay unregistered and unrewritten until this is ruled. That also revises #8087's premise on its third named code: `DUPLICATE` is neither \"genuinely wrong\" nor \"merely unregistered\".\n\n## The two available answers\n\n- **A — narrow the sandbox boundary.** Author-thrown codes get narrowed (or namespaced, e.g. a reserved prefix) before reaching `error.code`, so the wire vocabulary stays closed. Costs: it changes what a metadata app can put on the wire, which is a published capability #7867 deliberately granted; and it is a behaviour change for existing apps.\n- **B — declare a second, non-ledger vocabulary for author-thrown codes.** ADR-0112 states that `error.code` is closed *for platform producers* and that the sandbox limb is deliberately open, with the boundary named and pinned. Costs: the envelope's \"closed vocabulary\" property becomes conditional, and every consumer must learn which door and which limb it is reading.\n\nBoth are contract-shaped, which is why neither the dev nor the PM took them.\n\n## Four-prism block\n\n1. **Platform long-term coherence.** B makes an existing truth explicit; A makes the stated invariant actually hold everywhere. A is the cleaner invariant, B is the more honest description of a capability we already shipped. The real question is whether \"closed\" was ever meant to survive a tenant-extensible surface.\n2. **Measured business pull.** No reported consumer breakage. The limb is reachable today by any metadata app throwing a structured error — so it is live, not theoretical, but nothing measured says an operator or client has tripped on it. Neither option is urgent; the cost of deferring is that the ledger's guarantee is quietly weaker than its own note claims.\n3. **AI-agent error-resistance.** This is the axis that actually discriminates. Today an agent reading ADR-0112 concludes `error.code` is closed and may write a consumer that switches exhaustively on it — which is **wrong at exactly one door**, and wrong in a way no gate will tell it about. Both A and B fix that; silence does not. Whichever is chosen, the ADR text is the deliverable, not just the code.\n4. **Startup scope discipline.** A removes a capability that was deliberately granted (#7867) — that is a retirement decision, not a cleanup. B adds no code and no declared surface, only prose and a pin. B is the cheaper honest move; A is the more expensive correct-if-you-want-closure move.\n\n**Recommendation: B**, on the grounds that the capability in #7867 was deliberate and product-shaped, and retiring it to preserve a property nobody has yet needed at that door would be paying a real cost for a theoretical one. But prism 1 genuinely cuts both ways and this is a contract shape — recording the recommendation, not taking it.\n\n## Routing note for triage\n\nLanding differs by option: **A** lands in the sandbox/actions path (`domain:cli`, possibly `domain:engine-core`); **B** lands in ADR-0112 plus `packages/spec` prose (`domain:spec`, and ADRs are maintainer-merged either way). Suggest leaving `domain:*` off until it is ruled, since the ruling picks the lane.\n\nRelated: #8087 (the ruling and its gate) · PR #9099 (where this was measured) · #8846 (the ledger half) · #7867 (where the passthrough was granted) · #9098 (a different, unrelated hole at the REST door)."
+}

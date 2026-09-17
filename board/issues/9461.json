@@ -1,0 +1,36 @@
+{
+  "number": 9461,
+  "kind": "issue",
+  "title": "[finding] The envelope-position line has no live owner — `check-route-envelope.mjs`'s two `ratchet:` fields both name #7035, closed since 2026-08-10",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T02:52:28Z",
+  "updated_at": "2026-08-18T11:11:23Z",
+  "closed_at": "2026-08-18T11:10:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9461",
+  "body": "Found while implementing #9232, which was asked to repoint the stale `#7035` citations in `packages/rest/src/**` prose. It did. This is the same defect one file over, in a place #9232's declared file surface did not reach — `scripts/check-route-envelope.mjs` — so it is filed rather than folded in.\n\n## The measurement\n\n`check-route-envelope.mjs` requires a `dialectOnly` module to declare a `ratchet` — a string naming the end state that outstanding drift is held against. Two entries carry one, and both name the same closed card:\n\n- `packages/rest/src/rest-server.ts` → `ratchet: '#7035 (option 1: convert onto the shared sendOk/sendError)'`\n- `packages/rest/src/error-response.ts` → `ratchet: '#7035 (option 1: convert onto the shared sendOk/sendError)'`\n\n**#7035 reached state `completed` on 2026-08-10** via PR #7293, having converged three `/meta` 501 handlers and nothing else. It is not, and never was, the owner of \"convert this file onto the shared pair.\"\n\n## Why it matters more than an ordinary stale citation\n\nThe `ratchet` field is the *only* place these two entries say where the drift is going. The counts they hold down are substantial and real — `rest-server.ts` alone is declared `dialectOnly` because its write-site count is too hot to pin, and the gate's header records `stringError 44` among what #7035/PR #7293 deliberately left behind. So the gate is enforcing a shrink-only ratchet toward an end state whose only written owner is a card nobody can open.\n\nThe failure mode is quiet: the gate stays green, the counts keep ticking down (or not), and a reader chasing the plan lands on a completed issue about three `/meta` handlers.\n\n## There is currently no live card to point at\n\nVerified before filing, and this is the part that makes it a decision rather than a rename:\n\n- **#7035** — `completed` 2026-08-10 (PR #7293)\n- **#8111** — `completed` 2026-08-12 (PR #8212), having converged the record-sharing family it named\n- **#3843** — `completed` 2026-07-30 (PR #3972)\n\nand no open issue owns the envelope-position line for `packages/rest`'s flat dialect. Control for the \"no open card\" claim: the open `domain:cli` listing returns 27 issues, so the query works; the nearest neighbours are #9364 (plugin-route bodies) and #9436 (adapters/hono discovery bodies) — different files, different ratchet entries.\n\n#9232's own card body anticipated exactly this: *\"The envelope-convergence line needs a live card to point at — this one, or a dedicated envelope card if triage prefers to split them.\"* #9232 closes on merge, so it cannot be that card. Its in-prose citations were therefore repointed at the **ratchet mechanism** rather than at any card number — accurate and CI-enforced, but it leaves the `ratchet:` fields themselves, which structurally want a card.\n\n## What needs deciding\n\n1. **Open a dedicated envelope-position convergence card** for `packages/rest`'s flat dialect (the \"route these bodies through the shared `sendOk`/`sendError` pair\" end state) and point both `ratchet:` fields at it. This is what the field is for.\n2. Or **rule the flat dialect's position permanently accepted**, retire the `ratchet` fields, and let the entries be plain `dialectOnly` declarations — which would also settle the question ADR-0112 D5 leaves open, and should be recorded there if so.\n\nNot a code change either way until it is ruled; (1) is the cheap one and matches how #9364's family is tracked today.\n\n⚠️ Note for whoever takes it: ADR-0112's D5 amendment says retiring the flat shape \"belongs to the envelope-convergence line (#3843 family)\" — also a closed card. Whatever card is opened should be the one that line names too.\n\nRelated: #9232 (where this was found; repointed the in-prose half) · #8087 / ADR-0112 D5 · #9364, #9436 (live ratchet-owner cards for other files).\n"
+}

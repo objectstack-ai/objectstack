@@ -1,0 +1,33 @@
+{
+  "number": 7366,
+  "kind": "issue",
+  "title": "Console discards the server error message on 403, always showing the generic \"no permission to save\" string",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T08:02:37Z",
+  "updated_at": "2026-08-18T14:40:05Z",
+  "closed_at": "2026-08-18T14:40:05Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7366",
+  "body": "## Summary\n\nWhen a server-side hook rejects a write with **403**, the Console form **discards the server's\n`message` entirely** and substitutes a generic string. Any actionable, localized guidance the\napplication author wrote into the guard never reaches the user.\n\nNon-403 errors are handled correctly — the server message is shown. This is specific to the\n403 branch.\n\n## Where\n\n`@objectstack/console@17.0.0-rc.5`, form submit error handler\n(`dist/assets/ui-components-*.js`):\n\n```js\nlet n = F(e) ? i(`form.noPermissionToSave`) : ie(e) ?? i(`form.submitFailed`);\n```\n\n- `F` is the forbidden predicate (`dist/assets/framework-*.js`):\n\n  ```js\n  function oo(e){\n    if ((e.httpStatus ?? e.status ?? e.statusCode) === 403) return true;\n    const n = $(e.code, e.details?.code) ?? '';\n    if (n === 'PERMISSION_DENIED' || n === 'FORBIDDEN') return true;\n    …\n  }\n  ```\n\n- `ie(e)` is the server-message extractor — used on **every other** branch, but **not** on the 403 branch.\n- `form.noPermissionToSave` = `You don't have permission to save this record.` /\n  `您没有权限保存这条记录。` / `このレコードを保存する権限がありません。`\n\nSo the substitution is unconditional for 403: there is no \"fall back to generic only when the\nserver said nothing\" check.\n\n## Why this matters\n\nREST returns the guard's message correctly — we verified the 403 body carries the full text.\nIt is discarded at the Console layer, so **the application has no way to talk to the user on a\n403 path**: not via message, not via an override hook, not via i18n (the key is a fixed generic\nstring, not a template that could interpolate the server text).\n\nConcretely, in our app 11 hook guards return 403 with messages that tell the operator *why*\nthey were refused and *what to do instead* (e.g. which role owns the action, whom to ask).\nThe user sees only \"您没有权限保存这条记录。\" and has to call a developer — which is exactly\nthe outcome the guards were written to prevent.\n\nThis also creates an unpleasant incentive: to get their message shown, application authors are\npushed to return **400 instead of 403** for permission failures — degrading the status-code\nsemantics that logs, monitoring, and API consumers depend on. We are deliberately *not* doing\nthat, and are reporting this instead.\n\n## Expected\n\nPrefer the server-provided message when present; fall back to the generic string only when the\n403 response carries no usable message. Roughly:\n\n```js\nconst n = F(e) ? (ie(e) ?? i(`form.noPermissionToSave`))\n               : (ie(e) ?? i(`form.submitFailed`));\n```\n\nIf the current behavior is deliberate (e.g. to avoid leaking authorization internals through\n403 bodies), then please expose an opt-in — a form-level prop, a config flag, or an i18n\ntemplate that can interpolate the server message — so applications that *want* to speak to\ntheir users on 403 can do so. Silently dropping the message with no override is the part that\nhurts.\n\n## Repro\n\n1. Object with a `beforeUpdate` hook that throws `Object.assign(new Error('中文业务提示…'), { status: 403 })`;\n2. Trigger it from the Console record edit form;\n3. Network tab: the 403 response body carries the full message;\n4. UI: only the generic `form.noPermissionToSave` string is shown.\n\nFound while building an app on 17.0.0-rc.5; reported per \"platform issues go to the platform repo\".\nRelated but distinct: #7307 (409 `DELETE_RESTRICTED` message *content*; this one is about the\n403 message being *discarded*).\n"
+}

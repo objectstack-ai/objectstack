@@ -1,0 +1,35 @@
+{
+  "number": 9909,
+  "kind": "pull_request",
+  "title": "docs(objectql): drop the unverified \"268KB\" from the ./core boundary claim (#9803)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T07:15:16Z",
+  "updated_at": "2026-08-19T07:54:21Z",
+  "closed_at": "2026-08-19T07:54:20Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-19T07:54:20Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9909",
+  "body": "Fixes #9803\n\nThe `@objectstack/objectql/core` entry comment sold the ADR-0076 D2 boundary with a hard byte figure — \"the **268KB** metadata protocol\". The card asked whether to refresh it, drop it, or leave it. Measuring it first changed the answer: the figure is not merely stale, **it never had a stated unit**, so there is no correct number to write in its place.\n\n## H1 — what the figure actually measured\n\nRe-derivable with `git cat-file -s REV:PATH`. The extraction predates the default 63-commit shallow clone (finding #9878), so `git fetch --deepen=1200` first:\n\n| bytes | path | rev |\n|---|---|---|\n| 268,886 | `packages/objectql/src/protocol.ts` | `d9fe95fcf` — pre-extraction |\n| 268,921 | `packages/metadata-protocol/src/protocol.ts` | `13dbcf2d0` — same file, as it landed (#2415, 2026-06-28) |\n| 1,054,749 | `packages/metadata-protocol/src/protocol.ts` | `HEAD` |\n\n268,886 B = 268.9 decimal KB — so \"268KB\" was the **raw source bytes of one file**, `protocol.ts`, counted by ADR-0076's premise paragraph. Under its own original unit it is **3.9x stale** today.\n\n## H2 — the deeper defect: the unit\n\nThat per-file figure was then re-pointed at a whole package — \"the 268KB metadata-management layer\". Today \"the size of `@objectstack/metadata-protocol`\" is any of these, after `pnpm --filter @objectstack/metadata-protocol build`:\n\n| bytes | what |\n|---|---|\n| 169,718 | `dist/index.js`, gzipped — **less** than the quoted figure |\n| 591,087 | `dist/index.js`, raw |\n| 1,054,749 | `src/protocol.ts` — the quoted figure's own unit |\n| 1,513,973 | `src/**/*.ts`, excluding tests |\n| 3,637,237 | `src/**/*.ts` |\n\nA **21x spread that straddles \"268KB\" in both directions**, before an embedder's own bundler and tree-shaking are considered. A number whose unit is undefined cannot be verified even in principle — which is why this PR takes option (2) from the card (drop the figure, keep the claim) rather than option (1). Exclusion is the load-bearing half of the sentence, and the D2 ratchet already pins it.\n\n## H3 — every occurrence\n\nSeven at `origin/main`. Four fixed, three deliberately not:\n\n- fixed: `packages/objectql/src/core.ts:8` (the carded one), `packages/objectql/src/core-boundary.ratchet.test.ts:7`, `examples/embed-objectql/src/index.ts:7`, `examples/embed-objectql/README.md:18`\n- untouched: `docs/adr/0076-objectql-core-tiering.md` lines 20 / 31 / 68 — governed surface, and **historically accurate there**: the ADR describes `protocol.ts` the file, which genuinely was that size.\n\nThe full provenance above is recorded, commit-pinned, in the ratchet test header so the next reader can re-derive it instead of re-litigating it.\n\n## The one new assertion — please read this bit\n\nThe PR adds a second `it()` to the **existing** `core-boundary.ratchet.test.ts`, asserting `core.ts` quotes no byte figure for the excluded weight.\n\n**It is not a size ratchet.** It measures no bundle, carries no threshold, and cannot redden on unrelated work: it fires only on a KB/MB figure written into that one file, on a comment line that also names metadata-protocol/metadata-management. Scope is deliberately `core.ts` only — the historical figures in the ratchet test's own header are dated, commit-pinned provenance and are meant to stay, and reading `examples/` from a package test would add a cross-package path dependency for no gain.\n\nPriced by replay over all 14 states of `core.ts` since the file was created:\n\n```\nGREEN db22a4401 2026-08-19   (this PR)\nRED   f1da948d8 2026-08-13   // 268KB metadata protocol is never pulled into their dependency graph.\nRED   8b90d68b1 2026-08-12   (same line)\n...                          (10 more, all the same line)\nRED   13dbcf2d0 2026-06-28   // 268KB metadata protocol is never pulled into their dependency graph.\n```\n\n13 red / 1 green, and every red is this same defect — the figure was present from the file's very first commit. Zero false positives over the file's entire history.\n\n## Reverse verification (H4)\n\nBoth arms broken deliberately and restored with `git checkout HEAD -- packages/objectql/src/core.ts`, byte-identity confirmed by sha256 (`983554e1…`) both times.\n\n- **D2 boundary arm** — appended `export { assembleMetadataProtocol } from '@objectstack/metadata-protocol';` to `core.ts`. Red: `core.ts imports forbidden package @objectstack/metadata-protocol`.\n- **New figure arm** — restored the literal `origin/main` line. Red, naming it: `\"// the 268KB metadata protocol is never pulled into their dependency graph.\"`\n\n## Gates\n\nUnion re-run at final HEAD `db22a44014`, after the last commit:\n\n```\ncheck:nul-bytes                OK (6264 files, no raw control bytes)\ncheck:engine-double-contract   OK (321 pinned, 133 debt, 2 exempt)\ncheck:where-matcher            OK (257 matchers, 0 silently-wrong, none new)\ncheck:query-options-erasure    OK (none new)\ncheck:durability-log-level     OK\ncheck-engine-split-ratio.mjs   OK (report-only, ADR-0076 D7)\ncheck-affected-docs.mjs        OK (242 self-test cases)\npnpm --filter @objectstack/objectql test        219 files / 3879 tests passed\npnpm --filter @objectstack/objectql typecheck   clean\nexample-embed-objectql test + typecheck         passed\n```\n\n`examples/embed-objectql` typecheck first failed on `Cannot find module '@objectstack/driver-memory'` — an unbuilt dependency closure, not this change; green after `pnpm --workspace-concurrency=2 --filter '@objectstack/example-embed-objectql^...' build`.\n\n## Release\n\nComment-only in shipped source, plus one test assertion and two example-doc lines — nothing user-visible ships, so this carries `skip-changeset` rather than a changeset. (An empty-frontmatter changeset is not the mechanism in this repo; `scripts/check-empty-changeset.mjs` rejects newly added ones.)\n\nDraft on purpose — not arming auto-merge, not flipping out of draft.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XqDQYVU5smx29ts9pAErja)_"
+}

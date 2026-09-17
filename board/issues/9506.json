@@ -1,0 +1,34 @@
+{
+  "number": 9506,
+  "kind": "pull_request",
+  "title": "docs(qa): RUNNER.md rule 2 carries the access-control disclosure carve-out at its source",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T05:55:40Z",
+  "updated_at": "2026-08-18T06:32:17Z",
+  "closed_at": "2026-08-18T06:32:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-18T06:32:16Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9506",
+  "body": "Fixes #9471\n\nDocs-only, one file: `docs/qa/platform-checklist/RUNNER.md`.\n\n## The conflict this removes\n\nRule 2's closing sentence defined a completed `fail` verdict unconditionally:\n\n> A `fail` with no reproduction rule in its issue is not a completed verdict.\n\nThe `checklist-test` skill guardrail landed on `main` at `097fe96e1` (PR #9470) forbids\npublishing a reproduction for an authentication or authorization hole anywhere on GitHub,\nand states that it overrides this sentence. So a runner reading RUNNER.md on its own got\nthe unconditional rule with no hint a carve-out exists, and a runner reading both had to\nchoose between \"complete verdict\" and \"do not publish an exploit\" — resolved only by\nprecedence asserted from the skill side.\n\n## What changed\n\n**1. Rule 2 states the carve-out itself.** An auth/authz `fail` is a completed verdict\nwhen it records the item id, the clause, and `detail withheld pending maintainer`, with\nthe reproduction held in the runner session and the runner stopping to wait for the\nmaintainer. The wording is the same rule the merged skill guardrail states — the two are\nnow consistent at the source, and the new text says so explicitly rather than claiming\nprecedence in the other direction. Rule 2's force for every other failure class is\nuntouched, and the carve-out says that too, in its last sentence.\n\nAttribution follows the file's existing convention: maintainer disclosure ruling,\n2026-08-18, recorded on #9387. No verbatim quote is given because I did not have the\nmaintainer's original wording — the ruling is cited by date and record, not paraphrased\ninto quotation marks.\n\n**2. Bounded in-place fix, same defect class — three later restatements now point at the\ncarve-out instead of repeating the obligation unconditionally.** Naming them explicitly,\nsince they are beyond the letter of the card's scope paragraph (same file surface, no new\nverification surface, no other claim on this file — no open PR touches\n`docs/qa/platform-checklist/**`):\n\n| line | text before | why it is the same defect |\n|---|---|---|\n| Run records, \"the issue is text only\" | \"What the report carries for a defect is the **reproduction rule**\" | a restatement of the exact sentence rule 2 carves out |\n| issue-body composition | \"a reproduction rule per `fail`\" | same, in the report's field list |\n| extraction obligation | \"extract each one into its own standalone issue — reproduction and mechanism itemized in the card\" | this is the public-card shape the original disclosure travelled through; left unconditional it re-instructs the incident |\n\nEach is a **pointer** to rule 2, not a second copy of the rule — four copies of one policy\nin one document is the drift this card exists to prevent.\n\n## The card's \"worth checking while in the file\" sweep\n\nChecked, no change needed, reporting the confirmation:\n\n- **Trap vocabulary** — every row is about what a trap *fakes* and how to rule it out.\n  Nothing in it assumes a finding is safe to publish.\n- **Environment facts** (extended by #9427) — briefing facts about the stock environment.\n  Their ⛔ markers all govern verdict accuracy (\"do not file a whole-run red as a product\n  defect before checking the browser resolved\"), never disclosure.\n\nThe unconditional phrasing that does exist was the three restatements above, in other\nsections.\n\n## Out of file surface, filed separately\n\n`docs/qa/platform-checklist/README.md` and `docs/qa/platform-checklist/runs/README.md`\ncarry the same unconditional obligation (\"a reproduction rule per failure\" / \"**every\n`fail` carries a reproduction rule**\"). Both are outside this card's declared file\nsurface, so they are untouched here and filed as a separate finding.\n\n## Gates\n\nRe-derived against the actual diff rather than trusting the dispatch list:\n`node scripts/pm/dispatch-gates.mjs docs/qa/platform-checklist/RUNNER.md` places zero\nfamilies on this path. The checklist's own validator is not path-derivable but names\nRUNNER.md in its sources, so it was run anyway.\n\nUnion re-run at final HEAD `1c887f058`:\n\n```\ncheck-nul-bytes: OK (scanned 6136 text file(s) -- 6136 tracked, 0 untracked-not-ignored;\n  skipped 5 binary; no raw ASCII control bytes).\nchecklist-select self-test: 17 cases pass.\ncheck-platform-checklist: OK — 15 areas, 190 items (190 active); coverage: 30 kinds\n  mapped, 0 waived.\n```\n\nBoth checklist validators reference RUNNER.md only in prose/comments — neither parses its\ncontent, so neither can assert on this change. Recording that rather than presenting a\ngreen run as evidence the wording was verified.\n\nNo changeset: docs-only, nothing published — `skip-changeset` per repo convention.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Rn7aaamsR99FXRqLcpL99q)_"
+}

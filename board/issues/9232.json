@@ -1,0 +1,35 @@
+{
+  "number": 9232,
+  "kind": "issue",
+  "title": "finding: `packages/rest`'s flat `sendThrownError` still puts a thrown error's `code` on the wire un-narrowed — ADR-0112's closure does not reach that door",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T04:28:12Z",
+  "updated_at": "2026-08-18T12:14:58Z",
+  "closed_at": "2026-08-18T12:14:58Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9232",
+  "body": "Found while implementing #9106 (the demote at the dispatcher/actions door). Filed unassigned, **not** fixed there: #9106's ruled scope named the actions door and the shared resolver, and the claim for it explicitly fenced off `packages/rest/src/error-response.ts` as #9098's surface.\n\n## The measurement\n\nThe 2026-08-16 ruling on #9106 says `error.code` is a **closed vocabulary at every door**, and #9106 delivers that for the three exits that read `resolveThrownHttpError` (`HttpDispatcher.errorFromThrown`, `dispatcher-plugin`'s `errorResponseBase`, `endpoint-executor`'s `endpointErrorAnswer`) plus the direct-mount package registrar.\n\nOne thrown-error path is left outside it, and #9098's own landed prose says so in `packages/runtime/src/package-door-error-parity.test.ts`, verbatim:\n\n> - **THROWN errors:** NOT narrowed, deliberately and symmetrically with this door. `sendThrownError` passes a caught error's `code` through verbatim; narrowing that is an ADR-0112 public-contract decision, not an internal typing one.\n\nThat sentence was true when it landed. #9106 changed the half it rests on — the dispatcher door narrows now — so the stated symmetry is gone and `packages/rest`'s flat responder is the one thrown path that still emits an unregistered spelling.\n\n## Why it is narrower than it looks (and why it is still worth a card)\n\nThe flat dialect puts `code` at the body's **top level** (`{ error: 'message', code: 'X' }`), not in `error.code`. So it is arguably not the field ADR-0112 D4 closes, which is why #9106 did not reach it by construction rather than by oversight. Two reasons it is still a real card:\n\n1. **The invariant is now stated absolutely.** After the #9106 amendment, ADR-0112 reads \"closed at every door\". An agent reading it, then reading a `sendThrownError` body, sees a contradiction and has no way to tell which one is authoritative — the exact AI-error-resistance failure #9106 was filed to remove, moved one door over.\n2. **`check:dispatcher-error-vocabulary` sweeps only the PLATFORM producers of that path.** It cannot reach a code that is not written in this repo — the same construction limit that produced #9106's tenant-authored limb.\n\n## Deliberately not decided here\n\nWhether the answer is (a) narrow the flat door too and add a `declaredCode` sibling, (b) converge the envelope position first and let the vocabulary follow, or (c) rule the top-level `code` a different field that ADR-0112 does not govern, and say so in the ADR. That is a public-contract decision, per #9098's own note.\n\n## Stale citation to fix while here\n\n#9098's prose and the #9106 ADR amendment both point at **#7035** as the open envelope-position finding. #7035 is **closed** (completed 2026-08-10, PR #7293) and was only about three `/meta` 501 handlers. The envelope-convergence line needs a live card to point at — this one, or a dedicated envelope card if triage prefers to split them.\n\n## Not reproduced as a client-visible break\n\nNo consumer branch on an unregistered top-level `code` from that door was found: the #9106 precondition sweep classified every out-of-vocabulary SCREAMING_SNAKE literal on the consumer surfaces (`client`, `client-react`, `examples`, `qa`, the objectui checkout) and none was an `error.code`-class read. So this is a contract-coherence card, not an outage.\n\nRelated: #9106 (the ruling this measures against) · #9098 / PR #9222 (which split the responder and wrote the sentence above) · #8087 (the gate) · ADR-0112.\n"
+}

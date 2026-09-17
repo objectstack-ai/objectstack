@@ -1,0 +1,34 @@
+{
+  "number": 9775,
+  "kind": "pull_request",
+  "title": "docs(cli): document the i18n merge consequence for a corrected source string",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T23:01:35Z",
+  "updated_at": "2026-08-19T00:03:08Z",
+  "closed_at": "2026-08-19T00:03:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-19T00:03:07Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9775",
+  "body": "Fixes #9672\n\n## What this documents\n\n`os i18n extract`'s merge behaviour was already correct and already intentional: it\nnever overwrites an existing non-default-locale translation, so `--fill=default` only\nfills gaps. The consequence — that a source label/description **correction** does not\npropagate into a locale that already holds a translation of the old text — was true and\nunchanged, but stated nowhere the next reader (a translator, or the next author touching\nthis tool) would look. This PR closes that gap with two paragraphs, per the triage\nruling on #9672 — no behaviour change.\n\n**1. `packages/cli/src/commands/i18n/extract.ts`** — a comment above the\n`mergeExisting` option passed to `extractTranslations`, explaining why merge is the\ndefault and what it means for a corrected source string.\n\n**2. `packages/cli/src/utils/i18n-extract.ts`** — six new lines in\n`renderTranslationModule`'s default `header`, the single template every generated\n`<locale>.objects.generated.ts` / `<locale>.metadata-forms.generated.ts` bundle is\nbuilt from (confirmed: not duplicated anywhere else in the repo — 41 generated files,\none call site, no override).\n\nBecause the header is baked into every generated bundle, all 9 packages that own an\n`i18n-extract.config.ts` were regenerated (`node scripts/check-i18n-bundles.mjs\n--write`) so the committed output matches the new template. Translated content is\nbyte-identical; only the header comment gained 6 lines per file (42 files touched, 256\ninsertions, 0 deletions — confirmed via diff).\n\n## What this deliberately does NOT do\n\nPer the triage ruling, the source-hash staleness detector sketched in #9672's body is\nexplicitly out of scope — it's a real design, but new gate surface behind one measured\nincident (#9046), an appetite question rather than a queue item. No staleness marker,\nno `check:i18n` value comparison, no threshold change.\n\n## Mechanism re-verified on current `main`\n\nThe issue measured `origin/main` at `d693ba158`. Re-checked before writing:\n`packages/cli/src/commands/i18n/extract.ts`, `packages/cli/src/utils/i18n-extract.ts`,\n`packages/cli/src/commands/i18n/check.ts`, `packages/cli/src/utils/i18n-coverage.ts`,\nand `scripts/check-i18n-bundles.mjs` all show **zero commits** between `d693ba158` and\nthis branch's merge base — the mechanism the card describes is unchanged. Both halves\nhold:\n\n- `mergeExisting` (merge, the default) only skips a **gap**; a present translated value\n  for a non-default locale is preserved verbatim, corrected source or not.\n- `check:i18n`'s bundle-drift verdict compares a fresh extract's *content* against the\n  committed file — and a fresh extract for a non-default locale reuses the same stale\n  merged value, so drift never fires on staleness. `computeI18nCoverage` (which backs\n  `os i18n check`) only asks whether a key's value is `undefined`, never whether it\n  matches its source's meaning.\n\n## Verification (commit `cff1dd33c`, after merging `main`)\n\n- `pnpm check:i18n` — 9/9 packages in sync, no undeclared authoring keys, self-test\n  green.\n- `pnpm --filter @objectstack/cli typecheck` — clean.\n- `pnpm --filter @objectstack/cli test` — 134 test files / 1458 tests passed (ran wider\n  than intended — the `--` file-path filters were absorbed as vitest positional args\n  that matched everything rather than narrowing the run; all green regardless).\n- Targeted `eslint --no-inline-config` on both edited source files — 0 findings.\n- `check:cross-package-test-inputs`, `check:test-source-alias`,\n  `check:type-source-resolution`, `check:changeset-gate-self-tests`\n  (empty-changeset / adr-0087 / no-major), `check:objectui-changeset`,\n  `check-affected-docs.mjs` self-test — all green.\n- `check:nul-bytes` — clean (self-test + real scan).\n- `check:i18n-coverage` — **not measured**: this fresh worktree has no build output for\n  `@objectstack/connector-mcp`, which `examples/app-showcase`'s config needs to lint,\n  and that gate is not implicated by this diff's own path derivation\n  (`node scripts/pm/dispatch-gates.mjs`). Declaring not-measured rather than guessing.\n\n## Changeset\n\n`@objectstack/cli` is publishable and this diff touches its `src/**` with a real,\nif purely textual, change to what the CLI writes to disk — not a docs/tests-only PR, so\n`skip-changeset` does not apply. Added `.changeset/i18n-merge-consequence-documented.md`\n(patch).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012WKSnqAaoqtW3QX7SSf1Vk)_"
+}

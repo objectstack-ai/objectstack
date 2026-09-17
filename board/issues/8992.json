@@ -1,0 +1,34 @@
+{
+  "number": 8992,
+  "kind": "issue",
+  "title": "audit: no read/view audit — \"who viewed which record\" is unanswerable, blocking regulated-industry deals",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-16T04:31:50Z",
+  "updated_at": "2026-08-18T07:58:33Z",
+  "closed_at": "2026-08-18T07:58:33Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8992",
+  "body": "## Summary\n\n`sys_audit_log` covers writes only. `actionFor()` in `packages/plugins/plugin-audit/src/audit-writers.ts` maps exactly three events:\n\n```ts\nfunction actionFor(event: string): 'create' | 'update' | 'delete' | null {\n  if (event === 'afterInsert') return 'create';\n  if (event === 'afterUpdate') return 'update';\n  if (event === 'afterDelete') return 'delete';\n```\n\nThere is no read/view/export action, and the shipped audit views confirm the scope — `writes_only` filters on `['create','update','delete','restore']`, `auth_events` on `['login','logout','permission_change']`.\n\nSo the platform cannot answer **\"who viewed this customer record, and when\"**.\n\n## Why this matters commercially\n\nFound while scoping a bank CRM RFI (VTB Shanghai SME). The requirement is explicit and not unusual:\n\n> 客户数据全部操作（含查看与导出）均记录日志 — *all operations on client data, **including views and exports**, are logged*\n\nEvery regulated-industry buyer asks this in the first security review — banking, insurance, securities, healthcare, government. Today the only honest answer on the coverage matrix is \"requires customisation\", which turns a standard-product checkbox into a line item on every deal in those verticals. In that project alone it was quoted at ~45 person-days of custom work.\n\nThe surrounding pieces are already strong, which makes the gap more conspicuous: the row shape is complete (actor, delegated actor, object, record id, before/after values, source IP, user agent, tenant), and retention already exceeds what finance typically asks for (90d online + 7y archive vs. the common 5y requirement).\n\n## Design considerations\n\nReads vastly outnumber writes, so a naive synchronous write per read would wreck response times (the same RFI carries a 2s record-open / 1s query budget). Suggested shape:\n\n- **Configurable scope** — per object, opt-in; not global-on.\n- **Sensitivity-triggered** — ideally driven by a field/object sensitivity label rather than a hand-maintained list (see the separate data-classification discussion).\n- **Async, batched writes** off the request path.\n- **Sampling vs. full capture** as two modes — full for a short list of sensitive objects, sampled elsewhere.\n- Decide what counts as a \"view\": record detail open only, or list/search results too. Banks differ on this; make it declarable rather than assumed.\n\n## Packaging note\n\nThis looks like a natural **enterprise-tier** capability (the buyer is the compliance/internal-audit function, not the app author), and it would pair with export alerting and data classification as a coherent compliance bundle. The existing AI-governance precedent — neutral seam in the open runtime, policy in `security-enterprise` — seems like the right split here too: the audit-write seam belongs in `plugin-audit`, the policy/enforcement in the enterprise package.\n\n## Verified against\n\n`0f539bd` — `packages/plugins/plugin-audit/src/audit-writers.ts`, `packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts`.\n"
+}

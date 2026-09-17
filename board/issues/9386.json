@@ -1,0 +1,35 @@
+{
+  "number": 9386,
+  "kind": "issue",
+  "title": "docs(qa): land the #9296 wave's environment facts in RUNNER.md and the 34 checklist-accuracy corrections in areas/*.json",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tests"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T22:09:22Z",
+  "updated_at": "2026-08-18T03:54:23Z",
+  "closed_at": "2026-08-18T01:21:47Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9386",
+  "body": "Docs-only, one PR, `docs/qa/platform-checklist/**` and nothing else. Closes out the QA wave #9296, which ran every unpinned P0/P1 item plus all 77 pinned ones and produced two kinds of ledger debt: **facts the runner should not re-derive**, and **items that are factually wrong**.\n\nFiled separately from the skills card #9387 on purpose — skills changes are ADR-class and need a human merge, `docs/qa/**` does not. Mixing them would hold this behind a review it does not need.\n\n## Part 1 — `RUNNER.md`, \"Environment facts the runner should not re-derive\"\n\nThat section's own contract is *\"re-confirm one only when a run contradicts it, and correct it here when it does.\"* Six facts, each measured, each having cost a round real time:\n\n1. **`objectstack verify --rls` is a separate invocation.** Bare `objectstack verify` emits **no RLS section at all** — `runRlsProofs` only runs behind the flag. Two rounds cited plain `verify` while believing they had consulted an RLS oracle.\n2. **Playwright needs an explicit `executablePath` on these containers**: `@playwright/test` 1.62.1 resolves chromium build 1234, only `chromium-1194` is installed. Stock config reports **31 failed**; with `launchOptions.executablePath=/opt/pw-browsers/chromium-1194/chrome-linux/chrome`, **31 passed**.\n3. **`?id=` on `/api/v1/meta/app` keys on the app NAME, not the package id.** A package id returns `{\"items\":[]}` — reads exactly like missing metadata, the highest-value false-P0 shape there is. Real names: `showcase_app` / `setup` / `studio` / `account`.\n4. **`ss` is blind to sockets in these containers** — empty output for a port that is actively serving. Liveness is `curl -s -o /dev/null -w '%{http_code}' …/api/v1/health`. This is the \"a zero reading needs a positive control\" rule applied to one tool.\n5. **Console session auth is bearer-token-in-`localStorage` (`auth-session-token`) — *and* a real form sign-in also sets `better-auth.session_token`.** A `clearCookies()` gesture expires nothing and leaves a fully authed shell rendering (this nearly produced a fake P0); true expiry is `POST /auth/sign-out`. But the cookie is not decorative — `storage/upload/presigned` requires it, so a bearer-only session 401s there. Both halves are needed; each on its own has already misled a round.\n6. **A cold tree cannot boot from the console-build recipe alone.** `pnpm objectui:build` builds the console, not the framework CLI; on a fresh container `packages/cli` has no `dist` and `objectstack dev` answers `Error: command dev not found`. Missing step: `pnpm exec turbo run build --filter=@objectstack/cli... --filter=@objectstack/example-showcase...`. Point at **#9307** for the cold-tree `objectui:build` ordering bug rather than letting each runner re-diagnose it.\n\nPlus **one trap-vocabulary entry** for the failure mode behind this wave's only retracted finding:\n\n| trap | what it fakes | counter |\n|---|---|---|\n| `absence-inference` | a missing flag / key / script read as a missing capability | follow the forwarding chain to where the default is actually decided, before writing the finding down |\n\n## Part 2 — `areas/*.json`, 34 item corrections\n\nEach is a **change**, so each needs its fields fixed, `revision` bumped, and a `history` entry saying what changed and why. Do not batch them into one revision bump per file — run records pin per-item revisions, and a silent semantic edit re-validating an old result is exactly what the revision check exists to stop.\n\nThe corrections are itemised in the run records; read them from there rather than from this card, and ground each against the tree before editing:\n\n| run record | corrections |\n|---|---|\n| **#9334** (P0 round) | 5 — incl. a stale `showcase_contact=33` baseline (actual 32), the `?id=` spelling in two items, a `records-forms` negative that can never hold because the field carries a default, a missing `automated.ref` on the new ADR-0123 item, two items naming `runRlsProofs` without `--rls` |\n| **#9401** (pinned sweep) | 3 — `api-backend.query-contract-matrix` cites a **source module** (`packages/objectql/src/filter-comparand-shape.ts`) as an `automated.ref`; two refs name companion tests by bare name with no path |\n| **#9417** (api·cli·build) | 9 |\n| **#9453** (browser 1) | 9 — incl. `platform-core.console-login` **step 5 is wrong for this build** (the `clearCookies` gesture cannot expire a bearer-token session), a retired OWD gate an item still tests, a `publish` sub-route that 404s for `permission`, capability specimens on `showcase_field_zoo` not `zoo`, 11 settings namespaces not 10 |\n| **#9467** (browser 2) | 8 — incl. the activity/audit verb being **write-time localized from the tenant setting**, not the reader's session (so the clause asserting reader-session localization is wrong), and a stale `_views.emptyState` waiver whose #7714 specimen has since landed and renders |\n\n**Two markers to add, not just text fixes:**\n\n- `access-security.no-active-org-session-semantics` needs `blocked: { by: \"fixture\", ref: \"#9334\" }`. Three independent rounds derived the same dead end — the deployment is `tenancy: single` so ADR-0095 Layer 0 is inert, and booting `OS_TENANCY_POSTURE=isolated` is correctly refused because `@objectstack/organizations` is not declared. Without the marker the selector keeps listing it as runnable and a fourth round pays for it again.\n- `studio-authoring.first-run-loop` must lose any inherited \"Studio is not installed\" assumption. **It is runnable and it passes** — the app *registration* is absent from the admin's app list, but the App Builder UI is reachable at `/_console/studio` and the loop closes 6/6 with zero restarts (#9453).\n\n## Scope discipline\n\n⛔ No `.claude/skills/**` — that is #9387, and one skills path in the diff sends this whole PR to a human merge queue it does not belong in. ⛔ No CI posture changes (#9306 is the maintainer's). ⛔ No product code. Keep `node scripts/check-platform-checklist.mjs` green and paste its output.\n"
+}

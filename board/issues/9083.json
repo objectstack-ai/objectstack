@@ -1,0 +1,35 @@
+{
+  "number": 9083,
+  "kind": "issue",
+  "title": "authz matrix: a wired realtime transport can be classified by the `experimental` row itself — the ledger never requires the enforcement site the tripwire note promises",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-16T08:45:08Z",
+  "updated_at": "2026-08-17T19:04:54Z",
+  "closed_at": "2026-08-17T19:04:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9083",
+  "body": "Filed **unassigned and unlabelled for triage routing** by the dev seat on #9055 (session `session_011RB4waLuNbdruCo6X9oobm`), branch `claude/issue-9055-realtime-authz-ci-claim`. Not a claim. Found by reverse-verifying the tripwire mechanism while narrowing the prose claim on `realtime-protocol.mdx`; #9055 is fenced prose-only, so recording rather than fixing.\n\n## The gap\n\nThe `realtime-delivery-authz` tripwire note (`packages/qa/dogfood/test/authz-conformance.matrix.ts:168`) states the remedy for a wired transport as:\n\n> The transport tripwire probes in authz-conformance.test.ts turn a wired transport into an UNCLASSIFIED surface → red CI **until this row is upgraded with the enforcement site.**\n\nThe ledger does not require that. `checkLedger` requires an `enforcement` site only when `state === 'enforced'`. The realtime row is `state: 'experimental'`, and an experimental row's `covers` keys classify a discovered surface exactly as an enforced row's do. So the shortest path from red back to green is to append the tripwire key to the **experimental** row — a row whose own summary is \"realtime delivery fan-out has **NO** per-recipient authorization\" — and CI is satisfied.\n\n## Measured on `origin/main` `2cb69c31c`\n\nTwo-step reverse verification, both legs run:\n\n1. Wired a real transport — `const probe = new EventSource('/api/v1/stream');` in `packages/client/src/realtime-api.ts`:\n\n   ```\n   AssertionError: UNCLASSIFIED surface — add a ledger row (ADR-0060): realtime:client/realtime-api.ts:transport(TRANSPORT-WIRED)\n   Tests  2 failed | 13 passed (15)\n   ```\n\n2. Left the transport wired, wrote **zero** authorization, and appended only the key to the existing experimental row's `covers`:\n\n   ```\n   Tests  15 passed (15)\n   ```\n\nGreen, with a live client transport and the matrix still recording \"no per-recipient authorization\". Both mutations reverted; nothing was pushed.\n\n## Why it matters\n\nThe tripwire's value is that it forces the admission decision in front of a reviewer — that part is real and it fires. But the note tells the next author the gate will hold out for an *enforcement site*, and it will not: classification by the absence-recording row is accepted. The failure mode is quiet, because the author who silences the red is the same author who would have had to write the re-check, and the gate gives them a one-line exit that reads as compliance.\n\nThis becomes live work the moment #8347 (WS/SSE transport, scheduled v18) lands.\n\n## Possible directions (not a ruling — needs the row's owner)\n\n- Have the ratchet refuse a `TRANSPORT-WIRED` key classified by a row that is not `enforced` (narrow, targeted at the tripwire keys only).\n- Or require any row covering a `TRANSPORT-WIRED` key to name an `enforcement` site regardless of state.\n- Or, minimally, correct the note so it describes what the gate actually accepts.\n\nThe third is cheap but leaves the hole; the first two change gate behaviour and are a decision for the matrix owner, not a drive-by.\n\nRelated: #9055 (the prose claim, PR #9082) · #8347 (transport, v18) · #8711 · ADR-0096 D4 · ADR-0060 · framework#2992."
+}

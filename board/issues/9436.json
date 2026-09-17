@@ -1,0 +1,35 @@
+{
+  "number": 9436,
+  "kind": "issue",
+  "title": "adapters/hono's two bare `{ data }` discovery bodies lose their ratchet owner when #9364 lands",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T01:12:11Z",
+  "updated_at": "2026-08-19T01:49:29Z",
+  "closed_at": "2026-08-19T01:49:29Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9436",
+  "body": "Filed unassigned by the #9364 dev seat while banking that card's counter deltas. Nobody is on it.\n\n`Blocked-by: #9389` — the ruling there decides which way this one goes, so it should not be dispatched before that card lands.\n\n## The gap\n\n`scripts/check-route-envelope.mjs` pins `packages/adapters/hono/src/index.ts` at two counters:\n\n| counter | what it is | owner after #9364 |\n|:--|:--|:--|\n| `errorCodeNotString 1` | `errorJson` wrote the HTTP **status** into `error.code` | fixed by #9364 |\n| `unenveloped 2` | two `{ data: await dispatcher.getDiscoveryInfo(prefix) }` bodies, no `success` flag | **nobody** |\n\nTriage scoped #9364 to the error-path half only (`errorJson`), so the `errorCodeNotString` counter goes to zero there and the file's entry survives carrying `unenveloped 2` alone. That entry's `ratchet` field names #9364 — a card the same PR closes.\n\nThe three bare-payload surfaces #9389 rules on are a deliberately **closed list**: `/api/v1/runtime/config`, `current-user-endpoints.ts`, and `/bootstrap-status`. These two bodies are not among them, so #9389 will not sweep them up either.\n\n## Why they are the same class as #9389, and why that matters\n\nBoth are the discovery payload for a mount:\n\n```ts\napp.get(prefix, async (c) => c.json({ data: await dispatcher.getDiscoveryInfo(prefix) }));\napp.get(`${prefix}/discovery`, async (c) => c.json({ data: await dispatcher.getDiscoveryInfo(prefix) }));\n```\n\nThey are read before authentication, by SDKs and codegen rather than by a browser SPA — which is why they were not in #9389's SPA-driven list, and also why the answer may legitimately differ from it. `{ data }` is one key away from the envelope (`success` is the whole difference), so the migration cost here is far lower than for the SPA-read surfaces #9389 weighs.\n\n## What needs deciding\n\nThe same fork #9389 states, on a different consumer population:\n\n- **A. Envelope them** — add `success: true`; sweep SDK/codegen/AI-client readers of `body.data` from this mount first. Route and surface ownership rule 4 (\"machine-readable surfaces must not lie\") argues for uniformity here more strongly than it does for a browser bootstrap payload.\n- **B. Rule them exempt** with a written reason, the mechanism #9389 was ruled onto (maintainer, 2026-08-17, option B).\n\nWhichever way it goes, the gate records it — but only if the entry keeps pointing at a card that is open. Today's `ratchet` pointer goes stale the moment #9364 merges.\n\n## Same-shape residue in the ratchet table\n\nThree other entries name #9364 in their `ratchet` field and are #9389's to retarget when it lands: `runtime-config-plugin.ts`, `current-user-endpoints.ts`, `auth-plugin.ts`. Noting it here so the dangling-pointer sweep is one job rather than four discoveries.\n\nRelated: #9364 (the error-path half, where this was measured) · #9389 (the pre-auth bare-payload ruling) · #9267 (added the gate surface) · #3843 (the envelope guard's founding class).\n"
+}

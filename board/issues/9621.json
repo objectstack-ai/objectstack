@@ -1,0 +1,34 @@
+{
+  "number": 9621,
+  "kind": "issue",
+  "title": "A negative-lookbehind literal cannot be carried in an issue/PR body — the `!` is deleted from `(?` + less-than + `!` + `[`, and AGENTS.md's sanitizer clause names only less-than plus a letter",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T13:24:16Z",
+  "updated_at": "2026-08-19T01:35:53Z",
+  "closed_at": "2026-08-19T01:35:01Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9621",
+  "body": "Found while implementing #9610 (PR #9618). ⛔ Filed rather than fixed there: that card is a regex fix in one gate script, and this is a change to `AGENTS.md`'s binding sanitizer clause, plus a second measured instance of the read-layer family in #9557.\n\n> ⚠️ This body deliberately avoids the two token shapes it is about, so that it stays readable through every channel. Where it must name them it spells them out in words.\n\n## What happened\n\n#9610's \"Suggested fix\" proposes a negative lookbehind. As it reads back today — through the GitHub MCP tool **and** through the rendered web page — the literal is missing its `!`:\n\n```\nwhat the card shows:   (?  LT  [\\w$.'\"`])       -> SyntaxError: Invalid capture group name\nwhat the author wrote: (?  LT  !  [\\w$.'\"`])    -> compiles\n```\n\n(`LT` = a less-than sign; see the note above.) V8 reads a less-than immediately after `(?` as the opener of a **named group**, so the form that survives storage does not compile at all. I was one step from filing that as a defect in the card.\n\nIt is not one. The card's prose names \"a **negative lookbehind**\" and reasons from the property only the negative form has (\"satisfied at position 0\"), so the author wrote the `!`. The same deletion then happened to me: PR #9618's first body revision carried the real literal in three places and came back with all three `!` gone.\n\n⇒ Two independent authors, same construct, same deletion.\n\n## Measured — and narrower than \"less-than plus bang\"\n\nSix probe lines were authored into this card and read back off the rendered page. The transcription is its own control: it preserved a `!` in one line and dropped it in another.\n\n| probe | authored | read back | verdict |\n|:---|:---|:---|:---|\n| PROBE-1 | `A` less-than `!B` | `A<!B` | **survives** |\n| PROBE-2 | `A` less-than `=B` | `A<=B` | survives |\n| PROBE-3 | `A` less-than `-B` | `A<-B` | survives |\n| PROBE-4 | `A` less-than `xB` | `A<xB` | survives |\n| PROBE-5 | `A` less-than ` B` | `A< B` | survives |\n| PROBE-6 | `(?` less-than `[\\w$])` | `(?<[\\w$])` | ⛔ **`!` deleted** |\n\n⇒ The trigger is **not** a bare less-than followed by `!` — PROBE-1 keeps it. What is destroyed is less-than, `!`, then `[` — the markup-declaration/CDATA opener. That is exactly and only the shape of a negative lookbehind over a character class, which is the single most common way anyone in this repo would write one.\n\n⚠️ PROBE-4 surviving is worth noting separately: it contradicts a plain reading of the documented \"less-than followed by a letter is stripped as a tag\" rule. Inside a code fence, at least, a less-than plus letter came back intact. The documented clause may be describing prose position only, or may be imprecise.\n\n## A second, different mutation in the same card\n\nThe first revision of this issue contained the doctype opener (less-than, `!`, `D`, ...) in one prose sentence. Reading the card back through the GitHub MCP tool **truncated the body at that token** — everything after it was gone, while the web page showed the whole card.\n\nThat is #9557's finding (MCP truncates a body at a literal script-tag token) reproduced on a different token. ⇒ Deletion and truncation are two different behaviours in two different layers, and a seat can hit either.\n\n## Why this is worth a card rather than a shrug\n\n⚠️ **It is silent and it lands in the load-bearing sentence.** The deletion leaves text that still reads like code and no longer means what the author wrote. Here it converted a correct proposal into an apparent syntax error, and the only reason it was caught is that the implementer tried to compile it before believing it.\n\n⚠️ **`AGENTS.md` documents a neighbouring case, and its rule does not cover this one.** The sanitizer clause names a less-than followed by **a letter**. Following that rule exactly still loses a negative lookbehind, and PROBE-4 suggests the stated rule is not even the one in force inside code fences.\n\n⭐ **The `os-dev-report` marker is the same opener.** The dev contract already carries a measured warning that the marker is eaten at rest and prescribes a plain-text fallback. That clause and this one are describing the same family, and only the marker's instance is written down.\n\n## Suggested resolution\n\n- Replace the \"less-than followed by a letter\" clause with what is measured: name the markup-declaration opener (less-than, `!`, `[`) as the destructive one, and keep the marker fallback as its named instance.\n- State the guidance that is missing today and is what a seat actually needs: **a load-bearing literal containing a less-than must not be trusted to a GitHub body.** Put it in the diff, a file, or a fenced block whose exact bytes do not matter, and reference it.\n- Decide whether this attaches to #9557 (read layer) or stands alone (storage/render layer). The probe above does not separate storage from render — a byte-exact authenticated REST read would. The direct route is unavailable from a dev session: `api.github.com` returns `GitHub access is not enabled for this session. An org admin must connect the Claude GitHub App for this organization.`\n\nRefs: #9610 (where it surfaced) · PR #9618 · #9557 (read-layer truncation) · #9031 (entities are a read artifact)\n"
+}

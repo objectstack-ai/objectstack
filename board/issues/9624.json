@@ -1,0 +1,34 @@
+{
+  "number": 9624,
+  "kind": "pull_request",
+  "title": "docs(cli): name the fixture the `os compile` / `os info` transcripts were run against (#9430)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T13:36:10Z",
+  "updated_at": "2026-08-18T14:12:22Z",
+  "closed_at": "2026-08-18T14:12:20Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-18T14:12:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9624",
+  "body": "Fixes #9430\n\n`content/docs/deployment/cli.mdx` prints the same summary counts in two sample blocks —\n`os compile` and `os info` — and neither says which project produced them. The page's own\nwalkthrough builds a *different* fixture (`os generate object customer` / `action approve`\n/ `flow onboarding`), which prints `my_app_customer` and a `Logic:` row, so a reader who\nfollows the page reproduces neither block and cannot tell whether the page or their own\nrun is wrong. Same defect class #9152 / PR #9262 closed for the two sibling pages; `cli.mdx`\nwas explicitly out of that scope, so this is a remaining gap, not a regression.\n\n**No printed value changes.** The diff is a pure insertion (+20 lines, 0 deletions). The\ntranscripts are verified against real runs — #9092 / PR #9151 for `os compile`, #9342 /\nPR #9429 for `os info` — and clause 6 of this dispatch forbids touching them. What was\nmissing is the provenance those runs had and the page did not.\n\n## What lands\n\n- A `Callout` under the `os info` block naming the whole fixture: the project this page\n  already scaffolds in *Your First App in 2 Minutes* (`npm create objectstack@latest my-app`\n  — the `blank` starter, which supplies the two-field `my_app_note` object and three\n  connector plugins), **plus** the four-field ticket object, the view and the action listed\n  in `build-with-claude-code.mdx`, renamed out of that page's `support_desk_` namespace into\n  `my_app_`, with that page's `support` app deliberately left out.\n- Why the `UI:` row carries no `Apps`: `printMetadataStats` never prints a zero count\n  (`packages/cli/src/utils/format.ts`).\n- Which lines are **not** fixture identity, so nobody re-derives them as if they were:\n  timings are machine identity; the author-time rule count and the artifact size track the\n  CLI version.\n- One sentence under the `os compile` block pointing at that note — its counts come from\n  the same fixture and had the same gap.\n\nTriage ruled option 1 (prose naming the fixture + a link), not option 2 (re-derive against\nthe walkthrough — changes documented output) and not option 3 (copy the listings onto a\ncommand-reference page). This is option 1; it needed a short paragraph rather than one line\nbecause the fixture is a scaffold **plus** three listings **minus** an app, and dropping any\nof the three clauses leaves it unreconstructible.\n\n## Bounded in-place fix, declared\n\nThe card names the `os info` block. The `os compile` block ~70 lines above prints the same\nthree lines from the same fixture, so it is the same defect in the same file and section:\nmechanical, the correct shape pinned by PR #9429's own record of the fixture, no other open\nPR holds the file, no new gate family. It gets the one-sentence pointer above and nothing\nelse. Filing it separately would have queued a second PR against the same hot file for two\nsentences.\n\n## Evidence the fixture reconstructs\n\nEvery component is checkable in-tree, which is the property being restored:\n\n| Printed | Comes from |\n|---|---|\n| `my_app_note (2 fields, user)` | `packages/create-objectstack/src/templates/blank/src/objects/note.object.ts` (title, body) via the scaffolder's namespace rewrite (`rewrite-identity.ts`: `blank_note` becomes `my_app_note`) |\n| `my_app_ticket (4 fields, user)` | the ticket listing in `build-with-claude-code.mdx` (subject, description, priority, status) |\n| `Data: 2 Objects  6 Fields` | 2 + 4 |\n| `UI: 1 Views  1 Actions`, no `Apps` | the view and action listings; app omitted, and zero counts are not printed |\n| `Runtime: 3 plugins` | the `blank` template's `ConnectorRestPlugin` / `ConnectorOpenApiPlugin` / `ConnectorMcpPlugin` |\n| `My App v0.1.0` / `my-app` / `my_app` / no description line | the scaffolder's identity rewrite and its `manifest.description` drop (#9263, quoted by PR #9429) |\n| `Loaded in 59ms`, `(74ms)`, `7.6 KB`, `rules (41)` | environment / CLI version, marked as such in the new note |\n\n## Verification, at 46549a7d9 (final commit)\n\nLocal gate union derived from the changed path with `node scripts/pm/dispatch-gates.mjs\ncontent/docs/deployment/cli.mdx`, all green:\n`check:cross-package-test-inputs`, `check:docs-audit-scope`, `check:docs-redirects`,\n`check:role-word`, and spec `check:empty-state` / `check:liveness` /\n`check:strictness-ledger` / `check:variant-docs`.\n\nTwo additions the derivation did not name, run because the diff earns them:\n\n- `pnpm check:doc-anchors` (required in `lint.yml`) — green over 250 fragment links; the\n  diff adds three. **Reverse-verified:** breaking the new cross-page fragment to\n  `#3-what-claude-code-writes-BROKEN` turns it red (exit 1), and restoring leaves the tree\n  byte-identical to HEAD. So the gate really reads the new links rather than passing over\n  them.\n- The page compiles through `@mdx-js/mdx` 3.1.1 (144717 chars) — no local gate parses MDX.\n\nDocs-only, no package publishes, so the PR carries `skip-changeset`.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01XqDQYVU5smx29ts9pAErja)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XqDQYVU5smx29ts9pAErja)_"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 9509,
+  "kind": "pull_request",
+  "title": "docs(skills): state the ablation-on-dist hazard as a resolution property, not a dogfood one",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T06:00:47Z",
+  "updated_at": "2026-08-18T06:37:34Z",
+  "closed_at": "2026-08-18T06:37:33Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": "2026-08-18T06:37:33Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9509",
+  "body": "Fixes #8949\n\n## What changed\n\nTwo `.claude/**` instruction files stated the \"rebuild before you believe an ablation\"\nrule as a property of `packages/qa/dogfood`. Both now state it as a property of\n**resolution**, which is what it actually is.\n\n- `.claude/agents/os-dev.md` — the ablation clause in the standing-clauses section,\n  generalized in place (no new section).\n- `.claude/skills/dogfood-verification/SKILL.md` — the ablation bullet in section 2,\n  generalized in place (no new section).\n\n## The condition, as both copies now state it\n\nAny test whose subject resolves through the dependency's `exports` — which point at\nthat package's built `dist/`, not `src/` — with no vitest alias redirecting the\nspecifier back to source. That set is enumerable and already enumerated:\n`KNOWN_UNALIASED_TEST_IMPORTS` in `scripts/check-test-source-alias.mjs`.\n`packages/qa/dogfood` is the most familiar instance, not the definition.\n\nTwo measured pairs are carried as the shortest possible provenance, as mechanism\nillustration rather than as the rule body:\n\n| pair | what happened |\n|:--|:--|\n| `plugin-email` to `platform-objects` | 375 passes on an ablated field; 4 went red once the dep was rebuilt |\n| `plugin-auth` to `core` | legs meant to prove a new gate can fail ran the pre-mutation artifact and stayed green |\n\nThe second pair is the one both files are written around. An un-rebuilt ablation there\ndoes not return a null result — it returns \"the gate did not fire\", which in that\ncontext reads as evidence the **gate** is broken rather than the harness. The expensive\noutcome is a dev weakening a working gate until it fires, destroying the thing the\nablation was written to certify.\n\n## Both halves of the mechanical rule, now explicit in both copies\n\n    mutate  -> rebuild -> prove the marker is IN dist/\n    restore -> rebuild -> prove the marker is GONE   (--absent)\n\nThe restore half is the one that gets skipped: rebuilding after mutating is intuitive,\nwhile remembering that *restoring* also needs a rebuild before the **next** measurement\nis trustworthy is not. A marker left behind in `dist/` keeps mutated code live for every\nlater suite run in that worktree, so the runs that follow measure the wrong tree.\n\n## Scope\n\n- `scripts/ablation-dist-preflight.mjs` is deliberately **not** touched — that header is\n  the authority and already carries this framing (landed via PR #8951); it is #8706's\n  scope and out of bounds here. These two files were the lagging copies.\n- `packages/qa/dogfood/README.md` step 4 is the third coupled location and is **out of\n  scope on purpose** — it belongs to #8366 in the `domain:cli` lane. That card remains\n  open and is not addressed here.\n- Whether the preflight grows a per-symbol mode is a design question raised by #8706 and\n  is untouched.\n\n## Merge path\n\n⛔ **Human merge only.** Standing maintainer ruling, 2026-08-11:\n「所有 skills 的更新和 adr 类似,需要人工审核」. This PR is a draft; no AI seat should\nmark it ready, add it to the merge queue, or arm auto-merge. It is *awaiting a human\nmerge*, which on GitHub looks identical to \"forgotten\".\n\n## Verification\n\n`.claude/**` prose only — no package source, no published surface, so no changeset\n(`skip-changeset`).\n\nLocal gate union, all green at `2cfdd3bfb` (the final commit of this branch):\n\n| gate | result |\n|:--|:--|\n| `pnpm check:doc-authoring` | 377 files clean |\n| `pnpm --filter @objectstack/lint run check:doc-formula-expressions` | 24 self-test cases; 396 files / 1411 TS blocks clean |\n| `pnpm check:skill-frame-sync` | 4 copies structurally isomorphic across 3 files |\n| `pnpm check:pm-skill-ratchet` | `os-dev.md` 341 lines, ceiling 399, headroom 58 |\n| `pnpm check:pm-skill-id-lint` | 9 files clean; `os-dev.md` stays at zero issue-ID citations |\n| `pnpm check:agent-model-declared` | `os-dev.md` declares `opus` |\n| `pnpm check:nul-bytes` | 6136 text files, no raw control bytes |\n| `node scripts/check-adr-merge-approval.mjs` | 401 Bad credentials locally (expected — needs CI credentials) |\n\n`pnpm check:pm-skill-id-lint` was **not** in the dispatched gate list; it was picked up\nby re-deriving the family from the actual diff\n(`node scripts/pm/dispatch-gates.mjs` over the two changed paths) and is green. That\nre-derivation placed 8 families for this surface and matched no others.\n\nThe id-lint gate is why neither file cites an issue number: maintainer ruling\n2026-08-12 keeps operative agent-protocol text free of issue-ID dereferences, so the\ntwo measured pairs are named by package pair only.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Rn7aaamsR99FXRqLcpL99q)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Rn7aaamsR99FXRqLcpL99q)_"
+}

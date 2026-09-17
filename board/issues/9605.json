@@ -1,0 +1,34 @@
+{
+  "number": 9605,
+  "kind": "pull_request",
+  "title": "docs(kernel): point the runtime-services index at the audit slot's real registrant",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T12:54:50Z",
+  "updated_at": "2026-08-18T13:59:49Z",
+  "closed_at": "2026-08-18T13:59:48Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-18T13:59:48Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9605",
+  "body": "Fixes #9588\n\n`content/docs/kernel/runtime-services/index.mdx:46` listed the canonical source for the audit slot as `packages/services/service-settings/src/settings-service.types.ts`. That is the same wrong seam PR #9587 removed from the page this index links to, so after that PR lands the two files contradict each other for one slot.\n\n## Evidence, verified in this worktree against origin/main\n\n- **The wrong target.** `settings-service.types.ts:163` declares `SettingsAuditSink`, whose method is `record(entry)`. It is constructor-injected: `settings-service.ts:578` takes it as a ctor parameter, `:531` holds it as `private audit?`, and `:1459-1461` calls `this.audit.record({ ... })` inside a `try` after a settings write lands. Nothing registers it as a service.\n- **The real registrant.** `packages/plugins/plugin-audit/src/audit-plugin.ts:117-118` runs `ctx.registerService('audit', createAuthEventAuditSink({ ... }))`. Canonical source `packages/plugins/plugin-audit/src/auth-event-audit.ts`, which declares `AuthEventAuditSink` at `:112` with exactly one method, `recordAuthEvent(event)` at `:118`, produced by `createAuthEventAuditSink` at `:153`.\n- **Spot-check of the two-line registration.** A single-line `grep -rn \"registerService(\\s*'audit'\"` over `packages/` returns **zero hits** — the call spans two lines. A multiline sweep (`rg -U --multiline-dotall`) over the same tree returns the site above and confirms it is the **only** production registrant of the slot; the same sweep found each of the other eight slots' registrants, which is the positive control that the pattern works.\n- **No competing contract.** `packages/spec/src/contracts/` has no audit contract file, so the plugin implementation is the canonical source there is.\n\n## What changed\n\nOne entry repointed, and the displaced type kept reachable rather than dropped:\n\n- `- Audit bridge: .../settings-service.types.ts` becomes `- Audit: .../auth-event-audit.ts`. The word *bridge* goes with it — it is the word that made a constructor-injected settings sink read as the kernel seam, and every other row on the list is named for its slot.\n- A `Not this: the settings audit sink` callout under the list names `SettingsAuditSink`, gives its real source, says it is constructor-injected and never resolved from the slot, and notes the resolved object exposes `recordAuthEvent` and not `record`. This mirrors the reconciliation PR #9587 added to `audit-service.mdx` instead of swapping the pointer silently — the index is precisely where the two get conflated, so removing the wrong pointer without naming what it used to mean would re-open the same trap for the next reader.\n\nDocumentation only. No runtime change: no alias was added and nothing was re-registered to make the old pointer true.\n\n## Whole-page pointer sweep\n\nEvery canonical-source pointer on the page was checked against the real registrant, not only the one the card names. All nine target files exist, and each per-slot page's own canonical source agrees with its row here — the audit row was the only pointer that disagreed with its own target page.\n\nTwo drifts turned up that are **not** fixed here and are filed as #9604 instead: the chapter list omits `services.sms` although that page exists and its slot is registered, and the Source-of-Truth list carries a `Security` row for which this chapter has no page. Both reach past this file — `content/docs/kernel/index.mdx` carries the same omission — so patching only this page would create a new disagreement between the two index pages.\n\nOne further observation is already on record and was **not** re-filed: within this chapter nothing states that `services.storage` is notation for the really-registered key `file-storage` (`storage-service-plugin.ts:237`; `content/docs/kernel/contracts/storage-service.mdx:12` gives the real name). #9590 already records that the accessor-to-slot mapping lives only in an audit note and proposes declaring it somewhere a check can read. This page is independent confirmation of that entry rather than a second card.\n\n## Gates\n\nDerived from the changed path after the final commit with `node scripts/pm/dispatch-gates.mjs content/docs/kernel/runtime-services/index.mdx`, then run at `981293858`:\n\n| Gate | Result |\n| :-- | :-- |\n| `check:docs-audit-scope` | OK — scope in sync, 179 hand-written docs |\n| `check:docs-redirects` | OK — 92 entries, 98 chain probes |\n| `check:role-word` | OK — 43 baselined files, no new occurrences |\n| `check:nul-bytes` | OK — 6170 text files, no raw control bytes |\n| `spec check:empty-state` | OK — all classified |\n| `spec check:liveness` | OK |\n| `spec check:strictness-ledger` | OK |\n| `spec check:variant-docs` | OK — 18 unions, 8 governed |\n\n`check:nul-bytes` is owed on any edit and was added to the derived set. No package build or test is implicated: the diff is one MDX file.\n\nPublishes nothing, so this PR carries `skip-changeset` rather than a changeset.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01XqDQYVU5smx29ts9pAErja)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XqDQYVU5smx29ts9pAErja)_"
+}

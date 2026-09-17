@@ -1,0 +1,32 @@
+{
+  "number": 9538,
+  "kind": "issue",
+  "title": "finding: the `field` metadata type can never match as a reference TARGET — items are keyed `&lt;object&gt;.&lt;field&gt;` while every derived reference site holds a bare field name",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T08:20:26Z",
+  "updated_at": "2026-08-18T09:09:54Z",
+  "closed_at": "2026-08-18T09:09:54Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9538",
+  "body": "Measured by the dev seat implementing #9190 (PR #9324). ⛔ **Filed by the PM on that seat's behalf** — it was blocked by the shared GitHub API rate limit and could not run the dedup search that filing requires. The measurement is theirs; the dedup search has now been run.\n\n## The mismatch\n\nTwo spellings of \"a field\" that never meet:\n\n- **Field items are keyed `<object>.<field>`** — recorded in the #7893 comment on `DEFAULT_METADATA_TYPE_REGISTRY`. That is the identity a `/references` lookup is given.\n- **Every derived field reference site holds a BARE field name** — `view.config.columns[].field`, `dataset.dimensions[].field`, `object.validations[].field`, and roughly thirty more.\n\nSo `GET /api/v1/meta/field/account.owner/references` scans ten source types and answers `[]` on **every deployment, regardless of content**. The sites that genuinely point at that field hold `owner`, and nothing compares `owner` to `account.owner`.\n\n## What this is and is not\n\n⭐ **Derivation made this visible; it did not cause it.** The same mismatch existed under the hand-curated `REFERENCE_PATHS` — it was simply indistinguishable from the general silence, because `field` was one of twenty-plus types the table had never heard of. #9324 removed that silence for the other types and left this one standing alone, which is why it is now nameable.\n\n⛔ It is **not** a missing path. Adding more matchers cannot fix it: the paths are already derived and already correct. The two sides disagree about what a field's *name* is, and no path expression reconciles a qualified key with a bare one without deciding which is canonical.\n\n## Why it matters\n\nSame consumer, same harm shape as the layer #9324 closed: the \"Used by\" panel renders before a rename or delete, and its empty state reads\n\n```\n'engine.edit.refsEmptyDesc': 'Nothing in the metadata graph points at this item. Safe to delete.'\n```\n\nA field is one of the more dangerous things to delete on a false negative — columns, validations and dimensions referencing it break silently at render time rather than at delete time.\n\n## The decision this needs\n\nA **name-form decision**, not an implementation:\n\n1. **Qualify at the site** — treat a bare `field` value as `<enclosing object>.<field>` when deriving, using the source item's own object as the scope. Correct where the enclosing object is knowable; needs a stated answer for sites where it is not.\n2. **Unqualify at the lookup** — match on the bare segment of the target key. Cheapest, and wrong across objects: `account.owner` and `contact.owner` would collide into one answer.\n3. **Both, explicitly scoped** — qualify where derivable, and refuse (rather than silently under-report) where not.\n\nOption 2 is the one that looks easiest and produces confidently wrong answers, which on this consumer is worse than the current confidently-empty ones.\n\n## Re-check\n\n```\ngrep -n \"7893\" packages/metadata-protocol/src/*.ts\ngrep -rn \"columns\\[\\]\\.field\\|dimensions\\[\\]\\.field\" packages/metadata-protocol/src/reference-sites.ts\n```\n\nRelated: #9190 / PR #9324 (derivation, closed — this is its named residue), #9537 (the capability-gap layer above), ADR-0110 D3."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 9410,
+  "kind": "issue",
+  "title": "authz matrix: `dispatcher-plugin.ts` mounts routes AND already writes SSE, but no transport tripwire watches it — a realtime transport landing there mints no key",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T23:34:40Z",
+  "updated_at": "2026-08-18T07:34:50Z",
+  "closed_at": "2026-08-18T07:34:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9410",
+  "body": "Filed **unassigned and unlabelled for triage routing** by the dev seat on #9084 (session `session_012WKSnqAaoqtW3QX7SSf1Vk`), branch `claude/issue-9084-realtime-tripwire-mechanics`. Not a claim — measured while widening the fifth `#2992` transport tripwire. Out of scope there: the #9084 declared file surface is the conformance test, and this needs a decision the evidence does not settle (below).\n\n## The gap\n\nThe `#2992` transport tripwires in `packages/qa/dogfood/test/authz-conformance.test.ts` watch a curated list of five files. `packages/runtime/src/dispatcher-plugin.ts` is not one of them, and it has both properties that make a file a plausible landing site for a realtime transport:\n\n1. **It mounts routes.** It is the registration path for `/actions`, `/automation` and `/packages` — a path separate from the `@objectstack/rest` one. The conformance test's own comment already names this: \"`/actions` and `/automation` are mounted by dispatcher-plugin.ts, a separate registration path from the `@objectstack/rest` one that gates `/data` and `/meta`, which is exactly why they diverged unnoticed.\"\n2. **It already writes SSE server-push responses.** Two sites, `packages/runtime/src/dispatcher-plugin.ts:248` and `:356`:\n\n```\nres.header('Content-Type', 'text/event-stream');\nres.header('Cache-Control', 'no-cache');\nres.header('Connection', 'keep-alive');\n```\n\nSo the SSE machinery — content type, no-cache, keep-alive — is already present and working in an unwatched route-mounting file. A realtime subscribe/fan-out transport wired there produces no key, no UNCLASSIFIED surface and no CI failure. The protocol page's callout states the limitation in general terms (\"A transport wired outside the watched files produces no key and no failure\"); this issue is that the limitation has a specific, already-SSE-capable file sitting inside it.\n\nThis is the same class as #9084 (a tripwire aimed somewhere other than where the transport would land), one file over.\n\n## Measured on `origin/main` `e1bb0cad6`\n\n- `dispatcher-plugin.ts` appears in `authz-conformance.test.ts`: **only in a prose comment**, never as a probe `file`.\n- Probe `file` values naming a runtime dispatcher: `packages/runtime/src/http-dispatcher.ts` only (three probes). `http-dispatcher.ts` and `dispatcher-plugin.ts` are different files.\n- `text/event-stream` in `dispatcher-plugin.ts`: **2** occurrences (lines 248, 356).\n\nControl query, so the zero above is not a broken search: grepping `authz-conformance.test.ts` for `http-dispatcher.ts` returns 4 hits in the same read that returns 0 for `dispatcher-plugin.ts` as a probe file. The search works.\n\n## Why this is filed rather than patched\n\nThe obvious repair — add `dispatcher-plugin.ts` to the tripwire population with the mechanics pattern #9084 just introduced — **cannot be applied mechanically**, which is why it is a decision rather than a bounded fix. Those two existing `text/event-stream` sites are AI/agent response streaming, not realtime subscription fan-out. A mechanics probe on that file would mint a key for them on day one: an immediate UNCLASSIFIED surface on `main` for a surface that is not the hazard `#2992` is about, and the only exits are to classify two non-realtime sites in the authz matrix or to weaken the pattern. Neither should be chosen by a dev seat mid-card.\n\nOptions for the matrix owner:\n\n- **A.** Watch the file with a marker that separates subscription fan-out from per-request response streaming (e.g. an upgrade handler, a subscribe registration, or a realtime-service call) rather than the bare SSE content type.\n- **B.** Watch it with the full mechanics pattern and classify the two existing AI-streaming sites with an `enforced` row naming their authorization site — honest, but it puts two non-realtime surfaces into the realtime tripwire vocabulary.\n- **C.** Record deliberately that `dispatcher-plugin.ts` is out of the watched set, with the reason, so the next reader is not left to infer coverage that is not there.\n\nNo recommendation from this seat — under #9083's rule the choice changes what a `TRANSPORT-WIRED` key means, which is the matrix owner's call.\n\nRelated: #9084 (the same class in `rest-server.ts`, PR #9409) · #9083 (TRANSPORT-WIRED admission rule) · #8347 (WS/SSE transport, v18) · ADR-0096 D4 · framework#2992."
+}

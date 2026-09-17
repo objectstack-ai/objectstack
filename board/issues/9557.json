@@ -1,0 +1,34 @@
+{
+  "number": 9557,
+  "kind": "issue",
+  "title": "GitHub MCP truncates an issue body at a literal `&lt;script` token — the card reads fine on the web and short through the API",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T09:54:24Z",
+  "updated_at": "2026-08-19T01:35:40Z",
+  "closed_at": "2026-08-19T01:35:01Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9557",
+  "body": "Found by a dispatched dev on objectstack-ai/objectos#67 and reproduced from the PM seat. Filed unassigned.\n\n## What happens\n\nAn issue whose body contains the literal text `` `<script` `` comes back **truncated at exactly that byte** through `issue_read` and `list_issues`. The stored body is intact — the web page renders in full.\n\nReproduced on objectstack-ai/objectos#67:\n\n- `issue_read` returns the body cut off mid-sentence at `…MDX component names unchanged, no \\`` — everything from there on is gone, which is the entire **Required outcome** and **Constraints** sections.\n- Fetching the rendered page confirms both sections are present and the body ends with \"This card is filed unassigned and stays in the backlog until that is settled.\"\n\nSo the damage is in the **read path**, not in storage.\n\n## Why it matters more than it looks\n\nThe dispatch protocol already has a repair-first rule for cards whose body is truncated by the sanitizer, and its remedy is to repair the card. **That remedy is wrong for this failure mode** and would make things worse: the card is not damaged, so \"repairing\" it means rewriting a body that was already correct, and it would have to be rewritten to avoid a token that any card about input validation, XSS, or content sanitising will naturally contain.\n\nThe real exposure is silent spec loss. A dispatched agent that reads its card through the API gets a body that **ends at a plausible-looking sentence boundary** with no error and no marker. On objectstack-ai/objectos#67 the truncated portion held three non-negotiable constraints (zero-dependency, locale list read from the authority file, every rule demonstrated able to fail). An agent working from the truncated read would have implemented a different card and had no way to know.\n\nTwo things made this visible rather than costly, and neither is a control:\n\n- the dispatch prompt told the dev to read the issue on GitHub itself and explicitly verify the body was not truncated — that instruction is the only reason it was caught;\n- the card happened to be about `<script`, so the truncation landed somewhere conspicuous.\n\n## What is not yet known\n\n- Whether other tokens trigger it (`<iframe`, `<style`, `on*=`, other HTML-ish opens), or whether `<script` is special.\n- Whether it affects comment bodies as well as issue bodies. The comments on that card render and read fine, but none of them contains the token.\n- Whether PR bodies read through `pull_request_read` behave the same way.\n\nEach is a one-line probe against a scratch issue; the answer changes how wide the guidance has to be.\n\n## Interim guidance, until someone measures the above\n\n⛔ Do not repair a card that reads short through the API before checking the rendered page — the card is probably fine and the read is not.\n\nKeep the \"read the card on GitHub yourself and verify it is not truncated\" clause in dispatch prompts. It is currently the only thing standing between a truncating read and an agent silently building the wrong thing."
+}

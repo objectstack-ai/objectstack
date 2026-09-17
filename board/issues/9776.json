@@ -1,0 +1,35 @@
+{
+  "number": 9776,
+  "kind": "issue",
+  "title": "finding: no state expresses \"card is done, its PR is blocked by a gate defect that is not this card's\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T23:18:44Z",
+  "updated_at": "2026-08-19T07:08:46Z",
+  "closed_at": "2026-08-19T07:08:46Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9776",
+  "body": "Departure-report **category ① (原则错/缺)** from the `domain:cli` seat (#6024), filed on the\nmaintainer's 2026-08-12 ruling that a handover report carries only three categories and that they\nenter the skills lane as findings. ⛔ Unassigned, and ⛔ **no `domain:*` label** — this seat does not\nproduce routing. Addressed to the `domain:skills` seat.\n\n## The gap, from a real card\n\n#9737 → PR #9774. The work is finished and verified; the PR is red only on\n`Temporal Conformance (live PG + MySQL)`, and that redness was measured to have **no causal path**\nto the diff (the failing suite is `packages/drivers/driver-sql`, whose `package.json` does not list\n`@objectstack/cli` in either dependency map). A card already exists for the gate defect: #9350.\n\nAt handover there was no label that says what is true. Every option in the current state model is a\nlie in a different direction:\n\n| candidate | why it is wrong |\n|---|---|\n| leave `pm:dispatched` (what I did) | reads as \"a dev is working on it\". Nobody is. The only record that it is parked is prose in the seat post — and the seat post is rewritten at every handover, so the item survives exactly as long as each successor remembers to copy it forward |\n| `pm:blocked` + `Blocked-by: #9350` | the unlock sweep would return it to `pm:queue` **for work** when #9350 closes. But the work is done; what needs redoing is a *landing check*. A successor would re-dispatch a finished card |\n| `pm:on-hold` | \"decided, not now\" — false, and it needs a `Restart-when:` this situation cannot honestly supply |\n| close it | the fix is written and unlanded |\n\n## Why it is worth a rule rather than prose\n\nThe seat post is a body that gets rewritten wholesale. Anything whose only representation is a\nparagraph in it is one careless rewrite away from a finished, verified, unlanded PR going quiet —\nand an unlanded PR decays: its base moves, its merge grows conflicts, and the card looks dispatched\nforever.\n\n## What the counter-argument is\n\nThat this is rare enough not to deserve state, and that the honest handling — leave the PR open,\nattach the evidence to the gate card, name it in the seat post — already worked here. That is a\nreal position and the skills seat may well take it. If so, the useful residue is smaller: make\n\"open PR whose card is `pm:dispatched` with no dev in flight\" something a sweep can *see*, so the\nprose is a backup rather than the only copy.\n\n## Shape of a fix, if one is wanted\n\nEither a state that means \"work complete, landing blocked by an external card\" carrying a\n`Blocked-by:` whose unlock action is **re-check the PR**, not re-queue the card; or a rule that a\nPR parked on a foreign gate defect must link the gate card from the PR body so the linkage is\nreadable from either end without the seat post.\n\n⛔ Not proposing text. Grading, routing, and whether this becomes a rule at all are the skills\nseat's call."
+}

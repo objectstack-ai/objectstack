@@ -1,0 +1,35 @@
+{
+  "number": 9364,
+  "kind": "issue",
+  "title": "20 hand-built plugin-route bodies depart from the declared envelope — the ratchet #9267's third gate surface opened with",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-17T16:58:37Z",
+  "updated_at": "2026-08-18T06:19:26Z",
+  "closed_at": "2026-08-18T06:18:00Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9364",
+  "body": "Filed unassigned by the #9267 dev seat; nobody is on it. #9267 added a **third surface** to `scripts/check-route-envelope.mjs` — plugin-mounted Hono routes, discovered by parsing rather than by filename — and the first run measured drift in five packages that no check in the repo could previously see. #9267 fixed only what was small and local to a `packages/cloud-connection` error exit; everything below is recorded there as a `ratchet` pointing at this issue.\n\nEvery number is measured by `node scripts/check-route-envelope.mjs`, ticks DOWN only, and is pinned so none of it can get worse while it waits.\n\n## What is outstanding\n\n| file | counts | what they are |\n|:--|:--|:--|\n| `packages/plugins/plugin-hono-server/src/current-user-endpoints.ts` | `unenveloped 9` | nine `{ authenticated, userId, … }` bodies with no `success` flag |\n| `packages/plugins/plugin-hono-server/src/adapter.ts` | `unenveloped 4`, `stringError 4`, `siblingCode 1` | the adapter's own refusals: `{ error: 'Not found' }` 404, `{ error: 'No response from handler' }` 500, `{ error: 'Fallback handler failed' }` 500, and a 405 putting `code`/`method`/`path`/`allowed` beside `error` |\n| `packages/plugins/plugin-auth/src/auth-plugin.ts` | `unenveloped 3` | three `{ hasOwner: … }` bodies from `/bootstrap-status` |\n| `packages/adapters/hono/src/index.ts` | `unenveloped 2`, `errorCodeNotString 1` | two `{ data }` discovery bodies with no `success`, plus a shared `errorJson` writing the HTTP **status** into `error.code` |\n| `packages/cloud-connection/src/runtime-config-plugin.ts` | `unenveloped 1` | the `/api/v1/runtime/config` discovery payload |\n| `packages/cli/src/commands/serve.ts` | `unenveloped 1`, `stringError 1` | the unbound-hostname 404, `{ error: 'environment_not_found', message, hostname }` |\n\n`stringError` is the pre-#3675 dialect (`body.error.message` reads `undefined`); `siblingCode` is its #7035 twin (`body.error.code` reads `undefined`).\n\n## Why none of it was fixed in #9267\n\nTwo of these are **cross-repo breaking wire changes**, not conformance tidying, and that is the part that needs a decision rather than a patch:\n\n- `/api/v1/runtime/config` is read BARE by the Console SPA before first paint — objectui `app-shell/src/runtime-config.ts` reads `body.cloudUrl`, `body.features`, `body.branding` off the top level.\n- `current-user-endpoints.ts` and `/bootstrap-status` are read the same way, by the Account/Console SPAs.\n\nEnveloping any of them means a coordinated change in `objectui` and a compatibility story for runtimes and consoles on different versions. The `adapter.ts` and `serve.ts` refusals are the cheaper half — those are genuine error-path drift with no bare-payload contract behind them, and could land independently.\n\n## Suggested shape\n\n1. The error-path items first (`adapter.ts`, `serve.ts`, and `errorJson` in `adapters/hono`) — these are the classic #3843 class and need no consumer coordination.\n2. The bare discovery payloads second, as a deliberate decision with objectui: envelope + SPA update together, or an explicit ruling that discovery endpoints read before authentication are outside `BaseResponseSchema` (which is a legitimate answer — `hmr-routes.ts` already carries exactly such an `exempt` with a reason). Today they are neither, which is the state worth ending.\n\nWhichever way each goes, the gate records it: a fixed body lowers the number, a ruled-exempt file becomes an `exempt` entry **with a reason**. There is no state where nobody looked.\n\nRelated: #9267 (added the surface), #9223 (named the `plugin-route` door), #9246, #3843 (the envelope guard's founding class), #7035 / #7295 (the two dialects and the write-site-count lesson), #8884 (the same \"module outside the naming convention\" discovery gap).\n"
+}

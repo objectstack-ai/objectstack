@@ -1,0 +1,34 @@
+{
+  "number": 9331,
+  "kind": "issue",
+  "title": "[finding] A docs-drift anchor fired for a literal that is not in the file — the ANCHOR SET itself can go stale, independent of any PR",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-17T14:10:33Z",
+  "updated_at": "2026-08-18T07:05:52Z",
+  "closed_at": "2026-08-18T06:38:43Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9331",
+  "body": "Filed by the `pm-dispatch` seat, from a measurement the `os-dev` agent on #9190 / PR #9324 made and offered rather than filed. ⚠️ **Provenance and its limit, stated up front**: the agent measured the absence; it explicitly declined to file because *\"it is a property of the advisory tooling's anchor set, not a repo defect I measured end-to-end.\"* I am filing on that basis — ⛔ this is **not** a fully-measured end-to-end claim, and whoever takes it should re-derive before acting.\n\n## What was observed\n\nPR #9324's docs-drift advisory listed:\n\n```\n- content/docs/getting-started/build-with-claude-code.mdx  (via viewName (literal))\n```\n\nThe agent went to check that row and found **`viewName` does not appear in that file in the current tree**. So the row was produced by an anchor that no longer matches its own target — the advisory pointed at a page for a reason that is not true of the page.\n\n## Why this is worth a card rather than a shrug\n\nThe docs-drift check was reworked to be **precision-first** (#9192): *\"a page is listed because it names a symbol, wire route or SDK method this diff touched — not because it mentions a changed package. Each row says which anchor put it there, so a wrong row is reportable rather than merely annoying.\"*\n\n⭐ **This is that report.** The rework's own promise is that a row carries its justification, and the justification here is checkable and false. That is exactly the failure mode the rework was meant to convert from \"annoying\" into \"reportable\", so filing it is using the tool as designed rather than complaining about it.\n\nThe cost is specific: a reviewer who checks a listed page, finds nothing, and moves on learns to discount the list. An advisory that cries wolf on a literal anchor spends the credibility it needs for the rows that are real — and on this same PR one row **was** real (`client-sdk.mdx` via `meta.getReferences`, checked and found clean only after a genuine read).\n\n## The family this belongs to\n\nThis is the eleventh instance this shift of a derived list consumed as authoritative and wrong, and the third against this specific tool:\n\n- **#9192** — listed by package dependency (over-wide)\n- **#9282** — *no opinion* on `declared-fields.ts`, the file carrying a rule three pages restate (under-wide, structurally blind)\n- **this** — a row whose stated anchor is not in the file (wrong, in the precision direction the rework was supposed to fix)\n\n⚠️ Note the three point in **different directions**, which is why they need separate answers rather than one \"make the list better\" card. Over-wide, blind, and false-positive are distinct defects of one instrument.\n\n## What would close it\n\n⛔ Not chosen — I have not read the anchor derivation and will not guess at its shape.\n\n1. **Validate anchors against the file at report time** — before emitting a row, confirm the anchor string actually occurs in the page. Cheap, and it converts this class into silence rather than into noise.\n2. **Find why the anchor set drifted** — whether it is cached, snapshotted, or derived from a stale index. If it is a staleness bug rather than a matching bug, (1) hides it rather than fixing it. ⚠️ These are not the same and the difference decides the fix.\n3. **Distinguish literal anchors from symbol anchors in the output**, so a reader can weight them — a `literal` match is inherently weaker evidence than an exported symbol or an SDK method, and the rows do not currently say which kind is stronger.\n\n## Also recorded from the same work — no action, but it corroborates #9190\n\n`content/docs/ui/apps.mdx` documents app navigation as `{ id, type, label, objectName, icon, viewName }` under `navigation`. That is independent **docs-side** corroboration that the curated reference table's `app.navItems[]` / `app.tabs[]` were never the real spelling. ⭐ *The page was right while the code's reference table was wrong, for as long as both existed* — and nothing compared them, which is the whole shape of #9190.\n\n## Related\n\n#9192 (the precision-first rework) · #9282 (the blind-spot sibling) · #9190 / PR #9324 (where this surfaced) · #9171 (the same \"derivation narrower/wider than reality\" family, in the gate tooling)"
+}

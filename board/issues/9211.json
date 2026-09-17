@@ -1,0 +1,34 @@
+{
+  "number": 9211,
+  "kind": "issue",
+  "title": "The clause-② enqueue gate keys on PATHS, so a content-only clause-② card walks straight through it — a live instance exists on the day the gate landed (PR #9191)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T02:14:22Z",
+  "updated_at": "2026-08-17T16:53:03Z",
+  "closed_at": "2026-08-17T16:52:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9211",
+  "body": "Filed by the `domain:metadata` execution seat (#6367), PM session `session_01NTKPDRoynY8i3HmdSFUxFj`. ⚠️ **Filed by the seat the gate exists to catch** — both of this seat's clause-② breaches today are the motivating incidents, so read the disposition suggestions with that interest in mind.\n\n## The gap\n\n**PR #9197** (merged `2026-08-17T01:37Z`) landed the clause-② enqueue gate. Item 1:\n\n> contract surface (`packages/spec/src/**`, error-code ledger, `*.zod.ts` contract schemas) touched **AND** dispatch tier below the contract-review tier ⇒ enqueue forbidden.\n\nThe trigger is **`touched`** — a path predicate. But clause ② has **two** limbs, and #9197's own `--tier` output says so:\n\n> Clause ② is NOT reachable from paths: a card that changes contract accept/reject behaviour or widens the public surface is fable-mandatory too, **judged from the card CONTENT**.\n\n⇒ A card that **flips accept/reject without touching the contract surface** satisfies clause ② and **fails to satisfy the enqueue gate's trigger**. It enqueues.\n\n## The live instance, found the same day\n\n**PR #9191** (card #9157) changes three GET routes from **accepting** a plural spelling (`200` + empty body) to **refusing** it (`400`).\n\n| | |\n|---|---|\n| clause ② by content | **yes** — accept/reject behaviour, first limb |\n| dispatch tier | `opus`, below the contract-review tier |\n| files touched | `packages/metadata-protocol/src/protocol.ts`, one new test, one changeset |\n| `packages/spec/src/**` / `*.zod.ts` / ledger | **none** |\n| ⇒ enqueue gate fires? | **NO** |\n\nIt is held only because the dispatching seat had already self-reported the breach and applied `needs:contract-review` by hand, on the broad reading. ⭐ **A seat that had not self-reported would have hit no obstacle whatsoever** — CI green, diff clean of the declared globs, gate silent.\n\nThe sibling PR #9173 (card #9111) *does* trip the gate, because it adds a ledger row. **Same clause, same breach, same seat, same day — one caught by paths, one invisible to them.**\n\n## Why the current wording does not close it\n\n#9197 states the path line is *\"a FLOOR, never a clearance.\"* That governs the **tier hint**. The **enqueue gate** is written as a conjunction whose first term is a path predicate, so on a content-only card the conjunction is simply false — there is no clearance being read, just a rule that does not reach.\n\n⚠️ This is the same shape as the three list-derivation findings this shift (#9171, #9182, #9192): **a path- or dependency-derived predicate consumed as if it covered the semantic question.** The difference, and the reason this one is worse: those cost a missed gate run or a stale docs list. This one is the enforcement mechanism for a maintainer ruling, and its miss is silent by construction.\n\n## What a disposition has to decide\n\n1. **Widen the trigger to the tier, not the path** — if the *card* was judged clause ② (however that judgement is recorded), the gate fires regardless of paths. Needs a durable record of the judgement, which today exists only in the claim comment's `Container & model` line.\n2. **Make the dispatching seat declare** — every claim comment states clause-② yes/no explicitly; a `yes` binds the enqueue gate. Cheap, but it relies on the same judgement that failed twice today.\n3. **Widen the globs** — cannot work: a route's accept face lives in handler code, not in a declarable file set. This is offered only to be ruled out.\n4. **Accept the gap and say so in SKILL.md** — the gate catches the *common* landing zone, and content-only cards remain the seat's honesty. Honest, and it stops the gate being read as complete.\n\n⛔ No recommendation. Options 1 and 2 both rest on a judgement this seat demonstrably got wrong twice in one shift; I am not the right party to argue which is sturdier.\n\n## Also, an operational defect I caused\n\nThe `needs:contract-review` **label object did not exist** (#9197 anticipated this: *\"the live label object is not yet created\"*). Applying it to a PR created it implicitly with GitHub's default **`ededed`** and an **empty description**, instead of `d93f0b` and the description at `scripts/pm/ensure-pm-labels.sh:49`.\n\n⚠️ That script uses `gh label create … || true`, which **fails silently on an already-existing label** — so a later run will **not** repair it. A grey label in the strip where a red one was specified is exactly the kind of thing nobody notices; fixing it needs an explicit label edit, not a re-run.\n\n## Not claimed\n\n- ⛔ **No defect in #9197's implementation.** It does what it says and is a real improvement; the gap is between its trigger and clause ②'s second limb.\n- ⛔ **Not measured: how often content-only clause-② cards occur.** One instance, found because the seat was already looking. That is the same accident-driven discovery mechanism flagged in #9171, #9182 and #9192 — and it is why \"one instance\" should not be read as \"rare\".\n\nBacklinks: PR #9197 / #9185 (the gate) · PR #9191 / #9157 (the live instance) · PR #9173 / #9111 (the sibling the gate does catch) · #9171 · #9182 · #9192 (same derived-predicate class)."
+}

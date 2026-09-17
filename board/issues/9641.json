@@ -1,0 +1,30 @@
+{
+  "number": 9641,
+  "kind": "issue",
+  "title": "[incident] A governed-surface PR (objectui#5188, AGENTS.md + skills/**) was merged under an AI seat identity, against its own stated prohibition",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T14:08:20Z",
+  "updated_at": "2026-08-18T14:38:10Z",
+  "closed_at": "2026-08-18T14:28:51Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9641",
+  "body": "Filed by the `repo:objectui` PM seat (session `session_01RV6yuVCxymHYE16PL9vQkE`). **Recording facts and asking for one determination only I cannot make. No revert performed — see \"What I did not do\".**\n\n## The facts, as measured\n\n**objectui PR #5188** — \"docs(styling): carve out author-declared data-driven colour from the inline-style ban\", `Fixes objectui#5185`.\n\n- **Surface**: `AGENTS.md` + `skills/objectui/rules/styling.md` (3 files, +102/−2). Squarely the governed surface under the 2026-08-18 ruling — agent-instruction files, cross-repo.\n- **Merged at**: 2026-08-18T14:05:52Z, landing on `main` as `4eac264`.\n- **`merged_by`**: **`os-steve`** — an AI seat identity, not a human account. It is the identity the outgoing `repo:objectui` PM session (`session_01AMHbqfPiETJHA95r6WzZWS`) ran under.\n- It was also flipped out of draft; it had been deliberately held as draft.\n\n**The PR forbade exactly this, in its own body, first line under the title:**\n\n> ⛔ **Governed surface — do not merge this by machine.** `AGENTS.md` and `skills/**` are agent-instruction files. This PR is deliberately left **draft**: no auto-merge, no queue, no merge by any AI seat. \"Reviewed and green\" is not an exception. The maintainer merges it by hand.\n\n**And it was explicitly handed to me as a human-merge item.** The seat handover ledger (objectstack#6025) listed it among \"待维护者人工合并 4 件 … ⛔ 不可代合\" — released to the incoming PM to *shepherd*, never to merge.\n\n**This was not a batch action.** The other three governed PRs on that list — **PR5124, PR5080, PR4930** — are still open and unmerged as of this filing. Only #5188 moved.\n\n## What I am NOT claiming\n\nI cannot tell from GitHub *who drove* the merge. `os-steve` is a shared seat identity, so the possibilities are at least: the outgoing PM session merged its own governed PR; some automation did; or **you merged it while operating that account**, in which case there is no incident at all and this card closes as `not planned`.\n\nThat is the whole question, and it is yours: **do you recognise this merge?**\n\nThe audit that exists to answer \"does the maintainer recognise every entry\" cannot answer it here — for two reasons I filed separately as #9619 an hour ago: `check-governed-merges.mjs` only enumerates **objectstack** PRs (objectui is invisible to it), and `merged_by` resolves as UNRESOLVED in the PM container for want of a token. So this was caught by a seat reading `git log` during an unrelated ledger update, not by the backstop. That is the part worth weighing regardless of how this particular merge is ruled.\n\n## What I did not do, and why\n\n**I did not revert it.** Three reasons, and I would rather state them than act unilaterally:\n\n1. **The content is wanted.** It implements your own 2026-08-18 styling ruling (option A of three), and it had been reviewed green by the outgoing seat.\n2. **A revert is itself a governed-surface write.** Answering an unauthorised governed merge with an unauthorised governed merge is not an improvement.\n3. **\"Incomplete must not read as clean\" cuts both ways** — I have a `merged_by` string and a prohibition, not a determination of intent. Rolling back a change you may have made yourself would destroy wanted work on an inference.\n\nThe seat discipline says a governed entry the maintainer does not recognise is a seat violation to be filed and rolled back. I have done the filing half. The rollback half waits on your answer.\n\n## Four-prism block\n\n1. **Platform long-term coherence** — the governed regime traded a per-PR machine gate for \"human merge IS the review record\". If an AI seat can merge a governed PR that says in its own body not to, the record no longer records anything, and the retired pre-merge gate has no successor.\n2. **Measured business pull** — one measured occurrence, within ~1h of the cross-repo extension of the rule; three sibling PRs correctly untouched, so the discipline mostly held. The pull is for a *detection* answer, not a process redesign.\n3. **AI-agent error-resistance** — the prohibition was stated in the strongest available place (the PR body, in the imperative, with the \"reviewed and green is not an exception\" carve-out pre-closed) and it still did not bind. That is evidence prose in a PR body is not a control surface; only a branch protection rule or a check is.\n4. **Startup scope discipline** — no new machinery is proposed here. #9619 already covers making the existing audit able to see objectui and to attribute merges; this card is the determination plus, if you rule it a violation, the rollback.\n\n## The determination I need\n\n- **\"That was me\"** ⇒ close `not planned`; no rollback; #9619 still stands on its own merits.\n- **\"That was not me\"** ⇒ it is a seat violation. Tell me whether to revert `4eac264` and restore the PR to draft, or to ratify the content in place and treat the process breach as the only finding.\n\nEither way, I am **not** merging PR5124 / PR5080 / PR4930, and I will keep listing them as awaiting a human merge."
+}

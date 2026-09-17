@@ -1,0 +1,35 @@
+{
+  "number": 9800,
+  "kind": "issue",
+  "title": "incident: a self-declared P0-suspect sat 26h in the domain-without-pm-state half-state — both healing mechanisms existed and neither fired visibly",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T00:11:40Z",
+  "updated_at": "2026-08-19T05:21:43Z",
+  "closed_at": "2026-08-19T05:21:43Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9800",
+  "body": "Maintainer report (2026-08-19, PM chat, verbatim): 「项目经理等分诊,但是没有切换 label,导致挂了很久。」「我刚和他说了他才处理。」\n\n## Timeline, measured\n\nA QA-wave card (data-integrity DELETE regression, body self-declaring \"P0 checklist-item failure … priority label is triage's to set\") was filed 2026-08-17T22:18Z, correctly left unlabelled for routing. It later acquired `domain:engine-core` (+`bug`, `regression`) **without a paired pm-state label** — the half-annotated shape the protocol says its own single-label writes produce by design. In that shape it was invisible to every seat's candidate query for **~26 hours**, until the maintainer personally poked a seat at 2026-08-19T00:09Z (closed as duplicate — the underlying defect had meanwhile been handled elsewhere, which makes the hang pure waste, not lost coverage).\n\n## Why both existing defenses failed\n\n1. **Triage sweep disjunct ③** (\"有 domain:* 无 pm-state\") exists precisely to heal this shape, every round, hourly — and did not, for ~26h. Suspected mechanism: the per-round cap with 优先最新 ordering structurally starves OLD half-states — the longer a card hangs, the less likely the sweep reaches it. Aging inversion: the cap should prioritize the oldest (and any P0-suspect) half-states first, not last.\n2. **The emergency-triage channel** (p0 嫌疑 ⇒ immediate fable triage subagent, no waiting for the Routine) had its trigger sitting in the card's own body — but the seat that saw the card \"waited for triage\" in session memory, leaving **zero visible state**. Waiting is a state; it must land on the card (a comment naming the awaited seat at minimum; for a P0-suspect, invoking the emergency channel is the mandated move, not an option).\n\n## Mechanizable directions (grading adopts all three as this card's scope)\n\n- `scripts/pm/check-half-states.mjs`: add an **age-alarm detector** for domain-without-pm-state (report-only, per the family's convention), with a louder line when the card's body self-declares P0/data-integrity — half-states older than one sweep cycle are a defect of the healing loop, not inventory.\n- `references/dispatch-runbook.md` (triage sweep discipline): the half-state disjuncts process **oldest-first, P0-suspect first** — 优先最新 applies to fresh intake only, never to the healing backlog.\n- One protocol line at the 状态变更不过夜 clause: **waiting on another seat is a state** — it exists only if written on the card (who is awaited, since when); a P0-suspect wait ⇒ the emergency-triage channel is mandatory.\n\nGraded at filing by the skills seat (own-lane exception): `pm:queue`, M (script detector + two ratcheted instruction lines; runbook 223/223 and SKILL.md-adjacent — payment owed). Serial: dispatch after the hanging SKILL.md/runbook traffic clears (#9769 in queue, the four-axis card behind it); next shift's first dispatch if tonight's wind-down closes first."
+}

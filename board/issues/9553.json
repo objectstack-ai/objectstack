@@ -1,0 +1,34 @@
+{
+  "number": 9553,
+  "kind": "pull_request",
+  "title": "fix(ci): stage what the version pass actually writes in cut-rc.yml",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T09:22:54Z",
+  "updated_at": "2026-08-18T09:56:08Z",
+  "closed_at": "2026-08-18T09:56:06Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-18T09:56:06Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9553",
+  "body": "Fixes #9518\n\n`cut-rc.yml`'s \"Build the single version commit\" step stages an allowlisted set of\npaths and then asserts that nothing tracked is left modified-but-unstaged. Since\n#9064 put `node scripts/sync-docs-image-tags.mjs` at the end of `pnpm run version`,\nthat assertion has tripped on every cut: the rewriter's output falls outside the\npathspec, so `LEFT` is non-empty and the step exits 1. The rule was right; its input\nsurface had gone stale.\n\n## Measured, not assumed\n\nFull `pnpm run version` in a throwaway clone (no push remote) of `origin/main` @\n`b9f807734`, 199 pending changesets, `changeset pre enter rc` then the whole\npipeline, on today's pinned `@changesets/cli@2.31.1`. Result: **160 dirty paths** —\n77 `package.json`, 76 `CHANGELOG.md`, `.changeset/pre.json`, and 6 others.\n\nReplaying the step's shell verbatim (extracted from the YAML, not hand-copied)\nagainst `origin/main`'s version reproduces the refusal — and finds **four** offending\npaths, one more than the card recorded:\n\n```\n::error::tracked files were modified but fall outside the release file surface...\n::error::  unstaged: content/docs/deployment/self-hosting.mdx\n::error::  unstaged: content/docs/upgrading.mdx\n::error::  unstaged: docker/README.md\n::error::  unstaged: packages/create-objectstack/src/templates/blank/objectstack.manifest.json\n```\n\nThe fourth is written by `sync-template-versions.mjs` (`specVersion` to `^18.0.0`),\nnot by the docs rewriter, so #9518's body does not name it. It is fixed here anyway\nbecause it is the same defect in the same assertion in the same block: widening the\nallowlist for only three of the four would leave the cut refusing to push, which is\nthe acceptance criterion of the card. Per #9465 ruling 3 the allowlist follows the\nmeasurement.\n\n## The doc surfaces are read, not restated\n\n`sync-docs-image-tags.mjs` does not own its target list — it imports `SURFACES` from\n`scripts/check-docs-image-tag.mjs`, the gate whose findings it exists to clear, on\nthat file's stated principle \"one list, two consumers\". This step now joins as the\n**third** consumer of the same declaration, resolving it at run time:\n\n```sh\nnode --input-type=module \\\n  -e 'import { SURFACES } from \"./scripts/check-docs-image-tag.mjs\"; for (const s of SURFACES) console.log(s.file);'\n```\n\nThat module is import-safe by construction: #9064 added its entry-point guard for\nexactly this kind of consumer. Two new guards refuse the cut if the declaration\ncannot be resolved, or resolves empty — an unknown surface must never degrade into\nan empty allowlist, which would silently re-open this same hole.\n\nThe template manifest is instead named literally, beside its sibling\n`objectstack.config.ts`. `sync-template-versions.mjs` does declare its targets (a\n`TEXT_STAMPS` table plus a walk of `src/templates/`) but exports none of them and\nhas no entry-point guard, so importing it would run the sync rather than read its\nlist. Giving it those two things would let this pathspec read from it too; filed\nseparately as an observation.\n\n## This is deliberately not a wildcard\n\n`content/docs/**` would have silenced the exact signal the assertion exists for.\nOnly paths a reviewed declaration names are accepted. Two properties verified by\nreplay:\n\n- a `content/docs` page `SURFACES` does not name is still **rejected**;\n- the re-check matches the declared paths with `grep -vxF` (whole-line, fixed\n  string), so it is exact — an unescaped ERE alternation spelling `README.md` would\n  have accepted `READMEXmd`.\n\n## Verification — five replay legs\n\nThe workflow cannot run outside a cut, so its step was extracted from the YAML and\nrun under `bash -e` (the runner's default shell for `run:`) against the real dirty\ntree, restored byte-identically before each leg.\n\n| Leg | Workflow | Result |\n|---|---|---|\n| 1 | `origin/main` | exit 1 — 4 unstaged paths (above) |\n| 2 | this PR | exit 0 — `STAGED` 160, `BAD` empty, `LEFT` empty, commit built |\n| 3 | this PR + synthetic dirt | exit 1 — names `README.md` and `content/docs/ai/actions-as-tools.mdx` |\n| 4 | this PR, `SURFACES` emptied | exit 1 — \"resolved EMPTY ... Refusing to push\" |\n| 5 | this PR, module unparseable | exit 1 — \"could not resolve SURFACES ... Refusing to push\" |\n\nLeg 2, instrumented:\n\n```\ndoc surfaces declared by SURFACES (3):\n  docker/README.md\n  content/docs/deployment/self-hosting.mdx\n  content/docs/upgrading.mdx\nPROBE staged-count: 160\nPROBE accepted-by-fixed-regex: 157\nPROBE accepted-by-SURFACES-list: 3\nPROBE BAD=[]\nPROBE LEFT=[]\n```\n\n157 + 3 = 160: every staged path is accepted by exactly one filter, and nothing is\nleft behind. Legs 3-5 are the ones that matter most — a gate that can no longer fail\nis worse than the bug it was hiding.\n\nNo release was performed: throwaway clone, no remotes, no publish, no tags, no\npre-mode entry or exit on `origin`, no workflow dispatch.\n\n## Scope\n\n`cut-rc.yml:285`'s \"range is walkable\" preflight is untouched — a disjoint block\nbelonging to another card. #9498 rewrites this same allowlist for the v3 pre-mode\nfile set and is currently held on a maintainer decision; per #9518's claim this lands\nfirst and #9498 rebases onto it, which is the handover the filer asked for. That card\nis not addressed here.\n\n## Gates\n\nRe-derived for the actual diff with `node scripts/pm/dispatch-gates.mjs` (same five\nfamilies, no new ones) and run green at `0bfd6134b`:\n`check:node-version`, `check:required-contexts`, `check:shard-attestation`,\n`check:workflow-status-functions`, plus `check:nul-bytes`.\n\n## Changeset\n\nNone — `skip-changeset`. The diff is one workflow file. It publishes no package,\nchanges no user-visible behaviour and ships nothing to consumers; the release-notes\ninput for a change like this is nil by construction.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01HDA9nN6nXQngoQUAAzRdMb)_"
+}

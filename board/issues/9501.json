@@ -1,0 +1,32 @@
+{
+  "number": 9501,
+  "kind": "pull_request",
+  "title": "docs(pm-skill): stale-premise check covers ruling-named cards; triage self-exit guard sees in-flight sibling rounds",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T05:37:55Z",
+  "updated_at": "2026-08-18T06:16:23Z",
+  "closed_at": "2026-08-18T06:16:22Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-18T06:16:22Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9501",
+  "body": "Fixes #9038, Fixes #9200\n\nSingle-file bundle on `.claude/skills/pm-dispatch/SKILL.md` (hard same-file serial rule): the primary card's stale-premise gap plus the triage self-exit guard gap.\n\n**Skills-root PR — ADR-class. Draft on purpose, awaiting a human merge; no AI seat may flip it ready, queue it, or arm auto-merge (maintainer rulings 2026-08-08 / 2026-08-11).**\n\n## Change 1 — stale-premise check gains its card-reference half (primary card, Option A)\n\nThe pre-dispatch check previously re-verified only the ruling-named ACTIONS against `origin/main`. It now names two halves:\n\n- **action half** — the existing re-check, unchanged in substance: ruling-implementation cards re-verify the named action has not already landed on `origin/main`;\n- **card-reference half (new)** — every issue a ruling/card names as a blocker, claim surface, coordination target, or arms-once-this-lands dependency is re-read (open/closed/assignee) at dispatch time, and the dispatch order cites the observed state, never the ruling's description of it. Rationale kept to one line: the tree cannot answer whether a card is still open; a stale action claim self-corrects the moment the dev starts, a stale card reference never turns anything red.\n\nOption B (mechanized reference extraction) deliberately not built — per the card's own recommendation it is a separate grading.\n\n## Change 2 — round-open marker completes the seat-Routine mutual exclusion (second card, shape 1)\n\nThe guard read only the last closing brief, so an in-flight sibling round was invisible for exactly its own duration (briefs land at round end). Now: each fire, before its first write, reads two data points — the most recent closing brief AND the latest round-open marker on the seat post. Brief younger than one round interval, or a marker newer than the brief and itself younger than one round interval (a mid-flight round has by design not yet posted its brief; the marker is its only visible trace) ⇒ self-exit. Both readings clear ⇒ post a one-line round-open marker (session ID + fire time) on the seat post, then run. No new time constant: the window is expressed in round intervals, matching the existing guard's unit.\n\n## Line ratchet: 682/682, net zero (+22/−22)\n\nRatchet ruling honored: ceiling 682 shrink-only, no re-wrap accounting. Both additions are paid for by removing text that survives verbatim elsewhere — each cut site already cites the file that keeps the content:\n\n| cut (main file) | content survives in |\n|---|---|\n| create_trigger zero-output parenthetical (Routine principles ①) | `references/seat-post-protocol.md`, Routine-creation section (verbatim, with more detail); a one-line trap pointer stays |\n| release-board cadence tail (three-boards-empty, ~5-round freshness, clear-not-rescan) | `references/seat-post-protocol.md`, release-board ops section (verbatim); three-boards fact also in the main file's round-report metrics |\n| org Project hot-path note (invariants) | main file multi-repo rule 5 (one board, no second tracker); a parenthetical pointer stays |\n| epic territory-collision rationale sentence | `references/seat-post-protocol.md`, epic section (verbatim); \"declarative, narrower is more honest\" kernel stays inline |\n| landing-readings tail (two-readings landing check + eject-resubmit signature discipline) | `references/platform-readings.md` queue-membership entries + main file landing section; pointer to the fact table stays |\n\n## Gates (union re-run post-commit on `b6911a8db`)\n\n- `pnpm check:pm-skill-ratchet` — green: 682 lines, ceiling 682, headroom 0\n- `pnpm check:pm-skill-id-lint` — green: 9 files clean (no issue IDs in operational text; both new passages self-contained)\n- `pnpm check:skill-frame-sync` — green: 4 copies structurally isomorphic (decision frame untouched)\n- `pnpm check:doc-authoring` — green: 377 files clean\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` — green (after building the lint dependency closure in the fresh worktree)\n- `pnpm check:nul-bytes` — green (plus a direct control-byte grep over the edited file: no hits)\n- `node scripts/check-adr-merge-approval.mjs` — exit 1 locally (HTTP 401: no GitHub credentials in this container) — expected; in CI this gate stays red until the maintainer's own approval, by design for a skills-root PR\n- Gate list re-derived post-commit with `node scripts/pm/dispatch-gates.mjs` (no-args self-derived change set, 1 path vs merge base `e3a86e390`): 6 matched families = exactly the six above, nothing additional; model floor claude-fable-5 (clause ①) satisfied by this dispatch.\n\n`.claude/` internal tooling only — publishes nothing; `skip-changeset` label applied on this PR.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Rn7aaamsR99FXRqLcpL99q)_"
+}

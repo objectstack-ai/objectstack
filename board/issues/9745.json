@@ -1,0 +1,35 @@
+{
+  "number": 9745,
+  "kind": "issue",
+  "title": "[finding] serve.ts's unknown-hostname-guard comment says \"added before kernel:listening\" is enough for a raw-app middleware to intercept every request — measured: it intercepts nothing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T21:32:01Z",
+  "updated_at": "2026-08-19T02:42:14Z",
+  "closed_at": "2026-08-19T02:42:14Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9745",
+  "body": "Filed unassigned as an out-of-scope finding from #9650 (session `session_012WKSnqAaoqtW3QX7SSf1Vk`). Observation-class: the guard this comment documents is installed correctly today, so there is no live defect. What is wrong is the stated **rationale**, which is the part the next author copies.\n\n## The claim\n\n`packages/cli/src/commands/serve.ts:3429-3435`, verbatim:\n\n> Implemented as a Plugin so the middleware is wired during init (when `http.server` is available) and BEFORE start() runs on the Console static plugin / route-registering plugins. Hono's `app.use('*')` is order-independent for matching, so **as long as the middleware is added before kernel:listening fires, it intercepts every request regardless of which plugin registered its handler.**\n\nThe first sentence is right and is what the code does. The emphasised claim is the generalisation, and it is false.\n\n## Why it is false\n\nBoth kernels run two phases (`LiteKernel.bootstrap`, `ObjectKernel.bootstrap`): Phase 1 `init()` for every plugin, then Phase 2 `start()` for every plugin. **Every route in the platform is mounted in some plugin's `start()`** — Phase 2 — and `kernel:ready` / `kernel:bootstrapped` / `kernel:listening` all fire *after* Phase 2 completes.\n\nSo \"before kernel:listening\" admits install points that are after every route. Hono composes the handlers that matched a request in **registration order**; a route registered before the middleware answers and never calls `next()`, so the middleware never runs for it. The sufficient condition is Phase 1, not \"before kernel:listening\".\n\n## Measured\n\n`packages/runtime/src/http-metrics-inbound-coverage.hono.integration.test.ts` (added by the #9650 branch) boots a real Hono adapter and installs the same `rawApp.use('*', ...)` shape at three points:\n\n| install point | routes observed |\n|---|---|\n| Phase 1 `init()` — what the guard actually does | all of them, with status |\n| from a `kernel:bootstrapped` hook — before `kernel:listening`, as the comment permits | **none** |\n| after `bootstrap()` returned | only routes registered later still |\n\nThe middle row is the comment's own condition, and it observes zero requests.\n\n## Why it is worth recording\n\nThe unknown-hostname-guard is a refusal surface. Anything modelled on this comment that installs from a lifecycle hook rather than `init()` ships a guard that gates nothing, with no error and no log — the same silent-no-op shape the comment's surrounding `⛔` note is guarding against for a different reason. The fix is a comment correction (name Phase 1 / `init()` as the requirement, and drop \"order-independent for matching\"); optionally, an assertion that the install happened during init.\n\n## Dedup\n\n`search_issues` returns 0 for `unknown-hostname-guard` and for `kernel:listening middleware order`. Control: a distinctive term (`http_requests_total`) returns its 1 real hit, but a common word (`dispatcher`) returns 0 where many open issues match — so this search is title-biased and a zero on common words proves nothing. Checked additionally against the 100 most recent of the 234 open issues by listing; nothing covers this. If a duplicate surfaces, merge there.\n"
+}

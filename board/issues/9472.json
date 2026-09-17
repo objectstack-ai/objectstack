@@ -1,0 +1,30 @@
+{
+  "number": 9472,
+  "kind": "issue",
+  "title": "RUNNER.md rule 2 still requires a public reproduction for every `fail`, with no carve-out for access-control holes",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T03:38:04Z",
+  "updated_at": "2026-08-18T03:40:08Z",
+  "closed_at": "2026-08-18T03:40:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9472",
+  "body": "Surfaced while implementing the `checklist-test` disclosure guardrail (card #9387, PR #9470). Filing separately because the fix lands in `docs/qa/platform-checklist/RUNNER.md`, which #9387 is explicitly scoped out of.\n\n## The gap\n\n`docs/qa/platform-checklist/RUNNER.md`, accuracy rule 2, ends with an unconditional sentence:\n\n> A `fail` with no reproduction rule in its issue is not a completed verdict.\n\nPR #9470 adds a guardrail to `checklist-test` that forbids publishing a reproduction for an authentication or authorization hole anywhere on GitHub, and it names rule 2 as overridden. But the override is stated **only from the skill side**. RUNNER.md itself still reads as unconditional.\n\n## Why that is not merely cosmetic\n\n`checklist-test` tells the runner that RUNNER.md is the authority for per-clause judgement — 「先读它、服从它;本技能只是触发器、选择契约与隔离/并行方案,不是 runner 协议的第二份拷贝」. A runner who reads RUNNER.md directly, or who weighs the two documents by that stated precedence, can reasonably conclude that rule 2 wins and publish the reproduction. That is exactly the behaviour the guardrail exists to stop, and the QA wave already produced one real disclosure of a working unauthenticated read/write reproduction on a public tracking card.\n\nPrecedence stated in only one of two documents is a weak guarantee for a rule whose failure mode is publishing an exploit.\n\n## Smallest correction\n\nOne carve-out clause in rule 2, pointing the withheld case at the same record shape the skill now prescribes (item id + clause + `detail withheld pending maintainer`, reproduction held in session). No change to rule 2's default, which is correct for every non-security defect.\n\n## Notes\n\n- Unassigned, for triage — not claimed.\n- The wording to align against is in `.claude/skills/checklist-test/SKILL.md` Guardrails as of PR #9470."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 9518,
+  "kind": "issue",
+  "title": "cut-rc.yml refuses every cut since #9064: `sync-docs-image-tags.mjs` writes three paths outside the enforced release file surface",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p0"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T06:30:21Z",
+  "updated_at": "2026-08-18T09:56:59Z",
+  "closed_at": "2026-08-18T09:56:08Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9518",
+  "body": "Found while rehearsing #9497 (the @changesets/cli v3 epic, #9465). **It is not caused by that migration** — it reproduces identically on today's `@changesets/cli@2.31.1`, so it is filed on its own.\n\n## What is broken\n\n`cut-rc.yml`'s \"Build the single version commit\" step stages an allowlisted set of paths and then asserts that **nothing tracked is left modified-but-unstaged**:\n\n```\nLEFT=\"$(git diff --name-only)\"\nif [ -n \"$LEFT\" ]; then\n  echo \"::error::tracked files were modified but fall outside the release file surface, so the version commit would be incomplete. Refusing to push.\"\n```\n\n`pnpm run version` now ends with `node scripts/sync-docs-image-tags.mjs`, which rewrites three paths that the staging pathspec does not cover:\n\n```\ncontent/docs/deployment/self-hosting.mdx\ncontent/docs/upgrading.mdx\ndocker/README.md\n```\n\nSo `LEFT` is non-empty and the step exits 1. The cut refuses to push — correctly, by its own rule; the rule's input surface just went stale.\n\n## Measured\n\nThrowaway clone of `origin/main` @ `3397d7ec9` (165 pending changesets), `.changeset/pre.json` absent, then `changeset pre enter rc` + the full `pnpm run version` pipeline, then cut-rc.yml's staging + assertions replayed verbatim:\n\n```\n@changesets/cli@2.31.1  (today's pin)\n  STAGED count: 156\n  allowlist regex: accepts every staged path\n  unstaged assertion: TRIPS on:\n    content/docs/deployment/self-hosting.mdx\n    content/docs/upgrading.mdx\n    docker/README.md\n```\n\n`sync-docs-image-tags.mjs`'s own output for the same run:\n\n```\n  docker/README.md\n    32:6  image-tag: 17.0.0 -> 18.0.0-rc.0\n    43:3  image-tag: 17.0.0 -> 18.0.0-rc.0\n    65:45  build-arg: 17.0.0 -> 18.0.0-rc.0\n  content/docs/deployment/self-hosting.mdx\n    76:3  image-tag: 17.0.0 -> 18.0.0-rc.0\n    94:3  image-tag: 17.0.0 -> 18.0.0-rc.0\n    145:6  image-tag: 17.0.0 -> 18.0.0-rc.0\n    163:20  npm-pin: 17.0.0 -> 18.0.0-rc.0\n  content/docs/upgrading.mdx\n    41:8  image-tag: 17.0.0 -> 18.0.0-rc.0\n  8 pin(s) across 3 surface(s)\n```\n\nThe same replay under `@changesets/cli@3.0.0` trips on exactly the same three paths, so the migration neither causes nor cures it.\n\n## Why nobody has seen it\n\n`sync-docs-image-tags.mjs` was added to the `version` script by #9064 (2026-08-16). v17.0.0 shipped 2026-08-14. No cut has run since the rewriter joined the pipeline, so the assertion has never been reached with these three files dirty. The workflow's allowlist comment still describes a `pnpm run version` measured on the 17.0.0-rc.5 -> rc.6 train, before the rewriter existed.\n\n`release.yml`'s version-PR lane is unaffected: `changesets/action@v1` runs a plain `git add .`, with no allowlist.\n\n## Fix shape\n\nPer #9465 ruling 3 the allowlist follows the measurement. Widen the staging pathspec **and** the re-check regex in `cut-rc.yml` to cover the three docs/docker surfaces the version pass legitimately writes — ideally by naming them as the rewriter's declared output rather than by pattern, so the next surface `sync-docs-image-tags.mjs` learns about fails loudly here again.\n\nNote for whoever takes this: #9498 rewrites this same allowlist for the v3 pre-mode file set. Whichever lands first should carry the other's change or hand it over explicitly — two PRs editing this block is the shape #9465 exists to prevent."
+}

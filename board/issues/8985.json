@@ -1,0 +1,35 @@
+{
+  "number": 8985,
+  "kind": "issue",
+  "title": "`os start` / `os dev` inject OS_ARTIFACT_PATH into the child `serve` environment, so a downstream config cannot tell an operator's value from the CLI's own plumbing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T04:07:43Z",
+  "updated_at": "2026-08-17T18:00:52Z",
+  "closed_at": "2026-08-17T18:00:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8985",
+  "body": "Cross-repo filing from the `repo:cloud` whole-repo seat (objectstack#6026, session `session_0137TnZzVmkSjXxoSVgPFS6S`, 2026-08-16). Fix lands here; the consumer that needs it is cloud. Unassigned — `domain:*` routing is the triage seat's (`packages/cli` maps to `domain:cli`; taking that as a suggestion, not a label).\n\n## Measured\n\n`os start` writes `OS_ARTIFACT_PATH` into the child `serve` environment whenever it resolved an artifact and `OS_ARTIFACT_URL` is unset; `os dev` writes it unconditionally. Both happen **before** the downstream `objectstack.config.ts` is evaluated. Measured from cloud with the EE image's own `ENV` deliberately deleted: `os start` still printed `Artifact: dist/objectstack.json` and handed that path down.\n\n⇒ Inside any config, that variable is set on **every** boot, including boots where no operator ever mentioned it.\n\n## Why it matters downstream\n\ncloud#1292 retires `OS_ARTIFACT_PATH` in favour of `OS_ARTIFACT_URL`, and the retirement wants to be a loud refusal. The obvious implementation — *refuse if the variable is present* — is **unshippable**: it would refuse the shipped EE image on first boot and the documented `OS_MULTI_TENANT=1 … pnpm start` flow with it.\n\ncloud#1292 therefore ships a **value-based** refusal (fires on any value other than the project-local default the CLI derives on its own). That works and is what landed, but it is a weaker rule than intended, and it only works as long as the CLI's injected value stays predictable. A config cannot currently answer \"did a human ask for this, or did the CLI put it here?\" — and that question is the whole basis of the retirement.\n\n## Suggested direction (dev/triage judgement, not a ruling)\n\nStop injecting the variable and pass the resolved artifact path to the child by a means that is not an operator-facing knob — a CLI flag, an internal env var namespaced as such, or the existing precedence chain resolved once and passed structurally. Whatever the shape, the property downstream needs is: **the presence of `OS_ARTIFACT_PATH` in a config's environment means an operator set it.**\n\n⚠️ Precedence must not change: `--artifact > OS_ARTIFACT_URL > OS_ARTIFACT_PATH > <cwd>/dist > <home>/dist > auto-compile > empty`. And note `start` deliberately does not set `OS_BOOT_EMPTY` when `OS_ARTIFACT_URL` is set, so an unreachable artifact host is a loud refusal rather than a silently empty platform — that behaviour is load-bearing and should survive.\n\nOnce this lands, cloud can tighten its retirement from value-based to presence-based, which is the rule the cloud-side ruling originally intended.\n\nRe-check commands:\n\n```\ngit grep -n \"OS_ARTIFACT_PATH\" -- packages/cli/src\ngit grep -n \"OS_ARTIFACT_PATH\\|OS_ARTIFACT_URL\" -- packages/cli/src/commands/start.ts packages/cli/src/commands/dev.ts\n```\n\nRefs: cloud#1292 (the retirement + the measurement), cloud#1321, objectstack#8368 / #8526 (the `OS_ARTIFACT_URL` mechanism)."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 9345,
+  "kind": "issue",
+  "title": "TenantPlanSchema's doc block claims cloud-side readers fold unknown plan codes to free — that became true only on 2026-08-17, and the citation is wrong",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T14:34:55Z",
+  "updated_at": "2026-08-18T09:48:47Z",
+  "closed_at": "2026-08-18T09:48:47Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9345",
+  "body": "Filed by the `repo:cloud` whole-repo PM seat (objectstack#6026, session `session_0137TnZzVmkSjXxoSVgPFS6S`) as **item 3 of the maintainer ruling on cloud#1380** (2026-08-16), which assigns the filing to the cloud seat and the work to the **spec seat** — `packages/spec` is the spec seat's surface, so this card is filed unassigned rather than claimed here.\n\n> **Spec correction (same round, cross-repo)**: objectstack's `TenantPlanSchema` doc block (#7513) is corrected so its \"cloud-side readers fold unknown to free\" sentence becomes measured truth with an accurate citation — the cloud seat files the objectstack card (spec text surface) with `Blocked-by:` this card's A landing.\n\n## Blocked-by\n\n**objectstack-ai/cloud#1380** — specifically its item 1 (\"A\"), landing as objectstack-ai/cloud PR #1417. ⛔ Do not correct the sentence before that PR merges: until it does, the claim is false on the tenant-runtime side and a \"correction\" would make the doc block wrong in the opposite direction.\n\n## What is wrong today\n\n`TenantPlanSchema`'s doc block asserts that cloud-side readers fold an unrecognized plan code onto free. As of the ruling, that was true of **one** of the two mirrors:\n\n| reader | before 2026-08-17 | after cloud#1380 A |\n|---|---|---|\n| `service-cloud` `planKey` (control plane) | folds unknown → free | unchanged |\n| `objectos-runtime` `isFreePlan` (tenant runtime) | **granted PAID** for unknown | folds unknown → free |\n\nSo the sentence described the control plane and generalized it to \"cloud-side readers\". The disagreement between those two mirrors is the entire subject of cloud#1380 — a spec doc block asserting they agreed is what let it go unnoticed.\n\nThe citation attached to the sentence is also inaccurate; the correction should point at the ruling and at the code that actually implements the fold, not at the earlier reference.\n\n## What the corrected text has to say\n\n1. Unrecognized codes fold to free on **both** mirrors, as of the cloud#1380 ruling (2026-08-16) — with the accurate citation.\n2. The fold is at the **entitlement layer**, not in normalization. `sys_environment.plan` keeps the raw value modulo case, so \"a tier I do not know\" stays distinguishable from \"the free tier\" for any reader, log line, or operator. (Sinking it into normalization would have erased that distinction before anything could observe it — the reason cloud#1389 / PR #1393 states **normalize the spelling, never the vocabulary**.)\n3. The ruling's operational corollary, because it is the premise the fold rests on: new tiers are minted rarely, and images roll before a new tier is sold. **If that discipline changes, this ruling's premise changes with it.** It now lives in `isFreePlan`'s docstring on the cloud side; the spec text should not contradict it.\n\n⚠️ Do not write the sentence as if the two vocabularies are now one list. They are not — A landed over a **copy**, guarded by an element-for-element equality pin. Unifying them is objectstack-ai/cloud#1418 (ruled, not yet done), and a SHA-pinned image can predate a vocabulary entry even after that lands.\n\n## Scope\n\n`packages/spec` text surface only — a doc block correction, no schema or behaviour change. ⛔ This card carries no authority to change what `TenantPlanSchema` validates.\n\n## Related\n\nobjectstack-ai/cloud#1380 (the ruling and A) · objectstack-ai/cloud PR #1417 (A as landed) · objectstack-ai/cloud#1418 (item 2, the shared vocabulary) · objectstack-ai/cloud#1389 (the spelling red line) · objectstack#7513."
+}

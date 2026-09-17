@@ -1,0 +1,36 @@
+{
+  "number": 9486,
+  "kind": "issue",
+  "title": "tooling(qa): roll-up script over qa-run records — area × latest-verdict × staleness matrix for the wave anchor",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T03:59:32Z",
+  "updated_at": "2026-08-18T14:03:46Z",
+  "closed_at": "2026-08-18T14:03:46Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9486",
+  "body": "Maintainer authorization (2026-08-18, PM chat, skills-seat session `session_01Rn7aaamsR99FXRqLcpL99q`): 「同意你的落地动作」, approving the QA management-loop design, item 4.\n\n## What\n\nA small script (suggested home `scripts/qa/qa-rollup.mjs`) that answers the one question no current view answers: **\"what is the latest verdict for every checklist item/area, and is it stale?\"** — today that takes reading 14 issues by hand.\n\n- **Input**: `qa-run` issues (open and closed), read via the GitHub API — title convention `QA run · <selector> · <judged>/<total> · <sha8> · <date> · <counts>` plus the per-item verdict tables the records carry.\n- **Output**: a markdown matrix — area × latest verdict counts (PASS/PARTIAL/FAIL/BLOCKED/NOT-RUN) × the subject sha it was measured on, flagged stale when that sha is behind the current comparison target; plus the open-record (close-out debt) count. Suitable for pasting as a wave-anchor comment.\n- **Latest-per-selector wins**: a superseded record never shadows its replacement.\n- **It is a generated VIEW, not a tracker** (one board rule): no state is written anywhere; the run records stay the only source of truth.\n\nReaders (named, per the label/reader rule): the wave PM planning the next round's selectors; the maintainer reading test status.\n\nTriage note: routing suggestion `domain:devx` (general scripts/ tooling) or `domain:skills` (PM-loop adjacent) — triage decides; not `scripts/pm/**`, so no fable path mandate."
+}

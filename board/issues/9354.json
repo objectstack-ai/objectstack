@@ -1,0 +1,34 @@
+{
+  "number": 9354,
+  "kind": "issue",
+  "title": "[Decision] Should the MySQL deferred-DDL flush bound its `lock_wait_timeout` so a blocked `os migrate` fails loudly instead of hanging (default: one year)?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T15:56:03Z",
+  "updated_at": "2026-08-18T09:38:32Z",
+  "closed_at": "2026-08-18T09:38:32Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9354",
+  "body": "Filed by the PM seat from the #9350 investigation's second open question. Contract-affecting (changes migration behaviour operators depend on), so it is a maintainer decision, not an agent's.\n\n## The measured behaviour\n\nThe deferred-DDL flush (`flushDeferredSchemaDdl` → `migrateMysqlDatetimeColumns`, `packages/objectql` sql-driver ~L7717/7946) runs `alter table ?? modify column ?? datetime(3)` on a session that inherits MySQL's default `lock_wait_timeout` — **31,536,000 seconds (one year)**. If another transaction holds a metadata lock on the target table, the ALTER blocks silently for up to that long. This is the mechanism behind #9350's one genuine CI stall (a sub-second test blowing a 5000ms budget with no error — the ALTER just sat in a lock wait until vitest killed the process). An operator running `os migrate` against a busy production table meets the same behaviour with **no** diagnosable output: the command simply hangs.\n\n## Options\n\n- **A — bound the wait on the migration session** (e.g. `SET SESSION lock_wait_timeout = <bounded value>` before the widening ALTER): a blocked migration fails loudly with MySQL's lock-wait error, which the driver can envelope with the blocking context named. Structurally-prevents-mistakes shape: turns an undiagnosable hang into an actionable refusal. Open sub-questions if ruled A: the bound's value (seconds vs minutes), whether it applies to all deferred-DDL statements or only the widening ALTER, and the error envelope (per ADR-0112 the code must come from the closed vocabulary — likely a `DATABASE_ERROR`-family envelope naming the lock wait).\n- **B — leave it**: an operator may legitimately want a migration to wait behind a long transaction rather than fail. Cost: the wait is invisible — nothing prints \"waiting on a metadata lock held by X\" — so in practice B is \"hang with no explanation\", which no operator can distinguish from a crash.\n\n## Four-corner note (abbreviated — the axis that decides)\n\n③ error-resistance dominates: both an AI agent in CI and a human operator meet this as an unexplained freeze; every diagnosis starts from zero. ① A bounded, enveloped refusal is the declared=enforced shape. ② Business pull: one measured occurrence in CI, zero known field reports — real but thin, which argues for the minimal version of A (bound + envelope, no retry logic, no configurability until asked). ④ Scope: A's minimal version is a few lines plus a pin test.\n\n⛔ No agent implements this until the maintainer rules. Related: #9350 (the investigation, `pm:on-hold` for the metadata-lock measurement) · #3954 (the widening's origin) · ADR-0112 (error envelope)."
+}

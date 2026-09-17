@@ -1,0 +1,32 @@
+{
+  "number": 9390,
+  "kind": "issue",
+  "title": "DELETE is broken for any object targeted by a `multiple: true` reference — 400 INVALID_FILTER and the row survives (regression since #8895)",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-17T22:18:20Z",
+  "updated_at": "2026-08-19T00:10:21Z",
+  "closed_at": "2026-08-19T00:09:37Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9390",
+  "body": "Found by the `priority:P0` round of the #9296 QA wave; run record #9334. Subject sha `e4e5c6e3c608b1b807c83a0d5b734f213eb1a1dd`, stock showcase.\n\n## Symptom\n\n```\nDELETE /api/v1/data/showcase_account/<id>   →  400 INVALID_FILTER\n```\n\n**The row survives.** This is not a refusal-with-a-reason (the platform has one of those — see the contrast below); it is the delete path failing and reporting a filter error the caller never wrote.\n\n## Cause\n\n`cascadeDeleteRelations` (`packages/objectql/src/engine.ts`, ~10112) probes for dependents before deleting, issuing a bare-equality query per referencing field:\n\n```\nwhere: { [fieldName]: id }\n```\n\n`showcase_field_zoo.f_lookups` is a **multi-value** lookup at `showcase_account` — `Field.lookup('showcase_account', { label: 'Lookup → Accounts (multiple)', multiple: true })` (`examples/app-showcase/src/data/objects/field-zoo.object.ts:106`), stored as JSON TEXT. Bare equality against a JSON-TEXT multi-value column is exactly what the engine's own **#5869** guard refuses — so the dependent probe throws `INVALID_FILTER`, and the **#8895** catch, which only swallows missing-table errors, rethrows it and aborts the whole delete.\n\n**Why it is a regression, not a latent bug:** before #8895 that catch swallowed the failure, so the delete completed. #8895 tightened the catch for good reasons (it had been inventing \"no dependents\" for a relation whose probe could not run) and this case fell out of the tightening.\n\n## Blast radius — measured, not inferred\n\nOn stock showcase only `showcase_account` is affected: it is the sole object targeted by a `multiple: true` reference. Verified contrasts on the same boot:\n\n| object | DELETE result |\n|---|---|\n| `showcase_account` | **400 INVALID_FILTER, row survives** ← the defect |\n| team / category / announcement / private_note / project | 200, deleted |\n| product | 409 `DELETE_RESTRICTED` — a **correct** guard, not this bug |\n| sys_user | 405 — escapes via method, not via this path |\n\nGenerally: any object that is the target of a `multiple: true` reference field cannot be deleted. Stock showcase has one; a customer schema can have many, and the failure is silent-looking — a 400 about a filter gives no hint that a multi-value lookup elsewhere is the cause.\n\n## Fix direction (not prescribed — the owning lane decides)\n\nThe dependent probe needs to be **`$contains`-aware**: when the referencing field is `multiple: true`, probe with the containment operator the engine already supports for JSON-TEXT multi-value columns instead of bare equality. Landing in `packages/objectql`; the console is not involved.\n\nWhatever the shape, the regression test should assert **both** halves — the delete succeeds, *and* a genuine dependent through a multi-value reference is still detected (so the fix does not restore the old bug of inventing \"no dependents\").\n\n## Reproduction\n\n```\npnpm -C examples/app-showcase exec objectstack dev --ui --seed-admin -p <port> -d file:/tmp/<run>/del.db\n# authenticate as the seeded admin, then:\ncurl -X DELETE http://localhost:<port>/api/v1/data/showcase_account/<any seeded account id>\n```\n- **expected**: 200, row gone.\n- **actual**: 400 `INVALID_FILTER`, row still present on re-read.\n\nLeft unlabelled for `domain:*` — routing is the triage seat's call (the fix lands in `packages/objectql`). Levelling likewise: this is a P0 checklist-item failure and a data-integrity regression on a published surface, but the priority label is triage's to set.\n"
+}

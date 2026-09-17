@@ -1,0 +1,33 @@
+{
+  "number": 9765,
+  "kind": "pull_request",
+  "title": "docs(ci): state the create-objectstack cross-package rationale as the read it now is",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T22:37:32Z",
+  "updated_at": "2026-08-19T00:24:45Z",
+  "closed_at": "2026-08-19T00:24:44Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-19T00:24:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9765",
+  "body": "Fixes #9651\n\nA prose fix to one rationale in `scripts/check-cross-package-test-inputs.mjs`. **The `globs`\ndeclarations are byte-identical** — `git diff` touches comments only.\n\n## What was stale\n\nThe `create-objectstack` entry justified its `scripts/sync-template-versions.mjs` glob by the\nfile being *\"named in a comment rather than read\"*. PR #9648 (card #9554) landed\n`packages/create-objectstack/src/template-version-stamps.test.ts`, which loads the script by\nURL for its declaration surface (`stampedPaths()`, `findTemplateDirs()`, `TEXT_STAMPS`) and\nruns it with `execFileSync` over a two-template fixture. The glob stayed right; its reason\ndid not.\n\n## H1 — the card's severity claim, measured rather than assumed\n\nThe card argues the staleness is self-correcting: an editor who deleted the glob believing the\n\"only a prose mention\" rationale would go red at once. **Measured on `6f40ed736`, and it\nholds** — glob removed, `--verify` run:\n\n```\nFAIL: cross-package test inputs are not declared consistently.\n\n  - create-objectstack names path(s) no declared glob covers, so a change to them would not\n    re-run its tests:\n      scripts/sync-template-versions.mjs   (named in packages/create-objectstack/src/template-consistency.test.ts)\n```\n\nBut the failure names the file that *mentions* the path, not the one that reads it, so I ran\nthe counterfactual. **Removing the glob AND unquoting the two header-comment mentions passes,\nexit 0**: `OK: 12 package(s) read outside themselves, all declared`. Both tests spell the path\nas `join(repoRoot, 'scripts', 'sync-template-versions.mjs')`, and the literal collector only\nsees a whole repo-relative path inside one quoted string.\n\nSo the gate is red today for a reason that is *still* a prose mention. Writing \"it is a real\nread now\" and stopping would have replaced one false belief with a more dangerous one — that\nthe read has the radius covered. The rewrite therefore states three things: the read that\nexists now, the `template-consistency.test.ts` ratchets that would still justify the glob if\nthat test were deleted, and what actually forces it.\n\n## H2 — audited all twelve rationales; one more was stale, for the same reason\n\nEvery entry's named tests still exist and still do what the prose says (spot-checked the\nattributions that could drift: `check-nul-bytes.mjs` is **still** mention-only at\n`login-json-noninteractive.e2e.test.ts:143`, so the `@objectstack/cli` comparison stays\nuntouched as ruled; `connector-mcp-plugin.ts` is still spelled relative at\n`serve-capability-identity.test.ts:201`; spec's `packages/lint/src/**` is still read at\n`position-delegatable-enforcer.pin.test.ts:57`).\n\nOne other clause was stale — folded in here because it is the **same fact, second copy**, and\nbecause fixing only the entry the card named would have left my own edit contradicted three\nhundred lines above it. The `@objectstack/dogfood` entry read:\n\n> `realtime-protocol.mdx` is named in a comment rather than read, the same shape as\n> `check-nul-bytes.mjs` **and `sync-template-versions.mjs`** ...\n\nThe `realtime-protocol.mdx` half is still true (mentions at `authz-conformance.test.ts:175`\nand `:260`). The cross-reference to `sync-template-versions.mjs` is not, and stopped being\ntrue at the same commit. Only that clause is removed; the surviving reference now says where\nto find it.\n\nThe audit's real result is not \"N rationales rotted\" — ten of twelve are accurate. It is that\n**one fact restated in two places rotted in two places**, which is why the fix removes a\ncross-reference rather than adding one.\n\n## H3 — no new gate, recorded so it is not re-derived\n\nThe proposed property (*an entry whose rationale says \"named in a comment rather than read\"\nshould have no test that imports the path*) is not worth building, for a reason stronger than\n\"it needs natural-language reading\": **it cannot be right even if the prose parsed.** The\nsecond half of the predicate — \"a test actually reads this path\" — is exactly what this gate\ncannot determine, which the counterfactual above measures. A checker for it would need a\nbetter read-detector than the gate has; and given that detector, the prose distinction would\nbe unnecessary, because the coverage check would hold the glob directly. So the check is\neither unbuildable or self-obsoleting.\n\nThe useful variant is structural and lives one level down: teach the literal collector the\nspellings it misses. Recorded as #9763 (sub-issue of #9747) with the four declarations\ncurrently held by prose alone — not done here.\n\n## Verification\n\nRun on `bc26095b8`, the final commit:\n\n| gate | result |\n| --- | --- |\n| `node scripts/check-cross-package-test-inputs.mjs --verify` | `OK: 12 package(s) read outside themselves, all declared` |\n| `--self-test` | `All 33 self-test cases passed.` |\n| `node scripts/check-nul-bytes.mjs` | `OK (scanned 6237 text file(s) ... no raw ASCII control bytes)` |\n| `node scripts/check-ratchet-remedy-authority.mjs` | `OK ... 95 scripts swept` |\n| `node scripts/check-examples-live-imports.mjs` | `OK -- 0 invisible (declared), 6 inputs-declared, 67 graph-visible` |\n\n`dispatch-gates.mjs` named the first only; the last two were added by re-deriving from the\ndiff — both gates read this file (`check-ratchet-remedy-authority` classifies it by its own\nregistry, `check-examples-live-imports` mirrors its globs). Comment-only change, nothing\npublished, so `skip-changeset` rather than a changeset.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01XqDQYVU5smx29ts9pAErja)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XqDQYVU5smx29ts9pAErja)_"
+}

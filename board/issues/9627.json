@@ -1,0 +1,34 @@
+{
+  "number": 9627,
+  "kind": "pull_request",
+  "title": "docs: state the multi-value `set_null` semantics on the six pages that document it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T13:39:18Z",
+  "updated_at": "2026-08-18T14:27:14Z",
+  "closed_at": "2026-08-18T14:27:12Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-18T14:27:12Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9627",
+  "body": "Fixes #9521\n\nSix hand-written pages named `set_null` while saying nothing about what it does to a\n`multiple: true` reference. Each page is judged on its own job here rather than given\none pasted block — six copies of the same paragraph is the drift this lane has spent\nthe day collapsing.\n\n## The contract, quoted rather than paraphrased\n\n`packages/spec/src/data/field.zod.ts`, the `multiple` doc block:\n\n> An emptied multi-value lookup reads back as `[]`, never `null` — the rule binds every\n> writer (cascade repair, form clears, API writes), not just cascade repair (#9447,\n> maintainer ruling 2026-08-18).\n\nthe `required` doc block:\n\n> On a multi-value lookup (`multiple: true`) required means NON-EMPTY array — an emptied\n> required set fails validation loudly; `[]` does not satisfy it (#9447, maintainer\n> ruling 2026-08-18).\n\nMember removal itself is stated where it is implemented, `cascadeDeleteRelations` in\n`packages/objectql/src/engine.ts:10206-10212`: on a `multiple: true` field \"clear\" means\nremove the deleted MEMBER and keep the rest.\n\nEvery edited page cites the spec through the generated\n[Field reference](/docs/references/data/field), which renders those exact `describe`\nstrings — a pointer that cannot drift, rather than a seventh hand-written restatement.\n\n## Per page: what it was, and what it needed\n\n| page | before | what it got |\n|:---|:---|:---|\n| `protocol/objectql/types.mdx` | **wrong** — \"`set_null`: Set field to null when referenced record is deleted\", the single-value behaviour stated as universal | the option corrected, plus the residual-shape guarantee at protocol precision (`[]`, never `null`, binding on every writer — not a cascade convention) |\n| `data-modeling/fields.mdx` | **imprecise** — \"`null`, `\"\"` and `[]` mean 'no link' — exactly what `set_null` writes\", which is true of no one of them | now says which is written when: `null` on a single-value lookup, member removal on a multi-value one, `[]` when the last member goes |\n| `data-modeling/field-types.mdx` | **silent** — the two table cells where an author picks `deleteBehavior` and `multiple` | one clause in each cell; the citation link sits on the `multiple` row |\n| `deployment/troubleshooting.mdx` | **silent** — \"Option B: Set null (children keep existing, reference cleared)\", correct for single-value | the answer in place, for the mid-incident reader: a cleanup query looking for `null` will not match an emptied set |\n| `api/data-api.mdx` | **silent** — `set_null` appeared once, as a passing enum in batch delete | the read-back shape an integrator's client actually branches on, stated on `DELETE /data/:object/:id` |\n| `data-modeling/validation-rules.mdx` | **silent**, and the page that must not over-promise | the live representation guarantee, plus the ruled `required`-means-non-empty half marked **declared but not yet enforced** (the validator's `isMissing` treats only `undefined` / `null` / blank strings as missing, so `[]` passes today — tracked in #9476) |\n\n## Is six the real set? Surveyed independently\n\nThe card's six came from the drift check's `set_null` literal. Re-derived here by grep\nover `content/docs/**` rather than inherited:\n\n- **`set_null`** — 8 files: the six, plus `references/data/field.mdx` (AUTO-GENERATED\n  from `field.zod.ts`; it already carries both sentences verbatim, and the spec is its\n  fix site) and `releases/v15.mdx` (release-owned, untouched).\n- **`deleteBehavior` without `set_null`** — 2 further hand-written pages the literal key\n  cannot see: `getting-started/common-patterns.mdx` (master-detail cascade only) and\n  `protocol/objectql/schema.mdx` (a `multiple` property row and a `cascade` example).\n  Both are silent, neither states an empty representation, so neither needed an edit —\n  but the key would have missed them had they been wrong.\n- **`multiple: true` / \"multi-value\" language** — 5 more pages\n  (`field-type-decision-tree`, `schema-design`, `seed-data`, `queries`,\n  `automation/approvals`); grepped each for a `null` / empty / `[]` claim on those\n  lines and found none.\n\nSo six is the right **edit** set, arrived at independently; it is not proof that the\nliteral key is a survey.\n\n## Out of scope, filed unassigned\n\n`types.mdx` also claims \"An explicit `set_null` or `cascade` is always honored as\nwritten\". The engine escalates on the *resolved* behaviour\n(`engine.ts:10265-10281`), so it cannot tell an explicit `set_null` from a defaulted one\non a `required` lookup — and no test pins either reading. That is a different defect\nclass and the correct form is a decision, not a mechanical edit, so it is filed as\n#9625 and untouched here.\n\n## Verification\n\nUnion re-run **after** the final commit, at `496b3de13`:\n\n- `pnpm check:nul-bytes` — OK (6173 text files, no raw control bytes)\n- `pnpm check:docs-audit-scope` — OK (179 hand-written docs in scope; releases read-only)\n- `pnpm check:docs-redirects` — OK (92 entries resolved)\n- `pnpm check:role-word` — OK (43 baselined files, no new occurrences)\n- `pnpm --filter @objectstack/spec run check:empty-state` / `check:liveness` /\n  `check:strictness-ledger` / `check:variant-docs` — all OK\n- No local gate parses MDX, so all six pages were compiled through `@mdx-js/mdx` 3.1.1\n  directly — 6/6 OK, with a positive control (a deliberately unclosed component tag)\n  observed FAILING, so the harness is not silently green.\n\nDocs-only; publishes no package, so `skip-changeset` rather than a changeset file.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XqDQYVU5smx29ts9pAErja)_"
+}

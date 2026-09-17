@@ -1,0 +1,34 @@
+{
+  "number": 9339,
+  "kind": "issue",
+  "title": "#7282's watcher-timing flake family is NOT closed — it now ejects unrelated PRs through `watch-write-registration.test.ts`, the pin PR #7336 added to close it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-17T14:16:08Z",
+  "updated_at": "2026-08-18T16:20:55Z",
+  "closed_at": "2026-08-18T16:20:55Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9339",
+  "body": "Filed from PR #9312 (a `packages/spec` + `packages/services/service-datasource` change with **no dependency path to `metadata-fs`**) after `Test Core (1/3)` went red. Unassigned — recording, not claiming.\n\n## The signature\n\nRun [32031835133](https://github.com/objectstack-ai/objectstack/actions/runs/32031835133), job `Test Core (1/3)`, at `2444d022b`:\n\n```\n❯ test/watch-write-registration.test.ts (1 test | 1 failed) 20050ms\n  × registers a put() path with the watcher without waiting for a poll 20046ms\n\nFAIL test/watch-write-registration.test.ts > FileSystemRepository watcher — writes\n     register their own path (#7282) > registers a put() path with the watcher\n     without waiting for a poll\nAssertionError: expected [] to include 'anchor'\n ❯ test/watch-write-registration.test.ts:166:43\n    166|     expect(events.map((e) => e.ref.name)).toContain('anchor');\n\n Test Files  1 failed | 5 passed (6)\n      Tests  1 failed | 50 passed (51)\n```\n\n## Why this is #7282's family and not a new defect\n\nThe failing test's own describe block is named for #7282, and the file is the pin **PR #7336 added to close it**. #7282's central finding was that deadline widening is spent:\n\n> The test failed with a 20-second deadline. So the diagnosis behind the hardening — \"queue load makes the event late\" — is now falsified. A 6.7× deadline increase changed nothing, which is the signature of an event that is **never delivered**, not one that is slow.\n\nThis failure reproduces that signature exactly, on the successor test: `EVENT_WAIT_MS = 20_000`, the race fell through to the sleep (20046ms for a single test), and `events` was **`[]`** — all-or-nothing, not marginal.\n\nIt also reproduces #7282's blast radius verbatim. That card recorded the flake ejecting #7261, \"a one-file test-only change in `packages/objectql` with no dependency path to `metadata-fs` (which depends only on `@objectstack/metadata-core` and `chokidar`)\". PR #9312 is the same shape: it changes `packages/spec/src/data/datasource.zod.ts` and one `service-datasource` test, `metadata-fs` declares only `@objectstack/metadata-core` + `chokidar`, and its `src/` contains no occurrence of `datasource` at all.\n\n## What is narrowed, and what is not\n\n**Narrowed — the watcher was armed and ready.** The failure is at line 166, so line 155's `expect(watchedIn(repo, viewDir)).toContain('seed.json')` had already passed. `ready` therefore fired, the initial walk completed, and `seed.json` was registered. This is not the `ignoreInitial` race the test's own comment guards against; the anchor write happened against a live, ready watcher and produced no event in 20s.\n\n**Not narrowed — the delivery mechanism.** #7282's original mechanism (the coalesced poll event swallowed by the 200ms `selfWrites` timer) does not transfer unmodified: in this test no `put()` precedes the anchor write — `seed.json` is written before the repository exists, and `anchor.json` is a plain external `fs.writeFile` after `ready`. The suspect coupling is the same pair of production constants, from `repository.ts`:\n\n```ts\nawaitWriteFinish: { stabilityThreshold: 50, pollInterval: 20 },\nusePolling: true,\ninterval: 1000,\n```\n\nbut which of the polling/stability interactions drops this particular event is not established here, and I am deliberately not guessing at it — #7282 was closed on a mechanism that turned out to be one member of a family, and this card exists because that generalisation was the thing that failed.\n\n## Not reproducible locally, on either side\n\nBoth worktrees built from their own sources, `metadata-fs`'s closure built:\n\n| where | what | result |\n|---|---|---|\n| PR #9312 branch @ `2444d022b` | full `metadata-fs` package, 3 runs | 6 files / 51 tests passed, 3/3 |\n| PR #9312 branch | `watch-write-registration.test.ts` alone, 6 runs | 6/6 passed |\n| clean `origin/main` @ `e4e5c6e3c` | `watch-write-registration.test.ts` alone, 6 runs | 6/6 passed |\n| clean `origin/main` | same file, **8 concurrent** runs (deliberate watcher starvation) | 8/8 passed |\n\nSo it does not fail deterministically on `main` either — consistent with #7282's characterisation of a load-dependent, all-or-nothing suppression rather than anything a local control can pin.\n\n## Suggested directions\n\n#7282's own list still applies, minus the one already spent. Its option (1) — make suppression content-keyed rather than time-keyed — was the one it called \"the real fix\"; PR #7336 instead took the register-written-paths route, which closed the `put()` half while leaving the plain external-write half of the family live. Worth deciding explicitly whether the remaining exposure is fixed at the coupling or **quarantined** (#7282's option 4), because the cost is not carried by `metadata-fs`: every ejection rebuilds every PR behind it, and the failures land on cards with no connection to the watcher.\n\nBacklink: #7282 (the family, closed by #7336), #7208 (the spent 20s hardening), #7150 (the earlier inert-watcher defect), #9312 (this recurrence's host PR).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Y26DJEHSBhhAQ6wwfsHNza)_"
+}

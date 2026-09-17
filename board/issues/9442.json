@@ -1,0 +1,36 @@
+{
+  "number": 9442,
+  "kind": "issue",
+  "title": "`os serve`'s unknown-hostname guard has no test seam — the whole middleware, refusal body included, is unreachable from a test",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T01:14:50Z",
+  "updated_at": "2026-08-18T12:30:18Z",
+  "closed_at": "2026-08-18T12:28:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9442",
+  "body": "Filed unassigned by the #9364 dev seat. Nobody is on it.\n\n## What is missing\n\nThe `OS_ROOT_DOMAIN` unknown-hostname guard in `packages/cli/src/commands/serve.ts` has **zero** test coverage. Measured, with a control query that proves the search works:\n\n```\n$ grep -rln \"unknown-hostname-guard\\|OS_ROOT_DOMAIN\" --include=*.ts packages/cli/src/\npackages/cli/src/commands/serve.ts\n\n$ grep -rln \"resolveTenancyPostureOrRefusal\" --include=*.ts packages/cli/src/   # control\npackages/cli/src/commands/serve-tenancy-posture-gate.test.ts\npackages/cli/src/commands/doctor.ts\npackages/cli/src/commands/serve.ts\n```\n\nThe control names a sibling helper in the same file that IS tested, so the empty first result is a real absence rather than a broken pattern.\n\n## Why it is untestable rather than merely untested\n\n`packages/cli` has plenty of test infrastructure, and `serve.ts` has an established, well-used pattern for it: extract a pure exported helper (`resolveTenancyPostureOrRefusal`, `resolveStorageCapabilityArg`, `formatMultiNodeCapAdvisory`, `describeRegisteredDriver`, `resolveBannerConfigRow`, …) and test that.\n\nThe guard fits none of it. It is a `guardPlugin` object literal built inside the `run()` body of the `Serve` command class, whose middleware closes over `__rootDomain`, `RESERVED`, `getEnvRegistry` and `process.env.OS_CLOUD_URL`, and installs itself via `rawApp.use('*', ...)` on a `http.server` service resolved from the plugin context. Nothing about it is exported or constructible; reaching it means booting a real `os serve`.\n\nSo the untested surface is not just the refusal body — it is every branch above it, and several are load-bearing with sharp failure modes stated in the source comments:\n\n- health/readiness paths (`/api/v1/health`, `/api/v1/ready`, `/health`) must bypass the guard, because \"returning 404 here on an unmapped hostname would kill the container\" (Cloudflare's probe hits whatever Host header is bound to the worker);\n- reserved subdomains and the apex bypass it, with a cloud-connected `/_console` redirect branch;\n- `/_admin/*` and `/.well-known/*` always pass through, so cert flows are not broken;\n- the env-registry is resolved lazily per request specifically to avoid a plugin-ordering dependency, and every failure mode there falls through rather than refusing.\n\nEach of those is a \"silently stops working\" class, and none has a regression test.\n\n## Suggested shape\n\nExtract the plugin factory — something like `createUnknownHostnameGuardPlugin({ rootDomain, cloudUrl, getEnvRegistry })` — exported from `serve.ts` the way its sibling helpers are, with `run()` calling it. That makes the real middleware mountable on a real Hono app in a test, covering the bypass matrix above and the refusal itself.\n\nTwo constraints for whoever takes it:\n\n1. **Keep the `c.json({ ... }, 404)` object literal INLINE inside the middleware.** `scripts/check-route-envelope.mjs` judges the object literal passed to `c.json(...)`; an identifier or a call expression reads to it as a relayed body it must not police. Hoisting the body into a helper would silently drop this file out of the gate's view — it is pinned conformant at `{}` as of #9364, and that pin would become vacuous.\n2. The refusal assertion should pin `error.code` **and** the HTTP status, not just the status.\n\n## Why it is filed rather than fixed\n\n#9364 converted this body to the declared envelope, but its dispatch surface was \"the unbound-hostname 404 only\". Extracting a ~90-line middleware out of a closure in a 4200-line file is a refactor with several judgment calls (what to parametrize, where the reserved-host and redirect branches land), not a mechanical change with its correct shape already pinned by existing evidence — so it did not qualify for an in-place fix on that card. The pre-existing coverage gap is unchanged by #9364 in either direction; it is simply now visible.\n\nRelated: #9364 (converted the body) · #9267 (added the gate surface that found it).\n"
+}

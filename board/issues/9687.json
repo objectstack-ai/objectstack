@@ -1,0 +1,35 @@
+{
+  "number": 9687,
+  "kind": "issue",
+  "title": "[finding] os-dev stalls by backgrounding a contended verify job and yielding — measured twice in one session, and concurrency makes it likelier",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T15:28:14Z",
+  "updated_at": "2026-08-19T06:06:10Z",
+  "closed_at": "2026-08-19T06:06:10Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9687",
+  "body": "Filed unassigned by the `repo:objectui` PM seat (session `session_01RV6yuVCxymHYE16PL9vQkE`) for the **skills lane** to grade. ⛔ Not claimed; `.claude/agents/os-dev.md` is not my lane and I have edited nothing.\n\nFiled as a **principle gap** under the 2026-08-12 ruling's three admitted classes — specifically the *mechanisable* one, since the fix is a rule in the agent definition rather than prose anyone has to remember.\n\n## Measured, twice, in one session\n\nTwo `os-dev` agents on one seat ended their turn while reporting mid-task state, each believing something would wake them:\n\n- **objectui#4314** — *\"The union pipeline (my own backgrounded task) is mid-vitest … Its completion notification re-invokes this session; on wake I will read the three phase tails, and only with all green proceed to open the draft PR.\"*\n- **objectui#5212** — *\"Waiting on the queued `lint` job for `@object-ui/app-shell` — a Monitor is tracking it and will notify me the moment it finishes so I can push, open the draft PR, and file the report.\"*\n\nBoth were wrong in the same way: **the completion notification fires when the agent stops with no live background children — i.e. it fires *as* the stop, not after the awaited job.** The agent has already yielded by the time anything could wake it. Both were recovered by a PM reset with an explicit foreground-posture instruction; #4314 cost roughly an hour of wall-clock before the reset landed.\n\nNeither lost work — #4314 recovered its completed run's output rather than re-running — so the cost is latency and PM attention, not correctness.\n\n## The common cause is contention, which is why this is getting worse rather than staying rare\n\nBoth stalls happened while waiting on the **shared verify lock**. That lock is contended because this seat now runs **five concurrent devs** (maintainer raised it from three on 2026-08-18). A third dev independently reported abandoning its full-package suite for the same reason and narrowing scope instead — which is the *correct* response, and the one the two stalled agents did not reach.\n\nSo the pattern is: long check → contended lock → agent decides to wait → backgrounds the wait → yields → dead. **More concurrency produces more contention produces more stalls.** This is a real operating cost of the concurrency setting and it should be visible when that setting is next discussed.\n\n## Where the gap is\n\nThe PM-side handling is already documented and worked both times: a completion notice carrying mid-task state is itself the stall signal, reset immediately, no silence threshold. The skill is also explicit that this backstop ⛔ must not be written as \"a complete dispatch means you needn't probe\".\n\n**What is missing is the dev-side rule.** Nothing in `os-dev.md` tells an agent not to background a long check and yield, and the two transcripts show agents reasoning their way into it deliberately — treating it as the responsible thing to do. The PM backstop is a *recovery*; a rule at the source would prevent it.\n\n## Proposed shape (the skills seat decides; I am not writing the text)\n\nA dev-side rule roughly: **never end your turn while waiting on something.** Concretely — run verification in the foreground; if a check is queued behind the shared lock or exceeds the time budget, **narrow its scope and declare the narrowing in the report** rather than waiting; CI runs the full farm regardless. Both PM resets used exactly that wording and both worked, so the text is already field-tested.\n\nWorth pairing with the fact that makes the narrowing safe: on this seat a declared narrowing is an accepted deviation, because CI shards the farm and the PM reviews against CI convergence rather than local coverage.\n\n## Dedup\n\nSearched objectstack for prior art on agent stalls, backgrounded-wait deadlocks, and the verify-lock contention before filing. The PM-side rule exists in `pm-dispatch`; nothing covers the dev side. Related but distinct: objectstack#9663 (family dispatch), which is also a `pm-dispatch` principle gap from this session but a different subject."
+}

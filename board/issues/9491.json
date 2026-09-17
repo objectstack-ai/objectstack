@@ -1,0 +1,36 @@
+{
+  "number": 9491,
+  "kind": "issue",
+  "title": "finding: required check-run names are pinned in the workflows but unpinned in every agent instruction file that names them, so a rename leaves the instructions stale with nothing red",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T04:30:09Z",
+  "updated_at": "2026-08-18T06:45:18Z",
+  "closed_at": "2026-08-18T06:45:18Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9491",
+  "body": "Filed unassigned by the dev seat implementing #9420 (PR #9490). Observation-class: recording a measured gap in the pin's coverage, not a proposal to widen that PR.\n\n## The measurement\n\n`scripts/check-required-contexts.mjs` pins the required-status-check literals as contract — a job's `name:` in a workflow file is the check-run name GitHub matches a required context by, so a rename that moves one without the registry is red. That pin is real and it works.\n\nIts scan set is **the workflow files only**. It does not read `.claude/` or `AGENTS.md` at all:\n\n```\n$ grep -n \"claude\\|skills\\|SCAN\\|ROOT\" scripts/check-required-contexts.mjs\n(no output)\n```\n\nBut those same literals are operative text elsewhere. They tell a review seat which jobs to confirm before flipping a PR ready / arming auto-merge / enqueuing it:\n\n- `AGENTS.md:336` — the merge-queue required-set rule, naming both contexts\n- `.claude/skills/pm-dispatch/references/review-checklist.md:37` — the review seat's gate-clearance step, naming both contexts\n\nNothing ties either to the registry. Measured on the checklist line, by replacing the job name in it with `Nonexistent Job Name` and running the full derived gate union for that path:\n\n```\npnpm check:doc-authoring                                          -> exit 0\npnpm check:pm-skill-id-lint                                       -> exit 0\npnpm check:pm-skill-ratchet                                       -> exit 0\npnpm check:skill-frame-sync                                       -> exit 0\npnpm check:nul-bytes                                              -> exit 0\npnpm --filter @objectstack/lint run check:doc-formula-expressions -> exit 0\n```\n\nGreen across the board on a checklist that names a job which has never existed.\n\nThe complement holds too, so the gap is not \"the file is unscanned\": writing an issue-ID citation into that same line turns `check:pm-skill-id-lint` red naming the exact line number. The gates **do** read the file. None of them reads the job name.\n\n## Why it matters\n\nThis is the failure that just happened. The rename in #9421 moved the gate-family context; `lint.yml` and the registry both moved with it because the pin forces them to, and the two instruction surfaces did not. `AGENTS.md` was carried along inside that PR by hand, and the checklist line was noticed by the dev seat reading it — not by any gate — and had to be filed as its own card because the tiering ruling put it out of that seat's reach.\n\nThe harm is the one instruction files have: a seat that looks for a check-run name, finds nothing, and reads \"no such check\" as anything other than \"the name moved\" will either stall or arm on an unverified gate family. The literal is contract in both places; only one place is guarded.\n\n## Shape of a fix, for triage, not a decision\n\nTwo directions, and the second is the stronger one:\n\n1. Assert each pinned context literal appears verbatim in the instruction files that state the required set. Cheap, but it pins prose shape and goes red on legitimate rewording.\n2. Invert it: no instruction file in the scan set may name a **required-context-shaped literal that is not in the registry**. That catches the stale name, which is the actual defect, and stays blind to how the sentence is written. It needs a way to recognize the literals (the registry supplies them) and an anti-vacuous guard so an instruction file that stops naming any context does not pass by saying nothing.\n\nDirection 2 also covers a case direction 1 misses: an instruction file naming a context that was removed from the required set entirely.\n\nDeliberately not resolved here. Note the sequencing constraint any implementation inherits: the registry and the instruction files can only agree at rest, and a rename lands its halves in separate PRs by necessity (the Settings entry is maintainer-only), so the gate must be satisfiable at every intermediate state or it blocks the very sitting it is meant to protect.\n\n## Re-check commands\n\n```\ngrep -n \"claude\\|skills\" scripts/check-required-contexts.mjs\ngrep -n \"TypeScript Type Check\" AGENTS.md .claude/skills/pm-dispatch/references/review-checklist.md\nnode scripts/pm/dispatch-gates.mjs .claude/skills/pm-dispatch/references/review-checklist.md\n```\n\nContext: #9420 is the card whose whole content was one stale name on one line; #9421 carries the rename. Neither is addressed by this finding, and this finding does not block either.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01NYgmGheCzM6NrHZN436Cxf)_"
+}

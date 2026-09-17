@@ -1,0 +1,37 @@
+{
+  "number": 9418,
+  "kind": "issue",
+  "title": "`os migrate meta --from <N>` cannot load the retired-key sources it exists to fix — validates through the post-retirement schema before converting",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T00:10:45Z",
+  "updated_at": "2026-08-18T07:54:01Z",
+  "closed_at": "2026-08-18T07:52:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9418",
+  "body": "Extracted from the Tier-2A run record #9417 (QA wave #9296), where it is the round's single clause failure — `cli.migrate-meta-codemod` (P1, rev 1), clauses 1 & 2. Subject sha `e4e5c6e3c608b1b807c83a0d5b734f213eb1a1dd`.\n\n## The defect\n\n`os migrate meta --from <N>` loads the stack config through the **current, post-retirement schema** *before* any conversion runs. A source carrying a retired key therefore fails validation and the command exits 1 having rewritten nothing.\n\nThat input — a source with retired keys — is the **only** input the command exists to handle.\n\n## Why it matters more than a P1 usually does\n\nThe refusal it prints is the very instruction that sends people there. `Run \\`os migrate meta --from <N>\\` to rewrite existing sources automatically` appears **144 times across 39 files** under `packages/spec/src` (verified independently of the run: `git grep -c \"os migrate meta --from\" origin/main -- packages/spec/src`). Every one of those retirement messages promises an automatic fix that the tool cannot perform on the input it was told to fix.\n\nSo the user-visible loop is: author hits a retired key → spec tells them to run the codemod → codemod refuses **because** of the retired key → spec tells them to run the codemod.\n\n## Evidence and controls (from #9417, reproduced twice)\n\n- The retired key is the source's **only** validation issue — nothing else in the file is invalid.\n- Same refusal at `--from 17` and `--from 3`, so the ADR-0087 floor check is not the gate either; the failure is upstream of version dispatch.\n- `--out` is not implicated.\n- The command behaves normally on a clean tree, so it is not broken generally — only on the input class it targets.\n\n## Not yet probed\n\nThe **`--stored`** arm (replaying over `sys_metadata` rows) is a different code path and was not exercised. Worth a probe before the fix is scoped: if it shares the pre-validation step it has the same defect; if it does not, the fix may only need to bring the file arm in line with it.\n\n## Fix direction (not prescribed)\n\nThe conversion must run **before** the source is validated against the current schema, or the load must be tolerant of keys the target version retired. Whatever lands should be pinned by a test whose fixture is exactly the failing case — a source carrying a retired key, migrated end-to-end — since a test on a clean source passes today and proves nothing.\n\nLeft unlabelled for `domain:*`: routing is the triage seat's call (the fix lands in `packages/cli`, possibly with `packages/spec` retirement-message coordination). Priority likewise — filed P1 by its checklist item, but the 144 messages prescribing it are an argument for re-levelling that belongs to triage, not to the runner or the wave PM.\n"
+}

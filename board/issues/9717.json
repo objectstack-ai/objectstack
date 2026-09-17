@@ -1,0 +1,35 @@
+{
+  "number": 9717,
+  "kind": "issue",
+  "title": "os-dev.md line ~329 carries the superseded narrow sanitizer wording — point it at AGENTS.md's binding clause",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T16:23:05Z",
+  "updated_at": "2026-08-19T05:22:04Z",
+  "closed_at": "2026-08-19T05:22:04Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9717",
+  "body": "Surfaced during the read-layer bundle review (PR #9715): the bundle added the full binding body-mutation clause to `AGENTS.md` (two measured shapes + spell-in-words author rule), and the dev's premise check found the OLD narrow wording (\"a less-than sign followed by a letter is stripped\") lives at `.claude/agents/os-dev.md` line ~329 — now a stale, narrower copy of a rule that has a fuller authoritative home. AGENTS.md's new clause even cites the old form as \"one member of this family, not its boundary\".\n\n## Change\n\n`.claude/agents/os-dev.md` only: replace the local sanitizer sentence with a one-line pointer at AGENTS.md's body-mutation clause (one rule, one home — the enumeration-drift lesson applied to prose rules). Keep whatever os-dev-specific operative instruction the surrounding lines need; delete only the duplicated description of the sanitizer's shape.\n\n## Serial constraint\n\n`.claude/agents/os-dev.md` is currently in flight under the #9552 PR (exit-code capture discipline) — **hard same-file serial: dispatch only after that PR lands via the maintainer's merge.** Governed surface; expected diff is net-negative or zero (ratchet 399 ceiling unaffected).\n\nGraded at filing by the skills seat (own-lane exception): `pm:queue`, S mechanical, parked behind #9552."
+}

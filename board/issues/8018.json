@@ -1,0 +1,34 @@
+{
+  "number": 8018,
+  "kind": "issue",
+  "title": "`recordIdField` is not harvested into the grid's `$select` — `sys_session` \"Revoke Session\" reports success and revokes nothing",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T11:40:23Z",
+  "updated_at": "2026-08-18T14:58:45Z",
+  "closed_at": "2026-08-18T14:58:45Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8018",
+  "body": "Filed by the `domain:metadata` PM seat on behalf of #7823's dev, which measured this while doing that card's `objectui` console-SPA check but could not file it — the `objectstack-ai` org has no Claude GitHub App connection, so cloud dev containers are blocked from the GitHub API.\n\n⚠️ **Authored by the PM from the dev's measurements** (its own draft could not be relayed). The measurements and file/line anchors below are the dev's; the framing is mine. Correct me rather than the dev if the framing is off.\n\n## The defect\n\nA row action declaring `recordIdField` gets `undefined` for it, because the grid never projects that column.\n\n- `useConsoleActionRuntime.tsx:322-325` reads `rowRecord[action.recordIdField]` — a **generic** read, correct in itself.\n- The grid builds `$select` from **listView columns + `id` + predicate fields only** (`ObjectGrid.tsx:677-722`, `predicate-fields.ts:141-170`). **`recordIdField` is not harvested** into that projection.\n- So for any action whose `recordIdField` is not already a listView column, the row object has no such key and the action sends `undefined`.\n\n## Measured instance — `sys_session.revoke_session`\n\n`sys_session` declares `revoke_session` with `recordIdField: 'token'`, and `token` is in **no** listView. So the action sends no token, better-auth's `revoke-session` (`session.mjs:441-443`) matches nothing, deletes nothing — **and still answers `{ status: true }`.**\n\n⇒ **\"Revoke Session\" reports success and revokes nothing.** A security control that silently no-ops while reporting success.\n\n## Two things worth separating\n\n1. **The general defect** is the projection gap: any `recordIdField` outside the listView is silently `undefined`. `sys_session` is the instance that surfaced it, not the whole of it. ⚠️ Whoever picks this up should enumerate the other declarations rather than fixing the one — a per-action patch leaves the class open.\n2. **The silent success** is arguably its own defect: an action that identifies no record should not answer `{ status: true }`. That half may be better addressed upstream of the projection fix.\n\n## ⚠️ It interacts with #7823 — read this before choosing a fix\n\n#7823 proposes `internal: true` on `sys_session.token`. **If that lands, the obvious repair here — \"harvest `recordIdField` into `$select`\" — is foreclosed for this instance**, because an `internal` field is stripped from result rows *regardless of projection*. The generic projection fix would still be correct for every other `recordIdField`; `sys_session.revoke_session` would need a different mechanism (an action that names the record by `id` and lets the server resolve the token, for instance).\n\n⚠️ #7823 is currently a **design exit awaiting a maintainer ruling** on whether `internal: true` needs a mint-path exemption, so the interaction is live rather than hypothetical. ⛔ Do not assume either card's outcome when scoping this one.\n\n## Establishment level, stated honestly\n\nThe projection gap and the missing harvest are **read from code** (`grep` for `recordIdField` in the projection builders returns nothing; the control grep for `sys_session` in the same file set returns hits, so the search reaches `objectui` source). **The end-to-end \"click Revoke Session, observe nothing revoked\" was not run.** Reproduce before fixing.\n\n## Routing\n\nThe projection fix lands in **`objectui`** (`packages/app-shell`), not in this repo. The `sys_session.revoke_session` declaration lives in `packages/platform-objects` here. Filed without a `domain:` label so the triage seat can route it — it may need to be split across the two repos."
+}

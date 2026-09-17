@@ -1,0 +1,34 @@
+{
+  "number": 9293,
+  "kind": "issue",
+  "title": "docs：三处 16k 度量的宿主名词改为 \"the bundled example CRM\"（数字不动）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T12:03:57Z",
+  "updated_at": "2026-08-17T17:23:36Z",
+  "closed_at": "2026-08-17T17:22:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9293",
+  "body": "## 交付（维护者 2026-08-17 批准 B 案:「同意 16k 示例改名 B 卡」）\n\n三处把 `examples/app-crm` 量为 ~16k tokens 的文档段落,其宿主名词自称 \"a complete CRM\" / \"the whole business system\"——与新 tagline 的 \"a complete CRM in under 150k tokens\" 并存产生首屏疑惑。改法:**度量对象改名为 \"the bundled example CRM\"(或语境等价表述),⛔ 两个数字都不动,⛔ 不碰 tagline 定稿文案**——让「示例的 16k」与「完整 CRM 的 150k」各归其主,延续数字钉宿主纪律。\n\n## 三处位置（来自 PR #9242 的 sweep 表）\n\n1. `README.md`「The other half is size」段（31 files / 1,792 lines / ~16k tokens + \"the whole business system, in about 8% of a 200k-token context window\"）\n2. `content/docs/concepts/metadata-driven.mdx` 同表同句\n3. `content/docs/getting-started/how-ai-development-works.mdx` 同度量散文\n\n改后各处自证一致:16k 恒指捆绑示例、150k 恒指完整 CRM、100k 恒指业务逻辑。附带复核 \"8% of a 200k-token context window\" 句的宿主同步改名（8% 算的是 16k,属示例）。\n\n## 约束\n\n- 度量的可复现命令（`find … wc -l`）与数值保留原样。\n- ⛔ `content/docs/releases/**` 不碰;客户面恒英文;docs-only 按 changeset 惯例。\n- 契约面零接触（Clause-②: no）;非 ADR 面,复核后正常队列落地。"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 18558,
+  "kind": "pull_request",
+  "title": "docs(plugins): drop the stale (enterprise) tag from the @objectstack/organizations heading",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-try-charles",
+    "id": 313893388,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-17T01:32:22Z",
+  "updated_at": "2026-09-17T01:53:29Z",
+  "closed_at": "2026-09-17T01:53:28Z",
+  "closed_by": {
+    "login": "os-try-charles",
+    "id": 313893388,
+    "type": "User"
+  },
+  "merged_at": "2026-09-17T01:53:28Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/18558",
+  "body": "Fixes #18541\n\nClause-②: no\n\n## What changed\n\nOne line in `content/docs/plugins/packages.mdx`:\n\n```diff\n-### @objectstack/organizations (enterprise)\n+### @objectstack/organizations\n```\n\nNothing else in the file, and no other file. Section body untouched.\n\n## Why the tag is the wrong half\n\nThe prose immediately under that heading says the package ships from this repository as the open-core, Apache-2.0 `packages/plugins/organizations`, published on npm. The manifest agrees — read at `origin/main` = `79a046f8cdf085d95200826ee9bb2fa6584bc3d5`, tree `objectstack-ai/objectstack`:\n\n```\npackages/plugins/organizations/package.json\n  name           @objectstack/organizations\n  license        Apache-2.0\n  private        (absent)\n  publishConfig  {\"access\":\"public\"}\n```\n\nSo the heading's tag was the false half, and it is user-facing: this page is what a reader consults to decide whether a package is usable and under which licence.\n\n## Why the tag was deleted rather than replaced with a true one\n\nThis was the one design call on the card, and it is answered from the file's own convention, not from taste. Same tree and revision as above:\n\n```\ngit show 79a046f8cdf085d95200826ee9bb2fa6584bc3d5:content/docs/plugins/packages.mdx | grep -c '^### @objectstack/'\n  42                                  <- firing control: the instrument reads\n\n... | grep -n '^### @objectstack/.*('\n  329:### @objectstack/organizations (enterprise)\n  (exactly 1 — so the other 41 headings carry no parenthetical at all)\n```\n\nAll 41 neighbours are bare package names. Every edition, licence and composition caveat on this page already lives in the section body — including this section's own, which states the open-core licence, the host-app-only declaration boundary and the licence-gated commercial subclass far more precisely than a one-word tag could. Substituting `(open core)` would have made this heading the only annotated one of 42, self-styling against its neighbours, while adding nothing the body does not already say. Deleting restores consistency and leaves the accurate text in place.\n\nAnchor safety: `git grep -rn 'objectstackorganizations'` returns nothing across the tree (exit 1), against a firing control (`git grep -c 'plugins/packages'` names five files), so no in-repo link pointed at the old heading slug.\n\n## Changeset\n\n`skip-changeset`, measured rather than assumed. Of 83 `package.json` files in the tree, the only package whose directory contains `content/docs/plugins/packages.mdx` is the repo root `@objectstack/spec-monorepo`, which is `private: true` and declares no `files[]`. Firing control on the same scan: 70 published packages whose `files[]` really is read and really does ship `CHANGELOG.md`. Nothing published moves.\n\n## Gates\n\nDerived from the diff, not recalled: `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` → 39 commands. All 39 run, all green.\n\nFour needed prerequisites built first and reported `PREREQUISITE NOT MET` (exit 3, and exit 1 for the fourth) rather than a finding; after `pnpm --filter @objectstack/spec build` and a `turbo run build` over the `@objectstack/lint`, `@objectstack/formula` and `@objectstack/client-react` closures they were re-run and are green: `check:doc-formula-expressions`, `check:doc-security-posture`, `check:skill-examples`, `check:docs-transcript-drift`.\n\nOne gate is red and it is **not** this PR's: `pnpm check:cross-package-test-inputs`. See the acceptance notes.\n\n## Acceptance notes\n\n**`check:cross-package-test-inputs` is red on `main` itself, whenever `packages/spec/dist/` exists on disk.** Reported to the dispatching seat for filing; not filed from here and not fixed here — out of this card's file surface.\n\nProof, both legs on the same commit and with zero diff:\n\n```\nworktree detached at 79a046f8cdf085d95200826ee9bb2fa6584bc3d5, pnpm install, no build\n  node scripts/check-cross-package-test-inputs.mjs   -> exit 0\n\nsame worktree, + pnpm --filter @objectstack/spec build\n  node scripts/check-cross-package-test-inputs.mjs   -> exit 1\n  \"@objectstack/cli descends a directory tree from packages/spec/dist/, and part of\n   that radius is reached by no declared glob\"\n   rooted in packages/cli/test/init-created-files-summary.e2e.test.ts\n```\n\nThe verdict therefore turns on a gitignored build artefact: the `Lint & Repo Gates` job in `lint.yml` runs this gate with no build step anywhere before it, so CI enumerates an absent directory and passes, while any developer tree that has built the spec reds. Exit codes captured before any pipe.\n\n**Noted, not filed — two further lines still describing `@objectstack/organizations` as enterprise** (`docs/adr/0093-tenancy-mode-and-membership-lifecycle.md:79`, `packages/qa/dogfood/test/authz-conformance.matrix.ts:172`). Both sit inside the class an earlier tree-wide census already measured and ruled not-a-defect, and the card scopes this PR to the single self-contradiction. Carrier: that census's own disposition, not this PR.\n\n**Noted, not filed — ADR-0132's status line still reads `Proposed (2026-09-06)`** while the package it decides has shipped open-core in this tree. `docs/adr/**` is a governed surface, so its status is the maintainer's to move; recorded here only so the reading is not lost. Carrier: the maintainer.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017ef78bLdybu3AffehKkhfk)_"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 9623,
+  "kind": "issue",
+  "title": "Decide whether SEMCONV should declare an auth-failure metric — nothing instruments authentication today, and 401/403 out of `http_requests_total` cannot stand in for it",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-18T13:34:44Z",
+  "updated_at": "2026-08-18T22:30:58Z",
+  "closed_at": "2026-08-18T22:30:58Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9623",
+  "body": "Split out of objectstack-ai/objectos#87, which found that `content/docs/operate/observability.mdx` shipped a Prometheus alert on `auth_failures_total` — a metric nothing emits. That card asked two questions and only one belonged to the docs repo: *what should the page say today* (answered there — the alert is deleted) and *should the runtime emit an auth-failure metric at all*, which is this one. Filed rather than answered, unassigned.\n\n## The measurement\n\nOn `origin/main` at `b057e53f4`:\n\n```\ngit grep auth_failures_total origin/main    →  0 files\ngit grep -l SEMCONV        origin/main      → 15 files   (control: the grep and the tree are fine)\n```\n\n`packages/observability/src/semconv.ts` is the canonical registry — in its own words, it exists \"so hosts can wire alerts/dashboards against a stable namespace and so call sites don't sprinkle string literals through the code base\". It declares 13 names, grouped by the subsystem that emits them:\n\n| Group | Names |\n|---|---|\n| HTTP | `http_requests_total`, `http_request_duration_ms`, `http_request_errors_total` |\n| Storage | `storage_operations_total`, `storage_operation_duration_ms`, `storage_errors_total` |\n| Cache | `cache_lookups_total`, `cache_writes_total`, `cache_errors_total` |\n| Jobs | `job_schedule_failures_total` |\n| Registry | `registry_lookups_total`, `registry_lookup_duration_ms`, `registry_source_fetches_total` |\n\nNo auth metric among them. Authentication is the one inbound subsystem in that list's shape that instruments nothing.\n\n## Why the obvious substitute does not work\n\nThe natural reply is \"count 401/403 out of `http_requests_total`\". I measured it while fixing the docs, and it does not cover what an auth-failure alert claims — three independent reasons, any one of which is disqualifying:\n\n1. **The sign-in endpoints do not feed that counter at all.** `http_requests_total` has exactly one emitter, `instrumentRouteHandler` (`packages/runtime/src/observability/instrument.ts:106`). It is applied by a `Proxy` that `packages/runtime/src/dispatcher-plugin.ts:700-721` builds over a **local** `server` binding obtained from `ctx.getService('http.server')`; the proxy is never registered back as the service. `plugin-auth` mounts its routes on the raw Hono app instead — `registerAuthRoutes` calls `getRawApp()` and then `rawApp.all(basePath + '/*')` (`packages/plugins/plugin-auth/src/auth-plugin.ts:1622,2240`). So a failed password on `/api/v1/auth/sign-in/email` increments nothing. (`packages/rest` also resolves `http.server` itself, at `rest-api-plugin.ts:129`, so the REST data API is outside the counter too — worth its own look, but it is not what this card is about.)\n\n2. **A rejected API key is indistinguishable from no credential.** `packages/core/src/security/api-key.ts` validates fail-closed by design: \"anything ambiguous (missing, revoked, expired, malformed) resolves to no principal, never to an elevated one\". A presented-and-rejected key and a request that carried nothing both arrive at the route as anonymous, and both answer 401.\n\n3. **401/403 are dominated by traffic that is not an auth failure.** 403 is this runtime's authorization code — `PERMISSION_DENIED`, export-permission denials, share-link denials, `NOT_OVERRIDABLE` tenancy overrides, docs permission sets, and the ADR-0069 auth gate (password expiry / enforced MFA), all of which are raised against users who authenticated perfectly well. 401 is every ordinary anonymous request: a signed-out tab polling an API route, an expired session.\n\nThe audit ledger is not a substitute either: `plugin-audit`'s `AuthSessionAuditEvent` is a closed union of `login` | `logout` with a required `userId` (\"a real `sys_user` id\"), so it records **successful** sessions only. There is no failed-sign-in row anywhere.\n\n## Why it would belong in SEMCONV\n\nWhether to build it is the decision here, not mine. The case for, briefly: sustained auth-failure rate is the standard first-line signal for credential stuffing and for a misconfigured IdP, it is the one thing an operator asks for that this registry cannot answer, and every other inbound subsystem in the registry is already instrumented at its own seam rather than inferred from HTTP status. If it lands, the natural shape mirrors the existing entries — a counter with a label distinguishing the mechanism that rejected (password / api-key / oidc / mfa) — and `semconv.ts`'s own doc comment is where the name would be declared.\n\nIf the answer is \"no\", that is equally actionable: the docs now say plainly that no such metric exists, and this card can close as not-planned so the next reader of `observability.mdx` does not re-open the question.\n\n## Note on filing\n\n`search_issues` returns 0 for every query against this repository right now, including a control that must match (open #9621, \"sanitizer\" in its title). I checked for duplicates by listing all 229 open issues instead; none covers this.\n\nRelated: objectstack-ai/objectos#87, objectstack-ai/objectos#70.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01CJPxtTxoxTUnjNdTbiEaRa)_\n"
+}

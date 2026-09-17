@@ -1,0 +1,32 @@
+{
+  "number": 6022,
+  "kind": "issue",
+  "title": "[PM seat] domain:identity — 🔚 retired 2026-08-19, merged into domain:services (#6021)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:seat"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T15:03:26Z",
+  "updated_at": "2026-08-19T07:35:44Z",
+  "closed_at": "2026-08-19T07:30:07Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 26,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6022",
+  "body": "**This seat is retired.** 2026-08-19 lane consolidation (maintainer ruling quoted in SKILL.md's domain-lane table): the `domain:identity` lane (`plugin-auth`, `plugin-security`, `plugin-sharing`, `plugin-audit`) is merged into **`domain:services`** — seat post **#6021** is the single authoritative registry for all of it from now on; job description at `references/lanes/services.md`.\n\nThe `domain:identity` label is retired from circulation only — existing cards keep it as archive and are read as `domain:services` candidates via the lane table; nobody mass-relabels.\n\nAt retirement this seat's live state (in-flight #3002/PR #9869 and the queue readings) was absorbed verbatim into #6021's body by the same session holding both seats (`session_01PnJHU45vPJj5UQrxe946Bx`), so nothing was orphaned. Pre-merge ledgers live in this body's revision history."
+}

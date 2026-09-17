@@ -1,0 +1,35 @@
+{
+  "number": 9395,
+  "kind": "issue",
+  "title": "gate: extend `ADR maintainer approval` path predicate to `.claude/skills/**` — make Prime Directive #14 enforced (#9319 ruling)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T22:36:26Z",
+  "updated_at": "2026-08-17T23:42:26Z",
+  "closed_at": "2026-08-17T23:42:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9395",
+  "body": "Implements the maintainer's #9319 decision-2 ruling (2026-08-17, 「同意」 batch): PR #9238 proved a `.claude/skills/**` change can reach `main` through the merge queue with zero human clicks, bypassing Prime Directive #14 (skill/ADR PRs are human-merge only). Prose already forbade it; only a gate makes it impossible.\n\n## The work\n\nExtend the ADR merge-approval gate so PRs touching `.claude/skills/**` are held to the same contract as `docs/adr/**`:\n\n- `scripts/check-adr-merge-approval.mjs` — widen the path predicate that decides whether a PR is gate-scoped; keep the two surfaces' reason strings distinct in output (an ADR PR and a skills PR fail with wording naming their own rule).\n- `.github/workflows/adr-merge-approval.yml` — confirm the trigger set needs no change (it fires on all PRs and the script decides scope; verify rather than assume).\n- The **#8012 clause applies identically**: an ARMED auto-merge on a gate-scoped PR keeps the check red regardless of approval (armed+approved = unattended merge, which is exactly what #9238 demonstrated).\n- Self-tests: extend the gate's own test coverage for the new path class, including the armed-auto-merge case and a mixed-diff PR (skills + other files ⇒ gate-scoped).\n\n## Acceptance\n\n1. A PR touching only `.claude/skills/**` shows `ADR maintainer approval` red until maintainer approval, and stays red while auto-merge is armed.\n2. A PR touching neither surface is unaffected.\n3. Reverse verification in the PR body: demonstrate the gate red on a synthetic skills-path diff before approval.\n\n⛔ This PR itself touches gate scripts — it is NOT skill-surface, but treat sequencing carefully: it must not weaken any existing check while landing. No Settings change is needed (the check is already required).\n\nRefs: #9319 (the finding and ruling) · #9238 (the bypass instance) · #8012 (armed-auto-merge clause) · Prime Directive #14."
+}

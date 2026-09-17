@@ -1,0 +1,37 @@
+{
+  "number": 9402,
+  "kind": "issue",
+  "title": "Two PRs can ship the identical diff under two card numbers — the duplicate-claim gate is issue-keyed, not diff-keyed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "auto-adjudicated",
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T23:05:51Z",
+  "updated_at": "2026-08-18T13:22:27Z",
+  "closed_at": "2026-08-18T13:22:27Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9402",
+  "body": "## What happened\n\n#9393 (card #9356) and #9398 (card #8893) reached green **independently**, as separate PRs, shipping the **same physical change**:\n\n- both add the same path, `.changeset/console-82a94170c405.md`\n- both rewrite `.objectui-sha` `665661ab093263f39f2e660a295ea615dbcee35a` → `82a94170c4058d451ce3ac179d99296d90554479` — a **byte-identical hunk**\n\n#9393 entered the merge queue. #9398 was green and one flip away from enqueueing behind it, where it would have conflicted on both files.\n\n## Why nothing objected\n\nThe repo has a gate for exactly this shape — **`No other open PR may claim the same issue`** — and it passed on both, correctly. It compares the *card* each PR claims. These claim #9356 and #8893, two genuinely different cards. Nothing in CI compares what the PRs actually *do*.\n\nThe gate is not broken. Its key is the issue number, and the collision is in the diff.\n\n## Why the two cards existed\n\nBoth are legitimate, independently-filed cards that happen to be dischargeable by the same commit:\n\n- **#9356** — bump the objectui pin\n- **#8893** — bump the objectui pin *so the vendored console carries spec 17.0.0 GA*\n\n#8893 names a **reason** for a bump; #9356 names the bump. Neither is a duplicate of the other as written, which is why triage kept both, and why a human reading the two titles would not obviously flag them. The duplication only becomes visible at the diff.\n\nThis one is my fault as PM — I dispatched both — and no existing gate would have caught it. That combination is the reason this is worth filing rather than just fixing.\n\n## Why it matters beyond the wasted run\n\nTwo agents independently derived the *same* changeset narrative from the *same* commit range and **produced different answers** (110 vs 137 non-merge commits; 18 vs 20 no-changeset commits; and two different, both-partly-wrong commit-attribution tables — see #9393 for the measurement).\n\nThat disagreement is the **only** reason the attribution defect was found at all. Had the dispatch not been duplicated, one table would have landed unchallenged and been compiled into the release notes. The duplicate cost a CI run; it bought a defect that a single run would have shipped.\n\n## Candidate responses\n\nNot a prescription — the trade-offs differ a lot and this needs a ruling, not an implementation:\n\n1. **Diff-keyed duplicate detection in CI.** A gate that flags two open PRs whose changed-path sets intersect on an *exclusive* file. Cheap for singleton files like `.objectui-sha` and any `.changeset/*.md` path; noisy in general, since ordinary concurrent PRs touch shared files constantly. Probably worth scoping to a small declared list of at-most-one-writer paths rather than attempting it repo-wide.\n2. **Make `.objectui-sha` an explicitly single-claim surface** — one open PR at a time may modify it, enforced. Narrow, cheap, and covers the concrete recurrence (pin bumps are routine and will collide again).\n3. **Nothing in CI; fix it at dispatch.** Require the dispatching seat to check for an open PR already touching the surface a card implies. Puts the cost on the seat that caused it, adds no gate, but is exactly the discipline that just failed.\n\nOption 2 addresses the observed case at the lowest cost. Option 1 generalises but I have no measurement of its false-positive rate, and I would not want it landed without one.\n\n## Not filed as blocking\n\n#9393 lands as-is (its payload is correct); #9398 is held and repurposed into the attribution correction. Neither depends on this card. Filing unassigned — recording, not claiming.\n\nRelated: #9393, #9398, #8653 (release hold), #9356, #8893."
+}

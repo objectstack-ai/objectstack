@@ -1,0 +1,35 @@
+{
+  "number": 9318,
+  "kind": "issue",
+  "title": "ci: add an always-run roll-up job named `CI` so the queue's required check matches a real check run (#9283 Option A implementation)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T13:16:57Z",
+  "updated_at": "2026-08-17T15:27:28Z",
+  "closed_at": "2026-08-17T15:27:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9318",
+  "body": "Implements the maintainer's #9283 ruling (**Option A — the full suite SHOULD block the merge queue**), after the first implementation attempt froze the queue for ~1h45m on 2026-08-17 (~11:30–13:15Z). Full incident record: [#9283 comment](https://github.com/objectstack-ai/objectstack/issues/9283#issuecomment-5316475460).\n\n## What happened\n\nThe required check was registered as `CI` — the **workflow** name. Required status checks match **check-run (job) names**, and no job in `ci.yml` reports a check named `CI`, so the context was permanently \"Expected\": green merge groups timed out, nothing merged from 11:29Z until the maintainer removed the entry (~13:15Z). The failure mode flipped from #9283's \"red merges anyway\" to \"green cannot merge\".\n\n## Current interim posture (maintainer-set, 2026-08-17)\n\nRequired checks include the two existing aggregates `Test Core` (`test-gate`) and `Dogfood Regression Gate` (`dogfood-gate`). Four gate jobs have **no aggregate covering them** and are currently not required: `Temporal Conformance (live PG + MySQL)` — the exact job whose failure merged in #9283 — plus `Build Core`, `Build Docs`, `Console Pin Gate`. The PM has recommended adding those four names in settings as interim protection; this card is the durable fix.\n\n## The work\n\nAdd one roll-up job to `.github/workflows/ci.yml`:\n\n- **Job `name: CI`** — the literal string, chosen so the queue's required context has one stable name that survives job renames (the #9283 hazard class).\n- `needs:` every gate job of the workflow: `test-gate`, `dogfood-gate`, `temporal-conformance`, `build-core`, `build-docs`, `console-pin` (re-derive the list from the file at implementation time, do not trust this card).\n- `if: always()` — must run when needed jobs are skipped by the path `filter` (skips count as pass) and must **fail** when any needed job has `failure` or `cancelled` (read `needs.*.result` explicitly; do not rely on default propagation, which would skip the roll-up instead of failing it).\n- Runs on both `pull_request` and `merge_group` (both already trigger the workflow).\n- Runner cost: one `ubuntu-latest` no-op-shaped job per run — seconds.\n\n## Acceptance\n\n1. On a docs-only PR: `CI` reports **success** (all needed jobs skipped).\n2. On a PR with a failing needed job: `CI` reports **failure**.\n3. Job name is exactly `CI` in the check-run list.\n\n## Explicitly out of scope / sequencing\n\n- ⛔ This PR must merge through the queue **before** the settings change. After it lands, the **maintainer** (settings surface, not an agent) re-adds `CI` to the required checks — at that point the per-job interim entries (and even `Test Core` / `Dogfood Regression Gate`) can be pruned to the single `CI` entry.\n- ⛔ No changes to any other workflow, and no change to what the `filter` job skips.\n- Related: #9283 (the ruling and both incidents), #9290 (real `Temporal Conformance` failure correctly held out of the queue, needs its own triage)."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 9434,
+  "kind": "issue",
+  "title": "sys_setting's degradation message hands MySQL operators a duplicate-probe statement that does not parse on MySQL (`key` is reserved)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T01:11:00Z",
+  "updated_at": "2026-08-18T09:35:50Z",
+  "closed_at": "2026-08-18T09:35:50Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9434",
+  "body": "Found while verifying #9381's step 2 (checking the sibling migrations for the same dialect convention). Filed unassigned; not fixed in #9381's PR — different file, different statement, and it needs its own decision about whether these operator-facing statements become dialect-aware too.\n\n## What\n\n`packages/metadata-protocol/src/migrations/sys-setting-identity-index.ts` builds `buildSysSettingDuplicateProbeSql()` with bare identifiers, and one of the columns it names is `key`, which is a RESERVED word on MySQL. The statement is never executed by the platform — it is printed into the degradation/conflict log so an operator can list the offending rows themselves.\n\nThe audience is exactly the dialect it cannot run on. The `unsupported` arm is reached specifically on MySQL/MariaDB (no functional key parts, no `CREATE INDEX IF NOT EXISTS`), and its message ends:\n\n> MySQL/MariaDB before 8.0.13 has no functional key parts, so there is no in-dialect fix: run this platform on SQLite/PostgreSQL for the guarantee, and meanwhile watch for duplicates with: `SELECT COALESCE(organization_id, '__global__') AS organization_id_key, namespace, key, scope, …`\n\nSo the one remedy offered to the MySQL operator is a statement their server rejects.\n\n## Measured\n\nLive MySQL 8.0.46 (`sql_mode` = `ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION`), the exact statement the module prints:\n\n```\nERROR 1064 (42000): You have an error in your SQL syntax; check the manual that corresponds to your\nMySQL server version for the right syntax to use near 'key, scope, COALESCE(user_id, '') AS\nuser_id_key, COUNT(*) AS duplicate_rows FRO' at line 1\n```\n\nAlso measured, so the scope is precise:\n\n- `buildOverlayDuplicateProbeSql()` in `overlay-index.ts` — RUNS on the same server (its columns `type`, `name`, `organization_id`, `package_id` are not reserved). Clean.\n- `partial-index-probe.ts` — builds no identifier-quoted SQL of its own. Clean.\n- `sys-setting-identity-index.ts` documents the bare-identifier choice deliberately (the module header says quoting \"would not change that verdict\" for the INDEX statement, which is true — MySQL refuses that one for other reasons). The header's reasoning does not cover the probe statement, which is a plain `SELECT` that MySQL could run if `key` were quoted.\n\n## Not a runtime defect\n\nNothing in the platform executes this statement, so no boot path breaks. What breaks is the operator's copy-paste.\n\n## Options (for triage, not decided here)\n\n1. Quote the identifiers in `buildSysSettingDuplicateProbeSql` for the connected dialect, the way #9381 did for `seed-tenancy-backfill.ts` and #8928 did for `migrate/duplicates.ts`. Needs the dialect at that seam, which the ensure-function does not currently carry.\n2. Print a MySQL-spelled variant only in the `unsupported` arm, since that arm is already dialect-specific by construction.\n3. Accept it and say so in the message (\"quote `key` for MySQL\").\n\nBacklink: #9381 (the dialect-quoting fix for the seed-tenancy backfill; its PR does not touch this file)."
+}

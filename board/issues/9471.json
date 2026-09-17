@@ -1,0 +1,35 @@
+{
+  "number": 9471,
+  "kind": "issue",
+  "title": "RUNNER.md rule 2 unconditionally requires a reproduction rule in the public run issue — needs the access-control carve-out at the source",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T03:37:54Z",
+  "updated_at": "2026-08-18T06:32:17Z",
+  "closed_at": "2026-08-18T06:32:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9471",
+  "body": "Docs-only, `docs/qa/platform-checklist/RUNNER.md`. Follow-up from PR #9470 (skills card #9387), which identified this residual and correctly could not fix it — its file surface excludes `docs/qa/**`.\n\n## The conflict, verified on `main` (`ad217b192`)\n\n`RUNNER.md:55` reads, with no exception:\n\n> A `fail` with no reproduction rule in its issue is not a completed verdict.\n\nThe `checklist-test` skill is gaining a guardrail (PR #9470, awaiting maintainer review) that forbids publishing a reproduction for an authentication or authorization hole **anywhere on GitHub**, and which has to state that it *overrides* this sentence to work at all.\n\nSo after #9470 lands, two documents a runner is told to obey disagree, and the conflict is resolved only by **precedence asserted from one side**. That is the shape that rots: the next person to read RUNNER.md on its own gets the unconditional rule and no hint that a carve-out exists.\n\n## Why this is not cosmetic\n\nThis exact conflict already caused a real disclosure. In wave #9296 a runner found an unauthenticated read/write hole, followed the protocol faithfully, and published a working reproduction — because the protocol **told it to**. The instruction it received (withhold from the run issue, post to the tracking card) was the PM's error, but the underlying pull came from here: rule 2 makes a reproduction rule the definition of a completed `fail` verdict, so a runner suppressing one believes it is filing an incomplete verdict.\n\nA runner should not have to choose between \"complete verdict\" and \"do not publish an exploit\". Rule 2 should say so itself.\n\n## Scope\n\nAdd the carve-out to rule 2 in place — a `fail` on an authentication or authorization clause is complete **without** a published reproduction, provided it records the item, the clause, and that the detail is withheld pending the maintainer, with the reproduction held by the runner. Keep it short; rule 2's force for every other failure class must not soften.\n\nWorth checking while in the file: the trap vocabulary and the \"Environment facts\" section (extended by #9427) for any other unconditional phrasing that assumes every finding is safe to publish.\n\n⛔ No `.claude/skills/**` in this PR — #9470 owns the skill side and is awaiting a human merge; touching both would drag this docs-only change into the same queue.\n"
+}

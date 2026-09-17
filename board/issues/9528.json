@@ -1,0 +1,34 @@
+{
+  "number": 9528,
+  "kind": "issue",
+  "title": "pm-dispatch: the domain table splits the governed-surface mechanism across two lanes — anchor instruction-architecture and governance-enforcement files to domain:skills",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T07:06:13Z",
+  "updated_at": "2026-08-18T09:53:17Z",
+  "closed_at": "2026-08-18T09:52:37Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9528",
+  "body": "Blocked-by: #9495\n\nMaintainer ruling (2026-08-18, PM chat, skills-seat session `session_01Rn7aaamsR99FXRqLcpL99q`), verbatim: 「skills 相关的应该都归你管，为什么派给了 devx」 — stated after a measured collision: the devx lane extended the ADR gate to `skills/**` (#9511, landed) in the same hours the skills lane retired that gate under the #9495 ruling (PR #9523) — opposite directions on one mechanism, hours apart, because the domain table anchors by file location and the governance mechanism's files sit in devx territory (`scripts/` 门禁类, `.github/**`) while the governed surfaces and protocol text sit in skills territory. `AGENTS.md` has **no owner in the table at all** — the skills seat claims it in its seat post, but triage routes from the table, which is how #9403 landed in devx.\n\n## Change (the 域车道 table in `.claude/skills/pm-dispatch/SKILL.md`)\n\nAdd to the `domain:skills` row (and state the boundary in the devx row where needed):\n\n- `AGENTS.md`, `CLAUDE.md` — instruction-architecture files (all agent-facing constitution text);\n- `.github/CODEOWNERS` — the governance-routing half of the governed surface;\n- governance-enforcement files for the governed surface: the post-merge audit (`scripts/pm/check-governed-merges.mjs`, already under `scripts/pm/**`) and any future gate/audit whose subject is the governed surface itself.\n\n**Boundary kept honest**: `domain:devx` retains genuine dev-tooling gates (lint machinery, doc gates, `scripts/` general 门禁类) — the divider is the gate's SUBJECT: a gate that governs agent-instruction surfaces routes to skills; a gate that governs code/docs quality routes to devx.\n\nSerial constraint: the table lives in `SKILL.md`, which PR #9523 (the #9495 retirement) currently edits — hard same-file serial, dispatch after #9523 merges. Fable (clause ① path mandate); ADR-class human merge. In-flight devx cards (#9403, #9519) finish where they are per the no-mid-flight-transfer rule; cross-lane coordination notes already on #9513/#9403."
+}

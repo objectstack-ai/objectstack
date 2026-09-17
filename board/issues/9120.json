@@ -1,0 +1,35 @@
+{
+  "number": 9120,
+  "kind": "issue",
+  "title": "RestServer.probeMcpServeable re-derives the request's environment instead of using the shared entry point — /discovery's `mcp` advertisement can follow the wrong kernel",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-16T11:56:31Z",
+  "updated_at": "2026-08-17T22:29:09Z",
+  "closed_at": "2026-08-17T22:29:09Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9120",
+  "body": "Filed unassigned by the dev seat on #9058 (session `session_011RB4waLuNbdruCo6X9oobm`) while auditing every env-resolution call site for ADR-0076 OQ#9's D11 worklist item (4). Out of that card's scope — #9058 records an ADR outcome and deliberately carries no code — so recorded here. Searched open and closed issues by keyword first; the near neighbour is #4024 (closed, the issue that ADDED this probe), no open duplicate.\n\n## Measured against `origin/main` @ `ba2e3c172`\n\n`packages/rest/src/rest-server.ts` has one shared entry point for \"which environment does this request belong to\": `resolveRequestEnvironmentId` (line 997). Its own doc-comment calls it\n\n> THE single entry point for every unscoped-route environment decision (protocol, i18n, exec-ctx, analytics, …) so they can never disagree about which kernel a request belongs to.\n\n**Eight** call sites go through it — `resolveEndpointMatchAuthority` (869), `resolveMetadataService` (906), `resolveProtocol` (1054), `resolveI18nService` (1076), `computeExecCtx` (1550), `resolveSecurityService` (7337), the analytics service resolver (8114), the security-explain service resolver (8376).\n\n**`probeMcpServeable` (line 2842) is the ninth site that needs the request's environment, and the only one that does not.** It re-derives:\n\n```ts\nlet environmentId: string | undefined = req?.params?.environmentId;\nif ((!environmentId || environmentId === ':environmentId') && this.defaultEnvironmentIdProvider) {\n    try { environmentId = this.defaultEnvironmentIdProvider() || undefined; } catch { /* ignore */ }\n}\n```\n\nSo it consults neither the host's ADR-0006 `kernel-resolver` seam (which `resolveRequestEnvironmentId` consults first, wired by `rest-api-plugin.ts:167-201`) nor the legacy hostname / `X-Environment-Id` chain beneath it.\n\n## Why that is a defect rather than a quirk\n\nThe probe's own doc-comment claims parity with a sibling that does reach the entry point:\n\n> Same two probe paths as `resolveRegisteredServices` (ADR-0057 D10): the per-request kernel for multi-env hosts, else the single-env `serviceExistsProvider`.\n\n`resolveRegisteredServices` gets its kernel as `ctx.__kernel`, set at line 1717 inside `computeExecCtx` — i.e. downstream of `resolveRequestEnvironmentId` (1550). `probeMcpServeable` gets no such kernel on the deployment shape that matters: on a hostname-routed multi-tenant host, an unscoped `/discovery` request carries no `params.environmentId`, and `defaultEnvironmentIdProvider` is registered by `createSingleEnvironmentPlugin` — not by a multi-tenant host. The probe then falls to `serviceExistsProvider`, which answers for the **host** kernel, not the request's environment.\n\nBoth error directions are reachable, and #4024 exists because of the first:\n\n- host kernel has `mcp`, the request's environment does not ⇒ `/discovery` advertises `routes.mcp` for an environment whose route 501s (the `declared ≠ enforced` shape #4024 was filed to close);\n- host kernel lacks it, the environment has it ⇒ the route is withheld from an environment that would serve it. (`mcpServeable !== false` fails open only for a `null` probe, not for a confident `false` computed against the wrong kernel.)\n\nNeither is a crash, and on single-environment boots — where `defaultEnvironmentIdProvider` IS registered — the probe is correct. It is a multi-tenant-only inconsistency.\n\n## Suggested fix (not implemented here)\n\nReplace the hand-rolled derivation with `await this.resolveRequestEnvironmentId(req?.params?.environmentId, req)`, matching the eight siblings; the `'platform'` guard and the `serviceExistsProvider` fallback below it stay as they are. Whoever takes it should confirm the discovery handler at line 2913 passes the same `req` the other resolvers receive.\n\nRelated: #4024 (added the probe) · #9058 / ADR-0076 OQ#9 item (4) (the audit that found this) · #2462 (the OQ#9 audit that set the worklist).\n"
+}

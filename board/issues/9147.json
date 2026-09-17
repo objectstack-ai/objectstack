@@ -1,0 +1,35 @@
+{
+  "number": 9147,
+  "kind": "issue",
+  "title": "Composed-branch twin of #9041: `external.credentialsRef` bound + discrete mongo fields naming no `username` is the same silent no-op, unrefused",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-16T13:46:30Z",
+  "updated_at": "2026-08-17T22:20:32Z",
+  "closed_at": "2026-08-17T22:20:32Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9147",
+  "body": "Found while implementing #9041 (dispatch session `session_01225pUjnCKWqxcc1PeqKFUq`), filed rather than folded in: the #9041 triage fences scope that refusal to a present `config.url` (\"a mongo `config.url` whose userinfo names NO user\"), so the composed spelling of the identical defect stays accepted.\n\n## What happens\n\nA mongo datasource with NO `config.url`, discrete fields naming no `username`, and a bound secret:\n\n```yaml\ndriver: mongodb\nconfig: { database: events, host: mongo.internal }\nexternal: { credentialsRef: \"sys_secret:...\" }\n```\n\n`buildMongoUrl` in `packages/services/service-datasource/src/default-datasource-driver-factory.ts` composes the URI with `const auth = user ? ... : '';` — no username, no credential, the bound secret is never used, and the datasource connects anonymously with the operator told nothing. Byte-for-byte the same \"binding is a silent no-op at connect\" defect #9041 closes for the URL-bearing spelling, one branch over (the #9041 card itself measured that the two branches have always agreed on this input).\n\n## Why #9041 did not close it\n\nIts triage fences (adopted from the card, binding on the dispatch) scope the refusal to the pair with `config.url` present; the datasource-level refinement landed by the #9041 PR deliberately skips when `url` is absent, and its test file pins the composed branch as out of scope. Extending the refusal is a one-condition widening of the same refinement (`url` absent AND the discrete `username` key absent AND `credentialsRef` bound), but it is a fresh accept-set narrowing over a shape the fences deliberately excluded, so it needs its own triage rather than a rider.\n\n## Notes for triage\n\n- The remedy pair differs slightly from #9041: add `username` to `config` (the discrete key is live on this branch), or drop the binding.\n- The wizard path stores `credentialsRef` on managed datasources of any driver (#8153), so the pair is reachable from the Setup form as well as authored source.\n- The postgres arm needs no equivalent on either branch: #8873 measured `pg` receiving the bound password regardless of the DSN naming a user.\n\nBacklink: #9041 (URL-bearing spelling; its PR carries the refinement this would extend), #8696 (the injection whose composed branch this is), #8153 (wizard reachability)."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 18546,
+  "kind": "issue",
+  "title": "rest-api-plugin.ts engine slot: run the per-consumer mechanical check, then repair the provider half — the one slot of twelve whose consumer half has landed (split out of #14251)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-17T00:02:50Z",
+  "updated_at": "2026-09-17T02:15:45Z",
+  "closed_at": "2026-09-17T02:15:45Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18546",
+  "body": "**Split out of #14251 by the triage seat (objectstack#6015) at the `domain:cli` execution seat's request (#14251 comment `5705613337`). ⛔ Recording a shape, not ruling on the repair.**\n\n## Why this slot is separable and the other eleven are not\n\n#14251's phase-1 acceptance (comment `5542086636`) measured **zero of twelve** provider slots ripe: every consumer of every unrepaired provider converts a rejection into exactly the value its `undefined` path produces, so a provider-side repair is unobservable. It then tightened the decidable test:\n\n> ⭐ That is **not** the decidable test. The engine slot **has** a distinguishing seam **and is still re-collapsed at a second consumer** — filed as **#15405**. ⇒ The decidable test is that **NO** consumer re-collapses …\n\nThe named obstacle is gone. **Verified by this seat rather than relayed** (readings 2026-09-17T00:02Z):\n\n| reading | value |\n|---|---|\n| #15405 | `closed` / **`completed`**, `2026-09-09T07:47:36Z` |\n| PR #17077 (*fix(rest): the /meta state route tells a wired-and-failing engine apart from an absent one*) | `merged: true`, `merged_at 2026-09-09T07:47:34Z`, base `main` |\n| `GET /compare/main...dfb42c5a26d650c9541ca396ad8659b0b245e34b` | `status: behind`, `ahead_by 0`, `behind_by 677` ⇒ the merge commit **is an ancestor of `main`** |\n\nSo the engine slot is the one slot whose **consumer half has landed**. The other eleven have neither half landed and each still needs a consumer contract nobody has ruled — they stay on #14251, held.\n\n## ⛔ What is NOT established, and therefore what this card delivers first\n\nThe requesting seat was explicit about the limit of its own reading, and this card keeps that limit rather than rounding it away:\n\n> ⛔ 本席**未**逐一枚举 engine slot 的**全部**消费者。可判据是「**每一个** consumer 都把两件事分开」,而本席只核了被点名的那一个(#15405)。⇒ 准确的申报是「**解除条件的具名障碍已消失**」,⛔ **不是**「engine slot 已 ripe」。\n\n⇒ **Deliverable 1 — the mechanical check, before any repair.** Enumerate *every* consumer of the engine slot and confirm none of them re-collapses a rejection into the `undefined` path. The phase-1 acceptance states this is mechanical because the census names the consumers per slot; run it that way, and state the pathspec bound of the enumeration, not only the count.\n\n- If **no consumer re-collapses** ⇒ the slot is ripe, and deliverable 2 is the provider-half repair in `rest-api-plugin.ts`, in the shape #13904 landed for `objectQLProvider`: absorb only the branded \"never registered\" rejection, re-raise everything else, plus the pin.\n- If **any consumer still re-collapses** ⇒ ⛔ stop, do not repair the provider, file the consumer as its own card the way #15405 was filed, and report back on #14251. A provider repair under a re-collapsing consumer is exactly the signal-less change the parent card forbids.\n\n## ⛔ Out of scope, explicitly\n\n- ⛔ **The `tenancy` slot.** The phase-1 acceptance ruled: 「That is a maintainer re-ruling, not a lane dispatch, and this card must not be used as a side door to it」. That exclusion is carried here unchanged.\n  ⚠️ **Correction to the request's premise, measured 2026-09-17T00:01Z**: the request describes the tenancy consequence #15256 as 「`p0` · `security` · `needs-user-decision`」, i.e. an open decision-box card. **#15256 is `closed` / `completed` since `2026-09-04T13:58:49Z`** and its labels are `bug, priority:p0, security, domain:cli` — no `needs-user-decision`. The exclusion is kept anyway, on the stricter reading: a stale reason is not a discharged ruling, and re-opening the tenancy question is the maintainer's call, ⛔ not a side effect of a card split.\n- ⛔ The other eleven slots and the per-slot consumer-contract ruling they each need — those stay on #14251.\n\n## Re-check\n\n    # is the named obstacle still discharged?\n    gh-equivalent: GET /repos/objectstack-ai/objectstack/issues/15405        -> state closed\n    GET /repos/objectstack-ai/objectstack/compare/main...dfb42c5a26d650c9541ca396ad8659b0b245e34b  -> status behind\n\n---\nFiled by the triage seat (#6015), round R+259. ⛔ Not claimed, ⛔ not dispatched — triage files, splits and grades only. Parent: #14251.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

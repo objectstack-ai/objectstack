@@ -1,0 +1,35 @@
+{
+  "number": 9227,
+  "kind": "issue",
+  "title": "[spec] Field.inlineColumns is z.array(z.any()) — a mis-keyed inline-grid column publishes clean and renders blank cells",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T03:52:16Z",
+  "updated_at": "2026-08-18T00:31:20Z",
+  "closed_at": "2026-08-18T00:31:20Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9227",
+  "body": "Found while implementing objectui#3951 (grid columns converge on the declared `name` key). Out of that card's scope — filed, not fixed.\n\n## What\n\n`packages/spec/src/data/field.zod.ts:553` declares the inline master-detail grid's explicit column list with no shape at all:\n\n```ts\ninlineColumns: z.array(z.any()).optional().describe('Explicit columns for the inline grid (derived from the child object when omitted)'),\n```\n\n`z.any()` means **every** column object validates: right keys, wrong keys, misspelled keys, empty objects. Publish-time validation has nothing to check against, so the only place a mis-keyed column is ever noticed is the browser, as blank cells.\n\n## Why it matters now\n\nobjectui#3951 was exactly this failure with the divergence in the renderer instead of the metadata: `GridColumnDefinition` declared the column key as `name` while the widget read `field`, so metadata authored from the published type rendered a grid with the right row COUNT and every cell empty, plus a React missing-key warning. That renderer is now aligned to `name` (objectui PR for #3951).\n\nWhat that fix cannot reach is the authoring surface. After it lands, a relationship field authored as\n\n```ts\ninlineEdit: 'grid',\ninlineColumns: [{ field: 'amount', label: 'Amount', type: 'currency' }],\n```\n\nstill parses green, still deploys, and still renders a grid of blank cells — because `z.any()` accepts the retired spelling and the renderer no longer reads it. The same holds for any other typo (`lable`, `colmns`, a bare string where an object belongs).\n\nCensus taken during objectui#3951: **zero** `inlineColumns` usages across `examples/app-crm`, `examples/app-showcase`, `examples/app-todo` — every inline grid in the example apps takes the auto-derived columns path. So nothing in-repo is broken today; the exposure is for downstream apps and for AI-authored metadata, which is the repo's stated second axis: a lenient producer schema is where generated metadata errors hide.\n\n## Suggested direction (for triage, not a decision)\n\nGive `inlineColumns` a real element schema mirroring ObjectUI's `GridColumnDefinition` — `name` (required), `label?`, `type?`, `width?`, `required?`, plus the column extras the grid reads (`options`, `reference`, `readonlyWhen`, `requiredWhen`, `expression`, `scale`) — and make it strict, so an unknown key is a named rejection at publish time rather than a blank cell at render time. `relatedListColumns` (`field.zod.ts:588`) is `z.array(z.any())` for the same reason and is worth checking in the same pass; note `lookupColumns` (`:611`) already has a typed element schema, so the pattern exists in this file.\n\nSizing the strictness is a spec decision (which extras are authorable, whether the renderer's column extras belong in the spec at all), which is why this is filed rather than fixed.\n\n## Reproduce\n\nAuthor any object with a `master_detail` child whose relationship field sets `inlineEdit: 'grid'` and `inlineColumns: [{ field: 'x' }]`, then `FieldSchema.safeParse` it — it succeeds. Swap `field` for a nonsense key such as `zzz` and it still succeeds.\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 9704,
+  "kind": "issue",
+  "title": "bug(service-automation): a RETRY attempt runs with a smaller variable environment than the first — `executeWithoutRetry` seeds none of the engine-owned variables",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T16:06:16Z",
+  "updated_at": "2026-08-19T07:16:38Z",
+  "closed_at": "2026-08-19T07:16:38Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9704",
+  "body": "Found while implementing #9510 (the missing `isSuspendSignal` arm on the same method). Filed rather than fixed there: different defect class — a divergent run environment, not a lost durable pause — and repairing it changes what **every** retry attempt does, pausing or not, which #9510's ruling does not cover.\n\n## Measured\n\n`packages/services/service-automation/src/engine.ts`, `origin/main` @ `ed4ca5999`.\n\n`execute()` seeds the run's variable map with five things `executeWithoutRetry()` does not:\n\n```ts\n// execute() only:\nvariables.set('record', context.record);          // + every record field flattened,\n                                                  //   so bare `status` / `budget` resolve\nvariables.set('previous', context?.previous ?? null);\nvariables.set('$runId', runId);\nvariables.set('$flowName', flowName);\nvariables.set('$flowLabel', flow.label ?? flowName);\n```\n\n`executeWithoutRetry()` — the method `retryExecution` re-runs the flow through on **every** retry attempt — seeds only `seedDeclaredVariables(flow, context)` and `$record`.\n\nObserved directly: two runs of one flow, pausing on attempt 1 vs on attempt 2, produce continuations whose variable snapshots differ by exactly `$runId`, `$flowName`, `$flowLabel`, `previous` — present on the first-attempt run, absent on the retry.\n\n## Why it matters\n\nConditions are strict CEL, where reading an **unbound** name ABORTS the predicate (`Unknown variable: X`) rather than yielding `false` — the mechanism #4697 documents on `seedDeclaredVariables`. So on a retry attempt:\n\n- a `record-after-update` flow whose start condition or edge predicate reads `previous` (the create-vs-update discriminator #3427 bound deliberately, \"always, even to `null`\") aborts — **the retry fails for a reason attempt 1 never hit**, which reads as a flaky flow rather than a defect;\n- a bare `status` / `budget` reference to a triggering-record field aborts for the same reason (the flattening is `execute()`-only);\n- `$runId` is **undefined for a pausing node on a retry attempt**. Its documented purpose is ADR-0019 mapping: \"a pausing node (e.g. Approval) reads `$runId` to map its external state back to this run for resume\". An approval request row minted on a retry attempt therefore carries no run id — the pause is stored (since #9510) but the external record cannot point back at it.\n\nEvery one of these is reachable exactly where retry is most used: `errorHandling.strategy: 'retry'` on a record-change flow.\n\n## Not decided here\n\nWhether the repair is to hoist the shared seeding into one helper both methods call (the obvious reading — the two methods already duplicate the disabled / no-start-node / failure exits and have drifted once per card: #9378, #9415, #9414, #9510), or to make `executeWithoutRetry` take the already-seeded map from its caller. The first is more in keeping with `buildRunTrigger`'s chokepoint precedent, but it touches the first-attempt path too, so it wants a ruling rather than a guess.\n\n## Refs\n\n- #9510 — the suspend-arm restoration on the same method; its parity pin (`packages/services/service-automation/src/retry-attempt-pause.test.ts`) asserts this divergence explicitly so it cannot be repaired silently\n- #4697 / #3427 — the unbound-name CEL abort and the `previous` binding this breaks\n- ADR-0019 — the `$runId` contract for pausing nodes\n"
+}

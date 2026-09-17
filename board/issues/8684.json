@@ -1,0 +1,36 @@
+{
+  "number": 8684,
+  "kind": "issue",
+  "title": "automation: the run-resume route still answers HTTP 200 wrapping an inner {success:false} — the route #3962's status-code unification left behind",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-14T13:21:54Z",
+  "updated_at": "2026-08-17T22:57:16Z",
+  "closed_at": "2026-08-17T22:57:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8684",
+  "body": "Blocked-by: objectstack-ai/objectui#4784\n\nFound during the ObjectStack 17.0 GA close-out of the HotCRM app (objectstack-ai/hotcrm#1156, the transfer sweep). Filed here because the fix lands in this repo, per the maintainer ruling quoted at the bottom.\n\n## The residue, and why it is being filed now\n\nobjectstack-ai/hotcrm#522 (global action dispatch fails and the UI swallows it) and objectstack-ai/hotcrm#524 (screen-flow server-side failure has no UI feedback) are both **closed** — their user-visible complaints were fixed and verified. But each of their closing records parks the same leftover on the other: the automation **resume** route still answers HTTP 200 while wrapping an inner failure. With both cards now closed, that leftover has no holder, so it is recorded here rather than dropped on the floor.\n\n## Measured\n\nHotCRM 17.0 acceptance, independent dev server, `hotcrm@0899b4f + @objectstack 17.0.0-rc.2`. A screen flow (`lead_conversion`) driven to an engineered server-side node failure:\n\n```\nPOST /api/v1/automation/lead_conversion/runs/run_b07d.../resume\n     {\"inputs\":{\"createOpportunity\":true,\"opportunityName\":\"A1 engineered failure\",\"opportunityAmount\":0}}\n\nHTTP 200\n{\"success\":true,\"data\":{\"success\":false,\n  \"error\":\"Node 'create_opportunity' failed: create_record(crm_opportunity) failed: Amount must be greater than zero\"}}\n```\n\n`summary.nodes` marks `create_opportunity` with `status:\"failure\"`. The run genuinely failed; the transport reported success.\n\n## Why this is a defect and not a preference\n\n#3962 made exactly this argument for `/actions` and it was accepted before GA: business failures must not be HTTP 200 inside a double envelope. That card is closed and `/actions` now answers real status codes — measured on the same sweep, a script-body failure returns 400 `VALIDATION_ERROR` and an unknown action returns 404. The automation resume route was not part of that unification and still carries the old shape, so the platform is now internally inconsistent on the very thing #3962 set out to make uniform.\n\nImpact is bounded, and that should be stated honestly rather than inflated: the console reads the inner envelope and surfaces the node error verbatim (verified in the same sweep — a red toast carrying the full node message), so there is no user-visible silent swallow today. That was hotcrm#522's original complaint and it is fixed. What remains is the **wire contract**: a scripted or integration caller that checks the HTTP status alone reads a failed run as a successful one. That is the same class of caller #3962 protected on `/actions`.\n\n## Adjacent observation on the same endpoint — split it out if you prefer\n\nFrom the same measurement: the resume body honours only `inputs` / `variables` (plus `output` / `branchLabel`). An unknown **top-level** key is silently ignored — a body shaped `{\"nodeId\":..., \"values\":{...}}` was accepted, the submission was treated as empty, and the run completed on `init_defaults` and reported success.\n\n#4477 (closed, PR #4502) tightened the **inner** half of this same contract: the submitted field bag is now validated against the suspended node's declared fields, and an undeclared key inside it is refused. The outer envelope is that question one level up, and it was measured lenient on 2026-08-05 — after #4502 merged. Recorded here because it is the same endpoint's request/response contract; happy for it to become its own card if triage prefers.\n\n## Not measured here\n\nBoth readings above come from the rc.2 acceptance sweep. Neither was re-measured on 17.0.0 GA, and this report contains **no GA probe** — the sweep that produced it was routing and bookkeeping only, with no app boot and no probe scaffolding. Re-measure before implementing.\n\n> ⚠️ **Superseded: the GA re-measure is DONE.** The defect reproduces byte-for-byte on `origin/main @ 24173e9e4` — see the dev report at comment `5300125380`. This precondition is discharged; do not re-run it as a gate on dispatch.\n\n## Refs\n\n- objectstack-ai/hotcrm#522 (closed — dispatch + envelope; the origin of this residue)\n- objectstack-ai/hotcrm#524 (closed — screen-flow failure feedback; carried the same residue)\n- #3962 (closed — the `/actions` status-code unification this route was left out of)\n- #3913 (the original envelope report) · #4477 / PR #4502 (the inner-bag validation half)\n- objectstack-ai/hotcrm#1156 (the transfer sweep this came from)\n\n## Authority\n\nFiled under the maintainer ruling of 2026-08-14 (verbatim, untranslated):\n\n> hotcrm 席位的原则是用平台的能力做元数据应用的开发，平台的需求应该转给平台\n\nNo labels applied and no release target nominated — the transfer sweep nominates but does not label; placement is this repo's triage call.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XAK3brMLjd4ykF4QAhFnuo)_\n\n---\n\n> ⚠️ **PM edit 2026-08-16** (`domain:cli` seat, session `session_01NaS1PAHJcPfAA2acnV53Tn`): added the `Blocked-by:` line at the top and the superseded-precondition note above; the rest of the body is unchanged from the author's text. The blocker is release sequencing, not a code dependency — see the blocking comment for why, and note that the routing claim *\"lands in `packages/rest/src/rest-server.ts`\"* in the first triage comment is **measured wrong** (it is `packages/runtime/src/domains/automation.ts`)."
+}

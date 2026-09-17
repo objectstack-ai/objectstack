@@ -1,0 +1,35 @@
+{
+  "number": 9046,
+  "kind": "issue",
+  "title": "[finding] The ADR-0091 D5 recertification columns (`last_certified_at` / `certified_by`) are declared on both grant tables and nothing writes or reads them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "finding",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T07:29:15Z",
+  "updated_at": "2026-08-18T15:20:32Z",
+  "closed_at": "2026-08-18T15:19:45Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9046",
+  "body": "Restart-when: closed objectstack-ai/objectstack#9054\n\nMeasured while running the declared-security-key enumeration oracle for #8894. Filed unassigned; observation-class. ⛔ Deliberately not fixed there — #8894 measures the class, and repairing an instance is a different card with a different owner.\n\n## The four keys\n\n`packages/plugins/plugin-security/src/objects/sys-user-permission-set.object.ts` and its sibling `sys-user-position.object.ts` both declare the ADR-0091 D5 attestation pair:\n\n- `last_certified_at` — *\"[ADR-0091 D5] When this grant was last attested in a recertification review. Null = never certified.\"*\n- `certified_by` — *\"[ADR-0091 D5] Reviewer who last attested this grant.\"* (a `sys_user` lookup)\n\n## The measurement\n\nA whole-tree search over `packages/`, `apps/` and `examples/` (all `.ts`/`.tsx`, tests included) returns occurrences of either name in exactly three places:\n\n1. the two `.object.ts` declarations themselves;\n2. the generated i18n bundles (`translations/*.objects.generated.ts` — label/description strings, four locales);\n3. CHANGELOG prose recording the columns being added.\n\nThere is **no producer and no consumer**. Nothing stamps `last_certified_at` on a review, nothing reads it to decide anything, and no surface computes \"never certified\" or \"certification stale\". These are not the sibling ADR-0091 columns: `valid_from` / `valid_until` are enforced by `isGrantActive` at three `resolve-authz-context.ts` call sites, and `reason` / `delegated_from` are read by the delegated-admin gate. The D5 pair alone is inert.\n\n## Why this is the ADR-0049 class rather than a missing feature\n\nThe declared surface is what an author reads as a capability catalogue. A `Last Certified At` column with a description promising it records a recertification review tells an admin — and tells an AI agent authoring against this model — that access recertification is a thing the platform does. It is not. That is the \"false sense of compliance\" ADR-0049 was written about, and access recertification is a compliance surface specifically (SOX/ISO access reviews), so the misreading is the expensive kind.\n\nThe disposition is the usual ADR-0049 three-way, and it is a real question rather than a foregone one:\n\n- **enforce** — build the recertification review (a producer that stamps the pair, plus a staleness read). Real work, and there is no measured pull for it today.\n- **`experimental`** — mark the columns declared-but-not-enforced so authoring them is a known no-op.\n- **remove** — drop the columns; ADR-0087 conversion applies if they are considered authorable surface.\n\nNote the closest precedent points at *withdraw the claim* rather than *build the feature*: for `sys_capability.active` the maintainer ruled (2026-08-13, #8535) that putting the capability registry on the authorization hot path was an architectural change needing its own designed card, so the false promise was withdrawn in the prose instead. The D5 pair is quieter — no confirmation dialog asserts anything — but the field description makes the same shape of claim.\n\n## Corroboration that this is not a search artifact\n\nThe same sweep found the other declared keys on these two objects all resolve to real producers or consumers, so the search was not systematically blind: `granted_by` is read at `packages/plugins/plugin-sharing/src/sharing-plugin.ts:873`, `valid_until` at `packages/plugins/plugin-security/src/delegated-admin-gate.ts:477`, `reason` in `packages/lint/src/validate-security-posture.ts`. Only the D5 pair comes back empty on both sides.\n\n⚠️ Scope of the negative claim: **this repo only**. Per the `evidenceScope` discipline in `packages/spec/liveness/README.md`, a cross-repo look at `objectui` was not taken, and a designer preview that renders these two columns to a human would count as a consumer under the 2026-08-10 ruling — though not as *enforcement*, and not as a producer for a value nothing ever writes.\n\nRefs: #8894 (the measurement that surfaced it) · #8535 (the `sys_capability.active` precedent) · #8811 · ADR-0049 · ADR-0091 D5.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

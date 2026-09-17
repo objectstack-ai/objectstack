@@ -1,0 +1,35 @@
+{
+  "number": 9426,
+  "kind": "issue",
+  "title": "The REST audit route answers a MISSING `auditMetaItem` capability with `{events: []}` — a compliance surface reporting \"this item has no audit trail\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T00:54:34Z",
+  "updated_at": "2026-08-18T15:40:50Z",
+  "closed_at": "2026-08-18T15:40:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9426",
+  "body": "Found while implementing #9326 (PR #9425), by the sibling sweep that card's dispatch fence asked for. Filed rather than ridden on that PR, per the fence: \"Any sibling is a finding to file, not a rider.\"\n\n## The measurement\n\n`packages/rest/src/rest-server.ts`, the `GET /meta/:type/:name/audit` handler (`auditMetaItem` probe, around line 5296 on `origin/main` @ `51a46a440` — **locate it by text, not by this line number**; this file absorbs several merges a day):\n\n```ts\nif (typeof (p as any).auditMetaItem !== 'function') {\n    res.json({ events: [] });\n    return;\n}\n```\n\nThis is the same shape #9326 is about, one route over: a **capability gap** rendered as a well-formed **empty answer**. ADR-0110 D3 — a miss and a fault are different facts — and the two facts merged here are \"the audit trail was read and this item has no entries\" and \"this deployment cannot read an audit trail at all\".\n\nIt is arguably worse than the references case by consequence. The route's own comment describes it as the \"compliance trail for the metadata-protection layer ... so Studio's 审计日志 / Audit log tab can show who tried what and whether a lock blocked it\". An empty answer there reads as *nobody touched this item*, which is exactly the claim a compliance reader must not be given on false pretenses.\n\n## The sweep this came from, with its control\n\nEvery feature-detection limb on the resolved protocol in `rest-server.ts`, classified by how it answers absence:\n\n| limb | answer on absence |\n| --- | --- |\n| `getMetaDiagnostics` | `501` `NOT_IMPLEMENTED` |\n| `listDrafts` | `501` `NOT_IMPLEMENTED` |\n| `migrateStoredMetadata` | `501` `NOT_IMPLEMENTED` |\n| `getMetaItemLayered` | `501` `NOT_IMPLEMENTED` |\n| `historyMetaItem` | `501` (bare-string `error`, no code — an envelope-debt item, but it *does* refuse) |\n| `findReferencesToMeta` | `200 {references: []}` — #9326, fixed in PR #9425 |\n| **`auditMetaItem`** | **`200 {events: []}`** — this card |\n\n**Control**: the same scan found five limbs that *do* refuse, so \"no sibling\" was a possible outcome of this sweep rather than a foregone one. The remaining `typeof p.X === 'function'` sites in the file (`getMetaItems`, `getObjectSchema`, `getPackagedObjectBase`, `getMetaItemLayered` under `?layers=`) are optional-enrichment fallbacks, not answers to a question the caller asked — a different class, deliberately not listed above.\n\n## Reachability, measured the same way #9326's was\n\n`auditMetaItem` is **not** a member of `RestProtocol` (`= DataProtocol & MetadataProtocol`) and is not declared in `packages/spec` at all — it is an ADR-0076 D9 server-only extension, which is why the route reaches it through a runtime cast. So the branch is not reachable from any in-repo assembly today (`ObjectStackProtocolImplementation` is the only registered implementation and defines the method), but it *is* reachable from any host that implements the declared contract exactly, with no type error. Same reachability profile as #9326.\n\n## What would close it\n\nMost likely the same fix #9326 took, which is also what four of its five siblings already do: refuse with `501` `NOT_IMPLEMENTED` in the ADR-0112 **nested** `{ error: { code, message } }` envelope that #7035 converged the `/meta` 501 refusals onto.\n\nTwo things worth checking before assuming that, rather than asserting them here:\n\n1. **Whether the audit route's empty answer is load-bearing for an unprovisioned table.** The route's comment says \"Empty array on environments where the table is not yet provisioned\" — that is a *different* condition from the missing-method one, handled further down, but a fix should confirm the two are actually separate paths and not conflated. If they are conflated, the honest answer may need to distinguish three states rather than two.\n2. **The envelope ratchets.** `check:route-envelope` holds `rest-server.ts` to two shrink-only dialect counts (`stringError`, `siblingCode`). The nested shape is counted by neither; the flat sibling-`code` shape that `/layers` uses is counted by both, so copying `/layers` would push a ratchet up.\n\n⚠️ A wire-level `coverage` discriminator is **not** the route to take here without a spec decision — that was fenced to `packages/spec` on #9326 and the same fence applies.\n\n## Related\n\n#9326 / PR #9425 (the references limb, same defect class, same file) · #8896 (the empty-accumulator harm shape) · #7035 (the `/meta` 501 envelope convergence) · ADR-0110 D3 · ADR-0076 D9\n\n## Dedup\n\nSearched open issues for `auditMetaItem`, for capability-gap-as-empty-answer on REST routes, and for the audit route generally. Nearest existing cards are #8747 (`auditMetaItem`'s `organizationId` scope filter — closed, a different defect on the same method) and #9326 (the references limb). Neither covers the missing-capability limb on the audit route. No duplicate.\n"
+}

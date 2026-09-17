@@ -1,0 +1,35 @@
+{
+  "number": 9251,
+  "kind": "issue",
+  "title": "[finding] A gate carried only by a PR label is not durable: `needs:contract-review` was stripped from #9235 twice inside 40 minutes, with no push in between",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T06:53:02Z",
+  "updated_at": "2026-08-18T05:21:38Z",
+  "closed_at": "2026-08-18T05:21:38Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9251",
+  "body": "Observation, recorded from a live measurement rather than reasoning. Unassigned, no domain label — for triage to grade.\n\n## What was measured, on PR #9235 (head `c44f4f29f`, unchanged throughout)\n\n| time (UTC) | reading |\n|:--|:--|\n| ~05:17 | PM seat applies `needs:contract-review`; **read back: present**, six labels |\n| 05:31:36 | PR `updated_at` moves; **no new head sha**, no push |\n| ~06:50 | labels read again: `documentation, size/xl, protocol:data, tests, tooling` — **the gate label is gone** |\n| ~06:51 | re-applied; read back present again |\n\nThe `Auto Label` job in the two workflow runs inside that window (`31997494079` @ 05:19:21, `31998201873` @ 05:31:39) both concluded `skipped`, and the second one started *after* the 05:31:36 mutation — so the CI labeler is not the obvious culprit. `Check Changeset` re-ran at 05:19:23 and 05:31:42, which is the signature of `pull_request: edited` events, i.e. the PR body was edited twice after creation. **The actor that removed the label is not identified here** — naming it needs the timeline, and this card should not guess:\n\n```\nGET /repos/objectstack-ai/objectstack/issues/9235/timeline?per_page=100\n  → filter events to labeled / unlabeled, print `event | label | actor | created_at`\n```\n\n## Why this is worth a line now, when #5649 already closed\n\n#5649 measured exactly this clobbering in both directions and named **two** landing points. PR #5683 closed it by fixing the CI side (the two label-writing jobs no longer run concurrently and no longer retrigger on label events). Its **first** landing point — that a client applying one label must use add semantics (`POST /issues/{n}/labels`) rather than whole-set replacement — was left as a constraint on the instruction face, not a mechanism. Every agent seat writing labels through the MCP `issue_write` `labels` field is still performing a whole-set `PUT`: it sends the set it read, so any label applied by anyone else between that read and that write is erased. Nothing detects it.\n\nWhat changed since #5649 is the **cost**. Back then the clobbered label was `skip-changeset`, and the failure was loud: a gate went red and someone re-applied it. The label vocabulary has since grown a carrier whose whole purpose is to *withhold* permission — `needs:contract-review` — and that one fails **silently and in the unsafe direction**. A PR whose gate label has been erased does not look blocked; it looks clear. The only reason this instance was caught is that the seat happened to re-read the labels during a routine in-flight sweep, an hour after applying them.\n\n## Disposition, for whoever picks this up\n\nTwo independent readings, and they are not alternatives:\n\n1. **Write semantics.** Whether a single-label apply can be expressed as an add rather than a whole-set replacement from the tools the seats actually use. If it cannot, the constraint cannot live on the instruction face — a rule that every writer must re-read-then-write correctly is the class of rule this repo keeps proving is not mechanically holdable.\n2. **Carrier choice.** Whether a permission-withholding gate should depend on a label at all. A label is mutable by any writer and its absence is indistinguishable from \"never applied\". Candidates worth measuring against each other: draft status (an explicit human/agent action to flip, and it is what actually blocked #9235 while the label was missing), a required check that fails while the review is outstanding, or a check that reads a marker no whole-set write can erase.\n\nReference: #5649 (the measurement and its two landing points), PR #5683 (the CI half, merged). This card is filed as a recurrence with new evidence rather than a reopen: the symptom returned on a path #5683 did not claim to cover, and the cost of the symptom has changed since that card was graded."
+}

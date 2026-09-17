@@ -1,0 +1,35 @@
+{
+  "number": 9542,
+  "kind": "issue",
+  "title": "driver-sql: boot schema-sync's MySQL widening ALTER is still unbounded (one year) and still swallows a metadata-lock timeout",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "auto-adjudicated",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T08:29:38Z",
+  "updated_at": "2026-08-18T11:42:34Z",
+  "closed_at": "2026-08-18T11:42:34Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9542",
+  "body": "Found while implementing #9354. Filed unassigned for triage; **deliberately not fixed there**, because the 2026-08-17 ruling scoped that card to the deferred-DDL flush path and widening it unasked would have re-litigated the ruling's minimality.\n\n## What #9354 changed, and where it stops\n\n#9354 bounds `lock_wait_timeout` to 120s and raises an ADR-0112 refusal (`DATABASE_ERROR` / 500) when the MySQL widening `ALTER TABLE … MODIFY COLUMN` is blocked on a metadata lock — but **only while `flushDeferredSchemaDdl` is running**, i.e. only for operator-initiated `os migrate apply`.\n\nThe same two widening calls are reached from **boot schema-sync** through the same `initObjects` lines (`packages/drivers/driver-sql/src/sql-driver.ts`, the `if (exists) await this.migrateMysqlDatetimeColumns(...)` / `migrateMysqlTimeColumns(...)` pair). On that path the new `runWideningAlters` seam returns early and runs the statements through the pool, unbounded, exactly as before.\n\nSo on boot, against a table another session holds a metadata lock on:\n\n- the ALTER still inherits MySQL's default `lock_wait_timeout` of **31,536,000 seconds (one year)**;\n- nothing prints while it waits — boot appears to hang at schema-sync.\n\nThis is pinned as current, intended behaviour by `sql-driver-deferred-ddl-lock-wait.test.ts` (\"leaves BOOT sync unbounded and swallowing — it is not the flush\"), so it is a recorded gap rather than an unnoticed one.\n\n## Why it is not simply the same fix again\n\nThe swallow on the boot path is **deliberate and documented** — the widening's own doc comment states that correctness never depends on it having run, and that a migration must never take boot down. So the flush's answer (throw a loud refusal) is the wrong answer here: it would convert a lock contention into a failed boot.\n\nThe open question is therefore narrower than \"apply the same fix\":\n\n1. Should boot **bound** the wait at all (turning a year-long silent hang into a bounded wait plus the existing `logger.warn`), while still swallowing? That looks like a strict improvement — the warn already exists and would finally be reachable — but it changes boot timing behaviour.\n2. If so, is 120s the right bound for boot, or should boot be more patient than an operator at a prompt?\n\n## Suggested shape\n\nOption 1 above, with the bound armed unconditionally and the refusal still gated on the flush: the `runWideningAlters` seam #9354 added already separates \"bound the wait\" from \"escape the swallow\", so this is a one-line change to the early-return condition plus a pin.\n\nRelated: #9354 (the ruling and the flush-path implementation) · #9350 (the metadata-lock measurement) · #3942 / #3994 (the widenings themselves).\n"
+}

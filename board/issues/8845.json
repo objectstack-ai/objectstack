@@ -1,0 +1,36 @@
+{
+  "number": 8845,
+  "kind": "issue",
+  "title": "check-durability-degradation-log-level: the read-seam invention rule keys on `return`, so a `catch` that degrades by FALLING THROUGH into an empty accumulator is structurally invisible",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-15T09:00:23Z",
+  "updated_at": "2026-08-18T15:58:58Z",
+  "closed_at": "2026-08-15T16:08:56Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8845",
+  "body": "Filed by the triage seat (whole-repo Routine, fire 08:47Z), split out of **#8833** so that card can be ruled on its own terms. Unassigned. Not a claim.\n\n#8833's 06:36Z comment recommended this be its own card with its own measurement, and its 07:07Z comment repeated that it is worth filing **regardless of how #8833 is ruled**. This is that card. ⛔ It is deliberately not a rider on #8833: the gate extension is what stops the class recurring, and it must not be hostage to a response-contract decision on one endpoint.\n\n## The blind spot\n\n`scripts/check-durability-degradation-log-level.mjs` carries the **read-seam invention rule** (#5186, extended by #6451): a read seam must not invent an unreported answer. `packages/metadata-protocol/src` is in its scan roots, and it is green on `main`.\n\nThe rule classifies a `catch` by what it **returns**. Verified on `origin/main` @ `6b6b606` — the analysis keys on `ts.isReturnStatement` at `:863` and `:893`.\n\nSo a `catch` of this shape is invisible to it:\n\n```\n} catch {\n    // history table unavailable — fall through with empty list\n}\n```\n\nThere is no return statement to classify. The accumulator declared above the `try` stays at its initial `[]`, and the invention happens **later**, when code below reads that never-filled accumulator as though it were a real answer. The seam is neither baselined nor exempted — the rule simply cannot see it.\n\nThe live instance is `diffMetaItem` in `packages/metadata-protocol/src/protocol.ts`, which answers `200` with an empty diff when `sys_metadata_history` is unreadable (#8833). Measured there with a stub engine whose `find` throws; no log line is emitted either, so the outage leaves no trace on any surface.\n\n## Why it is worth a card rather than a note\n\nThis is the **third** recorded instance of the same meta-shape, which is what makes it a pattern rather than a one-off:\n\n- **#5186** — the rule was created because `check:durability-log-level` structurally could not see \"a read seam answers a fault as an empty value\";\n- **#6451** — the rule's own vocabulary could not see \"returns the input unchanged\" (identity pass-through), added as a criterion after measurement;\n- **this card** — the rule cannot see \"returns nothing at all and lets an empty accumulator stand in for an answer\".\n\nEach time, a rule written for exactly this harm was green over a live instance of it. The rule is good; its classification surface keeps turning out to be narrower than the harm.\n\n## Scope — measurement first, extension only if the red set is controllable\n\n⚠️ **The extension is NOT the first step.** `scripts/check-durability-degradation-log-level.mjs`'s own header documents the 收窄先行 discipline that #6451 followed, and that header is the authority on it — read it before writing anything.\n\n1. **Measure.** Across the three scan roots, count `catch` blocks that are (a) empty-bodied or contain no return, **and** (b) sit above a read accumulator that is subsequently read as an answer. Report the set and how many are already-correct.\n2. **Decide from the measurement.** If the set is small and mostly-correct, extend the criterion in the #6451 style. If it is large or noisy, ⛔ **do not extend** — report the false-positive surface and stop. A gate that goes red across dozens of benign seams gets baselined into uselessness, which is worse than the current blind spot.\n3. Only if step 2 says extend: add the criterion, with the new red set enumerated in the PR body.\n\n`premise_still_valid: false` or \"measured, extension not advisable\" with `pr: null` is a **valid and valuable** outcome here. This card is a measurement, not a promised diff.\n\n## Explicitly out of scope\n\n⛔ Do not fix `diffMetaItem` in this card. That seam's disposition is #8833 and is with the maintainer — it has three candidate response contracts and one of them changes a published shape. If the gate extension you build would go red on `diffMetaItem`, that is the correct outcome and should be **reported**, not resolved by editing the seam.\n\n## Related\n\n- **#8833** — the live instance; `needs-user-decision`, `domain:metadata`. Note PR #8841 (for #8798) makes that seam silent for *every* type, where it previously threw for some.\n- **#5186** — the rule's origin card.\n- **#6451** — the prior extension, and the template for how to measure before extending."
+}

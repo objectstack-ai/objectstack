@@ -1,0 +1,32 @@
+{
+  "number": 9329,
+  "kind": "issue",
+  "title": "security explain: the fls layer's three field-mask states are expressible only in the `detail` free-text string — no structured per-field slot on `ExplainLayer`",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T14:04:10Z",
+  "updated_at": "2026-08-17T15:45:37Z",
+  "closed_at": "2026-08-17T15:45:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9329",
+  "body": "## Observation\n\nFound while implementing #9127 (out of its scope — that card's ask was that the layer stop *misreporting*, which it now does).\n\n#9127 gives the `fls` layer three states — hidden / partially masked / readable — but `ExplainLayerSchema` (`packages/spec/src/security/explain.zod.ts`) has no structured slot for per-field results. The layer carries `layer`, `kernelTier`, `verdict`, `detail` (a plain string), `contributors` and the record-grained `record`. So the three states, and the `maskingRule` that produced each partial mask, exist **only** inside the prose of `detail`:\n\n```\n1 field(s) masked from responses: [ssn]; 2 field(s) PARTIALLY masked — the key is\nstill served, its value replaced: [phone (phone), bank (bank_account)]\n```\n\nA consumer that wants to know *which* fields are in *which* state has to string-parse that sentence.\n\n## Why it may matter\n\nADR-0090 D6 names two uses for the engine, and the second one is machine-facing — the module header states it directly: *\"the AI-safety story gets its audit substrate — a publish gate can show the SEMANTIC impact of a grant change instead of a JSON diff.\"* A publish gate diffing two explain reports to show that a grant change moved `phone` from readable to partially masked can only do it by diffing prose today. `contributors` and `record.rules[]` exist precisely so the other layers do not have this problem; the field-mask axis has no equivalent.\n\n## Why this is filed as an observation, not a defect\n\nMeasured on `main` at e4e5c6e3c — nothing is broken and nothing is waiting on it:\n\n- no in-repo consumer reads the `fls` layer's `detail`, or matches on `layer === 'fls'` outside `plugin-security` itself (the only hits are the spec enum, the spec's own test, and an unrelated `id: 'fls'` row in the dogfood authz matrix);\n- `packages/rest`'s explain route passes the whole decision through untouched;\n- no publish gate consuming explain reports exists yet.\n\nSo this is a **speculative capability surface** until something actually needs to read it. Per the startup-focus principle, the honest disposition is to wait for a real consumer and let that consumer's needs shape the field, rather than mint a reporting shape now and guess at it — a declared-but-unread structured field would be its own `declared ≠ enforced` liability on a security surface. Filing it so the reasoning is on record when a consumer does show up.\n\nIf one does, the shape worth considering is a per-field array on the layer (field name, state, and the applicable rule for the partial case), which keeps `detail` as the human rendering rather than the data.\n\nBacklink: #9127 · PR #9328\n"
+}

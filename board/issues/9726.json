@@ -1,0 +1,35 @@
+{
+  "number": 9726,
+  "kind": "issue",
+  "title": "[finding] The spec's three meta-read request schemas omit `organizationId`, which the protocol implementation accepts and honours",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T17:21:36Z",
+  "updated_at": "2026-08-18T21:53:49Z",
+  "closed_at": "2026-08-18T21:53:49Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9726",
+  "body": "Observed while implementing #9454. Pre-existing drift, **not** introduced by that card — recording it rather than widening into `packages/spec`, which belongs to another seat.\n\n## The drift\n\n`packages/spec/src/api/protocol.zod.ts` declares the request shapes for the metadata read verbs. None of the three declares `organizationId`:\n\n- `GetMetaItemsRequestSchema` — `type`, `packageId`\n- `GetMetaItemRequestSchema` — `type`, `name`, `packageId`\n- `GetMetaItemCachedRequestSchema` — `type`, `name`, `cacheRequest`, `locale`\n\nThe implementation in `packages/metadata-protocol/src/protocol.ts` accepts and **honours** an `organizationId` on the first two, via its own inline parameter types:\n\n```\nasync getMetaItems(request: { type: string; packageId?: string; organizationId?: string; previewDrafts?: boolean })\nasync getMetaItem(request: { type: string, name: string, packageId?: string, organizationId?: string, state?: 'active' | 'draft', previewDrafts?: boolean })\n```\n\nThat member is load-bearing: it selects the org partition in the ADR-0005 overlay read order. #9454 adds the same member to `getMetaItemCached`, in the same inline-type style, so all three verbs now diverge from their declared request schema in the same direction.\n\n## Why it is worth a card\n\nThe declared surface understates what the protocol accepts, in the direction that makes the org dimension **invisible to anyone reading the spec**. Consequences already observed:\n\n- every REST call site that threads the scope must cast (`as any`) to get past the declared type, so the compiler cannot check the very member that decides which tenant's row is served;\n- a reader auditing tenancy from `protocol.zod.ts` alone would conclude the metadata read verbs have no organization dimension at all — which is how #9454's read doors went unnoticed.\n\n`getMetaItemLayered` is a related but distinct case: it is not declared on the `MetadataProtocol` interface at all, so its callers reach it through `any` too.\n\n## Not asserted\n\n⛔ No behavioural defect is claimed. The implementation is correct; this is a declared-surface gap, and the wire contract is unchanged. Whether the fix is to declare the member on all three schemas, or to state deliberately that scope is a caller-side concern outside the request shape, is the spec seat's call.\n\nRepo: `objectstack`. Files: `packages/spec/src/api/protocol.zod.ts`, `packages/metadata-protocol/src/protocol.ts`.\n\nRelated: #9454.\n"
+}

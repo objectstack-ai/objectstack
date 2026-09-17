@@ -1,0 +1,34 @@
+{
+  "number": 9608,
+  "kind": "pull_request",
+  "title": "docs(drivers): document the MySQL migration metadata-lock bound and its two answers",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T12:56:49Z",
+  "updated_at": "2026-08-18T14:03:46Z",
+  "closed_at": "2026-08-18T14:03:44Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-18T14:03:44Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9608",
+  "body": "Fixes #9543\n\n`content/docs/data-modeling/drivers.mdx` documented the two connect-timeout defaults `SqlDriver` supplies, but not the third driver-supplied bound of the same genre: `lock_wait_timeout = 120` on the session running a widening `ALTER`, replacing MySQL's inherited default of 31,536,000 s (one year). Adds `### The migration metadata-lock bound` as the last subsection of the MySQL section.\n\n## Two behaviours, one bound — both documented\n\nThe card as originally filed described one behaviour (the `os migrate apply` refusal). Its comment thread records that #9542 / PR #9565 (`8bbf459`) later armed the same bound on boot schema sync with a deliberately different answer, so the page had to cover both. Re-derived from `packages/drivers/driver-sql/src/sql-driver.ts` on `main`, not from the card:\n\n| Path | Behaviour | Verified at |\n|---|---|---|\n| `os migrate apply` (deferred-DDL flush) | Refuses — `DATABASE_ERROR` / 500, exit 1 | `deferredDdlLockWaitError` sets `code`/`status`; the refusal is gated at `this.flushingDeferredDdl && isMysqlLockWaitTimeout(err)` |\n| Boot schema sync | Warns and carries on | The same catch rethrows off the flush; `migrateMysqlDatetimeColumns` / `migrateMysqlTimeColumns` log `logger.warn` and swallow |\n\nThe boot row gets the emphasis, because its operator-visible consequence is counterintuitive: the widening did not happen and the platform is running anyway. The page states the exact warning text to match on, why matching the server's own lock-wait message instead is wrong (MySQL and MariaDB word it differently and both translate it), and what an un-widened column actually costs.\n\nThe refusal message, the two warning texts, the 120 s value, the one-year default, and `DATABASE_ERROR` / 500 are all quoted from the code rather than from the card.\n\n## Premise checks — one card claim did not survive\n\nThe card and its comments place the section in the MySQL section because it \"already covers the `TIMESTAMP` to `DATETIME(3)` widening this bound protects\". **That is not true of `main`**: `drivers.mdx` had zero occurrences of `datetime`, `timestamp`, `widen`, `2038`, `lock_wait` or `metadata lock`, case-insensitively, with the control query (`### Connect timeouts`, line 316) positive — a measurement, not a dead grep. The widening's type rationale lives in `content/docs/protocol/objectql/types.mdx`. The placement verdict still holds, but the new section therefore has to introduce the widening itself before it can bound it, and cross-links to the type system page rather than assuming prior context.\n\nTwo further checks, both negative — no second unreported error:\n\n- The existing `### Connect timeouts` text is still accurate. `DEFAULT_CONNECT_TIMEOUT_MS = 10_000` and `DEFAULT_CREATE_TIMEOUT_MS = 15_000` are unchanged; the lock bound is a session variable set at ALTER time, not a Knex config default, so \"passing it through unchanged except for two connect-timeout defaults\" stays correct.\n- A *successful* migration is unchanged. The bound adds no log line on the success path — the `widened MySQL TIMESTAMP to DATETIME(3)` info line predates it — and the session's prior `lock_wait_timeout` is restored, so the bound never reaches unrelated runtime queries.\n\n## Placement\n\nNot a row in `### Connect timeouts` (PostgreSQL section, TCP/handshake bound) and not a row in `### MySQL dialect caveats` (that table is explicitly three *dialect* limits; this is driver-supplied behaviour). It sits as the final `###` subsection of `## MySQL`, before `## MongoDB`.\n\n## Not done here\n\n`packages/drivers/driver-sql/src/sql-driver.ts` is untouched — this documents what it does. `content/docs/releases/` is untouched, per the on-card prohibition and CLAUDE.md.\n\n## Gates\n\nAll run after the final commit, at `4c6680485`. Derived from the changed path with `node scripts/pm/dispatch-gates.mjs content/docs/data-modeling/drivers.mdx` (7 families), plus `check:nul-bytes` for any edit:\n\n```text\ncheck-nul-bytes: OK (scanned 6170 text file(s); no raw ASCII control bytes)\ncheck-role-word: OK (43 baselined file(s), no new occurrences)\ncheck-docs-redirects: OK (92 entries, 98 chain probe(s))\ncheck-docs-audit-scope: OK (179 hand-written doc(s); releases/ read-only)\nspec check:liveness: OK    spec check:empty-state: OK (all classified)\nspec check:strictness-ledger: OK    spec check:variant-docs: OK (18 unions)\n```\n\n`drivers.mdx` carries zero occurrences of the ratcheted word `check:role-word` guards, so it is not baselined and any use would have been a new-file failure — the new prose deliberately avoids it. The file was also compiled through `@mdx-js/mdx` directly (`MDX COMPILE OK`), since a stray JSX-looking construct in hand-written MDX only fails at docs build time.\n\nDocs-only, so no changeset — `skip-changeset` per the repo's precedent for `content/docs`-only PRs.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01XqDQYVU5smx29ts9pAErja)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XqDQYVU5smx29ts9pAErja)_"
+}

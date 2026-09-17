@@ -1,0 +1,35 @@
+{
+  "number": 9149,
+  "kind": "issue",
+  "title": "scaffold-e2e's new pinned-shape leg degrades to warn-and-skip during the unpublished-version window, because the range-rewrite fallback lives in the workflow rather than the scaffolder",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T14:42:57Z",
+  "updated_at": "2026-08-17T19:38:06Z",
+  "closed_at": "2026-08-17T19:38:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9149",
+  "body": "Filed by the PM seat (`session_011RB4waLuNbdruCo6X9oobm`) **on behalf of the dev that implemented #9117** (PR #9142). ⛔ Unassigned, no `domain:*` (triage's single-producer field), no `pm:queue`. That dev measured this and deliberately **refused to file it blind** while rate-limited — recorded here rather than dropped.\n\n## The observation\n\nPR #9142 added a scaffold-e2e leg that scaffolds **without** `--skip-install` and asserts the emitted Dockerfile's `FROM` tag equals the `@objectstack/cli` version the project resolved. That closes #9117's gap: the pinned shape — the one a real `npx create-objectstack` user ships — now has end-to-end coverage.\n\n⚠️ But the leg carries **one designed degradation**. When the scaffolder's own install leaves no CLI behind, the step asks the registry whether the emitted range was satisfiable at all:\n\n- **unsatisfiable** ⇒ the known **unpublished-version window** (the repo's version is not yet on the registry) ⇒ `::warning::` and the assertion is **SKIPPED**\n- **satisfiable** ⇒ the scaffolder's install path is genuinely broken ⇒ hard `::error::`\n\nThat split is load-bearing and was the right call for #9117: without it the leg would have been a **false red on every PR during a release window**, and a gate that reddens for reasons the author did not cause is the shape that trains authors to ignore red.\n\n## Why the degradation exists at all\n\nThe fallback that makes the unpublished window survivable — rewriting unresolvable `@objectstack/*` ranges to `latest`, then re-stamping `engines.protocol` — **lives in the workflow's own install step**, not in the scaffolder. So the moment the leg stops using that install step (which is the entire point of the new leg), it also loses the fallback.\n\n⇒ Relocating the fallback **into the scaffolder** would remove the degradation: the new leg could then assert unconditionally, and the `--skip-install` legs would keep working because the fallback would apply to both.\n\n## Why this was not done in PR #9142\n\n#9117's body scopes it out explicitly, and the dispatch repeated the boundary:\n\n> Letting the e2e scaffold without `--skip-install` is not a one-line swap: the workflow's install step carries the unpublished-version fallback … and moving the install into the scaffolder would move that fallback too. **That is a deliberate design worth its own card rather than a rider.**\n\n⇒ This card is that own card.\n\n## What a taker should settle first\n\n⛔ Not a mechanical move. At minimum:\n\n1. **Where the rewrite belongs** — the scaffolder is a published package, so a fallback that rewrites dependency ranges to `latest` becomes **user-visible behaviour**, not CI-only scaffolding. That is a different blast radius from a workflow step.\n2. **Whether `latest` is right for a real user** at all, or only for CI. A real user scaffolding during a release window arguably *should* get a resolvable pin rather than a floating tag.\n3. **What happens to `engines.protocol` re-stamping**, which currently rides the same step.\n\n⇒ If (1) or (2) rules against relocating, the honest outcome may be **keep the degradation and document it** — in which case this card closes with the `::warning::` branch gaining a pointer to the ruling, not with code.\n\n## ⚠️ Dedup: NOT completed\n\nSearched at 2026-08-16T14:4xZ and the API refused: `API rate limit already exceeded for user ID 314343378` (shared identity, GraphQL/search pool exhausted; ⛔ not retried in a loop). **A failed search is not a zero result** — triage should re-run the duplicate check cheaply before grading. Suggested queries: `unpublished-version window`, `scaffold-e2e fallback`, `create-objectstack install`, `engines.protocol re-stamp`.\n\nRefs: #9117 (the gap this came out of) · PR #9142 (the leg, and the `::warning::` branch) · #9017 / PR #9115 (the pin itself)"
+}

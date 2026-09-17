@@ -1,0 +1,36 @@
+{
+  "number": 8134,
+  "kind": "issue",
+  "title": "#7804's `GlobalFilterSchema.object` is unreachable in the Studio designer, and no console pin bump can fix it — the console vendors the PUBLISHED `@objectstack/spec`, which the key postdates",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T17:29:01Z",
+  "updated_at": "2026-08-18T15:17:55Z",
+  "closed_at": "2026-08-18T15:17:55Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8134",
+  "body": "Blocked-by: objectstack-ai/objectui#4854 (the `apps/console/vite.config.ts` hook the ruled mechanism needs — measured absent repo-wide and at the pinned SHA, 2026-08-16)\n\nFiling unassigned, as the measured residue of #8051. #8051 asked for a console pin bump and a re-check of two symptoms; the bump landed (PR for `claude/issue-8051-console-pin-bump`) and fixed symptom 1. **Symptom 2 survives the bump**, and the reason is not pin staleness — so it needs its own card rather than another bump.\n\n## What was measured, after the pin moved\n\nPin moved `6314e87f2d49` → `6d77acfe3125` (objectui `main`, 123 commits). Console rebuilt via `pnpm objectui:refresh`; `pnpm check:console-sha` and `pnpm check:objectui-pin-fresh` both green.\n\n`GlobalFilterSchema` in the **newly built** `packages/console/dist/assets/vendor-objectstack-DneBps14.js` still declares:\n\n```\nname, field, label, type, options, optionsFrom, defaultValue, scope, targetWidgets\n```\n\n`object` is absent from exactly the slot #7804 put it in (between `field` and `label`), and #7804's own `describe()` text — `translation-bundle entry resolves this filter` — matches **0 times** in the bundle. So a dashboard carrying `globalFilters[].object` still trips the designer's *\"Unrecognized key(s) on this global filter: `object`\"* banner, and auto-save still never fires while it stands.\n\nNote `optionsFrom.object` **does** appear in the bundle and is a different key — a bare grep for `object` false-positives here.\n\n## Why a pin bump cannot fix it\n\nThe chain is a publish-ordering dependency, not a staleness one:\n\n1. objectui pins `\"@objectstack/spec\": \"^17.0.0-rc.6\"` at both the old and the new pin, and its lockfile resolves it to exactly `17.0.0-rc.6`. `scripts/build-console.sh` runs `pnpm install --frozen-lockfile`, so it does not float.\n2. `@objectstack/spec@17.0.0-rc.6` was **published to npm 2026-08-10T13:09:42Z**. #7804's `object` key landed in this repo at `7dc10673` on **2026-08-12T11:36:21Z** — two days later. Verified against the tarball actually installed into the build tree: `.cache/objectui-6d77acfe3125/node_modules/@objectstack/spec` is `17.0.0-rc.6` and contains 0 matches for the key's `describe()` text.\n3. `17.0.0-rc.6` is the **highest version on npm**, and this repo's `packages/spec/package.json` is *also* `17.0.0-rc.6` — the workspace has moved well past the published tarball under an unchanged version string, so even the `^17.0.0-rc.6` range cannot reach the new content.\n4. `build-console.sh` injects only `OBJECTSTACK_CLIENT_DIST` (`packages/client`) into the objectui build. There is no equivalent injection for `packages/spec`, so the console's vendored spec always comes from objectui's lockfile.\n\nSo the key becomes authorable in the UI only after: a `@objectstack/spec` release publishes it, **then** objectui updates its lockfile to that version, **then** the console pin moves again. Three ordered steps across two repos, none of which #8051 could perform.\n\n## Why this is worth a card rather than a note\n\nThis is a general shape, not a one-key accident: **any** authorable key added to `packages/spec` after the last spec publish is accepted and round-tripped by the server while the Studio designer rejects it as unrecognized — and the framework-side card closes green, because `packages/spec`'s own pins pass. #7804 is simply the instance QA hit. The same trap will fire for the next such key with no signal, since `check:objectui-pin-fresh` answers *\"is the pin current\"* and `check:console-sha` answers *\"does dist match the pin\"*; neither asks whether the vendored spec carries the surface the framework now declares.\n\nPossible directions, not a recommendation — the trade-offs here belong to the spec/devx owners:\n\n- Mirror the existing client injection: give `build-console.sh` an `OBJECTSTACK_SPEC_DIST` alias so the console bundles **this** tree's spec, the way it already bundles this tree's client (the client injection exists for the same class of bug — see its rationale block, which cites shipping 11.5.0 against client 11.2.0).\n- Or leave the vendoring alone and add a gate that compares the console bundle's authorable-key surface against `packages/spec`, so the skew is loud at build time instead of found by a retest sweep.\n- Or accept the skew as the cost of frozen vendoring and document the ordering so a spec PR adding an authorable key states when it becomes UI-reachable.\n\nRefs: #8051 (the bump that measured this), #7804 (the key), `scripts/build-console.sh` (the client-injection precedent).\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

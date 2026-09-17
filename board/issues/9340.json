@@ -1,0 +1,35 @@
+{
+  "number": 9340,
+  "kind": "issue",
+  "title": "spec: ListViewSchema(strictObject)没有 map 可视化配置块 —— map 列表视图的 titleField/locationField/相机整体不可声明,showcase 全部 marker 标题为 undefined",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-17T14:22:46Z",
+  "updated_at": "2026-08-17T20:14:13Z",
+  "closed_at": "2026-08-17T20:14:13Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9340",
+  "body": "Part of objectstack-ai/objectui#5001(跨仓转卡:spec 契约面归 objectstack 队列,objectui 侧原卡随本卡关闭,取证全文见原卡)。\n\n## 事实(objectui#4941 实施中实测,PR objectui#5000)\n\n- `ListViewSchema` 是 `strictObject`,按可视化类型声明了 kanban/calendar/gantt/gallery/timeline/chart/tree 七个配置块,**没有 map 块** —— map 列表视图的字段映射(`titleField`/`locationField`)与相机(`zoom`/`center`)在平台契约层整体不可声明;strictObject 意味着作者写了也会被拒。\n- showcase 自己的注释已记载这件事:「map needs a spec MapConfigSchema the ListViewSchema doesn't yet have」。\n- **今天的用户可见后果**:showcase `task` 的 map 视图因无法声明 `titleField` 而落到默认 `'name'`,而该对象只有 `title` —— 所有 marker 标题 undefined(popup / 移动端卡片空白、搜索框匹配不到)。\n- 渲染端(objectui `plugin-map`)在插件层有文档化的 `zoom`/`center` 声明位,objectui#5000 已按「已声明相机胜出、无声明 fitBounds」收口相机初始化 —— 修法方向按原卡结论在 spec 侧补 `MapConfigSchema`,不在渲染端兜底。\n\n## Done when(建议,细节由实施者按 spec 惯例定)\n\n- `ListViewSchema` 获得 map 可视化配置块(与其余七块同构),至少覆盖 `titleField`/`locationField`/`zoom`/`center`;\n- objectui 侧消费跟进另立卡(spec 落地后由 objectui 车道按 pin 跟进,`Blocked-by` 本卡)。"
+}

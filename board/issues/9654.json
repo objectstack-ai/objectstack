@@ -1,0 +1,32 @@
+{
+  "number": 9654,
+  "kind": "issue",
+  "title": "finding: ObjectStack's /admin/ mounts shape-check the request body BEFORE authenticating, so an anonymous caller can probe required-parameter shapes",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T14:22:27Z",
+  "updated_at": "2026-08-18T17:17:43Z",
+  "closed_at": "2026-08-18T17:17:43Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9654",
+  "body": "Observed 2026-08-18 while building the derived `/admin/` route-walk for #9482. Filed unassigned, `finding` — low severity, and recorded mainly because it is what makes a naive route-walking security test vacuous.\n\n## What was measured\n\n`/admin/unlock-user` is representative (`auth-plugin.ts`), and `/admin/oauth2/toggle-disabled` plus the `/admin/sso/*` bridges follow the same order:\n\n```\n1. parse body\n2. if (!userId) return 400 INVALID_REQUEST      <-- before any identity is established\n3. session = await authApi.getSession(...)\n4. if (!session) return 401 UNAUTHENTICATED\n5. if (!isAdmin) return 403 PERMISSION_DENIED\n```\n\nSo an **anonymous** POST with an empty body draws:\n\n```\nPOST /admin/unlock-user  {}  ->  400 {\"code\":\"INVALID_REQUEST\",\"message\":\"userId is required\"}\nPOST /admin/sso/register {}  ->  400 {\"code\":\"INVALID_REQUEST\",\"message\":\"Missing required field(s): providerId, issuer, domain, clientId, clientSecret\"}\n```\n\nbetter-auth's own admin endpoints do the same, one layer down — an empty-body `/admin/ban-user` answers `400 VALIDATION_ERROR [body.userId]` to anonymous, member and platform admin alike.\n\n## Why it matters, and why it is small\n\nThe disclosure is a **parameter-shape oracle to an unauthenticated caller**: field names and which are required. That is close to free information for a documented API, which is why this is filed as a finding rather than a defect. Nothing is read, written or leaked beyond the schema shape, and with a valid payload the gate still refuses correctly (`403 PERMISSION_DENIED` on the ObjectStack mounts).\n\nThe larger practical consequence is for **testing**, and it is the reason this is written down at all: a route-walking security probe built on empty bodies never reaches the authorization check on any of these routes. It observes a 400 for the member, a 400 for the admin, asserts \"non-2xx\", and goes green while proving nothing about the gate. #9482's pin fires every route with a payload valid enough to reach authorization for exactly this reason, and its header records the measurement.\n\nIf it is ever addressed, the fix is an ordering change — authenticate, then authorize, then validate — which is a behaviour change on ~9 routes and wants its own decision rather than a rider on a test card."
+}

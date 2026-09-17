@@ -1,0 +1,36 @@
+{
+  "number": 9516,
+  "kind": "issue",
+  "title": "audit: the tenant fallback in `writeAudit` reads `session.tenantId`, a key removed in v11 — the guard against NULL-tenant audit rows can never fire",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T06:12:54Z",
+  "updated_at": "2026-08-18T16:20:30Z",
+  "closed_at": "2026-08-18T16:19:30Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9516",
+  "body": "Found while implementing #8992 (record-view auditing) — reading `audit-writers.ts` to match its tenant-stamping precedence on the new `read` row.\n\n## The defect\n\n`packages/plugins/plugin-audit/src/audit-writers.ts`, in `writeAudit`:\n\n```ts\nconst tenantId: string | undefined = recordOrgId ?? sess.tenantId;\n```\n\n`sess` is `HookContext.session`, and **that object has no `tenantId` key**. The engine builds it in `ObjectQL.buildSession` (`packages/objectql/src/engine.ts`) as an object literal with a fixed key set — `userId`, `organizationId`, `positions`, `accessToken`, and the conditional `isSystem` / `actor` / `skipTriggers` / `skipAutomations` / `preserveAudit`. There is no spread of the execution context, so no other key can arrive. The blessed name is `organizationId`, and `buildSession`'s own comment records the removal:\n\n> The deprecated `session.tenantId` alias (#3280) was removed here in v11 (#3290) — the driver-layer `execCtx.tenantId` knob is a separate axis and stays.\n\n`HookContext`'s schema agrees (`packages/spec/src/data/hook.zod.ts`): it declares `organizationId` and documents the alias as removed in the v11 major.\n\nSo the right-hand arm is dead. The expression is exactly `recordOrgId`.\n\n## Why the dead arm matters — it is a guard, not a nicety\n\nThe block's own comment states the consequence it exists to prevent:\n\n> Audit rows must never be written with `organization_id = NULL`, or the SecurityPlugin's RLS predicate hides them forever and the audit log UI reads permanently empty while writes succeed.\n\nand names the cases the session arm was written to cover:\n\n1. objects with no organization column at all (single-tenant stacks, and ADR-0066 platform-global objects — `resolveRecordOrganizationField` returns null for both);\n2. a row whose organization column is NULL or empty.\n\nOn those, `recordOrgId` is `undefined`, the dead arm contributes nothing, and the row is stamped `tenant_id: null` / `organization_id: null` — the permanently-invisible ledger row that #8245 and #8247 are about, reached by a different route. Writes keep succeeding, so nothing anywhere reports it.\n\nThere is a second occurrence in the same file, in `writeCommentMentions`:\n\n```ts\nconst tenantId: string | null = sess.tenantId ?? row.organization_id ?? null;\n```\n\nSame dead first arm. Lower stakes — it feeds `resolveWriteLocale`, so the symptom is a mention notification falling back to the workspace-default locale lookup with no tenant scope rather than an invisible row — but it is the same removed key.\n\n## Why it survived\n\nThe comment block above the first site is unusually thorough about *precedence* and even carries a directive written on the assumption that the arm is live:\n\n> ⛔ Do not flip this back to `sess.tenantId ?? recordOrgId`.\n\n#8707's ruling changed the ORDER of the two arms and the reasoning is recorded in full — but reordering two expressions does not evaluate either of them, so an arm that had already stopped resolving stayed invisible through a careful review of exactly this code. The #8011 shape: a declaration sitting next to a mechanism, with nothing enforcing the agreement.\n\nNothing goes red today. Every `sys_audit_log` field is `readonly: true` and `validateRecord` skips readonly fields, so a null tenant is accepted silently; and the write path is wrapped in a swallow-and-report, so even a refusal would not surface as a test failure.\n\n## Repro\n\n```\ngit grep -n \"sess.tenantId\" -- packages/plugins/plugin-audit/src/audit-writers.ts\ngit grep -n \"tenantId\" -- packages/objectql/src/engine.ts | grep buildSession -A 40\n```\n\nThen read `buildSession`'s object literal and confirm no `tenantId` key is emitted.\n\n## Suggested fix\n\nRead `sess.organizationId` at both sites, keeping #8707's precedence (the record's own organization still wins). The stronger half is a detector, since this class recurs: a pin that asserts an audit row written on an object with **no** organization column, under a session that HAS an active organization, lands with a non-null `organization_id`. That assertion fails today and is what would have caught the alias removal.\n\nWorth deciding at triage whether the same removed alias is read anywhere else — `git grep -rn \"session.tenantId\\|sess.tenantId\"` across the repo — since #3290 removed it repo-wide and any other reader would be dead the same way.\n\n## Not fixed in #8992's PR\n\nDifferent defect class (write-side tenant stamping vs. the read seam), and the correct form needs a decision about the detector, so it does not meet the in-place bar. #8992's own read-audit writer reads `session.organizationId` and is unaffected.\n"
+}

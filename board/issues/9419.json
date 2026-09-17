@@ -1,0 +1,35 @@
+{
+  "number": 9419,
+  "kind": "pull_request",
+  "title": "fix(automation): the resume body's outer envelope becomes a closed set — unknown top-level keys are refused",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T00:13:47Z",
+  "updated_at": "2026-08-18T00:45:29Z",
+  "closed_at": "2026-08-18T00:45:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-18T00:45:28Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9419",
+  "body": "Fixes #8796\n\nMaintainer ruling 2026-08-15 (Option A, verbatim on the issue: 「接受你的所有建议。」): the resume route's request body becomes a **closed set** — exactly `inputs` / `variables` / `output` / `branchLabel`. An unknown top-level key is refused with a located `400` naming the offending key(s) **and** the accepted set.\n\n## What was measured (premise re-verified on `bc6434b5b`, post-#8684)\n\n`POST .../runs/:runId/resume` with `{\"nodeId\":\"ask\",\"values\":{...}}` — no key of which the route reads — answered HTTP 200 `success:true` with the screen submission treated as **empty**: the run completed and the submitted value never reached the flow. Re-measured by reverse verification from the committed fix: with `packages/runtime/src/domains/automation.ts` restored to `origin/main`, all 5 refusal pins in the new test file go red in exactly that shape (engine called with an empty signal, 200), while all 5 preservation pins stay green. The premise held after #8684 landed; the accepted set is still exactly the four keys (walked every body read in the resume arm — nothing else is consumed).\n\n## The refusal's code — deliberately NOT `FLOW_FAILED`\n\nThe refusal is thrown as the duck-typed validation failure both dispatcher error exits map to **`400` + `error.code: 'VALIDATION_FAILED'` + `details.fields[]`** (#3918; `dispatcher-validation-error.test.ts` pins that mapping end-to-end for both exits) — the same wire shape the toggle arm's closed body set in this same file already answers, and a code the ADR-0112 ledger already registers for `@objectstack/runtime`. Reasoning, per the objectui contract recorded on #8684 (PR objectui#4899): the console treats 400 `FLOW_FAILED` as **terminal** — the engine consumed the suspension and the run actually ran. This refusal is the opposite case: the request **never reaches the engine**, the suspension is untouched, and the caller can legitimately retry with a corrected body. It therefore sits with `INVALID_SIGNAL` / `INVALID_SCREEN_INPUT` on the retryable side, and reusing `FLOW_FAILED` would have told the console a live run is dead. Each `details.fields[]` entry carries the ADR-0114 catalog code `unknown_field`.\n\n## Seam and ordering\n\n- The check runs **before** `automationService.resume()` — #3899's \"nothing reaches the service until the body is legal\", the same ordering the toggle arm enforces. Consequence: a body that is both malformed and unauthorized answers the envelope `400`; every engine verdict (`PERMISSION_DENIED`, `INVALID_SIGNAL`, `INVALID_SCREEN_INPUT`, `RUN_NOT_FOUND`, ...) is judged only on a legal envelope. That is the contract the closed-parameter-set policy implies: the refusal's whole point is that the service was never called.\n- #3801's field-by-field signal assembly is untouched — the refusal **wraps** it; there is still no body spread, so the service-authority marker stays unforgeable.\n- #8684's status/code mapping (`FLOW_FAILED` arm, `RUN_NOT_FOUND` stale-suspension arm) is untouched, and the trigger routes (#9378) are untouched.\n- Distinct from #4477's inner-bag validation by design: the inner bag is judged in the **engine** against the suspended node's declared fields (a per-suspension authority); this outer check is a static transport contract. Different authorities, different codes — kept distinct.\n\n## Wire shape, pinned\n\nNew test file `packages/runtime/src/domains/automation-resume-envelope.test.ts` (10 tests), following the `automation-body-validation.test.ts` precedent:\n\n- **Refusal pins** — the measured GA body, a single guessed `values`, a half-wrong body (valid `inputs` beside an unknown sibling — Option B was explicitly declined), and a non-empty array body: each names every offending key and the full accepted set, carries `unknown_field` field entries, is `VALIDATION_FAILED` (asserted ≠ `FLOW_FAILED`), and **the service is never called**.\n- **Preservation pins** — all four accepted keys forwarded byte-for-byte; the `variables` alias; empty object / `undefined` / `null` bodies still resume with an empty signal (a legal empty submission for a screen whose declared fields are all optional).\n- **Escape pin** — the refusal escapes `dispatch()` as the exact shape both HTTP error exits recognise (`validationFailureDetails`), with the service never called.\n\nKnown residue, filed rather than fixed (out of the ruling's scope — it covers unknown keys): a type-mismatched **value** on an accepted key is still silently dropped; recorded as #9416, which remains open and is not addressed here.\n\n## Verification (local, at head `ef513cf07`, after merging `main` @ `40d5b2d4c`)\n\n- `@objectstack/runtime` full suite: **166 files / 2477 tests passed** — including every #8684 pin (none moved) and the 10 new pins.\n- `pnpm --filter @objectstack/runtime typecheck` (`tsc --noEmit`): clean.\n- Reverse verification from the committed state: source restored to `origin/main` → 5 refusal pins red / 5 preservation pins green → restored; direction as expected (refusals turned red because the lenient envelope accepted the bodies).\n- Gates re-derived from the real diff (`scripts/pm/dispatch-gates.mjs`) and run at head: `check:cross-package-test-inputs`, `check:route-envelope`, `check:changeset-gate-self-tests`, `check:objectui-changeset`, `check-adr-0087-registration`, `check-changeset-no-major`, `check-empty-changeset`, `docs-audit/check-affected-docs`, `check:nul-bytes`, plus the convention-triggered test family the derivation added over the dispatch list: `check:query-options-erasure`, `check:type-check-coverage`, `check:type-check-debt` (workspace closure built first), `check:engine-double-contract`, `check:where-matcher` — all green.\n\n## Changeset\n\n**BREAKING** framing, shipped as `minor` per the launch-window lockstep rule (`check-changeset-no-major` prescribes it; every publishable package is one fixed group). ADR-0087 disposition answered in writing: `not-required (no-migration-prescription)` — no metadata surface changes shape; the only channel that reaches raw-HTTP callers is the changeset itself.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012WKSnqAaoqtW3QX7SSf1Vk)_"
+}

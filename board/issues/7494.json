@@ -1,0 +1,30 @@
+{
+  "number": 7494,
+  "kind": "issue",
+  "title": "updateViewConfig stores \"per-view personal config\" as ONE org-wide metadata item — sort/hiddenFields/columnState/rowHeight written by any user apply to every user of the view",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T02:52:56Z",
+  "updated_at": "2026-08-18T19:14:36Z",
+  "closed_at": "2026-08-18T19:14:36Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7494",
+  "body": "Cross-repo relay from the objectui whole-repo seat (session `session_017Qqyix2QcnpUC9XeYVDzx3`), carrying the platform-side half of objectui#4155 per the lane split recorded there. Filed unassigned for the objectstack lane's triage; the objectui seat does not land platform code.\n\n## Evidence (measured during objectui#4155's diagnosis, read-only)\n\n`packages/data-objectstack/src/index.ts:2818` (objectui repo, adapter layer) — `updateViewConfig` writes `this.client.meta.saveItem('view', viewId, merged)`: **one org-wide metadata item keyed by view id, with no per-user scoping anywhere in the call**. Meanwhile the console consumer (`ObjectView.tsx:~1456`) describes the keys it hydrates from that item as \"persisted user preferences … (Airtable-style per-view personal config)\" — which this storage does not deliver.\n\n## Why this survives objectui#4155's fix\n\nobjectui PR #4214 removed the DESTRUCTIVE key from that path: the list filter panel no longer persists a view overlay at all, which closes the reported symptom (a normal user's panel interaction silently replacing the source-declared `filter` for every account). But the toolbar still persists **sort, hiddenFields, columnState, rowHeight** by design — each written org-wide and applied to every user of the view. The client has nowhere to put a per-user overlay: the platform's view metadata offers no per-user scope.\n\nDownstream field reports on objectui#4155 (S06 acceptance run) additionally observed overlays surviving logout/re-login and applying across accounts — consistent with this storage shape.\n\n## Related observation (same path, decide whether it belongs here or its own card)\n\n`persistViewPatch` writes `{...baseViewDef, ...patch}`, so an overlay written by a mere sort/columnState change copies the view's **current effective filter** into the overlay verbatim. Not a session-state leak (verified: the panel's draft never enters `viewDef`), but it pins the filter as-of-write: a later change to the SOURCE view's filter does not reach users whose overlay carries the frozen copy.\n\n## The decision that is the platform's to make\n\nEither the view-overlay store grows a per-user scope (delivering the \"personal config\" the console promises), or the contract is explicitly org-wide and the console's prose + UX must stop presenting these as personal preferences (and arguably gate them behind a permission, since today any user with the panel can restyle the view for everyone). objectui will follow whichever contract is ruled — the seat asks only that the ruling be recorded on this card so the consumer side can cite it.\n\nRefs: objectui#4155 (diagnosis + fix of the destructive half, PR objectui#4214), objectui#4211 (adjacent UI-layer set-default gap, same surface family)."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 9593,
+  "kind": "issue",
+  "title": "security(service-datasource): datasource-admin routes require a platform-settings capability beyond authentication",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T12:29:56Z",
+  "updated_at": "2026-08-19T07:57:59Z",
+  "closed_at": "2026-08-19T07:57:59Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9593",
+  "body": "Blocked-by: #9391\n\nCommissioned by maintainer ruling (2026-08-18, live PM chat with the triage seat, session `session_01EUZUjvnLsqwHVkXkTv8TKQ`; verbatim: 「其他接受你的建议」, applying the recommendation on #9391's flagged judgement call). This is the capability half #9391's own body deliberately split out so it would not block the p0 authentication guard.\n\n## Scope\n\nOnce #9391's authentication guard lands, tighten the datasource-admin HTTP family (`/api/v1/datasources…` — list, read, driver catalog, remote-table introspection, create, patch, remove) from \"any authenticated user\" to a platform-configuration capability (`manage_platform_settings` or the nearest existing capability the sibling Setup-admin families already use — the implementer measures which capability the adjacent admin families gate on and matches it rather than minting a new one). Creating, patching, deleting and introspecting datasources are platform-configuration actions; per-tenant users have no business on them in a multi-user deployment.\n\nThe write-vs-read split (whether read-only datasource listing stays at a lower capability) is the implementer's measurement against the sibling families' precedent — match, don't invent.\n\n## Pinning\n\nExtend #9391's both-sides-on-one-boot test: entitled caller succeeds, authenticated-but-unentitled caller is refused with the standard capability refusal, anonymous stays refused. ⛔ Same disclosure discipline as #9391: no reproduction recipes in this card, the PR body, or commit messages.\n\n## Sequencing (why blocked)\n\n#9391's guard is release-blocking (`target:v17`) and must not wait on this; this card re-verifies its own premise against the landed guard's shape before dispatch.\n\n## Refs\n\n#9391 (the p0 authentication half and its \"judgement call\" paragraph) · #7744 (route-ledger history)."
+}

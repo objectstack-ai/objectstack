@@ -1,0 +1,35 @@
+{
+  "number": 9638,
+  "kind": "issue",
+  "title": "`auditMetaItem`'s unqualified `catch` reports ANY failed audit read as `{events: []}` — the compliance trail says \"no entries\" when the read broke",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "auto-adjudicated",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T14:05:13Z",
+  "updated_at": "2026-08-19T00:41:44Z",
+  "closed_at": "2026-08-19T00:41:44Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9638",
+  "body": "Found while implementing #9426 (PR #9637), by the Zone-2 check that card asked for: *confirm the missing-capability path and the unprovisioned-table path are genuinely separate.* They are — and measuring that is what exposed this, one layer down. Filed rather than ridden on that PR: #9426's declared file surface is `packages/rest/src/rest-server.ts`, and this lands in a different package.\n\n## The measurement\n\n`packages/metadata-protocol/src/protocol.ts`, closing the read inside `ObjectStackProtocolImplementation.auditMetaItem` (locate by text, not line number — this file moves):\n\n```ts\n} catch (err: any) {\n    // Table not provisioned (legacy env) or driver doesn't\n    // expose `find` — return empty rather than 500ing the tab.\n    console.warn(\n        `[Protocol] auditMetaItem read failed for ${request.type}/${request.name}: ${err?.message ?? err}`,\n    );\n    return { events: [] };\n}\n```\n\nThe comment names **two** benign causes. The `catch` is **unqualified** and takes every other one with them: a driver connection failure, a permission error, a malformed row, a query bug, a timeout. All of them are reported to the caller as the well-formed statement **\"this item has no audit entries\"**.\n\nADR-0110 D3 — a miss and a fault are different facts. This is the same collapse #9426 fixed at the route, but at the layer below it, and the harm shape is worse in one respect: at the route the condition was a *static* capability gap, whereas here it is a *transient* read failure, so the same item can report a full trail one minute and a clean one the next, with nothing on the wire distinguishing them.\n\n⚠️ Consequence, same as #9426's: this is the **compliance** surface. `auditMetaItem` is the read behind `GET /api/v1/meta/:type/:name/audit`, which exists so Studio's 审计日志 / Audit log tab can show \"who tried what and whether a lock blocked it\". An empty answer reads as *nobody touched this item*. A `console.warn` on the server is not an answer to the reader.\n\n## Control — this is a discriminating finding, not a blanket claim about `catch`\n\nThe same defect class has been filed and closed repeatedly in this package, which is what makes an unswept survivor worth naming rather than assuming:\n\n- #5532 — `getMetaItem`'s overlay read swallowed \"sys_metadata unreachable\" into \"item does not exist\" (closed)\n- #5980 — `MetadataProtocol.listCommits` answered an unreadable commit store with `[]` (closed)\n- #8833 — `diffMetaItem` answered 200 with an empty diff when `sys_metadata_history` was unreadable (closed)\n- #4867 — `SysMetadataRepository.nextEventSeq()` / `nextItemVersion()` read a failed read as \"table not created yet\" (closed)\n\nSo the sweep that produced this had a real chance of finding nothing here. It did not.\n\n## Scope note — what #9637 does and does not change\n\nPR #9637 refuses at the **route** when the protocol has no `auditMetaItem` method at all. It does not touch this path and deliberately leaves the unprovisioned-table answer intact, because the two are separate frames in separate packages and only the first was #9426's card. This one is still open after that PR merges.\n\n## What would close it\n\nNot obvious enough to assert here, and there is a real design question — which is why this is filed rather than fixed:\n\n1. **Narrow the `catch`** to the two conditions the comment already names (missing table / driver without `find`) and let everything else propagate, so the route's existing `handleRouteError` turns it into an honest 5xx. Keeps the documented empty-array promise exactly as documented.\n2. **Distinguish on the wire** — a third state beside \"read, no entries\" and \"read failed\". That is a response-shape decision and would be fenced to `packages/spec`, the same fence #9326 and #9426 both carried.\n\nOption 1 looks like the one that needs no contract decision, but the choice belongs to triage, and #8901 (the read-seam failure-propagation vocabulary) may govern how the propagating half is expected to be spelled.\n\n## Dedup\n\nSearched open issues for `auditMetaItem`, for the empty-collection-on-read-failure shape in `metadata-protocol`, and for the audit route generally. Nearest cards are #8747 (`auditMetaItem`'s org scope — closed, different defect on the same method), #9426 (the route's missing-capability limb — this card's sibling, open) and the four closed same-class cards listed above. None covers this `catch`. No duplicate.\n\n## Related\n\n#9426 / PR #9637 (the route limb, same class, one layer up) · #9326 / PR #9425 · #8896 (the empty-accumulator harm shape) · #8901 (read-seam failure-propagation vocabulary) · ADR-0110 D3\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 9814,
+  "kind": "pull_request",
+  "title": "feat(adapters): envelope the hono adapter's two discovery bodies (#9436)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T01:07:11Z",
+  "updated_at": "2026-08-19T01:49:29Z",
+  "closed_at": "2026-08-19T01:49:27Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-19T01:49:27Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9814",
+  "body": "Fixes #9436\n\nMaintainer ruling on that card (2026-08-18, option A, recorded 22:30:43Z): envelope both discovery bodies. `GET {prefix}` and `GET {prefix}/discovery` in `packages/adapters/hono/src/index.ts` now answer `{ success: true, data }` instead of bare `{ data }`. The ruling deliberately does not inherit #9389's pre-auth exemption — these bodies are read by SDKs, codegen and AI clients, and the migration is one key.\n\n## Reader sweep (ruled to run first — it did)\n\nEvery reported search ran with a control; no zero was accepted without one.\n\n- `@objectstack/client` `connect()` (`packages/client/src/index.ts` 531-532, 557-558): unwraps `body.data || body` on both the `/api/v1/discovery` probe and the `.well-known` fallback — bare, `{ data }`, and `{ success, data }` all resolve to the same document. Unaffected.\n- QA http-adapter (`packages/core/src/qa/http-adapter.ts` `resolveDataMount()`): discriminates on `'routes' in body`, else reads `body.data`. The new shape falls to `body.data`. Unaffected.\n- http-conformance integration test: `body.data?.routes ?? body.routes`. Unaffected.\n- objectui (cross-repo, read-only sweep): `ConditionalAuthWrapper.tsx` and `data-objectstack/src/index.ts` unwrap only when `typeof body.success === 'boolean' && 'data' in body` — today's bare `{ data }` fails that test; the post-flip shape satisfies it, so those readers now unwrap this mount correctly. `ConnectAgentWidget.tsx` uses the tolerant `(json?.data ?? json)?.routes`. No intolerant reader; no cross-repo flip needed, so no Blocked-by split.\n- Controls: `.well-known/objectstack` literal — 20 files subject, 20 on the intolerant spelling; objectui `fetch(` count 156 (nonzero harness); examples tree 197 ts files scanned, zero discovery readers (both hits were prose); cli 7 discovery mentions, all comments, against 17 `fetch(` sites.\n- The adapter's own tests were the only exact-shape assertions found; they are updated and strengthened here (six `success: true` pins added).\n\n## Gate table (`scripts/check-route-envelope.mjs`)\n\n- This file's entry graduates to conformant `{}` with a conversion comment; its `ratchet`/`note` drop per the gate's own last-counter rule.\n- The exempt-block header prose now records the #9436 ruling as the other side of #9389's boundary (who reads the body decides), replacing the text that carried the fork as open.\n- **Premise delta (dispatch brief Zone 2b):** the card's \"four `ratchet` entries name #9364\" was already discharged on `main` before this PR — PR #9455 had converted the three #9389 files to `exempt` entries (no `ratchet` field) and had repointed this file's `ratchet` at #9436. No pointer edits remained beyond this file's entry graduating; zero counters moved by pointer work. The two `'#9364'` strings still in the file are self-test fixture literals, not table entries.\n\n## Verification (all readings at head `c938eea`)\n\n- `check:route-envelope` before: 11 modules, 161 bodies — 7 conformant, **1 ratcheted (this file, unenveloped 2)**, 3 exempt; exit 0. After: **8 conformant, 0 ratcheted**, 3 exempt; exit 0, self-test green. The `unenveloped` counter is what dropped, 2 → 0, confirming Zone 2a — `success: true` was the only key the gate needed.\n- Reverse verification, from the committed state: de-enveloping one body turned the gate red (exit 1, \"unenveloped: found 1, declared 0\") and exactly the 3 test pins on that route red (70 passed / 3 failed); restore via checkout from the branch, gate green again. The vitest legs resolve `./index` relatively (source path, no dist in the chain), so no rebuild was involved in either leg — stated per ablation discipline.\n- `pnpm --filter @objectstack/hono test`: 73/73 passed (2 files), exit 0. `tsc --noEmit` on the package: exit 0.\n- Derived union (`node scripts/pm/dispatch-gates.mjs`, no hand-fed paths — 4 paths matched, exactly this PR's files): check:changeset-gate-self-tests, check:cross-package-test-inputs, check:objectui-changeset, check:route-envelope, check:test-source-alias, check:type-source-resolution, check-adr-0087-registration, check-changeset-no-major, check-empty-changeset, docs-audit/check-affected-docs, plus convention-triggered check:query-options-erasure, check:type-check-coverage, check:type-check-debt (full packages closure built first, 70 tasks; re-measure: no entry above its recorded number), check:engine-double-contract, check:where-matcher — all exit 0.\n- `pnpm lint` (run regardless, per the brief — the derivation does not name it): exit 0. `check:nul-bytes`: green.\n\n## Out of scope, filed\n\n- #9813 remains open and is not addressed here: `packages/runtime/src/dispatcher-plugin.ts` serves the same `{ data }` discovery shape on `/.well-known/objectstack` and the REST-less `{prefix}/discovery` fallback, outside this ruling's named file and outside the envelope gate's scan populations.\n\nChangeset: `minor` for `@objectstack/hono` (additive wire change; adr-0087 marker: not-required, no key renamed or removed).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WeN7F6jQFpcqW2BN56RdPa)_"
+}

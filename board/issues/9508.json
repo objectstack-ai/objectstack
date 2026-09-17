@@ -1,0 +1,34 @@
+{
+  "number": 9508,
+  "kind": "pull_request",
+  "title": "skills(checklist-test): write run close-out, supersede and re-test triggers into the skill",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T06:00:34Z",
+  "updated_at": "2026-08-18T06:47:11Z",
+  "closed_at": "2026-08-18T06:47:10Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": "2026-08-18T06:47:10Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9508",
+  "body": "Fixes #9484\n\nLands the run close-out and re-test process into `.claude/skills/checklist-test/SKILL.md`, per the maintainer authorization quoted on the card (2026-08-18, 「同意你的落地动作」). Zero new labels — every state rides an existing carrier. ADR-class: draft PR, human merge; never flipped ready, queued or auto-merged.\n\n## What landed\n\nNew section **§5 收口 —— 一张 `qa-run` 记录什么时候才算关闭**, placed after §4 (the run-record filing section) and before Guardrails, written in the file's own register:\n\n- **Four-way disposition for every `fail`**, as a table judged on the record's own evidence: product defect (extract a standalone card — dup-check, repo where the fix lands, no pm labels, normal triage) / assertion defect (test-fix card in the repo owning the item) / stale spec (re-point card citing the ruling) / invalid pairing (a `blocked` note, no card). The four are stated as exhaustive: a `fail` that fits no cell means the judging is not finished.\n- **A boundary clause** the spec implies but no existing text drew: a `fail`-derived assertion defect or stale spec gets its own card, while accuracy findings merely noticed during the run still park on the wave anchor per §4 / RUNNER. The divider is whether there is a red row someone owes green. Without it the two rules read as two answers to one question.\n- **`partial` coverage gaps are named, never dropped** — per-area pin-upgrade cards, or parked on the wave anchor. `not-run` is left to §4's existing completion criterion (the handover list) rather than restated.\n- **Machine-greppable close-out lines** — `Extracted:` / `Parked-on:` / `Superseded-by:` / `Carried-forward:`, one per line in the close-out comment, each with its field shape.\n- **`QA-source:` traceability** on every extracted card — greppable, no label.\n- **Supersede protocol** — the old record closes `not_planned` with `Superseded-by:` only after verdicts the new run did not re-derive are carried forward. The text says which line lands on which record (carry-forward on the new one, supersede on the old), since the protocol is unusable if that direction is left ambiguous.\n- **Re-test triggers, three and only three** — release candidate ⇒ full Tier-1 re-run; a QA-sourced fix card lands ⇒ the accepting seat appends the affected items to the wave anchor's re-test checklist (same discipline as cross-repo follow-ups: the first producer is the accepting seat); maintainer names a target.\n- **Open `qa-run` count = outstanding close-out debt**, same construction as the bare `finding` count, with the explicit \"never close records to make the number look better\".\n\nTwo merges rather than new rows, so the file gains no duplicate statement:\n\n- the §4 label bullet gains the lifecycle half (the record's label surface stays `qa-run` through close-out and closing) plus the observed drift shape — `tests` / `tracking` / `bug` added to records after the fact;\n- the §4 extraction bullet gains one pointer sentence to §5.\n\nDurable process rules only: no wave ids, card counts or dates as rule content. `docs/qa/**` is untouched — RUNNER.md owns \"what to extract\", this section owns \"when a record is closed\", and the RUNNER carve-out belongs to a different card.\n\n## The item locator (review round, commit `315b57f5c`)\n\nItem 2's `QA-source:` line reached the card body with its placeholders stripped by the GitHub body sanitizer, so the three field names were reconstructed rather than read. Review corrected the middle field: it is the **dotted `area.item` bare id**, not a bare item segment — the form the selector resolver already documents in §0 (`platform-core.console-login`), the form the run record's per-clause table locates items by, and the form the QA-source lines already in the wild use. `Extracted:` and `Carried-forward:` reuse the same locator, so all three greps hit each other.\n\nBoth blocks now show placeholders **without angle brackets**, and §5 states why: `<` plus a letter is eaten by the GitHub body writer, which would silently delete the traceability line these templates exist to produce. Placeholders are Chinese words; the real value is filled in directly.\n\n## Verification — gate union re-run at the final commit, `git rev-parse --short HEAD` = `315b57f5c`\n\nFamilies re-derived from the actual diff (`node scripts/pm/dispatch-gates.mjs`, self-deriving its change set) — 4 matched, a subset of the dispatch list, nothing new; re-run in full after the review commit, not carried over from the first round:\n\n- `pnpm check:doc-authoring` (+ self-test) — 377 files clean, no bare metadata literals\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` (+ self-test, 24 cases) — 22 record-scoped formula examples across 396 files / 1411 TS blocks clean, plus 9 spec TSDoc examples (built the `@objectstack/lint` dependency closure first in the fresh worktree)\n- `pnpm check:skill-frame-sync` (+ self-test, 12 cases) — 4 copies structurally isomorphic, 3 axes\n- `pnpm check:nul-bytes` (+ self-test, 75 assertions) — 6136 text files clean, plus a direct control-byte scan of the edited file\n- `node scripts/check-adr-merge-approval.mjs` — HTTP 401 locally (no GitHub credentials in this container), expected; CI is the real reading\n\n`check:pm-skill-ratchet` does not cover this file — its ceilings are the `pm-dispatch` surface plus `.claude/agents/os-dev.md`, read from `scripts/pm/check-skill-line-ratchet.mjs` rather than recalled. Net +70/-1 lines.\n\nNo changeset: `.claude/`-only, releases nothing (`skip-changeset`).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Rn7aaamsR99FXRqLcpL99q)_"
+}

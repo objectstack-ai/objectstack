@@ -1,0 +1,35 @@
+{
+  "number": 9792,
+  "kind": "issue",
+  "title": "ratchet: AGENTS.md is the only agent-instruction file with no line ceiling — the leak the 39-line clause came through",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T23:52:34Z",
+  "updated_at": "2026-08-19T04:28:07Z",
+  "closed_at": "2026-08-19T04:28:07Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9792",
+  "body": "Maintainer prompt (2026-08-18, PM chat, verbatim): 「尤其是需要这么大篇幅吗?对于skills的更新你也应该有规范。」 — asked while reviewing a PR that added a 39-line clause to `AGENTS.md` for what the facts table carries in 3 net-zero lines.\n\n## The gap, measured\n\n`check-skill-line-ratchet.mjs` now holds per-file ceilings for **all** `.claude/skills/**` instruction surfaces plus `.claude/agents/os-dev.md` (11 entries after today's widening). `AGENTS.md` — the largest, most-read, most binding instruction file in the repo — has **no ceiling**. The ratchet's own case law (unprotected files grew +31% in one shift while the protected file held 0%) applies with the most force to exactly this file, and today's oversized clause entered through exactly this hole.\n\n## Change\n\n`scripts/pm/check-skill-line-ratchet.mjs` only: add a CEILINGS entry for root `AGENTS.md` at its line count on fetched main **after** the pending read-layer-clause shrink lands (sequencing: the hanging AGENTS.md PR is being reworked to a compact clause; set the ceiling from the post-rework text, the same set-from-post-review rule the four-skills widening used). Extend the self-test coverage case. Same shrink-only convention; raising later needs a maintainer ruling quoted in the PR body.\n\nSerial: dispatch after the reworked read-layer PR (AGENTS.md) is MERGED — the ceiling must be measured on the settled file. Graded at filing by the skills seat: `pm:queue`, S mechanical (sonnet — correctness machine-judged by the gate on its own change; not a governed path)."
+}

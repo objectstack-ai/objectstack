@@ -1,0 +1,35 @@
+{
+  "number": 8928,
+  "kind": "issue",
+  "title": "Report the business identifiers already minted twice by the tenancy split — an operator-facing inventory, on installs the #8686 backfill cannot repair",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-15T17:33:02Z",
+  "updated_at": "2026-08-17T21:49:35Z",
+  "closed_at": "2026-08-17T21:49:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8928",
+  "body": "Follow-up deliverable required by the **#8844 maintainer ruling** (comment `5302919977`), binding point 3, filed as its own card rather than folded into the fix:\n\n> **Already-minted duplicates: report, do not rewrite** — same posture as #8686. The implementing dev files the duplicate-reporting deliverable as its own follow-up card (dedupe first) rather than folding renumbering into this fix.\n\nDedupe: searched open and closed issues for an operator-facing duplicate-identifier report (keyword and file-path over the autonumber/tenancy family — #8686, #8844, #5495, #6806, #6249, #8323, #3696, #7287). Nothing covers this. The closest existing thing is `backfillSeedTenancy`'s `collisions` array (`packages/metadata-protocol/src/migrations/seed-tenancy-backfill.ts`), which is the seed of the answer but not the deliverable — see \"What exists already\" below.\n\n## Why this is needed, and why it is not the fix\n\nTwo producers of untenanted rows have now been closed:\n\n- **#8686** (PR #8832) — the seed loader, plus a one-shot backfill for rows already written;\n- **#8844** — the runtime producer: a system-context write (hook, cron, custom endpoint, `runAs: system`) on a tenant-scoped application object now resolves the install's organization or is refused.\n\nNeither touches the **damage already done**. On the reporting install the duplicated numbers have propagated into notification bodies, approval trails and a cross-reference field, so renumbering is off the table there — and both rulings say the same thing: a business identifier that has already been handed out is not the platform's to rewrite. What the operator needs instead is to **know which ones they are**, per object and per field, so they can decide case by case.\n\nThe urgency is that the evidence is **perishable**. The moment either repair merges the two partitions, the two rows become indistinguishable: the `organization_id = NULL` marker that says \"this one came from the untenanted side\" is exactly what the repair overwrites. `backfillSeedTenancy` already runs its collision probe *before* the stamp for this reason. An install that upgrades without ever running a report loses the ability to produce one.\n\n## What exists already, and what is missing\n\n`backfillSeedTenancy` returns `collisions: [{ object, field, value, rows }]` and a `buildCollisionProbeSql(object, field)` the operator can re-run themselves. That covers exactly one entry point and one moment:\n\n| gap | why it matters |\n|:--|:--|\n| only reachable **during** a backfill run | the report is a side effect of a repair. An operator who wants to know the damage without repairing anything has no door. |\n| only on **single-tenant** installs | the backfill returns `skipped-multi-tenant` before the collision probe runs, so the population that most needs a manual decision gets no list at all. |\n| only on the `__global__` / organization **seed** split | it enumerates from `_objectstack_sequences` rows, so a duplicate on an object whose counter was since merged, or one produced by a different partition pair, is invisible. |\n| no **persisted** record | the result lives in one log line at boot. There is nothing to hand an auditor, and nothing survives the next restart. |\n| `sys_`/`cloud_`/`ai_` filtered out | correct for a *repair* (platform seeds stay global), but a report should not silently omit a real duplicate. |\n\n## What a fix has to decide\n\n1. **Where the door is.** A CLI command (`os …`, next to `os migrate`) is the obvious shape — it is the surface an operator already uses for exactly this class of question, and it does not need a running server. An admin REST endpoint and a boot-time report are the alternatives; they have different audiences and different disclosure properties.\n2. **What \"duplicate\" means for the report.** The narrow reading is the ruled one: values held by more than one row within one object/field, across the partitions `COALESCE(organization_id, '__global__')` separates. A wider reading (any `unique`-declared field with repeated values, whatever the cause) would also catch damage from other sources — worth deciding explicitly rather than by accident.\n3. **Output shape and durability.** Machine-readable (JSON/CSV, one row per duplicated value with its holder ids, organizations and creation timestamps) so it can be diffed and archived, versus a human summary. Persisting it as data would itself be a schema decision.\n4. **Whether it also reports the CONDITION, not just the damage.** An install still holding a `__global__` counter beside an organization-scoped one for the same object is about to mint more duplicates. On a version carrying both #8686 and #8844 that should no longer happen, so its presence is a useful signal in its own right.\n5. **Scope beyond the driver.** `_objectstack_sequences` is `driver-sql`'s table (`driver-turso` inherits it). A report keyed on it does not cover a non-SQL driver, and the data-side probe (group by value, having count greater than 1) does — that is a design choice, not an oversight to discover later.\n\n⛔ Explicitly **out of scope**, per both rulings: renumbering, deduplicating, or otherwise rewriting any already-minted identifier. This card produces an inventory and nothing else.\n\n## Related\n\n- **#8844** — the runtime producer; this deliverable is its ruling's binding point 3, deliberately not folded into that fix.\n- **#8686** / PR #8832 — the seed producer and the one-shot backfill whose `collisions` array is the seed of this report.\n- **#8323** / **#3696** — the adjacent \"which partition does uniqueness mean\" family.\n- Downstream app-side tracking (private): `steedos-labs/os-project-titanwind-ehr#1082`.\n"
+}

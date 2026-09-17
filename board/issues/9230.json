@@ -1,0 +1,35 @@
+{
+  "number": 9230,
+  "kind": "issue",
+  "title": "[finding][devx] The docs-drift anchor derivation cannot see a CLI command name — `os meta resync` is a lowercase word, so the shape guard drops it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T04:13:50Z",
+  "updated_at": "2026-08-17T16:13:00Z",
+  "closed_at": "2026-08-17T16:13:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9230",
+  "body": "Filed unassigned by the dev seat implementing #9192 (PR #9229), session `session_01Y26DJEHSBhhAQ6wwfsHNza`. Observation class — a measured recall gap in the derivation that PR introduces, stated there rather than hidden, recorded here so it is not rediscovered as a surprise. Duplicate-searched by tool name and by keyword against open issues; the prior findings on this tool (#7009, #7967, #8771, #6893) are all closed and all about the *package-granular* predicate, not this.\n\n## The measurement\n\nPR #9229 replaces the package-dependency predicate with an anchor derivation (a page is listed when it names a symbol / wire route / SDK method the change touched). One of its two guards requires an anchor to be **code-shaped** — camelCase, PascalCase, snake_case or dotted — because a single all-lowercase word cannot be told from the vocabulary the docs are written in (`label` matched 82 of 178 pages, `object` 113).\n\nThat guard has one identifiable recall class, measured on `07ad42463` (`fix(cli): explain os meta resync's skip count`):\n\n| | |\n|---|---|\n| anchors derived | `MetaResync`, `resyncSkipExplanationLine` |\n| pages naming either | **0** |\n| what the change is actually about | the terminal output of `os meta resync`, documented on `content/docs/deployment/cli.mdx` |\n\nThe command name — `os meta resync`, and the `resync` literal that registers it — is three lowercase words. It is exactly the shape the guard drops, so a CLI-surface change cannot anchor on the command it changes.\n\n## Why this is an observation and not a defect\n\n- The run is **honest** about it: it reports the 2 derived anchors, reports no page names them, and points at the coarse `packageMentionDocs` set in the PR comment's \"What this run could not see\" section. Nothing is silently narrowed.\n- The old predicate's answer here was 22 pages — every page mentioning `@objectstack/cli` — which is not a better answer, it is a longer one.\n- The guard is load-bearing: neutralising it takes one measured PR from 19 to 49 pages.\n\n## What a fix would probably look like (not claimed, not measured)\n\nA fourth anchor kind for **command names**, derived the same way the `sdk` kind is — from a declared table rather than from spelling. If the CLI has a command registry analogous to `rest-route-ledger.ts`, a changed handler could resolve to its command string, and the docs match would be on the multi-word phrase `os meta resync` rather than the bare token `resync`, which is distinctive enough to survive. Whether that registry exists in a machine-readable form is **not checked** — that is the first question this card needs answered.\n\n⛔ Not claimed: that this class matters often. One PR is not a rate here either; I measured ten PRs for #9192 and this was the only one whose miss traced to command naming.\n\nBacklinks: #9192 · PR #9229 · prior art on the same tool #7009 / #7967 / #8771 / #6893."
+}

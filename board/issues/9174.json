@@ -1,0 +1,34 @@
+{
+  "number": 9174,
+  "kind": "issue",
+  "title": "finding: `revertCommit` has no `STORED_TYPE_NOT_CANONICAL` pre-flight, so a non-canonical stored item degrades to a `console.warn` where the sibling doors give a wire-visible code",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T18:34:06Z",
+  "updated_at": "2026-08-17T17:34:05Z",
+  "closed_at": "2026-08-17T17:34:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9174",
+  "body": "Surfaced while implementing #9111 (PR #9173) — the reachability sweep over every producer of `hydrateOverlayIntoRegistry`. Filed unassigned, as a recording. Observation-class: nothing here is silent after #9173, and reachability is the same pre-#7894 at-rest residue that family already tracks.\n\n## What was measured\n\n#8908 introduced `isNonCanonicalStoredType` (`packages/metadata-protocol/src/protocol.ts:3482`) — the derived six-member class of stored spellings whose type the manifest-collection map omits (`fields`, `seeds`, `external_catalogs`, `externalCatalogs`, `translations`, `email_templates`). It guards **two** doors that consume an at-rest `type`:\n\n- `publishPackageDrafts` — pre-flight at `:14300`, refusing with a wire-visible `failed[].code` of `STORED_TYPE_NOT_CANONICAL` and an actionable re-author instruction, batch-atomic.\n- `migrateStoredMetadata` — at `:13311`, reporting the row `skipped` with the same reason (#8957).\n\n`revertCommit` is the **third** consumer of an at-rest `type` and has no such pre-flight. Its per-item loop folds with the manifest map at `:16062` and `:16243` and then hands the item straight to `applyRegistryWriteThrough`.\n\n## Why it is only an observation\n\nBefore PR #9173 that combination minted a registry entry under the raw stored spelling. After it, the mint door asserts and the throw lands in `applyRegistryWriteThrough`'s best-effort `catch`, which is correct there — the row is already persisted and #4521's contract is that a registry hiccup must never fail a committed write. So the outcome is now loud, just **less informative than its two siblings**: an operator gets a `console.warn` on the server rather than a named `failed[].code` in the response, for exactly the class the other two doors name explicitly.\n\n## The question for triage\n\nWhether the revert door should carry the same pre-flight the publish door carries — refusing such an item up front with `STORED_TYPE_NOT_CANONICAL` — or whether a revert is deliberately more permissive than a publish because it restores a row that already existed rather than minting a new active namespace. That is a contract question about `revertCommit`'s receipt, not a defect report, which is why this is filed as a finding rather than graded.\n\n⛔ Note for whoever takes it: `revertCommit`'s items feed a **commit record** (the append-only revert commit) and the `reverted[]` / `failed[]` receipts, and #9161 deliberately kept the caller's spelling on audit and ledger keys so #8908's `AUDIT_TYPE_NOT_CANONICAL` assert fires loudly. Any fold here would touch a ledger key. PR #9173 changed no producer spelling for exactly that reason.\n\nBacklinks: #9111 / PR #9173 (where this was measured) · #8908 (the predicate and the two guarded doors) · #8957 (the migrate door's `skipped` verdict) · #7894 (the URL door that closed the namespace)."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 9478,
+  "kind": "pull_request",
+  "title": "fix(pm): dispatch-gates derives its own change set from the merge base",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T03:56:07Z",
+  "updated_at": "2026-08-18T05:22:07Z",
+  "closed_at": "2026-08-18T05:22:05Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": "2026-08-18T05:22:05Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9478",
+  "body": "Fixes #9320\n\n`scripts/pm/dispatch-gates.mjs` took its change set from whatever the caller diffed. The obvious way to produce that list is the two-dot range, which is evaluated against `origin/main` **as it is now** — so on a branch that outlived a sibling merge, the sibling's landed files are attributed to your diff. The list is now computed inside the tool, off the merge base, whenever no paths are passed.\n\n## What changed\n\n**`scripts/pm/dispatch-gates.mjs`** — new `changedPathsFromGit()` plus a second input mode:\n\n- **No paths** (or `--changed`): the tool derives the change set itself from `git merge-base` — committed work, working-tree changes, and untracked files, unioned. Untracked and uncommitted are included deliberately: a dev re-deriving before committing would otherwise get a *short* list, and under-derivation is the one failure direction the original defect did not have.\n- **Paths passed**: untouched, including `--tier` followed by paths. This is the PM's form and it answers a different question — at dispatch time the card's file surface is a hypothesis about files that do not exist yet, which no git range can answer. Derivation is what the no-path invocation means, never an override of paths that were passed.\n- Provenance (base sha, per-source counts, the path list) goes to **stderr**, so `--tier` stdout stays paste-clean for a claim comment.\n- Rename detection is off, so a moved file contributes **both** names — a gate watching the old directory is exactly as implicated by the move as one watching the new.\n- An empty derived set exits non-zero rather than deriving over nothing (#4690: an unreadable input must never look like an empty answer). \"No gates\" is the most expensive thing this tool could say wrongly.\n\n**`.claude/agents/os-dev.md`** — the clause-④ re-derivation line named the invocation that *required* the dev to hand-derive a path list, which is the step that produced the two-dot range. It now names the no-path form and states what the two-dot form costs. The script fix alone would not have stopped the habit.\n\n## The shallow boundary — measured, and the opposite of the intuition\n\nThe card warned that local `merge-base` gives a false reading on a shallow checkout. Measured on a purpose-built shallow clone whose true base sits below the graft point, that is not what happens:\n\n| form | exit | output |\n|---|---|---|\n| `git merge-base` | 1 | **empty** |\n| three-dot diff | 128 | `fatal: no merge base` |\n| two-dot diff | **0** | the **inflated** list |\n\nThe merge-base form cannot lie here — it can only refuse. The form that silently returns a wrong answer is the two-dot one. This is argued from the reachability of the graft: a commit present in both truncated graphs *is* a common ancestor, so a returned base can be correct or absent, never wrong.\n\nSo the derivation **refuses** on a shallow checkout with no reachable base, names the shallow cause and the deepen remedy, and says in the error text why it will not fall back to the two-dot form. No silent wrong list, in either direction.\n\n## Tests\n\n`node scripts/pm/dispatch-gates.mjs --self-test` — **273 cases pass** (was 260; 13 new), at `06f7f0845`.\n\nThe new cases build real git repositories and run the real derivation over them. A fixture cannot stand in: the claim is about what a git range *means* when history moved underneath a branch, which is a property of git, not of a string this file could parse.\n\nThe load-bearing one is the **control**. Asserting only that the sibling's file is absent from the derived set would pass just as happily against a fixture that never reproduced the incident — so the same tree is diffed the *wrong* way in the same breath, and the sibling has to show up there:\n\n```\n✓ the CONTROL reproduces the incident: the two-dot range really does claim the sibling PR file\n✓ the derived change set drops the sibling file the two-dot range attributed to us\n✓ an untracked new file joins the change set\n✓ a shallow checkout with no reachable merge base REFUSES instead of answering\n✓ and it says why it will not fall back to the two-dot range\n```\n\n**Reverse-verification** (from the committed state, restored after; both directions were predicted before running):\n\n- merge base → two-dot: **2 red**, exactly the two exclusion claims. The control stayed green, which is the point — it proves the fixture reproduces the incident independently of the fix.\n- shallow refusal → silent fallback to the base tip: **3 red**, the whole refusal group.\n\n## Gates\n\nRe-derived from the actual diff with the tool itself (its own no-path mode), at `06f7f0845` — the dispatch named one family, the diff implicates eight:\n\n| gate | exit |\n|---|---|\n| `check:pm-dispatch-gates` (named) | 0 |\n| `check:nul-bytes` | 0 |\n| `check:agent-model-declared` | 0 |\n| `check:pm-skill-id-lint` | 0 |\n| `check:pm-skill-ratchet` | 0 (os-dev.md 334 lines, ceiling 399) |\n| `check:skill-frame-sync` | 0 |\n| `check:doc-authoring` | 0 |\n| `check:doc-formula-expressions` | 0 |\n\nThe seven additions all come from the `.claude/agents/os-dev.md` half, and they were found by running the change this PR makes.\n\nNo changeset: `scripts/pm/**` and `.claude/**` only — nothing published.\n\n⚠️ This diff touches `.claude/**`, so it is ADR-class: **draft, left for the maintainer**. Not flipped to ready.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Rn7aaamsR99FXRqLcpL99q)_"
+}

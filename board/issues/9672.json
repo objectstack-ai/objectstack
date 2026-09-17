@@ -1,0 +1,36 @@
+{
+  "number": 9672,
+  "kind": "issue",
+  "title": "i18n: a corrected source description never reaches an already-translated locale, and no gate can tell the stale translation from a current one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T14:45:57Z",
+  "updated_at": "2026-08-19T00:03:08Z",
+  "closed_at": "2026-08-19T00:03:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9672",
+  "body": "Recording a gap surfaced while landing #9046 (PR #9669). **Unassigned finding — not claiming, and not asserting a disposition.**\n\n## Observed\n\nWhen a field/object `description` or `label` is **corrected** in a `.object.ts` declaration, there is no mechanism that propagates the correction into a locale bundle that already holds a hand translation of the old text. The generated bundles keep the stale translation indefinitely, and every gate stays green.\n\nThe two halves, both measured on `origin/main` (`d693ba158`):\n\n1. **Extraction deliberately will not overwrite it.** `packages/cli/src/commands/i18n/extract.ts` merges against the committed bundles (`mergeExisting: !flags['no-merge']`), and only the **default** locale is filled from schema labels. `--fill=default` fills *gaps* — a stale-but-present string is not a gap, so it is skipped. This is correct behaviour on its own terms: the alternative (`--no-merge`) wipes every hand translation in the bundle, which is the incident that config's own comment warns about.\n\n2. **`check:i18n` cannot see the drift.** It proves the **keys** are in sync — that no authoring key is undeclared and no bundle carries an orphan. It never compares a translated *value* against the meaning of its source. So a locale asserting the opposite of what the English now says reports \"all bundles in sync.\"\n\n## Why it is worth a card\n\nThis is the same shape as the class #9046 belongs to: a **declared surface with no enforcement keeping it true**. The locale bundle asserts a description to every non-English reader; nothing verifies that assertion still matches the source it was translated from. On compliance-adjacent text this is not cosmetic — #9046 existed precisely because two column descriptions promised a recertification review that does not happen, and three of the four locales would have kept promising it after the English was fixed, with `check:i18n` green throughout.\n\nThe correction in #9669 reached the three localized bundles only because a human edited the `help` leaves in place — the maintenance path the generated bundle header itself names (*\"Edit translations in place; re-run extract (with --merge) to fill new gaps. Do not hand-edit the structure — only the leaf string values.\"*). That path works, but it is **unenforced and invisible**: nothing distinguishes \"translator corrected it deliberately\" from \"nobody noticed.\"\n\n## What is genuinely open\n\n⛔ I am **not** asserting this is a defect. It may be intended — translation staleness is normally a human/translator workflow concern, and a repo that regenerated translations automatically would be making a worse trade. The open question is whether it is *intended and accepted*, or an unnoticed hole:\n\n- If **accepted**, the honest close is to say so where it is discoverable — the extract config comment and the bundle header describe the merge behaviour but not its consequence for *changed* sources.\n- If a **hole**, the tractable shape is a staleness marker rather than a re-translation mechanism: record the source-text hash a translation was made from, and let `check:i18n` report the leaves whose source has moved since. That names which strings need a translator without touching any of them, and it does not degrade a locale to English to fix a promise.\n\n⛔ Scoped honestly: such a check would be a **translation-staleness detector for schema-derived strings**, not coverage of \"documentation that lies.\" It would not read prose in `content/docs/**`, JSDoc, or READMEs.\n\n## Related\n\n- #9046 / PR #9669 — the card that surfaced it; the PM ruling on that PR carries the full reasoning for why no generator-only option was available.\n- #9671 — a separate observation from the same PR (`content/docs/permissions/authorization.mdx` grouping enforced and inert columns as one set)."
+}

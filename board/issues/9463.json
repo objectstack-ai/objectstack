@@ -1,0 +1,35 @@
+{
+  "number": 9463,
+  "kind": "issue",
+  "title": "spec: declare `viewMode` on `GanttConfigSchema` — the contract half of objectui#5074's ruled both-branches wiring",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-18T02:57:05Z",
+  "updated_at": "2026-08-18T06:03:23Z",
+  "closed_at": "2026-08-18T06:03:23Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9463",
+  "body": "Filed by the triage seat as the spec half of the objectui#5074 ruling (maintainer, 2026-08-18, verbatim 「同意」: declare `viewMode` and wire BOTH branches — the half-wired state, effective only under `resourceView`, is the worst of the three options).\n\n## Scope\n\nAdd a `viewMode` enum to `GanttConfigSchema` in `packages/spec` (the `gantt` block vocabulary — currently 17 keys, `viewMode` absent), with the docs/authorable-surface/pin artifacts spec-surface conventions require.\n\n**Enum members come from measurement, not invention**: read `GanttView`'s actually supported granularities in objectui (`packages/plugin-gantt/src/GanttView.tsx` — its `viewMode` component prop and defaults) before fixing the member list; declare exactly what the renderer honors, nothing speculative.\n\n## Constraints\n\n- **Clause-②: yes** — this widens the accept set (a new authorable key); contract-review tier dispatch, claim carries `Clause-②: yes`.\n- Type is Feature by the mechanical boundary test (expands the accepted vocabulary), per the ruling's explicit authorization.\n- Downstream: **objectui#5074** (`pm:blocked` on this card) declares it on `ObjectGanttSchema` and wires the timeline branch, retiring the `(schema as any).viewMode` cast. After this lands, post the landing on objectui#5074 so its unlock scan fires.\n- The gantt component's other undeclared `as any` reads (`readOnly`, `markers`, `holidays`, …) are ⛔ out of scope — they belong to objectui#5043's family track.\n\nRefs: objectui#5074 (the ruling record and the measured half-wiring) · objectui#5057 (the README half that depends on this outcome) · objectui#5043 (the index-signature/passthrough root cause).\n\nFiled by triage session `session_pm_triage_20260818T0104Z`; ruling provenance on objectui#5074."
+}

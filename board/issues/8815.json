@@ -1,0 +1,38 @@
+{
+  "number": 8815,
+  "kind": "issue",
+  "title": "【缺陷】Console 列表筛选 filterBuilder 两处:date 型「介于(between)」只渲染 1 个输入框致查询必被拒;4 个运算符 i18n key 未翻译直出",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "priority:p0",
+    "repo:objectui",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-15T04:21:05Z",
+  "updated_at": "2026-08-17T16:31:39Z",
+  "closed_at": "2026-08-17T16:31:39Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8815",
+  "body": "## 现象(@objectstack 17.0.0,Console 列表快速筛选面板)\n\n**① date 字段的「介于」运算符只渲染 1 个日期输入框**\n\nspec 侧 `between` 运算符要求 `[min, max]` 成对取值,但 Console 筛选面板选「介于」后 UI 只出 1 个日期输入框;只填一个值提交,查询被服务端拒绝,列表报「该视图的查询被拒绝」。用户侧日期区间目前只能用「晚于 + 早于」两条条件拼(可用,但六个字段要点六次)。\n\n**② 运算符下拉混有 4 条未翻译的机器名**\n\n下拉里直出 i18n key:`filterBuilder.operators.isNull` / `isNotNull` / `exists` / `notExists`,其余运算符均为中文。全对象通用,任意列表页可复现。\n\n## 复现\n\n1. 任意含 date 字段且该字段在 `filterableFields` 里的对象列表页(下游项目实例:Titanwind EHR 考核单台账「申报日期」,`os_tianshun_ehr_assessment.declare_date`);\n2. 【筛选】→【添加筛选】→ 选该日期字段 → 运算符选「介于」⇒ 仅 1 个输入框;填 1 个值确认 ⇒ 列表报「该视图的查询被拒绝」;\n3. 同一运算符下拉滚动即见 4 条未翻译 key。\n\n## 期望\n\n- 「介于」渲染 min/max 两个输入框并成对提交;或在修复前隐藏该运算符,避免用户踩「必被拒」的死路;\n- 4 个运算符补翻译。\n\n## 影响\n\n所有声明 date 型筛选字段的下游项目;下游项目侧无 workaround 可修(纯 Console 渲染层)。发现于 Titanwind EHR 验收(steedos-labs/os-project-titanwind-ehr#1161 遗留登记、#1132 第 2 轮旁路发现 8)。\n\n## 环境\n\n`@objectstack/*@17.0.0`(正式版;rc.6 时期同现)。"
+}

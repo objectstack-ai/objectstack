@@ -1,0 +1,35 @@
+{
+  "number": 9545,
+  "kind": "issue",
+  "title": "The agent-authoring prompts published in `packages/spec/prompts/` import four spec symbols that do not exist — and one of them resolves to the JS global instead of failing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T08:31:59Z",
+  "updated_at": "2026-08-18T14:26:20Z",
+  "closed_at": "2026-08-18T14:26:20Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9545",
+  "body": "Found by the published-README export gate built for #9532 (piece 2). Filed separately from the README instances (#9544) because the audience and the failure mode are both different.\n\n`packages/spec` publishes `prompts` in its `files` array, registered in `check-published-files.mjs` as *\"Authoring prompts shipped for agents consuming the protocol.\"* Three of those prompts tell an agent to import symbols that `@objectstack/spec` does not export.\n\n| File | Line | Claim | Measured reality |\n|---|---|---|---|\n| `prompts/create-new-project.md` | 52 | `import { Object } from '@objectstack/spec/data'` | The real export is `ObjectSchema`. |\n| `prompts/implement-objectql.md` | 17 | `import { Object } from '@objectstack/spec/data'` | Same fabrication. |\n| `prompts/implement-objectos.md` | 16 | `import { ManifestSchema } from '@objectstack/spec/system'` | `spec/system` exports `AppManifestSchema` and `DeployManifestSchema`. There is no bare `ManifestSchema`. |\n| `prompts/implement-objectos.md` | 25 | `import { IdentitySchema } from '@objectstack/spec/system'` | `spec/system` exports `Identity`. There is no `IdentitySchema`. |\n| `prompts/implement-objectos.md` | 25 | `import { PolicySchema } from '@objectstack/spec/system'` | Only qualified ones exist — `KeyRotationPolicySchema`, `IncidentResponsePolicySchema`, `DataClassificationPolicySchema`, … There is no bare `PolicySchema`. |\n\n## ⚠️ Why `Object` is worse than the other four\n\nThe other four fail loudly: the import does not resolve and the agent gets a compile error it can react to.\n\n`Object` does not. `import { Object } from '@objectstack/spec/data'` is a named import that does not resolve, but the prompt then writes `export const AccountObject: Object = { ... }` — and `Object` is a **global type**. Depending on how the generated file is assembled, the annotation silently binds to the JS global instead of the spec schema, and the object definition type-checks against a type that constrains nothing. The generated metadata is then unvalidated while every signal says it passed.\n\nThat is the inverse of what these prompts are for. Their whole job is to make AI-authored metadata hard to get wrong; this one hands the agent an annotation that accepts anything.\n\n## Disposition\n\nNot fixed in the gate's PR — same reason #9532's own rewrites were deferred: each is a judgment call about what the prompt should say, not a mechanical substitution (`ManifestSchema` has **two** plausible real referents, and which one a boot prompt means is a decision).\n\nAll five are recorded in `scripts/published-readme-exports.baseline.json` with the measured real symbol. ⚠️ The baseline is reconciled in **both** directions: whoever fixes one must delete its entry in the same PR, or the gate fails on the stale entry.\n\nRefs: #9532 (the gate) · #9544 (the README instances of the same sweep) · #9517."
+}

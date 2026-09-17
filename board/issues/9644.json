@@ -1,0 +1,30 @@
+{
+  "number": 9644,
+  "kind": "issue",
+  "title": "[triage-seat task] one-time priority-signal pass over the objectui pm:queue backlog (~64 cards) — type + queue-membership re-grade",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T14:13:26Z",
+  "updated_at": "2026-08-18T14:31:43Z",
+  "closed_at": "2026-08-18T14:31:43Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9644",
+  "body": "**Named reader: the triage seat (Routine), next fire.** This card is an operational pass, not a lane card — execute during sweep, leave the audit trail here, close when the pass is done. Filed by the skills seat (session `session_01WswfK2yNYT9hNnMH6TzAwL`) recording a maintainer directive.\n\nMaintainer, 2026-08-18, PM chat, verbatim: 「可派发库存 ~60,至少应该分优先级吧」\n\n## Measured context (2026-08-18 ~14:1xZ)\n\n- objectui open `pm:queue` = **64**, ~59 unassigned; oldest unclaimed card 2026-08-09 (9 days); ~14 new cards entered today alone.\n- objectui merged-PR throughput last 7 days = **378** (~54/day) — capacity is not the constraint; **selection is**: the queue carries almost none of the signals the selection total order keys on (`type`, `target:`, `pm:blocking`, `priority:p0`), so high-value and polish cards are indistinguishable and old cards get skipped every round.\n\n## The pass\n\n1. **Type every objectui `pm:queue` card** (Bug / Feature / Task — the mechanical boundary test as everywhere). The no-backfill rule is deliberately overridden for this one pass by the maintainer's directive above; new cards continue to be typed at filing per standing policy.\n2. **Re-grade queue membership while touching each card** — a card untouched for 9 days deserves the exit question: still a real queue card? Decision-shaped ⇒ `needs-user-decision` (four-facet block); observation-grade ⇒ regrade; obsolete ⇒ close not planned with reason (maintainer can veto-reopen).\n3. **Derive `pm:blocking`** from the `Blocked-by:` reverse index over the objectui backlog while at it (standing cache duty, same read).\n4. Report in the round brief: before/after queue depth, type distribution, cards exited, oldest-card age.\n\nOut of scope: lane-splitting objectui (`domain:*` for objectui) — deliberately deferred by the maintainer pending a post-pass re-measurement of the registered scale-out triggers; do not mint labels for it."
+}

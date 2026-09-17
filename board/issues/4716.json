@@ -1,0 +1,35 @@
+{
+  "number": 4716,
+  "kind": "issue",
+  "title": "[P2] 运行时授权门扩到 object 写入 + 全量 runtime-safe 规则快照(#4463 P1 之后)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T20:50:56Z",
+  "updated_at": "2026-08-19T05:31:35Z",
+  "closed_at": "2026-08-19T04:05:20Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 22,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4716",
+  "body": "`Blocked-by: objectstack-ai/objectstack#4463`(PR #4715 合并前不要派发)\n\n#4463 P1 把作者时规则接上了运行时写入闸门(`saveMetaItem` 的 `active` 保存 + `promoteDraftForPublish`),但**只挡 `flow` 类型**,且只跑不需要全栈快照的规则族。这是 PM 在派发时刻意收窄的,不是遗漏 —— 本单是它记账下来的下一步。\n\n## 为什么 P1 停在 flow(裁定理由,接手前先读)\n\nobject 写入是产品里**最热**的元数据路径(Studio 每次改字段都走它),一个误判 422 的爆炸半径是租户**唯一**的编辑面 —— 严格劣于暂时留一个覆盖缺口。#4463 的全部验收标准也都是 flow。所以 P1 的选择是:先上 flow,等闸门跑过真实流量、有了误报预算再放宽。\n\n**本单要付的代价就是那份误报预算。** 不要把它当成「把 `runtimeTypes` 多写一个值」的一行改动交付。\n\n## 范围\n\n- [ ] `object` 类型上门:`RUNTIME_OBJECT_WRITES_P2` 标注的那批规则接进运行时 surface\n- [ ] `RUNTIME_NEEDS_FULL_SNAPSHOT` 那批:构造完整 registry 快照(#4463 D2 的选项 a),让读全栈集合(pages / dashboards / nav / translations / seeds)的规则也能在运行时门上跑。注意 #4463 正文记的那个反直觉红利:**运行时宇宙比 CLI 的单包视图更全**,`validateCapabilityReferences` 那类「可能由别的包提供」的 advisory 对冲在活的 registry 面前是**可判定的** —— 但把 advisory 升级成 gating 是严重性变更,**要单独一个 PR**,不要搭本单顺风车\n- [ ] 快照构造成本要实测(每次写入都构造 vs 缓存 + 失效),P1 的差分求值(规则跑两遍)在全量快照下成本翻倍,这条要量出来\n- [ ] 误报预算:上 object 之前需要一批真实租户元数据的回放,证明不会把既有合法 object 判红\n\n## 明确不在本单\n\n- advisory findings 进响应 + objectui 渲染 —— 见另一单\n- `validateSecurityPosture` 合进统一表(它在 object 上**已经**被 plugin-security 的 `registerAuthoringGate` 挡着,是合并不是缺口)\n\n## 关联\n\n#4463(P1 本体)、PR #4715、#4409 / #4445(CLI 三命令 registry)、ADR-0033、ADR-0087"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 9497,
+  "kind": "issue",
+  "title": "[v3 migration 1/4] Rehearse @changesets/cli v3 in a throwaway clone and answer U1–U6 with measurements — no repo changes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T05:34:09Z",
+  "updated_at": "2026-08-18T06:52:54Z",
+  "closed_at": "2026-08-18T06:52:54Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9497",
+  "body": "Sub-issue of #9465. **This card writes nothing to the repository.** Its entire deliverable is measurement, because every other card in this epic is scoped by what this one finds.\n\n## Why it is separate\n\nThe epic's ruling is that the bump and the migration land as one atomic PR. That PR cannot be written honestly until someone has watched v3 actually run against this repo's shape. Guessing the migration surface from a changelog is how a release machine gets broken in a way nobody sees until release day.\n\n## Method\n\nWork in a **throwaway clone**, never in a worktree that can push, and never against `origin`. Install `@changesets/cli@3.0.0` there, enter pre mode in that clone, and drive the real flows: `changeset status`, `pnpm run version`, `changeset` (the authoring prompt), and a `changeset version` with nothing pending.\n\nDo not enter or exit pre mode on `origin`. Do not publish. Do not push tags.\n\n## The six questions, each answered with a command and its output\n\n- **U1.** Does v3's exit-1-on-no-op cover the #4898 shape? #4898 was an **all-empty-frontmatter** set — files present, nothing releases — and it stalled `17.0.0-rc.2` silently and greenly. v3's stated trigger is \"no unreleased changesets\". Construct **both** shapes in the clone (zero changesets; and N changesets all with empty frontmatter) and report the exit code of each. This decides whether `scripts/check-empty-changeset.mjs` may ever be retired — and the default answer is \"it stays\".\n- **U2.** Does `___experimentalUnsafeOptions_WILL_CHANGE_IN_PATCH.onlyUpdatePeerDependentsWhenOutOfRange` still exist in v3? Its sibling `useCalculatedVersionForSnapshots` was removed. If ours is gone or ignored, what replaces it, and what does its absence do to bump math across the ~70-package `fixed` group? Measure with a real `changeset version` over a representative changeset set, not by reading types.\n- **U3.** What exact file set does a v3 pre-mode `changeset version` produce? Capture `git status --porcelain` verbatim. Compare line by line against the allowlist `cut-rc.yml` **enforces** — \"76 modified package.json, 76 modified CHANGELOG.md, and `.changeset/pre.json`. Zero deletions, zero untracked files.\" The `.changeset/pre/` restructure looks incompatible with \"zero deletions\" by construction; the measurement decides, and the allowlist is later changed to match reality, never the reverse.\n- **U4.** With `privatePackages` unset, what does v3 do to our private packages (`apps/docs`, `examples/*`, the workspace root) during `version`? Report the observed behaviour and what key value reproduces today's.\n- **U5.** After the restructure, how much of `check-changeset-no-major.mjs`'s pre/RC exemption (~88 lines) is still load-bearing? Answer by constructing the post-exit state in the clone — the state #8654 describes — and reporting which of the gate's branches still fire. This is benefit #1's payoff; report it honestly, including \"less than hoped\" if that is what you see.\n- **U6.** Does anything in v3 change what `changesets/action` drives, in a way that bears on #9208 (v1 → v2) against `release.yml`'s pinned rationale (#6170)? A reading, not a decision — the decision is sub-card 3/4.\n\n## Acceptance\n\n- A single report comment on **#9465** with a verdict per U1–U6, each carrying the command and its actual output. \"Probably\" is not a verdict; if something could not be measured, say which and why.\n- A recommended scope for the migration PR (sub-card 2/4): the concrete file list, and anything in the epic's expected surface that turns out **not** to need changing.\n- Zero commits, zero pushes, zero PRs from this card. `git status` in the real checkout must be clean when you finish.\n\nIf the rehearsal shows the migration is materially larger than the epic assumes, say so with the measurement — re-scoping the epic is a legitimate and useful outcome of this card.\n"
+}

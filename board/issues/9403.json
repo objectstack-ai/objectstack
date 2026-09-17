@@ -1,0 +1,35 @@
+{
+  "number": 9403,
+  "kind": "issue",
+  "title": "AGENTS.md Prime Directive #14 names only `docs/adr/**`, but the gate it describes now also holds `.claude/skills/**`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T23:14:40Z",
+  "updated_at": "2026-08-18T11:17:21Z",
+  "closed_at": "2026-08-18T11:17:21Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9403",
+  "body": "Filed out-of-scope while implementing #9395 (the `ADR maintainer approval` gate now refuses an unapproved or armed `.claude/skills/**` PR, per the #9319 decision-2 ruling).\n\n## The gap\n\nPrime Directive #14's own text (AGENTS.md, \"⛔ An ADR is confirmed and merged by the maintainer, by hand\") scopes itself entirely to one prefix:\n\n> on any PR whose diff touches `docs/adr/**`, ⛔ never merge it, ⛔ never add it to the merge queue, ⛔ never call `enable_pr_auto_merge`.\n\n`.claude/skills/**` appears nowhere in the directive. The human-merge reservation for skill PRs lives in the pm-dispatch skill's ACCEPT fork and in the maintainer ruling recorded on #7548 (2026-08-11, \"skills updates are ADR-class — human review/merge required\"), and #9319 refers to the reservation *as* Prime Directive #14 — but a seat that reads AGENTS.md alone is told only about ADRs.\n\nAfter #9395 the gate refuses skill PRs citing \"Prime Directive #14\" in its failure text. That citation should be checkable against a directive that names the surface.\n\n## Suggested fix (maintainer's call — this is governance prose, not code)\n\nOne sentence inside #14 naming `.claude/skills/**` alongside `docs/adr/**`, noting that both are now machine-enforced by the same required check, and stating where the published `skills/` catalog stands (see the sibling finding filed alongside this one).\n\nNot fixed in #9395's PR: that card's surface is `scripts/check-adr-merge-approval.mjs` + `.github/workflows/adr-merge-approval.yml`, and rewording a Prime Directive is the maintainer's, not a rider on a gate PR.\n\nRefs: #9395 (the gate change) · #9319 (the ruling) · #7548 (the 2026-08-11 skills-are-ADR-class ruling) · #9238 (the bypass instance)."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 9460,
+  "kind": "issue",
+  "title": "[finding] `check:dispatcher-error-vocabulary` cannot see a lowercase thrown code — `plugin-security`'s live `owd_widening_forbidden` was never swept",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T02:52:03Z",
+  "updated_at": "2026-08-18T12:08:45Z",
+  "closed_at": "2026-08-18T12:07:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9460",
+  "body": "Found while implementing #9232 (narrowing the flat REST door's thrown `code`). Filed unassigned, **not** fixed there: #9232 narrows doors, and registering or renaming a code is the `packages/spec` lane's call — `dispatcher-error-vocabulary.ts`'s own scope note says \"⛔ Nothing here edits the ledger.\"\n\n## The measurement\n\n`packages/plugins/plugin-security/src/object-posture-gate.ts:119` throws a real, live refusal carrying a **lowercase** code:\n\n```\nthrow postureError(\n  'owd_widening_forbidden',\n  `object/${ctx.name}: an environment overlay may only TIGHTEN a packaged object's OWD, never widen it ...`,\n)\n```\n\nIt reaches an HTTP error envelope — `packages/rest/src/meta-object-owd-gate.test.ts` drives it end to end through `PUT /api/v1/meta/object/:name` and reads it off the wire.\n\nIt is not an ADR-0112 member on **two** counts at once:\n\n1. **D1** rules the value space `^[A-Z][A-Z0-9_]*$`. A lowercase code cannot be one.\n2. `ERROR_CODE_LEDGER` does not carry it in any casing. Verified against the live union: `ErrorCode.safeParse('owd_widening_forbidden')` and `ErrorCode.safeParse('OWD_WIDENING_FORBIDDEN')` both fail. Control: `ErrorCode.safeParse('PERMISSION_DENIED')` succeeds, so the probe works.\n\n## Why the gate never reported it\n\n`pnpm check:dispatcher-error-vocabulary` passes clean, and reports its scope as \"1838 non-test source files under packages/; 290 registered codes; 12 unregistered code-stamping site(s) found; 12 classified.\" This site is not among the 12.\n\nThe reason is structural, not a missing table row: the scan's shapes match SCREAMING_SNAKE literals. A lowercase code stamps no site it can see, so it is not reported as unclassified either — it is invisible, which is the same class of blind spot #9223 fixed for `objlitconst` / `objlittemplate` (a shape that \"matched NOTHING and was not even reported as unresolved\").\n\nSo the gate's guarantee is narrower than it reads: it sweeps *unregistered SCREAMING_SNAKE codes*, not *codes outside the vocabulary*. Lowercase is precisely the ADR-0112 batch-2 sweep residue the gate would be most useful for catching.\n\n## Current state after #9232\n\nNot an outage, and #9232 already improved the wire answer: the flat door now demotes it, so the body is `{ code: 'PERMISSION_DENIED', declaredCode: 'owd_widening_forbidden' }` — a legal member with the gate's own spelling preserved beside it. Before #9232 it was `{ code: 'owd_widening_forbidden' }`, a body that could never satisfy the `ApiErrorSchema` it claimed to.\n\nConsumer check: nothing branches on it. Grep across `packages/`, `examples/`, the objectui checkout and `cloud` returned 7 hits, all of them the producer itself or prose (control: the same grep finds the producer, so the search works).\n\n## What needs deciding\n\n1. **Widen the scan** to report lowercase (and mixed-case) code stamps, so \"outside the vocabulary\" is what it measures. Likely surfaces other batch-2 residue — that is the point, and it is the same ratchet shape #9223 used.\n2. **Rule on this producer specifically**: register a SCREAMING_SNAKE code for it (`packages/spec` lane), or accept the demote as the permanent answer and let `declaredCode` carry the app-specific spelling — which is what the #9106 / #9232 rule already does for every unregistered spelling.\n\n(1) and (2) are separable; (1) is the one that stops the next one.\n\nRelated: #9232 (where this was found) · #9106 / ADR-0112 (the demote rule) · #8087 / #9223 (the gate and its previous blind spot) · #8846 (the registration hand-off).\n"
+}

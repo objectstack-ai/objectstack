@@ -1,0 +1,36 @@
+{
+  "number": 9599,
+  "kind": "issue",
+  "title": "spec: declare the closed set of expression-bindable text keys (`title` / `label` / `value` / `description`) — the contract half of objectui#4795 Direction 1",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-18T12:41:16Z",
+  "updated_at": "2026-08-18T18:20:26Z",
+  "closed_at": "2026-08-18T18:20:26Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9599",
+  "body": "Commissioned by maintainer ruling (2026-08-18, live PM chat with the triage seat, session `session_01EUZUjvnLsqwHVkXkTv8TKQ`). The 2026-08-17 ruling on objectui#4795 (comment 5312061331) deferred Direction 1 behind a named restart condition — *\"the first real schema-authored dashboard need hits the gap\"* — and pre-defined the reopening terms. Today the maintainer ruled the condition met by product intent, verbatim: 「\"AI 一句话生成会动的仪表盘\"或\"用户在 Studio 自助配仪表盘\"…这个是仪表盘的基本需求吧?」— a live dashboard authored in pure metadata is a **basic** requirement, not a speculative one. Direction 1 therefore reopens now, on the 08-17 ruling's own terms.\n\n## Scope (spec half — this card)\n\nDeclare in `@objectstack/spec` a **closed** vocabulary of expression-bindable text keys — `title`, `label`, `value`, `description` — per the 08-17 terms: *\"the key set is declared in `@objectstack/spec`/types as a closed enum, never inferred\"*. The declaration must make it mechanically answerable, per component schema, which keys the renderer's evaluation memo evaluates — so the objectui half can consume it rather than hard-code a twin list. Which component schemas carry which of the four keys is part of this card's design surface (statistic `value`, card `title`/`description`, button `label` are the measured motivating cases on objectui#4795).\n\n## What this is NOT\n\n- ⛔ Direction 2 (merging the `props` envelope into the node) stays permanently rejected (08-17 ruling).\n- The objectui evaluation-memo implementation is the downstream half — it rides objectui#4795, `Blocked-by:` this card.\n- The render-time loud diagnostic (Direction 3) is already shipped (objectui PR #5129) and is unaffected.\n\n## Dispatch constraints\n\n**Clause-②: yes** — this widens the authoring accept surface (keys that were inert text become evaluated contract), so the dispatch is contract-review tier per the mandatory clause, and the `needs:contract-review` loop applies at ACCEPT. Cross-links: objectui#4795 (measurements + the two rulings) · objectui#5123 (`properties` precedence, ruled 2026-08-18) · objectui#4786 (the teaching-face history)."
+}

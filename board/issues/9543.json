@@ -1,0 +1,36 @@
+{
+  "number": 9543,
+  "kind": "issue",
+  "title": "docs: drivers.mdx documents the driver's connect-timeout defaults but not the migration metadata-lock bound",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T08:29:49Z",
+  "updated_at": "2026-08-18T14:03:46Z",
+  "closed_at": "2026-08-18T14:03:45Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9543",
+  "body": "Found while implementing #9354, surfaced by that card's docs-audit step. Filed unassigned; **not fixed in #9354's PR** because that dispatch declared a file surface of `packages/drivers/driver-sql/src/sql-driver.ts` plus its sibling test files, and a `content/docs/**` edit is outside it.\n\n## The gap\n\n`content/docs/data-modeling/drivers.mdx` is the page `scripts/docs-audit/affected-docs.mjs` names first for a `driver-sql` change, and it already carries the matching subject: a `### Connect timeouts` section documenting the two timeout defaults `SqlDriver` supplies, each with its value and the reasoning behind it.\n\n#9354 adds a **third driver-supplied bound of the same genre**, and this one is operator-visible in a way the other two are not:\n\n- `lock_wait_timeout` is set to **120 seconds** on the session performing the deferred-DDL widening ALTER, replacing MySQL's inherited default of 31,536,000 s (one year);\n- a blocked `os migrate apply` now **fails** with an ADR-0112 envelope (`DATABASE_ERROR` / 500) naming the lock wait, where it previously hung silently.\n\nThat is a new failure mode an operator can meet on a real migration, with a specific error message and a specific remedy, and no page documents it.\n\n## Where it belongs\n\nThe existing `### Connect timeouts` section sits under the PostgreSQL heading and is specifically about the TCP/handshake bound, so this is **not** a row to add to that table. The natural home is the `## MySQL (via @objectstack/driver-sql)` section that immediately follows it — the page's home for MySQL-specific driver behaviour, which already covers the `TIMESTAMP` → `DATETIME(3)` widening this bound protects.\n\nWorth stating there: the bound's value, that it is deliberately not configurable and not retried (the 2026-08-17 ruling on #9354), that only the operator-initiated flush is bounded, and what the operator should do when they meet the refusal (find the lock holder, re-run — the widening is idempotent).\n\n⚠️ `content/docs/releases/v17.mdx` also appears in the affected-docs output; per CLAUDE.md that file is written centrally at release time and must **not** be edited as part of this.\n\nRelated: #9354 (the change that introduces the bound).\n"
+}

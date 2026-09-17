@@ -1,0 +1,30 @@
+{
+  "number": 9464,
+  "kind": "issue",
+  "title": "console: an admin-override decision renders as an ordinary Approve — no affordance distinction, no confirm, and the #4466 `via_override` marker is never surfaced in any UI",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T03:04:00Z",
+  "updated_at": "2026-08-18T09:09:07Z",
+  "closed_at": "2026-08-18T09:09:07Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9464",
+  "body": "Part of steedos-labs/os-project-titanwind-ehr#1225\n\n## TL;DR\n\nAn admin viewing a pending approval they hold **no slot in** (or have already voted on) sees the exact same filled **Approve** / **Reject** / **Reassign** buttons as a designated approver — no override styling, no confirmation, nothing. One unmarked click takes the #3424 privileged-override branch, which is *authoritative*: it finalizes the node even under `per_group`/`unanimous`/`quorum`, silently bypassing every remaining co-sign group. And although #4466 made the service record `sys_approval_action.via_override`, **no UI surface anywhere reads that column** — the timeline renders an override byte-for-byte like an ordinary approval.\n\nThe practical consequence in our app project: our PM walked a 3-stage countersign flow with two admin-posture accounts, saw Approve still rendered after each co-signer had voted, clicked it \"to see if it was real\", and it decided the next stage for an approver who never acted. They filed it as *\"countersign is broken — the Approve button is still there after I approved\"* (steedos-labs/os-project-titanwind-ehr#1225, private repo — screenshots there). The behavior is your documented design working correctly; the UI gives an admin no way to see that, so it reads as a broken countersign to the very people most likely to be driving a test.\n\n## Stale-premise check (done before filing)\n\n- `objectstack` main @ `f63afb237c09` — `packages/plugins/plugin-approvals/src/approval-service.ts` still gates the decision actions on `record.viewer.can_act || record.viewer.can_override`, and `decideNode` still finalizes on a non-slot-holder approve (`if (approve && behavior !== 'first_response' && isSlotHolder)` — the tally branch requires `isSlotHolder`, so an override approve falls through to finalize).\n- `objectui` main @ `68d9e282c83a` — `via_override` has **zero** hits in the repo (`can_override` is consumed in `apps/console/src/services/approvalsApi.ts`, `packages/app-shell/src/views/RecordDetailView.tsx`, `ApprovalsInboxPage.tsx` — only to *show* the buttons, never to mark them). Same in the shipped `@objectstack/console@17.0.0` bundle.\n- Issue sweep: #4466 (closed) added the `via_override` column — its own **Expected** said the marker should be \"*surfaced in the timeline*\", which is the half that never landed. #3424 designed the override. QA run #9453 (item 14, `per-group-signoff`) empirically re-confirmed on `e4e5c6e3`: `can_override:true` admits the admin with a 200. No open issue in either repo covers the affordance/rendering gap.\n\n## Repro (standalone — no app metadata needed)\n\n1. Any flow with an `approval` node; a request goes `pending` with a staffed slate that does **not** include the admin (or from which the admin has already been dropped after voting under `per_group`).\n2. View the record (or the approvals inbox drawer) as a platform/tenant admin.\n3. Observed: **Approve / Reject / Reassign render exactly as they do for a designated approver** — `visible: \"record.viewer.can_act || record.viewer.can_override\"` (plugin-approvals action declarations), primary/filled variant, no hint which predicate admitted you.\n4. Click Approve → 200, node finalizes (on a multi-group countersign node: all remaining groups bypassed), `sys_approval_action.via_override = true` is written —\n5. — and the rendered timeline shows a plain \"Approved · &lt;admin&gt;\", indistinguishable from a slot holder's approval. The only place the truth exists is the raw `sys_approval_request`/`sys_approval_action` tables under Setup.\n\n## Expected vs actual\n\n| | expected | actual |\n|---|---|---|\n| Affordance | An override-only viewer (`can_act:false, can_override:true`) sees a *visually distinct* action (\"Override approve…\" / warning variant), ideally behind a confirm that names the pending approvers being bypassed — this is an authoritative, group-bypassing act, not one vote | Identical filled Approve; one click, no confirm (Approve has no `description`, unlike Reject) |\n| Timeline | `via_override` rows marked (\"Approved — admin override\") — the surfacing #4466's Expected asked for | Column written, never read by any UI; override renders as an ordinary approval |\n| Contract cited | docs `content/docs/automation/approvals.mdx`: the decision records \"**which door it came through**\" precisely because \"an override and an ordinary approval were byte-for-byte identical\" — that argument applies to the rendered timeline exactly as it did to the DB row | the byte-for-byte identity is fixed at rest, still true on screen |\n\n## What we did NOT do\n\nNo app-side workaround exists or was attempted: the buttons are the platform's own `sys_approval_request` declared actions rendered by the console — an app cannot restyle, gate, or annotate them, and hiding admin rescue entirely would break the #3424 recovery path we do want. Our app-side issue is parked as Blocked-by this one.\n\n## Versions\n\n`@objectstack/{runtime,spec,objectql,cli}@17.0.0` (GA), `@objectstack/console@17.0.0`, `@objectstack/plugin-approvals@17.0.0`; re-verified unchanged on `objectstack@f63afb237c09` and `objectui@68d9e282c83a`. Node 22 / macOS.\n"
+}

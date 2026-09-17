@@ -1,0 +1,35 @@
+{
+  "number": 9308,
+  "kind": "issue",
+  "title": "Land the showcase seed fixtures that unblock the checklist's stock-fixture gaps (loginable 2nd member, publicSharing object, writable summary field, readable:false FLS grant)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "tests"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T12:23:59Z",
+  "updated_at": "2026-08-19T00:47:21Z",
+  "closed_at": "2026-08-19T00:47:21Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9308",
+  "body": "Related to #9296 (full checklist regression). Pays down the fixture debt recorded in `docs/qa/platform-checklist/FOLLOW-UPS.md` §3 — the gaps that make checklist items unrunnable on stock seeds. Same discipline and shape as #7670, which landed the attachments-storage QA scratch fixture permanently.\n\n**Scope is deliberately narrowed to seed data.** Four of the eight `blocked` items need a *harness* or a *design call*, not a fixture; bundling those here would produce a PR nobody can review. They are enumerated as out-of-scope below with what they actually need.\n\n## In scope — stock seed additions (`examples/app-showcase/**`)\n\n| # | fixture | unblocks | today's verdict without it |\n|---|---|---|---|\n| 1 | **A second, actually loginable non-admin member.** The personas already exist as `sys_user` rows (Ada Auditor; Mei Phone `usr_showcase_phone_demo`, who submits EXP-2001/EXP-DEMO and holds no approver position) — **the gap is the credential account, not the row**. A password hash is not enough: better-auth 1.7.0-rc.2 requires the credential account's issuer to equal `local:credential` (`seed-approval-demo.ts` records \"sign-in still …\"). | `approvals.per-group-signoff` (P1), `approvals.viewer-gating-submitter-side` (P1, `blocked`), `approvals.ooo-delegation-reroute` (P2), plus the recurring \"needs a 2nd user\" gap on several persona-gated items | knownGap / `blocked(fixture)` |\n| 2 | **One object with `publicSharing.enabled`.** Verified across `examples/app-showcase/src`: no stock object sets it, so `createLink` answers 422 `SHARING_NOT_ENABLED` for every showcase object. | `access-security.share-link-capability-tokens` (P2, `blocked`) | `blocked(fixture)` |\n| 3 | **A writable-package summary field** for the rollup editor half. | `automation.rollup-summary-filter` (P2, `blocked`) | `blocked(fixture)` |\n| 4 | **One `readable:false` FLS grant.** Stock showcase authors none, so the read-**masking** half (field absent/nulled on GET, `plugin-security/src/field-masker.ts`) has no fixture at all — only the write half is exercised. | `access-security.fls-mask-and-strip` (P1) | half the item permanently unprovable |\n\n## Explicitly OUT of scope — these are not fixture work\n\n- **`approvals.quorum-m-of-n`** — the showcase admin holds manager+finance+legal, so a 2-of-3 slate collapses to 1-of-1 and the runtime clamps it. Fixing that means **redistributing positions on the showcase admin**, which perturbs the approver assumptions of most of the approvals area. That is a **showcase design call**, not a seed addition — file it separately, do not smuggle it in here.\n- **`approvals.sla-escalation`** — minimum `timeoutHours` is 1 and the sweep runs on real time; needs a clock-control / `runEscalations()` **harness**, i.e. a runtime affordance (`domain:services`).\n- **`identity-auth.oauth-app-consent-loop`, `identity-auth.linked-accounts-social`** (and the existing `sso-enforced-first-paint` gap) — need a configured OIDC/social IdP, i.e. **environment config plus probably a stub IdP**, not seed data (`domain:identity`).\n- **`records-forms.import-job-undo-cancel`** — gated on `IMPORT_CONSOLE_LIVE` and an import-job-capable client wired in objectui's `e2e/import-console/`; **cross-repo**, belongs at destination.\n\n## The risk that makes this card non-trivial\n\n**Adding a member perturbs everything that reasons about \"who can see what.\"** `access-security.crud-permission-matrix` (P0) already reasons about the additive `showcase_member_default` everyone-baseline (ADR-0090 D5); the `packages/qa/dogfood` golden suites (`showcase-private-owd`, `owner-anchor-and-bulk-writes`, `showcase-anonymous-deny-surfaces`) assert concrete outcomes over showcase data; `examples/app-showcase/src/coverage.ts` is its own ratchet.\n\nSo the deliverable is **not** \"seeds added\" — it is *seeds added and every downstream assertion reconciled deliberately*:\n\n- run the `qa/dogfood` golden suite and the showcase tests; any diff is either a **deliberate, explained update** or a **stop-and-report**. ⛔ Never re-baseline a golden to make it green.\n- prefer additions that widen coverage without moving existing ground (a new object over a new row on a hot one) where the fixture allows it — but note honestly that #1 (a second member) *cannot* be non-perturbing by nature, and that is the point of the card.\n- checklist items whose `knownGaps` this closes get **revised in the same PR**: rewrite the gap as CLOSED-by-fixture (the #7670 pattern — do not delete the gap text, it carries the reason), bump `revision`, append `history`, keep `node scripts/check-platform-checklist.mjs` green.\n\n## Serial constraint — read before claiming\n\n**#9237** (\"app-showcase: two sharing rules declared on objects without record sharing enabled — boot backfill fails, rules never take effect\") is **open and unclaimed** on the same file surface (showcase sharing seeds) with `domain:identity`. Two cards editing showcase seeds in parallel will conflict, and worse, this card's fixture #2 sits right next to that defect. Claim order matters: either land #9237 first, or claim both and do them in one worktree. Whoever claims this one names its choice in the claim comment.\n\n## Sequencing against the QA wave (#9296)\n\n⛔ This does **not** land under the wave's pinned sha. A run record's fingerprint pins the framework sha it tested; changing seeds mid-wave would mean earlier rounds and later rounds observed different fixtures while both claim the same baseline. Ruling: rounds R1–R3 stay pinned at `e4e5c6e3`; this lands on `main` independently, and the items it unblocks get a **dedicated follow-up run** (`checklist-select … --include-blocked`, scoped to just those items) at a new sha afterwards. That follow-up card is filed when this one lands.\n"
+}

@@ -1,0 +1,38 @@
+{
+  "number": 9686,
+  "kind": "issue",
+  "title": "finding: the external-datasource federation HTTP family mounts outside the enforceAuth seam with no guard of its own — read and write",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue",
+    "priority:p0",
+    "security",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T15:27:44Z",
+  "updated_at": "2026-08-19T00:02:16Z",
+  "closed_at": "2026-08-19T00:01:23Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9686",
+  "body": "Found while implementing #9391 (the datasource-admin authentication guard). Filed rather than fixed there: it is a different registrar in a different package, and #9391's scope was ruled to be exactly the datasource-admin family.\n\n## Disclosure posture — inherited deliberately\n\n⛔ **No reproduction here, in any PR body, or in any commit message.** #9391 was revised on 2026-08-17 to remove its request/response table after the maintainer deleted the public reproduction; that decision travels with adjacent work. What follows is the cause, the source location, and the contract a fix would restore — which is what someone fixing it needs.\n\n## What was observed\n\n`registerExternalDatasourceRoutes` (`packages/rest/src/external-datasource-routes.ts`) mounts five routes under `/api/v1/datasources/:name/external/*` and performs no authentication check. Read at source: the module imports nothing auth-related, and none of the five handlers consults an identity before dispatching.\n\nThe five, by disposition:\n\n| route | kind |\n| --- | --- |\n| `GET .../external/tables` | read — remote-table introspection |\n| `POST .../external/tables/:remote/draft` | read — introspect + type-map, no persistence |\n| `POST .../external/tables/:remote/import` | **write** — creates a live runtime-origin federated object |\n| `POST .../external/refresh-catalog` | write — refreshes the cached catalog snapshot |\n| `POST .../external/validate` | read — validates the federated objects |\n\n## Cause — the same shape #9391 had, one package over\n\nThese routes are composed by `mountAndRecordDirectRoutes` (`packages/rest/src/direct-mount-composition.ts`), which mounts two registrars. That composition resolves the `RestServer`'s own execution-context resolver and passes it to **one** of them:\n\n- `registerPackageRoutes` receives `resolveExecutionContext` and applies the shared anonymous floor (`shouldDenyAnonymous` over the resolved context, failing closed when the resolver is absent — `packages/rest/src/package-routes.ts`);\n- `registerExternalDatasourceRoutes` receives no resolver and contains no check.\n\nBeing composed by `RestServer` is not itself a guard: `enforceAuth` is a private method invoked inside `RestServer`'s own handlers, not a middleware a direct mount passes through. That is the same reason the datasource-admin family needed its own line, and the same reason `registerPackageRoutes` grew one.\n\n## Why this is worth a card of its own, not a footnote on #9391\n\nTwo of these five routes are the declared twins of routes #9391 just guarded: `GET .../external/tables` and `GET /api/v1/datasources/:name/remote-tables` reach the same `IExternalDatasourceService.listRemoteTables`, and `POST .../external/tables/:remote/draft` and `POST /api/v1/datasources/:name/object-draft` reach the same `generateObjectDraft`. The equivalence is deliberate and pinned (`packages/rest/src/remote-tables-twin.equivalence.test.ts`; #4249 gave the two spellings one failure contract, #7955 one request shape). After #9391 lands, one operation is reachable at one spelling only with authentication and at the other without — so the family's own equivalence principle now argues for closing this, independently of the exposure.\n\nUnlike the admin spelling, this family **is** SDK-expressed (`datasources.external.*` on `ObjectStackClient`, per the REST route ledger), so a fix should be checked against those callers presenting a credential.\n\n## What a fix would look like (a lead, not a decision)\n\nHand the federation registrar the same `resolveExecutionContext` the composition already resolves for its sibling, and apply the same shared anonymous floor — decision from `shouldDenyAnonymous`, identity from the resolver, envelope from this surface's `sendError`, fail-closed when unwired. Whether these routes should require a capability beyond authentication is a separate question of the kind #9593 answers for the admin family, and should not be folded in.\n\nNot triaged here: the other direct-mount registrars vary by design (`service-settings` gates inside the service, `service-storage` gates uploads and parent-governed downloads, `service-i18n` serves locale bundles that may legitimately be pre-login). Each needs its own reading; this card is only about the federation family, where the read is unambiguous.\n\nBacklinks: #9391 (the sibling family, guarded), #7744 (added this area's route ledgers without a guard), #9593 (the capability question for the admin family). Unassigned and unqueued — for the triage seat to level and route.\n"
+}

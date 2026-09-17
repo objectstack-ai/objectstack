@@ -1,0 +1,35 @@
+{
+  "number": 9852,
+  "kind": "issue",
+  "title": "cross-seat requests parked as prose (seat-post knocks, ruling comments) leave the waiting card lying in pm:queue — requests must be cards, waits must be pm:blocked at them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T05:20:10Z",
+  "updated_at": "2026-08-19T07:08:45Z",
+  "closed_at": "2026-08-19T07:08:45Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9852",
+  "body": "Filed by the skills seat (session `session_01AeA3nU1B5Q2pgxqxgUrexd`) from the maintainer's 2026-08-19 report (verbatim: 「这个工作方式是不是有问题,卡状态没变,但是被卡住了。」), graded at filing under the own-lane exception.\n\n## The two specimens (spec lane, both label `pm:queue`, both stuck for ~2 days)\n\n1. **A card waiting on a cross-repo READING.** Dispatch precondition \"cloud measurement required\" was recorded honestly — but as card prose plus a request comment on the cloud seat's **seat post**. Two days, no answer, nothing anywhere aged or reddened. The card's label kept saying *dispatchable*.\n2. **A ruling that assigned CARD-OPENING to another seat.** The maintainer's decision comment carved implementation-card creation to the metadata seat. Two days later the cards do not exist, and nothing can notice \"an obligation was assigned and no card appeared\" — the obligation lives only in a ruling comment and a seat-post knock.\n\nSame genus as two graded siblings, one level over: the unlock-scan blindness card (sweep reads less than the card) and the foreign-gate parking card (no state for \"done but unlandable\"). Here the gap is on the **request side**: the label vocabulary can express \"blocked on issue #N closing\" and nothing else, so waits on readings / card-creation / authorizations get parked as prose, and prose is invisible to every candidate query, every sweep, and every age alarm.\n\n## The half that already exists\n\n- SKILL.md's 跨座位转移 clause already mandates exactly the right mechanism **for work transfers**: 「落到对方队列(目标仓立单带 `pm:queue` + 出处行)」. Seats are not applying it to non-work asks (readings, card-opening obligations, access requests) because the clause reads as being about transferring implementation work.\n- The just-delivered waiting-is-a-state clause covers the **write** side (the wait must be written on the card). Both specimens complied in spirit — and stayed invisible, because writing the wait does not put it in anyone's queue.\n- The heal-backlog age alarm + the pending standing-caller card give the read side teeth — but only over states the vocabulary can express.\n\n## Proposed shape (grading adopts it; wording is the dev's)\n\nOne scope clarification on the existing 跨座位转移 clause, SKILL.md: **a cross-seat ask of any kind — a reading, an obligation to open cards, an access/authorization need — is work, and lands as a card in the target seat's queue** (provenance line + the one-line executable criterion), ⛔ never with a seat-post comment or a ruling comment as its only carrier; the waiting card then goes `pm:blocked` + `Blocked-by:` at the request card, so the existing unlock scan releases it when the request closes, candidate queries see the request, and the age machinery covers both ends. Cheapest formulation wins; no new labels, no new sweep — the fix is routing waits into the vocabulary that already has readers.\n\nSerial: SKILL.md hot-file chain (behind the H13 PR's human merge → the hold-discharge card → the foreign-gate card); same unlock/state-model family — at dispatch time the seat decides whether these fold. `.claude/skills/pm-dispatch/**` ⇒ `claude-fable-5` mandatory, governed ⇒ draft PR, human merge. Ratchet: payment owed.\n\nUnsticking the two specimens themselves stays with their lanes (the spec seat has already put the three-option ask and the 催办 to the maintainer) — this card is only the rule that stops the next pair."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 9701,
+  "kind": "issue",
+  "title": "[finding] `node-metadata-manager`'s watcher has the same one-shot delivery structure #9339 just repaired, with no reconciliation behind it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T15:58:02Z",
+  "updated_at": "2026-08-18T22:59:35Z",
+  "closed_at": "2026-08-18T22:58:08Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9701",
+  "body": "Found while implementing **#9339** (PR #9656). Filed unassigned — recording, not claiming. ⛔ Not fixed in that PR: its declared file surface was `packages/metadata-fs/src/repository.ts`, and this is a different package with a different gate surface.\n\nOpen-issue search run before filing: no hits for `node-metadata-manager` + watcher.\n\n## The observation\n\n`packages/metadata/src/node-metadata-manager.ts:58` runs its **own** chokidar watcher over a project root:\n\n```\nusePolling: true, interval: 1000, ignoreInitial: true\n```\n\nThat is the identical structure #9339 measured and repaired one package over — and it has **no reconciliation behind it**.\n\n#9339's finding, which transfers verbatim: under `usePolling`, chokidar re-reads a directory only when its stat **strictly advances**. An external write advances the directory's mtime once, so the file gets **exactly one delivery attempt**; polls 2..N compare an unchanged stat and can never rediscover it. #9339 measured **at least six independent one-shot gates** sitting on that single attempt, spanning three layers (kernel timestamp, chokidar's readdir throttle and readdir snapshot, chokidar's emit gates), each producing a byte-identical observable: no event, ever, for that path.\n\n⇒ An externally created metadata file whose single directory-poll attempt is lost is **never announced, permanently**, for the life of the process.\n\n## What is NOT claimed here\n\n⚠️ No reproduction was attempted against this site. #9339's own bound applies and is worth restating: the six gates are **forced fault injections, not the CI mechanism**, which was never identified and may be a seventh. What transfers is the **structure** — one attempt, no second one — not a measured failure at this call site.\n\n⚠️ This also does **not** claim the consequence is equally severe. `metadata-fs` had a `heads` index whose divergence from disk is a well-defined thing to detect; this class announces file events and has no such index, so what \"lost\" costs here is a different question that this note does not answer.\n\n## Why the bounded in-place exemption does not cover it\n\nTwo independent reasons, either sufficient:\n\n1. **The repair is not mechanical here.** #9339's fix is a content-keyed reconciliation sweep comparing disk against `heads`. This class has no `heads` index to compare content against, so the fix *shape* differs — it is a design question, not a transcription.\n2. Different package, different gate surface.\n\n## Deliberately excluded, so the next reader does not re-derive it\n\n`packages/metadata/src/plugin.ts:498` also polls, but watches a **single file path** rather than a directory. It therefore gets a fresh attempt per edit and is materially less exposed. Judged, not left unexamined.\n\n## Related\n\n#9339 (the repaired sibling, PR #9656) · #7282 (the family; its *\"the signature of an event that is never delivered, not one that is slow\"*) · #7336 (the `put()` half, closed by routing around the fragile path) · #8845 (the gate blind spot — ⚠️ note `check:durability-log-level`'s READ vocabulary is anchored to `IDataDriver`'s `find`/`findOne`/`count`, so **every** filesystem-backed read seam in the repo is outside that rule by construction, not by scan scope; this site included)."
+}

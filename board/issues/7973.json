@@ -1,0 +1,33 @@
+{
+  "number": 7973,
+  "kind": "issue",
+  "title": "Studio block designer publishes three page-component inputs no renderer reads (objectui, found by #4001 batch A)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T09:15:32Z",
+  "updated_at": "2026-08-18T14:57:12Z",
+  "closed_at": "2026-08-18T14:57:12Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7973",
+  "body": "Filed from #4001 batch A (`ui/component.zod.ts` strictness conversion) under AGENTS.md Prime Directive #10 — out of that PR's scope, and the fix lives in the sibling repo `objectstack-ai/objectui`.\n\nBatch A enumerated every registered component type by **the renderer's read pattern** (the #6276 lesson) before closing the props shapes. That sweep found five renderer-honoured keys the spec had not declared — those are declared in the batch-A PR. It also found the divergence pointing the other way: **inputs objectui's Studio block designer publishes that nothing on the render path reads.** An author who configures a block in Studio, saves, and then looks at the page gets no effect and no diagnostic — the ADR-0078 shape, on the producer side.\n\nMeasured against `objectstack-ai/objectui@d8d0d66`, in `packages/app-shell/src/views/metadata-admin/previews/block-config.ts`:\n\n| Designer input | Read path | Verdict |\n|---|---|---|\n| `page:accordion` → `title` | `PageAccordionRenderer` (`renderers/layout/containers.tsx`) reads `items`, `allowMultiple`, `variant` — no `title` | dead input |\n| `page:accordion` → `items[].value` | the renderer **overwrites** it: `items.map((it, idx) => ({ ...it, value: \\`panel-${idx}\\` }))` (`containers.tsx:793`), so an authored value never reaches the Radix item | dead input |\n| `page:header` → `icon` | **retired** from the spec at `@objectstack/spec` 17.0.0 (#6946, ADR-0087 D2) — no renderer ever read it | designer has not caught up with the retirement |\n\nTwo notes that matter for whoever picks this up:\n\n1. **The accordion `value` case is not symmetric with `page:tabs`.** One component over, an authored `items[].value` *is* read (`containers.tsx:566`, with a `tab-<idx>` fallback), which is why the spec declares it there and #5776 exists for the `key` → `value` rewrite. The accordion's is genuinely derived. Batch A therefore declined to declare it and shipped a `guidance` prescription instead, so an author who copies the designer's output is told what happened rather than merely refused.\n2. **`page:header.icon` will now be refused, not dropped.** Batch A closed these shapes, so a designer-authored `icon` raises the #6946 tombstone (with its `os migrate meta --from 16` prescription) at the authoring gate instead of being stripped in silence. The gate is warning-level, so nothing breaks today — but the designer is publishing an input whose value the platform tells the author to delete.\n\nSuggested fix, objectui side: drop the three inputs from `block-config.ts` (`page:accordion.title`, `page:accordion.items[].value`, `page:header.icon`). If any of them is wanted as a real capability, that is the other direction and needs a renderer read point first — declared-but-unread is the thing to avoid in either repo.\n\nReproduce the sweep: for each type in `ComponentPropsMap`, grep objectui for `properties?.<key>` / hoisted `schema?.<key>` reads and diff against the declared shape. It is cheap and it is what turned both directions up."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 9499,
+  "kind": "issue",
+  "title": "[v3 migration 3/4] Decide #9208 — `changesets/action` v1 → v2 against release.yml's pinned rationale",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T05:34:45Z",
+  "updated_at": "2026-08-19T07:37:36Z",
+  "closed_at": "2026-08-19T07:37:36Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9499",
+  "body": "Sub-issue of #9465.\n\nBlocked-by: #9497\n\n`release.yml` pins `changesets/action@v1` and records a rationale for the pin (#6170). Dependabot's #9208 proposes v2. That bump and the CLI major (#9217) drive **one** machine, so deciding them independently means the failure only shows at the next release.\n\nThis card produces a decision with evidence, and then either folds the action bump into the migration PR (#9498) or closes #9208 with the reason recorded on it.\n\n## What has to be established\n\n- What `release.yml`'s v1 pin is actually protecting — read #6170 and the workflow's own comments rather than assuming the pin is inertia.\n- Whether v2 changes any of that behaviour, in particular anything touching how the action invokes `changeset version`/`publish` under v3's exit-1-on-no-op (this is the seam where the two bumps interact; U6 on #9497 supplies the reading).\n- Whether v2 requires inputs or permissions the current job does not grant.\n\n## Outcomes, both legitimate\n\n- **Fold in.** The action bump joins #9498's PR, with the argument for why v2 does not violate the pinned rationale written in that PR's body.\n- **Defer.** #9208 stays open or is closed with a comment stating what would have to change for v2 to be safe. A deferral is a real answer here; \"we bumped it because Dependabot offered\" is not.\n\nEither way: no release is performed by this card, and `release.yml` is not edited outside the migration PR.\n\n## Acceptance\n\n- A decision comment on #9208 stating the outcome, the evidence, and what was read (#6170, the workflow comments, v2's changelog).\n- If folded: #9498's PR carries the change and this card links to it. If deferred: #9208 carries the reason, and this card records it on #9465 so the next Dependabot re-offer meets an existing answer instead of a fresh debate.\n"
+}

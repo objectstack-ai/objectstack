@@ -1,0 +1,37 @@
+{
+  "number": 9311,
+  "kind": "issue",
+  "title": "flaky: two default-timeout tests red `pnpm test` under full-repo parallelism — `types/src/node.test.ts` (5s) and `dogfood/test/semantic-roles.dogfood.test.ts` (10s hookTimeout)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-17T12:41:36Z",
+  "updated_at": "2026-08-17T17:59:19Z",
+  "closed_at": "2026-08-17T17:59:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9311",
+  "body": "Found while taking the machine-lane baseline for the QA wave (#9296, round #9298). Filed as a finding, not fixed — R0 does not land code.\n\nSame defect class as the already-closed precedents #3662, #4186, #4485, #5421, #6329: a test on a **default vitest timeout** that only passes when it is not competing for CPU. Two more instances, neither previously filed.\n\n## What failed\n\n### 1. `@objectstack/types` — `src/node.test.ts`\n\n```\nFAIL src/node.test.ts > host-app package resolution (cloud#1013, #4700)\n     > falls back to the importing package's own resolution when the host does not declare\nError: Test timed out in 5000ms.\n ❯ src/node.test.ts:178:3\n```\n\nReported as `15 tests | 1 failed`, the failing case taking **5061 ms** against the default 5000 ms `testTimeout`. This case spawns a child process to exercise real Node resolution, so it pays process-spawn cost — the same shape as #3662's \"dist 探针\" cases, which were fixed by giving them their own timeout while a sibling already had 30s.\n\nThis aborted the whole gate: `pnpm test` exited 1 with turbo reporting\n\n```\nTasks:    26 successful, 44 total\nCached:   20 cached, 44 total\nTime:     33.875s\nFailed:   @objectstack/types#test\n```\n\nso **18 of 44 tasks never ran at all** — the failure is early and load-bearing, not cosmetic.\n\n### 2. `@objectstack/dogfood` — `test/semantic-roles.dogfood.test.ts`\n\n```\nFAIL |isolated| test/semantic-roles.dogfood.test.ts\nError: Hook timed out in 10000ms.\n ❯ test/semantic-roles.dogfood.test.ts:52:1\n     52| beforeAll(async () => {\n     53|   stack = await bootStack(showcaseStack);\n     54|   token = await stack.signIn();\n```\n\nReported as `(5 tests | 5 skipped) 10027 ms` against a 10000 ms `hookTimeout`. `bootStack` boots a full showcase stack (ObjectQL + ~45 plugins, per the boot log), which is far more than 10 s of work on a loaded box. Suite total: `Test Files 1 failed | 109 passed | 1 skipped (111)`, `Tests 775 passed | 8 skipped (783)`.\n\n## Both pass in isolation — these are load flakes, not product defects\n\nRe-run with nothing else on the box:\n\n| test | isolated result | wall clock |\n|---|---|---|\n| `types/src/node.test.ts` run 1 | **15 passed (15)**, exit 0 | 5 s |\n| `types/src/node.test.ts` run 2 | **15 passed (15)**, exit 0 | 3 s |\n| `dogfood/test/semantic-roles.dogfood.test.ts` | **5 passed (5)**, exit 0 | 29 s (27.25 s vitest) |\n\nNote the third row: the dogfood file needs **27 s** to do its `bootStack` even unloaded. A 10 s `hookTimeout` does not cover it with any margin at all — this one looks under-budgeted independent of load, and would presumably only pass today because the boot happens to land under 10 s on faster hardware.\n\n## Why it triggers here\n\n`turbo.json` sets no `concurrency`, so turbo defaults to **10** parallel tasks. This container has **4 CPUs / 15 GB RAM** (`nproc=4`). Ten concurrent `test` tasks, each of which forks its own vitest workers, oversubscribes the box several times over, and the timeout-sensitive cases lose the race.\n\nEnvironment:\n\n- framework sha `e4e5c6e3c608b1b807c83a0d5b734f213eb1a1dd` (tip of `main`)\n- node v22.22.2, pnpm 10.31.0, vitest 4.1.10, linux x64, 4 CPU / 15 GB\n- fresh worktree, single `pnpm install`, deps prebuilt\n\n## Reproduction\n\n```bash\npnpm test                     # exit 1, ~34s, Failed: @objectstack/types#test\npnpm --filter @objectstack/dogfood test   # exit 1, ~620s when run beside another build\n```\n\nthen the isolated controls:\n\n```bash\npnpm -C packages/types exec vitest run src/node.test.ts                       # 15 passed\npnpm -C packages/qa/dogfood exec vitest run test/semantic-roles.dogfood.test.ts  # 5 passed\n```\n\nThe dogfood failure above was observed while `pnpm objectui:build` was running concurrently; the `types` failure was observed with the box otherwise idle apart from turbo's own 10-way fan-out, so the default concurrency alone is enough to produce it.\n\n## Suggested direction (not implemented here)\n\nFollowing the precedent set by #3662 / #4186 / #5421 — give the two cases explicit timeouts sized to what they actually do, rather than capping repo-wide concurrency:\n\n- `types/src/node.test.ts:178` — an explicit `testTimeout` for the subprocess-spawning cases (its siblings in the same file already run in ms; only the spawning ones are exposed).\n- `dogfood/test/semantic-roles.dogfood.test.ts:52` — a `beforeAll` timeout sized against a real measured `bootStack` (27 s unloaded here), or the suite-wide `hookTimeout` other dogfood files use. Worth checking whether sibling dogfood files already carry a larger `hookTimeout` and this one was simply missed.\n\nSeparately worth a maintainer decision: whether `turbo.json` should pin a `concurrency` proportional to available CPUs, so the whole suite stops depending on runner size. That is a broader call than this issue and is not proposed as the fix here.\n"
+}

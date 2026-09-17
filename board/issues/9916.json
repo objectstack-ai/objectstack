@@ -1,0 +1,33 @@
+{
+  "number": 9916,
+  "kind": "issue",
+  "title": "Record beside the `changesets/action@v1` pin what a future v2 upgrade must re-verify first",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-19T07:36:47Z",
+  "updated_at": "2026-08-19T07:41:13Z",
+  "closed_at": "2026-08-19T07:41:13Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9916",
+  "body": "Comment-only change to `.github/workflows/release.yml`. No behaviour change, no version bump, no new input.\n\n## Why\n\n`release.yml` pins `changesets/action@v1` and the pin is a **safety property**, not staleness. The workflow deliberately passes **no `publish:` input**, and its own comment explains why by quoting v1's source:\n\n```\nchangesets/action@v1 branches on hasPublishScript = !!publishScript (src/index.ts):\n    case !hasChangesets && !hasPublishScript:  → does not publish\n    case hasChangesets:                        → runVersion(...)   // version PR only\nWith no publish script, runPublish is not reachable from any input state the action can observe.\n```\n\nThat is what makes this lane *structurally* unable to publish, per #6170 — the property that exists because this lane once minted `rc.3` and `rc.4` with no human involved.\n\nWhat the comment does **not** say is that the property is asserted against **v1's source specifically**. So a future reader — human or agent — sees a pinned major, reads it as ordinary version lag, and bumps it. Dependabot proposed exactly that in #9208, which the maintainer decided on 2026-08-19 not to take. This card writes the reason where the next person will actually be standing.\n\n## What to add\n\nBeside the existing `⛔ THERE IS NO publish: INPUT HERE` block, state plainly:\n\n1. The no-publish guarantee is verified against **v1's** branch structure. It is not inherited by a newer major.\n2. Before moving to v2 (or any later major), someone must re-read that version's source and confirm `runPublish` is still unreachable when no `publish:` input is supplied — a green CI run does **not** demonstrate this, because the lane only publishes on input states CI never produces.\n3. The second thing a major bump must re-verify, added by the v3 migration (#9465): the action bundles its own `@changesets/read`. Since `@changesets/cli` v3, consumed prerelease changesets live in `.changeset/pre/`, and a bundled reader that only scans the root sees just the unconsumed residue. The failure mode is the \"chore: version packages\" PR silently ceasing to refresh mid-window — invisible until a cut is dispatched against a stale number.\n4. Point at #9208 for the decision and at #6170 for the original incident.\n\nWording is yours; those four facts are the payload. Keep it tight — this block is already long, and a comment nobody finishes reading protects nothing.\n\n## Constraints\n\n- **Comments only.** Not one functional line of `release.yml` changes: not the `uses:` pin, not `version:`, not `commit:`/`title:`, not `createGithubReleases: false`.\n- **Do not add a `publish:` input.** Adding one re-arms the exact lane that minted two unasked-for releases. If anything in the task seems to call for it, stop and report.\n- Perform no release: no publish, no tags, no workflow dispatch, no Version Packages PR touched.\n- Verify with `git diff` that every changed line is inside a comment before you push.\n\n## Acceptance\n\n- One file changed, comment lines only, shown by the diff.\n- `check:workflow-status-functions` and the other gates `node scripts/pm/dispatch-gates.mjs .github/workflows/release.yml` names, run green.\n- `skip-changeset` — a workflow comment ships nothing to consumers.\n"
+}

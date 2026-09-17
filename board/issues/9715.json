@@ -1,0 +1,34 @@
+{
+  "number": 9715,
+  "kind": "pull_request",
+  "title": "docs(agents): sanitizer clause states the two measured body-mutation shapes; Skills section stops enumerating; platform-readings carries the read-layer facts",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T16:18:02Z",
+  "updated_at": "2026-08-19T01:35:01Z",
+  "closed_at": "2026-08-19T01:35:00Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": "2026-08-19T01:35:00Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9715",
+  "body": "Fixes #9621\nFixes #9557\nFixes #9526\n\nThree-card bundle on the read-layer/sanitizer family plus AGENTS.md inventory hygiene. Instruction text only — no runtime code. **Governed surface (AGENTS.md + `.claude/skills/`): this PR stays DRAFT and is merged by the maintainer, by hand — never queued, armed, or flipped ready by a seat.**\n\nPer the family's own convention, this body spells the poison tokens out in words and never writes them literally.\n\n**Rework provenance:** the AGENTS.md clause was compressed from ~34 lines to 6 per the maintainer's size review (2026-08-18); the facts moved to their proper tier, the platform-readings table, which was already in this PR and is unchanged.\n\n## What changed\n\n**1. AGENTS.md — body-mutation clause (Multi-agent working discipline), 6 lines.** The dispatch ruling said to amend the clause naming \"less-than + letter\"; measured on fetched `main` (`cd455c8`), **AGENTS.md carried no sanitizer clause at all** — the \"less-than + letter\" wording lives in the dev-agent definition file, a sibling card's solo surface, untouched here. The clause added (next to the attribution-footer/body-rewrite block, its nearest kin) is the operative minimum: the bold author rule (poison-shaped tokens — regex literals, script-tag shapes — go in fences with the dangerous character spelled out in words, or are described in words; read any less-than fragment back after writing), a pointer to the pm-dispatch platform-readings table where the two measured mutation shapes and triggers live, and the do-not-repair remedy (a body reading short only through the API is probably intact — check the rendered page before \"repairing\" it; a rewrite destroys a correct card).\n\n**2. AGENTS.md — Skills section.** Adopted grading direction 1: both hand-written inventories (the nine-name published list and the two-name internal list) are replaced by the two root paths (`skills/`, `.claude/skills/`) plus \"the filesystem is the catalog; consult the matching SKILL.md\". Stale names deleted, none added; the `metadata.internal: true` requirement is retained.\n\n**3. `platform-readings.md` — read-layer fact rows (the facts' authoritative tier).** The truncation row carries the deterministic read-side trigger (script-tag-shaped token; doctype/object shapes too) with the WebFetch-the-rendered-page remedy, and a new row carries the storage-layer exclamation-mark deletion (the markup-declaration opener — less-than, exclamation mark, open square bracket — exactly a regex negative lookbehind before a character class; measured at rest by two independent authors; bare less-than + exclamation mark survives) with the spell-in-words author rule. No issue numbers in operational text (id-lint green).\n\n## Ratchet payment table (`platform-readings.md`, ceiling 134)\n\n| direction | content |\n|---|---|\n| added | deterministic read-side truncation trigger + do-not-repair remedy (packed into the existing double-read row) |\n| added | new row: storage-layer exclamation-mark deletion shape + spell-in-words author rule |\n| cut | the generic single-read tail-loss clause (\"tool output limit / paging / slicing\") — superseded: the measured token trigger names the concrete read-side cause, and the leading double-read rule remains the discriminator |\n| net | **0 lines — file stays exactly 134/134 (headroom 0)**; no existing lines re-wrapped or merged; the pre-existing write-side short-fragment guidance moved to its own bullet verbatim |\n\nAGENTS.md post-rework count: **958 lines** (was 983 on base; the clause itself is 6) — input for the follow-up ceiling card.\n\n## Gates (all re-run at final commit `1334c1c`, the pushed head)\n\nDerived by `node scripts/pm/dispatch-gates.mjs` (no paths passed; 6 matched of 109 families; identical derivation before and after the rework commit):\n\n| gate | exit |\n|---|---|\n| `pnpm check:doc-authoring` | 0 |\n| `pnpm --workspace-concurrency=2 --filter @objectstack/lint run check:doc-formula-expressions` (closure rebuilt in the fresh worktree first — the initial run failed on a missing `dist/`, an environment artifact, not the diff; script echo verified) | 0 |\n| `pnpm check:pm-governed-merges` | 0 |\n| `pnpm check:pm-skill-id-lint` | 0 |\n| `pnpm check:pm-skill-ratchet` (platform-readings: 134 lines, ceiling 134, headroom 0) | 0 |\n| `pnpm check:skill-frame-sync` | 0 |\n| `node scripts/check-nul-bytes.mjs` (6203 files, no raw control bytes) | 0 |\n\n## Recovered content statement (the two mutilated member cards)\n\n- Lead card body truncates mid probe-table through the API; full probe table (six probes: the trigger is the bracketed opener, not bare less-than + exclamation mark), the second-mutation note (doctype-opener token truncated its own first revision through the API), and the suggested-resolution section were recovered from the rendered web page. Its comments read fine through the API.\n- The script-token card's body ends at the poison token through the API; the full text (silent-spec-loss analysis, the wrong-remedy warning against repairing intact cards, interim guidance) was recovered from the rendered web page; its triage comment (read fine via API) adds the object-tag-shaped trigger. Nothing remained unrecoverable on either card.\n\nTests/docs-only instruction change — `skip-changeset` applied read-modify-write with read-back.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WswfK2yNYT9hNnMH6TzAwL)_"
+}

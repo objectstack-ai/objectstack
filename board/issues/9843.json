@@ -1,0 +1,34 @@
+{
+  "number": 9843,
+  "kind": "pull_request",
+  "title": "docs(skills): point the checklist-test extraction bullet at the Guardrails auth carve-out",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T04:19:20Z",
+  "updated_at": "2026-08-19T05:21:14Z",
+  "closed_at": "2026-08-19T05:21:13Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-08-19T05:21:13Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9843",
+  "body": "Fixes #9607\n\n## What changed\n\nOne clause, one line, one file: `.claude/skills/checklist-test/SKILL.md`.\n\nThe section 4 extraction bullet (「收束抽取」) told the runner to extract every product defect found during a run into a standalone card with 「复现与机制条目化」 — reproduction and mechanism itemized — unconditionally. The skill's own Guardrails section already carves authentication/authorization defects out of that obligation (「认证 / 授权漏洞的复现,永不发布到 GitHub 的任何地方」 … 「本条压过 §4 的『每个 `fail` 一条复现规则』」), but that clause names only section 4's per-`fail` record rule, not its extraction bullet. A runner who lands on the extraction bullet alone therefore read an unconditional instruction with no hint a carve-out exists.\n\nThe added clause closes that reading path from the other direction:\n\n```\n  机器行与抽取卡的溯源行见 §5。⛔ 认证 / 授权漏洞的抽取卡不写复现,见 Guardrails。\n```\n\nDeliberately a **pointer, not a third copy** of the policy — it names which defects and where the rule lives, and nothing else. The Guardrails clause is correct as written and is unchanged. This follows the precedent the card cites: the corresponding paragraph in `docs/qa/platform-checklist/RUNNER.md` got exactly this one-clause treatment, and the two READMEs under `docs/qa/platform-checklist` were aligned the same way.\n\n## Premise verification\n\nRe-verified on `origin/main` at merge base `1408ae337` before editing, since the card gave approximate line numbers that could have drifted. Both held: the extraction bullet at lines 142–146 carried 「复现与机制条目化」 with no carve-out pointer, and the Guardrails clause sat at lines 223–229, correct and complete.\n\n## Line ratchet — zero net lines, nothing paid, nothing re-wrapped\n\n`.claude/skills/checklist-test/SKILL.md` is one of the entries in `scripts/pm/check-skill-line-ratchet.mjs`, at ceiling **232 with headroom 0**. Rather than pay for a new line by deleting instruction text, the clause was sized to fit the bullet's existing final line: that line carried 31 display columns against the file's 80-column prose wrap, and the 49-column clause lands it at exactly 80 — the same width as its neighbours (lines 143 and 147 are 81). No other line in the file moved, so no re-wrap was involved and none was claimed as payment.\n\n| | lines |\n|---|---|\n| before | 232 |\n| after | 232 |\n| ceiling | 232 |\n\nGate confirms it: `✓ check-skill-line-ratchet: .claude/skills/checklist-test/SKILL.md is 232 lines (ceiling 232; headroom 0).`\n\n## Gates run\n\nDerived from the real diff with `node scripts/pm/dispatch-gates.mjs` (no paths passed — the script takes the change set from the merge base itself), re-derived after the final commit; the set was identical both times. All verdicts below are the gates' own printed lines, at `51c5981fa`:\n\n- `pnpm check:pm-skill-ratchet` — `✓ check-skill-line-ratchet: .claude/skills/checklist-test/SKILL.md is 232 lines (ceiling 232; headroom 0).`\n- `pnpm check:pm-skill-id-lint` — `✓ check-skill-id-lint: 9 file(s) clean (pattern /#[0-9]{3,}/g).` (the clause cites no PR or issue number — it names the Guardrails section)\n- `pnpm check:doc-authoring` — `✓ doc authoring guard: 377 files clean — no bare metadata literals.`\n- `pnpm check:pm-governed-merges` — `✓ check-governed-merges --self-test: 77 assertions …`\n- `pnpm check:skill-frame-sync` — `✓ check-skill-frame-sync: 4 copies of the decision frame are structurally isomorphic across 3 files`\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` — `✓ check:doc-formula-expressions: 22 record-scoped formula example(s) across 396 files / 1413 TS blocks judged clean by @objectstack/formula.` (first run failed on a missing `@objectstack/formula/dist`; re-run green after `pnpm --filter '@objectstack/lint^...' build`)\n- `pnpm check:nul-bytes` — `check-nul-bytes: OK (scanned 6280 text file(s) … no raw ASCII control bytes).`\n\nNo changeset: `.claude/**` is internal agent tooling and publishes nothing user-visible, so this PR carries `skip-changeset`.\n\n## Merge posture\n\n`.claude/**` is a governed, human-merge-only surface. Opened as **draft** and left draft on purpose — auto-merge is not enabled and ready was not flipped. A human merges this.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AeA3nU1B5Q2pgxqxgUrexd)_"
+}

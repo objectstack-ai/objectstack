@@ -1,0 +1,34 @@
+{
+  "number": 9485,
+  "kind": "pull_request",
+  "title": "docs(pm-skill): land the quota/credential incident facts into platform-readings and reconcile the body-entity rows",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T03:59:29Z",
+  "updated_at": "2026-08-18T05:23:58Z",
+  "closed_at": "2026-08-18T05:23:57Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": "2026-08-18T05:23:57Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9485",
+  "body": "Fixes #8953\nFixes #9031\n\n## What this lands\n\nSingle-file update to `.claude/skills/pm-dispatch/references/platform-readings.md` (the PM lane's platform-facts table), merging:\n\n- **The five measured facts of the 2026-08-16 quota/credential incident** into the API-quota section: (1) the \"reads go REST\" rule is not executable from an MCP-only session — MCP list/search reads have no REST counterpart, direct REST is gated per-session (403 `GitHub access is not enabled for this session`, snapshotted at session start) and the egress proxy passes only repo-scoped paths, so a drained GraphQL pool leaves no list channel until reset; (2) mid-session credential rotation kills the GitHub MCP server unrecoverably (`Streamable HTTP error: invalid session`; a fresh session re-binds), and an identity switch also resets the quota burn; (3) list/search fan out Project field_values server-side — reconciled with the 2026-08-18 exhaustion reading that even minimal-field requests fail (`failed to fetch issue field values: API rate limit already exceeded`), so the row states that `fields` slimming saves payload, not the pool; (4) after an org-side auth change access propagates gradually, and a 403 error object saved to a file parses as JSON — an empty lane must be reverse-checked against `open_issues_count`; (5) the documented-not-measured note that conditional requests answered 304 do not count against the core pool, scoped to \"only if direct REST is ever authorized\".\n- **The 2026-08-18 famine-degraded read paths**: WebFetch of public github.com pages (zero API quota; boundaries recorded: ~15 min cache, no assignee in list rows, render-layer content) and git transport (fetch/ls-remote unaffected by REST/GraphQL quota; PR file reads go git-first because the REST PR files endpoint can transiently 404 — this also discharges the second parked candidate from the ledger).\n- **The read-layer / write-layer reconciliation** as one scoped, non-contradictory pair: read-side entity escaping is cosmetic and reversible (decode-then-write round-trips safely; comment bodies come back plain), while write-side stripping of HTML comments and short angle-bracket fragments is a real at-rest loss — therefore read back after every write; unmeasured boundaries stated in the row (whether the escaping belongs to the MCP server or the GitHub API; other entity kinds).\n\n## Parked-candidate triage\n\n- \"auto-merge first arm can silently fail to enqueue; a flip after churn heals it\" — already covered by the existing enable-verification-sequence row (step 3); made explicit there at zero line cost instead of adding a duplicate row.\n- \"REST PR files endpoint can transiently 404 (go git-first)\" — was missing; merged into the git-first row.\n\n## Line budget\n\nThe file's ratchet ceiling is 134 (`scripts/pm/check-skill-line-ratchet.mjs`); the file was at 133. The ~15 lines of new facts are paid for by genuine in-place compression of existing rows across the queue, quota, traps and closing-keyword sections — facts preserved, wording condensed, no re-wrap-only savings. The file lands at exactly 134, headroom 0, matching every other reference file in the ratchet set. One deliberate drop, recorded here for the reviewer: the egress-proxy rejection string `sessions are bound to their configured repositories` did not fit the budget; the 403 grant string was kept as the diagnostic signature for that mechanism.\n\n## Cheap verifications performed\n\n- Read-layer escaping corroborated in this session: `issue_read` returned numeric entities in both card bodies while comment bodies round-tripped plain — consistent with the row's \"comments come back plain\" scope.\n- WebFetch degraded path corroborated: a label-filtered issue-list page served all 12 rows (numbers and titles) from server HTML at zero API quota, and list rows carried no assignee.\n- The unconditional field_values fan-out under exhaustion stays as measured by the 2026-08-18 PM shift (error string quoted verbatim in the row); it is not cheaply reproducible from a healthy pool.\n\n## Gates — all runs at head `dbe1c8e13`\n\n- `pnpm check:doc-authoring` green · `pnpm check:pm-skill-id-lint` green · `pnpm check:pm-skill-ratchet` green (134/134, headroom 0) · `pnpm check:skill-frame-sync` green · `pnpm --filter @objectstack/lint run check:doc-formula-expressions` green · `node scripts/check-nul-bytes.mjs` green.\n- `node scripts/check-adr-merge-approval.mjs` cannot run locally: direct REST answers 401 Bad credentials in this container — the very session-gating fact this PR documents. It runs in CI, and on this PR it is expected to stay red until a maintainer approval exists; that is its designed behaviour for this surface, not a defect.\n- Gate set re-derived from the actual diff via `node scripts/pm/dispatch-gates.mjs` — exactly the six dispatched families, nothing additional.\n\n## Landing\n\n⛔ This PR touches `.claude/skills/**` (ADR-class surface): it stays a **draft, awaiting a human merge** — no ready flip, no queueing, no auto-merge arming by any seat.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Rn7aaamsR99FXRqLcpL99q)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Rn7aaamsR99FXRqLcpL99q)_"
+}

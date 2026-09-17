@@ -1,0 +1,35 @@
+{
+  "number": 9297,
+  "kind": "issue",
+  "title": "Dependabot group #9212 cannot author its own changeset: add the patch changeset for the published packages whose dependency ranges it changes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T12:07:38Z",
+  "updated_at": "2026-08-17T15:34:54Z",
+  "closed_at": "2026-08-17T15:34:54Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9297",
+  "body": "Mechanical, S. No design judgment in it — the only thinking is deriving *which* packages belong in the changeset, and the rule for that is stated below.\n\n## Why\n\n#9212 (weekly Dependabot production group, 19 updates) is red on two gates. One of them — the `driver-memory` / mingo 7.2.4 failure — is fixed on `main` as of `739fe5b79` (#9228 / PR #9235) and a rebase clears it. The other is `Check Changeset`, and no rebase can clear it: Dependabot does not author changesets, and this group is not docs-only. It changes the **runtime** dependency ranges of published packages, so consumers' installs change and the release needs a patch entry.\n\n## Deliverable\n\nExactly one new file — `.changeset/<slug>.md` — committed **onto Dependabot's own branch**, `dependabot/npm_and_yarn/production-dependencies-3e1bd0b732`, so that it lands inside PR #9212 and clears that PR's gate. There is no PR of your own to open, and nothing to merge.\n\n## The derivation rule (this is the whole task)\n\nA package gets a `patch` entry if and only if **its published manifest's consumer-facing dependency ranges changed** in this group — that is, an entry under `dependencies`, `optionalDependencies` or `peerDependencies`. A change confined to `devDependencies` does not reach consumers and must **not** get an entry. Private packages (the docs app, examples, the workspace root) are not published and get nothing.\n\nDerive the list from the **actual diff of #9212 at the commit you are working on**, not from this card. For cross-checking only, the reading taken when this card was filed (pre-rebase, head `45eaf8db`) was: `@objectstack/cli`, `@objectstack/driver-memory`, `@objectstack/driver-mongodb`, `@objectstack/driver-sql`, `@objectstack/driver-sqlite-wasm`, `@objectstack/driver-turso`, `@objectstack/metadata`, `@objectstack/plugin-auth`, `@objectstack/plugin-email`, `@objectstack/plugin-hono-server`, `@objectstack/plugin-pinyin-search`, `@objectstack/service-settings` — and deliberately **not** `@objectstack/spec`, `@objectstack/client`, `@objectstack/core`, `@objectstack/hono` (adapter) or `@objectstack/plugin-sharing`, whose changes are devDependencies only. If your derivation differs from that list, **your derivation wins** — say so in the report with the specific manifest hunk that decides it.\n\nBump level is `patch` for every entry. The summary line names what actually changed, in one sentence, for the release notes — a dependency refresh, not a feature.\n\n## Ordering constraint — read this before you push\n\n`·@·d·ependabot r·ebase` was requested on #9212 at ~11:22 UTC and may still be in flight. If you push while Dependabot is rebasing, its force-push destroys your commit silently.\n\nBefore committing, verify the rebase has landed by checking that the fix is an **ancestor** of the branch — the sha alone is not the criterion:\n\n```\ngit fetch origin dependabot/npm_and_yarn/production-dependencies-3e1bd0b732\ngit merge-base --is-ancestor 739fe5b79 FETCH_HEAD && echo \"rebased, safe to push\"\n```\n\nIf that is false, wait and re-check (a few minutes apart, up to ~20 minutes). If it never becomes true, stop and report — do not push onto a stale base.\n\n## Consequence to record in the PR thread\n\nOnce a non-Dependabot commit exists on that branch, **Dependabot stops rebasing and updating the PR**. That is an accepted cost, not a surprise — but it must be stated in a short comment on #9212 when you push, so nobody waits for an automatic update that will never come. Keep the comment to that fact plus one line on what you added.\n\n## Constraints\n\n- One new file. **No** `package.json`, `pnpm-lock.yaml` or `pnpm-workspace.yaml` change — the version bumps are Dependabot's, not yours.\n- Do not merge #9212, do not enable auto-merge on it, do not queue it. Whether the group is taken at all is the maintainer's decision and is not part of this card.\n- Do not add a `skip-changeset` label as a shortcut. This PR is not tests/docs-only, and the label would be a false exemption.\n\n## Acceptance\n\n- `Check Changeset` on #9212 concludes `success` on the commit you pushed (read the job conclusion, not the aggregate).\n- `pnpm check:empty-changeset` and `pnpm check-changeset-no-major` pass locally; re-derive the gate set for your actual diff with `node scripts/pm/dispatch-gates.mjs .changeset/<your-file>.md` and run whatever else it names.\n- The mingo failure is gone on the rebased head — report the `Test Core` and `Temporal Conformance` job conclusions as your evidence, since this is the first end-to-end confirmation that #9235 actually unblocks this group.\n\nThis card has no PR of its own, so nothing auto-closes it; the PM closes it on verification.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 9469,
+  "kind": "issue",
+  "title": "Unscoped `GET /api/v1/search` returns 400 on the stock config when pinyin recall is on and a federated object is registered",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T03:21:07Z",
+  "updated_at": "2026-08-19T02:38:30Z",
+  "closed_at": "2026-08-19T02:38:30Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9469",
+  "body": "Surfaced by the Tier-2C run record #9467 (QA wave #9296) while driving `search.console-global-search`. Subject sha `e4e5c6e3c608b1b807c83a0d5b734f213eb1a1dd`.\n\n## The defect\n\nAn **unscoped** `GET /api/v1/search` — no `objects=` parameter — answers **400** on the **stock** showcase configuration. Isolated to the pinyin-recall path: flipping `OS_SEARCH_PINYIN_ENABLED` changes the outcome, with a federated object registered.\n\n## Why it failed no clause, and why it is still worth a card\n\nThe console **always** scopes its queries with `objects=`, so nothing in the console surface is affected and no clause of `search.console-global-search` fails — that item passed. This card exists because the API is a **published surface in its own right**: an unscoped search is the obvious first call for any API consumer, it is documented as available, and on a stock deployment it returns 400.\n\nA defect reachable by every direct API consumer but by no console user is exactly the class a browser-driven sweep normally misses. It was caught only because the runner probed the door rather than stopping at the surface that consumes it — recording it here rather than letting a passing item bury it.\n\n## What a fix has to settle\n\nWhy the pinyin recall path rejects an unscoped query when a federated object is in the registry — most likely the federated object cannot satisfy whatever the recall path requires of every candidate object, and the unscoped case is the only one that includes it. Either the recall path skips objects it cannot serve, or the refusal explains itself; a 400 with no route to a working call is the part that has to go.\n\nPin it with an **unscoped** query against a stock boot with a federated object registered — the scoped query the console issues passes today.\n\nLeft unlabelled for `domain:*` and unlevelled — the triage seat's call.\n"
+}

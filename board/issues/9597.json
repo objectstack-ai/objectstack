@@ -1,0 +1,33 @@
+{
+  "number": 9597,
+  "kind": "pull_request",
+  "title": "fix(example-showcase): translate the app sidebar so a zh-CN session stops mixing locales",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T12:37:23Z",
+  "updated_at": "2026-08-18T13:31:32Z",
+  "closed_at": "2026-08-18T13:31:31Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": "2026-08-18T13:31:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9597",
+  "body": "Fixes #9260\n\nOn a zh-CN session the showcase app rendered a mixed-locale shell: view tabs, list columns, field labels and option values in Chinese, the left sidebar in English throughout. The bundle carried **no `apps.*` keys at all**, so the sidebar had nothing to fall back on but its English source labels.\n\n## Why `objects.*` could not cover this\n\nNavigation labels are their own key space — `apps.APP_NAME.navigation.NAV_ID.label`, addressed by the node's stable `id` regardless of tree depth. It is applied by `translateApp` (`packages/spec/src/system/i18n-resolver.ts`) at the `/meta` boundary in `@objectstack/rest`, and nothing under `objects.*` answers for it: a nav entry whose label was authored (`Projects`, not the bare `showcase_project`) keeps that authored label, so the object's translated `pluralLabel` never reaches the menu. That is why 12 object entries were already translated and all 12 still read English in the sidebar.\n\n## What changed\n\n`examples/app-showcase/src/system/translations/index.ts` gains a zh-CN `apps.showcase_app` block:\n\n| surface | found | translated |\n|---|---|---|\n| navigation items (leaves) | 49 | 49 |\n| group headers (`grp_*`) | 8 | 8 |\n| app label (`apps.showcase_app.label`) | 1 | 1 |\n| separator `nav_sep_reports` | 1 | n/a — declares no label, so there is no key |\n\nThe counts are measured, not eyeballed: `os lint --json` on the showcase config reported exactly 57 `i18n/missing-navigation` plus 1 `i18n/missing-app`, zh-CN only. The translated id set was diffed against that reported set — no missing ids, no extra ids. `en` needs no entries: the default locale is satisfied by the inline source label (`i18n-coverage.ts`), and restating it would be the fake translation this bundle's header already warns about.\n\nThe app's own label is included beyond the card's literal enumeration: it renders at the top of the same sidebar (`useObjectLabel().appLabel`), so leaving it English reproduces the mixed shell one line above the tree being fixed. Setup and Account translate theirs, Studio keeps its product name; this app is named for what it does, so it translates.\n\nWording reuses the vocabulary this bundle already established rather than minting a second word per idea — the object words for the object entries, `任务清单` / `工时按状态分布` / `活动时间线` / `工作地点地图` from `showcase_task._views` for the entries that open exactly those surfaces, `分流` from `showcase_inquiry._views.triage`, `排期` from `showcase_task._sections`, `业务单元` from the platform bundle. Each non-obvious choice carries its reason inline.\n\n## The ratchet\n\n`scripts/i18n-coverage-baseline.json`: `examples/app-showcase` 451 to 393 (exactly the 58 keys above). `check:i18n-coverage` rejects an un-ratcheted improvement as well as a regression, and its own remedy is `--update`; the baseline moves **down** only, and no other config's entry moved.\n\n## The header sentence\n\nThe bundle's header declared a columns-only remit (\"EVERY field surfaced as a column\", \"a list never mixes locales\") — which is precisely why nothing caught this: the invariant was scoped narrower than the surface it reads as covering. One sentence is added describing what the file now contains, deliberately **not** widened into a guarantee that every declared surface of the showcase is translated (it is not — the frozen baseline still counts 393), and pointing at that baseline as the measure of what remains.\n\n## Verification\n\nRun after the final commit, on the pushed tree (`883f9a938`):\n\n- `node packages/cli/bin/run.js lint examples/app-showcase/objectstack.config.ts --json` — `i18n/` issues 451 to 393; `i18n/missing-navigation` 57 to 0, `i18n/missing-app` 1 to 0, zero remaining keys under `translations.zh-CN.apps.`\n- `node scripts/check-i18n-coverage.mjs` — before the baseline update it went **red** on exactly this change (\"untranslated declared strings improved 451 to 393 — ratchet DOWN\"); after `--update`: `OK (12 config(s), 602 baselined untranslated string(s), none new)`\n- `pnpm --filter @objectstack/example-showcase --filter @objectstack/lint test` — 21 files / 334 tests and 74 files / 2088 tests, all passing (`packages/lint` imports this bundle in `validate-translatable-sections.test.ts`)\n- `pnpm --filter @objectstack/example-showcase typecheck` — clean\n- `pnpm check:cross-package-test-inputs` — OK (12 packages read outside themselves, all declared)\n- `pnpm check:i18n` — OK (9 packages, all bundles in sync). It does **not** cover this file: its population is `packages/**` directories owning a `scripts/i18n-extract.config.ts`, and no example has one. Run rather than assumed.\n- `pnpm check:app-nav-i18n` — OK (10 contributors, 53 merged `setup` nav ids, 4 locales). Also untouched by this diff, and run for the same reason: it computes its own population, so no path derivation can clear it.\n- `node scripts/check-nul-bytes.mjs` — OK (6160 files)\n\nGate union re-derived with `node scripts/pm/dispatch-gates.mjs` (no path arguments) against the committed diff: `check:cross-package-test-inputs` and `check:i18n-coverage`, both green above. The `examples/**` path pulls in `check:cross-package-test-inputs` — a `packages/**` card would not see it — because `packages/lint` declares this example file as a cross-package test input.\n\nNo changeset: nothing published changes (`@objectstack/example-showcase` is `private: true`; the other file is repo tooling). Using this repo's real mechanism for that — the `skip-changeset` label.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017qYPmkKEsfbWY1yVg83p8F)_"
+}

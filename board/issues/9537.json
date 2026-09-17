@@ -1,0 +1,33 @@
+{
+  "number": 9537,
+  "kind": "issue",
+  "title": "finding: the `/references` route answers `{references: []}` when the protocol has NO `findReferencesToMeta` at all — a capability gap rendered as &#34;Safe to delete.&#34;",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T08:20:02Z",
+  "updated_at": "2026-08-18T11:13:59Z",
+  "closed_at": "2026-08-18T11:13:30Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9537",
+  "body": "Measured by the dev seat implementing #9190 (PR #9324). ⛔ **Filed by the PM on that seat's behalf** — it could not file at the time because the shared GitHub API rate limit was exhausted (`search_issues` and `list_issues` both refused), and filing without the dedup search would have broken the filing contract. The measurement is theirs; the dedup search has now been run and returned nothing.\n\n## The defect\n\n`packages/rest/src/rest-server.ts:4141-4143` — when the resolved metadata protocol has no `findReferencesToMeta` method, the route answers:\n\n```js\nres.json({ references: [] })\n```\n\nA **capability that does not exist** is reported in the same words, with the same status code and the same body shape, as **a question that was asked and answered \"nothing\"**.\n\n## Why this one is worse than it reads\n\nThe consumer is not a debugging surface. `objectui`'s `ResourceEditPage` → `client.references()` → `ReferencesPanel` renders this immediately before a rename or a delete, and its empty state is not neutral phrasing — it is a recommendation, verbatim from the translation file:\n\n```\n'engine.edit.refsEmptyDesc': 'Nothing in the metadata graph points at this item. Safe to delete.'\n```\n\nSo a deployment whose protocol lacks the method tells every operator that **every item in the system is safe to delete**, on the screen where they are deciding whether to delete it. There is no error, no warning, no distinguishing field.\n\n## Where it sits relative to what just landed\n\nThis is the **ADR-0110 D3 / #8896 harm shape one layer above** the one #9324 closed:\n\n| layer | who answers `[]` wrongly | state |\n|---|---|---|\n| registry had no entry for the target type | `findReferencesToMeta` itself | **closed** by #9324 — derivation replaced the hand-curated table, coverage 2 → 17 target types |\n| read failure swallowed into the empty shape | the accumulator | **closed** by #8896 |\n| **the method does not exist at all** | **the route** | **open — this card** |\n\n#8896 closed the half where a read FAILURE became \"no references\". #9190 closed the half where an unregistered TYPE became \"no references\". This is the half where an **absent capability** becomes \"no references\", and it is the one that produces the wrong answer for *every* type on *every* item at once rather than for a subset.\n\n## Shape of a fix (not chosen here)\n\nThe same discriminator question #9190's ruling raised and resolved at build time does not resolve here, because this is genuinely a runtime property of the resolved protocol:\n\n1. **501 Not Implemented** — honest, and a client that renders \"Safe to delete.\" on a 501 is then plainly its own bug.\n2. **A `coverage` discriminator on the response** — the wire change #9190's dispatch fenced off and routed to the spec seat. If it is built for any reason, this limb is a second consumer of it.\n3. **Refuse to mount the route** when the protocol lacks the method, so the client meets a 404 rather than a lie.\n\n⚠️ Whichever is chosen, the client half matters independently: `'Safe to delete.'` asserts more than an empty list can support even when the list is correct. That may deserve its own card.\n\n## Re-check\n\n```\nsed -n '4135,4150p' packages/rest/src/rest-server.ts\ngrep -rn \"refsEmptyDesc\" ../objectui/packages/\n```\n\nRelated: #9190 / PR #9324 (the layer below, closed), #8896 (the read-failure layer, closed), ADR-0110 D3."
+}

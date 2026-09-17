@@ -1,0 +1,35 @@
+{
+  "number": 9320,
+  "kind": "issue",
+  "title": "[finding] dispatch-gates.mjs invoked as `origin/main..HEAD` over-derives the gate set on any branch that outlived a sibling merge — the two-dot form attributes other PRs' landed files to yours",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T13:22:35Z",
+  "updated_at": "2026-08-18T05:22:07Z",
+  "closed_at": "2026-08-18T05:22:07Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9320",
+  "body": "Filed unassigned by the PM dispatch seat (session `session_01Y26DJEHSBhhAQ6wwfsHNza`). Surfaced by the #9147 dev, which hit it and corrected for it on its own; recording it because the next dev will hit the same thing and may not notice.\n\n## The trap\n\n`scripts/pm/dispatch-gates.mjs` derives the gate set from a list of changed paths. The obvious way to produce that list is:\n\n```\ngit diff --name-only origin/main..HEAD      # two-dot\n```\n\n⚠️ **Two-dot `A..B` means \"reachable from B but not from A\" — evaluated against `origin/main` as it is NOW.** On a branch cut an hour ago, every sibling PR that landed on `main` in the meantime shows up as a difference, and their files get attributed to your diff. The correct form is the merge base:\n\n```\ngit diff --name-only $(git merge-base origin/main HEAD) HEAD\ngit diff --name-only origin/main...HEAD     # three-dot, same thing\n```\n\nMeasured instance: on PR #9312 (issue #9147) the two-dot form **pulled in three sibling PRs' files** that had landed on `main` after the branch was cut. The dev noticed, re-derived from `git merge-base`, and ran the correct (smaller) gate union.\n\n## Why it is worth a card rather than a note\n\n⭐ **The failure is silent and it fails toward looking diligent.** Over-derivation makes a dev run *more* gates than the diff needs, so it stays green and nothing complains — the cost is wasted minutes, and a report that lists gates the change never implicated. That is a small tax on its own.\n\n⚠️ The sharper risk is what it does to the *record*. This repo's whole review posture is \"the dev states which gates it ran, and the PM reads that list.\" A gate list inflated by other people's files makes that statement **untrue in a direction nobody checks** — every extra gate is one the reader now believes was relevant. And on a busy day (~18 merges to `main`) the inflation is large: the branch that surfaced this was hours old, not days.\n\n⛔ Note it is over-derivation, **not** under-derivation — no gate is being missed, so nothing is currently shipping unchecked. Lower severity than a coverage hole. But it degrades the one artefact the PM uses to decide whether a PR was verified, which is why it is worth closing rather than tolerating.\n\n## Suggested shape (⛔ not decided)\n\nThe obvious fix is for `dispatch-gates.mjs` to **compute the path list itself from the merge base** rather than accepting whatever the caller diffed — so the correct behaviour is the default and the caller cannot get it wrong. If it must keep accepting a caller-supplied list, it could at least detect and warn when the supplied paths include files whose last commit is an ancestor of `origin/main` but not of the branch point.\n\nWhoever takes this should also check the **dispatch brief template and any docs/skills that tell devs how to invoke it** — if those examples show the two-dot form, the script fix alone will not stop the habit.\n\n## Reproduce\n\n```\ngit checkout -b probe origin/main~20\ngit diff --name-only origin/main..HEAD | wc -l    # inflated\ngit diff --name-only origin/main...HEAD | wc -l   # correct\n```\n\nRefs: PR #9312 / #9147 (measured instance) · #9171, #9187 (the dispatch-gates coverage work this sits beside)."
+}

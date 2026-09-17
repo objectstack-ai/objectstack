@@ -1,0 +1,37 @@
+{
+  "number": 9566,
+  "kind": "issue",
+  "title": "script actions can only redirect to a NEW TAB — the redirectUrl convention has no same-tab (SPA route) form",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p0"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-18T10:53:01Z",
+  "updated_at": "2026-08-18T14:15:15Z",
+  "closed_at": "2026-08-18T14:15:15Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9566",
+  "body": "## Current behavior\n\nWhen a server-side action handler returns `{ redirectUrl }`, objectui's `consoleServerAction.ts` (the one place the `/api/v1/actions/...` response is interpreted for navigation) has exactly two paths:\n\n- with `opensInNewTab: true` — the pre-opened spinner tab is driven to the URL (popup-safe, works well);\n- without it — `window.open(url, '_blank')` after the awaited POST, where the user-gesture context is already gone, so the popup blocker fires almost every time and the user is left with the “Popup blocked” toast fallback.\n\nA same-tab navigation exists only as the *error fallback* when the pre-opened tab handle has gone stale (`window.location.href = url`). There is no way for an author or a handler to *ask* for it: `ActionSchema` is strict and has no post-success navigation key (`redirect` / `onSuccess` / `navigate` are all rejected), and `openIn` applies to `type:'url'` only.\n\nReferences: spec `opensInNewTab`/`newTabUrl` (#1787, in `packages/spec/src/ui/action.zod.ts`); redirectUrl convention fixed by objectui#2967 and consolidated in objectui#2904 (`packages/app-shell/src/utils/consoleServerAction.ts`). All shipped in spec/console@17.0.0.\n\n## Why this matters\n\n“Server-side action completes → take the user to the resulting record” is the standard ask for copy/clone/generate-style actions. Real case: steedos-labs/os-project-titanwind-ehr#1172 — a “copy as new version” record-header button clones a v+1 draft, but the user is left on the *old* record and has to re-filter the list to find the new one. The new-tab form is a workable interim, but the natural UX is an in-place jump.\n\n## Ask\n\n1. **Same-tab form for the redirectUrl convention.** Let the handler (or the action metadata) express it — e.g. handler returns `{ redirectUrl, openIn: 'self' }`, or an `ActionSchema` key — and have the console perform an SPA route navigation (no full page load, immune to popup blocking).\n2. **(Companion) client-side routing convention.** Today the handler must hand-build the console route (`/apps/<appId>/<object>/…`), leaking the console's URL scheme into every app's server code. A convention like “handler returns `{ recordId, objectName }` and the client routes to that record's detail page” keeps route knowledge where it belongs.\n\nEither half alone is not enough for the case above: (1) without (2) still hard-codes routes server-side; (2) without (1) still lands in a new tab.\n\n## Acceptance\n\nA `type:'script'` action whose handler returns the designated shape navigates the CURRENT tab to the target record's detail page via the SPA router — no full reload, no popup-blocker interaction."
+}

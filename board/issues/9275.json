@@ -1,0 +1,34 @@
+{
+  "number": 9275,
+  "kind": "issue",
+  "title": "objectql: a value-bearing diagnostic whose value contains \" - \" loses its template head to the statement cut, and the two anchor-less families leave a value suffix in the log",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-17T09:21:44Z",
+  "updated_at": "2026-08-17T16:52:04Z",
+  "closed_at": "2026-08-17T16:52:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9275",
+  "body": "Filed unassigned from #9160's implementation (PR #9274). **Measured off a thrown error**, not read off a manual — the probe that #9274 adds is what produced it. Duplicate-searched first (keyword + file path over open issues): no existing card.\n\n## The mechanism\n\n`redactStatementFromMessage` (`packages/objectql/src/driver-fault-redaction.ts`) cuts the bound statement at the **last** ` - ` in the message. That choice is deliberate and correct for its own purpose (#8682): a bound value may itself contain ` - `, and cutting at the first would leave a fragment of that value standing in the tail.\n\nBut when the value the DATABASE inlines into its own diagnostic also contains ` - `, the last separator lands **inside the diagnostic's value**, and the cut eats the template head along with it.\n\n#8823 already hit this for `ER_DUP_ENTRY` and solved it with a second pattern that keys off the template's **right anchor** (` for key '…'`): everything before the anchor is value residue by construction and is dropped whole. #9274 does the same for the families that also have a right anchor (` for column '…' at row N`).\n\n**Two measured families have no right anchor at all** — their value runs to the end of the message:\n\n- Postgres `22P02` / `22007`: `invalid input syntax for type integer: \"…\"`\n- MySQL `1292`, column-less spelling: `Truncated incorrect INTEGER value: '…'`\n\nFor those, a value containing ` - ` leaves a **suffix of the caller's value** standing in the log with nothing to anchor a recovery to. Measured on live PostgreSQL 16.13:\n\n```\nraised:   insert into \"t\" (\"age\") values ($1)\n            - invalid input syntax for type integer: \"CANARY - 2026 - Q3\"\ncut at:   the last \" - \", which is INSIDE the diagnostic's value\nlogged:   Q3\" [statement and bound values redacted]\n```\n\n`Q3` is the caller's data. It is a fragment rather than the whole value, and it is the tail rather than the head, so this is materially narrower than the exposure #8682 closed — but it is still caller data at ERROR level, which is the thing this neighbourhood exists to prevent.\n\n## Why it is filed rather than fixed in #9274\n\nEvery fix available for it changes the **cut**, which is #8682's contract rather than the redactor's value list:\n\n1. **Make the cut template-aware.** If the full message contains a known diagnostic head (` - invalid input syntax for type integer: `), that separator is the true one, whichever is last. Sound, and it reduces over-cutting generally — but it means matching templates BEFORE the cut, which the file currently forbids in terms (\"a bound value can contain anything, this file's own template included, and matching before the cut would let a value in the STATEMENT steer what survives\"). The steering here is bounded — a hostile value could suppress a real diagnostic, not leak — but that is a judgement about the contract, not about a regex.\n2. **Infer from unbalanced quotes.** A residue that ends in `\"` with an odd number of `\"` had its opening quote cut away. Cheap, but it is a new inference rule, and over-matching deletes the diagnostic an operator came for.\n3. **Accept it**, and record that the redaction is best-effort for values containing the separator.\n\nAll three are maintainer calls about #8682's cut, and #9160's dispatch fenced that explicitly (\"if the work starts to touch the redactor's contract — stop and report\").\n\n## Reproducing\n\n`packages/drivers/driver-sql/src/sql-driver-diagnostic-value-probe.test.ts` (from #9274) raises these families against the live services; add a case whose planted canary contains ` - ` and drive the message through `redactStatementFromMessage`.\n\n## Related\n\n- #9160 / PR #9274 — the probe that measured this, and the four families it encoded.\n- #8823 — the anchor-based recovery this generalizes, and the family it already covers.\n- #8682 / PR #8737 — the cut itself, and why it takes the last separator.\n\nBlocked-by: #9274 (the two anchor-less families are introduced there; before it lands they are not redacted at all, which is the larger bug this one is left over from).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01NTKPDRoynY8i3HmdSFUxFj)_"
+}

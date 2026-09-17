@@ -1,0 +1,35 @@
+{
+  "number": 9380,
+  "kind": "issue",
+  "title": "The three `kernel:ready` migrations in `assembleMetadataProtocol` never arm on a self-hosted boot — the standalone stack stamps `environmentId = 'proj_local'`, and the gate asks for `undefined`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-17T21:27:03Z",
+  "updated_at": "2026-08-18T05:34:58Z",
+  "closed_at": "2026-08-18T05:34:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9380",
+  "body": "Found while implementing #8928 (the duplicate-identifier report), where the question \"does running this command repair the install first?\" had to be answered by measurement rather than by reading. The answer turned out to be *no*, and the reason is this defect rather than anything about that command.\n\n## The gate, and what stands on it\n\n`assembleMetadataProtocol` (`packages/metadata-protocol/src/plugin.ts`) arms three migrations on `kernel:ready`, all inside one `if (environmentId === undefined)` block:\n\n- `ensureViewDefinitionActiveIndex` — #5839, the \"unique among ACTIVE rows\" index on `sys_view_definition`;\n- `ensureSysSettingIdentityIndex` — #8629, `sys_setting`'s row-identity index;\n- `backfillSeedTenancy` — #8686, the seed/API tenancy split repair that moves stored rows and merges the split autonumber counters.\n\nThe gate's own comment says what it is for: \"platform / standalone kernels own their local sys_metadata; per-project (cloud) kernels source metadata from the control plane and must NOT provision these tables locally.\" So **standalone is meant to be on the inside** of this gate.\n\n## Measured: standalone is on the outside\n\n`packages/runtime/src/standalone-stack.ts` line 515:\n\n```ts\nconst environmentId = cfg.environmentId ?? process.env.OS_ENVIRONMENT_ID ?? 'proj_local';\n```\n\nEvery boot that goes through `createStandaloneStack` — `os dev`, `os serve`, `os start`, and the whole `os migrate` family — therefore reaches `assembleMetadataProtocol` with `environmentId = 'proj_local'`, not `undefined`, and the block never runs.\n\nMeasured on `origin/main` @ `90c5285cb`, by instrumenting the built `@objectstack/metadata-protocol` and booting the real standalone stack against a SQLite fixture carrying the #8686 damage (a `__global__` counter at 38 beside an `org_x` counter at 4, untenanted seed rows, one organization row):\n\n```\nINFO Protocol service registered [MP-JS] envId=\"proj_local\" hookType=function\nBEFORE sequences: [{crm_case,__global__,38},{crm_case,org_x,4}]\nAFTER  sequences: [{crm_case,__global__,38},{crm_case,org_x,4}]\nVERDICT: boot mutated the pre-repair evidence = false\n```\n\nTwo controls, so this is not a fixture that simply cannot be repaired:\n\n1. calling `backfillSeedTenancy(resolveSeedTenancyExec(ql))` by hand on the same booted engine returns `status: 'applied'`, stamps the movable rows, merges the counter to 38 and deletes the `__global__` row;\n2. a probe plugin registering its own `kernel:ready` handler on the same boot fires and repairs — so `ctx.hook` works, `kernel:ready` is triggered by `kernel.bootstrap()`, and the seam is usable at that moment. Only the shipped registration is missing.\n\n## Why it matters\n\nFor #8686 specifically: its own header calls the `kernel:ready` migration the half that \"repairs an install that is ALREADY in that state, which covers every existing deployment\". On a self-hosted install it covers none. The only surviving path is the `sys_organization`-create handoff in `runtime/src/app-plugin.ts`, which fires when an organization is first created — i.e. the fresh-install half. An install that already had its organization when it upgraded gets neither, and keeps minting duplicates.\n\nThe same reasoning applies to the two index migrations beside it.\n\n## Not fixed here, deliberately\n\n#8928's file surface is `packages/cli/src/commands/**`, and the fix is a decision about a gate two packages away — whether the standalone default should be `undefined`, whether the gate should test something other than `environmentId` (what it actually wants is \"is this kernel the owner of its local platform tables\"), or whether the three migrations should be armed from a different seam. Worth noting that flipping this on changes what a plain `os migrate plan` does to a database: those three migrations would then run on every one-shot CLI boot, so whichever way it is fixed, the read-only commands need to be considered in the same breath.\n\nVerification hooks that already exist: `packages/cli/src/commands/migrate/duplicates.integration.test.ts` (from #8928) boots the real stack over a fixture carrying this exact damage and asserts the database is unchanged afterwards. When this gate is fixed, that assertion is where the change in behaviour will surface first."
+}

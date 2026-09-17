@@ -1,0 +1,36 @@
+{
+  "number": 9611,
+  "kind": "issue",
+  "title": "Two published `.d.ts` JSDoc comments in `packages/services/*` describe behaviour their code does not have — `MemoryCacheAdapter`'s \"LRU-style eviction\" is insertion-order, and `DbJobAdapterOptions.recordRuns` is documented as a numeric cap defaulting to none but is a boolean defaulting to true",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T12:59:55Z",
+  "updated_at": "2026-08-18T14:46:04Z",
+  "closed_at": "2026-08-18T14:42:31Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9611",
+  "body": "Found while rewriting the five service READMEs for #9532 (PR #9602), by checking each documented default against the source. ⛔ Filed rather than fixed there: that PR is README-only, and editing `packages/services/*/src/**` pulls in the test/typecheck gate families a docs diff does not carry.\n\nSame defect class as #9532 — **published documentation asserting behaviour the runtime does not have** — but in a channel no gate reads. Both comments are emitted into the packages' built `.d.ts`, so they are the editor tooltip an npm consumer sees:\n\n```\npackages/services/service-cache/dist/index.d.ts:19\n * Uses a Map-backed store with TTL-based expiry and LRU-style eviction.\n\npackages/services/service-job/dist/index.d.ts:77\n    /** Soft cap on sys_job_run rows recorded per job (defaults to none — handled by retention jobs) */\n    recordRuns?: boolean;\n```\n\n## 1. `MemoryCacheAdapter` — \"LRU-style eviction\" is FIFO\n\n`packages/services/service-cache/src/memory-cache-adapter.ts:33` claims LRU. The eviction picks the first key in `Map` insertion order, and nothing re-inserts on read:\n\n```ts\n// set(), on overflow\nconst firstKey = this.store.keys().next().value;\nif (firstKey !== undefined) this.store.delete(firstKey);\n```\n\n`get()` increments counters and returns `entry.value`; it never `delete`s-and-re-`set`s the key, so a hot entry does **not** move to the back. Eviction is therefore **oldest-inserted**, i.e. FIFO. Under a `maxSize` cap that is a materially different hit-rate profile from what the comment promises, and it is the kind of thing someone sizing a cache reads the tooltip for.\n\nTwo possible dispositions, and the choice is a product one:\n\n- **(a) correct the comment** to \"insertion-order (FIFO) eviction\" — smallest, honest, no behaviour change;\n- **(b) implement LRU** — `get()` re-inserts on hit, making the comment true.\n\nRecommendation: **(a)**, unless a consumer actually needs LRU. `maxSize` defaults to `0` (unlimited), so the eviction path is off by default and there is no measured pull for (b); minting a real behaviour change to satisfy a stale sentence is the more expensive direction.\n\n## 2. `DbJobAdapterOptions.recordRuns` — the comment describes a different field\n\n`packages/services/service-job/src/db-job-adapter.ts:34-35`:\n\n```ts\n  /** Soft cap on sys_job_run rows recorded per job (defaults to none — handled by retention jobs) */\n  recordRuns?: boolean;\n```\n\nThree claims, three mismatches against the code one line below and at line 94:\n\n| The comment says | The code does |\n|:---|:---|\n| a *soft cap* (a count) | `boolean` |\n| default *none* | `this.recordRuns = args.options?.recordRuns ?? true;` |\n| \"handled by retention jobs\" | the flag gates whether a `sys_job_run` row is written at all (`db-job-adapter.ts:305`) |\n\nThe field's real meaning is \"write a `sys_job_run` row for each run\", default **on**. The sentence reads as if it belongs to a numeric retention knob — plausibly copied from the `JobRunRetention` option that ADR-0057 retired (the index.ts note above the export records the retirement). A reader who sets `recordRuns: false` expecting \"no cap\" gets run history switched off.\n\nDisposition: correct the comment to state the boolean's real meaning and its `true` default. No behaviour change.\n\n## Why file rather than absorb into #9602\n\nUnder the bounded in-place exemption, ① and ② hold (same defect class; the correct form is pinned by the code itself) but ④ does not: #9602's diff is five READMEs, one changeset and a baseline, whose derived gate union carries no package test or typecheck job. Touching two `src/*.ts` files adds that surface, and the docs the card scoped are the READMEs.\n\n## Acceptance\n\n- neither comment survives in the built `.d.ts` in a form the code contradicts\n- if (b) is chosen for item 1, a test pins that a read refreshes eviction order — otherwise a test pins the FIFO order the comment then describes\n\nRefs: #9532 · PR #9602 (where both were measured)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 9587,
+  "kind": "pull_request",
+  "title": "docs(kernel): document services.audit as the slot it actually is",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T12:26:28Z",
+  "updated_at": "2026-08-18T13:20:47Z",
+  "closed_at": "2026-08-18T13:20:45Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-18T13:20:45Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9587",
+  "body": "Fixes #9534\n\n## What was wrong\n\n`content/docs/kernel/runtime-services/audit-service.mdx` was filed against the wrong seam. It is written as `services.audit` and lives under `runtime-services/`, so it reads as the kernel service slot — but every claim on it described `SettingsAuditSink`, a **constructor-injected** sink that `service-settings` receives directly and that is never registered as, or resolved from, that slot.\n\nA reader following the page and calling `getService('audit').record({ ... })` got a `TypeError`.\n\n## What the code actually says\n\nRe-derived from source rather than from the card's phrasing:\n\n| Claim on the page | Truth | Where |\n|---|---|---|\n| Canonical source `service-settings/src/settings-service.types.ts` | `packages/plugins/plugin-audit/src/auth-event-audit.ts` | the slot's only registrant |\n| `record(entry)` | `recordAuthEvent(event)` | `AuthEventAuditSink`, `auth-event-audit.ts:112` |\n| `action: 'set' \\| 'reset'` | `action: 'login' \\| 'logout'` | `AuthSessionAuditAction`, `auth-event-audit.ts:68` |\n| \"a throwing sink propagates its error and fails the caller's write\" | **False for both shapes** | see below |\n| write-only; query history via `services.data` | correct — kept verbatim | — |\n\n**Exactly one registrant**, `AuditPlugin` (`audit-plugin.ts:117`), and **exactly one in-repo consumer**, `plugin-auth` (`auth-plugin.ts:363`, typed `AuthEventAuditSurface`, whose inline shape matches field-for-field). No other shape occupies the slot in this repo or in `objectui`, so \"the registered service\" is unambiguous.\n\n⚠️ Worth flagging for anyone re-deriving this later: the card's own reproduction command, `git grep \"registerService(\\s*'audit'\"`, returns **zero** hits — the real registration spans two lines. The conclusion was right; the command printed in the card does not reproduce it. A line-based grep with a working positive control still reported nothing.\n\n## The claim the card did not name\n\nThe card listed the method and the event union. The sweep found a third, independent error in **Typical Errors**, which said the caller awaits `record()` without a surrounding `try`/`catch`. That is backwards for *both* shapes:\n\n- `recordAuthEvent` catches every failure internally and never throws (`auth-event-audit.ts:255-263`);\n- the settings service wraps its `this.audit.record(...)` call in `try`/`catch` (`settings-service.ts:1459-1482`), a guard added deliberately so a ledger cannot fail a write that already landed.\n\nAlso stale even as a description of the settings sink: the documented `record()` parameter list predates `tenantId`.\n\nThe rewritten Typical Errors section states the real posture — never throws, reports once per process then drops to `debug`, silently no-ops without an engine or a `userId`, and the datasource-split cause behind most failing inserts.\n\n## Deliberately unchanged\n\n- **Title `services.audit` and the page's path.** The 2026-06 hand-written docs audit ruled `services.*` a chapter-wide descriptive convention rather than a literal registry key, and sibling pages follow it. Here it happens to also *be* the literal key. Keeping the path also keeps `content/docs/kernel/index.mdx` and `meta.json` valid, so this PR touches one file.\n- **`experimental` stability.** Same audit ruled it a hand-asserted label with no code enum — not this card's call.\n- **The closing `sys_audit_log` / `sys_activity` query note**, kept verbatim per the card.\n\nA short \"Not this: the settings audit sink\" section now names the `record()` shape, its real canonical source, and why it is unreachable from this slot — so the shape the page used to carry stays discoverable, and the two are reconciled on the page instead of silently colliding.\n\n## Verification\n\nGate union re-derived from the actual changed path with `node scripts/pm/dispatch-gates.mjs` (identical to the dispatched list — no new families) and run at `0b4d38c12`, the final commit:\n\n```\nEXIT[pnpm check:nul-bytes]=0\nEXIT[pnpm check:docs-audit-scope]=0\nEXIT[pnpm check:docs-redirects]=0\nEXIT[pnpm check:role-word]=0\nEXIT[pnpm --filter @objectstack/spec run check:empty-state]=0\nEXIT[pnpm --filter @objectstack/spec run check:liveness]=0\nEXIT[pnpm --filter @objectstack/spec run check:strictness-ledger]=0\nEXIT[pnpm --filter @objectstack/spec run check:variant-docs]=0\n```\n\n`check:docs-audit-scope` confirms the page stays in the docs-accuracy-audit scope (179 hand-written docs in sync); `check:role-word` passes with the file still absent from the baseline (zero occurrences).\n\nNo changeset: `content/docs/**` only, no published package changes — `skip-changeset` applied.\n\n## Reported, not edited\n\nThree findings are outside this card's one-file surface and were filed unassigned rather than ridden along:\n\n- Filed as #9588 — `content/docs/kernel/runtime-services/index.mdx:46` points \"Audit bridge\" at `settings-service.types.ts`: the same wrong seam, one file up. After this PR the index and the page it links to contradict each other.\n- Filed as #9589 — the \"See Also\" link PR #9531 dropped from plugin-audit's published README may now be worth restoring, since the page it pointed at is no longer wrong. Blocked on this PR landing; that README is #9517's file.\n- Filed as #9590 (`finding`) — the 2026-06 docs-accuracy audit passed this page with an explicit \"None\", having verified the documented signature matched `SettingsAuditSink.record` EXACTLY. It did. The audit checks that a documented type exists and matches; it never asks whether that type is the one the page's seam resolves to.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XqDQYVU5smx29ts9pAErja)_"
+}

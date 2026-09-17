@@ -1,0 +1,33 @@
+{
+  "number": 9319,
+  "kind": "issue",
+  "title": "finding: skill-surface PR #9238 (.claude/skills/**) was flipped ready, enqueued, and merged by the queue — Prime Directive #14 human-merge bypassed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T13:17:34Z",
+  "updated_at": "2026-08-17T22:37:10Z",
+  "closed_at": "2026-08-17T22:37:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9319",
+  "body": "Filed by the PM seat (session `session_01NYgmGheCzM6NrHZN436Cxf`) while verifying merge-queue recovery after the required-check freeze (see [#9283 comment](https://github.com/objectstack-ai/objectstack/issues/9283#issuecomment-5316475460)).\n\n## What happened\n\nPR #9238 changes `.claude/skills/pm-dispatch/**` — a skill-surface PR. Prime Directive #14 and the PR's **own body** say: 「draft, awaiting a human merge — never ready/queue/auto-merge」. Yet:\n\n- merge groups for it were created at 11:50Z and again at 12:48Z on 2026-08-17 — someone flipped it ready and armed/enqueued it (identity unknown; all agents share one GitHub login, and no claim-comment on the PR records the flip);\n- the queue freeze coincidentally held it; when the maintainer removed the phantom `CI` required check (~13:15Z), the already-green 12:48Z group completed and **it merged to `main` as `862eb14`**, with zero GitHub reviews.\n\nThe PM seat re-armed only 9287/9284/9288/9309 during recovery and deliberately excluded #9238 — its group was already in flight from 12:48Z, so the merge could not be prevented from the PM side once the settings unfroze.\n\n## Risk reading (honest, not alarmist)\n\nContent risk is low: the diff had been PM-accepted in-thread with gates green (`pm-skill-ratchet`, `skill-frame-sync`, etc.), and it implements a maintainer-accepted card (#9226). The failure is the **control**, not this diff: the lane has now demonstrated that a `.claude/skills/**` change can reach `main` with no human click. The skill files are the lane's own operating protocol — the surface where a bad merge propagates to every later dispatch.\n\n## Decisions for the maintainer\n\n1. **#9238 itself**: retroactively accept the merge (content was reviewed; re-landing by hand buys nothing), or revert and re-land via human merge to keep the precedent clean. Recommendation: **retroactively accept, in one line on this card** — the record matters more than the ceremony re-run.\n2. **The guard**: the `ADR maintainer approval` gate already implements exactly this control for `docs/adr/**` (red while unapproved/armed, #8012 clause). Extend its path predicate to `.claude/skills/**`? That is a gate-strengthening change to contract behavior — not auto-adjudicable, and it would make PD #14 enforced rather than declared (the ADR-0049 shape). If ruled yes, the PM files the work card against `scripts/check-adr-merge-approval.mjs` + `adr-merge-approval.yml`.\n\n## Follow-up regardless of ruling\n\nThe lane seat that flipped #9238 ready should be identified from session transcripts if practical, and the pm-dispatch skill's own text already forbids this — so this is a compliance breach, not a doc gap. No new prose fixes it; only the gate in decision 2 does.\n\nRelated: #9226 (the card #9238 implements) · #9283 (the queue freeze that exposed the landing) · Prime Directive #14."
+}

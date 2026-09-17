@@ -1,0 +1,36 @@
+{
+  "number": 9568,
+  "kind": "issue",
+  "title": "[finding] `check:dispatcher-error-vocabulary` still cannot see a code held in a local ternary — `sys-metadata-repository`'s live 403 `NOT_CREATABLE` / `NOT_OVERRIDABLE`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T11:06:17Z",
+  "updated_at": "2026-08-18T13:56:18Z",
+  "closed_at": "2026-08-18T13:55:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9568",
+  "body": "Found while widening the scan for #9460 (half 1). Filed unassigned, **not** fixed there: #9460's scope was the lowercase/ownership rule and the three unseen stamp positions, and this is a fourth, separable resolver gap. Not an outage.\n\n## The measurement\n\n`packages/metadata-protocol/src/sys-metadata-repository.ts:1256` builds a live 403 refusal:\n\n```\nconst code = intent === 'runtime-only' ? 'NOT_CREATABLE' : 'NOT_OVERRIDABLE';\n...\nconst err: any = new Error(`[${code}] ${detail}...`);\nerr.code = code;\nerr.status = 403;\nthrow err;\n```\n\nAfter #9460 the scan sees the `err.code = code` stamp — the `codehelper` shape matches the position — but `code` here is a **local `const` holding a ternary of two string literals**, not a parameter of the enclosing declaration and not a module constant, so neither resolver limb reduces it and the site contributes nothing. Both codes stay invisible.\n\nNeither is registered. Control: the same probe finds `PERMISSION_DENIED` in the union, so the check works.\n\n## Why it is worth closing\n\nThis is the residual half of the same class #9460 closed, and it is the **cheapest** one left: unlike a runtime-computed value, a ternary of literals is fully reducible by a source scan. Every branch is right there. `resolveConstant` already reduces `const NAME = 'literal'`; extending it to a ternary (and to a `||`/`??` chain of literals) would resolve this site to two codes and, being value-level, would help every shape that routes through it rather than only this one.\n\n#9460's published bounds already name this file as the live example worth closing next, so this card is that note promoted to a tracked item rather than a new discovery.\n\n## Scope note\n\nReducing the site is the tooling half. Whether `NOT_CREATABLE` / `NOT_OVERRIDABLE` then get ledger rows is the `packages/spec` lane's call, exactly as for the two codes the widened scan already surfaced — and it should be a separate step, since a resolver change and a vocabulary change fail differently.\n\nRelated: #9460 (the widening that exposed this) · #9223 (the previous blind-spot ratchet) · #8846.\n"
+}

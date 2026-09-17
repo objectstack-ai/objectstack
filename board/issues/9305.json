@@ -1,0 +1,34 @@
+{
+  "number": 9305,
+  "kind": "issue",
+  "title": "docs(blog): the 2026-07-17 context-window post is a fourth host of the ~16k measurement, still calling it \"the entire business system\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T12:12:21Z",
+  "updated_at": "2026-08-18T02:15:07Z",
+  "closed_at": "2026-08-18T01:33:04Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9305",
+  "body": "## What was found\n\nWhile implementing #9293 (rename the ~16k measurement's host noun to \"the bundled example CRM\" in README plus two docs pages), a repo-wide sweep for `16k` / `1,792` / `~16,000` / `8% of a 200k` found a **fourth** carrier of the same measurement that the card's three-position list does not cover:\n\n`content/blog/context-window-is-the-constraint.mdx` (lines ~40-46) reproduces the identical table\n\n| | |\n| :--- | :--- |\n| Files | 31 |\n| Lines | 1,792 |\n| Approximate tokens | ~16,000 |\n\nand then says: *\"That's the **entire business system**. Not a module of it — the data model, the UI, the automation, the access rules, all of it. It fits in about 8% of a 200k-token context window.\"*\n\nThat is exactly the wording #9293 is removing from the three docs surfaces, and it collides with the finalized tagline the same way: 16k and 150k both claiming to be a complete/entire business system. The post is customer-facing and reachable from the docs site.\n\n## Why it was not fixed inside #9293's PR\n\nTwo reasons, both judgment calls that belong to the maintainer rather than to a dev card:\n\n1. **Out of the card's declared surface.** #9293 enumerates three positions from PR #9242's sweep table; the blog was not among them.\n2. **A dated post is a different editorial object than a living docs page.** This one carries `date: 2026-07-17` in its frontmatter. Whether a published, dated piece gets retro-edited for consistency, gets an editor's note, or is deliberately left as a snapshot of what was true when it was written is an editorial policy decision — not the mechanical rename #9293 authorizes.\n\n## Suggested dispositions (pick one)\n\n- **A. Retro-edit for consistency** — same host-noun rename as #9293 (\"the bundled example CRM\" / \"the whole example app\"), numbers untouched. Keeps every customer-facing surface self-consistent; costs the \"published text is immutable\" property.\n- **B. Leave it, snapshot semantics** — dated posts stand as written; accept that a reader arriving from the blog sees the older host noun.\n- **C. Minimal touch** — keep the post's argument intact but rename only the host noun in the sentence that directly follows the table, since that is the one that reads as a competing claim beside the current tagline.\n\nNumbers must not move under any option: 31 / 1,792 / ~16,000 / 8% / 200k, and the reproducible `find … wc -l` command stay verbatim (the #9293 discipline).\n\nRelated: #9293 (the three docs positions), #9242 (the tagline adoption that created the collision)."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 9366,
+  "kind": "pull_request",
+  "title": "docs(qa,pm): qa-run joins the sweep exclusion list; run records owe defect extraction at close-out",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T17:04:54Z",
+  "updated_at": "2026-08-17T22:11:45Z",
+  "closed_at": "2026-08-17T22:11:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-17T22:11:44Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9366",
+  "body": "Fixes #9363\n\nImplements the maintainer's 2026-08-17 ruling, quoted verbatim and untranslated: 「把 qa-run 加进 sweep 排除清单 —— run 记录和 pm:seat 贴同类:协议载体,不是工作」— plus the closing half the card mandates: once run records are excluded from the sweep, nobody fishes them for dispatchable work, so the extraction obligation becomes a clause of the qa-run protocol itself (precedent pair: run record #9351 → extracted card #9362).\n\n## Surface 1 — `.claude/skills/pm-dispatch/SKILL.md` (backlog sweep exclusion)\n\n`qa-run` records added to the triage sweep's exclusion list, parallel with the `pm:seat` posts, with the one-phrase rationale the card prescribes (协议载体非工作). Net line change **+0** — the edit lands inside the existing exclusion sentence, no new lines, no re-wrap; the file stays at exactly its 682-line ceiling (`check:pm-skill-ratchet` green below).\n\n## Surface 2 — `docs/qa/platform-checklist/RUNNER.md` (the qa-run producer's protocol)\n\nNew clause **\"Extraction obligation — the run record is a protocol carrier, not work\"**, carrying the card's four points:\n\n- the run issue carries run evidence only — not a dispatchable unit, never carries work labels (`bug`, priority, …); work labels ride the extracted cards;\n- product defects found during the run: at close-out the runner extracts each into its own standalone issue (self-contained title, reproduction and mechanism itemized, pointer back to the run record for the full evidence chain); defect cards do not carry `qa-run` and enter triage first-touch normally;\n- checklist-accuracy findings and fixture gaps close out through the wave's anchor card — not extracted;\n- environment blockers: recorded in the run record is enough.\n\nThe ruling is quoted in the clause verbatim, untranslated. RUNNER.md is not on the line ratchet; the clause is written tight (net +23 lines in that file).\n\n### Consistency sweep — the old \"plus `bug`\" convention removed everywhere\n\nThe prior convention (run issue gains `bug`/`regression` labels so it triages straight from the run) contradicts the new clause and was stated in four places. All are reconciled in this PR — same surface, same defect class, each named here:\n\n- `docs/qa/platform-checklist/RUNNER.md` — accuracy rule 2 (\"which is labeled `bug`\") and the Run-records header (\"plus `bug` when any clause failed\") → run issue is `qa-run`-only;\n- `.claude/skills/checklist-test/SKILL.md` §4 — the label bullet rewritten (`qa-run` only, work labels ride the extracted cards) and a close-out extraction bullet added; §3's \"defects go to FOLLOW-UPS.md (or an issue)\" now routes through the §4 extraction, keeping the expected-fail-probe half and the \"never tick green on a real defect\" rule intact;\n- `docs/qa/platform-checklist/runs/README.md` — the `bug`-label sentence → extraction at close-out;\n- `docs/qa/platform-checklist/README.md` (release-sweep section) — same.\n\n## Tier derivation (`node scripts/pm/dispatch-gates.mjs --tier` on the changed paths, output verbatim)\n\n```\nModel tier — MANDATORY: claude-fable-5 (derived from the file surface, not recalled).\n  - .claude/skills/pm-dispatch/SKILL.md ⇢ '.claude/skills/pm-dispatch/**' — clause ① of the model-tiering ruling: a card editing the PM dispatch skill is fable-mandatory, references included — the skill is the lane's own operating protocol and a wrong edit propagates to every later dispatch\n  The only exit is the measured quota exemption (fable unavailable ⇒ opus, never lower), recorded with its reason in the claim comment's `Container & model` line.\n  Clause ② is NOT reachable from paths: a card that changes contract accept/reject behaviour or widens the public surface is fable-mandatory too, judged from the card CONTENT. This line is a FLOOR, never a clearance.\n```\n\n## Verification — full gate union re-run at the final commit, `git rev-parse --short HEAD` = `9c797322c`\n\nPath-derived gates (`dispatch-gates.mjs` named 5) plus implicated families, all green at `9c797322c`:\n\n- `check:pm-skill-ratchet` (+ `--self-test`, 11 cases) — SKILL.md 682/682, headroom 0\n- `check:pm-skill-id-lint` — 9 files clean\n- `check:skill-frame-sync` — 4 copies isomorphic, 3 axes\n- `check:doc-authoring` (+ self-test) — 376 files clean\n- `check:doc-formula-expressions` (+ self-test, 24 cases) — 22 formula examples / 395 files clean (built the `@objectstack/lint` dependency closure first in the fresh worktree)\n- `check:nul-bytes` — 6087 text files clean\n- `check:platform-checklist` (+ `checklist-select --self-test`, 17 cases) — 15 areas, 190 items OK\n\nNo changeset: docs/`.claude`-only, releases nothing (`skip-changeset` applied).\n\nPer the card: draft PR, never ready/queued/auto-merged — parked for the maintainer.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017TNzEetykdh7ceZGwuAPLq)_"
+}

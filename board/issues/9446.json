@@ -1,0 +1,35 @@
+{
+  "number": 9446,
+  "kind": "issue",
+  "title": "The other two flow-dispatch doors never got the #9378 status table — `/actions` mislabels never-dispatched refusals, declared endpoints still answer 200",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T01:17:23Z",
+  "updated_at": "2026-08-18T12:38:35Z",
+  "closed_at": "2026-08-18T12:38:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9446",
+  "body": "Found while implementing #9415 (the #9378 ruling's remaining two rows). Filed unassigned for triage — **not** fixed there: #9378 ruled the two `trigger` routes, and what these two doors should answer is a contract decision of its own, not a mechanical extension.\n\nThree doors dispatch a flow through `IAutomationService.execute`. Only one of them classifies the result.\n\n## 1. `POST /api/v1/automation/:name/trigger` (+ the legacy spelling) — CORRECT\n\n`respondToFlowTrigger` (`packages/runtime/src/domains/automation.ts`) answers the full four-row table after #9413 + #9415:\n\n| engine exit | answer |\n|:---|:---|\n| flow not found | `404` |\n| flow disabled | `409` `FLOW_DISABLED` |\n| flow has no start node | `422` `FLOW_NO_START_NODE` |\n| ran and failed | `400` `FLOW_FAILED` |\n\n## 2. `POST /api/v1/actions/:object/:action` with `type: 'flow'` — MISLABELS two of the four\n\n`packages/runtime/src/action-execution.ts` maps **any** `success: false` result to one code:\n\n```ts\nif (result && typeof result === 'object' && 'success' in result && result.success === false) {\n    const err: any = new Error(`Flow '${action.target}' failed: ${result.error ?? 'unknown error'}`);\n    err.status = 400;\n    err.code = 'FLOW_FAILED';\n    throw err;\n}\n```\n\nIts comment says \"The flow RAN and rejected\" — which is now false for two of the exits it catches. A disabled flow invoked through an action answers `400 FLOW_FAILED`, telling the caller a run failed when no node ever executed. The producer's `result.code` is available and ignored.\n\n## 3. Declared endpoints (`type: 'flow'`) — still fully pre-#9378\n\n`packages/runtime/src/endpoint-executor.ts` ends the flow branch with:\n\n```ts\nreturn successAnswer(await automation.execute(plan.flow, automationContext));\n```\n\nUnconditional 200. Every failure — including a run that ran and failed — still rides the double envelope #3962 ruled out for `/actions`: `HTTP 200 {\"success\":true,\"data\":{\"success\":false,...}}`. This door was not in #9413's scope and nothing has flipped it since.\n\nConsequence for the docs: `content/docs/protocol/kernel/http-protocol.mdx` describes a `type: 'flow'` endpoint as \"delegated to the same automation pipeline as `POST /api/v1/automation/{name}/trigger`\". True of the context builder and the service method, no longer true of the response. #9415 corrects that page's wording to state the boundary; it does not change the behaviour.\n\n## The decision this needs\n\nWhether the #9378 table is a property of **the flow-dispatch contract** (all three doors converge) or of **the trigger route** (the others keep their own envelope conventions deliberately). Door 3 additionally carries the endpoint policy chain and `outputMapping`, so converging it is not a copy of the mapper.\n\nNote both doors also answer for `FLOW_FAILED` today, so this is not created by #9415 — that card only makes the divergence wider and easier to see, because the producer now says which refusal it is.\n\nRefs: #9378 (the ruling) - #9413 (rows 1-2) - #9415 (rows 3-4) - #3962 (the `/actions` double-envelope ruling)."
+}

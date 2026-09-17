@@ -1,0 +1,33 @@
+{
+  "number": 9376,
+  "kind": "pull_request",
+  "title": "test(qa): record the ADR-0091 grant validity-window primitive in the authz conformance matrix",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T19:56:36Z",
+  "updated_at": "2026-08-17T20:26:29Z",
+  "closed_at": "2026-08-17T20:26:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-17T20:26:27Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9376",
+  "body": "Fixes #8811\n\nThe ADR-0056 D10 matrix states \"one row per authorization primitive, each in EXACTLY ONE honest state\", but carried no row for the ADR-0091 grant validity windows. This adds it, mirroring the ADR-0049/#8613 `active`-flag disposition: an `enforced` row with **no** `covers`, documented as a statement about the ratchet's reach rather than an assertion the ratchet checks.\n\n## The row's `enforced` claim was verified at the call sites, not taken from the filing\n\nThe card named `isGrantActive` at \"three call sites\" in `resolve-authz-context.ts`. Measured on the branch point, the raw count of 5 there decomposes as 1 import + 1 comment + **3 real call sites** — so the count is right, but two of the card's other premises are not:\n\n**1. The primitive's enforcement is much broader than one file.** `isGrantActive` is applied at every seam that turns a window-carrying row into authority — 7 non-test files: `resolve-authz-context.ts` (steps 4 and 6), `explain-engine.ts`, `position-graph.ts`, `delegated-admin-gate.ts`, `last-admin-guard.ts`, `approval-service.ts`, and `runtime/domains/keys.ts`. The row names all of them.\n\n**2. The card's description of call site 1 is wrong, and it matters.** The card says the `sys_member` call happens \"before the membership role projection\". It does not: the predicate gates the `accessible_org_ids` accumulation, while the role projection beside it iterates the **unfiltered** array. That is exactly #8802.\n\n## Why the honest state is still `enforced` rather than partial\n\nThe window columns are declared on exactly **three** objects — `sys_user_position`, `sys_user_permission_set`, `sys_approval_delegation` — and on all three, every authorization-resolution seam applies the predicate. `sys_member` carries no window columns at all, so both the filtered call and the unfiltered projection beside it are no-ops today; the asymmetry is latent, not live. That reading is corroborated in-repo by `last-admin-guard.ts`, which already records that \"ADR-0091 windows are not columns on `sys_member` today\" and that the resolver \"is where the two halves have to be reconciled first\" if they ever land.\n\nThe second unfiltered read, `plugin-approvals`' own `expandPositionUsers`, is a ruled-intentional divergence (#8710) because approval **routing** is not grant resolution — its own note explicitly forbids \"fixing\" it with a filter.\n\nBoth carve-outs are stated in the row's note, since stating what is and is not mechanically checked is this file's own convention for honesty. #8802 is not addressed here and remains open: it is a defect in the enforcement, not in the ledger, and closing it leaves this row exactly as owed.\n\n## Header counts refreshed\n\nThe header's measured numbers move with the new row and were recomputed rather than incremented: 43 of 50 becomes **44 of 51** rows with no `covers` (7 rows / 9 keys unchanged), and 37 of 43 becomes **38 of 44** enforced rows in the in-resolver shape.\n\n## No interaction with #9083\n\n`checkTransportWiredAdmission` iterates `covers` entries only. This row declares none, so the TRANSPORT-WIRED admission rule is untouched — confirmed by reading the function and by the \"the real matrix declares no TRANSPORT-WIRED key today\" non-vacuity test staying green.\n\n## Verification — all at `08f4bd5`\n\nReverse-verified rather than assumed green: removing the `enforcement` string from the new row turns the gate **red across 6 tests**, naming the row by id (`grant-validity-window: enforced but names no enforcement site`). Restored from the commit, byte-identical.\n\n| Gate | CI job | Result |\n|---|---|---|\n| `authz-conformance.test.ts` (targeted) | Test | 21/21 pass |\n| full `@objectstack/dogfood` suite | Test | 110 files, 786 pass, 3 skipped |\n| `@objectstack/dogfood typecheck` | TypeScript Type Check | pass |\n| `check:empty-state`, `check:liveness`, `check:strictness-ledger`, `check:variant-docs` | spec-liveness-check | pass |\n| `check:test-source-alias`, `check:type-source-resolution` | ESLint | pass |\n| `check-affected-docs.mjs` | docs-drift-check | pass |\n| `check:nul-bytes` | ESLint | pass |\n\nGate set derived by re-running `node scripts/pm/dispatch-gates.mjs` against the actual changed path; the derivation named 7 families and all were run.\n\n## No changeset — `skip-changeset`\n\nThe diff is one test-only file inside `@objectstack/dogfood`, which is `private: true`. It publishes nothing and changes no runtime behaviour, so there is no user-visible change to describe.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012WKSnqAaoqtW3QX7SSf1Vk)_"
+}

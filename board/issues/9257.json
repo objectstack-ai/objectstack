@@ -1,0 +1,35 @@
+{
+  "number": 9257,
+  "kind": "issue",
+  "title": "A view's declared `sort` naming a `formula` field clears lint, then 400s on every load — the SORT axis has no authoring gate, unlike SEARCH (#6674)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T08:19:43Z",
+  "updated_at": "2026-08-17T23:16:09Z",
+  "closed_at": "2026-08-17T23:16:09Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9257",
+  "body": "Filed from objectui#3950's implementation (objectui PR #4965). Recorded, **not claimed**.\n\n## The gap\n\n`packages/lint/src/validate-searchable-fields.ts` rejects a `searchableFields` entry naming a `formula` field at authoring time, at `error` level. Its own docblock states the reason in the general form:\n\n> once the REST read path validates that override against the object (#4254), a stale declaration the engine had been silently skipping becomes a `400 INVALID_FIELD` on every list search for that object — a request-time break whose cause is an authoring typo made long before.\n\nThe SORT axis now has exactly that shape and no such rule. After #6994 (ingress, `assertSortFieldsExist`) and #7095 (engine, `assertOrderByIsMaterializable`), an `orderBy` naming a `formula` field is a hard `400 INVALID_SORT`. But nothing reads a view's `sort` declaration at authoring time:\n\n- `git ls-tree` over `packages/lint/src/` has no sort/order rule, and no non-test rule file reads `sort:` / `orderBy` / `defaultSort` off a view. The only hit for `sort:` in that tree is a fixture (`showcase-shape.fixtures.ts:186`).\n- `ListViewSchema.sort` is `string | Array<{ field, order }>`, so Zod cannot catch it either: the field name is a bare string, exactly as `searchableFields` entries were before #6674.\n\nNet effect: a list view authored with `sort: 'expected_revenue desc'` (a `formula` field) validates, publishes, and reports valid — then fails on **first load, every load**, with a 400 the author cannot connect to the declaration. That is strictly worse than the search-axis case the existing rule gates, because a refused sort is the view's initial fetch, not one optional interaction.\n\n## Why this is not objectui's to fix, and why it is not covered by objectui#3950\n\nobjectui#3950 / PR #4965 closes the *affordance* half in the renderer: the column header no longer offers a sort on a formula column. It deliberately does **not** filter a DECLARED sort out of the outgoing query — silently dropping an author's declaration would hide the authoring error, which is the fallback-in-the-consumer move `AGENTS.md` #0.1 forbids. So the loud runtime failure is the intended behaviour on that side, and it is intended precisely because the producer is supposed to reject it first. Right now nothing does.\n\nThe sort picker in objectui's list toolbar also keeps such a field listed when the current sort already names it — that row is the only way for a user to REMOVE the offending sort. So the runtime is already built assuming the declaration can exist and must be fixable; the missing piece is refusing it where it is written.\n\n## Suggested shape\n\nA lint rule mirroring `validate-searchable-fields`, judging by the same spec predicate the other three doors read (`isVirtualSearchField` / `SEARCH_VIRTUAL_TYPES` from `@objectstack/spec/data` — the storage fact, pinned to `formula` alone), over every author-written sort position:\n\n- a list view's `sort` (object `listViews.*` and standalone view metadata);\n- a saved report's `query.orderBy` (already noted in #7095 as author-reachable and forwarded verbatim into `engine.find` by `plugin-reports`);\n- flow node / dashboard widget sort config, if those carry one.\n\nDeliberately NOT `COMPUTED_VALUE_TYPES` — `summary` and `autonumber` have real stored columns and sort correctly; the trap is pinned by name in the engine's own conformance suite.\n\nLevel is the open question worth deciding rather than guessing: `error` matches the search-axis precedent and the consequence here is larger (the view's first fetch), but it would newly fail lint for metadata that exists today and currently only fails at runtime.\n\n## Not verified by me\n\nWhether any shipped example app or corpus view already declares such a sort. objectui#3950's own corpus sweep found formula fields RENDERED as columns (`crm_opportunity.expected_revenue`, showcase `project.budget_remaining`) but did not find one named in a `sort` declaration — so this may be a gate with no current violations, which is the cheap moment to add it.\n\nRefs: #6994 (ingress refusal), #7095 (engine refusal), #6674 (the SEARCH axis' twin, with the lint rule), #8296 (the FILTER axis), objectui#3950 / objectui PR #4965 (the renderer-affordance half).\n"
+}

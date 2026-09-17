@@ -1,0 +1,34 @@
+{
+  "number": 9415,
+  "kind": "issue",
+  "title": "spec: add `FLOW_DISABLED` / `FLOW_NO_START_NODE` to `AutomationResult.code` and deliver the trigger ruling's remaining two rows (409/422)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T23:56:34Z",
+  "updated_at": "2026-08-18T02:20:23Z",
+  "closed_at": "2026-08-18T02:15:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9415",
+  "body": "Completes the maintainer's #9378 ruling (2026-08-17 「同意」 batch). PR #9413 delivered two of its four rows (404, 400 `FLOW_FAILED`) and **stopped on the other two exactly as dispatched**: the ruled 409 (flow disabled) and 422 (no start node) are both never-dispatched exits, and the closed `AutomationResult.code` union has no honest member for either — `RUN_NOT_FOUND` is documented as a resume fact, nothing maps to 422 at all. Both workarounds were measured and rejected (message-text regex = PD #12; route-side enable-state probe = duplicated execution policy + a TOCTOU window that answers \"disabled mid-flight\" as \"malformed definition\").\n\nThis is the spec-seat fragment the #9384 ruling routes here: a **deliberate union widening with measured need**, not a mid-PR mint.\n\n## The work\n\n1. **`packages/spec/src/contracts/automation-service.ts`** — add `'FLOW_DISABLED'` and `'FLOW_NO_START_NODE'` to the `AutomationResult.code` union, with TSDoc stating each is a *trigger-time refusal the engine classifies before dispatch* (distinct from the resume-refusal members). Per #9413's measurement: union members + TSDoc only, no generated-artifact churn (the api-surface snapshot records the interface without member detail — re-verify, don't trust).\n2. **Engine** (`packages/services/service-automation/src/engine.ts`) — the disabled-flow and no-start-node exits stamp their codes (they continue to carry no `status`, preserving #9413's provable separation of never-dispatched from ran-and-failed).\n3. **Route** (`respondToFlowTrigger`, `packages/runtime/src/domains/automation.ts`) — two new arms reading the producer codes: `FLOW_DISABLED` ⇒ **409**, `FLOW_NO_START_NODE` ⇒ **422**. ADR-0112 ledger registration for both codes per standing process.\n4. **Flip the pins**: the two \"stay unchanged at 200\" assertions in `automation-trigger-route-status.test.ts` were written to flip when this lands — their comments say so; flip them to 409/422 citing this card, plus client-side pins mirroring the FLOW_FAILED ones.\n5. **Docs re-verification** (from #9413's drift advisory): `content/docs/api/client-sdk.mdx`, `api/plugin-endpoints.mdx`, `automation/flows.mdx`, `protocol/kernel/http-protocol.mdx`, `ui/actions.mdx` — re-verify the trigger-route/SDK failure semantics against the post-#9413+this state; correct what drifted (⛔ not `content/docs/releases/`).\n\n## Tier\n\n⚠️ **Fable-mandatory by clause ② (content judgment, not path)**: this changes contract accept/reject vocabulary on a closed public union. The dispatch claim records the tier with this reasoning.\n\n## Landing\n\nThe PR carries **`Fixes #9378`** — merging it completes all four ruled rows and closes that card. Ships as `minor` per the fixed-group convention (see #9413's changeset note); its changeset extends the same migration story (the \"pending a ruling\" paragraph in #9413's changeset becomes resolved behavior).\n\nRefs: #9378 (the ruling and the tracker) · PR #9413 (rows 1–2 + the measured exclusion) · #9384 (the union-stays-closed ruling and its spec-seat routing) · ADR-0112."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 9252,
+  "kind": "issue",
+  "title": "dev server: `OS_PRODUCT_STAGE` / `branding.stage` never reaches `/api/v1/runtime/config` — the documented PreviewBadge ops switch is a no-op on OSS",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "auto-adjudicated",
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-17T07:05:31Z",
+  "updated_at": "2026-08-18T15:01:09Z",
+  "closed_at": "2026-08-18T15:01:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9252",
+  "body": "## Observed\n\nAt `189a732254e6c46af75cfa38462693e67408d2d3`, running `examples/app-showcase` with `OS_PRODUCT_STAGE=ga objectstack dev`: the Console still renders the \"Preview\" badge. `/api/v1/runtime/config` does not include `branding.stage`, so the objectui `PreviewBadge` never sees the documented value — the switch objectui's docs present as the operational way to hide the badge is a no-op against the OSS dev server (RuntimeConfigPlugin does not push the key; the knob appears to be honored only by the cloud distribution).\n\n## Expected\n\nEither the OSS runtime pushes `branding.stage` (resolved from `OS_PRODUCT_STAGE`) through `/api/v1/runtime/config`, or the objectui/PreviewBadge documentation states the switch is cloud-distribution-only.\n\n## Repro\n\n```\ngit checkout 189a7322\ncd examples/app-showcase && OS_PRODUCT_STAGE=ga pnpm dev\n# open the Console — Preview badge still shown; inspect /api/v1/runtime/config — no branding.stage\n```\n\nRecorded as an unassigned finding (not claiming). Discovered during a read-only promo-video production run against the pinned SHA above (video-studio work order steedos-labs/video-studio#1); relayed by the coordinating PM session as the producing session has no GitHub scope on this repository."
+}

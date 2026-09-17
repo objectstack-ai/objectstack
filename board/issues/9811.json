@@ -1,0 +1,34 @@
+{
+  "number": 9811,
+  "kind": "pull_request",
+  "title": "docs(skills): elevate startup scope discipline to a first-class fourth axis — all four synced copies of the decision frame at once",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T00:50:29Z",
+  "updated_at": "2026-08-19T01:35:43Z",
+  "closed_at": "2026-08-19T01:35:42Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": "2026-08-19T01:35:41Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9811",
+  "body": "Fixes #9791\n\n**Governed surfaces throughout (`.claude/**`, `skills/**`) — DRAFT, human merge only. Never queue, never arm auto-merge, never flip ready.**\n\n## What\n\nMaintainer ruling (2026-08-18, verbatim, untranslated): 「9769 应该是四维度分析,但是还在写三轴。从实际业务需求,从平台长远合理性,从避免AI写代码犯错的角度,从创业阶段不扩散需求的角度。」\n\nThe escalation decision frame goes from THREE fixed axes to FOUR first-class axes — 实际业务需求 · 项目长远合理性 · 防 AI 写代码犯错 · 创业阶段不扩散需求 — one-to-one with the four card facets. All four synced copies in one PR, exactly as `check:skill-frame-sync` requires:\n\n- `.claude/skills/pm-dispatch/SKILL.md` (internal PM copy): **extraction, not rewriting** — 创业阶段聚焦原则 (the 2026-08-04 quote, implementation-first default, zero-consumption/sunk-cost clause) moves out of axis 1 into the new axis 4 「创业阶段不扩散需求」. Counts updated (三条固定评估轴 → 四条; 这三条轴/三轴冲突 → 四条轴/四轴冲突). The 四棱-serialization sentence becomes 「四棱是四条评估轴的卡面序列化,一一对应,同一个框架不是第二套」. Guards-index row: 三轴决策框架 → 四维决策框架.\n- `.claude/agents/os-dev.md` (internal dev copy): same extraction into a fourth bullet **Startup scope discipline**(创业阶段不扩散需求); counts three → four.\n- `skills/objectstack-pm-dispatch/SKILL.md` (published, English, both embedded copies): new **Axis ④ — startup scope discipline** in the PM section and a fourth bullet in the embedded dev template, carrying the sunk-cost / implementation-first / conventions-file-stance content moved out of Axis ①; every count mention updated (\"the deep three-axis analysis\" → four-axis, section header, declaring and binding sentences). The route-B generalization is preserved: the conventions-file delegation stays, no this-repo self-description added.\n- `scripts/check-skill-frame-sync.mjs`: the fourth `AXIS_MAP` entry (`startup-scope-discipline`, zh /创业阶段不扩散/, en /startup(?:-phase)? scope discipline/i) — the gate's own failure text mandates recording a new axis there in the same PR. Self-test fixture strings retargeted ONLY where the changed literals made cases red (7 cases: count-vs-entries want, coherent-demotion literals, \"both axes\" case gains a second demotion to stay a 2-entry specimen, binding/declaring-removed literals, mention-drift literals, misaligned-map case gains `AXIS_MAP[3]`). No logic changed.\n- `scripts/check-skill-frame-freshness.mjs`: one self-test want-line retargeted (`2 axes: long-term-soundness` → 3, `3 axes: business-need` → 4); the demotion machinery itself is count-agnostic and untouched.\n\nNot done on purpose: axis 2 keeps its established name 项目长远合理性 — the ruling's 「平台长远合理性」 is chat shorthand also present in the pre-existing 2026-08-12 quote, and the card's enumerated changes do not include an axis-2 rename (flagged in the dev report for the maintainer to confirm).\n\n## Ratchet payment table\n\n| file | before | after | ceiling | headroom |\n|---|---|---|---|---|\n| `.claude/skills/pm-dispatch/SKILL.md` | 681 | 681 | 682 | 1 (net-zero extraction) |\n| `.claude/agents/os-dev.md` | 352 | 353 | 399 | 46 |\n\n## Verification (all at final head `87b713e`, after merging origin/main forward)\n\n- `pnpm check:skill-frame-sync` (self-test 12 cases + gate): exit 0 — `4 copies … structurally isomorphic across 3 files / 4 axes: business-need → long-term-soundness → ai-authoring-safety → startup-scope-discipline / binding sentence present in all 4; 4 count mention(s) agree; 42 markdown files scanned`.\n- `pnpm check:skill-frame-freshness` (self-test 12 cases + gate): exit 0 — reports the structural difference vs origin/main as a deliberate LOCAL CHANGE notice, as designed.\n- Full derived union (`node scripts/pm/dispatch-gates.mjs`, no paths — 12 matched gates), each exit 0 at `87b713e`: `check:agent-model-declared` · `check:cross-package-test-inputs` (pnpm + node forms) · `check:doc-authoring` · `check:doc-formula-expressions` · `check:nul-bytes` · `check:pm-governed-merges` · `check:pm-skill-id-lint` · `check:pm-skill-ratchet` (table above) · `check:skill-compatibility` · `check:skill-frame-sync` · `check:skill-frame-freshness`.\n\nPredecessors verified present on the base before editing: the four-facet block with the os-decision-facets marker (merged 00:35Z) and the pipe-capture discipline in os-dev.md (merged 00:26Z).\n\nTests/protocol-text only — no published npm package changes; `skip-changeset` applies.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WswfK2yNYT9hNnMH6TzAwL)_"
+}

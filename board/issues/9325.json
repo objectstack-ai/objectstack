@@ -1,0 +1,34 @@
+{
+  "number": 9325,
+  "kind": "issue",
+  "title": "The `ESLint` required context carries ~54 `check:*` gates, so every one of their failures mis-routes its own diagnosis — and the rename needs a Settings change no agent seat can make",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T13:51:39Z",
+  "updated_at": "2026-08-18T04:28:22Z",
+  "closed_at": "2026-08-18T04:27:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9325",
+  "body": "Filed unassigned by the dev seat working #9258 (PR #9323). ⛔ Not fixed there: the card that sent me explicitly said to stop and report if the second item turned out to need a workflow restructure, and it needs strictly more than that.\n\n## The defect\n\n`lint.yml`'s `lint` job is named `ESLint` and runs ~54 sequential `pnpm check:*` steps. Any one of them failing publishes one failing check named **`ESLint`** on a PR whose diff may have nothing to do with linting. Whoever meets it has to open the log, discover the job runs a long gate chain, scroll to the failing step, and only then decide whether it is theirs.\n\nThat cost was paid three times on 2026-08-17 alone, all recorded on #9258: a crash inside `check:merge-driver` presented as a red `ESLint` on PRs #9256 and #9291 (plus the original filing), and the PM seat re-derived the routing each time because \"flaky\" is not a diagnosis worth asserting without confirming the failing step is the same one.\n\nThe compounding harm is the one that matters: a check whose name does not describe what it verifies trains readers to re-run on red, which is how a genuine regression in this gate family gets waved through. #5617 is the same family's worked precedent from the other direction.\n\n## Why it is not a one-line rename\n\n`scripts/check-required-contexts.mjs` pins the job `name:` literals as contract, and `ESLint` is a registered entry:\n\n```\n{\n  workflow: 'lint.yml',\n  job: 'lint',\n  context: 'ESLint',\n  authorized: '#5617 maintainer ruling 2026-08-07 — applied to the settings the same day',\n  carries: 'the whole check:* gate family — the job whose red did not block #5584',\n}\n```\n\nA GitHub required status check is matched **by check-run name**, and a job's check-run name is its `name:`. So the rename has two halves that cannot land atomically:\n\n1. **repo-side** — the `name:` in `lint.yml` plus the registry literal here;\n2. **settings-side** — the required-context entry in repository Settings → Rulesets.\n\nEither order leaves a window. Rename first and the old context sits permanently pending, which wedges every open PR and the merge queue. Change the settings first and the job carrying ~54 gates degrades to advisory with no signal anywhere — that is #5617 verbatim (PR #5584 merged with this job red for 19 minutes; four more merges repeated it that night before the settings were fixed on 2026-08-07).\n\n⚠️ And the settings half is not reachable from an agent seat. `check-required-contexts.mjs` already records this as measured (#6865): `GET /repos/objectstack-ai/objectstack/branches/main/protection` answers HTTP 403 `GitHub access is not enabled for this session`. Re-confirmed on this runner today — that call still 403s and there is no `gh` CLI installed either.\n\n⇒ This needs a maintainer, and it needs the two halves sequenced by someone who can see both. That is why it is a card and not a rider.\n\n## Shapes worth considering (none decided)\n\n- **Rename the context** to something that names the family, e.g. `Lint and repo gates`, coordinated across the registry and Settings in one sitting. Cheapest to read afterwards; needs the maintainer window above.\n- **Split the job** so the gate families report as separate contexts. Best diagnosability, biggest change, and it multiplies the required-context set (each new one is a new Settings entry and a new permanently-pending risk).\n- **Leave the name and surface the failing step**, e.g. an `if: failure()` step writing the failed step's name into `$GITHUB_STEP_SUMMARY`. Needs an `id:` on every step it wants to report on, which is ~54 edits to one file and still does not fix the name on the PR checks list.\n\n⛔ I did not measure the relative cost of these; ranking them is triage, not this filing.\n\n## Re-check commands\n\n```\ngrep -n \"name: ESLint\" .github/workflows/lint.yml\ngrep -c \"pnpm check:\" .github/workflows/lint.yml\nnode scripts/check-required-contexts.mjs\n```\n\nRefs: #9258 (the bug whose diagnosis this mis-routed, three times), PR #9323 (its fix), #5617 (the precedent for what a mis-sequenced rename costs), #6865 (the 403 measurement)."
+}

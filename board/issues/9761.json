@@ -1,0 +1,34 @@
+{
+  "number": 9761,
+  "kind": "issue",
+  "title": "pm-dispatch: the decision inbox gets a standard machine-marked four-facet block, a pinned digest view, and a batch-adjudication channel",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T22:27:21Z",
+  "updated_at": "2026-08-19T00:36:09Z",
+  "closed_at": "2026-08-19T00:35:46Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9761",
+  "body": "Maintainer ruling (2026-08-18, PM chat with the skills seat, session `session_01WswfK2yNYT9hNnMH6TzAwL`). Proposal verbatim: 「是不是应该有一个统一的地方可以登记和查看决策箱的4维分析记录。分诊PM对于决策箱的内容可以提前4维分析完,我只要定期看分析的结果,批量审核就可以。」 Token-cost revision, verbatim: 「统一视图 = scripts/pm/decision-inbox-rollup.mjs,这个和我直接分诊PM说,让他现场找,是不是会更加节省toekn」 — the script half is deferred behind a written trigger; the load-bearing half is block standardization (extraction degrades from an LLM comprehension task to a grep). Final 「同意」 on the revised four-point shape.\n\nThis implements the standing 2026-08-15 batch-adjudication ruling (「还是等我批量决裁吧。」) with the carrier it never had.\n\n## Change (`.claude/skills/pm-dispatch/SKILL.md`; a triage-duty line in the 分诊座位职责 section)\n\n1. **Standard four-facet block** — every `needs-user-decision` card carries, at filing: a machine-findable marker (fixed literal, e.g. an HTML-comment marker the sanitizer is known to preserve — the author verifies survival per the read-layer clause), the four facet lines, a one-line recommendation, lettered options (A/B/…), and one mandatory **confidence-gap line** (\"what this analysis cannot see\") — case law: two four-facet-aligned, low-risk, green, reviewed PRs were voided 2026-08-15 for direction premises the analysis could not see; the recommendation is INPUT, never clearance; the human floor is unchanged. Triage validates/completes the block at inbox intake; legacy cards are backfilled on a low-frequency sub-round.\n2. **Pinned digest issue** — one issue is the standing digest; the triage Routine refreshes its BODY (edit history = archive, seat-post mechanics) using a generic query + marker extraction (~ten inline lines, verbatim block paste, zero paraphrase). Authority stays on the cards — the digest is a generated view, never a second tracker (one-board rule).\n3. **Batch-adjudication channel** — one maintainer comment on the digest may rule many cards (\"9533 A · 9617 B · …\"); the triage seat transcribes each ruling onto its card under the existing atomic four-stroke discipline, quoting the batch comment as provenance.\n4. **Script upgrade trigger, written down**: if the inbox sustains >20 open cards or refresh cadence reaches daily (the inline command starts drifting across fires), freeze the extraction into `scripts/pm/decision-inbox-rollup.mjs` — a recorded exit, not a redesign.\n\nRatchet: SKILL.md 682/682 headroom 0 — additions paid by cuts, ⛔ no re-wrap. Serial: SKILL.md hot file — bundle with #9699 (objectos A-upgrade line, same file), one claim, one PR, `Fixes` both. Fable (clause ①); governed ⇒ draft, human merge. The pinned digest issue itself is created by the triage seat at first refresh, not by this PR."
+}

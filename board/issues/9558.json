@@ -1,0 +1,33 @@
+{
+  "number": 9558,
+  "kind": "pull_request",
+  "title": "pm-dispatch: fold objectos into the protocol as the fourth triaged repository (Option B)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T10:08:01Z",
+  "updated_at": "2026-08-18T11:42:34Z",
+  "closed_at": "2026-08-18T11:42:33Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": "2026-08-18T11:42:33Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9558",
+  "body": "Fixes #9551\n\nImplements the adjudicated **Option B plus the two adopted additions** (maintainer 2026-08-18, verbatim, untranslated: 「就按 B,带你补的两条,落地吧」).\n\n## What changed\n\n**`.claude/skills/pm-dispatch/SKILL.md`** (governed surface — this PR stays draft, human merge only):\n\n1. **Fold-in, stated in the multi-repo section**: `objectos` is the fourth coordinated repository (pure docs and site code, outside the runtime dependency chain). Triage sweeps it; execution folds into `domain:devx` (which already owns `content/docs/**` + `apps/docs`); no `repo:objectos` seat is minted now.\n2. **Addition 1 — the A-upgrade trigger is written down where the fold-in is stated**: either registered scale-out trigger from rule 4 (round duration approaching the fire cycle, or the objectos queue persistently starving under the selection total order) escalates objectos to a full `repo:objectos` seat — a recorded transition, not a second hole.\n3. **Addition 2 — objectos agent-instruction files are governed**: the governed-face unified definition (ACCEPT path fork) now names the cross-repo extension — objectui, cloud and objectos alike (maintainer 2026-08-18: 「任何对 agents.md 等文件的修改…包括 objectui cloud仓库」→「同意」). Execution routes to devx, but objectos instruction-file PRs stay draft/human-merge. Note: no pre-existing cross-repo clause was found anywhere in SKILL.md or references (grep evidence in the report on #9551), so the naming is anchored at the unified definition, which the Guardrails bullet already points to — no new section invented.\n4. **Honest dispatch-expectations notice**, one spot where the fold-in is stated: objectos has no changeset flow, no `packages/`, no merge queue (landing = human merge), and a different CI shape — dispatched agents must not look for machinery that isn't there.\n\n## 三仓-site inventory (per-site verdicts)\n\n| Site | Verdict |\n|---|---|\n| Multi-repo intro dependency sentence | **stays 三仓** — describes the product runtime topology (spec → objectui/cloud); objectos, a docs/site repo, does not join the chain. The fold-in paragraph is appended right after it. |\n| Rule 4 分诊座位「三仓唯一」 | **→ 四仓唯一**, objectos added to the list |\n| 分诊座位职责「对三仓统一执行」 | **→ 四仓统一执行** (provenance split: 三仓归一 2026-08-16, objectos 并入 2026-08-18); release-board duty marked skip for objectos |\n| 路由「读三仓代码定落点」 | **→ 四仓** — triage routes objectos cards too |\n| Shadow check 「搜两姊妹仓」 | **→ 各姊妹仓** (count-free; three siblings now) |\n| Release-board health metric「三仓 `target:*` 之和」 | **stays 三仓** — objectos has no `target:*` boards, no changeset/release flow; counting a board that cannot exist would make the zero-condition unreachable in the wrong direction. `ensure-pm-labels.sh` documents the deliberate exclusion. |\n\n## Line-ratchet payment table (682 → 682, headroom 0; ⛔ no re-wrap used)\n\n| Change | Lines | Content survives at |\n|---|---|---|\n| Fold-in + A-trigger + notice paragraph (multi-repo section) | +4 | new (the adjudicated content) |\n| Governed-face cross-repo naming (ACCEPT path fork) | +2 | new (the adjudicated content) |\n| 分诊职责 provenance split + release-board skip note | +0 | in-place edit |\n| Guardrails: PM-writes-no-files exception de-duplicated | −1 | 全体座位的不变量 bullet 2 (verbatim: 逐 PR 明示授权 / 原话引用在 PR 正文 / 复核需另一座位或 walkthrough / ⛔ 不得自审自合) |\n| Guardrails: release-act list de-duplicated | −2 | AGENTS.md release-act paragraph (the binding, seat-universal copy; SKILL.md keeps the ruling date, the Version Packages pin, and the incident-filing rule) |\n| Guardrails: governed ban trio / draft-exit / authoring-open de-duplicated | −2 | ACCEPT path fork ②③ (ban trio + draft-only exit, verbatim) and AGENTS.md Prime Directive governed-landing paragraph (authoring-open + reviewed-green-no-override) |\n| Guardrails: duplicated AGENTS.md-wins line deleted | −1 | 全体座位的不变量 bullet 4 (verbatim) |\n\n**`scripts/pm/ensure-pm-labels.sh`**: objectos joins the pm state-machine vocabulary loop (`pm:queue`, `pm:dispatched`, `needs-user-decision`, `pm:on-hold`, `pm:blocked`, `pm:blocking`, `finding`, `pm:epic`). Deliberately excluded, with comments saying why: the domain-lane loop (lanes are main-repo-only; objectos execution folds into devx) and the `target:*` loop (no release board). Retired-lane exclusions untouched. **Actually running it against objectos is the PM's landing step** — this session did not write labels to objectos. No `repo:objectos` seam label is minted either: it travels with the seat (or with the first real seam card), per the ruling's \"no seat now\" and startup scope discipline.\n\n## Gates (all at head `6a8b11b`, after the final commit)\n\nDerived with `node scripts/pm/dispatch-gates.mjs` (no paths — script-derived changed set, matches the dispatch prompt's list exactly; tier line: clause ① fable-mandatory, satisfied):\n\n- `pnpm check:pm-skill-ratchet` — exit 0 (SKILL.md 682/682)\n- `pnpm check:pm-skill-id-lint` — exit 0 (9 files clean)\n- `pnpm check:skill-frame-sync` — exit 0 (4 copies isomorphic, 3 axes)\n- `pnpm check:pm-governed-merges` — exit 0 (self-test, 25 assertions)\n- `pnpm check:doc-authoring` — exit 0 (377 files clean)\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` — exit 0 (built the `@objectstack/lint` upstream-dependency closure first)\n- `node scripts/check-nul-bytes.mjs` — exit 0\n\n## Open question (not adjudicated here)\n\nThe post-claim comment on #9551 raises the objectos **landing-shape** question (no merge queue; three shapes offered, no recommendation). This PR records only the de-facto status quo as a factual notice (落地 = 人工合并) and does not rule on which shape the protocol adopts — that sub-question remains open on the card.\n\n`.claude/` + `scripts/` only — publishes nothing; `skip-changeset` applies.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WswfK2yNYT9hNnMH6TzAwL)_"
+}

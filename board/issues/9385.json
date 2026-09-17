@@ -1,0 +1,35 @@
+{
+  "number": 9385,
+  "kind": "pull_request",
+  "title": "fix(qa): HttpTestAdapter resolves the Data Protocol mount from discovery, and degrades loudly",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T22:00:43Z",
+  "updated_at": "2026-08-17T22:34:17Z",
+  "closed_at": "2026-08-17T22:34:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-17T22:34:16Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9385",
+  "body": "Fixes #7983\n\nThe record-shaped `os test` action types (`create_record`, `read_record`, `update_record`, `delete_record`, `query_records`) built their URLs from the **defaults** of `RestApiConfigSchema.apiPath` and `CrudEndpointsConfigSchema.dataPrefix`, because `HttpTestAdapter` is handed an origin and nothing else. A deployment that moved the mount got a 404 that reads like the suite author's own URL mistake rather than a platform limitation.\n\nThe adapter now asks the server, following the `getRoute` precedent in `@objectstack/client` (copied from, never edited — that package is another card's this round): **one memoised `GET {apiBase}/discovery` per run**, addressing whatever `routes.data` advertises, with the schema-derived convention as the fallback.\n\n## What this closes, and what it does not\n\nMeasured per config off `RestServer`'s own normalized config — both bases read back from the server, never recomputed by the harness:\n\n| deployment | server serves | before | after |\n|---|---|---|---|\n| stock | `/api/v1/data` | created | created |\n| `crud.dataPrefix: '/objects'` | `/api/v1/objects` | `HTTP Error 404` | created |\n| `api.apiPath: '/api/2026-01'` | `/api/2026-01/data` | `HTTP Error 404` | `HTTP Error 404`, now naming the mount |\n\nThe `apiPath` row is **not** closed, and the reason is structural rather than an oversight: `registerDiscoveryEndpoints` mounts the document at `${basePath}/discovery` (`rest-server.ts`), so `apiPath` moves the base that discovery itself sits under — the document that would name the new mount is behind the very prefix the probe is missing. The `dataPrefix` row closes exactly because the discovery handler substitutes the configured prefix into `routes.data` (`rest-server.ts`), so reading it beats recomputing it here.\n\nThe one discovery document at a fixed path does **not** rescue the `apiPath` case, and is deliberately not probed: `/.well-known/objectstack` is the runtime dispatcher's, and `getDiscoveryInfo` composes `data: ${prefix}/data` from the dispatcher's own prefix — it never reads `crud.dataPrefix` or the REST `apiPath`, so it reports `/api/v1/data` whatever the REST server serves. Trusting it would attach a false provenance (\"discovery told us\") to the same 404.\n\nSo that case degrades **loudly** instead (Route and surface ownership section 3): the fallback prints a warning naming the mount it will address, the probe that failed and the remedy, and every 404/405 from a record action carries the mount it addressed and where that mount came from. A 400/422 is left undecorated — it reached the right route and got a real answer, so burying the server's own message under a URL would mislead.\n\n`api_call` is unchanged, issues no probe at all, and remains the escape hatch for a host the probe cannot reach. Per the Zone 1 ruling on the card, no `os test --api-path` flag is added — that would widen the public CLI surface.\n\n## Docs and checklist\n\nBoth places this limitation was written down are **narrowed, not deleted**, because the `apiPath` row is still a real gap: the `fixtures.knownGaps` entry in `docs/qa/platform-checklist/areas/cli.json` (item revision 3, with its history row) and the paragraph in `content/docs/deployment/cli.mdx`.\n\n## Tests\n\n`packages/core/src/qa/http-adapter.test.ts` pins the record URLs against a discovery document that deliberately advertises a **non-default** mount, so a pin that ignored the probe would still pass and does not. Also pinned: one probe per run including concurrent starts, the bearer token on the probe, the dispatcher's `{ data: ... }` envelope as well as the bare document, four distinct fallback modes each asserting mount plus evidence plus remedy, warn-once-per-run, that `/.well-known/` is never probed, and that `api_call` neither probes nor gets decorated.\n\n## Verification\n\nAll run on `99592d0ab`, the head of this branch:\n\n- `pnpm --filter @objectstack/core test` — 35 files, 857 tests passed.\n- `pnpm check:type-check-debt` — the ratchet re-measured 33 ledger entries, 1926 raw tsc errors, none above its recorded number, \"surplus: none\". This is the real typecheck for this package: `@objectstack/core` has no `typecheck` script, so a filtered invocation would match zero scripts and exit 0 without checking anything.\n- Gate union re-derived on the actual changed paths with `node scripts/pm/dispatch-gates.mjs` and run: `check:changeset-gate-self-tests`, `check:cross-package-test-inputs`, `check:docs-audit-scope`, `check:docs-redirects`, `check:role-word`, `check:kernel-hook-pairs`, `check:test-source-alias`, `check:objectui-changeset`, the four `@objectstack/spec` liveness checks, `check:adr-0087-registration`, `check:changeset-no-major`, `check:empty-changeset`, `check:cross-package-test-inputs`, `docs-audit/check-affected-docs`, plus the convention-triggered test-file family `check:query-options-erasure`, `check:engine-double-contract`, `check:where-matcher`, `check:type-check-coverage`. All green.\n- `packages/rest` `direct-mount-base-follows-apipath.test.ts` — 6/6, corroborating that discovery follows `apiPath`.\n\nNo gate was weakened, no threshold lowered, no baseline rebaselined, no test skipped.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012WKSnqAaoqtW3QX7SSf1Vk)_"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 9619,
+  "kind": "issue",
+  "title": "check-governed-merges cannot answer its own question where it is actually run: sibling repos are out of scope, and merged_by is UNRESOLVED without a token",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T13:22:08Z",
+  "updated_at": "2026-08-18T16:59:42Z",
+  "closed_at": "2026-08-18T16:57:17Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9619",
+  "body": "Filed unassigned by the `repo:objectui` execution seat (session `session_01RV6yuVCxymHYE16PL9vQkE`) while producing a round report. Not claimed — the fix lands in `scripts/pm/`, which is not my lane. Grading and routing are triage's.\n\n`check-governed-merges.mjs` (#9495) is the **post-merge audit that replaced the per-PR ADR approval gate**. The skill calls it the \"事后防线\" and the round-report contract says to run it rather than summarise from memory. I ran it this round and hit two things that stop it short of its stated purpose.\n\n## 1. It audits only `objectstack`, regardless of where it is run\n\nRun from the `objectui` checkout, it still enumerates **objectstack** PRs:\n\n```\ncd /home/user/objectui && node /home/user/objectstack/scripts/pm/check-governed-merges.mjs --since 1d\n  • PR #9509 …  surfaces: .claude/** ×2\n  • PR #9490 …  surfaces: .claude/** ×1\n```\n\nEvery entry it returned is an objectstack PR. It never looked at objectui's history.\n\nWhy that is now a coverage gap rather than a design choice: on **2026-08-18 the maintainer extended the governed-surface rule across repos** — \"任何对 agents.md 等文件的修改…包括 objectui cloud仓库\" → 「同意」 — and the PM skill's ACCEPT path-fork encodes it: `AGENTS.md`, `CLAUDE.md`, `.claude/**`, `skills/**` are governed **in objectui, cloud and objectos too**. objectui has a live `skills/**` tree (three PRs are queued against it awaiting a human merge right now: PR5124, PR5080, PR4930). So the surfaces are governed in those repos, the seat discipline is the only thing guarding them, and **the audit that is supposed to catch a seat violating that discipline is blind to those repos**.\n\nThe asymmetry is the risk: a governed merge in objectstack shows up in the audit; the identical merge in objectui does not, and nothing else would surface it.\n\n## 2. `merged_by` is UNRESOLVED in the container where the audit is actually run\n\nEvery entry carried:\n\n```\nmerged_by UNRESOLVED (GET https://api.github.com/repos/objectstack-ai/objectstack/pulls/9509 answered HTTP 401)\n```\n\nand the script closed with its own honest warning: attribution incomplete, *\"does the maintainer recognise every entry\" cannot be answered without the who-merged-it column, and incomplete must not read as clean*. Provide `GITHUB_TOKEN`/`GH_TOKEN` and re-run.\n\n**The script's refusal to read as clean is correct and should stay.** The problem is that in the PM session container, no `GITHUB_TOKEN`/`GH_TOKEN` is exported — GitHub access is through the MCP server, not the raw API — so **UNRESOLVED is the default outcome, not an edge case**. The audit is structurally unable to answer its question in the environment where round reports are produced. An audit that always degrades to \"incomplete\" is one a reader learns to skim, which is how a real violation gets waved through.\n\n## Why this is worth fixing rather than noting\n\nThese two compound. The governed-surface regime traded a per-PR machine gate for **human merge as the review record, with a post-merge audit as the backstop**. Right now the backstop cannot see three of the four repos it covers, and cannot attribute the merges it does see. That is closer to \"no backstop\" than the ruling assumed when it retired the pre-merge gate.\n\n## Directions (not decided here)\n\n- **Scope**: take a repo argument, or enumerate the sibling checkouts, so one invocation covers the four governed repos. Sibling repos are not always checked out, so absence must report as *unaudited*, never as clean.\n- **Attribution**: resolve `merged_by` through whatever GitHub channel the session actually has, or make the missing-token case a named, once-per-run line rather than a per-entry UNRESOLVED that buries the list.\n\n## Dedup\n\nSearched objectstack for prior art on both halves before filing. Nearest is **#9495** — the closed card that *created* this audit; it scoped the objectstack half and predates the 2026-08-18 cross-repo extension. No open card covers either half."
+}

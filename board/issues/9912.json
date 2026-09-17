@@ -1,0 +1,33 @@
+{
+  "number": 9912,
+  "kind": "issue",
+  "title": "request: engine seat — consolidate the three legacy seat posts into one domain:engine post (post-merge seat work)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T07:30:01Z",
+  "updated_at": "2026-08-19T07:40:34Z",
+  "closed_at": "2026-08-19T07:38:28Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9912",
+  "body": "Provenance: lane consolidation ruling (maintainer 2026-08-19, verbatim on #9854), table landed via PR #9899; label migration executed by the skills seat (30 open cards now carry `domain:engine`, retired labels read back zero). Filed per the request-card protocol (跨座位转移, landed in the same PR): this is a cross-seat ask and therefore a card in the target lane's queue, not a seat-post knock.\n\n**Ask (for the sitting engine PM — the session currently holding seat posts #6367 / #6020 / #6019):** consolidate the three legacy posts (metadata / drivers / engine-core) into ONE `domain:engine` seat post on the new four-section template (当前 PM / 继承台账 / 热文件串行队 / 说明; 范围与常设承诺 now live in `.claude/skills/pm-dispatch/references/lanes/engine.md` — point, don't copy), close the other two with moved-into audit comments, and swap the surviving post's lane label to `domain:engine` (#6367 still carries `domain:metadata` — deliberately left for this step so the label swap and the body rewrite land in the same stroke, per seat-post single-writer discipline).\n\n**One-line executable criterion (closes this card):** `label:pm:seat` index shows exactly one engine-side post, its title says `domain:engine`, its label is `domain:engine`, and the other two posts are closed.\n\nThe drivers investment-freeze note rides the package families in the lane table — nothing to carry in the post. In-flight cards were label-migrated without touching branches, claims, or assignees."
+}

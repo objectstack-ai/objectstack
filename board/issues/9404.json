@@ -1,0 +1,35 @@
+{
+  "number": 9404,
+  "kind": "issue",
+  "title": "finding: the published `skills/` catalog is human-merge by convention but is not gated — two of the pm-dispatch fork's three prefixes are enforced",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T23:14:51Z",
+  "updated_at": "2026-08-18T06:45:17Z",
+  "closed_at": "2026-08-18T06:45:17Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9404",
+  "body": "Observation filed while implementing #9395. No action proposed here; recording the gap so it is a decision rather than an oversight.\n\n## What was measured\n\nThe pm-dispatch skill's ACCEPT fork treats **three** prefixes as human-merge-only (`.claude/skills/pm-dispatch/SKILL.md`, verbatim):\n\n> 路径面**一条命中** `docs/adr/**`、`.claude/skills/**` 或 `skills/**` ⇒ ACCEPT 换终局三件套 … ⛔ 不合并不入队不挂auto-merge\n\nAfter #9395 the `ADR maintainer approval` gate enforces the first two. `skills/**` — the **published** catalog that ships to customer projects — remains convention only: a `skills/**`-only PR passes the gate on the zero-lookup clean path and can be flipped ready, armed and queued exactly as PR #9238 was on the internal surface.\n\nThis was deliberate in #9395, not an omission: the #9319 decision-2 ruling names `.claude/skills/**`, and the gate script's header states the exclusion out loud rather than quietly widening past the ruling.\n\n## Why it is worth a decision rather than a shrug\n\n- The risk profile differs from `.claude/skills/**` in an interesting direction: the internal skills steer this repo's own agents, while `skills/**` ships to customer projects — a bad landing propagates outward instead of inward.\n- If the answer is \"convention is enough for the published catalog\", that is a fine answer, but it should be a recorded one; the three-prefix fork currently reads as one rule with an unexplained two-thirds enforcement.\n- Mechanically this is a one-entry change: `GOVERNED_SURFACES` in `scripts/check-adr-merge-approval.mjs` takes a third row with its own rule wording, and the self-test's \"the published skills catalog is NOT governed\" assertion would invert.\n\nRefs: #9395 (where the two-of-three state was created) · #9319 (the ruling) · #7548."
+}

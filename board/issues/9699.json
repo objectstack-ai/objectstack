@@ -1,0 +1,34 @@
+{
+  "number": 9699,
+  "kind": "issue",
+  "title": "pm-dispatch: objectos upgrades to a full repo:objectos seat — the maintainer exercised the A-upgrade early; the multi-repo section's \"no seat now\" line is stale",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T15:55:07Z",
+  "updated_at": "2026-08-19T00:36:04Z",
+  "closed_at": "2026-08-19T00:35:46Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9699",
+  "body": "Maintainer action + words (2026-08-18, PM chat with the skills seat, session `session_01WswfK2yNYT9hNnMH6TzAwL`): a dedicated objectos PM has been started (「objectos 是新开的项目经理,是不是少了座位帖。」). Under the same-day Option-B ruling this is the registered A-upgrade, exercised early by the maintainer's own call — legitimate, and it makes one SKILL.md line stale.\n\n## Change (`.claude/skills/pm-dispatch/SKILL.md`, multi-repo section)\n\nThe objectos sentence currently states 「⛔ 现在不铸 `repo:objectos` 座位」 with the written escalation trigger. Amend to: the seat EXISTS (maintainer-exercised upgrade, this card's provenance), objectos execution moves from the devx fold-in to the `repo:objectos` execution seat (same execution-seat discipline as `repo:objectui` / `repo:cloud`: claims/dispatch/review/landing in-repo, ⛔ no `domain:*`/type/grading production), triage remains four-repo unchanged. Keep the honest-machinery notice (no changeset flow, no `packages/`; merge queue + `build` required + `merge_group` now LIVE as of today — update that clause too, it predates the queue).\n\nPrerequisites recorded, not part of this diff: the new seat files its own seat post (`pm:seat`, `[PM seat] repo:objectos`, six-section template, checked against the index first — verified absent 2026-08-18 ~16:0xZ, 12 posts none objectos); label vocabulary run pending (maintainer's `ensure-pm-labels.sh`, already four-repo since PR #9558).\n\nSerial: SKILL.md hot file — zero open PRs touch it at filing; ratchet 682/682, in-row amendment expected to be near-net-zero, payment if owed. Fable (clause ①); governed ⇒ draft, human merge."
+}

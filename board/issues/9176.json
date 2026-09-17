@@ -1,0 +1,35 @@
+{
+  "number": 9176,
+  "kind": "issue",
+  "title": "The publish door discards the runtime authoring gate's advisory findings — and Studio's designer only ever uses that door",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-16T18:46:44Z",
+  "updated_at": "2026-08-17T16:33:26Z",
+  "closed_at": "2026-08-17T16:33:26Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9176",
+  "body": "Measured on `origin/main` @ `66beee0f3` while taking #4716's cost measurement. Filed unassigned, not a claim.\n\n## What was measured\n\nThe runtime authoring gate runs on **both** metadata write doors (#4463 D1, deliberately, so `?mode=draft` then `/publish` is not a bypass). Only the **save** door puts its advisory findings on the response.\n\n`packages/metadata-protocol/src/protocol.ts` — the gate hook's own docblock states it plainly:\n\n> `[#4717]` Throws on the gating half, RETURNS the advisory half. Advisories do not block anything, so the only honest place for them is the 2xx the write earns — `saveMetaItem` attaches them to its response, and **the only other caller (the draft-to-active promotion in `publishMetaItem`) simply ignores the value**\n\nConfirmed against the tree: `runtimeAdvisories` is referenced at exactly two lines (`12621` gather, `12943` attach), both inside `saveMetaItem`. `advisories` does not appear in `PublishMetaItemResponseSchema` (`packages/spec/src/api/protocol.zod.ts:588`), which declares `success` / `version` / `seq` / `seedApplied` / `materializeApplied` / `projectionApplied` and no finding channel.\n\n## Why this is worth filing now rather than when it was deferred\n\nIt was a **knowing** deferral, and the reason it was deferred is discharged.\n\n- objectui#4133 (Studio renders the advisories — merged as objectui PR #4236, 2026-08-11) scoped the publish door out explicitly: *\"the publish door ... rides behind objectstack-ai/objectstack#7294 (that route has no spec declaration at all yet)\"*.\n- **#7294 closed `completed` on 2026-08-10** via merged PR #7356, which declared the publish door's response contract. The stated blocker is gone; nothing has picked the follow-up back up, and no open issue names it (searched this repo for the publish-door/advisory pairing: no hits).\n\nThe same card also recorded why it matters: *\"Studio's designer uses draft-then-publish on every edit.\"* So the rendering that objectui shipped is wired to the door Studio's designer does not take. A Studio tenant or an MCP/AI author has no `os lint` and no CLI config for `sys_metadata` overlay rows — for them this gate is not the weakest of four doors, it is the only one, and on their actual edit path its advisory half is still produced and thrown away server-side.\n\n## Shape of the fix (not a proposal, just the surface)\n\n`publishMetaItem`'s promotion call site ignores the hook's return value; `PublishMetaItemResponseSchema` would need the same optional, omitted-when-empty `advisories` key `SaveMetaItemResponseSchema` already carries (`RuntimeAuthoringIssueSchema` elements, declared once in `packages/spec`). The save door's conformance suite pins both directions of the optional key and is the precedent to copy.\n\n## Related\n\n#4463 (D1/D3), #4717 (the save-door half), #7294 / PR #7356 (the publish door's response contract), objectui#4133 / objectui PR #4236 (the Studio rendering), #4716 (the card this was measured under).\n"
+}

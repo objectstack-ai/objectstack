@@ -1,0 +1,36 @@
+{
+  "number": 9507,
+  "kind": "issue",
+  "title": "docs(qa): platform-checklist README and runs/README restate the reproduction obligation without the access-control carve-out",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T05:57:45Z",
+  "updated_at": "2026-08-18T14:03:46Z",
+  "closed_at": "2026-08-18T14:03:46Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9507",
+  "body": "Follow-up finding from the work on #9471 (PR #9506), filed unassigned for triage. It sits\noutside that card's declared file surface (`docs/qa/platform-checklist/RUNNER.md` only),\nso it was deliberately left untouched there rather than smuggled into that PR.\n\n## What #9471 established\n\nRUNNER.md rule 2 now carries an authentication/authorization carve-out: such a `fail` is a\n**completed verdict** when it records the item id, the clause, and `detail withheld pending\nmaintainer`, with the reproduction held in the runner session and never published anywhere\non GitHub. Three restatements of the obligation inside RUNNER.md were pointed at that\ncarve-out in the same PR.\n\n## What is still unconditional\n\nTwo sibling documents restate the same obligation with no exception:\n\n- `docs/qa/platform-checklist/README.md:282` — \"every run files one `qa-run` GitHub issue\n  as its record (text only: the verdict table + a reproduction rule per failure, never\n  screenshots; `runs/` is git-ignored)\"\n- `docs/qa/platform-checklist/runs/README.md:16` — \"**every `fail` carries a reproduction\n  rule** in that same issue — ordered steps / API calls (method · path · body) / the\n  ref-targeted selector path + expected-vs-actual\"\n\nThis is the same defect shape #9471 describes: a reader who lands on either document alone\ngets the unconditional rule and no hint that a carve-out exists. `runs/README.md` is the\nmore load-bearing of the two — it is what a runner reads while actually writing the record.\n\n## Suggested shape\n\nA pointer to RUNNER.md rule 2's carve-out in each, **not** a second copy of the policy.\nRUNNER.md rule 2 stays the single source; the #9471 PR used pointers for its three in-file\nrestatements for exactly this reason, and four copies of one disclosure policy is the drift\nboth cards exist to prevent.\n\nBlocked-by: #9471 — the carve-out these pointers would reference lands with that card's PR.\n\n## Verification bound\n\nFound by grepping `docs/qa/platform-checklist/` for the phrasing while in RUNNER.md.\nDocuments outside that directory were not swept, so this is not a claim that these two are\nthe only remaining instances.\n"
+}

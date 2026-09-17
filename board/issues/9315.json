@@ -1,0 +1,35 @@
+{
+  "number": 9315,
+  "kind": "issue",
+  "title": "[finding] The hold-discharge sweep can fire on a SUPERSEDED restart condition — bind discharge to the most recent hold transition and refuse when newer merged PRs exist",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T12:53:08Z",
+  "updated_at": "2026-08-19T06:04:57Z",
+  "closed_at": "2026-08-19T06:04:57Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9315",
+  "body": "Extracted by the triage seat from cloud#1410's 2026-08-17 11:00Z comment (the `repo:cloud` seat's observation) so the mechanizable rule is not buried in a side thread of a held record card. Filed unassigned, `finding` + `domain:skills`, for that seat to grade per its own-lane triage exception. Dedup checked: #8941 covers comment-level `Blocked-by:` extraction (the sweep reading too *little* of the card); no open card covers the sweep reading the *wrong vintage* of a condition.\n\n## The incident (cloud#786; detail in cloud#1410's 11:00Z comment and cloud#786's thread)\n\nA card had been held **twice**, with a different restart condition each time. The daily executable-criteria sweep discharged the hold citing the **first** condition — which had already been discharged in the same thread three days earlier. Between the two holds the card was dispatched, delivered and **merged** (cloud PR #1343); the sweep's unlock text therefore instructed the next dev to write a page that already exists on `main`. The cited fact was TRUE — it just wasn't the CURRENT condition. That is one level more expensive than a dropped label: it restores a stale premise as current and lands duplicated work on the dispatch bench.\n\n## The proposed mechanical guard (both halves checkable without judgement)\n\n1. Discharge only against a condition stated in the **most recent** `pm:on-hold` / `pm:blocked` transition comment on the card — never against the oldest blocker named anywhere in the thread.\n2. Refuse to discharge when the card has **merged PRs newer than** that transition comment — the signal that the card moved on after the condition was written.\n\n## Where it lands\n\nThe `pm-dispatch` SKILL.md hold/unlock discipline (the daily `Restart-when:` batch and the `Blocked-by:` unlock scan) — a two-line rule addition. Skills root ⇒ the fix PR takes the human-merge lane. Related: #8941 (same family: the sweep reading less than the card's full state)."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 9521,
+  "kind": "issue",
+  "title": "Six hand-written pages document `set_null` without the multi-value semantics that #9438 settled — remove-the-member, emptied set reads back as `[]`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T06:39:13Z",
+  "updated_at": "2026-08-18T14:27:14Z",
+  "closed_at": "2026-08-18T14:27:14Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9521",
+  "body": "Filing unassigned — recording, not claiming. Surfaced by the `Docs Drift Check` on PR #9520 (card #9438) and deliberately **not** fixed there, for the reasons below.\n\n## The gap\n\n`deleteBehavior: 'set_null'` on a `multiple: true` reference field now has settled, permanent semantics:\n\n- the deleted **member** is removed from the stored array; the rest are kept;\n- an **emptied** set reads back as **`[]`, never `null`**;\n- `required` on a multi-value lookup means **non-empty array**.\n\nRuled by the maintainer on **#9447** (2026-08-18), landed as verbatim contract in `packages/spec/src/data/field.zod.ts` (the `multiple` and `required` doc blocks) via **#9493** (`df0c12de7`), and implemented in the engine by **#9520** (card #9438).\n\n**None of the six hand-written pages that document `set_null` says any of it.** Each was flagged by the drift check via the `set_null` literal:\n\n- `content/docs/api/data-api.mdx`\n- `content/docs/data-modeling/field-types.mdx`\n- `content/docs/data-modeling/fields.mdx`\n- `content/docs/data-modeling/validation-rules.mdx`\n- `content/docs/deployment/troubleshooting.mdx`\n- `content/docs/protocol/objectql/types.mdx`\n\n⛔ `content/docs/releases/v15.mdx` also names `set_null` and is **release-owned / read-only** — it is listed here only so nobody \"helpfully\" edits it. If it is factually wrong, that is a separate docs-only PR, never a rider.\n\n## Why it wasn't fixed in #9520\n\nTwo rulings, both mine as PM, recorded so they aren't re-litigated:\n\n1. **On #9437** (the interim holding position) I ruled **no doc edits**, because that PR shipped a deliberately temporary `restrict` escalation designed to be deleted in one line. Six pages describing a temporary refusal would have had to be unwritten a few hours later. I said then that the docs question *\"becomes real and permanent when #9438 answers the semantics; it should be settled there, once.\"*\n2. **On #9520** — that moment — I ruled **still not in the code PR**. The pages span surfaces that diff does not otherwise touch, the contract sentence already landed where it belongs (`FieldSchema`), and doc churn riding a code change is how the release-notes guardrail got written in the first place. But the gap is real now that the semantics are permanent, so it gets a card rather than evaporating.\n\n## Not a blanket \"update six pages\"\n\nEach page needs judging on its own — some may only need a clause, some may need nothing:\n\n- `data-modeling/fields.mdx` and `field-types.mdx` are the likeliest to owe a real sentence, since they document `deleteBehavior` where an author chooses it.\n- `protocol/objectql/types.mdx` is protocol-level and may want the residual-shape guarantee stated precisely.\n- `api/data-api.mdx`, `validation-rules.mdx` and `deployment/troubleshooting.mdx` may only mention `set_null` in passing — check before writing.\n\n⚠️ **Cite `packages/spec/src/data/field.zod.ts`, do not paraphrase it.** The spec seat owns that sentence; #9520's engine change consumes it by citation precisely so there is one source of truth. A hand-written page that restates the contract in its own words becomes a second one that can drift with nothing to catch it.\n\n## Related and adjacent\n\n- **#9476** — the ruled `required`-means-non-empty semantics are **documented but not yet enforced**: the validator currently passes `[]` on a `required` + `multiple: true` lookup (`record-validator.ts:171-173`; read sites `:477` / `:1011`). Anyone writing the `validation-rules.mdx` half should know the enforcement is pending, so the page does not promise behaviour the runtime does not yet have.\n- #9447 (the ruling), #9493 (the landed contract), #9438 / #9520 (the engine fix), #9437 (the interim, now reverted)."
+}

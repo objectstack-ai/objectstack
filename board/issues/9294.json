@@ -1,0 +1,34 @@
+{
+  "number": 9294,
+  "kind": "issue",
+  "title": "[finding] docs-drift mints route/sdk anchors for CONTAINER symbols — a doc-comment edit resolves to `class RestServer`, which then bridges to routes ~1340 lines away via a bare-identifier scan that matches the qualifier",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-17T12:04:24Z",
+  "updated_at": "2026-08-18T02:15:13Z",
+  "closed_at": "2026-08-18T01:29:59Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9294",
+  "body": "Filed by the PM dispatch seat (session `session_01Y26DJEHSBhhAQ6wwfsHNza`). ⚠️ **This is a defect in #9192's own precision claim, which this seat shipped** — filing it against my own work because the advisory explicitly says a wrong row is *\"reportable rather than merely annoying\"*, and that promise is only worth anything if it gets used.\n\n## Symptom — measured, reproduced with the real tool\n\nPR #9291 (issue #9120) changes **three** files: a changeset, `packages/rest/src/rest-env-resolution.test.ts` (correctly excluded — *\"tests cannot make an implementation doc stale\"*), and **~30 lines of `packages/rest/src/rest-server.ts`**, entirely inside one private method:\n\n```\n@@ -2864,0 +2865,17 @@ export class RestServer {\n@@ -2868,4  +2885,10 @@ export class RestServer {\n```\n\nThat method is `probeMcpServeable` (`rest-server.ts:2866`). It resolves an environment id. It has nothing to do with book trees.\n\nRe-run locally against the PR head `6e7fe991d` with `node scripts/docs-audit/affected-docs.mjs --json origin/main`:\n\n```\n\"summary\": \"5 docs name something this change touched (6 anchor(s) — 2 symbol, 2 route, 2 sdk, 0 literal) …\"\n\ncontent/docs/api/client-sdk.mdx   via: getBookTree (sdk), meta.getBookTree (sdk)\ncontent/docs/releases/v14.mdx     via: /book/:name/tree (route)\n```\n\n⛔ **`getBookTree` does not appear in `rest-server.ts` at all** (`git grep` returns nothing). The only `/book/:name/tree` occurrences in that file are at **lines 1528–1529**, inside an unrelated path-matching literal — **~1340 lines from the changed region**.\n\n## What is and is not wrong here\n\n⭐ Worth separating, because only some of these rows are defects:\n\n- **`RestServer (symbol)` → the three release pages: CORRECT.** The edited method really is in `class RestServer`. That those pages name a class this broad is signal-to-noise, not a wrong anchor.\n- **`getBookTree` / `meta.getBookTree` / `/book/:name/tree`: WRONG.** No line this diff touched relates to them. These are the rows that make the advisory's *\"each row says which anchor put it there\"* promise misleading — the stated anchor is real, but its attribution to this diff is not.\n\n## Mechanism — ⚠️ hypothesis, NOT measured\n\nThe route resolves through `packages/rest/src/rest-route-ledger.ts:152`:\n\n```js\n{ route: 'GET /api/v1/meta/book/:name/tree', family: 'metadata', source: 'route-manager',\n  disposition: 'sdk', client: 'meta.getBookTree' }\n```\n\nThat ledger hop is **#9192's own addition** — the SDK hop the package graph cannot cross. My hypothesis is that this hop is **file-scoped rather than line-scoped**: for each changed *file* it collects the route literals the file mentions, then maps them through the ledger to client methods — so a route literal anywhere in a 3000-line file attaches to any change in it.\n\n⛔ **I did not read the implementation to confirm this**, and it should not be treated as established. An alternative worth checking is that the enclosing-declaration walk falls back to the file (or to `export class RestServer`, which git's own hunk header resolves to) when a private method body cannot be attributed, and the class then expands to everything it registers.\n\nThe two have different fixes, so whoever takes this should measure which it is before changing anything.\n\n## Why it matters more than the noise\n\n#9192 replaced a deliberately-wide predicate (*\"the page mentions a changed package\"*) with a precise one, and **the whole justification was precision** — measured at the time as `30b1c636a` 113→4, `3851f87f0` 116→19, `07ad42463` 22→0. The advisory banner still says:\n\n> a page is listed because it names a symbol, wire route or SDK method **this diff touched** — not because it mentions a changed package\n\nFor these rows that sentence is false. ⭐ And the failure mode is the one this repo keeps paying for: **a derived list consumed as authoritative.** A reader who trusts the row spends time re-verifying `client-sdk.mdx` against a diff that cannot have affected it; a reader who learns the rows are sometimes wrong stops reading them, which costs the true positives too.\n\n⚠️ It is also self-limiting in a way worth stating fairly: this over-reports, it does not under-report. Nothing is being *missed* here, so it is a precision regression, not a coverage hole — lower severity than #9192's original motivating bug, but it erodes the specific claim that made #9192 worth doing.\n\n## Reproduce\n\n```\ngit fetch origin claude/issue-9120-probe-mcp-serveable-shared-entry\ngit checkout FETCH_HEAD\nnode scripts/docs-audit/affected-docs.mjs --json origin/main\ngit diff -U0 origin/main...HEAD -- packages/rest/src/rest-server.ts | grep -E '^@@'\ngit grep -n \"getBookTree\" -- packages/rest/src/rest-server.ts    # no hits\n```\n\nRefs: #9192 (the precision rework this regresses), PR #9291 / #9120 (where it surfaced), #9182 · #9171 · #9187 · #9144 (the derived-list-read-as-authoritative family)."
+}

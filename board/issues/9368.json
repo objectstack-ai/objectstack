@@ -1,0 +1,35 @@
+{
+  "number": 9368,
+  "kind": "pull_request",
+  "title": "fix(tests): give two default-vitest-timeout cases real margin",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T17:09:46Z",
+  "updated_at": "2026-08-17T17:59:20Z",
+  "closed_at": "2026-08-17T17:59:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-17T17:59:18Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9368",
+  "body": "Fixes #9311\n\n## What\n\nTwo explicit timeouts, exactly the scope the card's triage comment fenced:\n\n1. **`packages/types/src/node.test.ts:178`** — `\"falls back to the importing package's own resolution when the host does not declare\"` gets an explicit **30s `testTimeout`**. It is the only case in its `describe` block that performs a real dynamic `import()` of `@objectstack/spec` (a multi-megabyte package); every sibling resolves a small on-disk fixture or fails fast, all under 10ms — checked directly, not assumed. Measured on this box: ~0.9-1.1s unloaded across 3 isolated runs. The card's own isolation runs already showed it failing at 5061ms against the 5000ms default under nothing heavier than `turbo run test --concurrency=2`, so 30s (matching the repo's `#3662` precedent for subprocess/real-load cases) gives real headroom without masking a genuine hang.\n\n2. **`packages/qa/dogfood/test/semantic-roles.dogfood.test.ts:52`** — the `beforeAll` that boots the full showcase stack (ObjectQL + ~45 plugins) through `@objectstack/verify`'s `bootStack` gets an explicit **180s `hookTimeout`**. This file's own isolated run here measured 18.3s (vitest `Duration`) / 19.5s wall clock for the whole file (boot dominates; the 5 tests themselves run in ~3.5s) — in the same range as the card's own ~27s unloaded measurement. The previously observed failure was 10027ms against the 10000ms default, essentially zero margin even idle. 180_000ms follows this package's own existing house pattern for the identical `bootStack(showcaseStack, …)` call — `admin-identity-audit-trail.dogfood.test.ts`'s `beforeAll(…, 180_000)` — rather than inventing a new number.\n\nNo sibling dogfood file carries a package-level `hookTimeout` override (`vitest.config.ts` sets none), so the per-hook precedent above is the house pattern being followed.\n\n## Why this and not `turbo.json` concurrency\n\nBoth cases pass in isolation and the repo's full suite is confirmed green at `--concurrency=2 --continue` (comment on #9311). The margin was never sized for the work these two cases actually do (a real package import; a 45-plugin stack boot) — that is the \"budget never sized for the work\" case the dispatch explicitly distinguished from \"hides work that got slower.\" Neither timeout changes behaviour; both suites already pass today. `turbo.json`'s default concurrency is out of scope per the card's own filing (a maintainer-level default) and is not touched here.\n\n## Verification\n\n- `packages/types`: `tsc --noEmit` clean; `vitest run` — **348/348 tests pass**, matching the card's own suite-size measurement.\n- `packages/qa/dogfood`: `tsc --noEmit` clean; the changed file alone — `vitest run test/semantic-roles.dogfood.test.ts` — **5/5 pass**, run 3× for timing consistency (Duration 18.26s / 19.5s wall clock).\n- Static gates run clean at head `dc151fd0` (all exit 0): `check:test-source-alias`, `check:type-source-resolution`, `check:query-options-erasure`, `check:engine-double-contract`, `check:where-matcher`, `check:cross-package-test-inputs`, `check:slot-lookup`, `check:nul-bytes`, `check:type-check-coverage`, and the `packages/spec` liveness family (`check:empty-state`, `check:liveness`, `check:strictness-ledger`, `check:variant-docs`), plus `scripts/docs-audit/check-affected-docs.mjs`.\n- `check:type-check-debt` (the re-measure half) could not complete locally — it needs the **full** 78-package workspace closure built (`pnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'`) and this worktree hit a missing `@objectstack/service-knowledge` dist partway through an unrelated package's dependency chain. Neither `@objectstack/types` nor `@objectstack/dogfood` appears in the `DEBT`/`TEST_DEBT` ledgers in `scripts/check-type-check-coverage.mjs` (grepped directly), so this diff — test-file-only, no new imports, no new test files — cannot move that ratchet; CI's own build will run it in a clean environment.\n- Did **not** run the full `@objectstack/dogfood` package suite (~780 tests across ~100 stack-booting files) locally — a real attempt ran past 8+ minutes without finishing under `--maxWorkers=2` on this shared, multi-agent-contended box, and continuing would hold the container-wide heavy-verification lock for an extended period at every other parallel agent's expense for a change with zero behavioural surface. The specific changed file was verified directly (above); CI runs the full suite in its own environment.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012WKSnqAaoqtW3QX7SSf1Vk)_"
+}

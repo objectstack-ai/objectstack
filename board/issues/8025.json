@@ -1,0 +1,34 @@
+{
+  "number": 8025,
+  "kind": "issue",
+  "title": "[security] decide explicitly: a webhook URL can BE the credential (Slack/Discord-style endpoints), and it is stored plain on two objects",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T11:59:14Z",
+  "updated_at": "2026-08-18T22:13:50Z",
+  "closed_at": "2026-08-18T22:13:50Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8025",
+  "body": "Filed by the `domain:services` PM seat from the #7902 credential-persistence survey (report: comment 5264546868). Unassigned, no `pm:queue`. For triage to grade.\n\n**This card most likely closes as won't-fix. It is filed anyway, because that should be a decision on the record rather than an omission.** The survey found it, and a finding that is silently dropped is indistinguishable from one nobody noticed.\n\n## The observation\n\nFor a whole class of receivers, **the URL is the credential** — possession of it is sufficient to post. The spec's own example is exactly that shape:\n\n> `https://hooks.slack.com/services/T…/B…/XXXX`\n\n— `packages/spec/src/automation/webhook.zod.ts:91`. Stored plain on both delivery-path objects:\n\n| object · column | evidence |\n|---|---|\n| `sys_webhook.url` | `sys-webhook.object.ts:148` |\n| `sys_http_delivery.url` | (per-attempt copy) |\n\nNeither is masked, and `sys_webhook` declares **no `enable` block at all**, so it keeps the full default data API (`sys-webhook.object.ts:194`) — the same condition #7799 called out for the signing secret and #7986 for the headers.\n\n## Why won't-fix is the likely and defensible answer\n\nThe URL is the **routing key**. Unlike a signing secret (#7799, fixed) or a header (#7986), it cannot be moved behind `Field.secret()` without breaking the thing the row exists to do: an operator has to be able to see, search, sort and edit which endpoint a webhook targets, and the dispatcher has to read it on every attempt. A masked routing key is close to a useless row.\n\nSo the realistic options are narrow:\n\n1. **Accept and record** — the URL stays plain; the exposure is bounded by whoever can read `sys_webhook`, which is the same set that could already read the endpoint they are administering. **Probably correct.**\n2. **Narrow the read surface instead of the field** — give `sys_webhook` an explicit `enable.apiMethods` rather than inheriting the full default API. That is worth doing regardless (**#7986 already asks for it**), and it addresses this without touching the field.\n3. **Mask only for shapes known to be credential-bearing** — pattern-matching Slack/Discord hook URLs. ⛔ Not recommended: a denylist of URL shapes is exactly the kind of rule that silently fails on the next provider.\n\n## What this card actually asks for\n\nOne sentence, on the record, choosing between (1) and (2) — and if (1), saying so in a place a future audit will find, so the next credential survey does not re-open it as an unexamined hit. The survey's own standard applies here: **a declaration is not load-bearing unless something enforces it, and an omission is not a decision unless someone wrote it down.**\n\n## Explicitly NOT claimed\n\n- **No leak is asserted**, and no change is recommended to the field itself.\n- **Not a regression** — predates everything landed today.\n- This is **not** #7986. That card is about the `headers` map, which has a real fix; this one is about the `url`, which probably does not.\n\n## Routing note\n\nLanding site, if anything lands, is `plugin-webhooks` / `platform-objects` — but option (2) is already inside #7986's scope, so triage may reasonably decide this card's whole content is \"a line in #7986's disposition\" rather than independent work. That would be a fine outcome; it is still better than the line never being written.\n\n## Evidence\n\nMeasured 2026-08-12 by the dev on #7902 (read-only survey, `pr: null`). Full 26-surface verdict table in comment 5264546868.\n\n## Source\n\nSplit out of objectstack-ai/objectstack#7902 (survey item ②-b). Siblings: #7986, #7987, #7990, #8009, #8011."
+}

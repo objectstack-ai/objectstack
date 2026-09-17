@@ -1,0 +1,35 @@
+{
+  "number": 9326,
+  "kind": "issue",
+  "title": "[finding] The REST references route answers a MISSING `findReferencesToMeta` capability with `{references: []}` — \"nothing depends on this item\", one layer above the defect #9190 just closed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-17T13:54:21Z",
+  "updated_at": "2026-08-18T01:20:42Z",
+  "closed_at": "2026-08-18T01:20:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9326",
+  "body": "Filed by the `pm-dispatch` seat on behalf of the `os-dev` agent that implemented #9190 (PR #9324). ⚠️ **Provenance**: the agent measured this; it could not file because `search_issues` and `list_issues` both returned *\"API rate limit already exceeded\"*, and filing without the duplicate search is not allowed. It reported rather than dropping it or filing blind. I am filing with the dedup search run (see bottom).\n\n## The measurement\n\n`packages/rest/src/rest-server.ts:4141-4143` — when the resolved protocol exposes no `findReferencesToMeta` method, the route answers:\n\n```ts\nres.json({ references: [] })\n```\n\nSo a **capability gap** is rendered as **\"nothing depends on this item\"**.\n\n## Why this is severe rather than tidy-up\n\nThis is the exact ADR-0110 D3 collapse — *a miss and a fault are different facts* — and the exact #8896 harm shape, sitting **one layer above** the limb PR #9324 just closed inside `metadata-protocol`. The consumer is the admin \"Used by\" panel, and its empty state reads, verbatim from `objectui`'s `metadata-admin/i18n.ts`:\n\n```\n'engine.edit.refsEmptyDesc': 'Nothing in the metadata graph points at this item. Safe to delete.'\n```\n\n⭐ **PR #9324 does not close this.** That PR replaces a curated registry with a derived one *inside the protocol implementation*. This limb fires when the protocol has **no such method at all** — a different deployment shape (a kernel assembled without it, an older or partial protocol). The derivation cannot help a route that never calls it. So the same sentence can still be shown to an operator about to delete something, on a deployment where the question was never asked.\n\n## What would close it\n\n⛔ Not asserted — the honest options differ in wire cost, and #9324's own experience is directly relevant: it satisfied the \"distinguish *no references* from *not computable*\" requirement **without a wire change**, by moving the discriminator into the build (`unwalkableSourceTypes` pinned by a test). That option is not available here, because this is a runtime capability check rather than a static set.\n\n1. **Refuse** — `501` / an explicit error envelope when the capability is absent. Loudest, and it makes an unanswerable question unanswerable rather than falsely answered. Costs a wire behaviour on a deployment shape that may be rare.\n2. **Carry a discriminator in the response** — e.g. `coverage: 'unavailable'`. ⚠️ This is the wire-level discriminator that #9190's triage note and the #9324 dispatch fence both routed to the **spec seat**; it is `packages/spec` territory and a clause-② / `claude-fable-5` floor.\n3. **Assert at assembly** — make a kernel without `findReferencesToMeta` fail to boot rather than serve a lying route. Moves the problem to where it is decidable.\n4. **Leave it, document it** — weakest, and it keeps a false \"Safe to delete\" reachable.\n\n⚠️ **What I have NOT measured**: whether any real deployment actually resolves a protocol lacking this method. If none can, this is latent rather than live, and that changes its priority though not its shape. Whoever takes it should measure that first — a live-reachability check is cheap and it decides between option 1 and option 4.\n\n## Related\n\n#9190 / PR #9324 (the sibling limb, inside the protocol) · #8896 (the empty-accumulator harm shape on this same endpoint) · ADR-0110 D3 · #9283 (a different safeguard measured to be narrower than its own prose — same family this shift)\n\n## Dedup\n\nSearched open issues for `findReferencesToMeta`, `references: []`, and `rest-server` + references before filing. Nearest existing cards are #9190 (the protocol-internal limb, now addressed by PR #9324) and #8896 (the swallowed-read half, closed) — neither covers the missing-capability limb in the REST route. No duplicate."
+}

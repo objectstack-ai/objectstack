@@ -1,0 +1,37 @@
+{
+  "number": 9362,
+  "kind": "issue",
+  "title": "【缺陷】被 multiple:true lookup 指向的对象 REST DELETE 全 400——cascadeDeleteRelations 依赖探针用裸等值查 JSON 列",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p0",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-17T16:24:13Z",
+  "updated_at": "2026-08-18T05:42:07Z",
+  "closed_at": "2026-08-18T05:42:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9362",
+  "body": "**自 qa-run 记录 #9351(records-forms R3 轮,crud-roundtrip clause 2,P0)抽取**——按维护者 2026-08-17 裁决,run 记录为协议载体不入分诊 sweep,可派发缺陷抽取为独立卡。完整证据链、控制组与复现命令见 #9351;本卡为可派发单元。\n\n## 复现（纯 schema 驱动,无需特定数据）\n\n```\nPOST   /api/v1/data/showcase_account   {\"name\":\"anything\",\"status\":\"active\"}  → 201, id\nDELETE /api/v1/data/showcase_account/<id>                                     → 400 INVALID_FILTER\n```\n\n期望 200 且行删除;实际 400,行存活。三个新建 id 复现 3/3;删空 `showcase_field_zoo` 全部行后仍 400(schema 驱动非数据驱动);对照 `showcase_announcement`/`showcase_category` DELETE 均 200(排除「DELETE 路由坏了」)。\n\n## 机制（读数在 `packages/objectql/src/engine.ts:10113`,`cascadeDeleteRelations`）\n\n依赖探针对每个指向被删对象的 `lookup`/`master_detail` 字段构造**裸等值** filter——**包括声明 `multiple: true` 的字段**。`showcase_field_zoo.f_lookups` 是 `Field.lookup('showcase_account', { multiple: true })`,存 JSON TEXT 列,driver 正确以 `INVALID_FILTER` 拒绝该拼写;探针 catch(engine.ts:10147)只放行 missing-table 类,`INVALID_FILTER` 上抛 ⇒ 整个删除失败。\n\n**爆炸半径**:凡被任何已注册对象的 `multiple: true` lookup 指向的对象,REST 删除全部不可用。stock showcase 上即 `showcase_account`。\n\n**关联**:#8895(2026-08-16 合并)把 `catch { continue }` 改为 discriminate-or-propagate——该收紧本身正确,但探针对多值引用字段的 filter 拼写从未修正:旧行为是静默吞掉(同时静默跳过该关系的完整性守卫,恰是 #8895 抱怨的),新行为是硬拒绝。**未做 bisect,因果为源码强推断非证明**(#9351 原文如此标注,如实转录)。\n\n**修向提示**(供实现参考,非裁决):多值字段的依赖探针应使用 driver 声明的多值拼写(`$contains` 类),或按字段声明分支构造 filter——修在探针构造处,⛔ 不放宽 driver 的拒绝。\n\n发现归 QA R3 轮 runner;抽取:skills 席(session_017TNzEetykdh7ceZGwuAPLq)。未定级——留分诊首触(P0 建议随定级确认)。"
+}

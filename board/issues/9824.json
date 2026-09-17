@@ -1,0 +1,35 @@
+{
+  "number": 9824,
+  "kind": "pull_request",
+  "title": "feat(security): REST 401 anonymous-deny body carries code UNAUTHENTICATED alongside error/message (#9487)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T02:54:14Z",
+  "updated_at": "2026-08-19T03:29:57Z",
+  "closed_at": "2026-08-19T03:29:56Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-19T03:29:56Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9824",
+  "body": "Part of #9487 — delivers the maintainer-ruled additive fix for the dispatched surface. One additional producer was found outside that surface and is filed as sub-issue #9823, so this PR deliberately uses no closing keyword: the PM decides whether the parent closes on this landing or on #9823.\n\n## What changed (ruling: additive only — no key removed, no key moved)\n\n- `packages/core/src/security/anonymous-deny.ts` — `ANONYMOUS_DENY_BODY` gains `code: ANONYMOUS_DENY_CODE`. The wire effect surfaces through `@objectstack/rest`'s `enforceAuth`, which writes this constant verbatim on every `/data`, `/meta` and `/reports` 401 (all 69 call sites). `error` keeps carrying the same code value it always has; docstring updated to match, including an explicit note that this does NOT settle ADR-0112 D5 (#9559 stays open — both envelope families unchanged in kind).\n- `packages/core/src/security/anonymous-deny.test.ts` — the strict pin updated to the new exact three-key shape (strict `toEqual`, not loosened).\n- `packages/qa/dogfood/test/showcase-anonymous-deny-surfaces.dogfood.test.ts` — the strict wire pin updated to the exact three-key shape. The two-family classifier (`isRestFlatDeny` / `isDispatcherWrapperDeny`) is byte-untouched: it judges family on the discriminating keys and tolerates the additive key — verified on the wire, not assumed (below). The `toEqual(ANONYMOUS_DENY_BODY)` verbatim pin follows the constant by construction and needed no edit.\n- `.changeset/anonymous-deny-401-code-key.md` — `@objectstack/core` minor. Not breaking; no ADR-0087 marker required (`check:adr-0087-registration` green).\n\n## The ledger half of the ruling — measured already satisfied, no spec edit needed\n\nThe ruling asks that the 401 family be declared like every other family. Measured on `main`: `UNAUTHENTICATED` is already a tier-1 `StandardErrorCode` member (`packages/spec/src/api/errors.zod.ts:69`) with `HttpStatusErrorCodeMap` 401 mapped to it (`:174`) — the same tier as `PERMISSION_DENIED` / `OBJECT_NOT_FOUND` / `RECORD_NOT_FOUND`; the card's other named codes (`VALIDATION_FAILED`, `BATCH_NOT_ATOMIC`, `UNSUPPORTED_QUERY_PARAM`) are tier-2 ledger rows only because they are not standard members. A tier-2 ledger row for `UNAUTHENTICATED` would be refused by the ledger's own admission gate (\"no registered code shadows the standard catalog\", `packages/spec/src/api/error-code-ledger.test.ts:38-42`). So `packages/spec/**` is untouched and the `domain:spec` boundary was never breached.\n\n## Measured benefit (the card's cost, removed)\n\n`packages/client/src/index.ts:4958-4961` reads `asSemanticCode(errorBody?.code) ?? asSemanticCode(errorBody?.error?.code)`. Harness against built dist (stub server answering the built constant; client resolved via package `exports`): before — `err.code === undefined`; after — `err.code === 'UNAUTHENTICATED'`, `err.httpStatus === 401`, with **no SDK change**. objectui's four `UNAUTHENTICATED` readers (`error-message.ts:212`, `MarketplacePackagePage.tsx:338`, tests) all key on `code` and start receiving it; none asserts absence.\n\n## Verification (all at `b0d5633c5`, the head this PR ships)\n\n- `@objectstack/core` tests: 35 files / 857 passed. `@objectstack/rest` full suite: 129 files / 2105 passed. `@objectstack/dogfood` full suite: 118 files passed / 1 skipped, 866 tests passed / 3 skipped; the anonymous-deny file alone re-run: 1 file / 25 passed against a real booted showcase — the additive body classified `rest-flat`, no third dialect, wire-verbatim pin green. `@objectstack/dogfood` typecheck green.\n- Reverse verification from the committed state, both legs rebuilt and dist-proven (`scripts/ablation-dist-preflight.mjs`, value-unique markers, `--absent` on the ablation leg): reverting the constant turns the core pin RED (1 failed / 7 passed, missing `code`) and the SDK harness back to `err.code === undefined`; restore leg returns 8/8 and PASS. First marker attempt was rejected by the preflight itself (the marker also matched a pre-existing docstring surviving in `.d.ts`) — remeasured with value-unique markers.\n- Gate union derived by `node scripts/pm/dispatch-gates.mjs` from the real changeset (15 path-matched + 5 convention-triggered), all green, plus the tool's known gaps run explicitly: `pnpm lint` and `pnpm check:slot-lookup` green, `check:nul-bytes` green, `check:type-check-debt` re-measure green on the built closure (turbo 70/70).\n\n## Scope discipline\n\n- Consumer sweep (with controls; intolerant count beside tolerant): exactly 2 strict whole-body pins existed and both are updated here; 1 verbatim pin follows the constant; the 2 tolerant top-level `body.error` readers (`rest-meta-auth.test.ts:49`, `security-routes.test.ts:99`) stay green by construction; all nested `error.code` readers are unaffected.\n- Producer sweep: the deny message has exactly two non-test spellings repo-wide. This PR fixes the constant; the inline copy in `packages/runtime/src/dispatcher-plugin.ts:213-221` (service-declared endpoint routes) is #9823 — out of the dispatched surface, reported rather than silently expanded into.\n- `packages/rest`, `packages/client`, `packages/spec`: zero edits needed, zero made.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WeN7F6jQFpcqW2BN56RdPa)_"
+}

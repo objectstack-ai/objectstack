@@ -1,0 +1,34 @@
+{
+  "number": 9495,
+  "kind": "issue",
+  "title": "governance: human merge IS the review record for governed surfaces — retire the per-PR ADR approval check, add a report-only post-merge audit",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T05:26:49Z",
+  "updated_at": "2026-08-18T08:06:08Z",
+  "closed_at": "2026-08-18T07:53:35Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9495",
+  "body": "Maintainer ruling (2026-08-18, PM chat, skills-seat session `session_01Rn7aaamsR99FXRqLcpL99q`). Background: human/agent GitHub accounts are not stably partitioned (maintainer: 「人工专属账号 和 agent 账户一直在切换，暂时没固定」), so no identity-based signal can prove a review is human — including \"different account from the PR author\", which agents spanning multiple accounts can satisfy. The seat proposed this package, quoted as put to the maintainer:\n\n> 1. **人工合并即人工审核**：governed PR（skills/ADR 面）的审核记录 = 你按下合并/入队那个动作本身。前提是纪律收死：**agent 席位对 governed PR 永不翻 ready、永不入队、永不挂 auto-merge**——升格成技能硬条款。\n> 2. **事后审计代替事前门**：`ADR maintainer approval` 这个每张必红的 check 退役（红灯常态化本身有毒），换成一个 **report-only 审计**：巡检脚本列出「governed 面合并清单」，出现在轮次报告里。清单上每一条都应该对应你的一次亲手合并；出现任何一条你不认识的 ⇒ 席位违规，立案回滚。\n> 3. **残余风险如实说**：防线从「合并前挡」移到「合并后查」。今天的门本来就不在必查项里、从未真正挡住过什么，实际安全面几乎没有损失。\n\nMaintainer's reply, verbatim: 「同意。」\n\n## Required outcomes\n\n1. **The per-PR check retires**: no check named `ADR maintainer approval` runs on PRs any more (`.github/workflows/adr-merge-approval.yml` + the gate mode of `scripts/check-adr-merge-approval.mjs`). It is not in the required-context set, so no Settings sitting is needed. Preserve the script's documented history/lessons wherever the implementation lands them — the header's incident records are institutional memory, not dead weight.\n2. **A report-only audit path exists**: enumerate PRs merged since a given ref/date whose diff touched a governed surface (`docs/adr/**`, `.claude/skills/**`, `skills/**`, `.claude/agents/**`), with merge metadata, consumable by the PM round report / the report-only patrol family (`check-half-states` precedent). Every listed entry should correspond to a deliberate human sitting; an unrecognized entry is the violation signal.\n3. **Skill text hardened** (`.claude/skills/pm-dispatch/SKILL.md`, ratchet 682 paid): the ACCEPT path fork / 终局三件套 updated — human merge is the review record for governed PRs; agent seats ⛔ never flip ready / enqueue / arm auto-merge on governed PRs (hard rule, now the sole pre-merge line of defense); round reports carry the governed-merges audit list. Sync `AGENTS.md` / `CLAUDE.md` if they reference the retired check (re-derive by grep, don't assume).\n4. Draft PR, human merge — its own merge is the first exercise of the new rule.\n\nSerial constraints: enters the `SKILL.md` hot-file queue behind the in-flight #9038+#9200 bundle and queued #8952 (seat post #7623 is the queue of record). Dispatch at fable (clause ① path mandate)."
+}

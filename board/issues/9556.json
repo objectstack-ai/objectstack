@@ -1,0 +1,33 @@
+{
+  "number": 9556,
+  "kind": "pull_request",
+  "title": "docs(metadata-protocol): name each decline list's remit and add the JSDoc's missing flow-conflict bullet",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T09:33:28Z",
+  "updated_at": "2026-08-18T10:10:08Z",
+  "closed_at": "2026-08-18T10:10:06Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": "2026-08-18T10:10:06Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9556",
+  "body": "Fixes #9271\n\nOption A as ruled on 2026-08-17: the two decline lists describing\n`migrateStoredMetadata` are an **intentional scope split**, now made explicit.\nTwo audiences, two documents, each self-describing — neither derived from nor\ntranscluded into the other.\n\nProse only. No behaviour change, no API change.\n\n## The ruling's falsifiable premise: verified, NOT falsified\n\nThe ruling carried a hard stop: verify the flow-conflict path is reachable from\na **non-CLI** caller, and if it turns out CLI-only, report the fork rather than\nforce the bullet. **It is reachable**, so the bullet was genuinely owed. What\nsettled it:\n\n- **Two non-CLI production callers, both HTTP doors**, and neither passes\n  `canonicalizeFlow`:\n  - `packages/rest/src/rest-server.ts` — `POST /meta/_migrate-stored`\n  - `packages/runtime/src/domains/meta.ts` — `POST /metadata/_migrate-stored`\n- With that argument omitted, the function resolves the engine itself —\n  `request.canonicalizeFlow ?? this.resolveFlowCanonicalizer()` — and\n  `resolveFlowCanonicalizer` reads the `automation` service off the services\n  registry.\n- The conflict branch is keyed on **only** two things: the row being a `flow`,\n  and the canonicalization returning a non-empty `conflicts` array. Nothing in\n  it discriminates on which caller supplied the engine.\n- Both route comments already assert that a server always holds a live\n  automation engine. A **live** executor registry is precisely the condition\n  under which the guard can refuse a real rename; the CLI's deliberately inert\n  engine is the weaker case, not the only one.\n\nPositive control for the caller sweep: the same sweep independently surfaced the\nexpected CLI caller (`packages/cli/src/commands/migrate/meta.ts`) and 25 files\nin total, so the non-CLI hits are a reading rather than an artefact of a query\nthat matches everything or nothing.\n\n## What changed\n\n**`packages/metadata-protocol/src/protocol.ts`** — the `migrateStoredMetadata`\nJSDoc block only:\n\n1. **Added the missing fifth bullet**, \"a flow whose rename that guard refused\".\n   Placed immediately after the no-reachable-engine bullet so the two\n   flow-related declines sit together — and so the remit sentence's existing\n   \"the first bullet below\" reference keeps pointing at the bullet it always\n   meant.\n2. **Restated the remit sentence's final clause.** PR #9270 had already landed\n   the remit sentence, ending \"That does not by itself account for every\n   difference between this list and cli.mdx's decline table — see #9271\". Adding\n   the bullet above makes that clause false: the difference is now fully\n   accounted for. It now states the finished fact, and names the split as ruled\n   rather than pointing at an open question. The sentence was **improved in\n   place, never duplicated** — no second remit sentence was added.\n\n**`content/docs/deployment/cli.mdx`** — one sentence naming the decline table's\nremit: the **operator-observable** surface, plus which single member the JSDoc\ncarries that it does not, and why no operator door can reach it.\n\nPer the ruling, `cli.mdx` deliberately does **not** grow a\n\"no reachable automation engine\" row — an operator cannot reach that path, and\ndocumenting it there would be its own small lie.\n\n## End state\n\n| | JSDoc | `cli.mdx` |\n|---|---|---|\n| `flow` rows with no reachable automation engine | yes | no, by stated remit |\n| A flow whose rename the conflict guard refused | **yes (new)** | yes |\n| Types with no repository write path | yes | yes |\n| Rows that still fail the schema after conversion | yes | yes |\n| Rows under a non-canonical metadata type spelling | yes | yes |\n\nFive members against four, differing by exactly one member in exactly one\ndirection, for a reason each document now states itself — which is the end state\nthe ruling predicted.\n\nVerified mechanically rather than by eye: parsing the file with the TypeScript\ncompiler API reports 0 parse diagnostics, attaches a 6481-char JSDoc to\n`migrateStoredMetadata`, and counts **5** decline bullets in it.\n\n## Changeset\n\nNone — the `skip-changeset` label is applied instead. This repo's\n`check-empty-changeset.mjs` gate **rejects** a newly added empty-frontmatter\nchangeset, and AGENTS.md reserves changesets for feature or functional work. A\nprose-only PR releases nothing, which is the label's textbook case as\n`lint.yml` itself describes it.\n\n## Gates\n\nRe-derived against the actual diff with `node scripts/pm/dispatch-gates.mjs`\n(no path argument, so the script takes its own change set) — it returned the\nsame 12 families the dispatch named, no additions. All 12 run green on the\npushed tree, commit `0d3ea23`, each exit status captured directly rather than\nthrough a pipe:\n\n`check:cross-package-test-inputs` · `check-cross-package-test-inputs.mjs` ·\n`check:docs-audit-scope` · `check:docs-redirects` · `check:role-word` ·\n`check:durability-log-level` · `check:filter-alias-parity` ·\nspec `check:empty-state` · spec `check:liveness` ·\nspec `check:strictness-ledger` · spec `check:variant-docs` ·\n`docs-audit/check-affected-docs.mjs`\n\nThe affected-docs mapper flags three pages against this diff. Two are\n`content/docs/releases/`, which is release-owned and untouched here. The third,\n`content/docs/concepts/metadata-lifecycle.mdx`, is a **negative and stays\nunedited**: it carries no decline list at all (zero occurrences of \"decline\"),\nand its single mention of the function is one accurate clause about the\nno-write-path skip, a decline this PR does not alter. So there is no third list\nto fold into the split — the card's two-list framing is complete.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017qYPmkKEsfbWY1yVg83p8F)_"
+}

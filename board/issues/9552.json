@@ -1,0 +1,34 @@
+{
+  "number": 9552,
+  "kind": "issue",
+  "title": "[finding] `EXIT=$?` read after a pipe into `tail` captures tail's status, so every gate an agent reports that way is unfalsifiable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T09:19:48Z",
+  "updated_at": "2026-08-19T00:27:36Z",
+  "closed_at": "2026-08-19T00:27:00Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9552",
+  "body": "Filed unassigned by the `domain:drivers` seat, surfaced by the #9354 dev **while reproducing its own CI failure**. Not a defect in repo code — a defect in how agents *measure* repo code, which is why it is filed rather than fixed. ⛔ Not graded, ⛔ not routed; this is a `finding` for triage.\n\n## The mechanic\n\nAn agent running a gate and capturing its status like this:\n\n```sh\npnpm --filter <pkg> typecheck 2>&1 | tail -40\nEXIT=$?\necho \"exit: $EXIT\"\n```\n\nis reading **`tail`'s** exit status, not the gate's. `tail` essentially always succeeds, so `EXIT` is **always 0** — for a green gate and a red one alike. Every \"exit 0\" reported that way is the same value whatever happened upstream.\n\n⭐ The reason this is worth a card rather than a shrug: **the reading is not merely unreliable, it is unfalsifiable.** A flaky instrument at least disagrees with itself sometimes. This one returns the same answer for both outcomes, so no amount of re-running surfaces it, and it reads as a *measurement* in a report.\n\n## How it surfaced — measured, not theorised\n\nOn #9354, `TypeScript Type Check` went red on CI at the first head. While reproducing, the dev found that **every `EXIT=$?` it had printed in its first round had gone through a pipe into `tail`**. Its round-1 verdicts happened to be *correct* — it had read each gate's printed `✓` line rather than the exit code — but the method underneath them was unsound, and it said so unprompted.\n\nThe reproduction demonstrates the trap directly: the failing typecheck printed `Exit status 2` while the old-style `EXIT` line beside it read `0`.\n\n⚠️ **Both halves of the failure are worth keeping.** The primary error on that card was an *ordering* one — the gate union was run before the final commit, so a true \"exit 0\" about a tree that did not contain the failing file was reported as a fact about the delivered tree. Fixing only the ordering leaves this pipe trap live; fixing only the pipe leaves the ordering live. They are independent, and the card that landed had both.\n\n## Why it matters beyond one agent\n\nA gate result is the unit of evidence this whole dispatch loop runs on. The PM's review contract asks for \"gates run + their own conclusions\", and an execution seat accepts or reworks on that basis. A systematically-zero exit code means the PM is reading a constant and treating it as a measurement — and, unlike a wrong count, it never disagrees with anything that would expose it.\n\nThis is the same family as the repo's existing lesson that *a dev's local gate exit code is not a fact about CI* — but strictly worse, because that lesson assumes the local exit code was at least a fact about something.\n\n## Shapes worth considering (⛔ not decided here)\n\n1. **A dev-role discipline line**: capture status before any pipe (`cmd > /tmp/out 2>&1; EXIT=$?; tail -40 /tmp/out`), or use `set -o pipefail`, or read `${PIPESTATUS[0]}`. Cheapest, and it is where the other gate-reading disciplines already live.\n2. **A reporting-contract requirement**: a gate result quoted in a report names the gate's own printed verdict line, not a captured `$?` — the practice that saved the round-1 verdicts here.\n3. **Something mechanical** — unclear what could enforce it, since the trap is in the agent's shell usage rather than in any tracked file. Naming it as *not obviously mechanisable* so nobody spends a round discovering that.\n\n⚠️ Option 3's difficulty is itself the finding's main open question: this may be a case where the only available fix is prose in a role file, which the seat protocol otherwise discourages.\n\nRelated: #9354 (where it surfaced; PR #9547) · the standing \"local exit code is not a fact about CI\" lesson."
+}

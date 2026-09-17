@@ -1,0 +1,35 @@
+{
+  "number": 9347,
+  "kind": "pull_request",
+  "title": "fix(cli): serve's ready banner no longer names a config that was not read",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T15:16:08Z",
+  "updated_at": "2026-08-17T16:18:15Z",
+  "closed_at": "2026-08-17T16:18:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-17T16:18:14Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9347",
+  "body": "Fixes #8978\n\n## The defect\n\n`os serve`'s ready banner's `Config:` row printed `relativeConfig`\nunconditionally. `relativeConfig` is derived from `args.config` at the top\nof `run()`, **before** the artifact-fallback branch is decided, so on every\nartifact-fallback boot it named a file that was either never read or does\nnot exist on disk:\n\n- **`OS_ARTIFACT_URL` boot (#8368)** — the `objectstack.config.ts` in cwd is\n  deliberately never executed; the boot diagnostics say so a few lines above\n  the banner, but the banner still named it.\n- **Plain artifact-fallback boot** (no config authored, booting from\n  `OS_ARTIFACT_PATH` or the cwd's `dist/objectstack.json` convention) — the\n  row named a config file that does not exist at all.\n\nThe banner is the surface an operator reads to answer \"what is this\ncontainer actually running\", and naming what did NOT boot points them at\nthe wrong app (cloud#1292).\n\n## The fix\n\n`packages/cli/src/commands/serve.ts` gains an exported pure decision\nfunction, `resolveBannerConfigRow`, next to the existing\n`describeRegisteredDriver` banner helper:\n\n- `pinnedArtifact` set (`OS_ARTIFACT_URL`) → report it. The resolver's\n  `display` string is already resolved and already redacted for a\n  pre-signed URL, so it is safe to print as-is.\n- `useArtifactFallback` set with no `pinnedArtifact` (`OS_ARTIFACT_PATH`,\n  the cwd's `dist/objectstack.json` convention, or an empty/quick-start\n  boot) → omit the row. No config was read, and there is no\n  safely-redacted display in hand here (`OS_ARTIFACT_PATH` may itself be a\n  credentialed URL) — an absent row beats a nonexistent-file claim or a\n  leaked secret.\n- Neither set (the ordinary config-boot path) → report `relativeConfig`\n  exactly as before.\n\n`packages/cli/src/utils/format.ts`'s `printServerReady` renders whichever\nof `configFile` / `artifactSource` the caller actually has — a new\n`Artifact:` row (value, then a literal \" (OS_ARTIFACT_URL)\" suffix) in the\n`Config:` row's slot, or no row at all.\n\nChose \"report the artifact, or omit\" over \"always report something\" for the\nplain artifact-fallback path specifically because printing `OS_ARTIFACT_PATH`\nverbatim risks the same credential-leak class `OS_ARTIFACT_URL`'s resolver\nalready guards against, and nothing upstream of the banner call site\ncurrently produces a redacted display for that path — computing one safely\nwas judged out of scope for this card (tight diff; `serve.ts` is a\nthree-way mutually-exclusive hot-file slot this batch, #8985 is held back\nuntil this lands).\n\nThe two other `relativeConfig` readers in `serve.ts` (`:1076`'s \"Loading …\"\ndiagnostic, `:1663`'s orphaned-export warning) are untouched — this PR does\nnot touch the `relativeConfig` variable itself, only how the banner call\nsite derives what to pass to `printServerReady`.\n\n## Tests\n\nBoth new test files pin the banner assertion the card requires, at the two\nlayers the fix touches:\n\n- `packages/cli/src/commands/serve-banner-config-row.test.ts` — pins\n  `resolveBannerConfigRow` against every boot shape (ordinary config boot,\n  `OS_ARTIFACT_URL`, plain artifact-fallback, empty/quick-start boot).\n- `packages/cli/src/utils/format.config-artifact-row.test.ts` — pins\n  `printServerReady`'s own rendering of the row (captures `console.error`,\n  ANSI-stripped, same pattern as the #4801 `Tenancy:` row test), so a future\n  edit to either function cannot silently reintroduce the\n  always-print-`configFile` bug.\n\nReverse-verified: committed the fix, reverted only\n`packages/cli/src/commands/serve.ts` and `packages/cli/src/utils/format.ts`\nto `origin/main` (tests untouched), ran the two new test files — 7 of 8\ncases failed (`resolveBannerConfigRow is not a function`; the `printServerReady`\n\"omits both rows\" case asserted `Config:  undefined` was printed instead of\nnothing). Restored the fix from the commit; all 8 pass.\n\n## Gates run locally\n\n- `pnpm check:cross-package-test-inputs` — OK\n- `node scripts/check-cross-package-test-inputs.mjs` — OK\n- `node scripts/docs-audit/check-affected-docs.mjs` — OK (self-test only,\n  advisory job; the real mapper flags 2 non-release docs via a same-named\n  but unrelated `artifactSource` symbol — the pre-existing `MetadataPlugin`\n  config option, not this PR's new `ServerReadyOptions.artifactSource`\n  field — no doc drift)\n- Convention-triggered (new test files): `pnpm check:query-options-erasure`,\n  `pnpm check:type-check-coverage`, `pnpm check:type-check-debt`\n  (`--re-measure`, full workspace closure built first),\n  `pnpm check:engine-double-contract`, `pnpm check:where-matcher` — all OK\n- `pnpm --filter '@objectstack/cli' typecheck` — clean\n- `pnpm --filter '@objectstack/cli' test` — 126 files / 1375 tests pass\n\nMerged current `origin/main` in (no churn on the two target files;\n`packages/spec` moved on the other side — rebuilt it, `check:generated`\nstill all up to date, then rebuilt `@objectstack/cli`'s dependency closure\nand re-ran the full cli suite and the debt re-measure gate on the merged\ntree).\n\n## Changeset\n\n`.changeset/serve-banner-artifact-row.md` — patch on `@objectstack/cli`.\n\n---\n\nZone 1 rule 5 followed: no model identifier anywhere in this diff, commit\nmessages, or this PR — `Co-Authored-By: Claude` only.\n\n_Generated by [Claude Code](https://claude.ai/code/session_012WKSnqAaoqtW3QX7SSf1Vk)_\n"
+}

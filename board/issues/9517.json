@@ -1,0 +1,35 @@
+{
+  "number": 9517,
+  "kind": "issue",
+  "title": "plugin-audit's shipped README documents an `auditService` API and a row shape that do not exist — a published compliance-capability claim with no runtime behind it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "finding",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T06:14:57Z",
+  "updated_at": "2026-08-18T08:44:55Z",
+  "closed_at": "2026-08-18T08:44:55Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9517",
+  "body": "Found while implementing #8992 (record-view auditing), checking whether any hand-written page states an audit scope the change makes false. This one is **pre-existing and unrelated** to that change — it was already wrong before it, and is wrong about a different thing.\n\n## What is wrong\n\n`packages/plugins/plugin-audit/README.md` is in the package's published `files` array, so it is what a reader sees on npm and on the package page. It documents an API surface that has no implementation anywhere in the repo.\n\n**Methods that do not exist** — all three return nothing from a repo-wide search over `packages/**/*.ts`:\n\n```\ngit grep -n \"getFailedActions\\|logAdminAction\\|logDataAccess\" -- 'packages/**/*.ts'\n```\n\nThe README calls them as `auditService.getFailedActions({...})`, `auditService.logAdminAction({...})`. There is no `auditService` with that shape. The plugin's real exports are `AuditPlugin`, `installAuditWriters`, `createAuthEventAuditSink`, `createFieldPresenceProbe` and the comment-access helpers, and the one registered service slot (`audit`) is the auth-event sink, whose only method is `recordAuthEvent`.\n\n**A row shape that is not the shipped one.** The README's TypeScript block declares `timestamp`, `userName`, `userEmail`, `errorMessage`. `sys_audit_log` declares none of them — it has `created_at`, `user_id`, `actor`, `object_name`, `record_id`, `old_value`, `new_value`, `ip_address`, `user_agent`, `tenant_id`, `metadata`.\n\n**Action values that are not in the enum.** The README shows `'insert'`, `'auth:login'`, `'security:password_reset'`, `'workflow:approval'`, `'user_role_change'`. The shipped enum is `create` / `update` / `delete` / `login` / `logout` / `config_change` / `import` (plus `read` once #8992 lands). The namespaced-colon spelling is not a form this object has ever accepted, and `sys_audit_log.action` is documented as snake_case.\n\n**Feature claims with no mechanism**, e.g. `getFailedActions` for \"security monitoring\" — the row has no success/failure column at all, so a failed operation is not distinguishable from a successful one on this ledger, and the audit writer only fires on `after*` events, which is to say only on writes that succeeded.\n\n## Why this is worth a card rather than a tidy-up\n\nAGENTS.md PD #10's corollary: **never advertise a capability the runtime does not deliver.** This is that, on the package whose entire value proposition is being trustworthy about what happened — and the README's own feature list opens with \"Meet SOC 2, HIPAA, GDPR audit requirements\". A buyer evaluating audit coverage from this file gets a materially wrong picture of the row shape, the queryable surface, and what is captured.\n\nIt is also the exact class the ledger-action work has been closing from the other side. #7675 / #8147 / #8315 spent three cards retiring `sys_audit_log.action` values that had no writer, on the stated principle 审计面宁窄勿谎 — a compliance surface should be narrow rather than untruthful. Those cards fixed the *enum*; this README makes a much larger set of the same kind of claim, in the artifact that actually ships to users, and no gate looks at it.\n\nNothing detects it: `check:i18n`, the docs-drift check and the liveness ledgers all scan other corpora. `content/docs/**` is clean on this subject — I checked the five hand-written pages that mention `sys_audit_log` and none states an audit scope that is false.\n\n## Suggested fix\n\nRewrite the README against the shipped surface: the real exports, the real `sys_audit_log` field list, the real action enum, and the real installation story (`AuditPlugin` registers hooks; there is no service you call to log things). Delete the sections describing methods that do not exist rather than implementing them — none has a measured consumer, and inventing an API to match a README is the wrong direction.\n\nWorth checking the sibling plugin READMEs in the same pass: if this one drifted this far unnoticed, the mechanism (no gate reads published READMEs against exports) is not specific to this package.\n\n## Not fixed in #8992's PR\n\nDifferent defect class from that card (a missing capability vs. published doc drift), and the fix is a judgment-heavy rewrite rather than a mechanical one, so it does not meet the in-place bar. #8992's PR leaves the README untouched.\n"
+}

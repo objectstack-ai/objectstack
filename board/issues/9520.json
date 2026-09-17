@@ -1,0 +1,35 @@
+{
+  "number": 9520,
+  "kind": "pull_request",
+  "title": "fix(engine): set_null on a multiple:true reference removes the deleted member; emptied set stored as [], never null; drop the #9437 interim 409 hold",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T06:37:03Z",
+  "updated_at": "2026-08-18T07:43:52Z",
+  "closed_at": "2026-08-18T07:43:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-18T07:43:50Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9520",
+  "body": "Fixes #9438\n\n## What this does\n\n`deleteBehavior: 'set_null'` on a `multiple: true` reference field now removes the deleted **member** from the stored array and writes what remains, instead of nulling the whole slot (which discarded every other live reference). The interim `restrict` escalation shipped with #9437 as an explicit holding position is removed in the same stroke — it was built to be removed, and the ruling that unblocked this card has landed.\n\n- **Member removal**: `next = current.filter(v => String(v) !== String(id))`, then write `next`. Whole-member comparison — the same reading the dependents narrowing already applies — so an id that is a prefix of another neither loses its own member nor takes its neighbor's.\n- **Residual shape is consumed, not decided here**: an emptied set is written as `[]`, never `null` — the representation `FieldSchema` pins as verbatim contract (`packages/spec/src/data/field.zod.ts`, the `multiple` and `required` doc blocks; #9447, maintainer ruling 2026-08-18, binding for every writer). The engine comment cites that file rather than restating the sentence.\n- **Interim revert**: the escalation `if`, its `multiValueHold` flag, and the TEMPORARY `developerMessage` limb are gone. Completion check from the dispatch: `grep -c` for `multiValueHold`, `TEMPORARY`, and `9438` in `packages/objectql/src/engine.ts` — all three are **0**.\n- Untouched, deliberately: the #9437 probe repair (`$contains` + exact element-wise narrowing), the required-FK escalation, `cascade`, explicit `restrict`, and the single-valued `set_null` limb.\n\nOut of scope, still open: **#9476 is not addressed here** (the validator still passes `[]` on a `required` + `multiple: true` lookup; the ruled non-empty semantics remain documented-but-unenforced). This change neither helps nor hinders it mechanically — the member-removal write goes through the ordinary update path, so when #9476 lands its enforcement, an emptying cascade repair on a required multi-value lookup will surface that contradiction loudly, which is the #9438 issue's own \"required FK cannot be honestly cleared\" reasoning one level up. Worth a sentence on that card, left to its implementer.\n\n## Tests\n\nUnion run at `18c20564a5` (the head of this branch; working tree clean at every run quoted below).\n\n- `packages/objectql/src/engine-cascade-delete-multivalue-probe.test.ts` — the hold suite is rewritten into the member-removal suite: defaulted and explicit `set_null` member removal, the emptying case asserted literally (`toEqual([])`, `not.toBeNull()`, `Array.isArray`), whole-member prefix safety, multi-row independence, restrict-with-its-own-sentence (no TEMPORARY / no card citation outliving the hold), plus the four controls. **17/17 green**. Full package suite: **3828/3828 green**.\n- `packages/runtime/src/cascade-delete-multivalue-lookup-real-driver.integration.test.ts` — on a real `SqlDriver` (better-sqlite3) through the real data-plane delete, asserting on the **database** via the driver's own connection: `[\"acc_a\",\"acc_b\"]` minus deleted `acc_a` re-reads as `[\"acc_b\"]` and `acc_b` still resolves; the emptying case re-reads as `[]`, explicitly not `null`. **7/7 green**. Full package suite: **2510/2510 green**.\n- Typecheck: `@objectstack/objectql` and `@objectstack/runtime` both clean.\n\n## Reverse verification (all three legs; runtime resolves objectql from `dist`, so each ablation leg was rebuilt and proved live via `scripts/ablation-dist-preflight.mjs` before its colour was trusted; the restore leg proved all markers **absent** from `dist`)\n\n- **Leg 1 — member-removal write ablated alone** (null write restored, hold still removed): the member-removal pins went RED in the expected direction — `expected null to deeply equal [ 'acc_b' ]` and `expected null to deeply equal []` — 5 unit + 2 integration failures, everything else green.\n- **Leg 2 — escalation-revert ablated alone** (hold re-added, member removal kept): the old 409 behaviour returned — the same 7 success pins went RED on `DELETE_RESTRICTED` refusals.\n- **Leg 3 — widen direction** for the \"guard does not fire\" control: `multiValued` forced true made the single-valued `set_null` control go RED (`expected [] to be null`), proving it non-vacuous. Run at the unit layer (src-resolved, no dist involved). This is the direction used, per the over-fire caution in the dispatch: removal-direction ablations cannot exercise that control.\n\n## Gates\n\nDerived via `node scripts/pm/dispatch-gates.mjs` over the changed paths; all derived families run locally and green at this tree: changeset-gate-self-tests, cross-package-test-inputs (pnpm + node forms), durability-log-level, objectui-changeset, stack-collection-maps, adr-0087-registration, changeset-no-major, empty-changeset, engine-split-ratio, affected-docs, query-options-erasure, where-matcher, engine-double-contract, type-check-coverage, type-check-debt (`--re-measure`, after the full packages closure build), nul-bytes. The ratchet families (query-options-erasure, where-matcher, engine-double-contract, nul-bytes) were re-run at the committed head `18c20564a5`; type-check-debt ran on the byte-identical tree the commit was created from.\n\nChangeset: `.changeset/cascade-set-null-multivalue-member-removal.md` (patch, `@objectstack/objectql`) — user-visible: deletes that returned 409 under the interim now succeed and remove the member.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01NTKPDRoynY8i3HmdSFUxFj)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 9481,
+  "kind": "issue",
+  "title": "tests(access-security): pin the read side of FLS mask/strip and the persona×CRUD cell matrix — coverage gaps from QA run #9401",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T03:58:27Z",
+  "updated_at": "2026-08-18T11:42:34Z",
+  "closed_at": "2026-08-18T11:42:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9481",
+  "body": "QA-source: #9401 · access-security.fls-mask-and-strip · read-side clauses\nQA-source: #9401 · access-security.crud-permission-matrix · persona-grained cells\n\nThe Tier-1 pinned sweep (#9401) found these two access-security items green on their pins but with the pins covering only a subset of the items' acceptance clauses. Security-priority per the maintainer's 2026-08-18 approval of the QA landing plan; the remaining (non-security) coverage gaps from that run are parked on the wave anchor #9296, not filed.\n\n## Unpinned clauses to cover with real tests\n\n1. **`fls-mask-and-strip`** — the existing pin (`showcase-permission-zoo`) covers the **write half only** (its ref says so explicitly). Unpinned: the read side — a masked field returns its masked value in the GET payload, and a stripped field is absent from the response shape, for an unentitled persona, asserted server-side.\n2. **`crud-permission-matrix`** — `objectstack verify` proves object-level CRUD + cross-owner RLS; the **persona × CRUD-cell matrix** (each persona's per-cell allow/deny, both sides) remains manual. Pin the cells, or the subset that is automatable, and update the item's `automated.ref` scope note for whatever remains manual.\n\nAcceptance: new tests land in the package that owns the surface (likely `packages/qa/dogfood` — triage to confirm the landing package and domain); the checklist items' `automated.ref` entries are extended/re-scoped so the next Tier-1 run scores these items honestly.\n\nTriage note: suggested lane by test-landing package; both items' evidence and clause text live in #9401's per-item table and coverage-gaps section."
+}

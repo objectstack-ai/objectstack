@@ -1,0 +1,34 @@
+{
+  "number": 8193,
+  "kind": "issue",
+  "title": "[bug] OIDC SSO registration is broken end-to-end: the bridge always sends `oidcConfig.mapping.id`, which `@better-auth/sso@1.7.0-rc.2` rejects as an unrecognized key",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T19:26:01Z",
+  "updated_at": "2026-08-18T07:31:19Z",
+  "closed_at": "2026-08-18T07:31:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8193",
+  "body": "Blocked-by: #8222\n\nFound (not fixed) while running the step-0 measurement for #8009. Out of that card's scope — filed separately, unassigned, for triage. **Measured, not inferred.**\n\n## Symptom\n\nEvery OIDC SSO provider registration through the `sys_sso_provider` `register_sso_provider` UI action fails with HTTP 400:\n\n```json\n{\"status\":400,\"body\":{\"success\":false,\"error\":{\"code\":\"SSO_REGISTER_FAILED\",\n \"message\":\"[body.oidcConfig.mapping] Unrecognized key: \\\"id\\\"\"}}}\n```\n\nThat is real output from driving the real product path — a real `betterAuth()` instance with `sso()` and the real `createObjectQLAdapterFactory` adapter over a real better-sqlite3 engine, authenticated with a real session, calling `runRegisterSsoProviderFromForm`.\n\n## Cause\n\n`packages/plugins/plugin-auth/src/register-sso-provider.ts:122-126` sets the claim mapping unconditionally:\n\n```js\noidcConfig.mapping = {\n  id: str(body?.mapId) || 'sub',\n  email: str(body?.mapEmail) || 'email',\n  name: str(body?.mapName) || 'name',\n};\n```\n\nBut the pinned `@better-auth/sso@1.7.0-rc.2` declares the mapping as a **strict** object with no `id` member (`dist/index.mjs:1462`):\n\n```js\nconst oidcMappingSchema = z.strictObject({\n  email: z.string()...,\n  emailVerified: z.string()...optional(),\n  name: z.string()...,\n  image: z.string()...optional(),\n  extraFields: z.record(z.string(), z.any()).optional()\n}).optional();\n```\n\n`id` is never optional-extra — `strictObject` rejects it outright, so the key the bridge always sends guarantees a 400. The `mapId` action param at `sys-sso-provider.object.ts:102` (\"Map: User ID claim\", default `sub`) feeds the same dead key.\n\n## Why it went unnoticed\n\nTwo things line up:\n\n1. The in-file comment at `auth-manager.ts:2548` records the plugin surface as \"verified against 1.6.20\", but the dependency is now pinned at `1.7.0-rc.2`. The mapping schema is one of the things that moved across that bump.\n2. `register-sso-provider.test.ts` covers **only** the SAML helper (`runRegisterSamlProviderFromForm`). The OIDC helper — the one with the bad key — has no test, and the SAML mapping schema is a different (also strict) object that the SAML bridge never populates.\n\nSo there is a coverage hole exactly where the regression landed.\n\n## Suggested shape (not decided here)\n\nDrop `id` from the emitted mapping and re-home the \"user ID claim\" intent. `sub` is the OIDC subject identifier and better-auth resolves it itself; if a configurable subject claim is genuinely wanted, `extraFields` is the member the strict schema leaves open. The `mapId` action param should go or be re-pointed in the same change. A test on the OIDC bridge asserting the emitted body parses against the installed `oidcMappingSchema` would keep the next dependency bump honest.\n\n## Reachability / severity note\n\nThis is a **broken feature**, not a security issue: registration fails closed with a clear 400, and nothing is persisted. Grading is triage's call — recording it plainly per the file-plainly rule rather than pre-judging it small.\n\n## Evidence\n\nMeasured 2026-08-12 against `origin/main` at 8e7955b7e, `@better-auth/sso@1.7.0-rc.2`. Same harness and same run that produced the #8009 step-0 measurement (see that card's measurement comment).\n\nBacklink: found during objectstack-ai/objectstack#8009."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 9190,
+  "kind": "issue",
+  "title": "`findReferencesToMeta` answers `{references: []}` for every target type absent from `REFERENCE_PATHS` — the \"Used by\" panel is silent by construction for 20+ declared types",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-17T00:16:36Z",
+  "updated_at": "2026-08-18T07:33:31Z",
+  "closed_at": "2026-08-18T07:33:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9190",
+  "body": "Surfaced while implementing #9157 (step ① of the #9180 ruling). ⚠️ Filed plainly and unassigned: the behaviour is *documented* in the method's own TSDoc, so this may well be triaged as working-as-declared. It is filed because the declaration and the consumer's reading of the answer disagree, not because I measured a live incident.\n\n## What was measured\n\n`packages/metadata-protocol/src/protocol.ts` on `origin/main` @ `50900479f`. `findReferencesToMeta` is driven entirely by the hand-curated `REFERENCE_PATHS` registry, which has exactly **seven** target keys:\n\n```\nobject · view · tool · skill · flow · dashboard · page\n```\n\nAny other target type misses the registry and takes this limb:\n\n```ts\nconst matchers = REFERENCE_PATHS[singularTarget];\nif (!matchers || matchers.length === 0) {\n    return { references: [] };\n}\n```\n\nSo `GET /api/v1/meta/permission/sales_admin/references`, `.../field/...`, `.../translation/...`, `.../seed/...`, `.../external_catalog/...`, `.../agent/...`, `.../report/...`, `.../email_template/...` — every declared type outside those seven — answer **200 with an empty list**, always, on every deployment, whether or not anything depends on the item.\n\n## Why this is filed rather than shrugged at\n\nThe method's TSDoc calls it legitimate:\n\n&gt; A target type not present in the registry, and a SOURCE type this deployment does not declare, both simply produce no hits — neither is an error.\n\nThat is true as a statement about the *registry*. It is not how the answer is consumed. This response drives the admin UI's **\"Used by\" panel**, which is rendered before a rename / delete / type-narrowing, and #8896 already named the harm shape for this exact endpoint: an empty or short list reads as *\"nothing depends on this — safe to remove\"*. #8896 closed the half where a read FAILURE was swallowed into that shape; this is the half where the registry simply has no entry, and the two are indistinguishable to the caller — same status, same body.\n\n⛔ Explicitly **not** the same defect as #9157. That card was about the type KEY being spelled wrong (a plural reaching a lookup keyed on singulars), and it is fixed. This is about the lookup being **empty for the key** even when the key is perfectly canonical. #9157's pin `the manifest-ABSENT class is NOT closed here, and that is stated rather than implied` asserts this residue deliberately so it could not be quietly read as closed.\n\n## Dispositions worth weighing at triage (not chosen here)\n\n1. **Leave it** — accept an incomplete registry, and make the RESPONSE honest instead: distinguish \"no dependents\" from \"this platform cannot answer that question for this type\" (a `coverage: 'none'` discriminator, or a 501). Cheapest, and it converts a silent wrong answer into a visible gap.\n2. **Extend `REFERENCE_PATHS`** to the remaining declared types. Real work per type, and it is hand-curated by construction, so it will drift again.\n3. **Derive the matchers** from the spec's own reference-bearing declarations rather than hand-curating them, so a newly declared type arrives covered — the shape #7894 used to make the URL-spelling map non-recurring.\n\n⚠️ Whether option 1's discriminator is worth a wire change is a product call, and options 2/3 are materially different sizes. Not chosen here — triage's field.\n\nBacklinks: #9157 (surfaced it; its pin asserts the residue) · #8896 (the empty-accumulator harm shape on this same endpoint) · #9180 (the ruling whose step ① #9157 implements) · ADR-0110 D3.\n"
+}

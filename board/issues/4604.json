@@ -1,0 +1,30 @@
+{
+  "number": 4604,
+  "kind": "issue",
+  "title": "[PM] 分片分工登记表 — 谁在管哪个仓库的队列",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T10:00:14Z",
+  "updated_at": "2026-08-18T08:37:51Z",
+  "closed_at": "2026-08-13T05:17:56Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 265,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4604",
+  "body": "# 🪦 本贴已作废(维护者 2026-08-13 拍板)\n\n**三项职能均已迁走,本页不再是任何东西的权威:**\n\n- **全舰队状态板 / 座位索引** → [`label:pm:seat`](https://github.com/objectstack-ai/objectstack/issues?q=is%3Aissue+is%3Aopen+label%3Apm%3Aseat) 标签查询(标题即状态,活索引不漂移)。本页曾维护的静态索引表已确认漂移(缺 `domain:metadata` 座位 #6367),⛔ 勿再引用。\n- **座位贴协议全文** → `.claude/skills/pm-dispatch/references/seat-post-protocol.md`(随 #5885/#5925 落地 `origin/main`;六段模板、三元同笔更新、活性判定、退场清单、拆域立贴规则全在)。\n- **历史存档** → 本贴评论区(2026-08-05 前的评论式登记,#1-79)与正文编辑历史(08-05~06 单正文座位表、08-06 迁移前最后一版索引表)。关闭不删除,存档完好。\n\n作废执行:skills 席(session `session_01139NJ9Wg5pFeZi1Zh8WLg6`),按维护者席聊指令。各座位贴正文中\"总入口 #4604\"指针由各席下次接管压缩时顺手移除。\n\n---\n\n<details>\n<summary>作废前正文(2026-08-11 版,存档)</summary>\n\n# ⛔ 座位表已迁移:一座位一贴,索引 = `label:pm:seat`\n\n**本正文不再承载座位状态。** 维护者 2026-08-06 批准座位贴架构:原因是 issue 正文更新为全文覆盖(无条件写入),12 个座位共编一个正文在机制上防不住并发互吞(08-06 当日多次实测,含本表头部记录的 19:50/19:52 事件)。座位贴为**单写手结构**,互吞类问题机制性消失。\n\n## 现行规则\n\n- **权威现状**:每个座位一张贴(下表),贴正文只由**在任座位 PM** 编辑;全量索引 = [`label:pm:seat`](https://github.com/objectstack-ai/objectstack/issues?q=is%3Aissue+is%3Aopen+label%3Apm%3Aseat)。\n- **接管/移交** = 同笔更新三处:座位贴**标题状态**(`[PM seat] <座位> — 🟢  / 🟢 Routine / ⏳ vacant / ⏸️ paused`,只放慢状态)、**assignee**(= 在任 PM 的 GitHub 账号;无 assignee = 空缺;Routine 座位留空)、**正文「当前 PM」三元**(GitHub 账号 + 会话/Routine ID + 上任时刻,正文为权威)+ 一条审计评论(评论只作存档,不承载状态)。空缺争用:重拉正文、审计评论时间戳先到先得、写后回读。`label:pm:seat` 列表页因此即全舰队状态板。\n- **活性判定**(惰性,仅接管冲突时评估):Routine 座位查调度器,会话座位查最近产出评论时间戳,>24h 无产出即可回收。\n- **加座位** = 拆域,走 SKILL 域表 PR,顺手立贴打 `pm:seat`;`pm:epic` 委托照旧不入座位体系(父单正文自带登记)。\n- **Routine 座位的收尾简报**改落各自座位贴;历史上落在本贴的简报仍可作备用活性读数。\n- 协议全文见 `.claude/skills/pm-dispatch/SKILL.md`(座位贴条款随 #5885/#5925 的 SKILL PR 落地;落地前以本页 + 各座位贴头部说明为准)。\n\n## 座位索引(仅拆域时更新)\n\n| 座位 | 座位贴 |\n|---|---|\n| **分诊**(objectstack 全仓) | #6015 |\n| **队列管家**(三仓合并队列) | #6016 |\n| `domain:spec` | #6017 |\n| `domain:spec-surface`(拆自 `domain:spec`,2026-08-07,SKILL PR #6301) | #6298 |\n| `domain:spec-tooling`(C 包,#5163) | #6018 |\n| `domain:engine-core` | #6019 |\n| `domain:drivers` | #6020 |\n| `domain:services` | #6021 |\n| `domain:identity` | #6022 |\n| `domain:devx` | #6023 |\n| **skills**(`.claude/skills/**` + `skills/**`,拆自 `domain:devx`,维护者 2026-08-11 拍板;域表 PR 随 #7548) | #7623 |\n| `domain:cli` | #6024 |\n| `repo:objectui`(整仓) | #6025 |\n| `repo:cloud`(整仓) | #6026 |\n\n---\n📜 历史:2026-08-05 前的评论式登记(评论 #1-79)与 2026-08-05~06 的单正文座位表均为历史存档;迁移前最后一版表格见本正文的编辑历史(2026-08-06)。\n\n</details>"
+}

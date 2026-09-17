@@ -1,0 +1,34 @@
+{
+  "number": 9363,
+  "kind": "issue",
+  "title": "技能卡：qa-run 入 sweep 排除清单 + run 记录抽取义务（协议载体定位）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T16:24:42Z",
+  "updated_at": "2026-08-17T22:12:01Z",
+  "closed_at": "2026-08-17T22:11:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9363",
+  "body": "## 出处\n\n维护者 2026-08-17 裁决(原话):「把 qa-run 加进 sweep 排除清单 —— run 记录和 pm:seat 贴同类:协议载体,不是工作」。裁决的隐含闭环由 skills 席补全并已先行执行一例(#9351 → #9362):排除 sweep 后,run 记录内的可派发工作无人会钓,抽取义务必须成为 qa-run 协议自身的条款。\n\n## 交付\n\n1. **SKILL.md 分诊 sweep 候选过滤**:排除项加 `qa-run`(与 `pm:seat` 并列,理由一短语:协议载体非工作)。行中性自筹。\n2. **checklist-test 技能 RUNNER.md**(qa-run 记录的生产者):新增抽取义务条款——\n   - run 记录只承载运行证据,⛔ 不是可派发单元,⛔ 不挂 `bug`/priority 等工作标签(工作标签随抽取卡走);\n   - 运行中发现的**产品缺陷**:runner 收束报告时逐个抽取为独立卡(标题自含、复现与机制条目化、指回 run 记录取全量证据),缺陷卡不挂 `qa-run`,正常进分诊首触;\n   - 清单准确性发现与 fixture 缺口归波次锚卡收口,⛔ 不抽取;\n   - 环境阻塞记录在案即可。\n3. 若 checklist-test 面有行数/结构约束,以其现文为准落条款;RUNNER 无合适落点时落 SKILL.md 侧并在 RUNNER 留一行指针。\n\n## 排序与档位\n\n- SKILL.md 为 PR #9322(挂起待维护者合并)热文件——**硬串行排其合并之后**,基线必须含之。\n- 档位:`--tier` 推导(SKILL.md 命中条款①);checklist-test 属技能根,ADR 类终局三步,PR 挂起等维护者。\n- 增长护栏照现行:净行数目标 ≤ 0、⛔ 抬顶、⛔ re-wrap。\n\n## Credit\n\n裁决:维护者。首例抽取与闭环条款:skills 席。P0 实例:QA R3 runner(#9351)。"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 8669,
+  "kind": "issue",
+  "title": "[finding] the `organizations.*` locale family is half-renamed: 8 of 10 packs mix \"workspace\" and \"organization\" in one menu",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-14T11:00:12Z",
+  "updated_at": "2026-08-18T14:57:38Z",
+  "closed_at": "2026-08-18T14:57:38Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8669",
+  "body": "Observation recorded while implementing objectstack-ai/objectstack#8096 (objectui PR objectstack-ai/objectui#4638). **Not fixed there** — out of that card's scope.\n\n## What\n\nThe `organizations.*` key family in `packages/i18n/src/locales/` has been renamed from \"organization\" to \"workspace\" terminology in **en** and **zh** only. The other eight packs (ar, de, es, fr, ja, ko, pt, ru) had **just one key** — `create` — followed, leaving the family internally inconsistent.\n\n`de.ts`:\n\n```\ncreate:            \"Workspace erstellen\"      ← workspace\nmine:              \"Meine Organisationen\"     ← organization\ntitle:             \"Organisationen\"\nheading:           \"Ihre Organisationen\"\nsearchPlaceholder: \"Organisation suchen\"\nnew:               \"Neue Organisation\"\ncurrent:           \"Aktuelle Organisation\"\n```\n\nSame shape in fr (`\"Créer un espace de travail\"` beside `\"Mes organisations\"`), ja (`\"ワークスペースを作成\"` beside `\"マイ組織\"`), and ko / es / pt / ru / ar. For comparison, en and zh are uniform:\n\n```\nen:  mine: 'My Workspaces',  create: 'Create workspace',  title: 'Workspaces'\nzh:  mine: '我的工作区',       create: '创建工作区',          title: '工作区'\n```\n\n## Why it is worth a card now\n\nThese keys render **next to each other in one dropdown**. After #4638 restores the avatar menu's \"My Workspaces\" entry, a German user sees `Meine Organisationen` directly above `Workspace erstellen` — two names for the same object, one menu, two lines apart. Before that PR `organizations.mine` was dormant (no call site), so the drift was invisible; it is now on screen in eight locales.\n\n## Why the existing gates do not catch it\n\nThis is a same-language *vocabulary* inconsistency, not a missing or stale key, so nothing currently in place sees it:\n\n- `all-locales-key-parity` — every pack **has** every key, so it is green.\n- `check:i18n-drift` — compares each pack against changes to the **en** value; en has not moved recently, so there is nothing to follow.\n- `check:i18n-keys` — validates that call-site keys resolve and that inline `defaultValue`s match the **en** pack; the eight non-en packs are not in its comparison set.\n\n## Scope\n\nEight locale files, seven keys each in the `organizations` family (`mine`, `title`, `heading`, `subtitle`, `searchPlaceholder`, `new`, `current`, plus `emptyTitle` / `emptyDescription` / `noMatches` which carry the same noun). Worth checking whether the sibling `organization.*` family (org MANAGEMENT — a deliberately distinct namespace, per the comment between them in `en.ts`) was meant to follow the rename at all, or whether \"organization\" is correct there and only the picker family was renamed. That question should be answered before any bulk edit — the two families are separated on purpose.\n\nFiled unlabeled for priority; tagged `finding` as an observation-class item (cosmetic / terminology consistency, no functional defect).\n"
+}

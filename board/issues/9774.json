@@ -1,0 +1,35 @@
+{
+  "number": 9774,
+  "kind": "pull_request",
+  "title": "fix(cli): os init template descriptions match what srcFiles emits",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T23:00:55Z",
+  "updated_at": "2026-08-19T00:31:53Z",
+  "closed_at": "2026-08-19T00:31:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-19T00:31:52Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9774",
+  "body": "Fixes #9737\n\n## The mismatch (re-measured on `origin/main` at the commit this branch was cut from)\n\n`packages/cli/src/commands/init.ts`'s `TEMPLATES.app` and `TEMPLATES.plugin` `description`\nstrings claimed metadata kinds neither template's `srcFiles` map ever writes:\n\n| template | `srcFiles` (re-measured) | old `description` |\n| --- | --- | --- |\n| `app` | `src/objects/index.ts`, `src/objects/__name___item.ts` (2 entries, both `src/objects/*`) | \"Full application with objects, **views**, and **actions**\" |\n| `plugin` | `src/objects/index.ts`, `src/objects/__name___item.ts` (2 entries, both `src/objects/*`) | \"Reusable plugin with objects and **extensions**\" |\n| `empty` | `{}` | \"Minimal project with just a config file\" (accurate, unchanged) |\n\nConfirms the card's own table exactly — #9666 (merged since the card's `e196c6a9b` reading)\nonly added a `sharingModel: 'private'` field to the rendered object *content*; it did not add\nor remove any `srcFiles` entries.\n\n`content/docs/deployment/cli.mdx`'s template table carried the same false `views` claim on the\n`app` row (its `plugin` row — \"Reusable plugin package with objects\" — was already accurate and\nis untouched).\n\n## Fix (Option 1, per triage's auto-adjudication — all four prisms aligned)\n\n- `app`: `'Full application with objects, views, and actions'` → `'Full application with objects'`\n- `plugin`: `'Reusable plugin with objects and extensions'` → `'Reusable plugin with objects'`\n- `cli.mdx` `app` row: drops the `views` claim, keeps the accurate `barrel imports` claim\n  (`src/objects/index.ts` re-exports the object — that claim was never wrong)\n\nOption 2 (emit a starter view/action so the description becomes true) is **not** in this PR —\nit is a Feature needing maintainer appetite, explicitly out of scope per the card.\n⛔ `srcFiles` maps are untouched; no template files added.\n\n## Pin\n\n`packages/cli/test/init.test.ts` gains a generic assertion: for every template, if its\n`description` claims a metadata kind (`objects`/`views`/`actions`/`extensions`), that kind's\n`src/<kind>/` prefix must have a matching `srcFiles` entry. This fails red against the\npre-fix wording (`app`/`plugin` claimed `views`/`actions`/`extensions` with zero matching\nentries) and is template-count-agnostic, so a future template can't drift the same way\nundetected.\n\n## Verification (all under the shared `os-heavy-verify.lock`, at head `6488f13c2`)\n\n- `packages/cli` typecheck: clean (`pnpm --filter @objectstack/cli typecheck`)\n- `packages/cli` lint: clean (`npx eslint packages/cli/src/commands/init.ts packages/cli/test/init.test.ts --no-inline-config`)\n- `pnpm --filter @objectstack/cli test` (full package suite, `--maxWorkers=2`): 134/134 files, 1461/1461 tests\n- Reverse-verification of the pin: checked out the pre-fix `init.ts` from `origin/main`, ran\n  `test/init.test.ts` alone → 2 failed / 30 passed, both failures on exactly the `views`/`extensions`\n  claims; restored the fixed file via `git checkout HEAD --`, re-ran → 32/32 green\n- Gate union derived from actually-changed paths (`node scripts/pm/dispatch-gates.mjs`), all run and\n  green: `check:cross-package-test-inputs`, `check:doc-anchors`, `check:docs-audit-scope`,\n  `check:docs-redirects`, `check:published-readme-links`, `check:role-word`,\n  `check:query-options-erasure`, `check:engine-double-contract`, `check:where-matcher`,\n  `check-type-check-coverage.mjs` (structural — hidden-test-file count unchanged at 952, since\n  `init.test.ts` already existed pre-fix and was already outside `packages/cli`'s `tsconfig.json`\n  `include: [\"src\"]`; I only edited an existing file, didn't add a new one), `check-affected-docs.mjs`,\n  and `@objectstack/spec`'s `check:empty-state`/`check:liveness`/`check:strictness-ledger`/`check:variant-docs`\n  (spec moved on `main`'s side of the merge)\n- After merging `main` (spec + several other packages moved): rebuilt `@objectstack/spec`,\n  `check:generated` clean, rebuilt the CLI's full dependency closure, re-ran CLI typecheck and\n  `init.test.ts` on the merged tree — all green\n\n## Zone 2 assumptions — one falsified\n\n- Exactly three built-in templates (`app`/`plugin`/`empty`) in `packages/cli/src/commands/init.ts`'s\n  `TEMPLATES` — **confirmed**.\n- `cli.mdx` is the only other docs location carrying the claim — **confirmed** (repo-wide grep,\n  `.ts`/`.tsx`/`.mdx`/`.md`/`.json`, with a negative control that returned nothing and a positive\n  control that found the known-accurate `empty` description). `packages/create-objectstack` has\n  its own, unrelated `TEMPLATES` registry (different command — `npm create objectstack@latest` —\n  different templates, `blank` only) whose description does not claim views/actions/extensions;\n  out of scope.\n- No test asserts the current wording — **confirmed** (added the pin above rather than weakening\n  anything).\n- **Falsified:** the card's framing that `os init --help` shows these strings. Running\n  `os init --help` for real (after building the CLI's dependency closure) shows only the flag's\n  own generic description, `Template: app, plugin, empty` — the per-template `description` string\n  is printed by `printKV('Template', …)` **after** the user has already invoked `init` with a\n  chosen template, and in the docs table. Doesn't change the fix (same two strings, same location),\n  but \"at the moment they pick a template\" is more precisely \"immediately after they've picked\n  one and the scaffold starts writing.\"\n\n_Generated by [Claude Code](https://claude.ai/code/session_012WKSnqAaoqtW3QX7SSf1Vk)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012WKSnqAaoqtW3QX7SSf1Vk)_"
+}

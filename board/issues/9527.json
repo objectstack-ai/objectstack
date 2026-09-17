@@ -1,0 +1,34 @@
+{
+  "number": 9527,
+  "kind": "pull_request",
+  "title": "docs(agents): Prime Directive #14 governs three surfaces, and names the register that holds them",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T07:04:31Z",
+  "updated_at": "2026-08-18T11:17:21Z",
+  "closed_at": "2026-08-18T11:17:20Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-18T11:17:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9527",
+  "body": "Fixes #9403\n\nPrime Directive #14 scoped itself to `docs/adr/**` while the governed set had grown past it. Rebased onto `main` after the per-PR approval check retired at `86ea8df7d`; the card's work was untouched by that landing and is still missing from `main`.\n\n## The card named one stale site. There were four.\n\n| line | site | what it said |\n| --- | --- | --- |\n| 176 / 180 | Prime Directive #14 itself | `docs/adr/**`, twice |\n| 328 | Multi-agent discipline §7, \"two classes of PR never enter this path\" | \"(a) a diff touching `docs/adr/**`\" |\n| 911 | Post-Task Checklist item 2, the land-it exception | \"Except a diff touching `docs/adr/**`\" |\n| 646 | Skills section | described both roots, said nothing about their merge posture |\n\nUpdating only #14 would have left two sites telling a seat it may arm a skill PR.\n\n## The shape: one enumeration, and it is now a quotation rather than a copy\n\n- **Prime Directive #14** carries three maintainer rulings verbatim with dates. The third **is** the surface definition, so the list in the directive is the ruling itself rather than a hand-made paraphrase of it. It then names the register — `GOVERNED_SURFACES` in `scripts/pm/check-governed-merges.mjs` — and gives a one-liner that prints today's set.\n- **§7 and the Post-Task Checklist** stop enumerating and defer to #14 as a class. They cannot go stale as the set grows.\n- **The Skills section** gains one class pointer, no list.\n\nFour hand-maintained copies to one. Deleting the last one was considered and rejected: a seat must be able to decide from `AGENTS.md` alone whether the PR in front of it is governed.\n\n## What the rebase changed, beyond conflict resolution\n\n`86ea8df7d` retired the per-PR check, deleted `scripts/check-adr-merge-approval.mjs`, moved the register, and widened the surface. Three assertions in the earlier draft of this PR were false against `main` and are rewritten:\n\n1. The one-liner pointed at a deleted file. It now resolves against `scripts/pm/check-governed-merges.mjs` and was run, not transcribed:\n   ```\n   $ node -e \"import('./scripts/pm/check-governed-merges.mjs').then(m=>console.log(m.GOVERNED_SURFACES.map(s=>s.glob).join(' · ')))\"\n   docs/adr/** · .claude/** · skills/** · AGENTS.md · CLAUDE.md\n   ```\n2. The required check `ADR maintainer approval` no longer exists. The enforcement half now states the real regime: a human merge IS the review record, discipline is the **only** pre-merge barrier, and detection is the report-only post-merge audit whose list every entry should match a merge the maintainer made in person. The directive says out loud that the retirement is not a relaxation.\n3. The set is five surfaces, not three — and **`AGENTS.md` and `CLAUDE.md` are on it**, so this PR is itself a governed-surface PR. §7 now says so explicitly, because that is where a seat decides whether to arm.\n\n**The `.claude/` widening was intended, not silent.** The maintainer's approval quotes the unified list verbatim, including the parenthetical: 含 agents/hooks/settings,不只 skills. Confirmed in the audit script's header and reproduced in the directive as the ruling's own words.\n\n**CODEOWNERS re-read rather than recalled.** It is now three rows: `/docs/adr/`, `/.github/CODEOWNERS`, `/scripts/pm/check-governed-merges.mjs`. Of the five governed surfaces exactly one is routed, so on the other four nothing requests the maintainer's review automatically. Stated as fact; no fix proposed here — #9513 stays open and undecided.\n\n## Verification\n\nGate union re-derived from the actual changed path and run after the final commit, at `428306907`, clean tree, one file changed:\n\n```\ncheck:nul-bytes            PASS      check:adr-anchors            PASS\ncheck:pm-skill-id-lint     PASS      check:adr-links              PASS\ncheck:required-contexts    PASS      check:pm-half-states         PASS\ncheck:docs-audit-scope     PASS      check:pm-skill-ratchet       PASS\ncheck:doc-authoring        PASS      check:skill-frame-sync       PASS\ncheck:skill-compatibility  PASS      check:skill-frame-freshness  PASS\ncheck:pm-governed-merges --self-test  PASS (25 assertions)\n```\n\n`check:pm-skill-id-lint` re-run after the rewrite as asked: green. The directive quotes three rulings and cites no issue number.\n\n**Reverse verification, both directions, from the committed state:**\n\n- *Positive control — the file is scanned.* Appending an issue-ID citation turned `check:pm-skill-id-lint` red naming the line. Restored byte-identical.\n- *The finding's measurement, re-run against the new register.* Dropping `CLAUDE.md` back out of the directive's quoted list left the union green. Nothing ties the prose to `GOVERNED_SURFACES`; the register moving files did not change that. Filed as #9525.\n\nNo changeset: `AGENTS.md` publishes nothing. Labelled `skip-changeset`; `Check Changeset` reports skipped.\n\n## Findings filed alongside, unassigned, not touched here\n\n- #9525 — nothing ties this prose to `GOVERNED_SURFACES`; the #9491 pin covers check-run names, not path prefixes.\n- #9526 — the Skills section's two inventories are stale (2 of 5 internal playbooks, 9 of 11 published skills).\n- #9513 stays open: CODEOWNERS routes one of five governed surfaces.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01XqDQYVU5smx29ts9pAErja)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

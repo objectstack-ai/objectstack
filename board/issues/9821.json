@@ -1,0 +1,34 @@
+{
+  "number": 9821,
+  "kind": "pull_request",
+  "title": "docs(cli): the unknown-hostname-guard's install-order rationale names Phase 1 init() (#9745)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T02:04:03Z",
+  "updated_at": "2026-08-19T02:42:14Z",
+  "closed_at": "2026-08-19T02:42:13Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-19T02:42:13Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9821",
+  "body": "Fixes #9745\n\nThe guard is installed correctly and this PR changes nothing it accepts or refuses. What was wrong is the **rationale** in its doc comment — the part the next author copies:\n\n> Hono's `app.use('*')` is order-independent for matching, so as long as the middleware is added before kernel:listening fires, it intercepts every request regardless of which plugin registered its handler.\n\n## Premise re-verified on this ref, not inherited\n\n- The comment block is still present in `packages/cli/src/commands/serve.ts` and still says what the card quotes. The card cites `:3429-3435`; on `origin/main` at 5cc8a3b08 it sits at `:3428-3435` — located by text, never by line number.\n- `LiteKernel.bootstrap` (`packages/core/src/lite-kernel.ts`) and `ObjectKernel.bootstrap` (`packages/core/src/kernel.ts`) each run Phase 1 `init()` for every plugin, then Phase 2 `start()` for every plugin, and only then trigger `kernel:ready` → `kernel:bootstrapped` → `kernel:listening`. All three hooks fire strictly after Phase 2.\n- Route registration begins in Phase 2 and continues past it: `createConsoleStaticPlugin` mounts the Console in `start()` (`packages/cli/src/utils/console.ts`), `HonoServerPlugin` registers the current-user endpoints from a `kernel:ready` hook, and `plugin-auth` defers its terminal `/api/v1/auth/*` mount to `kernel:ready` as well. Phase 1 `init()` is ahead of all of it — which is what the code already does.\n\nVerdict: the premise holds and the emphasised sentence is false. \"Before `kernel:listening`\" admits install points that sit behind every route.\n\n## What changed\n\n**1. `packages/cli/src/commands/serve.ts` — comment only.** Names Phase 1 `init()` as the requirement, states the true mechanism (Hono composes the handlers a request matched in registration order, so a route registered ahead of the middleware answers and never calls `next()`), and drops the \"order-independent for matching\" clause — the phrase that made the false generalisation sound principled. The correct first sentence is kept; the bypass matrix and the inline-object-literal note are untouched.\n\n**2. `packages/cli/src/commands/serve-unknown-hostname-guard.test.ts` — one new test** pinning the corrected sentence. Every other test in that file mounts the guard first via `mountGuard`, which is precisely the case that works, so none of them can fail when the false claim comes back.\n\nThe new test registers `/before` **ahead of** the guard's `init()` and `/after` **behind** it, on one real `HonoHttpServer`, then drives one unmapped hostname at both: `/before` answers 200 and the env-registry is never consulted; `/after` is refused with 404 and `ENVIRONMENT_NOT_FOUND`. Registration order is the only difference between those two requests.\n\n## Reverse verification\n\nPrediction stated before running: moving `/before`'s registration to after `init()` turns the test red on the pass-through leg. Measured, from the committed state:\n\n```\n- 200\n+ 404\n ❯ src/commands/serve-unknown-hostname-guard.test.ts:456:27\n Tests  1 failed | 34 passed (35)\n```\n\nRestored with `git checkout HEAD -- ...`, re-run: `Tests 35 passed (35)`. No rebuild is involved on either leg — the subject is imported from `./serve.js`, a same-package source specifier vitest resolves out of `src/`, and the mutation lived inside the test file itself.\n\n## Scope boundary\n\n`packages/runtime/src/http-metrics-inbound-coverage.hono.integration.test.ts` — the card's evidence table — was **read, never written**. The pin above needed no part of that harness: `packages/cli` already boots a real Hono adapter in its own guard suite. No `Blocked-by:` was wired, per triage.\n\n## Changeset: deliberately none — `skip-changeset` instead\n\nA judgment call, not an assumption. The `serve.ts` diff is prose inside a JSDoc block: nothing that executes changes, no public surface moves, and there is no user-visible behaviour for a release note to describe. The test file never reaches the published tarball at all — `packages/cli/tsconfig.build.json` carries `\"exclude\": [\"src/**/*.test.ts\", \"src/**/*.spec.ts\", \"src/**/__tests__/**\"]`, so it is not compiled and `files: [\"dist\"]` cannot ship it. Precedent landed on `main` today: #9802 corrected prose inside `@objectstack/lint`'s published `src/**` and merged with no changeset.\n\n## Gates run, all at 218e2be7b\n\nDerived with `node scripts/pm/dispatch-gates.mjs` (no paths passed — the script took the change set from the merge base 5cc8a3b08 itself), then run:\n\n| gate | result |\n|---|---|\n| `pnpm --filter '@objectstack/cli^...' build` | dependency closure built first, in this fresh worktree |\n| `pnpm lint` | clean, no findings (run regardless — the deriver does not name it) |\n| `pnpm --filter @objectstack/cli test` | `Test Files 134 passed (134)`, `Tests 1462 passed (1462)` |\n| `pnpm --filter @objectstack/cli typecheck` | `tsc --noEmit`, clean |\n| `pnpm check:route-envelope` | 11 modules audited, 7 conformant / 1 ratcheted / 3 exempt — unchanged |\n| `pnpm check:cross-package-test-inputs` | 33 self-test cases pass; 12 packages read outside themselves, all declared |\n| `pnpm check:engine-double-contract` | OK — 321 pinned, 133 ledgered, 2 exempt |\n| `pnpm check:where-matcher` | 257 matchers, 0 silently-wrong, 0 new |\n| `pnpm check:query-options-erasure` | ratchet holds, none new |\n| `pnpm check:nul-bytes` | OK, 6265 text files, no raw control bytes |\n| `node scripts/docs-audit/check-affected-docs.mjs` | self-test 242 cases pass |\n\n`check:type-check-coverage` / `check:type-check-debt` were not run locally, and the reason is the measurement rather than the cost: `packages/cli` declares a `typecheck` script and its `tsconfig.json` includes `src` — only `tsconfig.build.json` excludes tests — so the new test file already sits inside a tsc program and the package carries no TEST_DEBT entry to re-measure. The ratchet half needs the whole workspace closure built; CI runs that farm. `tsc --noEmit` over the package is the local half.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WeN7F6jQFpcqW2BN56RdPa)_"
+}

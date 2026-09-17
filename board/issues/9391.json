@@ -1,0 +1,39 @@
+{
+  "number": 9391,
+  "kind": "issue",
+  "title": "The datasource-admin HTTP family is reachable unauthenticated, read and write — mounts outside the enforceAuth seam",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:queue",
+    "priority:p0",
+    "security",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-17T22:18:51Z",
+  "updated_at": "2026-08-18T21:50:03Z",
+  "closed_at": "2026-08-18T16:49:13Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9391",
+  "body": "Found by the `priority:P0` round of the #9296 QA wave (run record #9334). Subject `e4e5c6e3c608b1b807c83a0d5b734f213eb1a1dd`, stock showcase, platform-default auth posture.\n\n## Disclosure posture\n\n**Revised 2026-08-17, after the maintainer deleted the public reproduction.** This card was first written carrying a full request/response table, on the reasoning that a working reproduction was already public on #9296 and withholding detail would only slow the fix. That premise no longer holds — the comment is gone — so the recipe-shaped detail has been removed from this card and it now carries only what someone fixing the defect needs: the cause, the source location, and the contract the fix must restore.\n\nWhat remains publicly derivable regardless: the source is public, and the family's own in-tree route ledger already describes it as *\"mounted, working, and guarded by nothing\"*. So this card is not the exposure — but it should not add to it either. The reproduction is held by the wave PM and is available to whoever picks this up.\n\n## The defect\n\nThe **datasource-admin HTTP family** (`/api/v1/datasources…` — list, read, driver catalog, remote-table introspection, create, patch, remove) performs **no authentication check**. Anonymous callers reach it for **read and write alike**, on a server where `/api/v1/data`, `/api/v1/meta`, `/api/v1/batch` and `/api/v1/security/explain` all correctly answer 401 `UNAUTHENTICATED`. Verified at the wire level with no cookie and no `Authorization` header; the anonymous read responses were byte-identical to the platform admin's.\n\nConsequences, in the order that matters: an unauthenticated caller can **create** and **delete** datasources, can make the server connect to a configured external datasource and enumerate its schema, and can read datasource configuration.\n\nCredential *values* are **not** exposed — `hasSecret` / `redactedConfigKeys` behaved correctly. The redaction path is intact; the authentication gate is the failure.\n\n## Cause\n\n`registerDatasourceAdminRoutes` (`packages/services/service-datasource/src/admin-routes.ts:113`) registers **straight onto `IHttpServer`**, bypassing the `@objectstack/rest` `enforceAuth` seam that produces the 401s on every sibling family, and the registrar contains no check of its own. That is exactly why two route families behave differently on one server.\n\n`packages/services/service-datasource/src/datasource-route-ledger.ts` already records the posture:\n\n> \"So the whole Setup → Datasources backend — list, read, create, patch, remove, probe, driver catalog, schema introspection — sat in the pre-#3563 posture: mounted, working, **and guarded by nothing**.\"\n\n**#7744** found the ledger gap and closed as completed, having added ledger entries and unknown-driver validation — it did not add a guard, and no open issue tracked the authentication hole until this one.\n\n## Fix — one part is not a judgement call, one part is\n\n**Not a judgement call: these routes must require authentication.** Every sibling admin family already does; this one is the outlier. Under this repo's own mechanical boundary test that is a **bug fix, not a feature** — it narrows the accept set and restores a declared contract rather than widening anything. It should not wait on a design discussion.\n\n**A judgement call, flagged for the maintainer:** whether authentication alone is enough, or whether these routes must further require a capability such as `manage_platform_settings`. Creating a datasource is a platform-configuration action, so \"any authenticated user\" may still be too wide for a multi-user deployment — but tightening beyond authentication changes who can use an existing feature, which is a product decision on a permission boundary and sits on the maintainer's floor.\n\n**Recommendation:** land the authentication guard now as the bug fix; treat the capability question as a follow-up card, not a blocker. \"Everyone\" → \"logged-in only\" is strictly safer in every deployment and cannot be the wrong direction.\n\nWhatever lands must be pinned by a test asserting **both sides on the same boot**: anonymous refused on read *and* write, and an entitled caller still succeeds — otherwise the fix is indistinguishable from breaking the feature.\n\n## Handling\n\n⛔ Do not put a reproduction in this card, in a PR body, or in a commit message. The fix is verifiable from the pinned both-sides test; nobody needs the recipe in public to review it.\n\n`priority:p0` set by the wave PM under the maintainer's instruction to decide this card's filing shape: an unauthenticated write path on a published surface is release-blocking by any reading of the release-blocker test. Triage may re-level. `domain:*` deliberately omitted — routing stays the triage seat's call (the fix lands in `packages/services/service-datasource`, possibly with a `@objectstack/rest` seam change).\n"
+}

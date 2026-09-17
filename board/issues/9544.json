@@ -1,0 +1,36 @@
+{
+  "number": 9544,
+  "kind": "issue",
+  "title": "Four more published READMEs document symbols that do not exist — driver-sql, mcp (×2), objectql, and spec's own front page",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T08:31:42Z",
+  "updated_at": "2026-08-18T15:51:10Z",
+  "closed_at": "2026-08-18T15:51:10Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9544",
+  "body": "Found by the published-README export gate built for #9532 (piece 2). That card's rewrite half covers five service packages; these five findings sit **outside** it and are nobody's card yet.\n\nEvery one was hand-verified against the built `.d.ts`, and each is a claim a reader acts on in the first ten lines of the page.\n\n| File | Line | Claim | Measured reality |\n|---|---|---|---|\n| `packages/drivers/driver-sql/README.md` | 137 | `import type { IDriver } from '@objectstack/spec'` | `IDriver` is not on spec's root entry — it is exported from `@objectstack/spec/contracts`. Wrong subpath. |\n| `packages/mcp/README.md` | 395 | `import { DriverSql } from '@objectstack/driver-sql'` | The real export is `SqlDriver`. `DriverSql` has never existed — and the next line calls `DriverSql.configure({...})` on it. |\n| `packages/mcp/README.md` | 40 | `MCPServerPlugin.configure({...})` | `MCPServerPlugin` **is** a real exported class (`packages/mcp/src/plugin.ts:96`), but it has no static `configure`. |\n| `packages/objectql/README.md` | 66 | `SchemaRegistry.registerObject(taskDef, ...)` | `registerObject` is an **instance** method (used everywhere as `engine.registry.registerObject(...)`). The README calls it on the class. |\n| `packages/spec/README.md` | 69 | `import { MCPServerConfigSchema } from '@objectstack/spec/ai'` | `@objectstack/spec/ai` exports `MCPServerRefSchema`. There is no `MCPServerConfigSchema`. |\n\nAll five packages are published with `README.md` in their `files` array and `private` unset, so these are the pages npm renders. The last one is the protocol package's own front page.\n\n## Why the two `.configure` rows are the interesting ones\n\n`MCPServerPlugin.configure` and `SchemaRegistry.registerObject` are the shape the **import half of a checker cannot see**: the import line resolves fine, and only the call site is fabricated. They are also the shape a careless rewrite of #9532's five READMEs would leave behind — renaming the class to a real export makes the import green while `.configure(...)` stays invented. Measured directly: substituting the real `AnalyticsServicePlugin` into service-analytics' README turns the import finding into a `AnalyticsServicePlugin.configure` call-site finding, not into silence.\n\n## Disposition\n\nEach of the five is recorded in `scripts/published-readme-exports.baseline.json` with the measured real symbol, so the fix is not a re-derivation. ⚠️ That baseline is reconciled in **both** directions: whoever fixes one of these must delete its entry in the same PR, or the gate fails on the stale entry.\n\nRefs: #9532 (the gate, and the five service READMEs) · #9517 (the first instance) · PR #9531."
+}

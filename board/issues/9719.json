@@ -1,0 +1,35 @@
+{
+  "number": 9719,
+  "kind": "issue",
+  "title": "The #4757 unscoped multi-delete refusal on sys_attachment never fires through ObjectQL.delete — per-row hook dispatch bypasses it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:blocking",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T16:29:06Z",
+  "updated_at": "2026-08-19T00:42:41Z",
+  "closed_at": "2026-08-19T00:42:41Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9719",
+  "body": "Found while pinning `attachments-storage.attach-requires-parent-edit` clause C3 for #9483. Reported, not fixed — #9483 is a tests-only card, and this is a product change.\n\n## What the guard promises\n\n`packages/services/service-storage/src/attachment-access-hooks.ts` carries an explicit #4757 refusal in its `beforeDelete` handler: when a delete carries **no id AND no `where`**, the engine hands `deleteMany` an AST of `{ object }` — the whole table — so the handler refuses outright rather than authorizing it by resolving zero rows.\n\n> `'Refusing an unscoped multi-delete of attachments — scope the delete to the rows you mean (an id or a where predicate)'`\n\nThe reasoning in the comment is the point of the rule: *\"Nothing to authorize\" and \"nothing was ever queried\" are not the same verdict; reading the second as the first is fail-open.*\n\n## What actually happens\n\nThat branch is unreachable through `ObjectQL.delete`. The predicate path dispatches `beforeDelete` **per row** via `dispatchPerRowBeforeHooks`, which builds each row context as `input: { id: rowId, options }`. The attachment handler opens with `asIdList(ctx?.input?.id)`, so with `input.id` bound it always takes the **by-id branch** and never reaches the `where === undefined` check. There is exactly one `triggerHooks('beforeDelete', …)` call in `engine.ts` and it sits in the by-id branch; the multi branch only does the per-row dispatch.\n\n## Measured\n\nReal dogfood stack (storage + audit + sharing), a member holding the `sys_attachment` delete bit, driving `ql.delete('sys_attachment', { multi: true, context: memberCtx })` — no id, no `where`:\n\n| case | rows before | result | rows after |\n|---|---|---|---|\n| member is uploader of one row, not entitled to the other | 2 | throws `ATTACHMENT_DELETE_DENIED` — but with the **per-row** message `Cannot delete attachment …: only the uploader or a user who can edit the parent record (att_readonly/…) may delete it` | 2 |\n| **member is the uploader of EVERY matched row** | 2 | **resolves, deletes both** | **0** |\n\nThe first row shows the refusal that does fire is the per-row gate, not #4757 — different rule, different message. The second row is the gap: a predicate-less delete wipes every row the caller happens to be entitled to, which is exactly the blast-radius shape the guard was written to refuse *outright*, regardless of entitlement.\n\nNot a privilege escalation: every deleted row was one the caller could have deleted individually by id. It is a deliberate safety guard that no longer fires.\n\n## Why this was not visible\n\n`attachment-access-hooks.test.ts` pins the refusal by calling the handler directly with a whole-operation context shape, including a case named *\"refuses even the uploader of every matched row — the AST is unscoped, not row-scoped\"*. That test is green and the wired engine does the opposite — the per-row dispatch (#5038 / #5574) landed after the guard and changed the context the handler receives on this path. A unit suite that constructs its own context cannot see it.\n\nThe REST surface is unaffected: `POST /data/:object/deleteMany` validates against `DeleteManyDataRequestSchema`, which strips `options.where` and requires an `ids` list (#3897), so an unscoped delete cannot be expressed there. The reachable callers are server-side ones that hold the engine — flows, actions, scripts, MCP tools.\n\n## Options\n\n1. Restore the check where it can see the operation shape — have the engine surface the predicate-less multi intent to per-row handlers (e.g. keep `options` carrying an explicit \"unscoped\" marker the handler can read), or refuse the unscoped AST in the engine itself for objects that declare a delete guard.\n2. Move the refusal into `ObjectQL.delete`'s multi branch as a general rule, so it protects every guarded object rather than sys_attachment alone.\n3. Accept the per-row gate as sufficient and retire both the guard and the unit case that claims it — the honest version of today's behaviour.\n\nWhichever is chosen, `attachment-access-hooks.test.ts`'s unscoped block should stop asserting a shape the engine no longer produces, or it stays a false green.\n\n## Checklist impact\n\n`docs/qa/platform-checklist/areas/attachments-storage.json` → `attachments-storage.attach-requires-parent-edit` clause 3 is recorded as **NOT pinned** by #9483, with this issue named, rather than pinned against current behaviour — pinning today's outcome would turn the fix red.\n"
+}

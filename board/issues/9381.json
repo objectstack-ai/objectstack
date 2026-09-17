@@ -1,0 +1,34 @@
+{
+  "number": 9381,
+  "kind": "issue",
+  "title": "metadata-protocol's raw-SQL migrations quote identifiers with `\"` on every dialect, but MySQL does not run with ANSI_QUOTES — the #8686 / #8629 / #5839 statements cannot parse there",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-17T21:27:22Z",
+  "updated_at": "2026-08-18T03:05:11Z",
+  "closed_at": "2026-08-18T03:05:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9381",
+  "body": "Noticed while implementing #8928, which needed the same raw-SQL seam and had to decide its own quoting.\n\n## The claim\n\n`packages/metadata-protocol/src/migrations/seed-tenancy-backfill.ts` quotes every identifier with double quotes, for every dialect:\n\n```ts\nfunction quoteIdent(name: string): string {\n  return `\"${name}\"`;\n}\n```\n\nIts module header explicitly names MySQL as a supported target — `normalizeRows` exists precisely to flatten \"mysql2's `[rows, fields]`\" beside `pg`'s `{ rows }` and better-sqlite3's bare array, and `resolveSeedTenancyExec` is built around `driver.execute(sql, params)`.\n\nUnder MySQL's default `sql_mode` a double-quoted token is a **string literal**, not an identifier. `ANSI_QUOTES` is what would change that, and grepping `packages/drivers/driver-sql/src/` finds no `sql_mode` / `ANSI_QUOTES` setting anywhere — the only MySQL session tweak `withUtcSession` applies is `SET time_zone = '+00:00'`. knex itself emits backticks for the `mysql`/`mysql2` clients, so nothing upstream normalises this either.\n\nSo on MySQL these statements should fail to parse. Every call site swallows that into a warning by design (a migration must never fail a boot), which means the visible symptom is a log line saying the migration was skipped — not a wrong answer, but not the repair either.\n\nAffected statements are all three migrations armed from the same assembly: `seed-tenancy-backfill.ts` (#8686 — split probe, collision probe, stamp, counter merge, global-counter delete), plus `partial-index-probe.ts` / `sys-setting-identity-index.ts` if they share the convention (worth checking in the same pass).\n\n## Verification status — stated exactly\n\n**Measured:** the quoting is unconditional in source; no `ANSI_QUOTES` / `sql_mode` is set anywhere in `driver-sql`; the module's own header claims MySQL support.\n\n**NOT measured:** this was not run against a live MySQL server. The repo has the machinery for that (`live-dialect-matrix.testkit.ts`, and the MySQL jobs that back `sql-driver-datetime-mysql-storage.test.ts`), so the confirming run is cheap for whoever picks this up — and it should be the first step, because if some layer *does* set `ANSI_QUOTES` this whole report is void.\n\n## Related\n\n#8928 took the dialect-aware route for its own probes rather than inheriting this convention: `os migrate duplicates` reads the live `driver.config.client` and quotes with backticks for `mysql`/`mysql2`, double quotes otherwise (`quoteIdent` in `packages/cli/src/commands/migrate/duplicates.ts`, pinned in `duplicates.probe-sql.test.ts`). That is one small, already-tested implementation of the fix, if a shared helper is the direction taken.\n\nNot fixed under #8928: `packages/metadata-protocol/**` was explicitly out of that card's file surface."
+}

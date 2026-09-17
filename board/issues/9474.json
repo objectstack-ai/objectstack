@@ -1,0 +1,36 @@
+{
+  "number": 9474,
+  "kind": "issue",
+  "title": "feat(actions): api 型动作需要「成功后跳转到服务端返回的记录」能力(ActionSchema 跳转键 + 响应进入插值作用域)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-18T03:46:15Z",
+  "updated_at": "2026-08-18T14:15:15Z",
+  "closed_at": "2026-08-18T14:15:15Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9474",
+  "body": "## 一句话\n\n**api 型动作要能把「服务端返回的记录 id」作为成功后的跳转目标。** 目前平台没有任何合法写法能做到「点按钮 → 服务端新建/克隆一条记录 → 前端跳到那条新记录的页面」。\n\n## 业务场景(应用项目实测,@objectstack/spec@17.0.0 / @objectstack/console@17.0.0)\n\n制造业项目里「任务版本 → 复制为新版本」按钮:api 动作触发 afterUpdate Hook 克隆出 v+1 草稿,用户点完仍停在旧版本记录页,必须手动回列表重新筛选才能找到新版本继续编辑。同款「复制类动作停在原记录页」在同一项目还有 4 处(任务复制/检查项复制/排班计划复制/设备复制),是通用诉求不是孤例。\n\n## 现状排查(为什么现有能力都够不着)\n\n1. `ActionSchema` 为 strict,对 `redirect` / `chain` / `onSuccess` / `navigate`+`to` 四种写法 `safeParse` 全部报 Unrecognized key(s),schema 层没有「成功后跳转」的任何键;\n2. console 前端 `executeAPI` 只返回 `{success, data}`,从不产生跳转;`refreshAfter` 只刷新**当前页**;\n3. `interpolateTarget` 插值作用域只有 `${param.*}` 与 `${ctx.origin|apiBase|user|org|recordId|selection}`——**接口响应不在作用域内**,即便服务端把新记录 id 吐出来,前端也没有合法通道消费它;\n4. `executeChain` 不把上一步返回值喂给下一步,链式动作同样表达不了。\n\n## 诉求(两件必须配套,任一单独放开都不够)\n\n1. `ActionSchema` 放开一个成功后跳转的键(如 `redirect` / `onSuccess.navigate`);\n2. 让接口响应进入地址插值作用域(如 `${result.id}`),或平台约定「响应里带某约定字段(如 `navigateTo`)即跳转」。\n\n## 项目侧现状\n\n按「平台能覆盖的问题等平台、不绕行」纪律,项目侧未做 type:'url' 302 / modal 自跳等偏方,原单挂起等待本能力(内部单:steedos-labs/os-project-titanwind-ehr#1172)。"
+}

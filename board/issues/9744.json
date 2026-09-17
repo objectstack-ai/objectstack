@@ -1,0 +1,32 @@
+{
+  "number": 9744,
+  "kind": "issue",
+  "title": "[finding] `GET /meta/&lt;unknown-type&gt;/&lt;name&gt;` says \"item not found\" — the single-item 404 cannot tell an unknown TYPE from an unknown ITEM",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T20:57:47Z",
+  "updated_at": "2026-08-18T21:14:25Z",
+  "closed_at": "2026-08-18T21:14:25Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9744",
+  "body": "Found while implementing #9488 (the list door's unknown-type refusal). Filed unassigned; not fixed there, because #9488's scope is the LIST door and this door does not carry #9488's defect — it already refuses distinguishably.\n\n## Observed\n\nMeasured on `packages/rest`'s `GET /api/v1/meta/:type/:name` with a type name that is in neither the static spelling contract nor any live registry:\n\n```\nGET /api/v1/meta/totally_invented_type/x\n  -> 404 {\"error\":\"Metadata item totally_invented_type/x not found\",\"code\":\"RESOURCE_NOT_FOUND\"}\n```\n\nThe producer is `@objectstack/metadata-protocol`'s `protocol.ts` (`Metadata item ${type}/${name} not found`).\n\n## Why it is worth recording\n\nThis is a **weaker form** of what #9488 was filed about, not an instance of it — and the difference is why this is an observation rather than a bug:\n\n- #9488's defect was **indistinguishable from success**: `200` with an empty collection reads exactly like \"this type exists and holds nothing\".\n- This answer is a refusal, so a caller cannot mistake it for a served result. Nothing is silently wrong.\n\nWhat it does do is **point the caller at the wrong half of the address**. The write door for the same segment says *\"'totally_invented_type' is not a metadata type\"*; this door says the **item** was not found, for a request whose actual mistake was the **type**. A caller who typo'd the type re-checks the name — the one thing that cannot help them, which is the same shape recorded on the repeated-filter refusal (a message naming the wrong cause sends the reader to re-check the part that was already correct).\n\nThe three doors therefore give three different accounts of one segment:\n\n| door | answer for an unknown type name |\n|---|---|\n| `PUT /meta/:type/:name` | `400` `INVALID_REQUEST` — \"'x' is not a metadata type\" |\n| `GET /meta/:type` (after #9488) | `400` `INVALID_REQUEST` — same sentence, same code |\n| `GET /meta/:type/:name` | `404` `RESOURCE_NOT_FOUND` — \"Metadata item x/y not found\" |\n\n## What a fix would have to respect, if one is wanted\n\nThe same constraint #9488 measured, and it is the reason this is not a one-line change:\n\n- the refusal cannot be raised from the static spelling contract alone. `unrecognisedMetaTypeRefusal` returns a verdict for `data`, `kind`, `package` and `policy` — live `SchemaRegistry` keys an ordinary `registerApp` produces and `GET /meta/types` enumerates — and for plugin types, which enter the live set by registering items. Refusing on the static half alone would answer `400` for types this same service advertises, which is the objection recorded when the write-side verdict landed and was deliberately not raised on the read entries then.\n- so it needs the same union #9488 built for the list door (static contract ∪ live listing), and a decision about whether a **type**-level refusal should outrank the item-level `404` on an address where both are true.\n\nNo consumer is known to depend on the current wording; the sweep behind #9488 found no caller addressing an off-contract type on this route outside refusal fixtures.\n\n## Not covered by\n\n- #9180 (`/meta` type segment is always singular) — that ruling is about **plural spellings**, a different axis.\n- #9488 — the list door only; the single-item doors were measured and explicitly left alone there.\n\nNo priority and no `domain:*` label — normal triage first-touch."
+}

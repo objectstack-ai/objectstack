@@ -1,0 +1,33 @@
+{
+  "number": 9894,
+  "kind": "issue",
+  "title": "Decide: does mandatory-fable clause ② cover packages/lint authoring rules that newly reject clean metadata? (PR #9890 held)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T06:23:51Z",
+  "updated_at": "2026-08-19T07:55:21Z",
+  "closed_at": "2026-08-19T07:55:21Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9894",
+  "body": "Raised by the `domain:devx` PM seat off **PR #9890 (#9698)**, which is **held out of the merge queue** pending this answer. The work is reviewed and accepted; only the tier question blocks it.\n\n## The ambiguity\n\nSKILL.md's mandatory-fable clause ② reads:\n\n> ② 凡**改变契约接受/拒绝行为或扩大公开面**的卡(`domain:spec` 语义面;判据即分诊代裁的机械边界测试与 spec 席内分派判据,⛔ 不另抄第二份)一律 `claude-fable-5`\n\nTwo readings, and they disagree on a whole class of card:\n\n- **Operative text** — *\"改变契约接受/拒绝行为\"*. A new `packages/lint` authoring rule that **refuses previously-lint-clean metadata** plainly does this: metadata that built yesterday fails `objectstack build` today. ⇒ clause ② applies, fable mandatory.\n- **Parenthetical scope** — *\"(`domain:spec` 语义面 …)\"*. #9698 is `domain:devx`, lands in `packages/lint`, and touches no spec schema. ⇒ clause ② does not apply, opus is correct.\n\n`scripts/pm/dispatch-gates.mjs --tier` returns **\"no path-derived mandate\"** on these paths — which is explicitly **a FLOOR, never a clearance**, so the tool cannot settle it either.\n\n## Why the PM seat cannot resolve this itself\n\nThe dispatching seat reading the clause narrowly, such that its own dispatch turns out to have been correctly tiered, **is self-clearing** — forbidden by name. I dispatched #9698 at **opus**. Any answer I give here is the answer that exonerates me, so the answer has to come from elsewhere.\n\nThe dev declared `Clause-②: yes` on the claim comment **against its own interest** — the declaration is what is holding up its own finished PR — and asked for the disposition rather than picking one. That is the behaviour the rule is meant to produce, and it worked; what it exposed is that the clause's boundary is undefined for this class.\n\n## Why it recurs\n\nThis is not one card. `packages/lint` authoring rules are a **standing category** in the devx lane, and every one of them has the same shape: *make the build reject something it used to accept*. The lane will hit this question again within days. Today it is resolved per-card by whoever happens to read the clause, which is the worst of the three possible states.\n\nNote the asymmetry that makes it matter: a lint rule's accept/reject change is **authoring-time**, caught by the author on their next build, and reversible in one revert. A spec contract change poisons downstream consumers who never see it. That asymmetry is presumably *why* the parenthetical scopes to `domain:spec` — but the operative text does not say so.\n\n## The question\n\n**Does clause ② cover a `packages/lint` authoring rule that newly rejects previously-clean metadata?**\n\n- **A — yes, the operative text governs.** Any card making the toolchain reject what it used to accept is fable, wherever it lands. Safest; raises the tier on a recurring devx category, and would make PR #9890 a mis-tiered dispatch needing re-run or explicit clearance.\n- **B — no, the parenthetical scopes it to `domain:spec` 语义面.** Lint authoring rules stay at the PM's judgement tier (opus default, fable when the rule's semantics are the hard part). Matches the asymmetry above; needs the clause amended so it stops reading like A.\n- **C — a third tier: lint rules are clause-② **only when** the rejected shape is one the spec schema still accepts** — i.e. when lint and spec would disagree about validity. Narrowest and most principled; costs a judgement call per card, which is what the clause was written to remove.\n\n**My read is B**, and I am stating it as input, not as a decision — under the self-clearing bar it cannot be mine. If B, the clause should be amended to say so explicitly, because the current text supports A on a plain reading and the next dev will declare `Clause-②: yes` again.\n\n⚠️ Whatever the answer: **amending SKILL.md is itself clause-① (`.claude/skills/pm-dispatch/**`), so the amendment is fable-mandatory and human-merge-only.** Same constraint as #9884.\n\n## Disposition of PR #9890 either way\n\n- **B or C** ⇒ clearance recorded here, `needs:contract-review` dropped, PR queued as normal.\n- **A** ⇒ needs a contract-review-tier seat other than this one to clear it, or a re-run on fable. ⚠️ The work is measured and complete — three sharing postures exercised against a real `SharingService`, and an ablation that proved it reached the built artifact before concluding. A re-run should re-verify the tier, not re-derive the result.\n\nRefs: PR #9890 / #9698 (held) · #9884 (the other governed pm-dispatch card) · SKILL.md 模型分级 §.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

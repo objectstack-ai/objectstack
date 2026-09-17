@@ -1,0 +1,35 @@
+{
+  "number": 8978,
+  "kind": "issue",
+  "title": "[finding] `serve`'s ready banner prints `Config: objectstack.config.ts` on an OS_ARTIFACT_URL boot, where no config was loaded",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-16T03:39:24Z",
+  "updated_at": "2026-08-17T16:18:15Z",
+  "closed_at": "2026-08-17T16:18:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8978",
+  "body": "Observation-class finding, no behaviour change requested. Found while adopting the artifact-pinned boot (#8368) on the ObjectOS EE image (cloud#1292). Filed unassigned.\n\n## What happens\n\nWith `OS_ARTIFACT_URL` set, `serve` resolves the reference, sets `useArtifactFallback = true`, and loads `{ mod: { default: {} } }` — the `objectstack.config.ts` in the cwd is deliberately never executed. The boot diagnostics say so plainly:\n\n```\nArtifact (OS_ARTIFACT_URL): http://127.0.0.1:41541/hotcrm-2.2.2.json [remote, sha256 verified]\nBooting from the artifact named by OS_ARTIFACT_URL (default host)...\n```\n\nBut the ready banner a few lines later still reports:\n\n```\n  Config:  objectstack.config.ts\n  Mode:    production\n  Driver:  SqlDriver(better-sqlite3)  → :memory:\n```\n\n`printServerReady({ configFile: relativeConfig, … })` is passed `relativeConfig` unconditionally, and `relativeConfig` is derived from `args.config` at the top of `run()` — before the artifact branch is decided. So the row names a file that exists, was found, and was not read.\n\n## Why it is worth a line of code\n\nThe banner is the surface an operator uses to answer \"what is this container actually running\", and on this path that is the whole question the feature turns on — the two-axis model means the config in the image and the artifact in the env are different apps. A row that names the file that did *not* boot points the reader at the wrong one, and it does it on the same screen that just said the opposite. It cost a reading during the cloud-side adoption: the row is the first thing that looks authoritative, and the plugin table is what actually settles it.\n\nThe neighbouring precedent is #4801 (cloud#1020), where the banner's tenancy row disagreed with the runtime wiring and every later investigation paid for it.\n\n## Suggested shape\n\nReport the artifact on this path instead of the config — the resolved `display` is already in hand (`pinnedArtifact.display`), already redacted for a pre-signed URL, and already printed by the diagnostic line above. Something like `Artifact: <display> (OS_ARTIFACT_URL)` in the `Config:` slot, or an added row with the `Config:` row omitted when `useArtifactFallback` is set.\n\nSame for the plain artifact-fallback path (no config authored, `dist/objectstack.json`), where the row currently names a config file that does not exist.\n\n## Reproduce\n\n```bash\nobjectstack build\nOS_ARTIFACT_URL=file://$PWD/dist/objectstack.json objectstack serve objectstack.config.ts\n# banner: Config: objectstack.config.ts   ← never loaded\n```\n\nVerified at `8798cd2a60649f9a54d794a97da314d41be4ab7b`.\n\nRelated: #8368, cloud#1292.\n"
+}

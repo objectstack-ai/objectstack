@@ -1,0 +1,34 @@
+{
+  "number": 9408,
+  "kind": "issue",
+  "title": "bump-objectui.sh's walkability guard cannot detect a shallow objectui clone — the digest silently ships a complete-looking release record derived from a truncated history",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-17T23:32:02Z",
+  "updated_at": "2026-08-18T02:15:17Z",
+  "closed_at": "2026-08-18T02:04:51Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9408",
+  "body": "Found while correcting `.changeset/console-82a94170c405.md` (card #8893, PR #9398). Filing separately because the corrected table is one artifact, whereas this makes **every** console pin bump run in a shallow container ship the same fault.\n\n## The defect\n\n`scripts/bump-objectui.sh:139-142` decides whether the pin range can be walked:\n\n```sh\nRANGE_OK=0\nif [[ \"$OLD_SHA\" != \"(none sentinel)\" ]] && git -C \"$OBJECTUI_ROOT\" cat-file -e \"${OLD_SHA}^{commit}\" 2>/dev/null; then\n  RANGE_OK=1\nfi\n```\n\nIts own comment names the case it means to catch — *\"(A shallow clone or a first-ever pin may not have OLD reachable — degrade to the tip subject, and SAY SO in the artifact: a degraded list and a complete one must never look alike, #4731.)\"* — but the implemented test only asks whether `OLD_SHA` **exists as an object**. It never asks whether the *walk between the endpoints is complete*.\n\nIn the common container shape the objectui clone is shallow and its graft boundary sits **inside** the pin range. Then:\n\n1. `cat-file -e OLD_SHA` passes (the object is there), so `RANGE_OK=1` and the degraded path at `bump-objectui.sh:163` never fires.\n2. `collectAddedChangesets()` runs `git log --no-merges --diff-filter=A --name-only ... -- .changeset/`, which walks only as far as the graft.\n3. The graft boundary commit is **parentless**, so git diffs it against the empty tree and reports every `.changeset/*.md` in its tree as `A`dded by it.\n4. The `seen` dedup in `collectAddedChangesets()` hands it exactly the paths no newer commit claimed — a single \"sink\" commit absorbing a whole batch.\n5. `objectui-changeset-digest.mjs` exits **0**. Nothing in the artifact says the history was incomplete.\n\n## Measured, not inferred\n\nThe landed `.changeset/console-82a94170c405.md` credits **36 of its 119 entries** to `183d09b78`, a commit that adds exactly **one** changeset file. Reproduced exactly by grafting a full clone at that commit:\n\n```\n$ git rev-parse 183d09b78 > .git/shallow          # synthesize the boundary\n$ git rev-list --count --no-merges 665661ab0932..82a94170c405\n110                                                # the landed record's denominator\n$ git cat-file -e 665661ab0932^{commit} && echo PASSES\nPASSES                                             # so RANGE_OK=1, no degradation\n$ node scripts/objectui-changeset-digest.mjs \\\n    --objectui-root GRAFTED_CLONE \\\n    --from 665661ab0932 --to 82a94170c405 --max 100 --out repro.md\nminor                                              # exit 0\n→ 121 releasing changeset(s), ..., 18 commit(s) without a changeset\n$ diff (grep '^- ' repro.md) (git show origin/main:.changeset/console-82a94170c405.md | grep '^- ')\n                                                   # byte-identical entry list\n```\n\n(the last line was a bash process substitution; the angle brackets are dropped here so the stored body survives GitHub's sanitizer)\n\nThe second data point falls out of the same mechanism: PR #9398's competing derivation reported **137** non-merge commits and pinned **12** entries to `75444e38a`. `183d09b78` is at index **110** of the range and `75444e38a` at index **137** — each container's reported commit count is exactly the index of its own sink. Two independent confirmations.\n\nGround truth on an unshallowed clone is **191** non-merge commits (`all`, `--no-merges` and `--first-parent` all agree; the range is linear).\n\n## Why this matters more than the one table\n\n- The failure is **silent and complete-looking**, which is precisely the property #4731 built this generator to eliminate and #6175 fixed in the opposite direction (a complete result that *looked* like a failure). This is the mirror: an incomplete result that looks complete.\n- It is **release-record data**. A console changeset becomes published CHANGELOG text; a wrong attribution is permanent once `chore: version packages` consumes it.\n- The **content** happens to survive (121 releasing of 166 was identical in all three derivations, because the boundary's empty-tree diff picks up what the truncated tail would have contributed), so nothing downstream notices. Only the per-entry attribution and the commit denominator are wrong — the two things no gate checks.\n\n## Suggested repair (not implemented here)\n\nMake the guard test walk completeness rather than object presence, and keep the honest degradation that already exists:\n\n- refuse-or-degrade when `git rev-parse --is-shallow-repository` is `true` **and** any graft boundary is an ancestor of the `to` endpoint / inside the range;\n- also verify the `to` endpoint resolves (today only `OLD_SHA` is checked — in the container that produced the landed record, `82a94170c405` was initially *absent* entirely);\n- better still, have `bump-objectui.sh` deepen first (`git fetch --unshallow`, or `--shallow-since` past the old pin) and only degrade if that fails, since the correct history is one fetch away;\n- consider a cheap sanity assertion in `objectui-changeset-digest.mjs`: no single commit may be credited with more added changesets than `git show --name-only` attributes to it. That check alone would have caught all three bad runs.\n\nRelated: #4731 (why the digest exists), #6175 (the inverse false signal), #6494 (the ADR-0087 placeholder).\n\nRepro material and the corrected table are in PR #9398.\n"
+}

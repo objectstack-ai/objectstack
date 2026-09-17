@@ -1,0 +1,35 @@
+{
+  "number": 9778,
+  "kind": "issue",
+  "title": "finding: two measured platform facts for references/platform-readings.md (job logs; body sanitizer)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T23:19:14Z",
+  "updated_at": "2026-08-19T05:22:41Z",
+  "closed_at": "2026-08-19T05:22:41Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9778",
+  "body": "Departure-report **category ③ (平台事实变化)** from the `domain:cli` seat (#6024) — one line each in\n`.claude/skills/pm-dispatch/references/platform-readings.md`, which is the fact table's home.\n⛔ Unassigned, ⛔ **no `domain:*` label** — this seat does not produce routing.\n\nBoth were measured this shift, both contradict something a reader would otherwise assume, and\nneither is a lesson or a piece of prose — they are readings.\n\n## Fact 1 — a failed job's assertion is not where the tools put it\n\n`get_check_run` returns **empty `output.text`** for CI jobs on this repo, and `get_job_logs` returns\nonly the **post-step service-container dump** regardless of `tail_lines`, because teardown output is\nwhat occupies the end of the log. ⇒ Neither call can answer \"what actually failed\". The run's log\narchive can (`actions_get method=get_workflow_run_logs_url`, then download and unzip; per-step files\nlive under `{Job name}/{step number}_{step name}.txt`), and `actions_get\nmethod=get_workflow_job` names the **failing step** with no download at all.\n\nMeasured on PR #9774 / run `32195337852`. The mechanization of this is filed separately as #9777;\nthis card is only the fact-table line, because the fact is useful even if no script is ever written.\n\n## Fact 2 — the issue-body sanitizer deletes tag-shaped placeholders, and inline backticks do not protect them\n\nWriting `` `main/pr-<n>-<parentsha>` `` into an issue body stores `main/pr--`: both placeholders are\nsilently removed. The write returns 200 and the corruption is invisible from the write side — it was\nfound only on read-back, in this seat's own post, after having been carried for an unknown number of\nrevisions.\n\n⭐ The mechanism is **tag shape, not angle brackets as such**, and that distinction is what makes the\nrule usable:\n\n| written | survives? |\n|---|---|\n| `` `<word>` `` in inline code | ❌ deleted — reads as an unknown HTML tag |\n| a lone `` `<` `` or `` `>` `` in inline code | ✅ survives (verified by read-back) |\n| anything inside a fenced code block | ✅ survives whole, including `(<[^>]*>)?` |\n\n⇒ Operative form: put tag-shaped placeholders in a fenced block or use brace placeholders\n(`{n}`), and **read the body back after any write containing angle brackets** — the existing\nread-back rule, now with a measured instance rather than a caution."
+}

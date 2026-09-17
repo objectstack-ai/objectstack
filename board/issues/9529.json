@@ -1,0 +1,35 @@
+{
+  "number": 9529,
+  "kind": "issue",
+  "title": "`os migrate meta` never rewrites the authored sources that 144 shipped retirement messages promise it will",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T07:13:35Z",
+  "updated_at": "2026-08-18T20:02:09Z",
+  "closed_at": "2026-08-18T20:02:08Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9529",
+  "body": "Found while implementing #9418 (the load-refusal half). Filed unassigned for triage — deliberately out of that card's scope and not fixed there.\n\n`Blocked-by: #9418` — a source rewriter cannot be built on a load path that refuses to open those sources. That half has landed; this one is downstream of it and was pre-existing.\n\n## The gap\n\nEvery `retiredKey()` prescription whose surface an ADR-0087 conversion covers closes with a sentence whose wording is maintainer-ruled (2026-08-09, #6856) and pinned class-wide by `packages/spec/src/shared/retired-key-migrate-sentence.test.ts`:\n\n> Run `os migrate meta --from N` to rewrite existing sources automatically.\n\nThe rule that fixed that wording is explicit about what the sentence claims — quoting `packages/spec/src/shared/retired-key.ts`:\n\n> The sentence states a property of the TOOL — it rewrites your source files — never the fate of the key.\n\nIt ships **144 times across 39 files** under `packages/spec/src`.\n\nThe command does not rewrite source files. Measured on `origin/main` @ `6ce8feb72`, `packages/cli/src/commands/migrate/meta.ts` writes in exactly two places, both guarded by `--out`, both writing the same artifact:\n\n```\n347:  if (flags.out) writeFileSync(resolve(flags.out), JSON.stringify(result.stack, null, 2));\n395:  writeFileSync(resolve(flags.out), JSON.stringify(result.stack, null, 2));\n```\n\nThat is a JSON snapshot of the migrated stack at a path the operator names, and the flag's own description says exactly that: `Write the migrated stack as a JSON snapshot to this path.` There is no `--write` / `--fix` / in-place flag; `objectstack.config.ts` and the per-artifact modules under `src/` are never touched. `os lint --fix` is not the missing half either — its own description reads `Show what would be fixed (dry-run)`.\n\nSo an author who follows the prescription gets the chain replayed, a printed diff, and optionally a JSON document — and then still edits every `.ts` file by hand. For a project that authors metadata across per-artifact modules (`defineView` / `defineAgent` / `defineFlow` — the shape the example apps use), the JSON snapshot is not even in the shape the sources are written in.\n\n## Reproduction\n\nWith #9418's fix in place, in a project whose config carries a retired key:\n\n```\nos migrate meta --from 16 --out migrated.json\n# exit 0, \"Applied 2 mechanical change(s)\", migrated.json written\ngit status          # objectstack.config.ts: unmodified\n```\n\n## The two honest resolutions — triage's call, not the finder's\n\n1. **Implement the promise.** An in-place rewrite of authored TypeScript means an AST codemod; `ts-morph` is already a `packages/cli` dependency. The chain's semantic TODOs must stay manual either way, so the rewrite covers the mechanical `applied` set only.\n2. **Reword the promise.** 144 messages across 39 files, plus the class-wide pin and the maintainer ruling that produced the current wording. Cheaper, but it withdraws the automatic-fix claim from the v17 upgrade path — which is the claim that makes the retirement audible.\n\nOption 2 edits a maintainer-ruled sentence, so neither option is an implementer's scope call.\n"
+}

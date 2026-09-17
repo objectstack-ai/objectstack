@@ -1,0 +1,35 @@
+{
+  "number": 9447,
+  "kind": "issue",
+  "title": "[Decision] Multi-value lookup after set_null member removal: does the emptied array read back as `[]` or `null`?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T01:17:47Z",
+  "updated_at": "2026-08-18T05:34:41Z",
+  "closed_at": "2026-08-18T05:34:41Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9447",
+  "body": "Split out of #9438 by the triage seat (the same shape as the #9364 → #9389 split): the interim repair on #9438 (escalate defaulted `set_null` to `restrict` for `multiple: true`, mirroring the pinned required-FK escalation) is queued and decides no semantics; this card carries the one question that blocks the real fix (#9438 option 1 — remove the member instead of refusing).\n\n## The question\n\nWhen `cascadeDeleteRelations` removes the deleted record's id from a `multiple: true` lookup array and the array becomes empty, what does the field read back as — `[]` or `null`?\n\nThe difference is observable on the read path, and it decides what a `required` multi-value validator sees (`[]` is a present-but-empty value; `null` is an absent one). `FieldSchema` currently says nothing, no sibling declaration pins it, and no landed ruling covers it — which is exactly why #9438's implementer refused to guess it inside a P0 hotfix (#9362 / PR #9437).\n\n## Four-facet analysis\n\n- **Platform long-term coherence**: the answer should be one rule for every writer of multi-value lookups (cascade repair, form clears, API writes), not a cascade-only convention — whichever value is chosen, the ruling text should say it binds the field's empty representation generally, or explicitly scope it to cascade writes and say why.\n- **Measured business pull**: becomes live the moment #9437 lands (the limb has never executed before it); the stock showcase carries the shape (`showcase_field_zoo.f_lookups`). Until option 1 lands, the interim `restrict` refusal (409) is what users see.\n- **AI-agent error-resistance**: `[]` keeps the field's type stable (an array field always reads as an array) — one less null-branch for generated code and formula/filter predicates to mishandle; `null` matches the single-value lookup's cleared state but makes the field's type a union in practice.\n- **Startup scope discipline**: either answer is one line in the repair plus a sentence in `FieldSchema`'s doc; the cost is only in changing it later, so rule once, now.\n\n**Recommendation: `[]`** — type-stable for every reader, consistent with \"the set lost a member\" rather than \"the field was cleared\", and it keeps `required` semantics honest (an emptied required set should fail validation loudly, which `[]` does and a vanished `null` may not, depending on the validator's absent-vs-empty treatment — the ruling should state which of those `required` means for multi-value lookups, since that is the same question wearing validation clothes).\n\n## On the ruling\n\nThe answer unblocks #9438 option 1 (member removal); the interim `restrict` escalation reverts in the same PR. Ruling text lands in `FieldSchema`'s doc block (spec text surface — spec seat) and the engine repair consumes it.\n\nRefs: #9438 (the defect and the interim) · #9362 / PR #9437 (what makes the limb reachable) · the pinned required-FK `set_null` → `restrict` escalation in the same block of `packages/objectql/src/engine.ts`.\n\nFiled by the triage seat routine — session `session_pm_triage_20260818T0104Z`."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 9462,
+  "kind": "issue",
+  "title": "Declared endpoints (`type: 'flow'`): converge onto the #9378 status table — the ruled follow-up to #9446's staged execution",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-18T02:56:50Z",
+  "updated_at": "2026-08-18T15:40:50Z",
+  "closed_at": "2026-08-18T15:40:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9462",
+  "body": "Filed by the triage seat as the door-3 half of the #9446 ruling (maintainer, 2026-08-18, verbatim 「同意」: the #9378 status table is a property of the flow-dispatch CONTRACT, executed in stages — door 2 in #9446 itself, door 3 as this card).\n\n## Scope\n\n`packages/runtime/src/endpoint-executor.ts`'s flow branch currently ends with an unconditional `successAnswer(await automation.execute(...))` — HTTP 200 wrapping `{\"success\":false,...}` on every failure, the double envelope #3962 ruled out for `/actions`. Converge it onto the four-row table the trigger routes answer after #9413/#9415 (404 / 409 `FLOW_DISABLED` / 422 `FLOW_NO_START_NODE` / 400 `FLOW_FAILED`), consuming the producer's `result.code`.\n\n## Constraints (from the ruling)\n\n- **The envelope flip is BREAKING** for any consumer of the current double envelope on declared endpoints. The PR must say so plainly, and landing is sequenced against consumers — enumerate them (objectui, examples, docs) with real greps before flipping, and coordinate the objectui half if one exists.\n- Door 3 carries the endpoint policy chain and `outputMapping`, so this is not a copy of door 2's mapper — the mapping must sit where those still apply.\n- `content/docs/protocol/kernel/http-protocol.mdx`'s boundary wording (corrected by #9415 to describe the divergence) flips back to \"same response contract\" in the same PR.\n- **Clause-②: yes** — accept/reject behavior changes on a public surface; contract-review tier dispatch, claim carries `Clause-②: yes`.\n- If implementation surfaces a reason door 3 cannot converge, report the fork back to the decision inbox — no silent scope change.\n\nRefs: #9446 (the ruling record) · #9378 (the table) · #9413 / #9415 (doors 1's rows) · #3962 (the double-envelope precedent).\n\nFiled by triage session `session_pm_triage_20260818T0104Z`; ruling provenance on #9446."
+}

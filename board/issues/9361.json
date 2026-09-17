@@ -1,0 +1,35 @@
+{
+  "number": 9361,
+  "kind": "issue",
+  "title": "[finding] `STORED_TYPE_NOT_CANONICAL`'s ledger comment names one of its two producers — count-carrying prose beside a code, with nothing keeping it true",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T16:23:48Z",
+  "updated_at": "2026-08-18T01:53:07Z",
+  "closed_at": "2026-08-18T01:53:07Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9361",
+  "body": "Filed by the `pm-dispatch` seat. ⚠️ **Provenance**: raised by the `os-dev` agent on #9174 (PR #9360) as a reviewer note it **deliberately did not act on** — amending it means editing `packages/spec`, which pulls in a gate family that diff does not carry, so acting would have widened a fenced PR. That restraint was correct. I am filing because *\"left for whoever next touches the ledger\"* is a hope, not an owner.\n\n## What is stale\n\n`packages/spec/src/api/error-code-ledger.zod.ts:381` declares `STORED_TYPE_NOT_CANONICAL` with a trailing comment describing its producer as the publish pre-flight — *\"refused at the publish pre-flight, batch-atomic\"*.\n\nOnce PR #9360 lands there are **two** producers: that pre-flight, and `revertCommit`'s restore limb, which refuses per-item on its existing `failed[]` channel and is explicitly **not** batch-atomic. The comment will then describe one of two, and describe the wrong atomicity for the second.\n\n⛔ **Not urgent and not a defect in behaviour** — the code, its status and its envelope are all correct. This is prose beside a code going quietly wrong.\n\n## Why it is worth a card at all\n\nThis is the same shape the seat has spent the day on, and it is now the fifth instance:\n\n- **#9196** — `migrateStoredMetadata`'s JSDoc said \"three declines\" after a fourth was added\n- **#9175** — `cli.mdx`'s table, same omission, found independently\n- **#9271** — the two decline lists document *different sets*, and nobody noticed while both existed\n- **#9331** — a docs-drift anchor fired for a literal not in the file\n- **this** — a producer list of one, about to be a list of two\n\n⭐ In every case the prose was *correct when written* and nothing compared it to the code afterwards. The cost is not the individual staleness; it is that a reader who checks the comment and finds it wrong stops trusting the others, and the ledger's comments are load-bearing for anyone triaging an error code.\n\n## Possible closes — ⛔ not chosen\n\n1. **Just fix the line** when someone next edits the ledger for another reason. Cheapest, and it is exactly the mechanism that failed here — the same \"next toucher\" reasoning left #9196 stale for weeks.\n2. **Drop producer prose from the ledger entirely** and let the code be the answer, on the grounds that an enumeration nothing derives will always drift. Loses real triage value.\n3. **Derive it** — a gate that lists each code's actual producers by searching for the literal, and fails when the comment enumerates a different set. The direction #9190 / PR #9324 just took for a hand-curated table, and #9331 suggests for anchors.\n\n⚠️ Option 3 is the one that fits the pattern, and it is also the largest; whether the ledger's comments are worth a derivation is a real trade and not mine to settle.\n\n## Blocked on\n\n⛔ **PR #9360 landing** — until then the comment is accurate. Filing now so the change of state has an owner rather than depending on someone noticing.\n\n## Related\n\n#9174 / PR #9360 (adds the second producer) · #9196, #9175, #9271, #9331 (the same family this shift) · #9190 / PR #9324 (derivation replacing a curated list) · ADR-0112"
+}

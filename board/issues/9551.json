@@ -1,0 +1,34 @@
+{
+  "number": 9551,
+  "kind": "issue",
+  "title": "[Decision] objectos is a fourth repository with no lane, no seat and no pm labels — which shape should it get?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T09:15:22Z",
+  "updated_at": "2026-08-19T03:14:30Z",
+  "closed_at": "2026-08-18T11:42:34Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9551",
+  "body": "## The gap\n\n`pm-dispatch` models three repositories — \"产品横跨三仓: `objectstack` → `objectui` and `cloud`\". `objectstack-ai/objectos` is a fourth, and the protocol has no answer for it:\n\n- No `domain:*` lane covers it and no `repo:objectos` seat exists, so the seat/lane bijection (\"域 X 谁管\" / \"PM Y 管什么\" each have exactly one answer) has no answer for it.\n- The triage seat is defined as \"三仓唯一\" and produces classification for three repositories. Nobody triages objectos.\n- `ensure-pm-labels.sh` has never run there: no `pm:queue`, no `pm:dispatched`, no `domain:*`. The only pm-vocabulary label present is `finding`.\n\nThis is not hypothetical — work is already flowing through that repository outside the protocol. Open cards objectstack-ai/objectos#61 and objectstack-ai/objectos#64 carry `finding` with no triage, no domain, no owner. And a change landed there written in-session by a PM seat with no issue filed first, precisely because no lane existed to route it through. That deviation is recorded on objectstack-ai/objectos#66; this card is about the structural cause rather than that one instance.\n\n## Update 2026-08-18: dispatch authorized, structure still open\n\nThe maintainer has authorized this session to dispatch work in objectos (原话: 「现在允许你派 objectos 的活」), under the standing 维护者直派通道. That unblocks the immediate queue and **does not answer this card**: an ad-hoc authorization to one session is not a seat, and the next session starts from the same ambiguity that produced the deviation above. The options below stand.\n\n## Options\n\n**A — full sibling-repo treatment.** Extend the triage seat to four repositories; mint a `repo:objectos` execution seat; run `ensure-pm-labels.sh` there. This is exactly the shape `objectui` and `cloud` already have, so both invariants survive unchanged.\n*Cost:* one more seat Routine and its fire cycles, for a repository with a handful of open issues.\n\n**B — triage extended, execution folded into `domain:devx` (recommended).** Triage seat covers four repositories (one extra lane-inventory query per round, no new seat); objectos execution routes to the existing `devx` lane, which already owns `content/docs/**` and `apps/docs` in this repository — objectos is *entirely* docs and site code. Mint `repo:objectos` as a seat only when volume justifies it, which is the protocol's own registered scale-out trigger.\n*Cost:* one lane briefly owns docs in two repositories, which is a wrinkle in the bijection until it is split out.\n\n**C — declare objectos out of scope.** It stays outside the PM loop; issues there are handled ad hoc by the maintainer.\n*Cost:* the gap becomes permanent and deliberate. Every future agent touching objectos hits the same ambiguity and resolves it the same improvised way.\n\n## Four facets\n\n- **Platform long-term coherence** — B and A both close the gap; A is more coherent long-run (repo → seat, as with the other two siblings), B is more coherent *today* (one lane already owns docs, and objectos is only docs). C leaves a documented hole in an otherwise total protocol, and the protocol's value comes from being total. Slight edge to B, converging on A as volume grows.\n- **Measured business pull** — thin, and worth saying plainly: a handful of open issues, ~15 merged PRs since the repository was repositioned in July. This is real but low-volume, which argues against minting a seat now and for the cheapest change that removes the ambiguity. Points at B.\n- **AI-agent error-resistance** — this is the decisive facet. The failure this card exists because of is an agent finding no lane and improvising one. A and B both make the answer lookup-able; C guarantees the improvisation recurs, and each recurrence will look locally reasonable. Rules out C.\n- **Startup scope discipline** — a seat is a permanent obligation (a Routine, a seat post, a fire budget). B adds one query per triage round and no new obligation; A adds an obligation ahead of demand. Points at B.\n\nFour facets converge on **B**, so this would meet the confidence gate for auto-adjudication on facets alone — but it sits squarely on the human floor: it changes `.claude/skills/pm-dispatch/**`, which is ADR-class and governed. Filed for you rather than adjudicated.\n\n## Implementation notes for whoever takes it\n\n- Any PR touching `.claude/skills/pm-dispatch/**` is `model: claude-fable-5` (mandatory clause ①) and merges by hand — governed face, no auto-merge, no queue.\n- The lane table and the multi-repo section both need editing in the same PR (\"新增或退役一个 `domain:*` 必须同批改本表\"); under B the edit is to the repo-coordination section rather than a new `domain:*` row.\n- The line ratchet applies: `check-skill-line-ratchet.mjs` only lets the file shrink, so this has to be paid for with deletions elsewhere or an explicit ratchet-raise decision quoted in the PR body.\n- `bash scripts/pm/ensure-pm-labels.sh` needs a repo argument or a run against objectos under either A or B.\n- objectos has no changeset flow, no `packages/`, and a different CI shape from the three modelled repositories. Whichever option lands should say so, or dispatched agents will look for machinery that is not there."
+}

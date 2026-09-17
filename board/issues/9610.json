@@ -1,0 +1,36 @@
+{
+  "number": 9610,
+  "kind": "issue",
+  "title": "check-published-readme-exports: the call-site half misses `Kernel.use(Plugin.configure(...))` — the boundary character is consumed by the outer call, and that is the exact shape a careless README rewrite produces",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T12:59:27Z",
+  "updated_at": "2026-08-18T13:46:21Z",
+  "closed_at": "2026-08-18T13:46:21Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9610",
+  "body": "Found while implementing #9532 piece 1 (PR #9602), by ablating my own rewrite against the gate landed in #9546. ⛔ Filed rather than fixed there: that dispatch forbids touching the gate script, and this is a change to the detector's core regex, which owes its own self-test cases.\n\n## What is wrong\n\n`extractMemberCalls` (`scripts/check-published-readme-exports.mjs:331`) finds `Name.member(` call sites with:\n\n```js\nconst rx = /(^|[^\\w$.'\"`])([A-Za-z_$][\\w$]*)\\s*\\.\\s*([A-Za-z_$][\\w$]*)\\s*\\(/g;\n```\n\nThe leading alternation exists to stop `a.b.c(` and `'str'.trim(` from matching. But the branch that is not `^` **consumes** one character, and `rx` is global — so when a match is *discarded* because its receiver is not import-bound, the character it consumed is gone, and a call starting at the very next character has no boundary left to match against.\n\n## Measurement\n\nDriving the published regex directly, receiver set `{CacheServicePlugin}`:\n\n```\n\"await kernel.use(CacheServicePlugin.configure({ a: 1 }));\"\n   all matches: [\"kernel.use\"]                                   => kept: []            ← MISSED\n\"await kernel.use(  CacheServicePlugin.configure({ a: 1 }));\"\n   all matches: [\"kernel.use\",\"CacheServicePlugin.configure\"]     => kept: [...]         ← caught\n\"CacheServicePlugin.configure({ a: 1 });\"                          => kept: [...]         ← caught\n\"const p = CacheServicePlugin.configure({ a: 1 });\"                => kept: [...]         ← caught\n\"foo(bar); CacheServicePlugin.configure({});\"                      => kept: [...]         ← caught\n```\n\n**Two spaces instead of one change the verdict.** End to end on the real tree, as ablation B of PR #9602: `service-cache`'s README rewritten to keep the genuine `CacheServicePlugin` but call `kernel.use(CacheServicePlugin.configure({...}))` — a static that does not exist — ran **green, exit 0**. Moving the same call one statement out (`const plugin = CacheServicePlugin.configure({...});`) produced the finding immediately:\n\n```\n✗ check:published-readme-exports — 1 undocumented symbol claim(s)\n  packages/services/service-cache/README.md\n    line 30: documents `CacheServicePlugin.configure(…)`, but CacheServicePlugin\n    (from '@objectstack/service-cache') has no `configure` member in its published types.\n```\n\nSo the resolution half is sound; only the extraction misses.\n\n## Why this shape specifically\n\nThe missed spelling is not exotic — it is the **most likely wrong rewrite of the six READMEs this gate was built for**. The correct usage of all six is `kernel.use(new SomePlugin({...}))`, so an author \"fixing\" `SomePlugin.configure({...})` by swapping the class name while keeping the static writes exactly `kernel.use(SomePlugin.configure({...}))`. #9546's own dev report names that substitution as the thing the call-site half exists to catch:\n\n> substituting the genuine `AnalyticsServicePlugin` for the fabricated `ServiceAnalytics` turns the import finding into an `AnalyticsServicePlugin.configure` call-site finding — not into silence.\n\nTrue when the call stands alone. Silent when it is nested inside another member call on the same line, which is how plugin registration is written.\n\n## Suggested fix\n\nUse a zero-width lookbehind so the boundary is asserted, not consumed:\n\n```js\nconst rx = /(?<[\\w$.'\"`])([A-Za-z_$][\\w$]*)\\s*\\.\\s*([A-Za-z_$][\\w$]*)\\s*\\(/g;\n```\n\n(Node 22 supports lookbehind; the `^` alternative folds in, since a negative lookbehind is satisfied at position 0.) An `exec`-and-rewind loop that resets `lastIndex` to the start of the receiver on a discarded match would also work, but the lookbehind is the smaller change.\n\n⚠️ **Add the nested case to `--self-test` in the same edit.** The existing case at line 948 (`extractMemberCalls — import-bound receiver only`) drives a fixture where the wanted receiver is not preceded by a discarded match, which is why the hole survived a gate written with self-tests in both directions. A fix with no pin for `kernel.use(X.y(` is the next silent regression.\n\n## Acceptance\n\n- `extractMemberCalls` reports `CacheServicePlugin.configure` in `await kernel.use(CacheServicePlugin.configure({...}));`\n- the existing false-positive corpus stays silent (the measured prose/bash/diff cases in the script header)\n- `--self-test` pins the nested-receiver case, in both directions\n\nRefs: #9532 (the card) · #9546 (the gate) · PR #9602 (where the ablation ran)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 8949,
+  "kind": "issue",
+  "title": "skills: the ablation-on-dist hazard is scoped to dogfood in os-dev.md and the dogfood skill, but it holds for every dist-resolved test",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T02:27:35Z",
+  "updated_at": "2026-08-18T06:37:34Z",
+  "closed_at": "2026-08-18T06:37:34Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8949",
+  "body": "Filed by the `domain:devx` seat (#6023), split out of **#8706** because it lands in the **skills root**, which is not this seat's lane. Unassigned. ⛔ No `domain:*` set — triage's single-producer field, though the `skills` seat (#7623) is the obvious owner.\n\n## The gap\n\n`scripts/ablation-dist-preflight.mjs:59-61` states the coupling in its own words:\n\n> invoked from the ablation procedure in `.claude/agents/os-dev.md` and `.claude/skills/dogfood-verification/SKILL.md` — **keep those two and this file's usage line in step.**\n\n#8706 measured that the hazard those procedures describe is **stated too narrowly**. The script header (and, per the card, those procedures) frame it as a property of `packages/qa/dogfood`. It is not: it holds for **any test whose subject resolves through the dep's `exports` (⇢ `dist/`)** — i.e. every entry of `KNOWN_UNALIASED_TEST_IMPORTS` in `scripts/check-test-source-alias.mjs`.\n\nTwo measured pairs, from two different sessions:\n\n| pair | what happened |\n|:--|:--|\n| `plugin-email` ⇢ `platform-objects` | ablation removed an `internal: true` flag; **375 tests passed** — vacuous, because the subject resolved to a pre-ablation `dist/`. Rebuild → 4 red, as predicted. |\n| `plugin-auth` ⇢ `@objectstack/core` | ablation legs meant to prove a new gate *can* fail ran the **pre-mutation artifact** and stayed green. |\n\n## ⚠️ Why the second pair is the one to write the procedure around\n\nThe false green there was **maximally convincing in the wrong direction**. The legs existed to prove a gate is capable of failing. An un-rebuilt ablation returns exactly *\"the gate did not fire\"* — which in that context reads as **evidence the gate is broken**, not as evidence the harness is. A dev acting on it goes hunting for a fix that is not needed, or **weakens a working gate to make it \"fire\"**.\n\n⇒ The procedure should carry the mechanical rule, both halves:\n\n- **rebuild after mutate**, and\n- **rebuild after RESTORE** — proving each reached `dist/`.\n\nThe restore half is the one most likely to be skipped: rebuilding after mutating is intuitive; remembering that *restoring* also needs a rebuild before the **next** measurement is trustworthy is not. The `plugin-auth` PR did it correctly and is worth copying — it proved the restore reached the artifact (`grep -c <marker> packages/core/dist/index.js` → `0` after `git checkout`).\n\n## ⛔ Scope and constraints\n\n- **Files**: `.claude/agents/os-dev.md` and `.claude/skills/dogfood-verification/SKILL.md`.\n- ⛔ **Human-merge only.** Standing maintainer ruling, 2026-08-11: 「所有 skills 的更新和 adr 类似，需要人工审核」. An AI seat may draft, branch and open the PR; it ⛔ must not merge it, queue it, or arm auto-merge. Surface it in the round report as *awaiting a human merge* — that state and \"forgotten\" look identical on GitHub.\n- ⛔ **Do not edit `scripts/ablation-dist-preflight.mjs` here** — its header is #8706's scope, in flight in the devx lane. Keeping them in separate PRs is deliberate: one is queueable, one is not.\n- ⛔ **Out of scope**: whether the preflight grows a per-symbol mode. Raised and deliberately unsettled by #8706; it is a design question.\n\n## Why this was split rather than done in #8706\n\n#8706's triage scoped it as *\"the preflight script's header and the AGENTS.md ablation clause\"*. ⚠️ **`AGENTS.md` has no ablation clause** — measured on `origin/main` @ `a8189aef`, with a positive control (the file reads 927 lines; only the worktree/stash directives match). The real second location is the pair above, which is another lane **and** a different merge path. Recorded on #8706."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 9567,
+  "kind": "issue",
+  "title": "Two live wire codes are outside the ADR-0112 vocabulary, newly measured: `FLOW_CONVERSION_CONFLICT` (409) and `owd_widening_forbidden` (403)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T11:06:05Z",
+  "updated_at": "2026-08-18T15:40:06Z",
+  "closed_at": "2026-08-18T15:40:06Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9567",
+  "body": "Surfaced by the widened `check:dispatcher-error-vocabulary` scan (#9460, half 1). Filed unassigned — **registering or renaming a code is the `packages/spec` lane's call**, and #9460's triage ruled that a registration sweep coming out of the widened report is a new card in that lane rather than work done on the gate card. The gate card records the measurement only; nothing here has been decided.\n\nBoth are recorded in `packages/runtime/src/dispatcher-error-vocabulary.ts` as `verdict: 'pending-registration'`, which is what took `PENDING_LEDGER_REGISTRATION` from 0 to 2. That list is the #8846 hand-off.\n\n## 1. `FLOW_CONVERSION_CONFLICT` — a live 409, straightforwardly registrable\n\n`packages/metadata-protocol/src/protocol.ts` refuses a metadata write whose token is already a live name in the environment:\n\n```\nconst err = new Error(`[flow_conversion_conflict] ...`);\n(err as any).code = 'FLOW_CONVERSION_CONFLICT';\n(err as any).status = 409;\nthrow err;\n```\n\nAlready SCREAMING_SNAKE, so ADR-0112 D1 is satisfied and this is an ordinary ledger admission. It was invisible until now because the `assign` shape demanded a bare identifier to the left of `.code` and this site writes a cast, putting a `)` where the anchor wanted a word character.\n\nNote the message prefix spells the code lowercase while the stamp spells it SCREAMING — worth a glance when registering, since the prefix is what a human reads in a log.\n\n## 2. `owd_widening_forbidden` — a live 403 that D1 forbids as spelled\n\n`packages/plugins/plugin-security/src/object-posture-gate.ts` throws the ADR-0090 D7 / ADR-0086 D1 refusal through a code-carrying helper. It reaches the wire verbatim: `packages/rest/src/meta-object-owd-gate.test.ts` drives `PUT /api/v1/meta/object/:name` and asserts a 403 whose body `code` is this exact lowercase string.\n\nThis is the producer #9460 and #9459 both attest. The open question is only what to do about the spelling, and it is genuinely a fork:\n\n- **A — register a SCREAMING_SNAKE rename** (`OWD_WIDENING_FORBIDDEN`), fix the producer, and let the row ratchet out. Costs a wire-visible code change on a route whose test pins the current string.\n- **B — keep the lowercase spelling and let the #9106/#9232 demote answer it** (`code: PERMISSION_DENIED` with `declaredCode` preserving the producer's spelling), and record the site under a verdict that says so. #9460's triage notes zero consumers branch on it.\n\n⚠️ **B is not what happens today on this route.** The #9460 issue body states the flat door already demotes it, but on `origin/main` at 65d4fff7c the REST meta door does **not** go through the demoting dispatcher — the test above asserts the raw lowercase code on the wire, and a search of the history finds no commit carrying that change. So the body is currently one `ApiErrorSchema` cannot parse. Whichever way this goes, that is the fact to start from.\n\n`pending-registration` is the only honest verdict the current vocabulary offers for it (`foreign-vocabulary` would be false — it is a request refusal on a wire; `boot-refusal` would be false — it crosses an HTTP boundary), but it is strictly a **record that a live wire code is outside the vocabulary**, not a vote for option A.\n\nRelated: #9460 (the gate widening that measured this) · #9459 · #8846 (the registration batch) · #9106 (the demote rule).\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 9532,
+  "kind": "issue",
+  "title": "Five more published service READMEs document a `.configure()` entry point and classes that exist nowhere in the repo — the same defect class as #9517, unfixed by it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T07:21:58Z",
+  "updated_at": "2026-08-18T13:38:50Z",
+  "closed_at": "2026-08-18T13:38:50Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9532",
+  "body": "Found while implementing #9517 (plugin-audit's published README). That card's own text asked for this check — \"worth checking the sibling plugin READMEs in the same pass: if this one drifted this far unnoticed, the mechanism (no gate reads published READMEs against exports) is not specific to this package.\" It is not. ⛔ Filed rather than fixed in that PR: five packages, each needing its own measurement of its real surface, which is nowhere near the bounded in-place bar.\n\n## What is wrong\n\nFive **published** service READMEs document an entry point that does not exist, in the same shape #9517 documented:\n\n| Package | README calls | Published? |\n|---|---|---|\n| `packages/services/service-analytics` | `ServiceAnalytics.configure({...})` | `files: ['dist','README.md','CHANGELOG.md']`, `private` unset |\n| `packages/services/service-automation` | `ServiceAutomation.configure({...})` | same |\n| `packages/services/service-cache` | `ServiceCache.configure({...})` | same |\n| `packages/services/service-i18n` | `.configure({...})` | same |\n| `packages/services/service-job` | `ServiceJob.configure({...})` | same |\n\nTwo independent measurements, both zero:\n\n```\n# no class in this repo exposes a static configure()\ngit grep -n \"static configure\" -- 'packages/**/*.ts'      # → nothing\n\n# and the identifiers themselves are not exported anywhere\ngit grep -c \"export .*ServiceAnalytics\\b\"  -- 'packages/**/src/**/*.ts'   # → 0 files\ngit grep -c \"export .*ServiceAutomation\\b\" -- 'packages/**/src/**/*.ts'   # → 0 files\ngit grep -c \"export .*ServiceCache\\b\"      -- 'packages/**/src/**/*.ts'   # → 0 files\ngit grep -c \"export .*ServiceJob\\b\"        -- 'packages/**/src/**/*.ts'   # → 0 files\n```\n\n⇒ It is not a renamed or moved API. **The class the README imports does not exist, and the static it calls has never existed on anything.** A reader following any of these five writes code that cannot compile — and because all five are in their packages' `files` arrays with `private` unset, these are the pages npm renders.\n\n## Why this is worth its own card\n\n#9517 was graded urgent because a published README is the artifact a prospective user reads first, and because nothing detects this class: no gate reads a published README against its package's actual exports. Fixing plugin-audit closed one instance. **The mechanism is untouched, and here are five more instances of it**, found by a single grep.\n\n⚠️ Severity is deliberately not asserted here. #9517's extra weight came from a SOC 2 / HIPAA / GDPR banner on top of the fabricated API; I have not checked whether any of these five carries a comparable claim, only that the entry point is fabricated. That check belongs to whoever picks this up.\n\n## Suggested disposition\n\nTwo separable pieces, and the second is the one that stops this recurring:\n\n1. **Per-package rewrite** against each package's real exports, same method as #9517 — measure the surface, delete what is false, document only what can be pointed at. Five independent judgment calls; not mechanical.\n2. **A gate**, which is the actual fix for the class: something that reads each published README's `import { X } from '@objectstack/<pkg>'` lines and its `X.method(` call sites against the package's built `.d.ts`, and fails when a documented symbol is absent from the exports. That is the check whose absence let both #9517 and this drift for as long as they did. ⚠️ Worth scoping carefully — a naive version will drown in false positives on prose and pseudo-code — but the narrow form (only `import` statements naming a workspace package, only in files listed in `files`) is tractable.\n\nRefs: #9517 (the plugin-audit instance, and the ruling that shaped its rewrite) · PR #9531 (that rewrite)."
+}

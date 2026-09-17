@@ -1,0 +1,35 @@
+{
+  "number": 9292,
+  "kind": "issue",
+  "title": "RestServer's /discovery handler builds its document from the control-plane protocol, not the request's — scoped `/environments/:id/discovery` included",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-17T12:02:23Z",
+  "updated_at": "2026-08-18T00:18:36Z",
+  "closed_at": "2026-08-18T00:18:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9292",
+  "body": "Filed unassigned by the dev seat on #9120 (session `session_01Y26DJEHSBhhAQ6wwfsHNza`) while verifying that card's `req`-threading requirement. Out of #9120's scope — that card is settled at \"route `probeMcpServeable` through `resolveRequestEnvironmentId`\", and this is a different seam with a much wider blast radius — so recorded here rather than fixed in PR #9291. Searched open and closed issues by keyword first; the near neighbours are #9120 itself and #7541 (closed, `capabilities.search` advertised false while the route served 200), no open duplicate.\n\n## Measured against `origin/main` @ `b0fa4fc1a`\n\n`packages/rest/src/rest-server.ts`, `registerDiscoveryEndpoints`, line 2914 — the first statement of the handler:\n\n```ts\nconst discovery = await this.protocol.getDiscovery();\n```\n\n`this.protocol` is the **control-plane** protocol captured at construction. Roughly thirty other handlers in the same file obtain theirs as `await this.resolveProtocol(environmentId, req)`, which routes through `resolveRequestEnvironmentId` and returns the per-request kernel's own `protocol` service. `/discovery` is the surface that describes the API to SDKs, codegen and AI clients, and it is the one that does not.\n\nThe handler does read `req.params?.environmentId`, but only for **route-string substitution** (`realBase`) and the `scoping` block at the end. Nothing about the document's content follows it.\n\n## Why this looks like a defect rather than a deliberate control-plane choice\n\nThe sharper half is the **scoped** route. `registerRoutes` registers the same closure for both the unscoped base and `.../environments/:environmentId` (`registerForBase(basePath)` and `registerForBase(scopedBase)`), so `GET /api/v1/environments/abc/discovery` — a request that names its environment explicitly, in the URL — still returns the control-plane protocol's document. If the unscoped route's answer were a deliberate \"discovery is a control-plane concern\", the scoped route would still be the counter-example: there is no ambiguity about which environment that caller means.\n\nWhat the document carries that is protocol-derived, and therefore host-derived today:\n\n- `capabilities.transactionalBatch` — the protocol derived it from `engine.transaction`, i.e. from a kernel's datasource;\n- `capabilities.search` — the protocol answered `typeof searchAll === 'function'` for its own kernel;\n- the base `routes` map and `version` before this handler overwrites parts of it.\n\nOn a single-environment boot the host protocol and the request's protocol are the same object, so this is invisible — the same reason #9120's probe defect was invisible. It is reachable only on a multi-tenant host with per-environment kernels.\n\n## What I did NOT measure\n\nI read this off the source and the route registration; I did **not** boot a multi-tenant host and diff two environments' discovery documents, and I did not establish that any deployed pair of environments currently differs in `transactionalBatch` or `search`. So the *reachability* is argued from the code path, not observed end to end — worth confirming before the fix is designed. That is also why this is not a drive-by fix in #9291: unlike the probe, whose correct form was pinned by eight siblings, \"which protocol should serve `/discovery`\" is a design question about the surface's meaning, and the answer may legitimately differ between the scoped and unscoped routes.\n\nNote AGENTS.md, Route and surface ownership rule 4: \"Machine-readable surfaces must not lie. `/discovery` and friends are read by SDKs, codegen and AI clients.\"\n\nRelated: #9120 / PR #9291 (the ninth env-resolution consumer, fixed) · #7541 (closed, the same class one layer up) · #4024 (closed, added the `mcp` probe).\n"
+}

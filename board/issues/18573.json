@@ -1,0 +1,30 @@
+{
+  "number": 18573,
+  "kind": "pull_request",
+  "title": "docs: name both Connect-an-Agent doors in three published pages",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "os-try-charles",
+    "id": 313893388,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-17T02:19:58Z",
+  "updated_at": "2026-09-17T02:20:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/18573",
+  "body": "Part of #18143\n\nClause-②: no\n\n## What this changes\n\nThree published documentation pages still sent readers to **Setup → Connect an\nAgent** to reach the Connect-an-Agent page. `SETUP_APP` declares\n`requiredPermissions: ['setup.access']`, so that instruction is a dead end for\nevery non-admin — and the ruling that made the page reachable for them was\ndelivered by a second `navigationContributions` entry into the **`account`**\napp's `grp_account_developer` group, not by opening Setup up. Each line is\njudged on its own; two different fixes result.\n\n| Page | Shape | Fix |\n|:--|:--|:--|\n| `content/docs/api/index.mdx` | a direct key-minting instruction | names **both** doors |\n| `content/docs/ai/agents.mdx` | descriptive summary that already defers step-by-step setup to `/docs/ai/connect-mcp` | drops the `Setup → ` prefix only |\n| `content/docs/getting-started/build-with-claude-code.mdx` | descriptive, but its subject is \"Admins\" | names **both** doors |\n\n**Why `agents.mdx` gets the prefix drop and not the two-door treatment.** The\nparagraph sits under a Callout that already reads *\"Step-by-step client setup\n(Claude Code, Claude Desktop, `.mcp.json`, API keys) with verification and\ntroubleshooting lives in [Connect an MCP Client](/docs/ai/connect-mcp). The\nsummary below covers the architecture.\"* That page carries the authoritative\ntwo-door routing. Naming the page without a door removes the false direction\nwithout duplicating routing into a section that explicitly defers it.\n\n**Why `build-with-claude-code.mdx` cannot be fixed by a prefix drop.** Its\nsubject was *\"Admins find …\"*. Deleting `Setup → ` leaves the sentence still\ntelling a non-admin reader that this is somewhere admins go. The subject is the\ndrift, so the sentence is rewritten and both doors are named.\n\nWording for the two-door lines is copied from what already shipped in\n`packages/mcp/README.md` and `content/docs/ai/connect-mcp.mdx`.\n\n## Deliberately out of this PR\n\n- `content/docs/deployment/environment-variables.mdx:260` carries the fourth\n  instance of the same drift. It is left untouched here because another PR is\n  in flight against that file; it will be taken in a follow-up round. That is\n  why this PR says `Part of #18143` and not a closing keyword — #18143 stays\n  open for that remaining line.\n- The four occurrences the card marks *\"Deliberately NOT included\"*\n  (`docs/adr/0101-…`, `docs/qa/platform-checklist/areas/ai.json`, and two\n  `.changeset/*.md` bodies) are dated records — a ruling, a test checklist and\n  published version history. They are history, not drift.\n\n## Facts re-verified for this PR\n\nTree `objectstack-issue-18143`, revision `340b6dcf74df4f2e931e26f8fb795ce9b5dbf0cb`:\n\n- `packages/platform-objects/src/apps/setup.app.ts:47` — `requiredPermissions: ['setup.access']` (control: `:31` `name: 'setup'`).\n- `packages/mcp/src/connect-ui.ts` — two `navigationContributions`: `app: 'setup'` / `group_integrations`, and `app: 'account'` / `grp_account_developer`; both items `id: 'nav_connect_agent'`, `label: 'Connect an Agent'`.\n- `packages/platform-objects/src/apps/account.app.ts:179-181` — `id: 'grp_account_developer'`, `label: 'Developer'`; `:186` `nav_account_api_keys`.\n- `packages/apps/account/src/index.ts:27` — `ACCOUNT_APP_PACKAGE_ID = 'com.objectstack.account'`.\n\n## Changeset\n\n`skip-changeset`, measured rather than assumed. Every `files[]` array in the\nworkspace was enumerated (70 packages): the distinct entry set is\n`CHANGELOG.md | README.md | api-surface | dist | json-schema | liveness |\nllms.txt | prompts | spec-changes.json | src/**/*.zod.ts`. `files[]` resolves\nrelative to each package root and `content/docs/` sits above all of them, so no\nentry can reach it. Firing control for the enumerator: it does report\n`@objectstack/lint` shipping `CHANGELOG.md`, and `@objectstack/spec` shipping\n`llms.txt` / `prompts`. Symbol check: three distinctive strings from this diff\n(`copy-paste-ready connect snippet`, `The in-product entry point`,\n`scripts, CI, headless agents`) return zero hits across `packages/`, `apps/`\nand `examples/`; the same grep over `content/docs/` hits all three lines.\n\n## Acceptance notes\n\n- `noted, not filed:` `content/docs/ai/connect-mcp.mdx:104` spells the admin\n  door as a bullet whose direct link is `/_console/apps/com.objectstack.setup/page/connect_agent`,\n  while the pages fixed here spell the same door only as a breadcrumb. Purely a\n  consistency observation, not a defect, and no in-flight PR or reader path\n  depends on it. Successor: none.\n\n## Verification\n\nText-only change to three MDX pages; no code, no behaviour, no gate and no\nauthorization change. Gate families were derived from the diff with\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`\nand run locally; results are in the dispatch report. Repo-wide scans belong to\nCI.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017ef78bLdybu3AffehKkhfk)_"
+}

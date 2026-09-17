@@ -1,0 +1,35 @@
+{
+  "number": 9498,
+  "kind": "issue",
+  "title": "[v3 migration 2/4] Land the v3 migration as one atomic PR — bump, gates, workflows and config together",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T05:34:30Z",
+  "updated_at": "2026-08-18T11:00:47Z",
+  "closed_at": "2026-08-18T11:00:14Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9498",
+  "body": "Sub-issue of #9465.\n\nBlocked-by: #9497\n\nDo not start before #9497's measurements are on #9465. The scope of this card **is** those measurements; starting early means writing the migration against a guessed shape, which is the failure this epic is structured to avoid.\n\n## Ruling — one PR, not a sequence\n\nBoth half-states are broken, and each is broken *silently* until the next release:\n\n- bump alone → v3 installed while the gates and `cut-rc.yml` still model v2's pre-mode semantics;\n- migration alone → gates expecting `.changeset/pre/` while v2 never creates it.\n\nSo this PR carries `@changesets/cli: ^3.0.0` in the root `package.json` **and** every consequential change. #9217 (Dependabot's raw bump) closes itself once `main` carries `^3.0.0`.\n\n## Expected surface — re-derive it from #9497's verdicts, do not copy this list\n\n`package.json` (the bump; and the `version` script is a `&&` chain — `changeset version && sync-protocol-version.mjs && sync-template-versions.mjs && sync-docs-image-tags.mjs` — so v3's exit-1 behaviour reaches all of it) · `.changeset/config.json` (`$schema`, `privatePackages` per U4, the experimental key per U2) · `scripts/check-changeset-no-major.mjs` (the pre/RC exemption, per U5) · `scripts/objectui-changeset-digest.mjs` (reads `.changeset/pre.json`, and its self-test fixtures write `{\"mode\":\"pre\",\"tag\":\"rc\"}`) · `scripts/check-empty-changeset.mjs` (**only** if U1 measured exact coverage; the default is that this gate stays) · `.github/workflows/cut-rc.yml` (the enforced allowlist and the prose describing v2 semantics) · `.github/workflows/pr-automation.yml` (prose referencing pre.json behaviour and #4898).\n\n## Non-negotiable\n\n- **The allowlist follows the measurement, never the reverse.** If a v3 `changeset version` produces a file set `cut-rc.yml` would reject, the allowlist is updated to the measured truth — you do not massage the tool's output to fit a list written under v2.\n- **A self-test that still asserts v2 semantics is a failed run**, not a passing one. Every touched script's `--self-test` must model v3 and pass.\n- **Perform no release.** No `changeset publish`, no version tags, no release-workflow dispatch, no merging of a Version Packages PR, and no pre-mode transition on `origin`. Releases are human-only here and this card does not change that.\n- Do not weaken a gate to accommodate v3 before #9497 measured what v3 actually does.\n\n## Acceptance\n\n- One PR, first body line `Fixes #<this card>`, carrying the bump and every consequential change together.\n- PR body carries the rehearsal record from #9497 (measured file set vs the allowlist) and states which of U1–U6 drove which change.\n- Every touched script's `--self-test` passes and models v3; gates re-derived for the actual diff with `node scripts/pm/dispatch-gates.mjs` and run.\n- Changeset decision stated and justified: a root devDependency change reaches no consumer, so `skip-changeset` may be correct here — decide from the diff and say why.\n- `pnpm changeset`, `changeset status` and a dry `pnpm run version` all exercised after the change, with output quoted.\n"
+}
