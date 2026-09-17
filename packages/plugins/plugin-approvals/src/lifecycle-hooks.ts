@@ -68,9 +68,53 @@
  * by-id path: extending a guard to more rows must move the *allow* rules with
  * the *deny* rules, or fail-open merely becomes false-positive.
  *
+ * ## The per-record refusal is END-USER copy — the other three are not (#18153)
+ *
+ * Four sites raise {@link lockedError}, and they answer two different readers.
+ * Three of them are OPERATOR boundary messages — over the
+ * {@link PENDING_LOCK_LIMIT} cap on a named-id write, over it on a predicate
+ * write, and an unanswerable intersection query — raised about a WRITE SHAPE,
+ * not about a record. Naming the object's API name there is the useful thing to
+ * say, because the reader is whoever has to rescope that write, and their
+ * wording is deliberately left alone.
+ *
+ * The fourth — the per-row verdict at the foot of {@link bindApprovalLockHook}
+ * — is the one an end user reads in a toast when a drag or an inline edit is
+ * refused. It used to spell the record as `record '<id>' of '<apiName>'`,
+ * putting an opaque primary key and a machine identifier into user-facing
+ * prose. That is the defect `@objectstack/objectql`'s `resolveRecordTitle`
+ * exists to stop ("no id fallback", its header), and it is also a DISCLOSURE
+ * surface: a deny-path toast is exactly the string that ends up in screenshots,
+ * screen recordings and support tickets. So the sentence now names the record
+ * the way the object declares it — {@link recordLockRefusal} — and the id plus
+ * the API name are demoted to the CONSOLE, where a support path can still read
+ * them.
+ *
+ * What that costs is ZERO extra reads, which is worth stating because the
+ * opposite was assumed. Both halves are already in hand at the refusal:
+ *
+ *   - the object's `label` and its ADR-0079 title pointer come from
+ *     `engine.getSchema(object)` — an in-memory registry read, no I/O;
+ *   - the record itself is `ctx.previous`, the pre-image the engine has
+ *     ALREADY read. Measured against the real engine + a real sqlite driver on
+ *     all four update shapes (by-id, `updateManyData`, predicate `multi`, and
+ *     unscoped `multi`): every one dispatches this hook per row with `previous`
+ *     bound and `input.id` set, so the title is free on each.
+ *
+ * Two things it deliberately does NOT do. It does not read the record itself
+ * on the deny path: a title fetched as SYSTEM would be a title for a row the
+ * caller may not be allowed to READ, and this hook exists precisely to gate
+ * rows in that state (the #4630 rule above). And it does not mine
+ * `payload_json`, whose whole discipline is that it is served REDACTED per
+ * reader — a field lifted out of it into an error message would route around
+ * that. When no title is in hand the sentence degrades to the object's label,
+ * and when that is missing too, to "This record" — ⛔ never back to the id.
+ *
  * Registered under `packageId: 'plugin-approvals:lock'` so it can be cleanly
  * unbound on plugin stop.
  */
+
+import { resolveDisplayField } from '@objectstack/spec/data';
 
 export const APPROVALS_HOOK_PACKAGE = 'plugin-approvals:lock';
 
@@ -83,6 +127,15 @@ interface MinimalEngine {
   }): void;
   unregisterHooksByPackage(packageId: string): number;
   find<T = any>(object: string, args: any, opts?: any): Promise<T[]>;
+  /**
+   * The registry read that lets the refusal name a record the way its object
+   * declares it (`label`, ADR-0079 `nameField`). REQUIRED on `IObjectQLEngine`
+   * — the slot's actual occupant — and optional HERE for the same reason every
+   * other member of this interface is structural: the hook is bound against
+   * fakes and foreign engines in tests, and a missing registry must degrade the
+   * WORDING, never the lock.
+   */
+  getSchema?(objectName: string): any | undefined;
 }
 
 /**
@@ -146,6 +199,65 @@ function lockedError(message: string): never {
   err.code = 'RECORD_LOCKED';
   err.statusCode = 409;
   throw err;
+}
+
+/**
+ * The record's human title, or `undefined` — ⛔ NEVER its id (#18153).
+ *
+ * `resolveDisplayField` is ADR-0079's single arbiter of "which field is the
+ * title" (`nameField`, then the deprecated `displayNameField` alias, then a
+ * deterministic derivation), asked here rather than re-derived so this sentence
+ * and the approvals inbox's `record_title` cannot name different fields for one
+ * object.
+ *
+ * Two guards sit on top of it, and both exist because this message is the one
+ * the id must not reach:
+ *
+ *   - the derivation tier "first title-eligible field by declaration order"
+ *     will happily land on a `text` primary key, so a title pointer spelled
+ *     `id` is refused outright — the same `declared !== 'id'` line
+ *     `ApprovalService.resolveDisplayField` already draws;
+ *   - a title whose VALUE is the record id is refused too, so "no id in the
+ *     toast" holds structurally rather than by trusting the pointer.
+ *
+ * An empty or whitespace-only title is absence, not a title.
+ */
+function recordTitleOf(
+  schema: unknown,
+  record: Record<string, unknown> | null | undefined,
+  recordId: string,
+): string | undefined {
+  if (!schema || !record || typeof record !== 'object') return undefined;
+  const field = resolveDisplayField(schema as any);
+  if (!field || field === 'id' || field === '_id') return undefined;
+  const raw = record[field];
+  if (raw === null || raw === undefined || typeof raw === 'object') return undefined;
+  const title = String(raw).trim();
+  if (!title) return undefined;
+  if (recordId && title === recordId) return undefined;
+  return title;
+}
+
+/**
+ * The END-USER sentence for a record held by a live approval (#18153).
+ *
+ * Three degradations, in the order the material runs out, and none of them
+ * reaches for the id or the object's API name:
+ *
+ *   - title + label → `Opportunity 'Acme renewal' is locked …`
+ *   - label only    → `This Opportunity is locked …`
+ *   - neither       → `This record is locked …`
+ *
+ * The lock's own clause is kept verbatim from the message this replaced ("is
+ * locked while an approval is in progress"), so a reader who has seen the old
+ * text recognises the new one; what is added is the one thing the old sentence
+ * never said — what has to happen before the record can be edited again.
+ */
+function recordLockRefusal(objectLabel: string | undefined, recordTitle: string | undefined): string {
+  const subject = recordTitle
+    ? (objectLabel ? `${objectLabel} '${recordTitle}'` : `'${recordTitle}'`)
+    : (objectLabel ? `This ${objectLabel}` : 'This record');
+  return `${subject} is locked while an approval is in progress, and cannot be edited until that approval is complete`;
 }
 
 /**
@@ -389,9 +501,29 @@ export function bindApprovalLockHook(engine: MinimalEngine, logger?: MinimalLogg
       const mirror = config?.approvalStatusField;
       if (typeof mirror === 'string' && mirror && changedFields.every((f) => f === mirror)) continue;
 
-      lockedError(
-        `record '${String(pending?.record_id ?? '')}' of '${object}' is locked while an approval is in progress`,
+      // ── The one END-USER sentence of the four (#18153) ─────────────
+      // See the module docstring. The id and the API name are not deleted —
+      // they move to the console, which is where a support path reads them
+      // and where a screen recording does not.
+      const recordId = String(pending?.record_id ?? '');
+      let schema: unknown;
+      try { schema = engine.getSchema?.(object); } catch { /* registry unavailable — label degrades */ }
+      const objectLabel = typeof (schema as any)?.label === 'string' && (schema as any).label
+        ? String((schema as any).label)
+        : undefined;
+      // `previous` is the pre-image the engine already read for THIS row; it is
+      // used only when it really is the row this pending request names, so a
+      // dispatch that ever carried a different row cannot title the wrong
+      // record. No fallback read — see the module docstring.
+      const previous = ctx?.previous as Record<string, unknown> | undefined;
+      const previousId = previous ? String(previous.id ?? previous._id ?? '') : '';
+      const record = previousId && previousId === recordId ? previous : undefined;
+
+      logger?.info?.(
+        `[approvals] update refused RECORD_LOCKED: record '${recordId}' of '${object}' ` +
+        `is held by pending approval request '${String(pending?.id ?? '')}'`,
       );
+      lockedError(recordLockRefusal(objectLabel, recordTitleOf(schema, record, recordId)));
     }
   }, { packageId: APPROVALS_HOOK_PACKAGE, priority: 50 });
 
