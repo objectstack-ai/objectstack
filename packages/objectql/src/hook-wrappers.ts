@@ -1080,12 +1080,13 @@ function declaredFieldsFor(ctx: HookContext): Record<string, unknown> | undefine
  * Materialisation is applied only when the record's persisted state is in hand
  * — an insert (nothing to know) or an update whose prior row was fetched.
  *
- * Since #5038 a predicate bulk update's AFTER dispatch is per row and DOES
- * carry the row's prior state, so it merges and materialises like any
- * single-record write — which is exactly what "`record` is the row's real state,
- * not the bare payload" means (#4862). Its `before*` dispatch still fires once
- * for the batch with no prior row, so that payload is left exactly as it is
- * rather than gaining `null`s that contradict N stored rows.
+ * A predicate bulk update's AFTER dispatch is per row since #5038, and its
+ * `before*` dispatch since #5574 (ADR-0058 Addendum II, D1/D2): both carry the
+ * row's prior state, so both merge and materialise like any single-record
+ * write — which is exactly what "`record` is the row's real state, not the
+ * bare payload" means (#4862). A context whose prior row was never read keeps
+ * its payload exactly as it is rather than gaining `null`s that contradict
+ * stored state.
  *
  * Copies, never mutates: `ctx.previous` and `ctx.input.data` are the engine's
  * own objects, observed by the handlers that run after this gate.
@@ -1174,12 +1175,15 @@ function pickRecordPayload(ctx: HookContext): any {
  * identifier from the CEL scope. Same here:
  *   - **insert** — there is no prior state, so `previous` is unbound and any
  *     reference to it is an author error, reported as such;
- *   - **the `before*` dispatch of a predicate (`multi: true`) bulk write** —
- *     it fires ONCE for N matched rows, so there is no single prior record to
- *     bind; `previous` stays unbound rather than being invented. The `after*`
- *     dispatch of that same write is per row since #5038 and binds the row's
- *     own pre-image, so a transition condition there reads exactly as it does
- *     on a single-record write.
+ *   - **a `before*` dispatch that names no row** — the opt-in
+ *     `dispatchUnscopedMultiWrite` one, fired once for a `multi: true` write
+ *     carrying no caller predicate at all: with no row there is no single
+ *     prior record to bind, so `previous` stays unbound rather than being
+ *     invented. A predicate (`multi: true`) bulk write is NOT this case — it
+ *     dispatches both phases per matched row (`after*` since #5038, `before*`
+ *     since #5574, ADR-0058 Addendum II D1/D2), each binding the row's own
+ *     pre-image, so a transition condition reads exactly as it does on a
+ *     single-record write.
  * Binding `null`/`{}` instead would make `previous.x == null` answer "yes"
  * for a record whose prior state is simply unknown — a fabricated fact, the
  * one thing materialisation is careful never to do.
