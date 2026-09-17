@@ -88,12 +88,26 @@
 
 import type { HookContext } from '@objectstack/spec/data';
 import type { IDataEngine } from '@objectstack/spec/contracts';
+import { isMissingTableError } from '@objectstack/types';
 // DERIVED, never re-typed — the same rule `audit-writers.ts` states for its own
 // two faces. An object excluded from write auditing (recursion, auth/session
 // noise, ADR-0057 telemetry plumbing) is excluded from read auditing for the
 // identical reasons, and a second hand-kept list would disagree on the day
 // either is fixed.
-import { AUDIT_EXCLUDED_OBJECTS, createFieldPresenceProbe } from './audit-writers.js';
+//
+// ⚠️ [#18247] `auditFailureCauseKey` / `auditFailureCauseSummary` join that
+// derivation for the same reason and on the same seam. #15166 replaced a
+// process-wide boolean with a cause key in `audit-writers.ts`; #17452 found a
+// SECOND copy of the boolean in `auth-event-audit.ts` and imported the key
+// rather than re-spelling it, and exported it for exactly that purpose. This
+// file was the THIRD copy. ⛔ A third spelling of the key is how the defect
+// travelled the first two times — import it.
+import {
+  AUDIT_EXCLUDED_OBJECTS,
+  auditFailureCauseKey,
+  auditFailureCauseSummary,
+  createFieldPresenceProbe,
+} from './audit-writers.js';
 
 /**
  * The ledger action this writer emits.
@@ -481,28 +495,94 @@ export function installReadAuditWriter(
     );
   };
 
-  let failureReported = false;
+  /**
+   * Report a lost batch of record-view rows — once per CAUSE, not once per
+   * failed flush.
+   *
+   * Same discipline, and the same reason, as `reportAuditWriteFailure` in
+   * `audit-writers.ts` and `reportAuthEventWriteFailure` in
+   * `auth-event-audit.ts`: a systemic cause (the ledger is unreachable from
+   * this connection) would otherwise emit one `error` per flush and train
+   * everyone to skim the channel. That much is unchanged, and ⛔ must stay —
+   * AGENTS.md records the once-per-degradation rule as a deliberate anti-noise
+   * choice and names 「log every failure at `error`」 as its falsifier.
+   *
+   * [#18247] What changed is the COUNTING UNIT, and it changed here for the
+   * THIRD time in this package: this file carried its OWN copy of the
+   * process-wide boolean and its OWN fixed message literal, so neither
+   * #15166's fix to `audit-writers.ts` nor #17452's to `auth-event-audit.ts`
+   * reached it. All three copies had the same two defects.
+   *
+   *  1. One process-wide boolean means the first failure of ANY cause silences
+   *     every later failure of every OTHER cause for the life of the process.
+   *     The rule's unit is a DEGRADATION and a second cause is a second
+   *     degradation, so the key is now the failure's identity —
+   *     {@link auditFailureCauseKey}, imported rather than re-spelled. A repeat
+   *     of an already-reported cause still degrades to `debug`, exactly as
+   *     before; a NEW cause gets its own `error` line, once.
+   *  2. The fixed literal printed the ADR-0057 §3.6 telemetry-datasource
+   *     remedy for every cause, so a fault that had nothing to do with
+   *     datasource routing sent its operator to check something that was
+   *     working. ⛔ The guidance is not deleted and not weakened — it is the
+   *     right remedy for the missing-table cause it was written for, and is now
+   *     printed for exactly that cause, asked through the shared
+   *     `isMissingTableError` predicate.
+   *
+   * ⭐ Why this seam is not merely the third repetition: `persistReadAuditRows`
+   * is registered in `DURABILITY_CRITICAL_CALLEES`
+   * (`scripts/check-durability-degradation-log-level.mjs`), so the repo has
+   * already declared this write durability-critical. A reporter that switches
+   * itself off after one cause is exactly the failure that declaration cannot
+   * afford — the board's green looks identical to a real one.
+   *
+   * ⛔ The key is built from the error's `code`, NEVER its message — see
+   * {@link auditFailureCauseKey} for why that is what keeps the cause set
+   * bounded by boot-declared vocabularies instead of by traffic.
+   */
+  const reportedReadAuditFailureCauses = new Set<string>();
   const reportReadAuditWriteFailure = (count: number, err: unknown): void => {
     const detail = String((err as any)?.message ?? err);
     try {
-      if (failureReported) {
-        logger?.debug?.('Read-audit write failed (already reported)', { count, err: detail });
+      // The object dimension of the shared key is the LEDGER here, not the
+      // object whose record was viewed. ⛔ Not an arbitrary choice between the
+      // two: one flush is ONE write carrying rows about MANY audited objects,
+      // so there is no single viewed object to name — picking whichever landed
+      // first in the batch would make the key depend on traffic, which is the
+      // one property {@link auditFailureCauseKey} exists to deny. The failure
+      // is a property of the write against `sys_audit_log`, so that is the
+      // object named, and the key reduces to the driver's code vocabulary:
+      // bounded by construction, and still the same key shape rather than a
+      // second one. (`audit-writers.ts` passes `ctx.object` and
+      // `auth-event-audit.ts` its constant `sys_session` because on those two
+      // seams the viewed/audited object IS single-valued per write.)
+      const cause = auditFailureCauseKey('sys_audit_log', err);
+      if (reportedReadAuditFailureCauses.has(cause)) {
+        logger?.debug?.('Read-audit write failed (already reported)', { count, err: detail, cause });
         return;
       }
-      failureReported = true;
+      reportedReadAuditFailureCauses.add(cause);
+      // `persistReadAuditRows` writes ONE table, so the missing-table question
+      // is asked about that one — unlike `persistAuditTrailRow`, which writes
+      // the ledger row and its `sys_activity` mirror and asks about both.
+      const missingTable = isMissingTableError(err, 'sys_audit_log');
       const message =
-        `Read-audit write FAILED — ${count} record-view row(s) were LOST and the compliance trail is now ` +
-          'INCOMPLETE. The reads themselves SUCCEEDED and returned 200, so the API, the screens and every ' +
-          'counter read clean; only the `sys_audit_log` rows recording WHO opened those records never landed, ' +
-          'and nothing retries them. Every subsequent batch is likely lost the same way (this is reported ONCE ' +
-          '— raise the log level to `debug` to see the rest). The whole point of this capability is answering ' +
-          '"who viewed this record" for an auditor, so the failure mode is a query that returns a confident, ' +
-          'wrong, SHORT answer. Fix: confirm `sys_audit_log` is reachable from the connection this write ran ' +
-          'on — its ADR-0057 §3.6 lifecycle class routes it to the dedicated `telemetry` datasource whenever ' +
-          'one is registered (`os dev` provisions one by default as a SIBLING SQLite file), so a "no such ' +
-          'table" here usually means the write executed against a DIFFERENT datasource than the one the table ' +
-          'was created in. Set `OS_TELEMETRY_DB=0` to keep every lifecycle-classed object on the primary ' +
-          'datasource.';
+        `Read-audit write FAILED (${auditFailureCauseSummary(err, detail)}) — ${count} record-view row(s) ` +
+          'were LOST and the compliance trail is now INCOMPLETE. The reads themselves SUCCEEDED and returned ' +
+          '200, so the API, the screens and every counter read clean; only the `sys_audit_log` rows recording ' +
+          'WHO opened those records never landed, and nothing retries them. Every subsequent batch failing ' +
+          'THIS WAY is lost the same way (this CAUSE is reported ONCE — raise the log level to `debug` to see ' +
+          'the rest; a DIFFERENT cause gets its own `error` line). The whole point of this capability is ' +
+          'answering "who viewed this record" for an auditor, so the failure mode is a query that returns a ' +
+          'confident, wrong, SHORT answer. ' +
+          (missingTable
+            ? 'Fix: confirm `sys_audit_log` is reachable from the connection this write ran on — its ADR-0057 ' +
+              '§3.6 lifecycle class routes it to the dedicated `telemetry` datasource whenever one is ' +
+              'registered (`os dev` provisions one by default as a SIBLING SQLite file), so a "no such table" ' +
+              'here usually means the write executed against a DIFFERENT datasource than the one the table was ' +
+              'created in. Set `OS_TELEMETRY_DB=0` to keep every lifecycle-classed object on the primary ' +
+              'datasource.'
+            : 'Fix: resolve the driver fault quoted at the head of this line on the connection this write ran ' +
+              'on — every batch that hits it loses its rows until it is resolved.');
       // `error` is OPTIONAL on this sink, so `logger?.error?.(…)` printed
       // NOTHING when the host injected one without it — the durability
       // degradation this text describes would then be reported by nobody at
