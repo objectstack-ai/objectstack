@@ -76,7 +76,7 @@ const result = DashboardSchema.parse(data);
 | **compareTo** | `{ kind: Enum<'previousPeriod' \| 'previousYear'>; dimension?: string }` | optional | Period-over-period comparison window (`{ kind, dimension? }`) |
 | **dataset** | `string` | ✅ | Dataset name to bind (ADR-0021) |
 | **dimensions** | `string[]` | optional | Dimension names — X/group/split |
-| **values** | `string[]` | ✅ | Measure names — Y (at least one) |
+| **values** | `string[]` | ✅ | Measure names — Y (at least one; exactly one on the metric/kpi/gauge/solid-gauge/bullet family) |
 | **layout** | `{ x: number; y: number; w: number; h: number }` | optional | Grid layout position (auto-flowed when omitted) |
 | **options** | `{ dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; sortBy?: string; sortOrder?: Enum<'asc' \| 'desc'>; limit?: integer; … } & Record<string, any>` | optional | Widget specific configuration |
 | **filterBindings** | `Record<string, string \| false>` | optional | Per-widget dashboard-filter bindings: filter name → this widget's field, or false to opt out |
@@ -181,7 +181,7 @@ Dashboard header action
 | **compareTo** | `{ kind: Enum<'previousPeriod' \| 'previousYear'>; dimension?: string }` | optional | Period-over-period comparison window (`{ kind, dimension? }`) |
 | **dataset** | `string` | ✅ | Dataset name to bind (ADR-0021) |
 | **dimensions** | `string[]` | optional | Dimension names — X/group/split |
-| **values** | `string[]` | ✅ | Measure names — Y (at least one) |
+| **values** | `string[]` | ✅ | Measure names — Y (at least one; exactly one on the metric/kpi/gauge/solid-gauge/bullet family) |
 | **layout** | `{ x: number; y: number; w: number; h: number }` | optional | Grid layout position (auto-flowed when omitted) |
 | **options** | `{ dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; sortBy?: string; sortOrder?: Enum<'asc' \| 'desc'>; limit?: integer; … } & Record<string, any>` | optional | Widget specific configuration |
 | **filterBindings** | `Record<string, string \| false>` | optional | Per-widget dashboard-filter bindings: filter name → this widget's field, or false to opt out |
