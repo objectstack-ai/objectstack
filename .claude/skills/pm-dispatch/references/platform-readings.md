@@ -371,10 +371,11 @@
 - 有的现场 regen 一件没跑,推送前先跑生成物门禁别赌。
 - ③:死在源码编辑中途 ⇒ 先读 diff 判完整性:docblock 写全动机与判据的可代跑终验后提交。
 - 写一半意图不明的 ⛔ 不代提交,记交接;dev 临时目录(`.os-scratch/` 一类)清掉,⛔ 不进 PR。
-- 零提交的探针分支不是在飞工作:容器发不出分支删除 refspec。
-- `git push origin --delete <b>` 回 send-pack: unexpected disconnect,三次退避全败,同会话普通 push 正常。
-- ⇒ 测量型派发留下的探针分支永久堆在 origin 上。
+- 零提交的探针分支不是在飞工作:容器建得出远端分支却删不掉,两会话两分支实测。
+- 两道皆 403:`git push --delete` 回 RPC failed,`DELETE /git/refs/heads/…` 回 not permitted,⛔ 不重试。
+- ⇒ 探针分支永久堆在 origin 上,只有带删权的手(维护者)清得掉,本闭环内无人有该权。
 - 判据两读:`git rev-list --count origin/main..origin/<b>` 为 0,且分支名下无 open PR。
+- 「分支在」不是「卡已认领」:认领是 `Claim:` 评论,分支只是线索;291 个头里 257 个无 PR。
 - ⛔ 不据 `ls-remote | grep issue-` 正命中回避该卡:失效方向是活卡被读成已认领,无红信号。
 - 会话从上下文检测不到自己的静默降档:横幅只在 UI 侧渲染,上下文零信号。
 - 服役档的权威读数是 `get_session`(claude-code-remote MCP,无参)的 `external_metadata.last_served_model`。
@@ -428,7 +429,6 @@
 - `check:pm-dispatch-gates` 单机 430–450 秒贴容器上限 ⇒ detach 加 `tail --pid=$!`;超时非读数。
 - `check-half-states.mjs` 连 `--help` 都跑整仓 I/O ⇒ 早读到的输出文件是空的,不是干净的。
 - 后台工具调用里再 `nohup … &` 会让包装器报假 `exit 0`,而真活还在跑。
-- 分支删除被拒有第二形态:代理回 403,与既有 send-pack 断连同处置 ⇒ 不可删,⛔ 不重试。
 - harness 按内容拒写:同会话派发 PR 上 PASS 拒为 `[Self-Approval]`;同通道建卡、ACCEPT 照过。
 
 ## 闭合关键词解析(PR 正文写侧)
