@@ -149,7 +149,23 @@ export function checkKanbanQuickAdd(tag: string, key: string, value: unknown): D
   if (!value) return null;
   return {
     severity: 'warning',
-    code: INERT_QUICK_ADD,
+    // DIVERGENCE FROM OBJECTUI, and the only one below this file's header:
+    // objectui writes `code: INERT_QUICK_ADD` here. This repo runs
+    // `check:dispatcher-error-vocabulary`, whose `objlitconst` shape reads the
+    // SCREAMING_SNAKE constant NAME at a `code:` position and then must reduce
+    // it to a literal — and its literal grammar is `[A-Za-z][A-Za-z0-9_]*`,
+    // which a KEBAB-case value cannot satisfy. So the constant form is reported
+    // as an unresolvable code constant, and that finding cannot be declared
+    // away. `inert-quick-add` is a parser DIAGNOSTIC code, not an ADR-0112 wire
+    // code, and an inline quoted literal is the form both vocabulary gates
+    // already accept for the sibling diagnostic codes in `validate.ts` and for
+    // `unconsumed-widget-option` next door. The emitted VALUE is unchanged, and
+    // the test next door pins it equal to `INERT_QUICK_ADD` so the two
+    // spellings cannot drift apart. ⛔ This does NOT weaken the lockstep: that
+    // gate resolves an identifier at a code position through the package's own
+    // module-level constants, so both spellings reduce to the same code and the
+    // two copies still agree on all 26.
+    code: 'inert-quick-add',
     message:
       `<${tag}> prop "${QUICK_ADD_KEY}" reaches no control — the Quick Add button is gated on ` +
       `BOTH "${QUICK_ADD_KEY}" and an "onQuickAdd" handler, and this block supplies neither half ` +

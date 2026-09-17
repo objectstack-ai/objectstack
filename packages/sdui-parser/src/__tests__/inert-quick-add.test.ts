@@ -108,6 +108,19 @@ describe('an authored `quickAdd` is diagnosed on the ObjectKanban tags', () => {
     expect(HOST_TAGS).toEqual(['object-kanban']);
   });
 
+  it('the stamped literal equals the exported constant', () => {
+    // objectui stamps `code: INERT_QUICK_ADD`; this copy stamps the inline
+    // literal, because `check:dispatcher-error-vocabulary` cannot reduce a
+    // kebab-case constant at a `code:` position (the divergence is documented
+    // at the stamp, and is the same one `unconsumed-widget-option` carries).
+    // This row is what keeps the two spellings from drifting apart — and the
+    // lockstep gate resolves the identifier through this constant, so both
+    // copies still agree on the same code.
+    expect(INERT_QUICK_ADD).toBe('inert-quick-add');
+    const [diagnostic] = diagnose({ type: 'object-kanban', objectName: 'task', quickAdd: true });
+    expect(diagnostic.code).toBe(INERT_QUICK_ADD);
+  });
+
   it.each(HOST_TAGS)('<%s> — an authored `quickAdd: true` draws exactly one warning', (tag) => {
     const diagnostics = diagnose({ type: tag, objectName: 'task', quickAdd: true });
     expect(diagnostics).toHaveLength(1);
