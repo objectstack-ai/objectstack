@@ -334,7 +334,12 @@ console.log(explained.sql, explained.params);           // { sql, params }
 
 ```typescript
 const packages = await client.packages.list();
-await client.packages.install({ id: 'com.objectstack.plugin-auth', version: '1.0.0' });
+await client.packages.install({
+  id: 'com.objectstack.plugin-auth',
+  type: 'plugin',
+  name: 'Auth Plugin',
+  version: '1.0.0',
+});
 await client.packages.enable('com.objectstack.plugin-auth');
 await client.packages.disable('com.objectstack.plugin-auth');
 await client.packages.uninstall('com.objectstack.plugin-auth');
