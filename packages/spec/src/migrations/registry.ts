@@ -9085,6 +9085,49 @@ const step18: MigrationStep = {
         + 'duration key — which is not a reader of this schema and is unchanged.',
     },
     {
+      id: 'list-view-navigation-view-retired',
+      surface: 'view.list.navigation.view',
+      replacement:
+        'page assignment — assign a `record` page to the object and let `isDefault` pick the one '
+        + 'that opens. That is the machinery that resolves a detail layout by name; a list view\'s '
+        + '`navigation` block decides only HOW the detail is surfaced (`mode`, `size`, '
+        + '`preventNavigation`, `openNewTab`, `width`), and every one of those keys is unchanged',
+      reason:
+        'DECLARED, CONSUMED, AND WRONG — which is why this is a semantic TODO rather than a '
+        + 'mechanical strip. The key\'s describe promised "the form view to use for details" and '
+        + 'no layer from spec to console ever resolved a view by name. Its only read in the '
+        + 'shipped console put the value in the SECOND argument of `onNavigate`, the slot that '
+        + 'otherwise carries the navigation-MODE token: an authored `view` did not select a view, '
+        + 'it SUBSTITUTED for the mode. At least one consumer in the same bundle reads that '
+        + 'argument against a closed two-value vocabulary (`edit` / `view`), so any other authored '
+        + 'value matched neither branch — invisible on grids whose handler takes one argument, a '
+        + 'dead row click on the ones that do not. The enumeration behind the removal was '
+        + 'exhaustive rather than sampled: every `.view` property read in the bundle (three) and '
+        + 'every `formViews` read, and NO read anywhere is keyed by an authored view name, so '
+        + 'there is no path by which this key or any sibling could have resolved one. '
+        + 'ADR-0049 enforce-or-remove; zero authored instances in this repo and the one external '
+        + 'author removed its occurrence, so the pull that would justify ENFORCE is zero. '
+        + 'A mechanical D2 strip was weighed and declined with the direction: deleting the key '
+        + 'silently discards the author\'s actual intent — "open the detail in THIS layout" — and '
+        + 'leaves no record of which list view carried it, which is exactly the judgement a '
+        + 'semantic TODO exists to hand back. Should "open the detail in a chosen view" ever be '
+        + 'pulled, it belongs to the page-assignment machinery (`record` pages, `isDefault`), not '
+        + 'to a string on a list view.',
+      acceptanceCriteria:
+        'For EACH list view that declared `navigation.view` — the TODO names the surface, you name '
+        + 'the view: delete the key from that view\'s `navigation` block, then decide whether the '
+        + 'detail layout it asked for was ever actually delivered. It was not, so nothing regresses '
+        + 'by deleting it: confirm the record detail opens exactly as it did before (the surviving '
+        + '`mode` and `size` decide that, and both are untouched). If the named layout is one you '
+        + 'still want, publish it as a `record` page on that object and mark the one that should '
+        + 'open `isDefault`. Done when no `navigation` block in your sources carries `view`; a block '
+        + 'that still does fails to parse with the removal prescription, at `ListViewSchema`, at '
+        + '`ObjectListViewSchema` and at the `PUT /api/v1/meta/view` overlay door, and authoring it '
+        + 'is a `tsc` error at the call site. ⚠️ Nothing else in the block moves — a `navigation` '
+        + 'that carries only live keys (`{ mode: \'drawer\', size: \'lg\' }`) parses byte-for-byte '
+        + 'as it did before.',
+    },
+    {
       id: 'logging-durations-unit-in-key',
       surface: 'HttpDestinationConfig `batch.flushInterval` / `retry.initialDelay` / `timeout` and '
         + 'LoggingConfig `buffer.flushInterval` (system/logging.zod.ts)',
@@ -14973,6 +15016,29 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // which is a different key on a different surface and has always rendered. D2:
     // `view-page-mount-removed`.
     'ui/ListView:pageName',
+    // #16885 — the list view's `navigation.view` binding, retired under ADR-0049
+    // enforce-or-remove by maintainer ruling 2026-09-13 (director decision batch
+    // #126 item 4, verbatim 「同意」, option B). The key's describe promised "the
+    // form view to use for details" and no layer from spec to console ever
+    // resolved a view BY NAME: its one read in the shipped console passed the
+    // value into the SECOND argument of `onNavigate` — the slot that otherwise
+    // carries the navigation-mode token — so an authored name substituted for the
+    // mode rather than selecting a view, and a consumer reading that argument
+    // against its closed `edit`/`view` vocabulary matched neither branch. Zero
+    // authored instances in this repo; the one external author deleted its
+    // occurrence. ONE key and one entry: `NavigationConfigSchema` is reused BY
+    // REFERENCE (`ListViewSchema.navigation` is its only referent), so the walked
+    // shape has a single `ui/NavigationConfig` def and the baseline marks one line
+    // `[RETIRED]`.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, and deliberately:
+    // the ruling's disposition is a D3 SEMANTIC entry
+    // (`list-view-navigation-view-retired`). A mechanical strip would delete the
+    // key without telling anyone which list view lost it, and an author who wrote
+    // it wanted a named detail layout — a want that page assignment serves and a
+    // stripped key does not record. So the prescription reaches consumers as that
+    // semantic TODO plus this tombstone.
+    'ui/NavigationConfig:view',
     // #11805 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-25,
     // decision-inbox batch 4: 「#11805 退役 defaultSort,不需要major」; the producer
     // half of objectui#5861, under the objectui#4869 「接受所有」 direction).

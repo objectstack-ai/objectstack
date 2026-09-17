@@ -39,6 +39,7 @@
 - ⛔ `post-stamped`/`label-write` 永不接进管道再 `&&`:拒收读成 0;看尾先落文件或 `set -o pipefail`。
 - ⛔ 永不 MCP `issue_write`(锁 1 已拒);会话分类器拒改动 ⇒ 无通道,交有通道席位立卡。
 - ✓ 建卡带标签 `POST .../issues` · 改正文 `PATCH .../issues/{n}` · 认领 `POST .../issues/{n}/assignees`。
+- ✓ 该 `PATCH` 带 `state` 关卡/重开,`state_reason` 交付 `completed`、撤单 `not_planned`,走裸 REST。
 - 请求体走文件(`-d @file`)或引号定界 heredoc(`<<'EOF'`),⛔ 永不内联双引号串。
 - 每个写请求必带 `Content-Type: application/json`;缺头的 415 与判别式见配额段。
 - ✓ 请求复审 `POST .../pulls/{n}/requested_reviewers` · 开 PR `POST .../pulls` 带 `draft=true`。
@@ -58,8 +59,7 @@
 1. 语义搜索:`/search/*` 被出口代理按设计拒绝。退路 = REST 列表端点加本地 grep。
    REST 也被会话门关掉的席位 = 一次定向 MCP `search_issues`,⛔ 不宽表扫。
 2. Projects field_values:GraphQL-only —— 舰队并不需要它;MCP 服务器端无条件抓它才是漏点。
-3. `issue transfer`:issues 端点表无 transfer 路由(核对文档,未实调)⇒ 同为 GraphQL-only。
-   拿不到时当轮改走在目的仓重建配方,配方住 `platform-readings.md`。
+3. `issue transfer`:issues 端点表无此路由(未实调)⇒ 同为 GraphQL-only;配方住 `platform-readings.md`。
 
 ## 第三桶 —— git 零配额等价物
 

@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { retiredKey } from '../shared/retired-key';
+import { EpochMs } from '../shared/epoch.zod';
 
 /**
  * Document Version Schema
@@ -32,7 +33,7 @@ export const DocumentVersionSchema = lazySchema(() => z.object({
   /**
    * Timestamp when this version was created (Unix milliseconds)
    */
-  createdAt: z.number().describe('Creation timestamp'),
+  createdAt: EpochMs.describe('Creation timestamp'),
 
   /**
    * User ID who created this version
@@ -399,7 +400,7 @@ export const DocumentSchema = lazySchema(() => z.object({
     /**
      * Timestamp when access expires (Unix milliseconds)
      */
-    expiresAt: z.number().optional().describe('Access expiration'),
+    expiresAt: EpochMs.optional().describe('Access expiration'),
   }).optional().describe('Access control'),
 
   /**

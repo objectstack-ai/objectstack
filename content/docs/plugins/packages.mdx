@@ -326,7 +326,7 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 - **When to use**: Multi-user applications with access control requirements
 - **README**: [View README](https://github.com/objectstack-ai/objectstack/blob/main/packages/plugins/plugin-security/README.md)
 
-### @objectstack/organizations (enterprise)
+### @objectstack/organizations
 
 **Organization Scoping** — Multi-org (a.k.a. "soft" multi-tenant) row-level scoping. Ships from this repo as the **open-core, Apache-2.0 package** `packages/plugins/organizations`, published on npm — ADR-0132 brought it back to open core, so it is no longer closed-source or absent from this repository. ⛔ Only a **host app** may declare it: ADR-0132's entitlement boundary forbids any framework package taking `@objectstack/organizations` as a dependency, because the commercial repository ships a licence-gated subclass under the same package name and a framework-level dependency would put the ungated class inside the tree a commercial app links against (`packages/plugins/organizations/src/no-framework-dependents.pin.test.ts` is the mechanical half). It composes with the Layer 0 tenant wall in `plugin-security` (`tenant-layer.ts`).
 

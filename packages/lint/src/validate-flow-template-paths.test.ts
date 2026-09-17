@@ -660,3 +660,370 @@ describe('validateFlowTemplatePaths — unprovisioned injected anchors (#8340)',
     expect(only(findings)).toHaveLength(1);
   });
 });
+// ── variable roots (#17305) ──────────────────────────────────────────────────
+//
+// The three token-root shapes #17305 measured, transplanted here as FIXTURES.
+// ⛔ These pins are about the SHAPES, not about that report's site counts —
+// the flows it measured live in a different repository and are not readable
+// from here, so nothing below claims a count on them.
+//
+// | token root                      | kind               | seen before #17305 |
+// |---------------------------------|--------------------|--------------------|
+// | `{caseRecord.owner_id.manager}` | `get_record` output| no                 |
+// | `{currentCase.owner_id.manager}`| `loop` iterator    | no                 |
+// | `{record.owner_id.manager}`     | trigger record     | yes                |
+//
+// Both invisible shapes sit on a `schedule` flow in the report, which is the
+// second dimension: the rule skipped a non-record-triggered flow whole. Every
+// "flags" pin below therefore fails against the pre-#17305 rule, and every
+// "silent" pin passes both before and after — the negative controls.
+describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
+  const CASE_OBJECT: AnyRec = {
+    name: 'crm_case',
+    fields: {
+      subject: { name: 'subject', type: 'text' },
+      status: { name: 'status', type: 'text' },
+      owner_id: { name: 'owner_id', type: 'lookup', reference: 'sys_user' },
+    },
+  };
+
+  /** A `schedule` flow — the kind the rule used to skip whole. */
+  const scheduleFlow = (nodes: AnyRec[], extra: AnyRec = {}): AnyRec => ({
+    objects: [CASE_OBJECT],
+    flows: [
+      {
+        name: 'case_sla_monitor',
+        type: 'schedule',
+        nodes: [{ id: 'start', type: 'start', config: { triggerType: 'schedule', cron: '0 * * * *' } }, ...nodes],
+        ...extra,
+      },
+    ],
+  });
+
+  /** `get_record` binding ONE record of `crm_case` to `caseRecord`. */
+  const FETCH_ONE: AnyRec = {
+    id: 'fetch_one',
+    type: 'get_record',
+    config: { objectName: 'crm_case', filter: { status: 'open' }, outputVariable: 'caseRecord' },
+  };
+
+  /** `get_record` binding a LIST of `crm_case` to `staleCases` (limit > 1). */
+  const FETCH_MANY: AnyRec = {
+    id: 'fetch_many',
+    type: 'get_record',
+    config: { objectName: 'crm_case', filter: { status: 'open' }, limit: 200, outputVariable: 'staleCases' },
+  };
+
+  // ── shape 1: a `get_record` output root ───────────────────────────────────
+
+  it('flags a lookup hop off a get_record output, on a schedule flow', () => {
+    const findings = validateFlowTemplatePaths(
+      scheduleFlow([
+        FETCH_ONE,
+        { id: 'escalate', type: 'notify', config: { body: 'Escalating to {caseRecord.owner_id.manager}' } },
+      ]),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(FLOW_TEMPLATE_LOOKUP_TRAVERSAL);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].path).toBe('flows[0].nodes[2]');
+    expect(findings[0].message).toContain('{caseRecord.owner_id.manager}');
+    // The object is named from the BINDING node, not from a trigger there is none of.
+    expect(findings[0].message).toContain("'owner_id'");
+    expect(findings[0].hint).toContain('{caseRecord.owner_id}');
+    // config.expand is the START node's opt-in and must not be prescribed here.
+    expect(findings[0].hint).toContain("START node's opt-in");
+  });
+
+  it('flags a typo off a get_record output', () => {
+    const findings = validateFlowTemplatePaths(
+      scheduleFlow([
+        FETCH_ONE,
+        { id: 'escalate', type: 'notify', config: { body: 'Case {caseRecord.subjcet}' } },
+      ]),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(FLOW_TEMPLATE_UNKNOWN_FIELD);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].message).toContain("'subjcet' is not a field on object 'crm_case'");
+  });
+
+  it('gates a variable-root hop in a filter-guarded position (#3810 severity split)', () => {
+    const findings = validateFlowTemplatePaths(
+      scheduleFlow([
+        FETCH_ONE,
+        {
+          id: 'close',
+          type: 'delete_record',
+          config: { objectName: 'crm_case', filter: { owner_id: '{caseRecord.owner_id.manager}' } },
+        },
+      ]),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].message).toContain('refuses to run at execution time');
+  });
+
+  it('resolves a get_record output on a RECORD-TRIGGERED flow too (the root dimension alone)', () => {
+    const findings = validateFlowTemplatePaths({
+      objects: [CASE_OBJECT],
+      flows: [
+        {
+          name: 'on_case_create',
+          type: 'record_change',
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'crm_case', triggerType: 'record-after-create' } },
+            { id: 'fetch_one', type: 'get_record', config: { objectName: 'crm_case', outputVariable: 'peerCase' } },
+            { id: 'note', type: 'notify', config: { body: '{peerCase.owner_id.manager}' } },
+          ],
+        },
+      ],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('{peerCase.owner_id.manager}');
+  });
+
+  // ── shape 2: a `loop` iterator root ───────────────────────────────────────
+
+  it('flags a lookup hop off a loop iterator bound to a multi-record read', () => {
+    const findings = validateFlowTemplatePaths(
+      scheduleFlow([
+        FETCH_MANY,
+        {
+          id: 'each',
+          type: 'loop',
+          label: 'Each stale case',
+          config: {
+            collection: '{staleCases}',
+            iteratorVariable: 'currentCase',
+            body: {
+              nodes: [{ id: 'ping', type: 'notify', config: { body: 'Ping {currentCase.owner_id.manager}' } }],
+              edges: [],
+            },
+          },
+        },
+      ]),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(FLOW_TEMPLATE_LOOKUP_TRAVERSAL);
+    expect(findings[0].path).toBe('flows[0].nodes[2].config.body.nodes[0]');
+    expect(findings[0].where).toBe('flow "case_sla_monitor" loop "Each stale case" › body node "notify"');
+    expect(findings[0].message).toContain('{currentCase.owner_id.manager}');
+  });
+
+  it('accepts the bare-name collection spelling loop-node.ts falls back to', () => {
+    const findings = validateFlowTemplatePaths(
+      scheduleFlow([
+        FETCH_MANY,
+        {
+          id: 'each',
+          type: 'loop',
+          config: {
+            collection: 'staleCases',
+            iteratorVariable: 'currentCase',
+            body: { nodes: [{ id: 'ping', type: 'notify', config: { body: '{currentCase.subjcet}' } }], edges: [] },
+          },
+        },
+      ]),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(FLOW_TEMPLATE_UNKNOWN_FIELD);
+  });
+
+  // ── shape 3: the trigger root, unchanged ──────────────────────────────────
+
+  it('still sees the trigger root at the same severity (negative control)', () => {
+    const triggered = (block: AnyRec, type = 'notify'): AnyRec => ({
+      objects: [CASE_OBJECT],
+      flows: [
+        {
+          name: 'on_case_create',
+          type: 'record_change',
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'crm_case', triggerType: 'record-after-create' } },
+            { id: 'n1', type, config: block },
+          ],
+        },
+      ],
+    });
+    const warned = validateFlowTemplatePaths(triggered({ body: '{record.owner_id.manager}' }));
+    expect(warned).toHaveLength(1);
+    expect(warned[0].rule).toBe(FLOW_TEMPLATE_LOOKUP_TRAVERSAL);
+    expect(warned[0].severity).toBe('warning');
+    expect(warned[0].hint).toContain("config.expand (#3475)");
+
+    const gated = validateFlowTemplatePaths(
+      triggered({ objectName: 'crm_case', filter: { status: '{record.owner_id.manager}' } }, 'update_record'),
+    );
+    expect(gated).toHaveLength(1);
+    expect(gated[0].severity).toBe('error');
+  });
+
+  it('keeps {record.…} unjudged on a flow with no record trigger', () => {
+    expect(
+      validateFlowTemplatePaths(
+        scheduleFlow([{ id: 'note', type: 'notify', config: { body: '{record.subjcet}' } }]),
+      ),
+    ).toEqual([]);
+  });
+
+  // ── the conservatism: an ambiguous root stays silent ──────────────────────
+
+  it('is silent on a valid field read off a variable root (no false positive)', () => {
+    expect(
+      validateFlowTemplatePaths(
+        scheduleFlow([FETCH_ONE, { id: 'note', type: 'notify', config: { body: '{caseRecord.subject}' } }]),
+      ),
+    ).toEqual([]);
+  });
+
+  // A `flow.variables` DECLARATION is the slot the binding node fills, not a
+  // second writer — and it is the shape the platform's own canon teaches
+  // (examples/app-todo declares `tasksToRemind` beside the `get_record` that
+  // fills it). Reading it as a collision would make this resolution inert on
+  // exactly the flows it was written for.
+  it('still resolves the root when the flow DECLARES the variable it binds', () => {
+    const findings = validateFlowTemplatePaths(
+      scheduleFlow(
+        [FETCH_ONE, { id: 'note', type: 'notify', config: { body: '{caseRecord.subjcet}' } }],
+        { variables: [{ name: 'caseRecord', type: 'object', isInput: false, isOutput: false }] },
+      ),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(FLOW_TEMPLATE_UNKNOWN_FIELD);
+  });
+
+  it('resolves the declared-variable + loop shape examples/app-todo ships', () => {
+    const findings = validateFlowTemplatePaths(
+      scheduleFlow(
+        [
+          FETCH_MANY,
+          { id: 'loop_cases', type: 'loop', config: { collection: '{staleCases}', iteratorVariable: 'currentCase' } },
+          { id: 'note', type: 'notify', config: { title: '{currentCase.subject}', body: '{currentCase.subjcet}' } },
+        ],
+        { variables: [{ name: 'staleCases', type: 'record_collection', isInput: false, isOutput: false }] },
+      ),
+    );
+    // The loop body lives in the EDGE graph, not a region slot — the root map
+    // is flow-scoped, so a token on a top-level node still resolves.
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('{currentCase.subjcet}');
+  });
+
+  it('is silent when an assignment node also writes the name', () => {
+    expect(
+      validateFlowTemplatePaths(
+        scheduleFlow([
+          FETCH_ONE,
+          { id: 'seed', type: 'assignment', config: { assignments: { caseRecord: 'x' } } },
+          { id: 'note', type: 'notify', config: { body: '{caseRecord.subjcet}' } },
+        ]),
+      ),
+    ).toEqual([]);
+  });
+
+  it('is silent when two get_record nodes bind the name to different objects', () => {
+    expect(
+      validateFlowTemplatePaths({
+        objects: [CASE_OBJECT, { name: 'crm_lead2', fields: { a: { name: 'a', type: 'text' } } }],
+        flows: [
+          {
+            name: 'two_writers',
+            type: 'schedule',
+            nodes: [
+              { id: 'start', type: 'start', config: { triggerType: 'schedule' } },
+              { id: 'a', type: 'get_record', config: { objectName: 'crm_case', outputVariable: 'row' } },
+              { id: 'b', type: 'get_record', config: { objectName: 'crm_lead2', outputVariable: 'row' } },
+              { id: 'note', type: 'notify', config: { body: '{row.subjcet}' } },
+            ],
+          },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it('is silent when the name is also a node id', () => {
+    expect(
+      validateFlowTemplatePaths(
+        scheduleFlow([
+          { id: 'caseRecord', type: 'get_record', config: { objectName: 'crm_case', outputVariable: 'caseRecord' } },
+          { id: 'note', type: 'notify', config: { body: '{caseRecord.subjcet}' } },
+        ]),
+      ),
+    ).toEqual([]);
+  });
+
+  it('is silent when the name collides with a flattened trigger field', () => {
+    expect(
+      validateFlowTemplatePaths({
+        objects: [CASE_OBJECT],
+        flows: [
+          {
+            name: 'on_case_create',
+            type: 'record_change',
+            nodes: [
+              { id: 'start', type: 'start', config: { objectName: 'crm_case', triggerType: 'record-after-create' } },
+              { id: 'fetch', type: 'get_record', config: { objectName: 'crm_case', outputVariable: 'status' } },
+              { id: 'note', type: 'notify', config: { body: '{status.subjcet}' } },
+            ],
+          },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it('is silent on an outputVariable bound by a node type other than get_record', () => {
+    expect(
+      validateFlowTemplatePaths(
+        scheduleFlow([
+          { id: 'ask', type: 'screen', config: { objectName: 'crm_case', outputVariable: 'answer' } },
+          { id: 'note', type: 'notify', config: { body: '{answer.subjcet}' } },
+        ]),
+      ),
+    ).toEqual([]);
+  });
+
+  it('is silent on a multi-record output read as if it were one record', () => {
+    expect(
+      validateFlowTemplatePaths(
+        scheduleFlow([FETCH_MANY, { id: 'note', type: 'notify', config: { body: '{staleCases.subjcet}' } }]),
+      ),
+    ).toEqual([]);
+  });
+
+  it('is silent on a loop whose collection does not resolve to a known list', () => {
+    expect(
+      validateFlowTemplatePaths(
+        scheduleFlow([
+          {
+            id: 'each',
+            type: 'loop',
+            config: {
+              collection: '{somethingElse}',
+              iteratorVariable: 'currentCase',
+              body: { nodes: [{ id: 'ping', type: 'notify', config: { body: '{currentCase.subjcet}' } }], edges: [] },
+            },
+          },
+        ]),
+      ),
+    ).toEqual([]);
+  });
+
+  it('leaves the unprovisioned-anchor rule a TRIGGER-root question (documented boundary)', () => {
+    const findings = validateFlowTemplatePaths({
+      objects: [{ name: 'ext_customer', external: { remoteName: 'customers' }, fields: { email: { name: 'email', type: 'text' } } }],
+      flows: [
+        {
+          name: 'ext_sweep',
+          type: 'schedule',
+          nodes: [
+            { id: 'start', type: 'start', config: { triggerType: 'schedule' } },
+            { id: 'fetch', type: 'get_record', config: { objectName: 'ext_customer', outputVariable: 'customer' } },
+            { id: 'note', type: 'notify', config: { body: '{customer.owner_id}' } },
+          ],
+        },
+      ],
+    });
+    expect(findings.filter((f) => f.rule === FLOW_TEMPLATE_FIELD_UNPROVISIONED)).toHaveLength(0);
+  });
+});

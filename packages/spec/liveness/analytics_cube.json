@@ -1,0 +1,152 @@
+{
+  "type": "analytics_cube",
+  "_note": "CubeSchema (packages/spec/src/data/analytics.zod.ts). Seeded 2026-09-17 (#18582): the LAST of the three PENDING_GOVERNANCE debts #18133 declared when PR #18581 widened the governance denominator from the registered kinds to `authorableTypes()`; `sharing_rule` was paid first (PR #18587) and `connector` is paid in the same diff as this file, which empties the map. NOT a registered metadata KIND — it is bound in `UNREGISTERED_KIND_SCHEMAS` (#10194) and reaches this walk through `getMetadataTypeSchema`'s unregistered-kind fallback, so the ledger governs it while `listMetadataTypeSchemaTypes()` still does not enumerate it. THE SHAPE FACT THAT DECIDES EVERY ROW BELOW: one Cube shape, THREE producers, one registry. `packages/services/service-analytics/src/cube-registry.ts` names them itself — (1) authored cubes (`defineStack({ analyticsCubes })` / `defineCube()`), threaded by the CLI into `AnalyticsServiceConfig.cubes` and registered by `registerAll`; (2) COMPILED DATASETS (ADR-0021), where `dataset-compiler.ts` MINTS a Cube from a `dataset` document; (3) ad-hoc query inference (`inferCubeFromQuery`). Only (1) is the authoring door this ledger governs, so a key whose only reader sits on path (2) is NOT live here however busy that reader is — that is the #4837 producer rule applied to a shape with three producers, and it is what decides `dimensions.granularities` and `measures.format` below. Every `live` row therefore carries a `producer` naming the CLI threading site: a consumer citation alone would be the `seed.env` shape, where the mechanism was right and nobody supplied the input. #10238 IS NOT PREJUDGED: the PENDING_GOVERNANCE row this file discharges said whether cube authoring is live end-to-end is its own measurement and 'this row does not prejudge it'. This ledger does not answer that question either — it answers the per-key one (who reads this key?), and the answers below are mixed: the query path (`sql`, `measures.sql`/`.type`, `dimensions.sql`/`.type`, `joins.name`) is genuinely consumed, while the caching, access-control and display-annotation keys are not. PREVIEW READ POINTS ENUMERATED (the #7131 mechanical rule, objectui @dda8f3815): `registerBuiltinPreviews()` in packages/app-shell/src/views/metadata-admin/previews/index.ts registers nineteen types and `analytics_cube` is NOT one of them — this type has no registered metadata-admin preview. Recorded rather than skipped, because 'the type has no registered preview' is the sentence a later sweep needs. What objectui DOES consume is the whole SHAPE: `clientValidation.ts` maps `analytics_cube` to `CubeSchema` itself, and unlike `sharing_rule` it is absent from `AUTHOR_SHAPE_ONLY_TYPES`, so both the CREATE and the EDIT door in metadata-admin refuse a cube this schema rejects. ADR-0054: no row here carries a `proof`, and none is owed — the `analytics` high-risk class binds `dataset/dimensions.dateGranularity` (the dataset door), not this type.",
+  "props": {
+    "name": {
+      "status": "live",
+      "verifiedAt": "2026-09-17",
+      "evidence": "packages/services/service-analytics/src/cube-registry.ts#register — `this.cubes.set(cube.name, cube)`: the authored name IS the registry key, so it decides what `AnalyticsQuery.cube` can resolve at all; packages/services/service-analytics/src/analytics-service.ts#getMeta emits it as the cube's `name` and as the `${cube.name}.${key}` member id of every measure and dimension served by `GET /api/v1/analytics/meta`; packages/services/service-analytics/src/strategies/native-sql-strategy.ts#resolveMeasureSql names it in the `INVALID_FIELD` refusal for an undeclared member.",
+      "producer": "packages/cli/src/commands/serve.ts#CAPABILITY_PROVIDERS — the `analytics` entry declares `configKey: 'analyticsCubes'` and the capability resolver threads it into the plugin (`const cubes = (config as any).analyticsCubes ?? (config as any).cubes ?? []; arg = { cubes }`); packages/services/service-analytics/src/analytics-service.ts#registerAll (`if (config.cubes) this.cubeRegistry.registerAll(config.cubes)`) is where the authored array becomes the registry every consumer below resolves through. Without this thread an authored cube reaches no reader at all — the `seed.env` shape (#4837).",
+      "note": "Identity, not display — `title` is the display half. A second cube registered under the same name silently replaces the first (`register` is a `Map.set`)."
+    },
+    "title": {
+      "status": "live",
+      "verifiedAt": "2026-09-17",
+      "evidence": "packages/services/service-analytics/src/analytics-service.ts#getMeta — `title: cube.title` is the cube's display title on `GET /api/v1/analytics/meta`, the discovery surface a dashboard/report builder picks a cube from; packages/drivers/driver-memory/src/memory-analytics.ts#getMeta answers the identical projection for the in-memory driver, so the value reaches the wire on both execution paths.",
+      "producer": "packages/cli/src/commands/serve.ts#CAPABILITY_PROVIDERS — the `analytics` entry declares `configKey: 'analyticsCubes'` and the capability resolver threads it into the plugin (`const cubes = (config as any).analyticsCubes ?? (config as any).cubes ?? []; arg = { cubes }`); packages/services/service-analytics/src/analytics-service.ts#registerAll (`if (config.cubes) this.cubeRegistry.registerAll(config.cubes)`) is where the authored array becomes the registry every consumer below resolves through. Without this thread an authored cube reaches no reader at all — the `seed.env` shape (#4837).",
+      "note": "Display-shaped, so the #7131 split settles it: being shown to a human IS the whole of the claimed effect, and there is no second layer where a 'real' consumer would live. The read point is the platform's own analytics discovery endpoint, NOT a metadata-admin preview — this type has none (enumerated in the file note above). `label` is the metric/dimension spelling of the same idea and is declared as an ALIAS of `title` on the cube (`strictObject` aliases), so a mis-spelled `label:` is refused with the corrective name rather than dropped."
+    },
+    "description": {
+      "status": "dead",
+      "verifiedAt": "2026-09-17",
+      "note": "Parsed, stored, and read by NOTHING. The `CubeMeta` projection both `getMeta` implementations build (`analytics-service.ts#getMeta`, `memory-analytics.ts#getMeta`) carries `name`, `title`, `measures` and `dimensions` — `description` is not in it, so unlike `title` it never reaches the discovery wire, and no strategy, driver or lint rule reads it. Census: zero reads of `cube.description` across packages/services, packages/drivers, packages/rest and packages/objectql, with `cube.title` as the lit control in the same scan (two hits, both cited on the `title` row above). ⛔ NOT an ADR-0049 retirement candidate on this reading alone: it is an administrative note on an authoring surface whose sibling annotations (`measures.description`, `dimensions.description`) are dead for the same reason and would go with it, and the `position.description` precedent keeps a documentation-shaped key that only documents. What it is NOT is enforced — an author who expects it on a dashboard picker is wrong today."
+    },
+    "sql": {
+      "status": "live",
+      "verifiedAt": "2026-09-17",
+      "evidence": "packages/services/service-analytics/src/strategies/native-sql-strategy.ts#extractObjectName — `return cube.sql.trim()` is the FROM table of every generated statement and the object whose RLS/tenant read scope is injected (`applyReadScope(this.extractObjectName(cube), …)`); packages/services/service-analytics/src/strategies/objectql-strategy.ts#extractObjectName resolves the same value for the `engine.aggregate` path; packages/services/service-analytics/src/analytics-service.ts#cubeObjects adds `cube.sql.trim()` to the object set the tenant scope is computed over; packages/drivers/driver-memory/src/memory-analytics.ts#extractTableName reads it as the in-memory collection name.",
+      "producer": "packages/cli/src/commands/serve.ts#CAPABILITY_PROVIDERS — the `analytics` entry declares `configKey: 'analyticsCubes'` and the capability resolver threads it into the plugin (`const cubes = (config as any).analyticsCubes ?? (config as any).cubes ?? []; arg = { cubes }`); packages/services/service-analytics/src/analytics-service.ts#registerAll (`if (config.cubes) this.cubeRegistry.registerAll(config.cubes)`) is where the authored array becomes the registry every consumer below resolves through. Without this thread an authored cube reaches no reader at all — the `seed.env` shape (#4837).",
+      "note": "'Base SQL statement or Table Name' in the describe, and the platform's own aliases (`table`, `sqlTable`) say which half is load-bearing: every consumer treats it as an OBJECT/TABLE name. Authoring it wrong is not silent — an unknown object fails the query."
+    },
+    "measures": {
+      "children": {
+        "name": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "The RECORD KEY is the identity, not this field. `measures` is `z.record(z.string(), MetricSchema)`, and every consumer resolves a measure by its key: `analytics-service.ts#getMeta` publishes `${cube.name}.${key}`, `native-sql-strategy.ts#lookupMember` looks the member up in the `cube.measures` bag by key, `memory-analytics.ts` indexes `cube.measures[fieldName]`. Nothing reads the inner `name`. The dataset compiler WRITES it (`dataset-compiler.ts`: `const metric: Metric = { name: m.name, … }; measures[m.name] = metric`) — writing it equal to the key it files the metric under, which is exactly why no reader ever needed it. Authoring a `name` that DISAGREES with the key is the trap: the key wins everywhere and the authored value is inert. ⛔ Not an ADR-0049 deletion candidate as it stands: it is `z.string().regex(…)` and REQUIRED, so removing it breaks every authored cube to delete nothing; the honest repairs are to derive it from the key or to make the disagreement an authoring refusal, and both are decisions rather than sweeps."
+        },
+        "label": {
+          "status": "live",
+          "verifiedAt": "2026-09-17",
+          "evidence": "packages/services/service-analytics/src/analytics-service.ts#getMeta — `title: measure.label` is the human title of each measure on `GET /api/v1/analytics/meta`; packages/drivers/driver-memory/src/memory-analytics.ts#getMeta emits the identical projection.",
+          "producer": "packages/cli/src/commands/serve.ts#CAPABILITY_PROVIDERS — the `analytics` entry declares `configKey: 'analyticsCubes'` and the capability resolver threads it into the plugin (`const cubes = (config as any).analyticsCubes ?? (config as any).cubes ?? []; arg = { cubes }`); packages/services/service-analytics/src/analytics-service.ts#registerAll (`if (config.cubes) this.cubeRegistry.registerAll(config.cubes)`) is where the authored array becomes the registry every consumer below resolves through. Without this thread an authored cube reaches no reader at all — the `seed.env` shape (#4837).",
+          "note": "Display-shaped and settled by the #7131 split, same as the cube's `title`. `CubeRegistry`'s own header names this read point ('maps every registered cube's measure/dimension `label` onto the `CubeMeta` titles served by GET /api/v1/analytics/meta'). REQUIRED on the schema, so there is no empty state to classify."
+        },
+        "description": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Not in the `CubeMeta` measure projection (`{ name, type, title }`) and read nowhere else — the same census, and the same reasoning, as the cube-level `description` row above."
+        },
+        "type": {
+          "status": "live",
+          "verifiedAt": "2026-09-17",
+          "evidence": "packages/services/service-analytics/src/strategies/native-sql-strategy.ts#resolveMeasureSql — `const wrap = AGGREGATE_SQL[measure.type]` picks the aggregate the column is wrapped in (SUM / COUNT / AVG / …), `CONDITIONAL_AGGREGATE_SQL[measure.type]` picks its conditional form for a scoped measure filter, and `EXPRESSION_METRIC_TYPES.has(measure.type)` is what emits a custom expression UNWRAPPED; an unrecognised type throws rather than substituting `COUNT(*)` (#4157). packages/services/service-analytics/src/analytics-service.ts#getMeta also publishes it as the measure's `type` on `GET /api/v1/analytics/meta`.",
+          "producer": "packages/cli/src/commands/serve.ts#CAPABILITY_PROVIDERS — the `analytics` entry declares `configKey: 'analyticsCubes'` and the capability resolver threads it into the plugin (`const cubes = (config as any).analyticsCubes ?? (config as any).cubes ?? []; arg = { cubes }`); packages/services/service-analytics/src/analytics-service.ts#registerAll (`if (config.cubes) this.cubeRegistry.registerAll(config.cubes)`) is where the authored array becomes the registry every consumer below resolves through. Without this thread an authored cube reaches no reader at all — the `seed.env` shape (#4837).",
+          "note": "The arithmetic itself: this key decides what number the query returns. `metric-type-coverage.test.ts` pins `AGGREGATE_SQL` ∪ `EXPRESSION_METRIC_TYPES` as an exact partition of the `AggregationMetricType` enum, so no spec-valid value can fall through."
+        },
+        "sql": {
+          "status": "live",
+          "verifiedAt": "2026-09-17",
+          "evidence": "packages/services/service-analytics/src/strategies/native-sql-strategy.ts#resolveMeasureSql — `measure.sql` is the column (or expression) the aggregate is applied to, and `qualifyAndRegisterJoin(measure.sql, …)` is what lowers a dotted reference into a LEFT JOIN chain; packages/services/service-analytics/src/strategies/objectql-strategy.ts#resolveFieldName reads `measure.sql.replace(/^\\$/, '')` as the aggregate field for the `engine.aggregate` path.",
+          "producer": "packages/cli/src/commands/serve.ts#CAPABILITY_PROVIDERS — the `analytics` entry declares `configKey: 'analyticsCubes'` and the capability resolver threads it into the plugin (`const cubes = (config as any).analyticsCubes ?? (config as any).cubes ?? []; arg = { cubes }`); packages/services/service-analytics/src/analytics-service.ts#registerAll (`if (config.cubes) this.cubeRegistry.registerAll(config.cubes)`) is where the authored array becomes the registry every consumer below resolves through. Without this thread an authored cube reaches no reader at all — the `seed.env` shape (#4837).",
+          "note": "REQUIRED, and the one place a cube author writes physical SQL. `'*'` is special-cased to a bare `*` (the COUNT(*) form); anything with a dot is either a relationship path or a SQL expression, and `IDENTIFIER_PATH` is what tells them apart (#4157)."
+        },
+        "format": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Written by the DATASET compiler, read by nobody — the three-producer fact in the file note decides this row. `dataset-compiler.ts` copies a dataset measure's own `format` onto the minted cube metric (`if (typeof m.format === 'string') metric.format = m.format`), and the value a caller actually receives is threaded from the DATASET measure, not from the cube: `analytics-service.ts` enriches the result's `fields[]` with `if (f.format == null && m.format) f.format = m.format`, where `m` is `dataset.measures[…]`. So the live key is `dataset.measures[].format` (governed in dataset.json), and the cube metric's own `format` is a carbon copy nothing reads back. On the AUTHORING door governed here there is no dataset to copy from, so a hand-written `format:` is inert. ⛔ Retirement is NOT the remedy: the key is the dataset compiler's own output slot on a shared shape, so deleting it from `MetricSchema` would break a live internal write; what is dead is authoring it by hand."
+        }
+      }
+    },
+    "dimensions": {
+      "children": {
+        "name": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Same shape and same verdict as `measures.name`: `dimensions` is a `z.record`, every consumer resolves by the record KEY (`getMeta` publishes `${cube.name}.${key}`, `lookupMember` indexes the bag, `memory-analytics.ts` reads `cube.dimensions[fieldName]`), and the dataset compiler writes the inner `name` equal to the key it files the dimension under (`dimensions[d.name] = dim`). A `name` that disagrees with its key is inert. Not a deletion candidate for the reason given on `measures.name`."
+        },
+        "label": {
+          "status": "live",
+          "verifiedAt": "2026-09-17",
+          "evidence": "packages/services/service-analytics/src/analytics-service.ts#getMeta — `title: dimension.label` is the human title of each dimension on `GET /api/v1/analytics/meta`; packages/drivers/driver-memory/src/memory-analytics.ts#getMeta emits the identical projection.",
+          "producer": "packages/cli/src/commands/serve.ts#CAPABILITY_PROVIDERS — the `analytics` entry declares `configKey: 'analyticsCubes'` and the capability resolver threads it into the plugin (`const cubes = (config as any).analyticsCubes ?? (config as any).cubes ?? []; arg = { cubes }`); packages/services/service-analytics/src/analytics-service.ts#registerAll (`if (config.cubes) this.cubeRegistry.registerAll(config.cubes)`) is where the authored array becomes the registry every consumer below resolves through. Without this thread an authored cube reaches no reader at all — the `seed.env` shape (#4837).",
+          "note": "Display-shaped, #7131 split, same as `measures.label`. The dataset side of the same field is where #6761 was found (an inline locale map was dropped and the machine name published as a title); a hand-authored cube declares a plain string, so that resolver is not in this path."
+        },
+        "description": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Not in the `CubeMeta` dimension projection (`{ name, type, title }`) and read nowhere else — same census as the two `description` rows above."
+        },
+        "type": {
+          "status": "live",
+          "verifiedAt": "2026-09-17",
+          "evidence": "packages/services/service-analytics/src/strategies/native-sql-strategy.ts#carriesUninterpretableTemporalComparand — `this.lookupMember(cube, member, 'dimension')?.type === 'time' ? 'datetime' : null` decides how a filter comparand is shaped before it is bound as a parameter; packages/services/service-analytics/src/analytics-service.ts#getMeta publishes it as the dimension's `type` on `GET /api/v1/analytics/meta`; packages/services/service-analytics/src/dataset-executor.ts#timeDimensionsOf selects the bucketable dimensions with `compiled.cube.dimensions[d]?.type === 'time'`.",
+          "producer": "packages/cli/src/commands/serve.ts#CAPABILITY_PROVIDERS — the `analytics` entry declares `configKey: 'analyticsCubes'` and the capability resolver threads it into the plugin (`const cubes = (config as any).analyticsCubes ?? (config as any).cubes ?? []; arg = { cubes }`); packages/services/service-analytics/src/analytics-service.ts#registerAll (`if (config.cubes) this.cubeRegistry.registerAll(config.cubes)`) is where the authored array becomes the registry every consumer below resolves through. Without this thread an authored cube reaches no reader at all — the `seed.env` shape (#4837).",
+          "note": "`time` is the member that carries behaviour (comparand shaping, bucketability); the other members are published and otherwise inert. The dataset-executor citation is on the compiled-dataset path — it is listed because it reads the same key off the same shape, and the authoring-door consumer is the comparand shaping in native-sql-strategy."
+        },
+        "sql": {
+          "status": "live",
+          "verifiedAt": "2026-09-17",
+          "evidence": "packages/services/service-analytics/src/strategies/native-sql-strategy.ts#resolveDimensionSql — `dim.sql` is the GROUP BY / SELECT column, and `qualifyAndRegisterJoin(dim.sql, …)` lowers a dotted path into the LEFT JOIN chain; packages/services/service-analytics/src/strategies/objectql-strategy.ts#resolveFieldName reads `dim.sql.replace(/^\\$/, '')` as the group-by field for the `engine.aggregate` path.",
+          "producer": "packages/cli/src/commands/serve.ts#CAPABILITY_PROVIDERS — the `analytics` entry declares `configKey: 'analyticsCubes'` and the capability resolver threads it into the plugin (`const cubes = (config as any).analyticsCubes ?? (config as any).cubes ?? []; arg = { cubes }`); packages/services/service-analytics/src/analytics-service.ts#registerAll (`if (config.cubes) this.cubeRegistry.registerAll(config.cubes)`) is where the authored array becomes the registry every consumer below resolves through. Without this thread an authored cube reaches no reader at all — the `seed.env` shape (#4837).",
+          "note": "REQUIRED. Same dotted-path / expression split as `measures.sql`."
+        },
+        "granularities": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "There IS a reader and an AUTHORED cube cannot reach it — the distinction the file note's three-producer fact exists to make. The one read is `packages/services/service-analytics/src/dataset-executor.ts#granularityOf` (`const cd = compiled.cube.dimensions[name]; … cd.granularities?.length === 1 ? String(cd.granularities[0]) : undefined`), whose argument is a `CompiledDataset` — a shape only `compileDataset()` produces, from a `dataset` document. The writers are the same two non-authoring producers: `dataset-compiler.ts` (`dim.granularities = d.dateGranularity ? [d.dateGranularity] : ['day','week','month','quarter','year']`), `cube-registry.ts#inferFromObject` and `analytics-service.ts#inferCubeFromQuery` (the 5-entry 'all granularities' list). A cube registered through `AnalyticsServiceConfig.cubes` never becomes a `CompiledDataset`, so a hand-authored `granularities:` is read by nothing. The AUTHORABLE key that really drives bucketing is `dataset.dimensions[].dateGranularity` — governed in dataset.json and the ADR-0054 `analytics` high-risk class's bound property. ⛔ ADR-0049 RETIREMENT IS NOT THE REMEDY, and this row says so explicitly so the enforce-or-remove channel does not act on the word `dead`: the key is the dataset compiler's own output channel on a shared shape, so deleting it from `DimensionSchema` would break a live internal path. What is dead is AUTHORING it on a hand-written cube."
+        }
+      }
+    },
+    "joins": {
+      "children": {
+        "name": {
+          "status": "live",
+          "verifiedAt": "2026-09-17",
+          "evidence": "packages/services/service-analytics/src/strategies/native-sql-strategy.ts#qualifyAndRegisterJoin — `const joinTable = cube?.joins?.[alias]?.name ?? alias` is the TABLE the LEFT JOIN is emitted against, which is what makes an alias differ from its object (`account` -> `crm_account`); packages/services/service-analytics/src/strategies/native-sql-strategy.ts#crossFieldComparisonIn resolves `cube.joins?.[alias]?.name ?? alias` for every joined object when it walks the RLS read scopes; packages/services/service-analytics/src/analytics-service.ts#cubeObjects adds every `cube.joins[*].name` to the tenant-scoped object set; packages/services/service-analytics/src/strategies/objectql-strategy.ts#isCrossObjectField resolves the same value for the aggregate path.",
+          "producer": "packages/cli/src/commands/serve.ts#CAPABILITY_PROVIDERS — the `analytics` entry declares `configKey: 'analyticsCubes'` and the capability resolver threads it into the plugin (`const cubes = (config as any).analyticsCubes ?? (config as any).cubes ?? []; arg = { cubes }`); packages/services/service-analytics/src/analytics-service.ts#registerAll (`if (config.cubes) this.cubeRegistry.registerAll(config.cubes)`) is where the authored array becomes the registry every consumer below resolves through. Without this thread an authored cube reaches no reader at all — the `seed.env` shape (#4837).",
+          "note": "Security-relevant, not cosmetic: the joined object resolved here is what the read scope is computed for, so a wrong name would scope the wrong table. Note the JOIN is keyed by the record key (the alias) — `name` is its TARGET."
+        },
+        "relationship": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Declared with a `.default('many_to_one')` and dispatched on by nothing. The join SQL is SYNTHESISED, not read: `native-sql-strategy.ts#qualifyAndRegisterJoin` emits `LEFT JOIN <table> <alias> ON \"<parent>\".\"<seg>\" = \"<alias>\".\"id\"` for every hop, a foreign-key equality that is the same statement whichever cardinality the author declared. Census: `relationship` is WRITTEN by `dataset-compiler.ts` (`relationship: 'many_to_one'`, a constant) and read in neither strategy, neither driver, nor the REST layer; the lit control in the same scan is `cube.joins?.[alias]?.name`, which returns the hits cited on the `name` row above. The authoring trap is real — `one_to_many` parses, changes no SQL, and the aggregate silently keeps the many-to-one arithmetic."
+        },
+        "sql": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "The most expensive dead key on this type: it is REQUIRED, documented as 'Join condition (ON clause)', and the ON clause is synthesised without ever consulting it. `native-sql-strategy.ts#qualifyAndRegisterJoin` builds `ON \"<parentAlias>\".\"<seg>\" = \"<alias>\".\"id\"` from the dotted member path alone; `objectql-strategy.ts` resolves joins through `cube.joins?.[alias]?.name` and lowers them to relationship traversals, with no ON clause at all. So an author who writes a non-FK join condition gets a DIFFERENT query than the one they declared, with a 200 and a plausible number — the `#10298` shape. ⛔ Not a mechanical ADR-0049 deletion: the key is required, so removing it edits every authored cube, and the honest fix is a decision (refuse a `sql` the engine will not honour, or teach the strategies to emit it). Recorded here so the decision has a measurement behind it."
+        }
+      }
+    },
+    "refreshKey": {
+      "children": {
+        "every": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Pre-aggregation / cache refresh cadence with no engine behind it. Census over the whole repository: `refreshKey` appears in `analytics.zod.ts` (the declaration), in `examples/app-showcase/src/data/analytics/showcase.cube.ts` (an AUTHOR writing it), in the generated authorable-surface artifacts, and in the protocol-18 strictness migration note — and in no consumer. There is no refresh scheduler, no pre-aggregation table and no cache keyed on it anywhere in packages/services, packages/drivers or packages/rest. The showcase authoring it is the evidence that the trap is live rather than theoretical."
+        },
+        "sql": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "The 'SQL to check for data changes' probe of the same unimplemented refresh mechanism — same census as `refreshKey.every`. The block's own `strictObject` history note ('a typo'd `sql` probe left the cube refreshing on nothing') describes a cadence that does not exist either way."
+        }
+      }
+    },
+    "public": {
+      "status": "dead",
+      "verifiedAt": "2026-09-17",
+      "note": "An ACCESS-CONTROL key that gates nothing, which is the worst class this ledger records (a security no-op / false compliance, the reason the gate exists). Declared `z.boolean().default(false)` under the comment 'Access Control'. Census: three sites WRITE it — `analytics-service.ts#inferCubeFromQuery`, `cube-registry.ts#inferFromObject` and `dataset-compiler.ts`, each a literal `public: false` — and the showcase example authors `public: false`; nothing anywhere READS `cube.public`. Access to `/api/v1/analytics/query` is decided by the REST layer's own auth plus the per-object RLS/tenant scope `applyReadScope` injects from `cube.sql` and `cube.joins[].name`, never by this flag, so `public: true` grants nothing and `public: false` withholds nothing. ⛔ Do NOT read the dead verdict as 'the cube is exposed': it is not a hole that was opened, it is a knob that was never wired. ADR-0049 wants a DECISION here rather than a sweep — either enforce it at the query door or remove it — and the removal half is not free, because a `.default(false)` key is present on every parsed cube."
+    }
+  }
+}

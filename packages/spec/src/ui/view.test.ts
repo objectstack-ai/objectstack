@@ -182,6 +182,45 @@ describe('KanbanConfigSchema', () => {
 
     expect(() => KanbanConfigSchema.parse(config)).not.toThrow();
   });
+
+  // [#16894] Director seat, decision batch #87 (objectstack-ai/objectui#8367,
+  // maintainer 「批 #87 同意」): `titleField` joins this schema as optional
+  // `z.string()`. The legs below are the card's executable acceptance
+  // criterion — BOTH controls fire on the same call shape, so the PROBE's flip
+  // is evidence about the NAME and not about a parser that stopped refusing.
+  it('ACCEPTS `titleField` as a member, with both controls firing on the same shape', () => {
+    const canonical = {
+      groupByField: 'status',
+      columns: ['name', 'owner'],
+    };
+
+    // CONTROL-1 — the parser CAN refuse, on the named surface.
+    const control1 = KanbanConfigSchema.safeParse({ ...canonical, zzUnlikelyBogusKey__: true });
+    expect(control1.success).toBe(false);
+    const issues = JSON.stringify(control1.error?.issues);
+    expect(issues).toContain('unrecognized_keys');
+    expect(issues).toContain('zzUnlikelyBogusKey__');
+    expect(issues).toContain('this kanban configuration');
+
+    // CONTROL-2 — a refusal is about the name: the canonical block is accepted.
+    expect(KanbanConfigSchema.safeParse(canonical).success).toBe(true);
+
+    // PROBE — before this card: `ok=false unrecognized_keys=["titleField"]`.
+    const probe = KanbanConfigSchema.safeParse({ ...canonical, titleField: 'subject' });
+    expect(probe.success).toBe(true);
+    // Accepted as a MEMBER, not merely tolerated: the value survives the parse.
+    expect(KanbanConfigSchema.parse({ ...canonical, titleField: 'subject' }))
+      .toMatchObject({ titleField: 'subject' });
+  });
+
+  // ⛔ NOT required. `TimelineConfigSchema` and `GanttConfigSchema` spell
+  // `titleField` required and are the two siblings this declaration does not
+  // copy: absence resolves through the ADR-0079 record display-name chain, so
+  // requiring it would demand more than the renderer reads (#13748).
+  it('leaves `titleField` OPTIONAL — a board that omits it is a complete config', () => {
+    const parsed = KanbanConfigSchema.parse({ groupByField: 'status', columns: ['name'] });
+    expect('titleField' in parsed).toBe(false);
+  });
 });
 
 describe('CalendarConfigSchema', () => {
@@ -4115,6 +4154,101 @@ const flattenUnionIssues = (issues: z.ZodIssue[]): z.ZodIssue[] =>
       ? [i, ...flattenUnionIssues(nested.flat())]
       : [i];
   });
+
+// ============================================================================
+// [#16885] The RETIRED `navigation.view` binding — declared, consumed, wrong
+// ============================================================================
+
+/**
+ * `navigation.view` promised "the form view to use for details", and nothing
+ * from spec to console ever resolved a view BY NAME: its one read in the
+ * shipped console put the value in the SECOND argument of `onNavigate` — the
+ * slot that otherwise carries the navigation-MODE token — so an authored name
+ * substituted for the mode instead of selecting a view. Retired under ADR-0049
+ * enforce-or-remove by maintainer ruling 2026-09-13 (director decision batch
+ * #126 item 4, option B).
+ *
+ * The refusal is pinned at all three doors, and the five surviving keys of the
+ * same block are pinned ACCEPTING beside it — separately and together. That
+ * second half is not ceremony: a tombstone that also broke its live siblings
+ * would satisfy every refusal assertion above while being a different and
+ * larger bug, and `navigation` is one `strictObject`, so the blast radius of a
+ * mistake here is the whole block.
+ */
+describe('ListViewSchema — the RETIRED `navigation.view` binding (#16885)', () => {
+  describe.each(viewDoorsCarryingObjectLevelChecks)('%s', (_label, parse) => {
+    it('REFUSES `navigation.view` with the tombstone prescription, not a bare unknown-key report', () => {
+      const r = parse({ type: 'grid', columns: ['name'], navigation: { view: 'summary_view' } });
+      expect(r.success).toBe(false);
+      // Select the TOMBSTONE issue by the SHAPE `retiredKey()` raises rather
+      // than by its text — the overlay door also carries that text on the union
+      // WRAPPER (path `[]`), so a text-only find is satisfied by either, and
+      // this pin's subject is that the refusal is raised AT THE KEY the author
+      // wrote, which needs the issue that has a path.
+      const issue = flattenUnionIssues((r as { error: z.ZodError }).error.issues)
+        .find((i) => (i as { expected?: string }).expected === 'never');
+      expect(issue, JSON.stringify((r as { error: z.ZodError }).error.issues)).toBeDefined();
+      expect(issue!.message).toContain('`view.list.navigation.view` was removed');
+      // The prescription must name the ROUTE, not merely the removal: a bare
+      // "this key is gone" leaves the author with the want that made them write
+      // it. Page assignment is where a chosen detail layout belongs.
+      expect(issue!.message).toContain('`record` page');
+      expect(issue!.message).toContain('`isDefault`');
+      expect(issue!.path.join('.')).toBe('navigation.view');
+    });
+
+    it("still ACCEPTS `navigation: { mode: 'page' }` — the lit control for the refusal above", () => {
+      expect(parse({ type: 'grid', columns: ['name'], navigation: { mode: 'page' } }).success).toBe(true);
+    });
+
+    it('still ACCEPTS every surviving key of the same block, one at a time and all together', () => {
+      const survivors = {
+        mode: 'drawer',
+        preventNavigation: false,
+        openNewTab: false,
+        size: 'lg',
+        width: '600px',
+      } as const;
+      for (const [key, value] of Object.entries(survivors)) {
+        const r = parse({ type: 'grid', columns: ['name'], navigation: { [key]: value } });
+        expect(r.success, `${key}: ${JSON.stringify(r.success ? null : (r as { error: z.ZodError }).error.issues)}`)
+          .toBe(true);
+      }
+      expect(parse({ type: 'grid', columns: ['name'], navigation: { ...survivors } }).success).toBe(true);
+    });
+  });
+
+  // The tombstone must not become the answer for every navigation typo. An
+  // unrelated unknown key keeps the ordinary closed-shape report, which is what
+  // tells the author it is unrecognised rather than retired — the failure mode
+  // `acceptsNothing()` exists for, one message over.
+  it('does not hand the removal prescription to an unrelated unknown navigation key', () => {
+    const r = ListViewSchema.safeParse({ type: 'grid', columns: ['name'], navigation: { placement: 'right' } });
+    expect(r.success).toBe(false);
+    const messages = flattenUnionIssues((r as { error: z.ZodError }).error.issues)
+      .map((i) => i.message).join('\n');
+    expect(messages).not.toContain('`view.list.navigation.view` was removed');
+    // ...and it must not SUGGEST the tombstoned key either: `view` is still in
+    // `Object.keys(shape)` and is 4 edits from `placement`, so the guard that
+    // keeps a dead key out of the suggester is load-bearing here.
+    expect(messages).not.toMatch(/Did you mean[^\n]*`view`/);
+  });
+
+  // A `navigation` block that carries only live keys parses byte-for-byte as it
+  // did before the retirement — the property the semantic TODO promises.
+  it('leaves a live-only navigation block byte-identical after parse', () => {
+    const r = ListViewSchema.safeParse({
+      type: 'grid',
+      columns: ['name'],
+      navigation: { mode: 'drawer', size: 'lg' },
+    });
+    expect(r.success).toBe(true);
+    expect((r as { data: { navigation?: Record<string, unknown> } }).data.navigation)
+      .toMatchObject({ mode: 'drawer', size: 'lg' });
+    expect((r as { data: { navigation?: Record<string, unknown> } }).data.navigation)
+      .not.toHaveProperty('view');
+  });
+});
 
 describe("ListViewSchema — calendar in `appearance.allowedVisualizations` requires the `calendar:` block (#13817)", () => {
   // The same three doors, and since #17063 this is the ONLY object-level check

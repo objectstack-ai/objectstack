@@ -147,4 +147,36 @@ describe('lowerRequiresFeature', () => {
       expect(issues[0]).toMatchObject({ code: 'custom', path: ['requiresFeature'] });
     }
   });
+
+  // The same ADR-0078 leg, one step further in: a blank `source` is a STRING,
+  // so it passes the type test above and used to compose into
+  // `(   ) && <gate>` — a predicate no CEL parse accepts on any scope, so the
+  // flag decided nothing at render. Same shape as the pin above: kind and
+  // subject, never the wording.
+  it('rejects a CEL visible whose source is blank after trimming (ADR-0078)', () => {
+    for (const visible of [
+      { dialect: 'cel', source: '   ' },
+      { dialect: 'cel', source: '' },
+      { dialect: 'cel', source: '\n\t' },
+    ]) {
+      const { ctx, issues } = noIssues();
+      const out = lowerRequiresFeature({ requiresFeature: 'admin' as const, visible }, ctx);
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toMatchObject({ code: 'custom', path: ['requiresFeature'] });
+      // Refused, not composed — no `(   ) && …` envelope is produced.
+      expect(out.visible).toEqual(visible);
+    }
+  });
+
+  // The boundary the refusal must NOT cross: a source that is merely PADDED is
+  // authored, and still composes verbatim (the engine trims its own input).
+  it('still composes a source that has leading/trailing whitespace around real text', () => {
+    const { ctx, issues } = noIssues();
+    const out = lowerRequiresFeature(
+      { requiresFeature: 'admin' as const, visible: { dialect: 'cel', source: ' a ' } },
+      ctx,
+    );
+    expect(issues).toHaveLength(0);
+    expect(out.visible).toEqual({ dialect: 'cel', source: '( a ) && features.admin == true' });
+  });
 });

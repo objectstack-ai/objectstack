@@ -29,6 +29,7 @@ import {
   isMultiValueField,
   valueSchemaFor,
   referenceTargetOf,
+  referenceCarrierOf,
 } from './field-value.zod';
 
 const ok = (def: Parameters<typeof valueSchemaFor>[0], v: unknown, form?: 'stored' | 'expanded') =>
@@ -72,6 +73,60 @@ describe('semantic type classes', () => {
     expect(referenceTargetOf({ type: 'text', reference: 'accounts' })).toBeUndefined();
     expect(referenceTargetOf(undefined)).toBeUndefined();
     expect(referenceTargetOf('user')).toBeUndefined();
+  });
+
+  it('`referenceCarrierOf` REFUSES an unreadable carrier instead of answering "no target" (#13053)', () => {
+    // The defect class, stated as a test. A `reference` in a shape no reader can
+    // read used to come back as `undefined` — indistinguishable from a field that
+    // names no target at all — so the carrier was refused by
+    // `ObjectSchema.safeParse` where it was WRITTEN and read as absent where it
+    // was CONSUMED, and nothing anywhere reported it.
+    //
+    // #13053's exact shape first.
+    expect(() => referenceCarrierOf({ type: 'lookup', reference: { object: 'shop_invoice' } })).toThrow(TypeError);
+    expect(() => referenceCarrierOf({ type: 'lookup', reference: { object: 'shop_invoice' } }))
+      .toThrow(/`reference` is an object/);
+    // Every other non-string shape, named in the message so the author can see
+    // which one they wrote.
+    expect(() => referenceCarrierOf({ reference: ['a', 'b'] })).toThrow(/`reference` is an array \(length 2\)/);
+    expect(() => referenceCarrierOf({ reference: 42 })).toThrow(/`reference` is a number/);
+    expect(() => referenceCarrierOf({ reference: true })).toThrow(/`reference` is a boolean/);
+    // The refusal carries the fix, not just the complaint.
+    expect(() => referenceCarrierOf({ reference: { object: 'x' } }))
+      .toThrow(/FieldSchema declares it as an optional STRING/);
+    // The caller label is the reader's, so the message says WHO could not read it.
+    expect(() => referenceCarrierOf({ reference: { object: 'x' } }, 'some-rule refOf'))
+      .toThrow(/^some-rule refOf: /);
+
+    // CONTROLS — everything that is not an unreadable carrier still answers.
+    expect(referenceCarrierOf({ reference: 'shop_invoice' })).toBe('shop_invoice');
+    // ABSENCE is not a wrong shape: `undefined` is what `.optional()` admits and
+    // `null` is what the blueprint's `StrictField` admits. Neither throws.
+    expect(referenceCarrierOf({ type: 'lookup' })).toBeUndefined();
+    expect(referenceCarrierOf({ type: 'lookup', reference: undefined })).toBeUndefined();
+    expect(referenceCarrierOf({ type: 'lookup', reference: null })).toBeUndefined();
+    // An empty string names no object — absence too, and the answer every caller
+    // already read for it.
+    expect(referenceCarrierOf({ type: 'lookup', reference: '' })).toBeUndefined();
+    // Not a field-def at all: still `undefined`, never a throw.
+    expect(referenceCarrierOf(undefined)).toBeUndefined();
+    expect(referenceCarrierOf('user')).toBeUndefined();
+  });
+
+  it('`referenceTargetOf` inherits the refusal — one carrier accessor, one answer', () => {
+    // The single arbiter reads the carrier through `referenceCarrierOf`, so the
+    // engine, the expand gate and every lint rule that asks it get the refusal
+    // rather than three different silences.
+    expect(() => referenceTargetOf({ type: 'lookup', reference: { object: 'shop_invoice' } }))
+      .toThrow(/referenceTargetOf: `reference` is an object/);
+    // ⛔ Not gated on the field being a reference TYPE: the carrier is refused by
+    // `FieldSchema` for every type, so reading it as absent on a `text` field is
+    // the same silence one type over.
+    expect(() => referenceTargetOf({ type: 'text', reference: { object: 'x' } })).toThrow(TypeError);
+    // CONTROL — the answers the arbiter already gave are unmoved.
+    expect(referenceTargetOf({ type: 'lookup', reference: 'accounts' })).toBe('accounts');
+    expect(referenceTargetOf({ type: 'user' })).toBe('sys_user');
+    expect(referenceTargetOf({ type: 'lookup', reference: null })).toBeUndefined();
   });
 
   it('every reference type either implies a target or admits one — no third state', () => {

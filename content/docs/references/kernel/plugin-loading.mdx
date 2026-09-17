@@ -42,7 +42,7 @@ Plugin loading lifecycle event
 | :--- | :--- | :--- | :--- |
 | **type** | `Enum<'load-started' \| 'load-completed' \| 'load-failed' \| 'init-started' \| 'init-completed' \| 'init-failed' \| 'preload-started' \| 'preload-completed' \| 'cache-hit' \| … +5 more>` | ✅ |  |
 | **pluginId** | `string` | ✅ |  |
-| **timestamp** | `integer` | ✅ |  |
+| **timestamp** | `integer` | ✅ | Event timestamp — Unix milliseconds |
 | **durationMs** | `integer` | optional | Duration in milliseconds |
 | **metadata** | `Record<string, any>` | optional |  |
 | **error** | `{ message: string; code?: string; stack?: string }` | optional |  |
@@ -78,8 +78,8 @@ Plugin loading state
 | **pluginId** | `string` | ✅ |  |
 | **state** | `Enum<'pending' \| 'loading' \| 'loaded' \| 'initializing' \| 'ready' \| 'failed' \| 'reloading' \| 'unloading' \| 'unloaded'>` | ✅ |  |
 | **progress** | `number` | optional (default: `0`) |  |
-| **startedAt** | `integer` | optional |  |
-| **completedAt** | `integer` | optional |  |
+| **startedAt** | `integer` | optional | Loading start time — Unix milliseconds |
+| **completedAt** | `integer` | optional | Loading completion time — Unix milliseconds |
 | **lastError** | `string` | optional |  |
 | **retryCount** | `integer` | optional (default: `0`) |  |
 

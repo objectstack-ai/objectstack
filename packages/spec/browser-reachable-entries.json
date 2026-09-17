@@ -10,7 +10,7 @@
       "externals": []
     }
   },
-  "_unjudgedComment": "Entries this gate asserts NOTHING about. They are not declared browser-reachable, so linking zod is not a defect here — these are the server/build-time surfaces. Listing them is what makes the reconciliation two-directional: a new exports-map subpath cannot land without someone deciding which list it belongs in. Moving one UP to browserReachable is the only direction this file is meant to travel, and it is a maintainer decision plus a passing gate, never a ledger edit alone.",
+  "_unjudgedComment": "Entries this gate asserts NOTHING about. They are not declared browser-reachable, so linking zod is not a defect here — these are the server/build-time surfaces. Listing them is what makes the reconciliation two-directional: a new exports-map subpath cannot land without someone deciding which list it belongs in. Moving one UP to browserReachable is the only direction this file is meant to travel, and it is a maintainer decision plus a passing gate, never a ledger edit alone. ⛔ 'Asserts nothing' is a statement about this GATE, never that nobody looked. Where the weight question was actually put to one entry and answered, the reading and the verdict are in `_measuredNonPromotions` below; an entry absent from that map has not been measured, which is a third state again and must not be read as either of the first two.",
   "unjudged": [
     ".",
     "./ai",
@@ -28,6 +28,26 @@
     "./system",
     "./ui"
   ],
+  "_measuredNonPromotions": {
+    "_comment": "Entries measured for WEIGHT and left in `unjudged` on purpose, each with the reading that decided it. `unjudged` is a flat list of subpaths, so a member has nowhere to carry a reason — without this map a deliberate non-promotion and a never-examined entry are the same silence, which is the state #17535 was filed against. ⛔ An entry here is NOT a lesser `browserReachable`: this gate still asserts nothing about it. ⛔ An entry NOT here has not been measured, and its absence says nothing about its weight. ⛔ A reading here is a count plus the tree it was taken against — re-measuring REPLACES a row, it never appends to one.",
+    "./api": {
+      "verdict": "measured, and stays unjudged",
+      "why": "`browserReachable` is a SCHEMA-FREE PROMISE, not a byte budget. `./api`'s vocabulary IS the zod graph — the symbols a consumer reaches there are request/response schemas — so the promotion #17535 offers is not a threshold anyone can set: declared browser-reachable, this entry reds rule 1 on the same commit. Measured by ablation on f962be9d08: 4 problems, `dist/api/index.mjs` and `dist/api/index.js` each linking 'zod' and the undeclared external 'pg-connection-string'. Promotion would first require the entry to stop linking zod — a redesign of a published export surface, not a ledger edit — and `_unjudgedComment` above already reserves promotion to a maintainer decision plus a passing gate. So the honest record is this one.",
+      "measured": {
+        "what": "the growth #17535 reports, re-derived in isolation: parent 0aa88eb6b0 vs the #17517 merge 9165d5cd4c, both built from source; `./contracts` and `./meta-spelling` measured byte-identical across the pair as controls",
+        "entryBundleRaw": "1433893 -> 1867678 bytes (+433785)",
+        "entryBundleGzip": "418675 -> 546266 bytes (+127591, +30.5%)",
+        "browserBundleOfWholeNamespaceGzip": "273904 -> 330104 bytes (+56200, +20.5%) — this is the axis #17535's +19.4% reproduces on",
+        "sourceGraphInputs": "110 -> 159 (+49) — #17535 reports 188 -> 237, a different absolute base and the same delta",
+        "narrowestRealConsumerImportGzip": "132121 -> 261221 bytes (+129100, +97.7%) — a browser bundle whose ONLY use of this entry is the two string constants `@object-ui/core` re-exports. The narrower the import, the WORSE the ratio: tree-shaking recovers proportionally less of the new graph than of the old one, so the headline percentage understates what the real consumers pay by roughly 5x.",
+        "onMainToday": "f962be9d08: 1914896 raw / 560968 gzip (node condition), 1912968 / 560390 (browser condition), 160 source graph inputs"
+      },
+      "objectuiLeg": "MEASURED, and it was the half #17535 could not reach. objectui at dda8f3815d — ⚠️ this session's attached checkout, NOT the pinned `.objectui-sha` 53ded82bf7, which is absent from that shallow clone and was ⛔ not fetched or bumped to take a reading — value-imports `@objectstack/spec/api` from 6 browser-shipped non-test source files: `@object-ui/core` utils/column-sortability.ts, `@object-ui/data-objectstack` metadata-client.ts, `@object-ui/app-shell` views/metadata-admin/clientValidation.ts, `@object-ui/plugin-chatbot` usePendingActions.ts, `@object-ui/react` utils/error-message.ts, `@object-ui/types` data.ts. So the bytes are paid by a real downstream browser consumer, not hypothetically. Control for the scan: `./contracts` reports 9 such files, matching the sites this file's own `browserReachable` entry already names.",
+      "cloudLeg": "NOT MEASURED. The `cloud` repo was not attached to the session that took these readings. ⛔ Its absence is not a zero — a reading that did not cover a population vouches only for the part it did cover.",
+      "notAnOutlier": "⚠️ `./api` is one of fifteen unjudged entries and the measurement does NOT single it out. By the same scan, objectui browser-shipped source value-imports twelve of the fifteen, several of them harder than this one: `./ui` 48 files, `./data` 30, `./kernel` 12, against `./api`'s 6; `./kernel` is the heavier bundle (1544209 raw / 457761 gzip on f962be9d08). Only `./marketplace`, `./qa` and `./studio` are at zero. ⛔ This row is therefore a record about `./api` alone and says NOTHING about the other fourteen — it is not a clean bill for them, and their silence is still the untested kind.",
+      "whatWouldChangeThis": "Nothing in this gate has a weight axis for a schema-bearing entry — there is no byte threshold in it, for any entry, judged or not. Giving `./api` one means a NEW rule, which is a different decision from the one this row records and belongs to whoever takes that decision."
+    }
+  },
   "_notAModuleComment": "Exports-map subpaths that resolve to something other than a JS module, so there is no module graph to walk and no zod link to look for. A separate section from `unjudged` because the two say different things to a reader: `unjudged` means 'a module we chose not to judge', this means 'not a module at all'. The gate refuses to scan these rather than silently reporting them clean.",
   "notAModule": [
     "./openapi.json",

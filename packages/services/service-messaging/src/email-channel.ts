@@ -4,6 +4,7 @@ import type { IDataEngine } from '@objectstack/spec/contracts';
 import type {
     ChannelAvailability,
     ChannelAvailabilityQuery,
+    ChannelUnavailableReason,
     Delivery,
     ErrorClass,
     MessagingChannel,
@@ -76,7 +77,13 @@ export interface EmailSenderSurface {
 }
 
 export interface EmailChannelOptions {
-    /** Resolve the email service; `undefined` ⇒ the channel no-ops (not installed). */
+    /**
+     * Resolve the email service; `undefined` ⇒ there is no transport, which
+     * {@link MessagingChannel.isAvailable} reports as
+     * `transport_not_configured` and {@link MessagingChannel.send} REFUSES with
+     * the same reason (#18424). ⛔ Not a no-op success: a delivery nothing was
+     * sent for is never reported as delivered.
+     */
     getEmail(): EmailSenderSurface | undefined;
     /** Resolve the data engine (recipient address lookup). */
     getData(): IDataEngine | undefined;
@@ -102,6 +109,22 @@ export interface EmailChannelOptions {
      */
     getDefaultTemplateLocale?(): string | undefined;
 }
+
+/**
+ * The ONE token both members of this channel use for "there is no transport"
+ * (#18424) — the reason `isAvailable()` already returns, reused verbatim so the
+ * refusal `send()` writes onto the delivery row and the suppression fan-out
+ * records on `sys_notification.suppressed_channels` name the same condition.
+ *
+ * ⛔ Deliberately NOT a new error code. The vocabulary is the closed
+ * `CHANNEL_UNAVAILABLE_REASONS` set in `channel.ts`, and the annotation is what
+ * holds this constant inside it: a token nobody declared would not compile
+ * here, so the two spellings cannot drift apart silently.
+ *
+ * It leads the error string because `classifyError` below reads the row's error
+ * text, and the same convention already applies to `sendTemplate`'s codes.
+ */
+const TRANSPORT_NOT_CONFIGURED: ChannelUnavailableReason = 'transport_not_configured';
 
 const EMAIL_SHAPE = (s: string): boolean => {
     // Linear, non-backtracking "looks like an email" — same shape as the
@@ -137,9 +160,11 @@ const EMAIL_SHAPE = (s: string): boolean => {
  * path) use that one resolution. A producer-set `payload.locale` — the
  * pre-ruling single value for the whole notification — is no longer consulted.
  *
- * Degrades like the inbox channel: no email service ⇒ logged no-op success
- * (capability not installed); a recipient with no resolvable address ⇒ a
- * reported failure (so the delivery row shows why).
+ * Failure is always REPORTED, never absorbed (#18424): no email service ⇒ a
+ * refusal carrying the declared `transport_not_configured` reason, graded
+ * `permanent` so the row dead-letters on attempt one; a recipient with no
+ * resolvable address ⇒ a reported failure. Either way the delivery row shows
+ * why — ⛔ nothing this channel did not send is recorded as delivered.
  */
 export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel {
     const userObject = opts.userObject ?? USER_OBJECT;
@@ -248,8 +273,32 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
         async send(ctx: MessagingChannelContext, delivery: Delivery): Promise<SendResult> {
             const email = opts.getEmail();
             if (!email) {
-                ctx.logger.warn(`[email] no email service registered; '${delivery.recipient}' not emailed`);
-                return { ok: true }; // capability not installed — no-op, like inbox w/o data
+                // [#18424] The SAME condition `isAvailable()` answers above, so
+                // it gets the same answer — a refusal naming
+                // `transport_not_configured`, ⛔ never `{ ok: true }`.
+                //
+                // This used to return success ("capability not installed —
+                // no-op"), which recorded a delivery nobody performed: the row
+                // reached `status: 'success'`, nothing went red, and a
+                // deployment with no mail transport reported every notification
+                // as delivered. The channel already KNEW it was unavailable.
+                //
+                // ⛔ Not a suppression either. A suppression is fan-out's
+                // pre-write answer, recorded on
+                // `sys_notification.suppressed_channels`; by the time `send()`
+                // runs the delivery row exists and `SendResult` has no
+                // suppression arm. Where both answers are decidable at once —
+                // the plugin composition, whose `lazyChannelMount` gates the
+                // mount on this very resolver — an absent transport is already
+                // a REFUSAL (#18041/#18050), so refusing here is what makes the
+                // two compositions answer one condition the same way.
+                ctx.logger.warn(
+                    `[email] no email service registered; '${delivery.recipient}' was NOT emailed`,
+                );
+                return {
+                    ok: false,
+                    error: `${TRANSPORT_NOT_CONFIGURED}: no 'email' service is registered; nothing was sent to '${delivery.recipient}'`,
+                };
             }
 
             const n = delivery.notification;
@@ -349,10 +398,20 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
             // row) instead of burning the whole retry schedule first. These
             // are `IEmailService.sendTemplate`'s own error codes plus this
             // channel's missing-capability refusal above.
+            //
+            // [#18424] `transport_not_configured` joins them, and the grade is
+            // driven rather than assumed: in the shipping composition the same
+            // condition already terminates a claimed row at once — the mount
+            // gate unmounts the channel and the dispatcher acks
+            // `dead: true, attempts: 1` without consulting this method at all.
+            // Grading the refusal `retryable` would make the two compositions
+            // answer one condition differently, burning the whole ladder
+            // against a transport that no attempt can install.
             const msg = typeof err === 'string' ? err : String((err as Error)?.message ?? err ?? '');
             if (/\b(TEMPLATE_NOT_FOUND|TEMPLATE_INACTIVE|MISSING_VARIABLES|TEMPLATE_UNSUPPORTED)\b/.test(msg)) {
                 return 'permanent';
             }
+            if (msg.startsWith(`${TRANSPORT_NOT_CONFIGURED}:`)) return 'permanent';
             return 'retryable';
         },
     };

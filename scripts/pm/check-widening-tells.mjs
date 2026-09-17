@@ -480,6 +480,136 @@
  * which `surfaceFlags` puts off the contract source surface. It is a different
  * reading's card on the day that population is not zero.
  *
+ * ## The seventh accidental variable #18234 removed — a REMOVED value that
+ * accepted EVERYTHING
+ *
+ * T1's sentence is "the accept set gains a spelling an author may now write",
+ * and objectui#9540 raised it on a diff that takes a spelling AWAY. One key was
+ * narrowed out of `z.unknown()` — zod's universal acceptor — into a
+ * `z.union([…])`: `'stage=won'` and `42` were admitted before and are refused
+ * after, so the accept set SHRANK and the tell's own sentence is inverted on
+ * it. `check-clause2-carriers --pair 9540` returned exit 4 against a correct
+ * `Clause-②: no`, and the only sanctioned clear is the false `yes` this file
+ * already refuses to ask an author for.
+ *
+ * ⭐ The finding is the CONTROL SET, not that reasoning. The same removal with
+ * the replacement spelled `+ filter: z.array(z.any()).optional()…` DECLINED,
+ * while spelling the identical narrowing `+ filter: z.union([` FIRED. One
+ * semantic change, two opposite verdicts, decided by nothing but whether the
+ * added value's FIRST LINE opens a closed-set constructor — which is not a
+ * scale that is set too strict, it is a predicate measuring something other
+ * than what it claims to measure.
+ *
+ * ⛔ It is NOT #16943's budget being too thin, and ⛔ not #17618's three-fact
+ * spend being wrong. The budget was EARNED — the removed `filter:` line is
+ * T1-shaped and buys one T1 unit — and then refused at the SPEND, because
+ * #17618 lets a closed-set-valued key spend only on "a removed line naming the
+ * SAME key, both member lists readable on their own line, and the added list a
+ * SUBSET of the removed one". Fact 1 holds. Fact 2 CANNOT: a universal acceptor
+ * has no member list at all — and that is precisely the case where no list
+ * comparison is needed, because the removed set is the UNIVERSE and every
+ * replacement is a subset of it by construction. The three-fact test is the
+ * right instrument for `z.enum` → `z.enum` and has no way to express "the
+ * previous value accepted everything".
+ *
+ * What is added is therefore a SECOND way to supply #17618's own requirement —
+ * positive evidence that the set gained nothing — carried by the removed
+ * value's semantics instead of by a list comparison: the block removed the SAME
+ * key, and the value it removed was a universal acceptor. ⛔ Nothing about the
+ * added value's spelling is read, which is the accidental variable itself.
+ *
+ * The class is MEASURED rather than assumed, because "both accept everything"
+ * is a claim about zod and not about a regex. On zod 4.4.3 in this tree,
+ * `safeParse` over `42`, `'stage=won'`, `null`, `undefined`, `{}`, `[]`, `true`
+ * and a function: `z.unknown()`, `z.any()` and both with `.optional()` accept
+ * all eight; `z.unknown().refine(v => typeof v === 'string')` refuses seven of
+ * the eight, which is why a narrowing chain step disqualifies the line.
+ * `z.unknown()` and `z.any()` differ only in what `tsc` then permits at the USE
+ * site, and that is not the question clause ② asks. ⚠️ `z.custom()` accepts
+ * everything too and is deliberately NOT declared: 0 code occurrences in this
+ * tree (3 text hits, all prose), and the spelling that would arrive,
+ * `z.custom(fn)`, narrows — a row for a shape no tree carries is the dead data
+ * the surface table's existence guard exists against.
+ *
+ * The sensitivity guarantee is the KEY plus the arithmetic, unchanged: a
+ * removed acceptor on a DIFFERENT key buys nothing, a removed value that was
+ * never universal buys nothing, a `.refine()`d one buys nothing, and the
+ * #16943 budget is still SPENT rather than bypassed — so a genuine new key in
+ * the same block still fires with its own file:line. An inline enum widened in
+ * place has no removed acceptor to name and still fires on the T1 row, which is
+ * the one row that can report it.
+ *
+ * ⚠️ The residual direction, stated rather than left to be discovered, and it
+ * is the LOUD one: the reading is line-local, so a removed acceptor whose chain
+ * WRAPS onto a second line (`exportOptions: z.unknown().optional()` with its
+ * `.describe(…)` below it) is not certified and its replacement still fires.
+ * Measured on this tree: 99 of the 132 universal-acceptor key lines terminate
+ * on their own line, 33 do not. ⭐ The OVERTURN CONDITION is written down so it
+ * needs no second discussion: the FIRST landed pair whose removed acceptor
+ * wraps closes it by reading the block's removed run forward instead of one
+ * line.
+ *
+ * ⚠️ And the direction this deliberately does NOT touch: a key re-typed INTO a
+ * universal acceptor (`z.union([…])` → `z.unknown()`) is a real widening and
+ * goes unreported. ⛔ That silence is #16943's replacement budget and it
+ * PREDATES this reading — measured identical at 21b7c12b4 with the new-key and
+ * widened-enum controls firing on the same harness — so it is filed as its own
+ * finding rather than repaired here: reporting it is a change to the budget for
+ * every key, not to this class. The battery carries it as an asserted quiet
+ * direction, which is the case that reds the day it is repaired.
+ *
+ * ## The remedy with no reader — #17848, and a pin the shape never had
+ *
+ * #17848 filed two halves against this family. Re-measuring both on the tree
+ * that answers today is the whole of what this round changed.
+ *
+ * ⭐ HALF ONE DID NOT REPRODUCE. The card measured three parked PRs and read
+ * nine T1 tells on keys that had existed for releases — a key re-declared
+ * because the diff hung a zod `{ error: … }` param on it (#17846, seven doors),
+ * or rewrote its `.describe()` (#17796), or moved beside a retirement (#17638).
+ * Re-run against all three PR diffs, this matcher reports NO tell on any of
+ * them — and neither does it AS IT STOOD AT THE CARD'S OWN FILING COMMIT
+ * (`758ac409`, seventeen minutes before the card was written). The repair had
+ * landed three days EARLIER, in #16943's replacement budget above: a key
+ * re-declared in place removes a T1 line and adds one, and the removal pays.
+ *
+ * ⛔ So no matcher change was made for half one, and the reason is not that the
+ * change would have been small. The shapes the card floated — pairing across a
+ * HUNK, or diffing the file's key SET instead of the block's lines — are the
+ * silence `changeBlocks`'s own docblock refuses, and buying them would have
+ * traded a loud failure for a quiet one to repair a defect that was not there.
+ *
+ * What half one did leave is a gap in the INSTRUMENT rather than in the reader:
+ * the `{ error: … }` shape had no case of its own, and it is arithmetically
+ * distinct from the `.describe()` pair #16943 pinned — one removed line against
+ * THREE added, of which exactly one is a key. A budget counting LINES instead
+ * of KINDS comes up short precisely there. Its battery is below, carrying the
+ * dark control that shows the silence is bought by the removal and never by the
+ * shape, and the surplus control that shows a real new key riding along still
+ * fires.
+ *
+ * ⭐ HALF TWO REPRODUCED EXACTLY, and it is what this round repairs. The
+ * refusal sentence offered two doors and only one was real: "explain in the
+ * claim why this addition does not widen" has NO READER — `c5WideningTell()`
+ * compares the declaration against the diff's tells and stops there. The
+ * sections above had recorded that twice, at #16822 and again at #16943,
+ * without ever changing the string a refused author actually reads; so this
+ * file knew, and the author could not. ⇒ the only door that moved the exit code
+ * was `Clause-②: no` → `yes`, which on a FALSE tell is the one thing the
+ * standing rule forbids outright: 「⛔ 永不把 `no` 翻成 `yes` 去过门」.
+ *
+ * A declared-but-unenforced remedy is a shape this repo removes rather than
+ * documents, so the sentence now names the two doors that work — re-declare
+ * when the diff really widens, and repair the MATCHER when the tell is false —
+ * and states the explanation's uselessness outright, so nobody spends a round
+ * rediscovering it. ⛔ Giving the explanation a READER was refused rather than
+ * overlooked: an author-written sentence that clears the author's own gate is
+ * 自查放行, and it would need exactly the new claim-line syntax #16448 forbids.
+ *
+ * ⛔ No exit code moves for either half. The register below is unchanged, every
+ * tell fires where it fired, and `--self-test` GREW cases in both directions
+ * rather than losing any.
+ *
  * ## Where the surfaces come from — imported, never hand-copied
  *
  * The contract SOURCE surface is `SUSPECT_TIER_GLOBS`, imported from
@@ -694,11 +824,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#17618 — a PARAMETER is not a key, and a closed set RE-SPELLED around fewer values is not a new one': 24,
   '#17300 — the retirement ledger is a record of REMOVALS, not a set that gained a value': 27,
   '#17955 — a `retiredKey()` tombstone declares a key UNWRITABLE, and never adds a spelling': 29,
+  '#17848 — a key RE-DECLARED with a zod `error` param is not a key ADDED': 8,
+  '#18234 — a key narrowed OUT of a universal acceptor is not a set that gained a value': 33,
   'T3 — a new row in a published entry point': 8,
   'T4 — a new registration in a registry': 10,
   '#16448 acceptance: the four positive controls, each with its file:line': 8,
   '#16448 acceptance: the negative controls a widening gate must let through': 10,
-  'the refusal sentence, and the two prohibitions it must keep': 8,
+  'the refusal sentence, and the two prohibitions it must keep': 11,
   'the exit register is distinct in every direction it must be': 6,
   'the declared registry rows still exist in this tree': 4,
   '#17112 — the count is split: examined is not examinable': 23,
@@ -721,15 +853,36 @@ export const EXIT_INCOMPLETE = 2;
 export const EXIT_REFUSED = 4;
 
 /**
- * The sentence #16448 fixes, quoted from the card and NOT paraphrased.
+ * The sentence a refused author reads — the two doors that MOVE THE EXIT CODE,
+ * and the one that never did (#17848).
  *
- * It is a constant because the whole point of the refusal is that the author
- * knows the two ways out of it — re-declare, or explain — without reading this
- * file. A row renders it once; ⛔ never a second wording per tell.
+ * ⚠️ It is no longer #16448's wording, and the change is measured rather than
+ * editorial. That wording read "re-declare `yes` or explain in the claim why
+ * this addition does not widen", and the header above has twice recorded that
+ * its second branch has NO READER: `c5WideningTell()` compares the declaration
+ * against the diff's tells and nothing else, so an author who followed the
+ * instruction got the identical exit 4 with no way to learn that the remedy was
+ * never implemented. What that left standing was the branch the standing rule
+ * forbids outright — 「⛔ 永不把 `no` 翻成 `yes` 去过门」 — a widening written
+ * into a governance ledger that did not happen and afterwards indistinguishable
+ * from one that did. ⛔ A gate whose only working door is a lie teaches the lie.
+ *
+ * ⛔ The repair is NOT to give the explanation a reader. An author-written
+ * sentence that clears the author's own gate is 自查放行, and it would need the
+ * new claim-line syntax #16448 forbids. The repair is to name the door this
+ * file has said was the right one since #16822: a DEMONSTRATED false positive
+ * is repaired HERE, in the matcher, with a `--self-test` case pinning the
+ * shape — and to say plainly that the claim is not where it gets repaired.
+ *
+ * It stays a constant for #16448's reason: the author knows the ways out
+ * without opening this file. A row renders it once; ⛔ never a second wording
+ * per tell.
  */
 export const REFUSAL_SENTENCE =
-  'a widening tell with `Clause-②: no` — re-declare `yes` or explain in the claim why this ' +
-  'addition does not widen';
+  'a widening tell with `Clause-②: no` — re-declare `yes` if the diff really widens; if the tell ' +
+  'is FALSE, repair it here in the matcher (`scripts/pm/check-widening-tells.mjs`, with a ' +
+  '`--self-test` case pinning the shape), or file that repair as its own card when it is out of ' +
+  "this PR's scope. ⛔ An explanation in the claim moves no exit code — nothing reads one";
 
 // ---------------------------------------------------------------------------
 // The surfaces
@@ -1409,6 +1562,24 @@ const KEYED_PROPERTY_NAME = /^[ \t]*(?:'([^']+)'|"([^"]+)"|(\[[^\]]+\])|([A-Za-z
 const CLOSED_SET_CONSTRUCTOR = /z\.(enum|union|discriminatedUnion|literal)\(/;
 
 /**
+ * The KEY a T1-shaped line names, or `null` when the line names none.
+ *
+ * ⛔ One reading, shared by every predicate below that asks "which key is
+ * this line about" — the two spend readings (#17618's closed-set re-spelling
+ * and #18234's universal acceptor) and nothing else may grow a second one: two
+ * spellings of "the same key" would disagree about a quoted or optional-marked
+ * name on the day one of them moved, and the budget would then pay on one side
+ * of the comparison and refuse on the other.
+ */
+export function keyedPropertyName(text) {
+  const s = String(text ?? '');
+  if (COMMENT_LINE.test(s) || !SCHEMA_PROPERTY.test(s)) return null;
+  const name = KEYED_PROPERTY_NAME.exec(s);
+  if (name === null) return null;
+  return name[1] ?? name[2] ?? name[3] ?? name[4];
+}
+
+/**
  * The key a T1 line names and the closed-set members its value declares INLINE,
  * or `null` when either half is not readable on this one line.
  *
@@ -1418,10 +1589,8 @@ const CLOSED_SET_CONSTRUCTOR = /z\.(enum|union|discriminatedUnion|literal)\(/;
  */
 export function keyedClosedSetMembers(text) {
   const s = String(text ?? '');
-  if (COMMENT_LINE.test(s) || !SCHEMA_PROPERTY.test(s)) return null;
-  const name = KEYED_PROPERTY_NAME.exec(s);
-  if (name === null) return null;
-  const key = name[1] ?? name[2] ?? name[3] ?? name[4];
+  const key = keyedPropertyName(s);
+  if (key === null) return null;
   const ctor = CLOSED_SET_CONSTRUCTOR.exec(s);
   if (ctor === null) return null;
   const openParen = ctor.index + ctor[0].length - 1;
@@ -1462,6 +1631,125 @@ export function respellsExistingClosedSetKey(text, removedTexts) {
     if (before === null || before.key !== added.key) return false;
     return added.members.every((m) => before.members.includes(m));
   });
+}
+
+/**
+ * Zod's UNIVERSAL ACCEPTORS — the values a key may carry that admit EVERY
+ * value — measured on this tree's zod rather than assumed (#18234).
+ *
+ * Measured with `safeParse` on zod 4.4.3, over `42`, `'stage=won'`, `null`,
+ * `undefined`, `{}`, `[]`, `true` and a function: `z.unknown()` and `z.any()`
+ * accept all eight, and so do `z.unknown().optional()` and `z.any().optional()`.
+ * The two differ only in what `tsc` then permits at the USE site (`unknown` vs
+ * `any`), which is not the question clause ② asks — the accept set is what an
+ * author may write, and for both of these it is everything. ⛔ So `z.any()` is
+ * in the class on a reading, not on a resemblance.
+ *
+ * ⚠️ `z.custom()` with no validator accepts every value too, and is NOT
+ * declared here: measured over `packages/spec/src/**` and
+ * `packages/runtime/src/**` it has ZERO code occurrences (3 text hits, all of
+ * them prose in a docblock or a test comment). A row for a shape no tree
+ * carries is the dead data the surface table's existence guard exists against,
+ * and `z.custom(fn)` — the spelling that would actually arrive — narrows. The
+ * class grows by MEASUREMENT: a landed carrier, then a case beside it.
+ */
+const UNIVERSAL_ACCEPTOR_CALL = /^z\.(?:unknown|any)\(\)/;
+
+/**
+ * The chain steps a universal acceptor may carry without ceasing to be one.
+ *
+ * ⛔ Measured, and deliberately SHORT: over the 132 key lines on this tree
+ * whose value opens `z.unknown()` (127) or `z.any()` (5), the whole vocabulary
+ * is `.optional()` (89), `.describe()` (84) and `.meta()` (1) — nothing else
+ * appears. Every step outside this list leaves the tell FIRING, which is the
+ * loud direction: `.refine()` NARROWS (measured: `z.unknown().refine(v =>
+ * typeof v === 'string')` refuses `42`), and so do `.pipe()` and `.and()`.
+ * ⚠️ Growing this list makes the gate QUIETER, so a step is added only with
+ * the measurement that it cannot narrow — never because it looks harmless.
+ */
+const INERT_CHAIN_STEP = /^\.(?:optional|describe|meta)\(/;
+
+/** What may follow the value when it TERMINATES on this line: a comma, nothing else. */
+const UNIVERSAL_ACCEPTOR_TAIL = /^[ \t]*,[ \t]*$/;
+
+/**
+ * The key this line declares as a UNIVERSAL ACCEPTOR, or `null` (#18234).
+ *
+ * `z.unknown()` is zod's universal acceptor, so a key carrying it accepts
+ * EVERY value an author may write. That is the one fact #17618's three-fact
+ * spend cannot express: its second fact asks for both member lists to be
+ * readable, and a universal acceptor HAS no member list — which is precisely
+ * the case where no list comparison is needed, because the removed set is the
+ * universe and every replacement is a subset of it by construction.
+ *
+ * The evidence is positive, line-local and absent by default, the way every
+ * decline in this file is. Three things must all be readable ON THIS LINE:
+ *
+ *   ① the line names a key (`keyedPropertyName`, the one reading);
+ *   ② its value IS `z.unknown()` or `z.any()` — the call and nothing before
+ *     it, so `legacy: z.string().or(z.unknown())` is not one; and
+ *   ③ what follows is inert chain steps and then the END of the value, proven
+ *     by the terminating comma.
+ *
+ * ⛔ Fact ③ is why an unterminated line answers `null`. A value that has not
+ * ended cannot be read: `exportOptions: z.unknown().optional()` with
+ * `.describe(…)` wrapped onto the next line shows nothing about what the next
+ * line does, and `.refine(…)` there would make the removed set NARROWER than
+ * the universe. Measured on this tree, 99 of the 132 universal-acceptor key
+ * lines terminate on their own line and 33 do not; the 33 keep telling.
+ *
+ * ⚠️ The residual QUIET direction is none — this predicate only ever declines
+ * to certify, and the residual is a FALSE POSITIVE on the wrapped spelling,
+ * which is the loud direction this file accepts by name. ⭐ The OVERTURN
+ * CONDITION, so it needs no second discussion: the first landed pair whose
+ * removed universal acceptor wraps onto a second line closes it by reading the
+ * block's removed run forward instead of one line.
+ *
+ * @param {string} text — one patch line's text, with its `+` / `-` stripped
+ * @returns {string|null} the key, or `null` when the line declares no
+ *   universal acceptor
+ */
+export function declaresUniversalAcceptorKey(text) {
+  const s = String(text ?? '');
+  const key = keyedPropertyName(s);
+  if (key === null) return null;
+  const name = KEYED_PROPERTY_NAME.exec(s);
+  if (name === null) return null;
+  let rest = s.slice(name[0].length).trimStart();
+  const head = UNIVERSAL_ACCEPTOR_CALL.exec(rest);
+  if (head === null) return null;
+  rest = rest.slice(head[0].length);
+  for (;;) {
+    const step = INERT_CHAIN_STEP.exec(rest);
+    if (step === null) break;
+    // `matchingCloser` is string-aware, so a paren inside a `.describe()` string
+    // cannot close the step early and let a narrowing arm through.
+    const close = matchingCloser(rest, step[0].length - 1);
+    if (close === -1) return null; // the step's arguments continue on a later line
+    rest = rest.slice(close + 1);
+  }
+  return UNIVERSAL_ACCEPTOR_TAIL.test(withoutComments(rest)) ? key : null;
+}
+
+/**
+ * Does this added line put a narrower value on a key the same change block
+ * removed as a UNIVERSAL ACCEPTOR? (#18234)
+ *
+ * Two facts, both carried by the block: the added line names a key, and a
+ * removed line names the SAME key with a value that accepted everything. No
+ * third fact is needed and none is asked for — ⛔ in particular NOT the added
+ * value's own shape, which is the accidental variable this reading removes: the
+ * live pair declined when the replacement was spelled `z.array(z.any())` and
+ * fired when the identical narrowing was spelled `z.union([`, purely because
+ * the second opens a closed-set constructor and the first does not.
+ *
+ * ⛔ The KEY must match. A removed `filter: z.unknown()` buys nothing for an
+ * added `other: z.union([` — that block really does add a spelling.
+ */
+export function replacesUniversalAcceptorKey(text, removedTexts) {
+  const key = keyedPropertyName(text);
+  if (key === null || !Array.isArray(removedTexts)) return false;
+  return removedTexts.some((r) => declaresUniversalAcceptorKey(r) === key);
 }
 
 /**
@@ -1846,8 +2134,22 @@ export function tellsInFile(file, { repo = THIS_REPO, licensed = null } = {}) {
     // SAME key and the inline member list did not grow. Without that evidence
     // the refusal stands, because an inline `z.enum([…])` widened in place has
     // no per-member line for T2 to read and this row is the only one that fires.
+    // #18234 — … or on the OTHER positive evidence a block can carry that the
+    // set gained nothing: the same block removed the SAME key carrying a value
+    // that accepted EVERYTHING. `z.unknown()` is zod's universal acceptor, so
+    // every value the replacement admits was already admitted and the added
+    // list is a subset BY CONSTRUCTION — there is no member list to compare
+    // because the removed set was the universe. ⛔ This is the same positive
+    // evidence #17618 asks for, supplied by the removed value's own semantics
+    // instead of by a list comparison; it is NOT a relaxation of the refusal:
+    // an inline set widened in place still has no removed universal acceptor to
+    // name, and still fires on this row.
     const declaresClosedSet = CLOSED_SET_OPENER.test(text);
-    const spendable = !declaresClosedSet || respellsExistingClosedSetKey(text, removedOfLine.get(i));
+    const removedHere = removedOfLine.get(i);
+    const spendable =
+      !declaresClosedSet ||
+      respellsExistingClosedSetKey(text, removedHere) ||
+      replacesUniversalAcceptorKey(text, removedHere);
     if (kind !== null && spendable) {
       const budget = budgetOfLine.get(i);
       const paid = budget?.get(kind) ?? 0;
@@ -2823,6 +3125,175 @@ export function selfTest() {
   // that reds when it does.
   t('⚠️ QUIET — a multi-line tombstone whose CLOSING line chains a live arm is not reported; population 0, and the header carries the overturn condition', tells({ filename: TOMBSTONE_FILE, status: 'modified', patch: '@@ -30,0 +30,3 @@\n+  legacy: retiredKey(\n+    LEGACY_PRESCRIPTION,\n+  ).or(z.string()),' }).length === 0);
 
+  // -- #17848 -----------------------------------------------------------------
+  //
+  // The card behind this battery read nine T1 tells across three PRs on keys
+  // that had existed for releases. Re-measured, none of the three fires — and
+  // none fired at the card's own filing commit either, because #16943's
+  // replacement budget above had already landed. ⭐ These cases therefore pin a
+  // repair that was ALREADY HERE rather than one this round made, which is
+  // exactly why they earn their lines: the shape had no case of its own, so
+  // nothing would have reported the day it stopped being paid for.
+  //
+  // ⚠️ It is arithmetically distinct from the `.describe()` pair #16943 pinned.
+  // The block removes ONE line and adds THREE, of which exactly one is a key —
+  // a budget counting LINES instead of KINDS comes up short right here. The
+  // specimen is #17846's, written seven times in one diff.
+  battery("#17848 — a key RE-DECLARED with a zod `error` param is not a key ADDED");
+  const REDECLARED_WITH_ERROR_PARAM = {
+    filename: 'packages/spec/src/ui/component.zod.ts',
+    status: 'modified',
+    patch: [
+      '@@ -2491,7 +2502,12 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({',
+      '   dataSource: ElementDataSourceSchema.optional(),',
+      ' ',
+      '-  filter: z.array(ViewFilterRuleSchema).optional()',
+      '+  filter: z.array(ViewFilterRuleSchema, {',
+      "+    error: ruleArrayFilterError({ surface: 'object_grid', migration: 'rule-array' }),",
+      '+  }).optional()',
+      "     .describe('Filter rules'),",
+    ].join('\n'),
+  };
+  // The SAME added lines with nothing removed to pay for them. ⛔ Without this
+  // control the case above proves only that something declined, never that the
+  // REPLACEMENT is what declined it.
+  const ERROR_PARAM_UNPAID = {
+    ...REDECLARED_WITH_ERROR_PARAM,
+    patch: REDECLARED_WITH_ERROR_PARAM.patch
+      .split('\n')
+      .filter((l) => !l.startsWith('-'))
+      .join('\n'),
+  };
+  // One genuine new key riding along with the re-declaration: the removal pays
+  // for the key it replaced and has nothing left for this one.
+  const ERROR_PARAM_PLUS_NEW_KEY = {
+    ...REDECLARED_WITH_ERROR_PARAM,
+    patch: [
+      '@@ -2491,7 +2502,13 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({',
+      '   dataSource: ElementDataSourceSchema.optional(),',
+      ' ',
+      '-  filter: z.array(ViewFilterRuleSchema).optional()',
+      '+  filter: z.array(ViewFilterRuleSchema, {',
+      "+    error: ruleArrayFilterError({ surface: 'object_grid', migration: 'rule-array' }),",
+      '+  }).optional()',
+      "+    .describe('Filter rules'),",
+      '+  filterLogic: z.string().optional(),',
+      ' ',
+    ].join('\n'),
+  };
+  t('⭐ the card’s specimen — key, optionality and element schema byte-identical, an `error` param added — is not a new key', tells(REDECLARED_WITH_ERROR_PARAM).length === 0);
+  t('…and the pair reads CLEAN end to end, which is the exit code the card reported as unreachable', wideningRefusal({ declaration: 'no', files: [REDECLARED_WITH_ERROR_PARAM] }).state === 'clean');
+  t('⛔ DARK CONTROL — the same three added lines with NO removal still fire: the silence is bought by the replacement, never by the shape', tells(ERROR_PARAM_UNPAID).length === 1 && tells(ERROR_PARAM_UNPAID)[0]?.tell === 'T1');
+  t('…at the line that declares the key, not at the param that chooses a refusal message', at(ERROR_PARAM_UNPAID)[0] === 'packages/spec/src/ui/component.zod.ts:2504');
+  t('⛔ an `error:` param is not a key on a shape — its value is not schema-shaped, so it neither fires nor SPENDS the budget', memberTellKind("    error: ruleArrayFilterError({ surface: 'object_grid' }),", { onContractSource: true }) === null);
+  t('⭐ SURPLUS CONTROL — a genuinely new key added in the SAME block still fires: one removal pays for one key', tells(ERROR_PARAM_PLUS_NEW_KEY).length === 1 && tells(ERROR_PARAM_PLUS_NEW_KEY)[0]?.tell === 'T1');
+  t('…and the row it reports is the new key, never the re-declared one', at(ERROR_PARAM_PLUS_NEW_KEY)[0] === 'packages/spec/src/ui/component.zod.ts:2508');
+  t('⛔ and the re-declaration does not license the block: a THIRD key with no removal behind it is reported too', tells({ ...REDECLARED_WITH_ERROR_PARAM, patch: `${REDECLARED_WITH_ERROR_PARAM.patch}\n+  extra: z.string(),` }).length === 1);
+
+  // -- #18234: a REMOVED value that accepted EVERYTHING ----------------------
+  //
+  // The live pair is objectui#9540: one key narrowed out of `z.unknown()` —
+  // zod's universal acceptor — into a `z.union([…])` whose list opens on the
+  // next line. `'stage=won'` and `42` were admitted before and are refused
+  // after, so the accept set SHRANK, and T1's own sentence ("the accept set
+  // gains a spelling an author may now write") is inverted on it.
+  //
+  // ⭐ The finding is the CONTROL rather than that reasoning: the SAME removal
+  // with the replacement spelled `z.array(z.any())` DECLINED, while spelling it
+  // `z.union([` FIRED — one semantic change, two verdicts, decided by nothing
+  // but the first line of the added value. The case below asserts the two
+  // spellings agree, which is the defect in one assertion.
+  //
+  // ⭐ Read the FIRING half first, the way #17300's and #17955's batteries are
+  // ordered: a reading that can only suppress is untestable in the direction
+  // that matters, so the decline is bracketed on every side — a different key,
+  // a removed value that was never universal, a narrowing chain step on it, a
+  // genuine key riding along, and the dark control with nothing removed.
+  battery('#18234 — a key narrowed OUT of a universal acceptor is not a set that gained a value');
+  const UA_BOARD = 'objectstack-ai/objectui';
+  const UA_MIRROR = 'packages/types/src/zod/objectql.zod.ts';
+  const uaTells = (file) => tellsInFile(file, { repo: UA_BOARD });
+  const uaAt = (file) => uaTells(file).map((r) => `${r.file}:${r.line}`);
+  const uaPatch = (...lines) => [
+    '@@ -1811,2 +1811,5 @@ export const ObjectGallerySchema = BaseSchema.extend({',
+    ...lines,
+    ' ',
+  ].join('\n');
+  const UA_REMOVED = "-  filter: z.unknown().optional().describe('Query filter, forwarded verbatim as $filter'),";
+  const UA_ADDED_UNION = [
+    '+  filter: z.union([',
+    '+    z.array(z.any()),',
+    '+    z.record(z.string(), z.any()),',
+    "+  ]).optional().describe('Query filter, forwarded verbatim as $filter'),",
+  ];
+  // The live pair, in the bytes objectui#9540 pushed.
+  const UNIVERSAL_ACCEPTOR_NARROWED = {
+    filename: UA_MIRROR,
+    status: 'modified',
+    patch: uaPatch(UA_REMOVED, ...UA_ADDED_UNION),
+  };
+  // ⭐ CONTROL A — the identical removal, the replacement spelled so that its
+  // first line opens no closed-set constructor. This one declined BEFORE this
+  // reading landed, and it is why the pair is a defect rather than a strictness
+  // preference.
+  const UNIVERSAL_ACCEPTOR_NARROWED_INLINE = {
+    filename: UA_MIRROR,
+    status: 'modified',
+    patch: uaPatch(UA_REMOVED, "+  filter: z.array(z.any()).optional().describe('Query filter, forwarded verbatim as $filter'),"),
+  };
+  // The same shape on THIS repo's own contract surface — the reading is about
+  // the removed VALUE, never about which board is being judged.
+  const uaHere = (patch) => ({ filename: 'packages/spec/src/a.zod.ts', status: 'modified', patch });
+
+  // -- the firing half: what a removed universal acceptor must NOT buy -------
+  t('⛔ DARK CONTROL — the same added union with NOTHING removed still fires: the silence is bought by the removal, never by the shape', uaTells({ ...UNIVERSAL_ACCEPTOR_NARROWED, patch: uaPatch(...UA_ADDED_UNION) }).length === 1);
+  t('…at the line that declares the key, which is the row the live pair was refused on', uaAt({ ...UNIVERSAL_ACCEPTOR_NARROWED, patch: uaPatch(...UA_ADDED_UNION) })[0] === `${UA_MIRROR}:1811`);
+  t('⛔ a removed universal acceptor on a DIFFERENT key pays nothing — that block really does add a spelling', uaTells({ ...UNIVERSAL_ACCEPTOR_NARROWED, patch: uaPatch('-  legacyFilter: z.unknown().optional(),', '+  filter: z.union([', '+    z.string(),', '+  ]),') }).length === 1);
+  t('⛔ a removed value that was never universal pays nothing either — `z.string()` is not the universe', uaTells({ ...UNIVERSAL_ACCEPTOR_NARROWED, patch: uaPatch('-  filter: z.string().optional(),', '+  filter: z.union([', '+    z.string(),', '+  ]),') }).length === 1);
+  t('⛔ nor does one carrying a NARROWING chain step — a `.refine()`d `z.unknown()` refuses values, so the replacement may widen', uaTells({ ...UNIVERSAL_ACCEPTOR_NARROWED, patch: uaPatch('-  filter: z.unknown().refine(isFilterish).optional(),', '+  filter: z.union([', '+    z.string(),', '+  ]),') }).length === 1);
+  const UA_SURPLUS = { ...UNIVERSAL_ACCEPTOR_NARROWED, patch: uaPatch(UA_REMOVED, ...UA_ADDED_UNION, '+  filterLogic: z.union([AndSchema, OrSchema]),') };
+  t('⛔ SURPLUS CONTROL — a genuinely new key added in the SAME block still fires: one removal pays for one key', uaTells(UA_SURPLUS).length === 1);
+  t('…and the row it reports is the new key, never the narrowed one', uaTells(UA_SURPLUS)[0]?.text === 'filterLogic: z.union([AndSchema, OrSchema]),');
+  t('⛔ CONTROL — an inline enum WIDENED in place still tells: no universal acceptor was removed, and no per-member line exists for T2 to read', tells(uaHere("@@ -95,2 +95,2 @@\n-  kind: z.enum(['a', 'b']),\n+  kind: z.enum(['a', 'b', 'c']),")).length === 1);
+  t('⛔ CONTROL — a genuinely new key on a shape still tells, with its own file:line', at(FILE_SCHEMA_KEY)[0] === 'packages/spec/src/kernel/manifest.zod.ts:44');
+  t('⛔ CONTROL — a set whose list opens on a LATER line with no universal acceptor removed keeps telling', tells(uaHere("@@ -95,3 +95,4 @@\n-  strategy: z.enum(['a', 'b']),\n+  strategy: z.enum([\n+    'a',\n+  ]),")).some((r) => r.tell === 'T1'));
+
+  // -- the declining half: objectui#9540's one row --------------------------
+  t('⭐ THE LIVE PAIR — a key narrowed out of `z.unknown()` into a multi-line `z.union([` reads no tell', uaTells(UNIVERSAL_ACCEPTOR_NARROWED).length === 0);
+  t('⭐ THE FINDING, in one assertion: the two spellings of the SAME narrowing now agree', uaTells(UNIVERSAL_ACCEPTOR_NARROWED).length === uaTells(UNIVERSAL_ACCEPTOR_NARROWED_INLINE).length);
+  t('…and control A still declines, so the agreement was not bought by making it fire', uaTells(UNIVERSAL_ACCEPTOR_NARROWED_INLINE).length === 0);
+  t('⭐ …and the live pair reads CLEAN end to end, which is the exit code a correct `Clause-②: no` could not reach', wideningRefusal({ declaration: 'no', files: [UNIVERSAL_ACCEPTOR_NARROWED], repo: UA_BOARD }).state === 'clean');
+  t('⭐ `z.any()` is in the class on a MEASUREMENT — both accept every value; they differ only in what `tsc` permits at the use site', tells(uaHere("@@ -30,2 +30,4 @@\n-  filter: z.any().optional(),\n+  filter: z.union([\n+    z.string(),\n+  ]),")).length === 0);
+  t('⭐ …and the reading is about the removed VALUE, not the board: the same shape on this repo\'s own surface declines too', tells(uaHere("@@ -30,2 +30,4 @@\n-  filter: z.unknown().optional().describe('Initial filter'),\n+  filter: z.union([\n+    z.array(SortItemSchema),\n+  ]),")).length === 0);
+  t('⭐ …and a `z.discriminatedUnion` / `z.literal` replacement reads the same — the added value\'s spelling decides nothing', tells(uaHere("@@ -30,2 +30,3 @@\n-  mode: z.unknown(),\n+  mode: z.discriminatedUnion('type', [\n+    A,\n+  ]),")).length === 0 && tells(uaHere("@@ -30,1 +30,1 @@\n-  mode: z.unknown(),\n+  mode: z.literal('grid'),")).length === 0);
+
+  // -- the reader itself -----------------------------------------------------
+  t('`declaresUniversalAcceptorKey` reads the key a universal acceptor is written on', declaresUniversalAcceptorKey("  filter: z.unknown().optional().describe('prose'),") === 'filter' && declaresUniversalAcceptorKey('  filter: z.any(),') === 'filter');
+  t('…in every key spelling `SCHEMA_PROPERTY` admits — quoted, and optional-marked', declaresUniversalAcceptorKey("  'a.b': z.unknown(),") === 'a.b' && declaresUniversalAcceptorKey('  filter?: z.unknown(),') === 'filter');
+  t('…and the whole measured chain vocabulary of this tree: `.optional()`, `.describe()`, `.meta()`', ['  f: z.unknown().optional(),', "  f: z.unknown().describe('x'),", '  f: z.unknown().optional().meta({ title: 1 }),'].every((l) => declaresUniversalAcceptorKey(l) === 'f'));
+  t('⛔ …and declines a NARROWING step, which is the direction that must never be certified', declaresUniversalAcceptorKey('  f: z.unknown().refine(isThing),') === null && declaresUniversalAcceptorKey('  f: z.unknown().pipe(z.string()),') === null);
+  t('⛔ …and a value that merely MENTIONS the acceptor inside a live schema', declaresUniversalAcceptorKey('  f: z.string().or(z.unknown()),') === null && declaresUniversalAcceptorKey('  f: z.array(z.unknown()),') === null);
+  t('⛔ …and an UNTERMINATED value, which shows nothing about what the next line chains onto it — 33 of this tree\'s 132 acceptor key lines', declaresUniversalAcceptorKey('  f: z.unknown().optional()') === null && declaresUniversalAcceptorKey("  f: z.unknown().describe(") === null);
+  t('…a trailing comment is not a chain step', declaresUniversalAcceptorKey('  f: z.unknown(), // forwarded verbatim') === 'f');
+  t('⛔ …but a paren inside a `.describe()` STRING cannot close the step early and let a narrowing arm through', declaresUniversalAcceptorKey("  f: z.unknown().describe('call foo(bar)'),") === 'f' && declaresUniversalAcceptorKey("  f: z.unknown().describe('call foo(bar)').refine(x),") === null);
+  t('⛔ …and `z.custom()` is NOT declared: measured 0 code occurrences in this tree, and `z.custom(fn)` narrows', declaresUniversalAcceptorKey('  f: z.custom(),') === null);
+  t('⛔ …nor a bare acceptor that names no key — this is a PROPERTY reading, not an expression one', declaresUniversalAcceptorKey('  z.unknown(),') === null && declaresUniversalAcceptorKey('  // f: z.unknown(),') === null);
+  t('`replacesUniversalAcceptorKey` needs the SAME key', replacesUniversalAcceptorKey('  filter: z.union([', ['  filter: z.unknown().optional(),']) === true && replacesUniversalAcceptorKey('  filter: z.union([', ['  other: z.unknown().optional(),']) === false);
+  t('…and an added line that names no key spends nothing', replacesUniversalAcceptorKey("    z.array(z.any()),", ['  filter: z.unknown(),']) === false);
+  t('`keyedPropertyName` is ONE reading, shared with #17618\'s re-spelling: the two cannot disagree about a key', keyedPropertyName("  strategy: z.enum(['a']),") === 'strategy' && keyedClosedSetMembers("  strategy: z.enum(['a']),")?.key === keyedPropertyName("  strategy: z.enum(['a']),"));
+  t('⭐ the vocabulary is INTACT — `memberTellKind` still classifies a universal-acceptor key line as T1, so both sides of the budget read one question', memberTellKind('  filter: z.unknown().optional(),', { onContractSource: true }) === 'T1');
+  t('⭐ …and the narrowed key SPENDS the budget rather than being exempt from it: two removed acceptors pay for two narrowed keys, and a third key fires', tells(uaHere('@@ -30,2 +30,3 @@\n-  a: z.unknown(),\n-  b: z.unknown(),\n+  a: z.union([X]),\n+  b: z.union([Y]),\n+  c: z.union([Z]),')).length === 1);
+
+  // ⚠️ The direction this reading deliberately does NOT touch, asserted rather
+  // than described: a key re-typed INTO a universal acceptor — `z.union([…])`
+  // → `z.unknown()` — is a real WIDENING and goes unreported. ⛔ That silence
+  // is #16943's replacement budget and it predates this reading: measured
+  // identical at 21b7c12b4, with the new-key and widened-enum controls firing
+  // on the same harness. It is filed as its own finding rather than repaired
+  // here, because reporting it is a change to the budget for EVERY key rather
+  // than to this one class, and this case is what reds the day that lands.
+  t('⚠️ QUIET — the inverse direction (a key re-typed INTO `z.unknown()`) is unreported, unchanged by this reading and filed as its own card', tells(uaHere('@@ -30,1 +30,1 @@\n-  filter: z.union([A, B]),\n+  filter: z.unknown().optional(),')).length === 0);
+
   // -- T3 --------------------------------------------------------------------
   battery('T3 — a new row in a published entry point');
   t('a new export row is a tell', tells(FILE_API_SURFACE)[0]?.tell === 'T3');
@@ -2882,7 +3353,10 @@ export function selfTest() {
 
   // -- the sentence and the prohibitions ------------------------------------
   battery('the refusal sentence, and the two prohibitions it must keep');
-  t('the sentence names both ways out', says(REFUSAL_SENTENCE, 're-declare `yes`') && says(REFUSAL_SENTENCE, 'explain in the claim'));
+  t('the sentence names both ways out', says(REFUSAL_SENTENCE, 're-declare `yes`') && says(REFUSAL_SENTENCE, 'repair it here in the matcher'));
+  t('⛔ #17848 — and BOTH are doors this file can open: the one with no reader is gone', !says(REFUSAL_SENTENCE, 'explain in the claim'));
+  t('…and its uselessness is stated outright, so no author spends a round rediscovering it', says(REFUSAL_SENTENCE, 'moves no exit code'));
+  t('…while the matcher door names the file to open and the case that must come with it', says(REFUSAL_SENTENCE, 'scripts/pm/check-widening-tells.mjs') && says(REFUSAL_SENTENCE, '`--self-test` case pinning the shape'));
   t('…and quotes the declaration in the spelling the reader uses', says(REFUSAL_SENTENCE, '`Clause-②: no`'));
   t('⛔ no label name appears anywhere in this file\'s outputs — a checker that hung one would be issuing the verdict', !says(REFUSAL_SENTENCE, 'needs:') && refusalLines(refusedAll).every((l) => !l.includes('needs:')));
   t('⛔ no new claim-line syntax is invented: the two values are the sibling\'s two', wideningRefusal({ declaration: 'maybe', files: positives }).state === 'not-applicable');
@@ -3093,6 +3567,8 @@ export function selfTest() {
       'each bracketed by the control that still fires, ' +
       '#17300\'s retirement-ledger licence with the firing controls that bracket it on every side, ' +
       '#17955\'s tombstone decline — read before the budget so a rename is still paid for, and requiring the value to BE the call — with the un-retiring control, the two chained-arm controls that fire, and the multi-line chained close pinned as the residual quiet direction, ' +
+      "#17848's re-declared key with a zod `error` param — declined by #16943's budget, bracketed by the dark control that fires when nothing paid and the surplus control that fires on a real new key beside it, " +
+      "#18234's key narrowed out of a universal acceptor — certified by the REMOVED value's own semantics rather than by the added value's spelling, with the dark, different-key, never-universal, narrowing-step and surplus controls that still fire, " +
       "#16448's four positive controls each with its file:line, its negative controls — " +
       'the same diffs with `yes`, and a removal-only diff with `no` — the local path composed end ' +
       'to end so a binary change to a tell surface cannot read as clean, #17112\'s split count with ' +

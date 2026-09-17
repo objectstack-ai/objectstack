@@ -9,7 +9,10 @@
  * | declaration | members |
  * |:---|:---|
  * | `DiscoveryEnvironmentSchema` (`api/discovery.zod.ts`) | `production` `sandbox` `development` |
- * | `EnvironmentTypeSchema` (`cloud/environment.zod.ts`) | those three + `test` `staging` `preview` `trial` |
+ * | `EnvironmentTypeSchema` (`api/discovery.zod.ts`) | those three + `test` `staging` `preview` `trial` |
+ *
+ * Both rows name one module on purpose: #16325 removed the `./cloud` subpath
+ * and `EnvironmentTypeSchema` moved here with its only open-source reader.
  *
  * Keeping both is the ruled outcome, not a defect: discovery answers the coarse
  * question ("am I talking to production?") on a machine-readable surface whose
@@ -23,8 +26,9 @@
  * nothing referenced one enum from the other, so a rename or a removal on the
  * seven-member side would leave the three-member side silently claiming a
  * membership it no longer has. The prose cross-references now run both ways
- * (`discovery.zod.ts`'s `.describe()` since #4828; `environment.zod.ts`'s JSDoc
- * since this pin) — and prose is unassertable, which is what this file is for.
+ * (`DiscoveryEnvironmentSchema`'s `.describe()` since #4828;
+ * `EnvironmentTypeSchema`'s JSDoc since this pin, carried through the move) —
+ * and prose is unassertable, which is what this file is for.
  *
  * ⛔ Scope: this pins the RELATION only. It deliberately does not pin either
  * enum's exact membership — `EnvironmentTypeSchema` is free to grow a new

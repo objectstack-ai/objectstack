@@ -10,10 +10,12 @@ import type {
 import { emptyGroupValueFor, type FilterCondition } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import {
+  bucketDateKey,
   bucketKeyToCalendarRange,
   filterTokenContextFrom,
   resolveAnalyticsDateRangeString,
   resolveFilterTokens,
+  zonedDateStartToUtcMs,
   type LoweredDateRangeWindow,
 } from '@objectstack/core';
 import type { CompiledDataset, DerivedMeasureSpec } from './dataset-compiler.js';
@@ -480,30 +482,72 @@ export function resolveOrdering(
 
 // ── compareTo date math (deterministic — no Date.now) ────────────────────────
 
-function parseUTC(date: string): number {
-  // Accepts 'YYYY-MM-DD' (and ISO datetimes); interpreted as UTC.
-  const ms = Date.parse(date.length === 10 ? `${date}T00:00:00Z` : date);
-  // [#5716] `DATASET_INVALID` / 400 — the string comes from the REQUEST
-  // (`selection.timeDimensions[].dateRange`, usually a dashboard's date filter),
-  // reaches here only through `shiftRange`'s `compareTo` math, and no schema
-  // refines it into a date. A caller who sends an unparseable bound gets told
-  // which bound it was; nothing about it is a server fault.
+/**
+ * [#18245] The epoch ms one `compareTo` bound denotes.
+ *
+ * ⭐ **A bare `YYYY-MM-DD` is a CALENDAR DAY, not an instant**, and every piece
+ * of arithmetic below it feeds — {@link shiftYear}, {@link shiftRange}'s
+ * previous-period length, {@link bucketOrdinalOfDay} — is calendar arithmetic
+ * that no timezone changes: "one year before 2026-09-01" is `2025-09-01` in
+ * Shanghai exactly as in New York. So a bare day is carried on the **UTC
+ * proxy** `zonedDateStartToUtcMs` yields for an unset zone, which is the
+ * pattern `analytics-date-range.ts`'s own header prescribes ("anchors on the
+ * reference timezone's calendar day and does its arithmetic on a UTC proxy").
+ * ⛔ Threading a zone in HERE instead would put DST in the middle of a year
+ * shift: `2026-03-09` is `04:00Z` in `America/New_York` (EDT) and the same
+ * clock reading a year earlier is `2025-03-08T23:00` EST — a different day.
+ *
+ * The other spelling is a real INSTANT (the ISO bound an author may write in
+ * the explicit-array arm, which judges arity and bound TYPE but never a bound's
+ * VALUE — `date-range-array-arm.ts`). It is parsed as one, unchanged.
+ *
+ * [#5716] `DATASET_INVALID` / 400 — the string comes from the REQUEST
+ * (`selection.timeDimensions[].dateRange`, usually a dashboard's date filter)
+ * and no schema refines it into a date. A caller who sends an unparseable bound
+ * gets told which bound it was; nothing about it is a server fault.
+ */
+function boundInstantMs(bound: string): number {
+  const ms = bound.length === 10 ? zonedDateStartToUtcMs(bound) : Date.parse(bound);
   if (Number.isNaN(ms)) {
-    throw datasetInvalidError(`[dataset-executor] invalid date in dateRange: "${date}"`);
+    throw datasetInvalidError(`[dataset-executor] invalid date in dateRange: "${bound}"`);
   }
   return ms;
 }
 
 const DAY_MS = 86_400_000;
 
-function toISODate(ms: number): string {
-  return new Date(ms).toISOString().slice(0, 10);
+/**
+ * [#18245] The calendar day an instant falls on, in `timezone` — the ONE seam
+ * in this module's `compareTo` math that a reference zone reaches.
+ *
+ * It is `@objectstack/core`'s `bucketDateKey` at its `'day'` granularity: the
+ * same shared, `Intl`-backed extraction the runtime's own grouping labels rows
+ * with, and the exact inverse of the `zonedDateStartToUtcMs` that
+ * `analytics-date-range.ts` renders every preset bound through. ⛔ There is
+ * deliberately no second implementation of it here — that is the one this
+ * package's shared vocabulary module exists to refuse, and what this function
+ * replaced (a local `toISODate` slicing `toISOString()`) was exactly that
+ * second implementation, silently pinned to UTC.
+ *
+ * Callers doing pure calendar-day arithmetic pass NO zone and get the UTC
+ * proxy back, round-tripping {@link boundInstantMs} exactly.
+ */
+function calendarDayAt(ms: number, timezone?: string): string {
+  const day = bucketDateKey(ms, 'day', timezone);
+  if (day == null) {
+    // `bucketDateKey` answers `null` only for an absent or unparseable instant,
+    // and every caller here holds a finite epoch ms this module just computed.
+    // Loud rather than a fabricated day: same condition, same envelope as an
+    // unparseable bound above (#5716).
+    throw datasetInvalidError(`[dataset-executor] compareTo date math produced no calendar day for ${ms}`);
+  }
+  return day;
 }
 
 function shiftYear(date: string, years: number): string {
-  const d = new Date(parseUTC(date));
+  const d = new Date(boundInstantMs(date));
   d.setUTCFullYear(d.getUTCFullYear() + years);
-  return toISODate(d.getTime());
+  return calendarDayAt(d.getTime());
 }
 
 /**
@@ -531,10 +575,10 @@ function shiftYear(date: string, years: number): string {
  * ## Why it reports INSTANTS while `runCompare` shifts DAYS
  *
  * What is reported here is the window the VOCABULARY resolved, which is what
- * the kit holds every face to. Projecting it onto this module's UTC calendar is
+ * the kit holds every face to. Projecting it onto calendar days is
  * a per-face calendar translation and stays downstream, in
- * {@link inclusiveUtcDayWindow} — the same split `lowerPreviewDateRange` makes
- * when it leaves the #3777 bare-day widening in its own predicate.
+ * {@link inclusiveCalendarDayWindow} — the same split `lowerPreviewDateRange`
+ * makes when it leaves the #3777 bare-day widening in its own predicate.
  *
  * ⛔ The ARRAY arm is the CALLER's explicit window and is handed back bound for
  * bound, with the inclusive upper reading it has always had (#16179) — the
@@ -558,7 +602,7 @@ export function lowerDatasetCompareDateRange(
 }
 
 /**
- * [#17973] The UTC calendar days a lowered window covers, as the INCLUSIVE
+ * [#17973] The calendar days a lowered window covers, as the INCLUSIVE
  * `[first, last]` pair every piece of `compareTo` math in this module takes.
  *
  * {@link shiftRange} measures `previousPeriod`'s length as a count of whole
@@ -573,10 +617,33 @@ export function lowerDatasetCompareDateRange(
  * calendar preset one day too long and shift `previousPeriod` by a day. The
  * three rolling presets end at NOW, a moment they REACH, so their bound is
  * already the last day.
+ *
+ * ## [#18245] ⭐ `timezone` decides WHICH calendar, and it is not optional here
+ *
+ * The bounds arriving here are INSTANTS, and the ten calendar presets open and
+ * close at the reference zone's midnight — `analytics-date-range.ts` renders
+ * both through `zonedDateStartToUtcMs` precisely so they do. Reading those
+ * instants on the UTC calendar therefore moves a boundary in every zone whose
+ * midnight is not UTC's, and it moves it in OPPOSITE directions either side of
+ * the meridian. MEASURED on `e0d05538c`, `this_month` + `previousYear` frozen
+ * at 2026-09-09: `Asia/Shanghai` opened at `2025-08-31` (its September midnight
+ * is the previous UTC day) and `America/New_York` closed at `2025-10-01` (its
+ * October midnight is the next UTC day) — each 31 days against a 30-day
+ * September, each still an ordinary `200`.
+ *
+ * ⛔ That is a day-boundary projection, ⛔ not an off-by-one: no constant makes
+ * both sides right, which is why the caller threads the SAME zone
+ * {@link DatasetExecutor.buildQuery} resolves the primary pass in.
  */
-function inclusiveUtcDayWindow(window: LoweredDateRangeWindow): [string, string] {
-  const endMs = parseUTC(window.end);
-  return [toISODate(parseUTC(window.start)), toISODate(window.endExclusive ? endMs - 1 : endMs)];
+function inclusiveCalendarDayWindow(
+  window: LoweredDateRangeWindow,
+  timezone?: string,
+): [string, string] {
+  const endMs = boundInstantMs(window.end);
+  return [
+    calendarDayAt(boundInstantMs(window.start), timezone),
+    calendarDayAt(window.endExclusive ? endMs - 1 : endMs, timezone),
+  ];
 }
 
 /**
@@ -682,13 +749,15 @@ export function shiftRange(range: [string, string], kind: CompareTo['kind']): [s
     case 'previousYear':
       return [shiftYear(start, -1), shiftYear(end, -1)];
     case 'previousPeriod': {
-      // The equal-length window ending the day before `start`.
-      const startMs = parseUTC(start);
-      const endMs = parseUTC(end);
+      // The equal-length window ending the day before `start`. Both bounds are
+      // CALENDAR days by the time they reach here (#18245), so this counts days
+      // on the UTC proxy and no zone enters the arithmetic.
+      const startMs = boundInstantMs(start);
+      const endMs = boundInstantMs(end);
       const lengthDays = Math.round((endMs - startMs) / DAY_MS) + 1;
       const prevEndMs = startMs - DAY_MS;
       const prevStartMs = prevEndMs - (lengthDays - 1) * DAY_MS;
-      return [toISODate(prevStartMs), toISODate(prevEndMs)];
+      return [calendarDayAt(prevStartMs), calendarDayAt(prevEndMs)];
     }
     default: {
       const exhaustive: never = kind;
@@ -741,10 +810,12 @@ function isoWeekKeyOfUtcMs(ms: number): string {
  * silently shifts by one and the comparison column lands on its neighbour.
  * Ordinals are computed from the CALENDAR, so a gap costs nothing.
  *
- * @param ymd - a `YYYY-MM-DD` UTC calendar day.
+ * @param ymd - a `YYYY-MM-DD` calendar day, already resolved in the reference
+ *   zone by {@link inclusiveCalendarDayWindow}; the ordinal is counted on the
+ *   UTC proxy, which is zone-free calendar arithmetic (#18245).
  */
 export function bucketOrdinalOfDay(ymd: string, granularity: DateGranularityValue): number {
-  const ms = parseUTC(ymd);
+  const ms = boundInstantMs(ymd);
   const d = new Date(ms);
   const y = d.getUTCFullYear();
   const m = d.getUTCMonth(); // 0-11
@@ -788,7 +859,7 @@ export function bucketKeyAtOrdinal(ordinal: number, granularity: DateGranularity
       return isoWeekKeyOfUtcMs(ordinal * 7 * DAY_MS - 3 * DAY_MS);
     case 'day':
     default:
-      return toISODate(ordinal * DAY_MS);
+      return calendarDayAt(ordinal * DAY_MS);
   }
 }
 
@@ -1395,26 +1466,33 @@ export class DatasetExecutor {
     //
     // [#17973] The STRING arm is the CLOSED preset vocabulary, lowered by the one
     // shared `resolveAnalyticsDateRangeString` every other face calls and then
-    // projected onto this module's UTC calendar. ⛔ What this replaced was the
+    // projected onto calendar days. ⛔ What this replaced was the
     // degenerate `[range, range]` fallback #17015 removed everywhere else: it
-    // handed `parseUTC` the preset NAME, so `last_30_days` — declared, honoured,
-    // and exactly what the schema tells an author to write — came back as
-    // `DATASET_INVALID "invalid date in dateRange"`. A false diagnostic on a
-    // valid input has no repair to send the author to.
+    // handed the preset NAME to this module's date parser, so `last_30_days` —
+    // declared, honoured, and exactly what the schema tells an author to write —
+    // came back as `DATASET_INVALID "invalid date in dateRange"`. A false
+    // diagnostic on a valid input has no repair to send the author to.
     //
     // The timezone precedence is `buildQuery`'s, verbatim, so the comparison
     // window is resolved in the SAME calendar as the primary pass it is
     // compared against — a preset resolved here in UTC while the primary pass
     // read it in the org's zone would misalign the two grids by a day.
+    //
+    // [#18245] ⭐ And it is threaded a SECOND time, into the projection. Lowering
+    // in the org's zone and then reading the resulting INSTANTS on the UTC
+    // calendar reproduced the very misalignment the paragraph above prevents —
+    // one day, in opposite directions either side of the meridian, under an
+    // ordinary `200`. One zone, resolved once, carried to both steps.
+    const timezone = selection.timezone ?? context?.timezone ?? 'UTC';
     const lowered = lowerDatasetCompareDateRange(
       td.dateRange as string | readonly unknown[],
-      selection.timezone ?? context?.timezone ?? 'UTC',
+      timezone,
     );
     const range: [string, string] = Array.isArray(td.dateRange)
       ? // The caller's own bounds, untouched — `explicitDateRangeWindow` already
         // refused anything that is not a two-bound window (#17124).
         [lowered.start, lowered.end]
-      : inclusiveUtcDayWindow(lowered);
+      : inclusiveCalendarDayWindow(lowered, timezone);
     const shifted = shiftRange(range, cmp.kind);
     const shiftedTd = (selection.timeDimensions ?? []).map((t) =>
       t.dimension === dimension ? { ...t, dateRange: shifted } : t,

@@ -1,0 +1,405 @@
+{
+  "type": "connector",
+  "_note": "DeclarativeConnectorEntrySchema (packages/spec/src/integration/connector.zod.ts). Seeded 2026-09-17 (#18582) together with `analytics_cube`: the last two of the three PENDING_GOVERNANCE debts #18133 declared when PR #18581 widened the governance denominator to `authorableTypes()` (`sharing_rule` was paid first, PR #18587). Their landing empties that map. NOT a registered metadata KIND — bound in `UNREGISTERED_KIND_SCHEMAS` (#6245) and reached through `getMetadataTypeSchema`'s unregistered-kind fallback. WHAT THE WALKER ACTUALLY RESOLVES, measured rather than assumed: the binding names `DeclarativeConnectorEntrySchema`, and that schema is `ConnectorSchema.superRefine(...)`. In Zod 4 a `superRefine` attaches a CHECK to the same object def rather than wrapping it, so `shapeOf()` returns `ConnectorSchema`'s shape unchanged and the key set walked here is byte-identical to the base's — the ADR-0097 cross-field rules add no key and remove none. The gate therefore cannot tell the two schemas apart; what the binding buys is REFUSALS, which are invisible to the walk and visible only in the `authentication` / `actions` / `triggers` rows below, where they are the whole verdict. THE SHAPE FACT THAT DECIDES EVERY ROW: one schema, TWO doors. This ledger's denominator entry exists because of the AUTHORING doors (`defineStack({ connectors })` and `PUT /api/v1/meta/connector/:name`); the same `ConnectorSchema` is ALSO what `AutomationEngine.registerConnector` parses for a def a PLUGIN or an ADR-0097 provider factory builds in code. So a key can have a real consumer and still do nothing when a metadata author writes it, and every row below says WHICH door its consumer is fed from. The keys an authored entry can reach are exactly the `ConnectorProviderContext` fields plus `name` and `enabled`; everything else in an authored entry is stored, served back by `/meta/connector`, and read by no runtime. That asymmetry is the trap this type carries, and it is recorded per key rather than asserted once. PRIOR MEASUREMENTS RE-VERIFIED, not inherited: the ADR-0087 conversion registry's `connector-field-mapping-transform-removed` entry recorded 'Execution: none — `fieldMappings` is spelled only inside packages/spec' (2026-08-06), the `syncConfig.schedule` retirement recorded '`syncConfig` has no reader outside `packages/spec`' (#16320, 2026-09-10), and `ConnectorTriggerSchema`'s own docblock says 'NOT YET ENFORCED — declared but never read by the runtime (#3197)'. All three were re-run on this checkout and all three still hold; the counts are in the rows. One prior claim FAILED re-verification and is corrected here: a comment in packages/spec/src/conversions/registry.ts asserts that `retryConfig` 'and the timeouts beside it are untouched — they are live'. They are not read anywhere; see those three rows. PREVIEW READ POINTS ENUMERATED (the #7131 mechanical rule, objectui @dda8f3815): `registerBuiltinPreviews()` registers nineteen types and `connector` is NOT one of them — this type has no registered metadata-admin preview. What objectui DOES consume is (a) the whole SHAPE, via `clientValidation.ts`, which maps `connector` to `DeclarativeConnectorEntrySchema` on BOTH the create and the edit door (it is not strict, so it may judge a stored body), and (b) the RUNTIME registry projection `GET /api/v1/automation/connectors`, from which `connectorsToOptions` reads `name`/`label`/`origin`, `connectorActionsToOptions` reads `actions[].key`/`.label`, and `connectorActionInputSchema` reads `actions[].inputSchema`. Those three are the cross-repo citations below. ADR-0054: no row carries a `proof` and none is owed — no high-risk class binds a `connector/*` path.",
+  "props": {
+    "name": {
+      "status": "live",
+      "verifiedAt": "2026-09-17",
+      "evidence": "packages/services/service-automation/src/plugin.ts#materializeDeclaredConnectors — the authored name keys the desired-set map, is the identity the §4 origin-conflict rule is checked against (`engine.getConnectorOrigin(name) === 'plugin'`), and is FORCED onto the provider's def (`const def = { ...materialization.def, name }`) so discovery and dispatch agree with the metadata; packages/services/service-automation/src/engine.ts#getConnectorDescriptors publishes it as the connector id on `GET /api/v1/automation/connectors`, which is what a `connector_action` flow node names in `connectorConfig.connectorId`.",
+      "producer": "packages/services/service-automation/src/plugin.ts#materializeDeclaredConnectors — the ADR-0097 reconcile: it builds the desired set from the declared `connectors:` items, resolves the provider factory and calls `engine.registerConnector(def, handlers, 'declarative')`. This is the ONLY seam by which an authored entry reaches the connector registry, so it is the producer every `live` row below depends on (#4837): without it a declared connector is a stored document and nothing else.",
+      "note": "Identity, not display. A duplicate declared name is refused by name (`duplicate declarative connector instance name`), so this key also decides whether a stack boots."
+    },
+    "label": {
+      "status": "live",
+      "verifiedAt": "2026-09-17",
+      "evidenceScope": "cross-repo",
+      "evidence": "packages/services/service-automation/src/plugin.ts#materializeDeclaredConnectors — `label: entry.label ?? name` puts the authored label on `ConnectorProviderContext`; packages/connectors/connector-openapi/src/openapi-provider.ts, packages/connectors/connector-rest/src/rest-provider.ts and packages/connectors/connector-mcp/src/mcp-provider.ts each copy `label: ctx.label` onto the def they return; packages/services/service-automation/src/engine.ts#getConnectorDescriptors then publishes `label: def.label`; objectui @dda8f3815 packages/app-shell/src/views/metadata-admin/inspectors/FlowReferenceField.tsx#connectorsToOptions renders it as the connector picker's option text (`${label} (${name})`) in the flow designer.",
+      "producer": "packages/services/service-automation/src/plugin.ts#materializeDeclaredConnectors — the ADR-0097 reconcile: it builds the desired set from the declared `connectors:` items, resolves the provider factory and calls `engine.registerConnector(def, handlers, 'declarative')`. This is the ONLY seam by which an authored entry reaches the connector registry, so it is the producer every `live` row below depends on (#4837): without it a declared connector is a stored document and nothing else.",
+      "note": "Display-shaped, so the #7131 split settles it: being shown to a human IS the whole claimed effect. All three shipped provider factories carry it, so this is the one authored display key that survives materialization intact — contrast `icon` and `type` below, which reach the same context object and are dropped."
+    },
+    "type": {
+      "status": "live",
+      "verifiedAt": "2026-09-17",
+      "evidence": "packages/services/service-automation/src/engine.ts#getConnectorDescriptors — `type: def.type` is published on `GET /api/v1/automation/connectors`; packages/services/service-automation/src/plugin.ts#materializeDeclaredConnectors threads the authored value onto the provider context (`type: typeof entry.type === 'string' ? entry.type : 'api'`).",
+      "producer": "packages/connectors/connector-openapi/src/openapi-connector.ts (`type: 'api'` in the def literal), packages/connectors/connector-rest/src/rest-connector.ts and packages/connectors/connector-mcp/src/mcp-connector.ts — the def's `type` is supplied by the PLUGIN / provider factory, never carried over from the authored entry.",
+      "note": "⚠️ THE PRODUCER IS NOT THE AUTHOR, and that is the finding on this row. The authored `type` reaches `ConnectorProviderContext.type` and is then dropped: not one of the three shipped provider factories reads `ctx.type`, and `openapi-connector.ts` hard-codes `type: 'api'` into the def it returns. So on the PLUGIN door the key is live (a plugin writes it, `/automation/connectors` publishes it); on the DECLARATIVE door an authored `type: 'database'` on a provider-bound instance is published as whatever the factory chose. `type` is REQUIRED, so every author writes one. ⛔ Not an ADR-0049 candidate — it is enforced on one of its two doors; what is owed is either a factory that honours `ctx.type` or a declaration that it is provider-owned."
+    },
+    "description": {
+      "status": "live",
+      "verifiedAt": "2026-09-17",
+      "evidence": "packages/services/service-automation/src/plugin.ts#materializeDeclaredConnectors — `description: entry.description` on the provider context; packages/connectors/connector-openapi/src/openapi-provider.ts and packages/connectors/connector-mcp/src/mcp-provider.ts copy `description: ctx.description` onto the def; packages/services/service-automation/src/engine.ts#getConnectorDescriptors publishes `description: def.description`.",
+      "producer": "packages/services/service-automation/src/plugin.ts#materializeDeclaredConnectors — the ADR-0097 reconcile: it builds the desired set from the declared `connectors:` items, resolves the provider factory and calls `engine.registerConnector(def, handlers, 'declarative')`. This is the ONLY seam by which an authored entry reaches the connector registry, so it is the producer every `live` row below depends on (#4837): without it a declared connector is a stored document and nothing else.",
+      "note": "Display-shaped (#7131). Two of the three shipped factories carry it — `connector-rest`'s does not, and writes its own fixed sentence instead — so an authored description survives on the openapi and mcp providers and is replaced on rest. The ADR-0097 §3 refusal message also points an author here (\"describe the auth scheme in `description`\"), which makes it the documented home for what `authentication` may not carry."
+    },
+    "icon": {
+      "status": "live",
+      "verifiedAt": "2026-09-17",
+      "evidence": "packages/services/service-automation/src/engine.ts#getConnectorDescriptors — `icon: def.icon` is published on `GET /api/v1/automation/connectors`; packages/services/service-automation/src/plugin.ts#materializeDeclaredConnectors threads the authored value onto the provider context (`icon: entry.icon`).",
+      "producer": "packages/connectors/connector-openapi/src/openapi-connector.ts — `icon: config.icon ?? 'globe'`, where `config` is the factory's OWN argument object; the def's icon is supplied by the plugin, not by the authored entry.",
+      "note": "⚠️ Same split as `type`, and measured the same way: `ConnectorProviderContext.icon` is SET by the materializer and read by none of the three shipped provider factories (census: zero `ctx.icon` reads across packages/connectors, with `ctx.label` — four hits — as the lit control in the same scan). So an authored `icon:` on a declarative instance never reaches `/automation/connectors`, while a plugin-registered def's icon does. Optional, unlike `type`, so the trap is quieter."
+    },
+    "authentication": {
+      "status": "planned",
+      "verifiedAt": "2026-09-17",
+      "evidence": "packages/spec/src/integration/connector.zod.ts#DeclarativeConnectorEntrySchema — `if (entry.authentication && entry.authentication.type !== 'none')` adds a custom issue on every authored entry, descriptor and provider-bound instance alike (#7990): the parse FAILS and the message names `auth: { type, credentialRef }` as the mechanism to use instead. Both authoring doors run it — `stack.zod.ts` binds this schema element-wise to `connectors:`, and `/meta/connector/:name` resolves it through `UNREGISTERED_KIND_SCHEMAS`.",
+      "producer": "packages/connectors/connector-openapi/src/openapi-connector.ts and packages/connectors/connector-rest/src/rest-connector.ts — `authentication: auth` on the def a provider factory returns, built from the RESOLVED credential, never from an authored value.",
+      "note": "PLANNED, deliberately not `dead` and deliberately not `live`, on the `api.inputMapping.transform` precedent: the only value an author may write is `{ type: 'none' }`, and anything else is LOUDLY REFUSED rather than silently dropped — an author who inlines a token is told so and told what to do instead, because a published connector row lands whole in `sys_metadata` where it would be cleartext at rest. Not `live`: the accepted value does nothing, and `.authentication` is read by NO consumer anywhere outside packages/spec (census across packages/connectors, packages/services, packages/rest and packages/runtime: every hit is a WRITE — `authentication: auth` or `authentication: { type: 'none' }` — or a TYPE reference `Connector['authentication']`). Not `dead`: the refusal is real and is the whole point of the key's presence on this door. ⛔ Not an ADR-0049 enforce-or-remove candidate: it is already enforced, by refusal."
+    },
+    "provider": {
+      "status": "live",
+      "verifiedAt": "2026-09-17",
+      "evidence": "packages/services/service-automation/src/plugin.ts#materializeDeclaredConnectors — presence of `provider` is what flips an entry from an inert catalog descriptor to an instance declaration (`if (typeof entry.provider !== 'string' || entry.provider.length === 0) continue`), and its value selects the factory (`engine.getConnectorProvider(provider)`); an unknown provider is a hard, named boot failure listing the installed ones. packages/spec/src/integration/connector.zod.ts#DeclarativeConnectorEntrySchema also branches every cross-field rule on it (`const isInstance = typeof entry.provider === 'string' && …`).",
+      "producer": "packages/services/service-automation/src/plugin.ts#materializeDeclaredConnectors — the ADR-0097 reconcile: it builds the desired set from the declared `connectors:` items, resolves the provider factory and calls `engine.registerConnector(def, handlers, 'declarative')`. This is the ONLY seam by which an authored entry reaches the connector registry, so it is the producer every `live` row below depends on (#4837): without it a declared connector is a stored document and nothing else.",
+      "note": "The load-bearing key of ADR-0097 and the only one on this type whose absence changes the MEANING of every other key: without it `providerConfig` and `auth` are refused, `actions`/`triggers` become legal, and the entry is audited as a descriptor (#2612) instead of materialized."
+    },
+    "providerConfig": {
+      "status": "live",
+      "verifiedAt": "2026-09-17",
+      "evidence": "packages/services/service-automation/src/plugin.ts#materializeDeclaredConnectors — `providerConfig: entry.providerConfig ?? {}` on the provider context; packages/connectors/connector-openapi/src/openapi-provider.ts reads `ctx.providerConfig` for `spec` and `baseUrl` (and refuses a non-string `baseUrl` by name), packages/connectors/connector-rest/src/rest-provider.ts requires `providerConfig.baseUrl` and validates `defaultHeaders`, packages/connectors/connector-mcp/src/mcp-provider.ts reads `cfg.transport`; packages/spec/src/integration/connector.zod.ts#DeclarativeConnectorEntrySchema refuses it outright on an entry with no `provider`.",
+      "producer": "packages/services/service-automation/src/plugin.ts#materializeDeclaredConnectors — the ADR-0097 reconcile: it builds the desired set from the declared `connectors:` items, resolves the provider factory and calls `engine.registerConnector(def, handlers, 'declarative')`. This is the ONLY seam by which an authored entry reaches the connector registry, so it is the producer every `live` row below depends on (#4837): without it a declared connector is a stored document and nothing else.",
+      "note": "Deliberately `z.record(z.string(), z.unknown())` — validated by the provider factory, not by this schema (ADR-0023). Not a container as far as this walk is concerned: a record of `unknown` has no child shape, so there is no subtree to drill and nothing is riding on a blanket verdict."
+    },
+    "auth": {
+      "status": "live",
+      "verifiedAt": "2026-09-17",
+      "evidence": "packages/services/service-automation/src/plugin.ts#materializeDeclaredConnectors — `auth = await this.resolveInstanceAuth(entry.auth, resolver, name, provider)` resolves the declared `credentialRef` through the secrets/env layer and puts the RESOLVED credential on the provider context; a failure there degrades or fails the instance by name (ADR-0097 §3). packages/connectors/connector-rest/src/rest-provider.ts, packages/connectors/connector-openapi/src/openapi-provider.ts and packages/connectors/connector-mcp/src/mcp-provider.ts each read `ctx.auth` and use it to sign the upstream call. packages/spec/src/integration/connector.zod.ts#DeclarativeConnectorEntrySchema refuses it on an entry with no `provider`.",
+      "producer": "packages/services/service-automation/src/plugin.ts#materializeDeclaredConnectors — the ADR-0097 reconcile: it builds the desired set from the declared `connectors:` items, resolves the provider factory and calls `engine.registerConnector(def, handlers, 'declarative')`. This is the ONLY seam by which an authored entry reaches the connector registry, so it is the producer every `live` row below depends on (#4837): without it a declared connector is a stored document and nothing else.",
+      "note": "The live half of the pair whose other half (`authentication`) is refused: this key is how an authored connector carries a credential at all, and it carries a REFERENCE, never the secret."
+    },
+    "actions": {
+      "children": {
+        "key": {
+          "status": "live",
+          "verifiedAt": "2026-09-17",
+          "evidenceScope": "cross-repo",
+          "evidence": "packages/services/service-automation/src/engine.ts#registerConnector — `if (typeof handlers[action.key] !== 'function') throw` refuses a def whose declared action has no handler, so the key is the contract between declaration and implementation; packages/services/service-automation/src/engine.ts#resolveConnectorActionEffect looks the action up by `a.key === actionId`, and `getConnectorActionHandler` dispatches `handlers[actionId]`; packages/services/service-automation/src/engine.ts#getConnectorDescriptors publishes it; objectui @dda8f3815 packages/app-shell/src/views/metadata-admin/inspectors/FlowReferenceField.tsx (`connectorActionsToOptions`) and .../connector-input-fields.ts#connectorActionInputSchema both resolve an action by `a.key === actionKey`.",
+          "producer": "packages/connectors/connector-mcp/src/mcp-connector.ts — `actions: selected.map((tool) => ({ key: tool.name, … }))` derives the action set from the upstream `tools/list`; packages/connectors/connector-openapi/src/openapi-connector.ts derives one action per OpenAPI operation. ⚠️ THE METADATA AUTHOR IS NOT A PRODUCER HERE: packages/spec/src/integration/connector.zod.ts#DeclarativeConnectorEntrySchema REFUSES `actions` on a provider-bound instance (ADR-0097 §5 — the provider derives them), and on a descriptor (no `provider`) the entry never reaches the registry at all.",
+          "note": "Live on the PLUGIN/provider door, inert-and-audited on the authoring door — the two-door fact in the file note, at its sharpest. What an authored `actions[]` on a descriptor DOES do is trigger a boot warning: packages/services/service-automation/src/plugin.ts#findInertDeclaredConnectors returns every declared connector that has at least one action, no runtime registration and no `enabled: false` opt-out, and `auditDeclaredConnectors` warns once per boot naming them and the remedy. That warning is the #2612 contract made audible; it is not dispatch."
+        },
+        "label": {
+          "status": "live",
+          "verifiedAt": "2026-09-17",
+          "evidenceScope": "cross-repo",
+          "evidence": "packages/services/service-automation/src/engine.ts#getConnectorDescriptors — `label: a.label` on each projected action; objectui @dda8f3815 packages/app-shell/src/views/metadata-admin/inspectors/FlowReferenceField.tsx (`connectorActionsToOptions`, fed by `useConnectorActionOptions` off `GET /api/v1/automation/connectors`) renders it as the action picker's option text in the flow designer.",
+          "producer": "packages/connectors/connector-mcp/src/mcp-connector.ts — `label: titleize(slugify(tool.name))`; packages/connectors/connector-openapi/src/openapi-connector.ts derives one per operation. Same two-door caveat as `actions.key`.",
+          "note": "Display-shaped and settled by the #7131 split — the designer's action picker IS the claimed effect. REQUIRED, so there is no empty state."
+        },
+        "description": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Projected onto the wire and read by nobody. `engine.ts#getConnectorDescriptors` copies `description: a.description` into the `GET /api/v1/automation/connectors` payload, and no consumer in either repo reads it back: objectui's three connector-descriptor consumers take `name`/`label`/`origin` (`connectorsToOptions`), `key`/`label` (`connectorActionsToOptions`) and `key`/`inputSchema` (`connectorActionInputSchema`), and nothing in this repo reads a projected action's description. The lit control for that scan is `inputSchema` in the same projection, which IS read (see that row). Being on a machine-readable surface is not a consumer — the `view.label` precedent."
+        },
+        "inputSchema": {
+          "status": "live",
+          "verifiedAt": "2026-09-17",
+          "evidenceScope": "cross-repo",
+          "evidence": "packages/services/service-automation/src/engine.ts#getConnectorDescriptors — `inputSchema: a.inputSchema` on the projected action; objectui @dda8f3815 packages/app-shell/src/views/metadata-admin/inspectors/connector-input-fields.ts#connectorActionInputSchema finds the committed action in that payload and returns its `inputSchema`, and `FlowNodeInspector.tsx` types the connector node's whole Input section from it (`connectorInputFields(connectorActionInputSchema(...))`, objectui #4305) — an action that declares none falls back to the generic key/value repeater, which is the observable difference.",
+          "producer": "packages/connectors/connector-mcp/src/mcp-connector.ts — the MCP tool's own JSON Schema is passed straight through ('The MCP inputSchema is already JSON Schema'); packages/connectors/connector-openapi/src/openapi-connector.ts derives it from the operation's parameters. Same two-door caveat as `actions.key`.",
+          "note": "The one action key with a structural (not display) consumer, and it is cross-repo: the designer builds a typed form from it. Declared `z.record(z.string(), z.unknown())` — JSON Schema by convention, unvalidated here — so it has no child shape and nothing rides on a blanket verdict."
+        },
+        "outputSchema": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "The twin of `inputSchema`, projected the same way and consumed by nothing — which is exactly what makes this row falsifiable rather than a guess. `engine.ts#getConnectorDescriptors` publishes `outputSchema: a.outputSchema`; the census over both repos finds no reader, while the identically-projected `inputSchema` one line above returns objectui's `connectorActionInputSchema` in the same scan. A flow node's downstream references are typed from the RUN's actual output (`nodeOutputRefs`), not from this declaration. ⛔ Not an ADR-0049 sweep candidate on this reading: the honest repair is to type the node's output refs from it, which is a feature decision, not a deletion."
+        },
+        "effect": {
+          "status": "live",
+          "verifiedAt": "2026-09-17",
+          "evidence": "packages/services/service-automation/src/builtin/connector-nodes.ts — `const effect = engine.resolveConnectorActionEffect(cfg.connectorId, cfg.actionId)` is resolved BEFORE dispatch and decides what the run reports: `write` → `{ acted: 1 }`, `read` → `{ acted: 0 }`, undeclared → `{ unmeasuredEffect: true }`, so the declaration is what lets a connector-driven flow contribute a signal to the broken-sweep alert at all (#4395); packages/services/service-automation/src/engine.ts#resolveConnectorActionEffect reads it off the stored def (`.def.actions?.find((a) => a.key === actionId)?.effect`); packages/services/service-automation/src/engine.ts#getConnectorDescriptors also carries it to the designer.",
+          "producer": "packages/spec/src/integration/connector.zod.ts#ConnectorActionSchema names the producer itself: 'This is the ONLY producer of the effect' — whoever writes the def writes it, and both the hand-registered path and the ADR-0097 materialization path read it from there. Same two-door caveat as `actions.key`.",
+          "note": "Optional on purpose: a connector written before the key keeps reporting `unmeasuredEffect`, so declaring it is a strict improvement rather than a migration. The empty state is therefore meaningful and benign, which is why it is not `authorWarn`ed."
+        }
+      }
+    },
+    "triggers": {
+      "children": {
+        "key": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "The whole trigger sub-surface is declared and unread, and the schema says so itself: `ConnectorTriggerSchema`'s docblock reads '⚠️ NOT YET ENFORCED — declared but never read by the runtime (#3197). AutomationEngine.registerConnector ignores a connector's triggers … No polling loop or webhook receiver is driven by these definitions.' Re-verified on this checkout: `registerConnector` walks `parsed.actions` only, and the `this.triggers` map in engine.ts is the FLOW trigger-type registry (`schedule`/`record`/…), a different vocabulary that no connector trigger ever enters — that near-miss is the reason this row spells the control out. The one runtime touch of the key is a REFUSAL: packages/spec/src/integration/connector.zod.ts#DeclarativeConnectorEntrySchema rejects `triggers` on a provider-bound instance (ADR-0097 §5). On a descriptor it parses and evaporates. ⛔ ADR-0049 is owed a decision here rather than a sweep — either a polling/receiver engine or a retirement of the whole `ConnectorTriggerSchema` shape; the sub-keys below are dead for this one reason and are not repeated per row."
+        },
+        "label": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Dead for the one reason recorded on `triggers.key` — nothing reads a connector trigger."
+        },
+        "description": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Dead for the one reason recorded on `triggers.key`."
+        },
+        "type": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Dead for the one reason recorded on `triggers.key`. `polling` and `webhook` name two engines that do not exist for connectors: no polling loop reads `intervalSeconds`, and the webhook dispatcher is driven by `sys_webhook` rows materialized from the TOP-LEVEL `webhooks:` collection (see the `webhooks` subtree below)."
+        },
+        "intervalSeconds": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Dead for the one reason recorded on `triggers.key`. Renamed from `interval` by the protocol-18 conversion (#15680/#14478) so the unit lives in the key name — a rename that made the declaration honest without making it enforced."
+        },
+        "interval": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "REMOVED (#15680, ruling B on #14478) — tombstoned at the schema with `retiredKey`, which carries the prescription and makes authoring it both a tsc error and a parse error; sources are renamed by the protocol-18 conversion. The row stays because `retiredKey` keeps the key in the walked shape (the `rls.priority` precedent). Use `intervalSeconds`; the value (seconds) is unchanged. The tombstone is packages/spec/src/integration/connector.zod.ts#ConnectorTriggerSchema."
+        }
+      }
+    },
+    "syncConfig": {
+      "children": {
+        "strategy": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "`syncConfig` has NO reader outside packages/spec, and this ledger re-measured it rather than inheriting the claim: the only non-spec occurrence of the word in packages/ or examples/ is a prose comment in packages/qa/dogfood/test/expression-conformance.ledger.ts. No engine performs a connector-attached sync — no strategy dispatch, no direction dispatch, no batching, no conflict resolution. The same finding is recorded at the schema by the #16320 retirement of `syncConfig.schedule` ('nothing ever evaluated it'), which deleted the cron slot outright and left the rest of the block standing. ⛔ ADR-0049 owes this subtree a DECISION, not a mechanical sweep: it is seven keys of a declared capability the docs advertise (packages/spec/docs/SYNC_ARCHITECTURE.md ticks 'Conflict Resolution: multiple strategies'), so retiring it is a product call. The sub-keys below are dead for this one reason."
+        },
+        "direction": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Dead for the one reason recorded on `syncConfig.strategy` — no connector-attached sync engine exists."
+        },
+        "realtimeSync": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Dead for the one reason recorded on `syncConfig.strategy`. The `webhooks` subtree below is the mechanism this flag claims to enable, and it is dead on this type too."
+        },
+        "timestampField": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Dead for the one reason recorded on `syncConfig.strategy` — nothing tracks a last-sync watermark for a connector."
+        },
+        "conflictResolution": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Dead for the one reason recorded on `syncConfig.strategy`. Its default (`latest_wins`) is the kind of value that reads as a configured policy and resolves nothing."
+        },
+        "batchSize": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Dead for the one reason recorded on `syncConfig.strategy` — no bulk path reads it."
+        },
+        "deleteMode": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Dead for the one reason recorded on `syncConfig.strategy`. `soft_delete` by default, applied by nothing."
+        },
+        "filters": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Dead for the one reason recorded on `syncConfig.strategy`. Declared `z.record(z.string(), z.unknown())`, so it is not a container for this walk and no subtree rides on this verdict."
+        }
+      }
+    },
+    "fieldMappings": {
+      "children": {
+        "source": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Re-verified, not inherited: the ADR-0087 conversion registry's `connector-field-mapping-transform-removed` entry measured (2026-08-06) that '`fieldMappings` is spelled only inside packages/spec — the four connector packages, the automation engine, REST and objectui never read it'. That still holds on this checkout: zero occurrences of `fieldMappings` anywhere in packages/ or examples/ outside packages/spec. A connector field mapping is parsed, stored, and moves no value. ⛔ Same disposition as `syncConfig`: a decision, not a sweep — the whole L3 sync layer it belongs to is declared and unbuilt. Sub-keys below are dead for this one reason."
+        },
+        "target": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Dead for the one reason recorded on `fieldMappings.source`."
+        },
+        "transform": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "REMOVED (#5552, ADR-0049) — tombstoned on the shared base `FieldMappingSchema` with `retiredKey`, which retires all three authorable spellings at once; the whole five-member `FieldMappingTransform` union went with it, because no runtime executed any of them. The row stays because `retiredKey` keeps the key in the walked shape (the `rls.priority` precedent). Value conversion belongs on a surface that runs it: the import mapping's own `transform` (`data/mapping.zod.ts`), applied row by row by the REST import path and recorded live in mapping.json."
+        },
+        "defaultValue": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Dead for the one reason recorded on `fieldMappings.source`."
+        },
+        "dataType": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Dead for the one reason recorded on `fieldMappings.source`. SYNC_ARCHITECTURE.md's corrected note says an L3 mapping 'declares `dataType` and `syncMode` and performs no value transformation' — true about the transform half, and this row records that the declaration half is not read either."
+        },
+        "required": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Dead for the one reason recorded on `fieldMappings.source`. A `.default(false)` that no validation consults."
+        },
+        "syncMode": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Dead for the one reason recorded on `fieldMappings.source`. `read_only` / `write_only` / `bidirectional` gate nothing — there is no sync to gate."
+        }
+      }
+    },
+    "webhooks": {
+      "status": "dead",
+      "verifiedAt": "2026-09-17",
+      "note": "A connector's NESTED webhook array is not the collection the dispatcher reads, and nothing else reads it either. `bootstrapDeclaredWebhooks` (packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.ts) materializes `sys_webhook` rows from `readDeclared(engine, metadataService, 'webhook')` — metadata ITEMS of type `webhook`, which the decomposition registers from the TOP-LEVEL `webhooks:` stack collection (`METADATA_ARRAY_KEYS` in packages/objectql/src/engine.ts, and `webhooks: 'webhook'` in packages/metadata/src/plugin.ts). `connectors: 'connector'` in that same map registers a connector entry WHOLE, so the array nested inside it never becomes a `webhook` item and never reaches the materializer. Census: the only `.webhooks` reads outside packages/spec are of `stack.webhooks` — packages/lint/src/validate-functional-completeness.ts (`for (const hook of entriesOf(stack.webhooks))`) and the bootstrap's own docblock — with no read of a connector's own array anywhere. ⚠️ That docblock says it materializes each 'stack/connector-authored webhook'; the phrase is not backed by its code on this checkout, and it is what makes this key look live. ⛔ ADR-0049 owes a decision rather than a sweep — either decompose a connector's webhooks into `webhook` items, or retire the key. WHY ONE VERDICT COVERS THE SUBTREE, declared rather than assumed: the coordinate is recorded in scripts/liveness/undrilled-containers.baseline.json. `WebhookConfigSchema` is `WebhookSchema.extend({ events, signatureAlgorithm })`, so a `deferred` row pointing at the governed `webhook` type would be refused by the gate's key-set EQUALITY check — correctly, because the extension adds two keys the target does not classify. Drilling would mean writing 21 child rows of which 8 are the ADR-0010 protection envelope the gate auto-classifies `live` everywhere else and 13 would repeat this one sentence: fabricated granularity over a container that is dead as a whole. The recorded row is the honest form, and it leaves the baseline as soon as the decision above is taken."
+    },
+    "rateLimitConfig": {
+      "status": "dead",
+      "verifiedAt": "2026-09-17",
+      "note": "REMOVED in @objectstack/spec 17.0.0 (#4911, ADR-0049 D2) — the entire `ConnectorRateLimitConfig` / `RateLimitStrategy` shape went, not just this key, because no outbound rate-limiting engine ever existed: the platform's only token bucket (runtime `security/rate-limit.ts`) throttles INBOUND requests. Tombstoned with `retiredKey`, which is why the key is still in the walked shape (the `rls.priority` precedent) and why authoring it is both a tsc error and a parse error. ⛔ Do NOT substitute `shared` `RateLimitConfig` — that is the inbound limiter and would cap the wrong direction; until an outbound throttle exists, rate-limit at the provider or upstream gateway. The tombstone is packages/spec/src/integration/connector.zod.ts#ConnectorSchema."
+    },
+    "retryConfig": {
+      "children": {
+        "strategy": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "⚠️ THIS ROW CORRECTS A PRIOR IN-REPO CLAIM. A comment in packages/spec/src/conversions/registry.ts (the `connector-rate-limit-config-removed` entry) states '`retryConfig` and the timeouts beside it are untouched — they are live'. Measured on this checkout: the word `retryConfig` does not occur anywhere in packages/ or examples/ outside packages/spec — zero files. Nothing retries a connector call on a strategy, a backoff, a jitter or a status-code list; a provider factory's handler makes one fetch. The claim was about what the RATE-LIMIT retirement did not touch, and it was read as a liveness verdict it never measured. ⛔ ADR-0049 owes a decision, not a sweep: `retryConfig` is the documented answer for a rate-limited upstream (SYNC_ARCHITECTURE.md points an author here because its `retryableStatusCodes` default includes 429), so retiring it removes the only advice the docs give. Sub-keys below are dead for this one reason."
+        },
+        "maxAttempts": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Dead for the one reason recorded on `retryConfig.strategy` — no retry loop reads it."
+        },
+        "initialDelayMs": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Dead for the one reason recorded on `retryConfig.strategy`."
+        },
+        "maxDelayMs": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Dead for the one reason recorded on `retryConfig.strategy`."
+        },
+        "backoffMultiplier": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Dead for the one reason recorded on `retryConfig.strategy`."
+        },
+        "retryableStatusCodes": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Dead for the one reason recorded on `retryConfig.strategy`. Its `[408, 429, 500, 502, 503, 504]` default is the value SYNC_ARCHITECTURE.md cites when it tells an author this is the answer for a 429 — a default that is read by nothing."
+        },
+        "retryOnNetworkError": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Dead for the one reason recorded on `retryConfig.strategy`."
+        },
+        "jitter": {
+          "status": "dead",
+          "verifiedAt": "2026-09-17",
+          "note": "Dead for the one reason recorded on `retryConfig.strategy`."
+        }
+      }
+    },
+    "connectionTimeoutMs": {
+      "status": "dead",
+      "verifiedAt": "2026-09-17",
+      "note": "⚠️ Write-only, and the same prior claim corrected on `retryConfig.strategy` covers it ('the timeouts beside it … are live'). Every occurrence outside packages/spec is a WRITE of the literal 30000 into a def so the object satisfies the post-parse `Connector` type — packages/connectors/connector-{mcp,openapi,rest,slack} and the degraded-husk literal in packages/services/service-automation/src/plugin.ts — and the comment above each says exactly that ('Defaulted by ConnectorSchema; set explicitly so the literal satisfies the (post-parse) Connector output type'). No fetch, transport or handler reads it, so an authored timeout does not bound any call. The descriptor-only contract (#2612) is the other half of why this is inert on the authoring door: a `connectors:` entry with no `provider` never reaches the registry at all, and a provider-bound one contributes only `name`/`label`/`description`/`icon`/`type`/`providerConfig`/`auth` through `ConnectorProviderContext` — the rest of the entry is not carried anywhere."
+    },
+    "requestTimeoutMs": {
+      "status": "dead",
+      "verifiedAt": "2026-09-17",
+      "note": "Write-only, identical census and identical five write sites as `connectionTimeoutMs` — see that row. The two are declared with the same bounds and the same 30000 default and are read by nothing; a connector call is unbounded whatever an author writes."
+    },
+    "status": {
+      "status": "dead",
+      "verifiedAt": "2026-09-17",
+      "note": "Declared `ConnectorStatusSchema` with a `.default('inactive')`, and dispatched on by nothing — no consumer reads `def.status` in this repo, and the runtime's answer to 'can this connector be dispatched?' is a DIFFERENT field: `RegisteredConnector.state` (`ready` / `degraded`, #3017), which `getConnectorDescriptors` publishes as `state` and which no authored value can set. The two names one letter apart on one wire payload are the trap: `status: 'active'` on an authored entry neither enables nor advertises anything, while `state` — the field a reader will actually see — is computed. The keys that DO decide participation are `enabled` (materialization + the #2612 audit opt-out) and `provider`. ⛔ ADR-0049 owes a decision: retire it, or make it the authored half of the dispatchability answer."
+    },
+    "enabled": {
+      "status": "live",
+      "verifiedAt": "2026-09-17",
+      "evidence": "packages/services/service-automation/src/plugin.ts#materializeDeclaredConnectors — `if (bound.enabled === false) continue` keeps the instance out of the desired set, and an instance that WAS materialized and is then disabled is torn down (`dematerializeConnector`) and dropped from the degraded-retry map, so `false` withdraws a live connector rather than merely not creating one; packages/services/service-automation/src/plugin.ts#findInertDeclaredConnectors treats `enabled: false` as the explicit opt-out that marks a deliberate catalog-only descriptor and silences the #2612 boot warning.",
+      "producer": "packages/services/service-automation/src/plugin.ts#materializeDeclaredConnectors — the ADR-0097 reconcile: it builds the desired set from the declared `connectors:` items, resolves the provider factory and calls `engine.registerConnector(def, handlers, 'declarative')`. This is the ONLY seam by which an authored entry reaches the connector registry, so it is the producer every `live` row below depends on (#4837): without it a declared connector is a stored document and nothing else.",
+      "note": "One of exactly two authored keys (with `provider`) that decide whether an entry participates at all, and the only one whose `false` is load-bearing in TWO directions — it removes a materialized connector AND suppresses an audit warning. Its `.default(true)` is why an omitted value is the participating one."
+    },
+    "errorMapping": {
+      "status": "dead",
+      "verifiedAt": "2026-09-17",
+      "note": "RETIRED (ADR-0049 enforce-or-remove) — eleven authorable keys (`ErrorMappingConfig` ×4, `ErrorMappingRule` ×7) that nothing in the tree ever read, one of them spelled `userMessage`, the name of the LIVE API-error channel, so writing a rule here validated, published and showed nobody anything. Tombstoned with `retiredKey` because `ConnectorSchema` is not `.strict()` and a plain delete would be a silent strip (ADR-0104); the tombstone is inherited by `DeclarativeConnectorEntrySchema`, so `stack.connectors[]` and `/meta/connector` refuse it too. The row stays because `retiredKey` keeps the key in the walked shape (the `rls.priority` precedent). Registered as `integration/Connector:errorMapping` and `integration/DeclarativeConnectorEntry:errorMapping` in `RETIRED_KEYS_BY_MAJOR[18]`; sources are rewritten by the D2 conversion `connector-error-mapping-removed`. The tombstone is packages/spec/src/integration/connector.zod.ts#ConnectorSchema."
+    },
+    "health": {
+      "children": {
+        "healthCheck": {
+          "children": {
+            "enabled": {
+              "status": "dead",
+              "verifiedAt": "2026-09-17",
+              "note": "No connector health-check loop exists. Census: the only `healthCheck` occurrences outside packages/spec are the KERNEL's own plugin health contract (`packages/core/src/health-monitor.ts`, `PluginHealthCheck`) — a different shape on a different subject — and nothing in packages/connectors or packages/services/service-automation polls a connector endpoint, counts consecutive failures, or acts on a threshold. SYNC_ARCHITECTURE.md ticks '✅ Monitoring: Health checks, metrics, logging' at L3; that tick is not backed on this surface. ⛔ ADR-0049 owes a decision rather than a sweep. The sub-keys below are dead for this one reason."
+            },
+            "intervalMs": {
+              "status": "dead",
+              "verifiedAt": "2026-09-17",
+              "note": "Dead for the one reason recorded on `health.healthCheck.enabled` — nothing schedules the probe."
+            },
+            "timeoutMs": {
+              "status": "dead",
+              "verifiedAt": "2026-09-17",
+              "note": "Dead for the one reason recorded on `health.healthCheck.enabled`."
+            },
+            "endpoint": {
+              "status": "dead",
+              "verifiedAt": "2026-09-17",
+              "note": "Dead for the one reason recorded on `health.healthCheck.enabled` — no request is ever made to it."
+            },
+            "method": {
+              "status": "dead",
+              "verifiedAt": "2026-09-17",
+              "note": "Dead for the one reason recorded on `health.healthCheck.enabled`."
+            },
+            "expectedStatus": {
+              "status": "dead",
+              "verifiedAt": "2026-09-17",
+              "note": "Dead for the one reason recorded on `health.healthCheck.enabled`."
+            },
+            "unhealthyThreshold": {
+              "status": "dead",
+              "verifiedAt": "2026-09-17",
+              "note": "Dead for the one reason recorded on `health.healthCheck.enabled`."
+            },
+            "healthyThreshold": {
+              "status": "dead",
+              "verifiedAt": "2026-09-17",
+              "note": "Dead for the one reason recorded on `health.healthCheck.enabled`."
+            }
+          }
+        },
+        "circuitBreaker": {
+          "children": {
+            "enabled": {
+              "status": "dead",
+              "verifiedAt": "2026-09-17",
+              "note": "No circuit breaker exists for connectors. Census: nothing outside packages/spec reads `circuitBreaker` except the protocol-18 rename conversion in packages/spec/src/conversions/registry.ts, which rewrites the key's NAME and is not a consumer. No state machine opens, half-opens or closes anything, and no call path consults a breaker before dispatching a connector action. The nearest real mechanism is the ADR-0097 DEGRADED instance (#3017) — a husk registered with `state: 'degraded'` and a backoff retry — which is driven by materialization failures and reads none of these keys. ⛔ ADR-0049 owes a decision rather than a sweep. Sub-keys below are dead for this one reason."
+            },
+            "failureThreshold": {
+              "status": "dead",
+              "verifiedAt": "2026-09-17",
+              "note": "Dead for the one reason recorded on `health.circuitBreaker.enabled`."
+            },
+            "resetTimeoutMs": {
+              "status": "dead",
+              "verifiedAt": "2026-09-17",
+              "note": "Dead for the one reason recorded on `health.circuitBreaker.enabled`."
+            },
+            "halfOpenMaxRequests": {
+              "status": "dead",
+              "verifiedAt": "2026-09-17",
+              "note": "Dead for the one reason recorded on `health.circuitBreaker.enabled`."
+            },
+            "monitoringWindowMs": {
+              "status": "dead",
+              "verifiedAt": "2026-09-17",
+              "note": "Dead for the one reason recorded on `health.circuitBreaker.enabled`. Renamed from `monitoringWindow` by the protocol-18 conversion (#15680/#14478) so the unit lives in the key name — an honesty fix to a declaration that is still unread."
+            },
+            "monitoringWindow": {
+              "status": "dead",
+              "verifiedAt": "2026-09-17",
+              "note": "REMOVED (#15680, ruling B on #14478) — tombstoned at the schema with `retiredKey`, which carries the prescription and makes authoring it a tsc error and a parse error; sources are renamed by the protocol-18 conversion `connector-duration-unit-suffixes`. The row stays because `retiredKey` keeps the key in the walked shape (the `rls.priority` precedent). Use `monitoringWindowMs`; the value (milliseconds) and the 60000 default are unchanged. The tombstone is packages/spec/src/integration/connector.zod.ts#CircuitBreakerConfigSchema."
+            },
+            "fallbackStrategy": {
+              "status": "dead",
+              "verifiedAt": "2026-09-17",
+              "note": "Dead for the one reason recorded on `health.circuitBreaker.enabled`. `cache` / `default_value` / `error` / `queue` name four behaviours none of which is implemented anywhere — the shape this ledger exists to find."
+            }
+          }
+        }
+      }
+    },
+    "metadata": {
+      "status": "dead",
+      "verifiedAt": "2026-09-17",
+      "note": "'Custom connector metadata' — an open `z.record(z.string(), z.unknown())` bag that is stored with the entry and read by nothing: it is not in the `getConnectorDescriptors` projection, so it does not reach `GET /api/v1/automation/connectors`, and no provider factory, handler or lint rule consults it. ⛔ NOT an ADR-0049 retirement candidate: an untyped extension bag is a legitimate escape hatch whose whole contract is that the platform does not interpret it, so 'no consumer' is its specification rather than a defect. Recorded so the next sweep does not have to re-decide that. Not a container for this walk (a record of `unknown` has no child shape)."
+    }
+  }
+}

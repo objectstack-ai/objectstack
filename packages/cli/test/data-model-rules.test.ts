@@ -780,32 +780,51 @@ describe('lintDataModel — `reference_to` is a rejected alias, not a tolerated 
     ).toBe(false);
   });
 
-  it('a non-string `reference` is not a target either', () => {
-    // `refOf` is declared `string | undefined`; the old `||` chain returned
-    // whatever truthy value was there, so this shape used to be reported as a
-    // resolved target named `[object Object]`.
+  it('a non-string `reference` is REFUSED, loudly, rather than read as no target', () => {
+    // #13053's whole defect, and the assertion this case exists for, INVERTED on
+    // purpose. `refOf` used to answer `undefined` for a non-string carrier, so a
+    // fixture spelling `reference: { object: … }` was invisible in both
+    // directions at once: refused by `ObjectSchema.safeParse` where it was
+    // written, read as absent where it was consumed, and therefore reported
+    // nowhere. This case used to pin the SECOND half of that silence — it
+    // asserted the shape resolved to nothing and produced `missing-reference`,
+    // which is a finding about the wrong thing: the target is not missing, it is
+    // unreadable, and the two want different fixes from the author.
     //
-    // ⚠️ The non-string value is BOUND THROUGH A VARIABLE rather than written
-    // inline, and the binding is a legibility device — not a way past a gate.
-    // `packages/lint/scripts/check-reference-carrier-shape.mjs` refuses a
-    // non-string LITERAL at a `reference` carrier position, and it is right to:
-    // an AUTHORED site of that shape is invisible in both directions at once —
-    // refused by `ObjectSchema.safeParse` and read as `undefined` by every rule
-    // that resolves it (#13053), so it reports nothing either way.
+    // The reader now throws (`referenceCarrierOf`, `@objectstack/spec/data`), so
+    // a fixture that cannot be read fails its test instead of passing it. The
+    // gate that used to guard this shape at the source level
+    // (`check:reference-carrier-shape`) is retired: it caught zero in its
+    // lifetime, its coverage was partial by its own header, and the protocol
+    // already refuses the shape at the contract door.
     //
-    // That shape is exactly what this case must keep driving, because the whole
-    // assertion is that such a value resolves to NOTHING: it is a deliberate
-    // counter-example, not an authored carrier. The gate judges literals and
-    // leaves a non-literal unjudged, so the binding keeps its authored-site
-    // sweep honest while the assertion goes on testing the identical shape.
-    // ⛔ Do not inline this value again; ⛔ do not weaken the gate or add a path
-    // ignore there — it has no baseline and wants none, by design.
+    // ⛔ Not a bare `toThrow()`: an unrepaired reader that threw some other
+    // `Error` on some other input would satisfy that. The class and the sentence
+    // the author actually reads are both asserted.
     const nonStringReference = { object: 'project' };
+    const lintWithObjectCarrier = () =>
+      lintDataModel([
+        { name: 'task', fields: { project: { type: 'lookup', reference: nonStringReference } } },
+      ]);
+    expect(lintWithObjectCarrier).toThrow(TypeError);
+    expect(lintWithObjectCarrier).toThrow(/`reference` is an object/);
+    expect(lintWithObjectCarrier).toThrow(/FieldSchema declares it as an optional STRING/);
+
+    // CONTROL — the identical object with a STRING carrier reads fine and reaches
+    // the ordinary rules, so the throw above is about the carrier's SHAPE and not
+    // about this fixture, this field type, or `lintDataModel` refusing to run.
+    const stringCarrier = lintDataModel([
+      { name: 'project', fields: { name: { type: 'text', label: 'Name' } } },
+      { name: 'task', fields: { project: { type: 'lookup', reference: 'project' } } },
+    ]);
+    expect(has(stringCarrier, 'relationship/missing-reference')).toBe(false);
+
+    // CONTROL — an ABSENT carrier is still the ordinary `missing-reference`
+    // finding, not a throw. Absence and unreadability are different answers and
+    // the reader must keep telling them apart.
     expect(
       has(
-        lintDataModel([
-          { name: 'task', fields: { project: { type: 'lookup', reference: nonStringReference } } },
-        ]),
+        lintDataModel([{ name: 'task', fields: { project: { type: 'lookup' } } }]),
         'relationship/missing-reference',
       ),
     ).toBe(true);
