@@ -18,10 +18,10 @@
  * | organization-less key             | **200 total 0 (silent) · 403** | **401** |
  *
  * objectstack#15163 measured it on the framework; cloud#1982 reproduced it on
- * `apps/objectos-ee` with the REAL cloud-private `@objectstack/organizations`
- * mounted, reading the written row back out of the sqlite file — the enterprise
- * plugin adds no request-time refusal, so the blast radius was every walled
- * deployment.
+ * `apps/objectos-ee` with the REAL licence-gated `@objectstack/organizations`
+ * subclass mounted, reading the written row back out of the sqlite file — the
+ * enterprise plugin adds no request-time refusal, so the blast radius was
+ * every walled deployment.
  *
  * ## Why the fixture is shaped the way it is
  *
