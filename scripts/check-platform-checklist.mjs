@@ -1749,11 +1749,21 @@ function selfTestSymbolAnchors() {
   t('V1 the anchorable-extension vocabulary this gate names IS the shared object — a second definition is the drift this card closes',
     ANCHORABLE_EXTENSIONS === symbolAnchorsModule.ANCHORABLE_EXTENSIONS && ANCHORABLE_EXTENSIONS.length > 8,
     `${ANCHORABLE_EXTENSIONS?.length} extension(s)`);
+  /* ⚠️ NAME-BASED, and the names are matched as a PREFIX with any suffix
+   * allowed — not as an equality, which is what this pin was first written as
+   * and what let a `…_SHADOW` redefinition of the same vocabulary straight
+   * through when it was ablated. A fork under a nearby name is a fork.
+   *
+   * ⛔ The residual gap is stated rather than papered over: a fork under a name
+   * sharing none of these tokens is invisible here, and no regex over a
+   * source file will close that. V3 beside it is what keeps the READ honest
+   * (a read that returned nothing would pass V2 forever), and the pin claims
+   * exactly this much and no more. */
+  const noLocal = (name) => !new RegExp(`\\b(?:const|let|var)\\s+${name}\\w*\\s*=`).test(OWN_SOURCE);
   t('V2 this gate defines NO anchor grammar of its own — no local extension set, no anchor regex, no detector',
-    !/const\s+ANCHORABLE_EXTENSIONS\s*=/.test(OWN_SOURCE)
-      && !/const\s+SYMBOL_ANCHOR\s*=/.test(OWN_SOURCE)
-      && !/function\s+findSymbolAnchors\b/.test(OWN_SOURCE)
-      && !/function\s+absentAnchorSegments\b/.test(OWN_SOURCE));
+    noLocal('ANCHORABLE_EXTENSIONS') && noLocal('SYMBOL_ANCHOR')
+      && !/\bfunction\s+findSymbolAnchors\w*\b/.test(OWN_SOURCE)
+      && !/\bfunction\s+absentAnchorSegments\w*\b/.test(OWN_SOURCE));
   t('V3 CONTROL for V2 — the same source read DOES find the registration, so a green above is "no fork" and not "the read returned nothing"',
     /defineCorpus\(\{/.test(OWN_SOURCE) && /sweepCorpus\(CORPUS, ROOT\)/.test(OWN_SOURCE));
 
