@@ -51,11 +51,18 @@ vocabulary should be declared so the two sides cannot drift is a cross-repo ques
 this change deliberately does not answer.
 
 Not breaking, and measured rather than assumed: the finding is `warning` severity,
-like its sibling. `partitionFindings` routes everything that is not `error` to
-advisories, so `os build` / `os validate` / `os lint` still exit 0, and the
-registration-time twin in `@objectstack/objectql` is field-only and warns without ever
-throwing. Nothing that builds today starts failing. Blast radius measured over this
-repo, the five example apps and objectui at the pinned `.objectui-sha`
-`53ded82bf7a494f54e344e19099dbf00854b8694`: **zero** authored `colors` maps carry an
-unresolvable value — the one shipped map, `examples/app-showcase`'s task grid, spells
-all four values as colour names and resolves clean.
+like its sibling. `@objectstack/lint`'s `splitBySeverity` sorts everything that is not
+`error` into advisories, so `os build` / `os validate` / `os lint` still exit 0, and the
+registration-time twin in `@objectstack/objectql` is field-only — it calls
+`checkFieldCompleteness` and never the view predicate — and warns without ever throwing.
+Nothing that builds today starts failing, and nothing authored today is refused.
+
+Blast radius measured over this repo, the five example apps and objectui at the pinned
+`.objectui-sha` `53ded82bf7a494f54e344e19099dbf00854b8694`: **zero** authored `colors`
+maps reach this rule carrying an unresolvable value — the one shipped map,
+`examples/app-showcase`'s task grid, spells all four values as colour names and resolves
+clean. The pinned sibling does hold three hex `colors` literals, and they are named here
+so the zero is checkable rather than asserted: all three are objectui's OWN React test
+fixtures (`ObjectView.rowColorRelay-7218.test.tsx`, in `app-shell` and in `plugin-view`),
+they assert a relay by `toEqual`, and they never traverse `checkViewCompleteness` — so
+this rule does not judge them and does not change their verdict.
