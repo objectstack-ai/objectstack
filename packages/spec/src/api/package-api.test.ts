@@ -6,6 +6,7 @@ import {
   GetInstalledPackageRequestSchema,
   GetInstalledPackageResponseSchema,
   PackageInstallRequestSchema,
+  PackageInstallBodySchema,
   PackageInstallResponseSchema,
   PackageUpgradeRequestSchema,
   PackageUpgradeResponseSchema,
@@ -22,6 +23,7 @@ import {
   InstalledPackageAtEitherStageSchema,
 } from './package-api.zod';
 import { InstalledPackageSchema } from '../kernel/package-registry.zod';
+import { ManifestSchema } from '../kernel/manifest.zod';
 import { AssembledPackageBodySchema } from '../stack.zod';
 import { z } from 'zod';
 
@@ -436,7 +438,12 @@ describe('PackageApiContracts', () => {
   it('should have correct paths', () => {
     expect(PackageApiContracts.listPackages.path).toBe('/api/v1/packages');
     expect(PackageApiContracts.getPackage.path).toBe('/api/v1/packages/:packageId');
-    expect(PackageApiContracts.installPackage.path).toBe('/api/v1/packages/install');
+    // [#18058] REBOUND, not relaxed: this used to pin
+    // `/api/v1/packages/install`, a path the composed runtime mounts nowhere.
+    // It now pins the door that serves — a bare `POST /api/v1/packages`,
+    // distinguished from `listPackages` by method, not by path.
+    expect(PackageApiContracts.installPackage.path).toBe('/api/v1/packages');
+    expect(PackageApiContracts.installPackage.path).not.toContain('install');
     expect(PackageApiContracts.upgradePackage.path).toBe('/api/v1/packages/upgrade');
     expect(PackageApiContracts.resolveDependencies.path).toBe('/api/v1/packages/resolve-dependencies');
     expect(PackageApiContracts.uploadArtifact.path).toBe('/api/v1/packages/upload');
@@ -620,5 +627,161 @@ describe('the read-API responses are declared at both stages (#17431)', () => {
       envelope({ packages: [MIXED_ROW], total: 1, hasMore: false }),
     ).success).toBe(false);
     expect(GetInstalledPackageResponseSchema.safeParse(envelope(MIXED_ROW)).success).toBe(false);
+  });
+});
+
+// ==========================================
+// #18058 — the install contract names the door that serves, and the shapes it
+//          is actually reached with
+// ==========================================
+
+/**
+ * The card: `PackageInstallRequestSchema` was declared, published and bound to
+ * `POST /api/v1/packages/install`, a path nothing mounts, while the door that
+ * serves — `POST /api/v1/packages` — had no declared request contract at all.
+ * Ruling A (batch #148 item 4) rebinds the contract to the live door and
+ * reconciles it to what that door measurably accepts.
+ *
+ * Every case below is a body a first-party caller really sends, or the
+ * published example a reader really copies. ⛔ None is constructed to fit the
+ * schema; each names where it was taken from.
+ */
+describe('#18058 — install contract bound to the live door', () => {
+  /** The client SDK's pinned manifest — `packages/client/src/client.test.ts`. */
+  const SDK_MANIFEST = { id: 'com.acme.crm', name: 'Acme CRM', version: '1.0.0', type: 'app' };
+
+  /**
+   * The published README example — `packages/client/README.md`, the acceptance
+   * fixture the ruling names. It is transcribed through the SDK's own wrapping
+   * (`index.ts`: `{ manifest, settings, enableOnInstall, ...overwrite }`), so
+   * this asserts the body that leaves the process, not a hand-built one.
+   */
+  const README_MANIFEST = {
+    id: 'com.vendor.plugin',
+    name: 'Vendor Plugin',
+    namespace: 'vendor',
+    version: '1.0.0',
+    type: 'app',
+  };
+
+  it('the contract-map entry names the serving door, with the phantom path gone', () => {
+    expect(PackageApiContracts.installPackage.method).toBe('POST');
+    expect(PackageApiContracts.installPackage.path).toBe('/api/v1/packages');
+    // The whole map, so the phantom cannot come back under another key.
+    const paths = Object.values(PackageApiContracts).map((c) => c.path);
+    expect(paths.filter((p) => p.includes('/install'))).toEqual([]);
+  });
+
+  it('the bound input is the BODY schema, so both declared forms reach it', () => {
+    expect(PackageApiContracts.installPackage.input).toBe(PackageInstallBodySchema);
+  });
+
+  describe('`overwrite` is declared, so a parse carries it instead of stripping it', () => {
+    it('survives the parse with its value intact', () => {
+      const verdict = PackageInstallRequestSchema.safeParse({
+        manifest: SDK_MANIFEST,
+        overwrite: true,
+      });
+      expect(verdict.success).toBe(true);
+      // ⭐ The line this half of the card exists for: before it was declared,
+      // this key parsed green and came out GONE — a deliberate re-install
+      // silently demoted to a 409.
+      expect(verdict.data?.overwrite).toBe(true);
+    });
+
+    it('stays optional — the SDK omits it unless asked, and the 409 guard depends on that', () => {
+      const verdict = PackageInstallRequestSchema.safeParse({ manifest: SDK_MANIFEST });
+      expect(verdict.success).toBe(true);
+      expect(verdict.data && 'overwrite' in verdict.data).toBe(false);
+    });
+
+    it('is still a boolean — a string `overwrite` is refused, not coerced', () => {
+      const verdict = PackageInstallRequestSchema.safeParse({
+        manifest: SDK_MANIFEST,
+        overwrite: 'true',
+      });
+      expect(verdict.success).toBe(false);
+    });
+  });
+
+  describe('the two declared body forms, and nothing else', () => {
+    it('parses the WRAPPED form the client SDK sends', () => {
+      const body = { manifest: SDK_MANIFEST, settings: undefined, enableOnInstall: true };
+      expect(PackageInstallBodySchema.safeParse(body).success).toBe(true);
+    });
+
+    it('parses the BARE manifest form the runtime door drives send', () => {
+      // `package-door-namespace-conflict-code.test.ts` posts exactly this.
+      const bare = { id: 'com.acme.crm', name: 'com.acme.crm', namespace: 'crm', version: '1.0.0', type: 'app' };
+      expect(PackageInstallBodySchema.safeParse(bare).success).toBe(true);
+    });
+
+    it('the two branches are DISJOINT — a wrapped body never falls through to the bare one', () => {
+      // `manifest` is not a manifest key and `ManifestSchema` is strict, so the
+      // only branch a wrapped body can satisfy is the wrapped one.
+      expect(ManifestSchema.safeParse({ manifest: SDK_MANIFEST }).success).toBe(false);
+    });
+
+    it('refuses a body that is NEITHER form', () => {
+      // A wrapper around something that is not a manifest: fails branch 1 on
+      // the manifest's own keys and branch 2 on `manifest` being unknown.
+      expect(PackageInstallBodySchema.safeParse({ manifest: { label: 'nope' } }).success).toBe(false);
+      expect(PackageInstallBodySchema.safeParse({ label: 'nope' }).success).toBe(false);
+    });
+
+    it('the BARE form carries no install options — they are refused, never dropped', () => {
+      const verdict = PackageInstallBodySchema.safeParse({ ...SDK_MANIFEST, overwrite: true });
+      expect(verdict.success).toBe(false);
+    });
+  });
+
+  describe('the two acceptance fixtures the ruling names', () => {
+    it('the published README example parses green, wrapped exactly as the SDK wraps it', () => {
+      const body = {
+        manifest: README_MANIFEST,
+        settings: undefined,
+        enableOnInstall: undefined,
+      };
+      const verdict = PackageInstallBodySchema.safeParse(body);
+      expect(verdict.error?.issues ?? []).toEqual([]);
+      expect(verdict.success).toBe(true);
+    });
+
+    it('the README example ALSO parses as the bare form, which is how the door reads it', () => {
+      expect(PackageInstallBodySchema.safeParse(README_MANIFEST).success).toBe(true);
+    });
+
+    it('the README example as it was WRITTEN is still refused — the fixture is not vacuous', () => {
+      // The pre-#18058 text: no `id`, no `type`, and a `label` key the manifest
+      // surface refuses by name. If this ever turns green the manifest contract
+      // has been relaxed, not the example fixed.
+      const asShipped = { name: 'vendor_plugin', label: 'Vendor Plugin', version: '1.0.0' };
+      expect(PackageInstallBodySchema.safeParse({ manifest: asShipped }).success).toBe(false);
+      expect(PackageInstallBodySchema.safeParse(asShipped).success).toBe(false);
+    });
+
+    it('both client-SDK pinned calls parse green', () => {
+      // `client.test.ts`: `install(MANIFEST, { enableOnInstall: true })` …
+      expect(PackageInstallBodySchema.safeParse({
+        manifest: SDK_MANIFEST, settings: undefined, enableOnInstall: true,
+      }).success).toBe(true);
+      // … and `install(MANIFEST, { overwrite: true })`.
+      expect(PackageInstallBodySchema.safeParse({
+        manifest: SDK_MANIFEST, settings: undefined, enableOnInstall: undefined, overwrite: true,
+      }).success).toBe(true);
+    });
+  });
+
+  it('the manifest slot names ONE stage — the authoring one this wire carries', () => {
+    // The assembled stage reaches the packages table through
+    // `ObjectQL.registerApp`, never over this door, so the write contract names
+    // one stage where the read contract names two. Assembled `objects` are
+    // definitions, not globs, and this schema says so by refusing them.
+    const assembled = { ...SDK_MANIFEST, objects: [{ name: 'crm_account', fields: {} }] };
+    expect(PackageInstallBodySchema.safeParse({ manifest: assembled }).success).toBe(false);
+    // The authoring spelling of the same key parses.
+    expect(PackageInstallBodySchema.safeParse({
+      manifest: { ...SDK_MANIFEST, objects: ['objects/**/*.object.ts'] },
+    }).success).toBe(true);
   });
 });

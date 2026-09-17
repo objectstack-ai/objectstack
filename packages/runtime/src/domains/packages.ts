@@ -771,6 +771,39 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             } else {
                 pkg = registry.installPackage(manifest, body.settings);
             }
+            // [#18058] HONOUR `enableOnInstall`, which this door declared and
+            // ignored. `PackageInstallRequestSchema` has carried
+            // `enableOnInstall: z.boolean().default(true)` since it was written,
+            // the first-party SDK SENDS it (`client.packages.install(m, {
+            // enableOnInstall: false })`, pinned in `client.test.ts`), and NO
+            // server-side handler read the key — an author switched it off and
+            // the runtime installed the package enabled anyway, silently. That
+            // is «declared ≠ enforced» on a published option, the exact shape
+            // Prime Directive #10 refuses.
+            //
+            // Only `false` does anything: the declared default is `true`, and
+            // `installPackage` already lands a package enabled, so the true
+            // case is the no-op it declares. The disable goes through the SAME
+            // two calls `PATCH /packages/:id/disable` uses — the registry flip
+            // and the durable `setPackageDisabled` write — so an install that
+            // asked to stay off is not silently re-enabled by the next restart.
+            //
+            // ⚠️ Read from the WRAPPED body alone. `manifest !== body` is this
+            // handler's own test for which of the two declared body forms
+            // arrived (`PackageInstallBodySchema`); in the BARE form the key
+            // would be a manifest key, which `ManifestSchema`'s strict close
+            // refuses by name — honouring it there would enforce something no
+            // schema declares.
+            const wrapped = manifest !== body;
+            if (wrapped && body?.enableOnInstall === false) {
+                const disabled = registry.disablePackage(pkgId);
+                if (disabled) pkg = disabled;
+                try {
+                    setPackageDisabled(_context?.environmentId, pkgId, true);
+                } catch (err) {
+                    console.warn('[handlePackages] failed to persist enableOnInstall:false', { id: pkgId, error: (err as Error)?.message });
+                }
+            }
             const res = deps.success(pkg);
             res.status = 201;
             return { handled: true, response: res };
