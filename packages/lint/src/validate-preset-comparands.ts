@@ -120,7 +120,11 @@ import { indexObjectGraph, recordsOf, resolveFieldPath, type ObjectGraph } from 
  *   picker (`FormFieldPublicPickerSchema`) queries the REFERENCED object, so
  *   its `filter` must never fall through to the parent form object (#16106
  *   review finding B1: that fall-through was a false refusal wherever the two
- *   objects share a field name with differing types);
+ *   objects share a field name with differing types). That reader claims the
+ *   position by POSITION, not by key name: only where the enclosing record is
+ *   a form field (`field`, required on `FormFieldBaseSchema`). A node that
+ *   merely spells the same key somewhere else is bound by the ordinary
+ *   readers below instead of inheriting this one's unjudged exit (#16403);
  * - and, under `objects`, the object itself — its list views, tabs and
  *   `relatedListFilter` (the filter runs over the CHILD rows, i.e. the object
  *   that owns the field).
@@ -420,11 +424,26 @@ function bindAncestors(
     // parent and the referenced object share a field name with differing
     // types (a `date` on the parent, a `select` whose option value is a
     // preset name on the referenced object).
-    if (key === PUBLIC_PICKER_KEY) {
+    //
+    // [#16403] The branch is entered by POSITION, never by key NAME alone.
+    // `publicPicker` is declared in exactly ONE place — `FormFieldBaseSchema`
+    // (`ui/view.zod.ts`), where the enclosing record is a form field and its
+    // `field` is REQUIRED — so the enclosing `field` identifies the position,
+    // and it is the same read the branch already has to make. Matching on the
+    // key alone would hand this reader every future node that happens to spell
+    // `publicPicker`, at any depth on any of the eight surfaces, because
+    // `scanForFilters` recognises a filter by key rather than by declared
+    // carrier; such a node would leave through this reader's `undefined` exit
+    // and take its whole filter subtree out of arm 2 SILENTLY. Under-reporting
+    // is the only failure direction this arm may have, so that hole could
+    // never VIOLATE the invariant — it would quietly spend it, where no test
+    // asking "was the invariant violated?" can see it. Outside the declared
+    // position the node falls through to the ordinary nearest-ancestor readers
+    // below, exactly like every other key this walk does not recognise.
+    const formField = key === PUBLIC_PICKER_KEY ? strName(chain[i - 1]?.node.field) : undefined;
+    if (formField) {
       const override = literalObjectName(r.object);
       if (override) return override;
-      const formField = strName(chain[i - 1]?.node.field);
-      if (!formField) return undefined;
       const formObject = bindAncestors(collection, chain, i - 2, datasets, graph);
       if (!formObject) return undefined;
       const verdict = resolveFieldPath(graph, formObject, formField);

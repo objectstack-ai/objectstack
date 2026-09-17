@@ -58,7 +58,7 @@
  * failure is known to mean "the bytes did not land". Adding an entry is a
  * deliberate, reviewable act.
  *
- * Three honest limitations, stated up front rather than discovered later:
+ * Four honest limitations, stated up front rather than discovered later:
  *
  *   1. It cannot FIND a durability seam whose operation is not in the
  *      vocabulary. It guarantees the seams already paid for cannot regress to
@@ -76,6 +76,33 @@
  *      This is a DECIDED narrowness, not an undiscovered one: see the decision
  *      recorded at `LOGGER_RECEIVERS` for what was weighed and why widening it
  *      was declined.
+ *   4. The third answer can only be spelled as a NAME, so a catch that hands
+ *      the failure to the caller by RETURNING AN OUT-PARAM OBJECT is not
+ *      expressible here. `FAILURE_PROPAGATION_CALLEES` and
+ *      `FAILURE_PROPAGATION_SITES` both key on a callee the catch reaches;
+ *      `return { ok: false, error: err }` reaches none — the delivery IS the
+ *      constructed value. This is constructive, not a missing row: no entry in
+ *      either map can name that seam, and at such a site the only ways to green
+ *      the gate are the two this file's own header rejects, a baseline entry for
+ *      correct code or a bolted-on `logger.error`.
+ *
+ *      MEASURED rather than asserted, because "a gap with one member is a note,
+ *      a gap with thirty is a hole". The census is
+ *      `scripts/measure-return-propagating-durability-seams.mjs`, and it prints
+ *      the population split by how the guarded operation is declared. Two of its readings are what
+ *      make this limitation latent rather than live — every seam THIS gate
+ *      currently sees answers through a log or a declared callee, so the shape
+ *      costs the present verdict nothing, while the seams that return their
+ *      failure sit one vocabulary entry away from becoming visible. ⛔ Read the
+ *      instrument's own output rather than quoting a count from here; and note
+ *      that a green over any site it lists means NOT MEASURED for that site,
+ *      never "level approved".
+ *
+ *      What to DO about it is deliberately not decided here — re-keying on the
+ *      enclosing function, reading the declared return TYPE, and recording the
+ *      shape as out of scope are all open, and they are not equivalent: the
+ *      first moves the question from "what did this call do" to "who is asking"
+ *      and could weaken the seams the gate holds today.
  *
  * ## Why AST, not regex
  *
