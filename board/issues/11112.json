@@ -1,0 +1,36 @@
+{
+  "number": 11112,
+  "kind": "pull_request",
+  "title": "Make the additive label POST the prescribed write and permit it for dev agents",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-22T17:51:41Z",
+  "updated_at": "2026-08-22T19:59:11Z",
+  "closed_at": "2026-08-22T19:59:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-22T19:59:08Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11112",
+  "body": "Fixes #10902\nFixes #10686\n\nOne defect in two halves, one commit per member.\n\n## Member 1 — `.claude/agents/os-dev.md` (commit 8c0a24c51)\n\nThe skip-changeset paragraph taught the whole-set read → union → write as what the label write *is*. Rewritten to the adjudicated four-point shape:\n\n1. The additive `POST /repos/{owner}/{repo}/issues/{n}/labels` is THE mechanism, named executably — the exact `curl` line with `Authorization: Bearer $GITHUB_TOKEN` (measured working from an agent seat; \"apply it additively\" alone was demonstrably not actionable).\n2. Read-back stays as the closing step — and the measured caveat is folded in: the additive POST is necessary but NOT sufficient. A bot's whole-set PUT was measured erasing a correct additive write within about 1 second, so the read-back happens AFTER the bots settle, and a vanished label is re-applied, not treated as the agent's own error.\n3. The whole-set read → union → write is demoted to an explicitly declared fallback for a seat where the additive call is refused, with the requirement to report the read-back when used.\n4. The objectui half (the label does not exist there; never create it) is untouched.\n\nLine budget: os-dev.md 392 → 395 lines, ceiling 399 (`check:pm-skill-ratchet` verdict below). No ceiling raise. No issue numbers added (id-lint clean).\n\n## Member 2 — `.claude/settings.json` (commit f6d61c9b7)\n\nDirection A from the paired card: the auto-mode permission classifier was measured blocking a dev agent's additive label POST while permitting the whole-set `issue_write` labels array — the inversion that pushes agents into the clobbering shape. Two `permissions.allow` entries pre-approve exactly the additive POST spelling that os-dev.md now prescribes, for this repo and the objectui twin (the same settings file governs sessions that touch both):\n\n- `Bash(curl -sS -X POST https://api.github.com/repos/objectstack-ai/objectstack/issues/*/labels *)`\n- `Bash(curl -sS -X POST https://api.github.com/repos/objectstack-ai/objectui/issues/*/labels *)`\n\nStrictly narrower than the whole-set write already permitted: the endpoint can only add. Documentation note: `settings.json` is strict JSON and cannot carry comments, so the rationale lives here and in the os-dev.md paragraph the entries serve (the doc pins the exact spelling the rules match — URL directly after `-X POST` — and says not to rewrite it). Failure direction if the harness does not support the mid-pattern wildcard on the issue number: the rule is inert and the classifier keeps deciding, i.e. no wider than today. This does not address the labeler's own whole-set PUT — that half remains open: #10703 remains open (devx lane).\n\nVerified this session from a dev seat: the additive POST to this PR's own labels endpoint returned 200 and the read-back after the size-labeler settled shows the label intact (evidence in the report comment on the anchor card).\n\n## Gates (all at head f6d61c9b7, run after the final commit)\n\n`node scripts/pm/dispatch-gates.mjs` (no hand-fed paths) derived 8 families; all green:\n\n- `check:pm-skill-ratchet` — \"✓ check-skill-line-ratchet: .claude/agents/os-dev.md is 395 lines (ceiling 399; headroom 4).\"\n- `check:pm-skill-id-lint` — \"✓ check-skill-id-lint: 17 file(s) clean (pattern /#[0-9]{3,}/g).\"\n- `check:doc-authoring` — \"✓ doc authoring guard: 389 files clean — no bare metadata literals.\"\n- `check:nul-bytes` — \"check-nul-bytes: OK (scanned 6426 text file(s) … no raw ASCII control bytes).\"\n- `check:pm-governed-merges` — \"✓ check-governed-merges --self-test: 119 assertions …\"\n- `check:agent-model-declared` — \"✓ check-agent-model-declared: 1 agent definition(s) under .claude/agents/ all declare a model\"\n- `check:skill-frame-sync` — \"✓ check-skill-frame-sync: 4 copies of the decision frame are structurally isomorphic across 3 files\"\n- `check:doc-formula-expressions` — \"✓ … 22 record-scoped formula example(s) across 416 files / 1447 TS blocks judged clean\"\n\n`.claude/**` only — no publishable package changes, so no changeset; skip-changeset label applied. Governed surface (Prime Directive #14): draft PR, human merge only.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01MsbKEG4LtERSLaDrbehM3e)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01MsbKEG4LtERSLaDrbehM3e)_"
+}

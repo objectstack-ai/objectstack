@@ -1,0 +1,34 @@
+{
+  "number": 11282,
+  "kind": "pull_request",
+  "title": "docs(agents): re-point the Documentation Guardrails ghost `content/docs/guides/` row",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T08:45:43Z",
+  "updated_at": "2026-08-23T09:42:57Z",
+  "closed_at": "2026-08-23T09:42:56Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-23T09:42:56Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11282",
+  "body": "Fixes #11079\n\nThe Documentation Guardrails table carried a row for `content/docs/guides/`, a directory that does not exist. This re-points that row at the trees that do exist, keeping the `meta.json` rule it carried.\n\n## Governed surface — draft only, human merge\n\n`AGENTS.md` is on the governed-surface register (`docs/adr/**` · `.claude/**` · `skills/**` · `AGENTS.md` · `CLAUDE.md`). This PR **opens as draft and stays draft**: it must never be flipped ready, must not get auto-merge, and is **human merge only**.\n\n## Evidence: re-point, not drop\n\nThe card allowed dropping the row *if* the rule it carries were already stated for the real trees elsewhere in the table. It is not — so the row is re-pointed.\n\n**1. `content/docs/guides/` never existed. No tree \"took over\" it.**\n\nThere is no rename trail to follow, because there is nothing to follow from — across all 512 commits reachable in this repo, no path matching `*guides*` was ever added, renamed or deleted:\n\n```\n$ git log --all --oneline --follow -- 'content/docs/guides'      # (empty)\n$ git log --all --oneline --diff-filter=D -- 'content/docs/guides/*'   # (empty)\n$ git log --all --oneline --name-only --diff-filter=ADR -- '*guides*'  # (empty)\n$ git rev-list --all --count\n512\n```\n\nThe row was a ghost from the start, not a stale pointer to relocated content. The issue's suggested targets (`getting-started/` / `capabilities/`) are therefore not \"the tree that took over\" — `getting-started/` was already its own row in this table, and `capabilities/` is simply one more hand-written tree among many.\n\n**2. The `meta.json` rule is real, and this row was its ONLY statement in AGENTS.md.**\n\n```\n$ grep -n 'meta\\.json' AGENTS.md\n547:| `content/docs/guides/` | hand-written | ✅ Update `meta.json` when adding pages. |\n```\n\nOne hit, on the ghost row. Dropping the row would have deleted the rule from the file outright.\n\n**3. The rule applies to every hand-written tree, not to one special tree.**\n\nAll 13 hand-written trees have their own `meta.json`, and every one is an explicit ordered `pages` array with **no** rest-spread (`\"...\"`), so a page added but not listed does not appear in the nav:\n\n```\n$ grep -l '\"\\.\\.\\.\"' $(find content/docs -name meta.json)   # (empty — all explicit)\n$ for d in ai api automation capabilities concepts data-modeling deployment \\\n           getting-started kernel permissions plugins protocol ui; do ...\nai: pages=9 mdx=9          api: pages=12 mdx=12       automation: pages=10 mdx=10\ncapabilities: pages=11 mdx=11   concepts: pages=6 mdx=6    data-modeling: pages=18 mdx=18\ndeployment: pages=12 mdx=12     getting-started: pages=11  kernel: pages=8\npermissions: pages=21 mdx=21    plugins: pages=5 mdx=5     protocol: pages=7\nui: pages=17\n```\n\n(Trees whose `pages` count exceeds their top-level `.mdx` count reference subdirectories — `kernel/contracts/`, `protocol/objectql/` and friends.)\n\n**4. Cross-checked against the gate-owned list.** `check:docs-audit-scope` maintains the generated `ALL_HANDWRITTEN` block in `.claude/workflows/docs-accuracy-audit.js` — 189 hand-written docs across 14 trees plus 3 root files. It contains no `guides` path. That list is regenerated from the tree, so it is the authoritative population; the prose row was the only thing claiming `guides/` exists.\n\nBecause the trees are enumerated and kept fresh by that gate, the replacement row deliberately **does not enumerate** them — an enumeration in prose is exactly the drift class this issue reports. It is defined by exclusion instead (`every tree except references/ and releases/ above`), which stays correct when a tree is added.\n\n## The change\n\nOne row in, one row out:\n\n```diff\n-| `content/docs/guides/` | hand-written | ✅ Update `meta.json` when adding pages. |\n+| `content/docs/<tree>/` — every tree except `references/` and `releases/` above | hand-written | ✅ Update that tree's own `meta.json` when adding a page: each is an explicit ordered `pages` array with no rest-spread, so a page you add but never list is absent from the nav. The rows below are named examples, not the whole set. |\n```\n\nThe `concepts/` / `getting-started/` / `protocol/` rows below are untouched; the replacement row now says out loud that they are examples rather than the complete set, which was the second half of the original row's misleading effect.\n\n## Ratchet\n\n`AGENTS.md` is at its ceiling with zero headroom, so the change is line-neutral (1 insertion, 1 deletion, one file). `pnpm check:pm-skill-ratchet` verdict line:\n\n```\n✓ check-skill-line-ratchet: AGENTS.md is 961 lines (ceiling 961; headroom 0).\n```\n\n## Gates\n\nDerived with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` on the actual change set (the script read the change set from the merge base itself; it reported `1 path(s)` — `AGENTS.md`). All 7 matched families run green, as a union at `d4c72da9`:\n\n| Gate | Verdict |\n|:---|:---|\n| `check:docs-audit-scope` | `✓ docs-accuracy-audit scope is in sync with content/docs/: 189 hand-written doc(s).` |\n| `check:pm-governed-merges` | `✓ check-governed-merges --self-test: 119 assertions` — exit 0 |\n| `check:pm-governed-prose` | `✓ 2 instruction surface(s) name all 5 registered governed surfaces … and claim no others.` |\n| `check:pm-skill-id-lint` | `✓ check-skill-id-lint: 17 file(s) clean` |\n| `check:pm-skill-ratchet` | `✓ AGENTS.md is 961 lines (ceiling 961; headroom 0).` |\n| `check:required-contexts` | `✓ 6 required context name(s) pinned across 2 workflow(s)` |\n| `scripts/check-required-contexts.mjs` (patrol) | exit 0 |\n\n`skip-changeset` per convention — instruction-file prose only, nothing published.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RMTpSRF5CjMmQBFfPtPCwJ)_"
+}

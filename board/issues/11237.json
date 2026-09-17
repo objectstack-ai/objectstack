@@ -1,0 +1,32 @@
+{
+  "number": 11237,
+  "kind": "issue",
+  "title": "metadata.register('object', ...) applies no namespace-prefix check — the ADR-0028 invariant is enforced caller-by-caller, not at the runtime write path",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T04:51:55Z",
+  "updated_at": "2026-08-23T15:02:53Z",
+  "closed_at": "2026-08-23T15:02:52Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11237",
+  "body": "Found while working #11061 (the `importObject` name-override seam). Filed rather than\nfixed there: #11061's triage scoped that card to the import seam, and its own body calls\nthis \"a much wider question than this seam\". Unassigned — recording, not starting.\n\n## What was measured\n\n`MetadataManager.register(type, name, data)` (`packages/metadata/src/metadata-manager.ts`)\napplies exactly two guards before writing: `assertMetadataRegisterContract` (name/data\nagreement, document shape, canonical type) and the `persistence.writable` gate. It applies\n**no namespace check of any kind** on `register('object', ...)` — `validateObjectNamespacePrefix`\nis not called, and no other name gate exists on that path.\n\nThe ADR-0028 prefix rule runs at exactly two gates today:\n\n- `defineStack()` / `os validate` — compile time (`packages/spec/src/stack.zod.ts`,\n  `validateNamespacePrefix`).\n- the publish pre-flight — `packages/metadata-protocol/src/protocol.ts`\n  (`NAMESPACE_PREFIX` violations, batch-refused with the validator's own message).\n\n`metadata.register` is neither, so any runtime caller that persists an object through it\nbypasses the declared invariant entirely.\n\n## Live exposure, as of #11061's fix\n\nIn-tree `register('object', ...)` callers measured:\n\n- `packages/services/service-datasource/src/plugin.ts` (`persistObject` for\n  `importObject`) — was the live bypass; #11061's PR closes it **at the service seam**,\n  not at `register`.\n- `packages/objectql/src/plugin.ts` (two boot-time bridge writes, SchemaRegistry to\n  metadata service) — objects that already passed `defineStack`, so no live violation\n  minted there.\n\nSo after #11061 the known live exposure is closed, but the invariant remains enforced\ncaller-by-caller rather than at the write path itself. The next runtime feature that\npersists an object via `register` starts un-gated by default — the same\ndeclared-vs-enforced shape #11061 closed, one layer down.\n\n## The question to grade\n\nShould `register('object', ...)` itself gate the name (making declared = enforced at the\nwrite path), or is the gate deliberately a publish/authoring-time concern with `register`\nkept as the low-level primitive? Considerations pulling in both directions, stated so\ntriage does not have to rediscover them:\n\n- A gate at `register` needs a namespace to judge against; `MetadataManager` has no\n  manifest concept (`publishPackage`'s own doc says it indexes by `packageId` and cannot\n  prove a namespace — that is why the publish gate takes `namespace` as an option).\n- A gate at `register` would also sit on the boot-time bridge writes and any rehydration\n  path that reaches it, where refusing a legacy stored row is a different decision than\n  refusing a fresh runtime write.\n\nRelated: #11061 (the import seam and its ruling that the prefix rule is declared\nbehavior), #10712 / PR #11059 (the draft half)."
+}

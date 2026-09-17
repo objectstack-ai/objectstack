@@ -1,0 +1,32 @@
+{
+  "number": 11079,
+  "kind": "issue",
+  "title": "[finding] AGENTS.md Documentation Guardrails table names `content/docs/guides/` — the directory does not exist on main",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-22T15:48:24Z",
+  "updated_at": "2026-08-23T09:43:21Z",
+  "closed_at": "2026-08-23T09:42:57Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11079",
+  "body": "## Observation\n\nAGENTS.md's Documentation Guardrails table carries the row:\n\n| Path | Type | Rule |\n|:---|:---|:---|\n| `content/docs/guides/` | hand-written | Update `meta.json` when adding pages. |\n\nbut `content/docs/` on current `main` (`93304c2`) contains no `guides/` directory at all (top-level dirs: `ai`, `api`, `automation`, `capabilities`, `concepts`, `data-modeling`, `deployment`, `getting-started`, `kernel`, `permissions`, `plugins`, `protocol`, `references`, `releases`, `ui`).\n\nNoticed while exercising #9866's provenance recompute: a temp page write to `content/docs/guides/…` failed with \"No such file or directory\" because the table row pointed at a directory that is not there.\n\n## Why it matters (mildly)\n\nThe table is the reader's map of which docs trees are hand-written vs generated vs release-owned. A row naming a missing directory is the same drift class the docs-audit gate exists to catch in `ALL_HANDWRITTEN` (#4851) — here it is prose, so nothing checks it. The `meta.json` advice the row carries is real and applies to the trees that DO exist; it is anchored to a ghost path.\n\n## Suggested disposition\n\nEither drop the row or rename it to the tree(s) that took over guide content (e.g. `getting-started/` / `capabilities/`). AGENTS.md is a governed surface — the fix is a small governed PR, human merge.\n\nObservation-class: filed unassigned, `finding` label, no `pm:queue`, per triage discipline."
+}

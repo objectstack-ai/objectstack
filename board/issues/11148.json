@@ -1,0 +1,34 @@
+{
+  "number": 11148,
+  "kind": "issue",
+  "title": "`packages/sdui-parser` carries the same `.trim()` that deletes the space between a text run and an adjacent inline element",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-22T21:16:04Z",
+  "updated_at": "2026-08-23T16:18:44Z",
+  "closed_at": "2026-08-23T16:17:24Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11148",
+  "body": "Filed from objectui, not fixed here: this is the upstream twin of\n[objectstack-ai/objectui#5661](https://github.com/objectstack-ai/objectui/issues/5661),\nwhose triage required the twin check and ruled that the cross-repo copy must be a\nseparate card rather than a rider on the objectui PR.\n\n## Measured, on `origin/main` (`acb4dbc`)\n\n`packages/sdui-parser/src/parse.ts`, inside `parseChildren`'s children loop:\n\n```ts\n// :167\nconst text = this.readTextRun();\n// :168\nconst trimmed = text.replace(/\\s+/g, ' ').trim();\nif (trimmed) children.push(trimmed);\n```\n\nThe collapse (`\\s+` → one space) is correct and is HTML's own whitespace model.\nThe `.trim()` is not: HTML collapses a whitespace run to one space, it does not\ndelete it. What gets deleted is exactly the space separating a text run from an\nadjacent inline sibling, so `A <strong>x</strong> page` parses to\n`['A', {strong}, 'page']` — the words run together wherever that tree is rendered.\n\n## The two copies have drifted — this is not a byte copy\n\nBoth files were diffed in full (objectui `origin/main` `190fbd01d` against\nobjectstack `origin/main` `acb4dbc`). The whole difference is objectui's html-tier\nprovenance stamp (objectui#4000): one added import and an 8-line comment plus\n`markHtmlTierNode(...)` at the node-construction site. That 9-line block is the\nentire reason the line numbers differ (objectui `:176`/`:177`, objectstack\n`:167`/`:168`); the defective statement itself is byte-identical in both.\n\nSo a patch cannot simply be cherry-picked by line number, and the two files should\nbe expected to keep drifting.\n\n## What is different about the consequence here\n\nIn objectui the parser output is rendered — the symptom is user-visible text with\nits words run together. In this repo the only in-tree consumer measured is\n`packages/lint/src/validate-jsx-pages.ts`, which uses `parseJsx`/`compile` for\nbuild-time diagnostics; its findings do not depend on the whitespace, so nothing is\nvisibly broken today. The defect matters here as contract drift: the same authored\nsource produces a different tree in the two repos, and it produces the wrong one in\nboth.\n\n## The fix already ruled on downstream\n\nobjectui triage chose option (b) and it landed there as\n`objectstack-ai/objectui#5661`: collapse the run, then keep one leading space when a\nsibling precedes it and one trailing space when a sibling element follows; the\nparent's own start/end still drop their edge space. It is mechanical — it invents no\nblock/inline taxonomy for a schema tree that has none. Its one bounded cost is that a\nwhitespace-only run between two siblings survives as a single space, so a\npretty-printed `<ul>` gains one `' '` child per inter-item gap; the objectui PR pins\nthat bound with a `<ul>` control.\n\nWhether this repo takes the same rule is this card's decision, but adopting the\ndownstream ruling verbatim is the cheap answer and keeps the two parsers agreeing."
+}

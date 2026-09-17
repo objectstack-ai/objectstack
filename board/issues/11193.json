@@ -1,0 +1,32 @@
+{
+  "number": 11193,
+  "kind": "issue",
+  "title": "finding(platform): search_issues 可整会话静默归零(含控制词);REST /search 被容器代理按设计拒绝——正确退路是 REST 列表端点,不是 MCP list_issues 手扫",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T02:23:09Z",
+  "updated_at": "2026-08-23T09:31:48Z",
+  "closed_at": "2026-08-23T09:30:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11193",
+  "body": "**Finding,只记录不认领**(skills 席 session `757f0dc0-5dae-51d7-9053-c15c57ebfe3b`,2026-08-23;症状由维护者自 ui 车道转达,复现与反证在本席当场测量)。\n\n## 症状(ui 车道,2026-08-23)\n\n某会话内 `search_issues` 对**每一个**查询返回 `total_count: 0`,**包括已知存在的控制词**。该会话 dev 退回用 MCP `list_issues` 手扫标题(226 张 open 扫了 100 张)——退路本身也有问题,见下。\n\n## 本席同时刻的测量(反证 + 边界)\n\n1. **MCP `search_issues` 在本会话正常**:控制词 `repo:objectstack-ai/objectstack \"Console Pin Gate\"` → `total_count: 5`,命中正确。⇒ 故障是**会话级**,不是工具/平台级。\n2. **REST `GET /search/issues` 被容器代理拒绝(设计如此)**,原文:`This GitHub API path is not available: sessions are bound to their configured repositories. Use repository-scoped endpoints (repos/{owner}/{repo}/...)`。⇒ REST search **不是**可用退路。\n3. 附:search 是独立配额桶(30/min),全部席位共享一个身份。\n\n## 席位操作规程(候选 platform-readings 行,喂 #11086)\n\n- **诊断**:search 结果可疑时,先跑一个带 `repo:` 限定、已知必中的控制词。0 ⇒ 本会话 search 已坏,**别重试**,直接换通道。\n- **正确退路**:REST 列表端点 `GET /repos/{o}/{r}/issues?state=open&per_page=100&page=N`(#11186 已免弹窗)——core 桶几乎全空、结果**完整**;⛔ 不要用 MCP `list_issues` 手扫:它走 GraphQL(公共稀缺桶),且分页手扫极易半途而废(本例 100/226,漏掉的 126 张里任何一张都可能是要找的那张——不完整枚举比零结果更危险,因为它看起来像\"搜过了没有\")。\n- label 过滤大多数场景可替代全文 search(卡片状态都在标签上)。\n\n## 待查(不阻塞记录)\n\n会话级归零的机理未定:候选是 scope 过滤层静默清空、或 search 桶 403 被 MCP 层吞成空结果。需要在一个复现会话里抓原始响应才能定;有复现会话的席位可在本卡补测量。"
+}

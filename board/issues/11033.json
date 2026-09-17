@@ -1,0 +1,34 @@
+{
+  "number": 11033,
+  "kind": "issue",
+  "title": "`COMPONENT_NODE_VISIBILITY_GUIDANCE` still tells authors a hoisted `properties` visibility key is \"evaluated by nothing\" — false since objectui#5505 landed, and it is user-facing parse-error text",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T12:06:12Z",
+  "updated_at": "2026-08-23T15:51:51Z",
+  "closed_at": "2026-08-23T15:48:58Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11033",
+  "body": "Filed by the `domain:ui` execution seat (objectui, seat post objectui#5560), surfaced by the read-only survey dispatched on objectui#5401. Filed unassigned — recording only.\n\n## The claim, and why it is now false\n\n`packages/spec/src/ui/component.zod.ts:275-280`, on `origin/main`:\n\n```\n    prescription:\n      'Visibility is a COMPONENT-level predicate, not a prop: move it up one level to the '\n      + 'component node\\'s own `visibleWhen` (ADR-0089 canonical spelling), beside `type` and '\n      + '`id`. Inside `properties` it is hoisted onto the node by the renderer but evaluated by '\n      + 'nothing — the component renders unconditionally, which is a visibility gate that '\n      + 'silently does not gate.',\n```\n\n**\"hoisted onto the node by the renderer but evaluated by nothing\" was true when it was written and is not true now.** objectui `c86185eb5` — *\"Bind `record` into node-level `visibleWhen`, and stop `visible` swallowing it (objectui#5505)\"*, merged 2026-08-21 08:09:49 UTC — bound `record` into SchemaRenderer's node-level evaluator. Post-#5505 the hoisted value **is** evaluated by the node gate.\n\n## Why this one matters more than an ordinary stale comment\n\nThis is not a docblock. `prescription` is the text emitted to an author when the key-set guard fires — **user-facing parse-error guidance**. The false sentence reaches authors directly, at exactly the moment they are deciding what to do, and it tells them the opposite of what the renderer now does.\n\nThe consequence compounds for generated metadata: an agent that trusts *\"evaluated by nothing\"* will reason about the wrong gate — either moving a key that no longer needs moving, or assuming a props-level gate is inert when it now gates.\n\n## Measured, not inferred\n\nFrom the objectui#5401 survey, which swept 10,446 files across both repos:\n\n- **2** authored sites currently carry a `record.*` predicate that reaches the node-level gate, both `properties.visible` on a `record:alert` (`platform-objects/src/pages/sys-user.page.ts:79`, `app-showcase/src/ui/pages/task-detail.page.ts:51`).\n- **0** of them changed verdict when #5505 landed — post-binding both gates evaluate the same value over the same `RecordContext` row and compose as an idempotent AND.\n\nSo there is **no shipped behavioural regression** to chase here. The defect is confined to the prescription text — which is why it is filed as a finding rather than as a P0.\n\nThe enumeration is closed by this file itself, incidentally: `COMPONENT_NODE_VISIBILITY_KEYS` refuses a props-level `visible` on every component except `record:alert`, and `PageComponentSchema` declares only `visibleWhen` + `visibility` at node level. Those are the only two routes in, which is what makes the \"2 sites\" figure a closed count rather than a sample.\n\n## What a fix has to decide\n\nNot just \"delete the false sentence\". The prescription's *first* half — move it up to the node's own `visibleWhen`, ADR-0089 canonical spelling — is still the right advice, and the reason is now different: it is about canonical spelling and layer discipline, **not** about the props-level form being inert. Whoever fixes this should say which of those two reasons the guidance is now resting on, because that is the sentence authors will act on.\n\n⚠️ Adjacent, filed separately: `content/docs/protocol/objectui/layout-dsl.mdx:824` teaches `user.hasRole(...)` inside a CEL `visibleWhen`, and `hasRole` appears nowhere in `packages/spec` or `packages/core`."
+}

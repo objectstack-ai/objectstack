@@ -1,0 +1,35 @@
+{
+  "number": 11371,
+  "kind": "pull_request",
+  "title": "fix(service-datasource): one live introspection per datasource per validation sweep",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T14:39:57Z",
+  "updated_at": "2026-08-23T16:40:59Z",
+  "closed_at": "2026-08-23T16:40:57Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": "2026-08-23T16:40:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11371",
+  "body": "Fixes #10962\n\n## What\n\n`validateAll` / `validateDatasource` performed one live `introspect(datasource)` round-trip per federated **object**, all concurrently — M objects on one datasource dialled the same remote M times per sweep. The sweep now threads a **per-call introspection memo** through the validation body:\n\n- `sweepScopedIntrospect()` returns a reader that memoises the **in-flight introspection promise** by datasource name for the lifetime of one `validateEach` call. The memo is a local of that call — it dies when the call returns.\n- `validateObject`'s body moved to a private `validateObjectUsing(objectName, readSchema)`; the public method passes `config.introspect` directly (a direct call is always a live read), the sweep passes the memoised reader. Public signatures are unchanged.\n- Memoising the promise (not the resolved value) makes the concurrent `Promise.all` sweep share one read; a rejected read is shared the same way — one connection attempt, M failure rows.\n\n**Why per-call, not per-instance** (the design constraint from triage): a `Map` on the service instance would also collapse M reads into 1 — and would serve last sweep's schema to every later sweep for the life of the process. The memo's lifetime is one call, so a long-lived service always answers a new sweep from the remote's schema as it is now.\n\n## Proof — the counting pins\n\nNew block `per-sweep introspection memo [#10962]` in `external-datasource-service.test.ts` (counting fake records every `introspect` call):\n\n- `validateAll` / `validateDatasource` with M=3 objects on one datasource: **one** read per datasource per sweep.\n- **Second-sweep control**: a second `validateAll()` on the same instance reads live **again** (count 2), and *sees a remote change made between sweeps* (tables dropped → `missing_table`, a fact read from a returned schema). A per-instance cache passes every counting pin above and fails exactly this one.\n- Direct `validateObject` twice: two live reads, remote change seen — no cross-call reuse.\n- One unreachable remote: **one** connection attempt, and every object on it still gets its per-object failure row (`kind: 'unreachable'` per #11166's ruling — see merge note below).\n\nAblation at `890f8e7cfd` (mutation confirmed on disk by anchored greps; predicted signature written first): bypassing the memo turns exactly the 4 counting pins red (`4 failed | 36 passed`) while every correctness test — including the #11241 refusal-path pin (`nothing persisted, nothing introspected`) — stays green; restore proven byte-identical via `git hash-object`, all green. No rebuild needed: the suite imports `../external-datasource-service.js` source-relative.\n\n## Merge with `main` at `92809ceb23` — joint resolution with #11166\n\n#11166 (unreachable diff kind, merged 14:17Z) rewrote the same `validateEach` hunks. Resolution keeps both sides whole: the memoised reader (this branch) plus the `unreachable` kind in the per-object catch (main), both docblock additions kept. The new counting pin for an unreachable remote now asserts `kind: 'unreachable'` (a throw out of `introspect` is never an invented `missing_table`); the second-sweep and direct-call pins keep asserting `missing_table` because their schemas are successfully **read** and lack the table — exactly the structural line #11166 draws.\n\n## The one `packages/spec` line\n\n`contracts/external-datasource-service.ts:157` documented `validateAll` as \"parallelised per datasource\" while the implementation parallelised per object. The docstring now states the actual behaviour: parallel per object, one live schema read per datasource per call. Comment prose only — no accept/reject change, no surface widened.\n\n## Verification at `92809ceb23` (merged head)\n\n- `pnpm --filter @objectstack/service-datasource test`: **577 passed (26 files)**; target file verbose: **42/42**, with the five memo pins, the #11241 refusal pin, and #11166's own classification pin all listed by name and green.\n- `pnpm --filter @objectstack/service-datasource typecheck`: clean.\n- `pnpm --filter @objectstack/spec build && check:generated`: all 14 artifacts up to date (run post-merge-commit, never in MERGE state).\n- Dispatch gate union (re-derived by `scripts/pm/dispatch-gates.mjs` at `92809ceb23`, no hand-supplied paths): 26 gates re-run to real verdicts, all green. Declared narrowings, receipts in the dev report on the issue: `check-dev-prereqs` (its own verdict names only \"workspace is not built\" — 49 unbuilt packages, none in this diff) and `check:type-check-debt` (neither touched package carries a DEBT/TEST_DEBT ledger entry; service-datasource's tsc program includes its tests and ran clean).\n\n## Scope notes\n\n- #10961 remains open — it is the same seam's runtime half and belongs to the cli lane; referenced here for sequencing only, not folded in.\n- Changeset: patch for `@objectstack/service-datasource` (behavioural fix, no API change) and `@objectstack/spec` (docstring correction shipped in the package).\n\nClause-②: **yes** — by the PATH limb (the diff touches `packages/spec/src/contracts/external-datasource-service.ts`); content limb **no** (comment prose only). This PR stays draft and waits on the review chain.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01APWX2AwT3a4xDcjPCe8bk4\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01APWX2AwT3a4xDcjPCe8bk4)_"
+}

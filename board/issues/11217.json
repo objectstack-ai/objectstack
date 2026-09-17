@@ -1,0 +1,32 @@
+{
+  "number": 11217,
+  "kind": "issue",
+  "title": "[finding] The half-state patrol sweeps objectstack ONLY — 37 blocked cards in objectui/cloud/objectos have never been machine-swept, and 7 stale blocks were sitting in the gap",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T03:50:04Z",
+  "updated_at": "2026-08-23T09:33:24Z",
+  "closed_at": "2026-08-23T09:31:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11217",
+  "body": "**Finding — recording only, not claimed.** Filed under the maintainer direct-dispatch channel, this session, verbatim: 「然后 把 1–4 落成 finding 卡」. PM session `session_0124Qg8rLvpXnQDwCmpKUmaJ`.\n\n## Measured\n\n`.github/workflows/half-state-patrol.yml` runs `check-half-states.mjs` against `${{ github.repository }}`. It is installed in this repo only, so the sweep covers **objectstack and nothing else**. The anchor #9857 says so in its own header: *\"…in objectstack-ai/objectstack — 94 half-state(s) found.\"*\n\nOpen `pm:blocked` inventory across the four repos, 2026-08-23:\n\n| repo | blocked | machine-swept |\n|:--|--:|:--|\n| objectstack | 22 | yes |\n| objectui | 28 | **no** |\n| cloud | 7 | **no** |\n| objectos | 2 | **no** |\n\n**37 of 59 blocked cards are outside any patrol.**\n\n## The cost, measured rather than asserted\n\nA hand-run of H19's predicate over objectui's 12 blocked cards that carry a resolvable `Blocked-by:` target found **7 whose blocker was already closed**:\n\n| card | blocker | blocker closed | days stale |\n|:--|:--|:--|--:|\n| objectui#4676 | #9019 | 2026-08-16 | 7 |\n| objectui#4664 | #8704 | 2026-08-16 | 7 |\n| objectui#5233 | #9933 | 2026-08-19 | 4 |\n| objectui#5210 | #9934 | 2026-08-19 | 4 |\n| objectui#5329 | objectui#5127 | 2026-08-20 | 3 |\n| objectui#5601 | #10054 | 2026-08-21 | (stays blocked — unreleased, see below) |\n| objectui#5120 | objectui#5149 | 2026-08-21 | 2 |\n\nSix were returned to `pm:queue` this round; #5601 stays blocked because its blocker's change is closed but unreleased. **58% of objectui's machine-readable blocks were false.** The same predicate runs hourly in objectstack and caught its four (H19 rows on #9857) — the difference is not discipline, it is that one repo has a caller and three do not.\n\n## Second-order\n\nThe same absence hides the other predicates too. Spot-checked while sweeping: objectui#5127 and #5149 are both **closed while still carrying `pm:dispatched`** — the H22 shape — and nothing in objectui will ever report it.\n\n## Shape of the fix\n\nParameterise the workflow's target repo and install it (or a matrix leg) for objectui, cloud and objectos. The script is already repo-agnostic — `--format=markdown` exists precisely so a caller can stamp its own provenance, and the anchor-issue-per-repo pattern carries over unchanged. The open questions are the token's cross-repo scope (see the sibling finding on H19's 404) and one anchor issue per repo to rewrite in place.\n\n⛔ Not filed as queue work: whether four separate scheduled callers or one matrix job is right, and who owns the anchors, is a routing call for triage.\n\n## Re-check\n\n```\ngit show origin/main:.github/workflows/half-state-patrol.yml | grep -n 'github.repository'\n```"
+}

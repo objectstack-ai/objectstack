@@ -1,0 +1,36 @@
+{
+  "number": 9483,
+  "kind": "issue",
+  "title": "tests(attachments): pin the unpinned authorization clauses of the attachments chain — coverage gaps from QA run #9401",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T03:58:41Z",
+  "updated_at": "2026-08-23T12:04:51Z",
+  "closed_at": "2026-08-23T12:03:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9483",
+  "body": "Blocked-by: #9719\n\nQA-source: #9401 · attachments-storage.download-authz-both-sides · C3, C4\nQA-source: #9401 · attachments-storage.read-inherits-parent-rls · C1, C3\nQA-source: #9401 · attachments-storage.attach-requires-parent-edit · C3\n\nThe Tier-1 pinned sweep (#9401) found the attachments permission matrix green (15/16) but with authorization-relevant clauses unpinned. Security-priority per the maintainer's 2026-08-18 approval of the QA landing plan; the non-authz attachment gaps (presign envelope shapes, status pipeline, reap ordering, chunked-session round-trip) are parked on the wave anchor #9296, not filed here.\n\n## Unpinned authorization clauses to cover with real tests\n\n1. **`download-authz-both-sides` C3** — `acl=public_read` re-opens the stable anonymous capability URL (the positive side of the anonymous gate); **C4** may stay manual (browser denial copy) with the ref's scope note saying so.\n2. **`read-inherits-parent-rls` C1** — COUNT is filtered identically to rows (a count leak is a real RLS leak); **C3** — the filter fails CLOSED on compute failure and past the 2000-row pre-scan cap.\n3. **`attach-requires-parent-edit` C3** — an unscoped multi-delete with neither id nor where is refused outright.\n\nAlso note from the run: the cross-tenant clauses are structurally unprovable in the OSS workspace (`@objectstack/organizations` is cloud-private) — the item ledger should carry that marker rather than each run re-deriving it.\n\nAcceptance: tests land in the package owning the surface (likely `packages/qa/dogfood`'s attachments matrix — triage to confirm lane); the items' `automated.ref` entries extended so the next Tier-1 run scores them honestly.\n\n---\n\n## Status after PR #9724 (2026-08-18)\n\nPR #9724 landed as **`Part of`, not `Fixes`**. Two of the three clause sets are pinned in full and all three items' `automated.ref` are re-scoped honestly.\n\n| clause set | state |\n|---|---|\n| `download-authz-both-sides` C3 | ✅ pinned by #9724 |\n| `read-inherits-parent-rls` C1 + C3 | ✅ pinned by #9724 |\n| `download-authz-both-sides` C4 | manual by construction (browser denial copy) |\n| `attach-requires-parent-edit` C3 | ⛔ **blocked on #9719** |\n\n**Why clause 3 above is not pinned.** It specifies that an unscoped multi-delete carrying neither an `id` nor a `where` is *\"refused outright (#4757)\"*. Measured end-to-end, **that refusal never fires**: `ObjectQL.delete`'s predicate path dispatches `beforeDelete` per row with `input.id` bound, so `attachment-access-hooks.ts` always takes its by-id branch and the \"neither id nor where\" arm is unreachable. A caller who uploaded every matched row deletes the whole table with a predicate-less delete.\n\nPinning the clause as written would fail; pinning current behaviour would turn the eventual fix red. So the behaviour is filed as #9719 and this clause waits on that decision.\n\nWhat #9724 *did* land for this item is the half that holds regardless of #9719: an unscoped AST cannot slip past the per-row gate and deletes **nothing** — not even the row the caller was entitled to — `where:{}` behaves the same, a zero-match predicate is allowed through, and the same caller's scoped delete still succeeds.\n"
+}

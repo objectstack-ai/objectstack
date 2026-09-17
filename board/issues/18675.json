@@ -2,7 +2,7 @@
   "number": 18675,
   "kind": "pull_request",
   "title": "test(cli): derive the build/validate gate roster from what the commands call, not from how a gate is spelled",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -19,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-17T13:55:42Z",
-  "updated_at": "2026-09-17T14:14:21Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-17T14:38:52Z",
+  "closed_at": "2026-09-17T14:38:50Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": "2026-09-17T14:38:50Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/18675",

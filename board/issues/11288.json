@@ -1,0 +1,34 @@
+{
+  "number": 11288,
+  "kind": "issue",
+  "title": "`lintLivenessProperties` walks `stack.translations` as if each item were a `TranslationItem` — it is a locale-keyed bundle, so the whole translation ledger warns nobody",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T08:54:32Z",
+  "updated_at": "2026-08-23T15:37:15Z",
+  "closed_at": "2026-08-23T15:36:38Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11288",
+  "body": "## Summary\n\n`lintLivenessProperties` registers `{ type: 'translation', key: 'translations' }` and then walks `stack.translations` items as if each were a `TranslationItem` — reading `item['flows']`, `item['objects']`, … off the top level. But `stack.translations` is `z.array(TranslationBundleSchema)` (`packages/spec/src/stack.zod.ts:275`): each item is a **locale-keyed bundle**, so its top-level keys are `en` / `zh-CN` / `ja-JP` / …, and every warned property lookup misses.\n\nNet effect: the whole `translation` liveness ledger is silent for file-authored bundles — the only way apps author translations today. It is the exact failure the surrounding code comment names:\n\n> A newly governed type needs its collection registered or its ledger warns nobody, which would leave the ledger correct and silent: the exact shape this lint exists to prevent.\n\nHere the collection *is* registered; the shape underneath it is the mismatch.\n\n## Measurement (HotCRM @ `a0bc5e8d`, `@objectstack/*` 17.1.0)\n\nGuarded ablation on a real app. `flows` is the ledger's only currently-warned `translation` property (`status: planned`, `authorWarn: true`, with an `authorHint` that says no shipped runner reads the group). Injected a `flows:` section into `src/translations/zh-CN.ts`, ran `objectstack lint --json`, restored via `trap`:\n\n```\ninjected-marker count: 1          # mutation confirmed on disk, anchored on the injected text\nflows-key count:       1\nobjectstack lint exit: 0\ntotal issues: 91 | errors: 0 | warnings: 81\nliveness findings naming flows: 0\ni18n/missing-* count: 0\n```\n\nBaseline on the unmutated tree, same command: **91 total issues** as well. The mutation is completely invisible — zero delta, and specifically zero liveness advisories.\n\nExpected direction was \"one new advisory\". Measured direction was \"no change at all\", which is what turned this from a corroboration into a finding.\n\n## Why it misses\n\n`packages/lint/src/lint-liveness-properties.ts`:\n\n```ts\nfor (const { type, key } of TYPE_COLLECTIONS) {\n  const warnMap = loadWarnMap(dir, type);\n  if (warnMap.size === 0) continue;\n  for (const item of asArray(stack[key])) {\n    …\n    checkItem(type, item, subject, warnMap, findings);   // reads item[path] for a dotless path\n```\n\nFor `flows` (a top-level, dotless path) `checkItem` takes the `[item[path]]` branch, i.e. `bundle['flows']` — and a `TranslationBundle` has no `flows` key at any depth reachable that way; the groups live one level down, under each locale code.\n\nThe two doors #3778 bridged share the group vocabulary but not the container: the runtime `translation` metadata item has `locale` + groups at the top level (which is the shape this walk assumes), while the file-authored stack collection is `Record<locale, TranslationData>`.\n\n## Consequence\n\nAn app author who reaches for a `planned` translation group gets **silence** — no warning, no error, a green `os lint` — and ships translations that render nowhere. That is strictly worse than the ledger being absent, because the ledger's stated contract is that `authorWarn` is what tells the author. Measured today this affects `flows` (the only warned row); it will affect every future `planned` translation group the same way.\n\n## Suggested fix\n\nGive the `translation` type a bespoke walk, the way `object` already has one for its field nesting: for each bundle in `stack.translations`, iterate its locale entries and `checkItem` the `TranslationData` under each, with a subject naming the locale (e.g. `translation bundle · locale 'zh-CN'`). A test should pin it against a locale-keyed fixture, since a fixture shaped like a `TranslationItem` passes on the broken walk.\n\nWorth deciding at the same time whether runtime-authored `translation` items are reached at all by this lint, or only ever the stack collection — the ledger's rows cite both doors, and only one of them is walked here.\n\n## Back-link\n\nFound while measuring <https://github.com/objectstack-ai/hotcrm/issues/1210> (HotCRM's screen-flow localization card), whose platform half is filed as #11287. Not a blocker for either — this is the reason the `flows` row's `authorWarn` never reached the app author who would have benefited from it.\n\nNo labels applied — routing is triage's call.\n"
+}

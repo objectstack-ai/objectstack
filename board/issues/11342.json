@@ -1,0 +1,34 @@
+{
+  "number": 11342,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): hang the keys beside the contract-review gate (discoverability only)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T12:42:26Z",
+  "updated_at": "2026-08-23T13:49:52Z",
+  "closed_at": "2026-08-23T13:49:51Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-23T13:49:51Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11342",
+  "body": "Fixes #11335\n\n## What this is\n\nDiscoverability text only — hanging the keys beside the `needs:contract-review` gate. The card's operative scope is the grading comment: the review-chain mechanism, the seat-session fuse, the value and semantics of `CONTRACT_REVIEW_TIER`, and who may clear the label are all explicitly untouched (the mechanism was confirmed correct by the card's own four independent reproductions).\n\n## The four edits\n\n1. **`scripts/pm/dispatch-gates.mjs`** — one JSDoc line beside `CONTRACT_REVIEW_TIER` pointing at the SKILL.md rulebook (the 「入队与落地」 clause-② gate + the `needs:contract-review` review-chain bullets). The seat greps the constant; the constant now says where its rulebook lives. No behavior change; the script's self-test stays green (`✓ dispatch-gates self-test: 557 cases pass.`).\n2. **`SKILL.md`, the 「保险丝只对座位自会话有效」 passage** — the subagent clause now reads 「subagent 的实际服役档位现无法对 `CONTRACT_REVIEW_TIER` 自证」, so a grep for the constant lands on the operative sentence. In-sentence, line-neutral.\n3. **Same passage** — one loud anti-pattern sentence appended in-line: 「**⛔ 反模式:派更高档位子 agent 去执行契约复审** —— 看似满足档位,实为构造上不可测量(多次实测:子代理读回父会话档位并拒绝出裁决)。」 In-sentence, line-neutral.\n4. **`SKILL.md` 「平台读数纪律」** — one situation-index line: 「**GitHub 限流 ⇒ 先 `GET /rate_limit`(零配额)取精确 reset 与余量,⛔ 不盲等**;公开仓降级 WebFetch 读法与限流细则见 platform-readings。」 Detail stays in references; both remedies verified present in `references/platform-readings.md`.\n\n## Ratchet payment (SKILL.md at 682/682, headroom 0)\n\nRatchet verdict quoted from the mechanical-guard index: 「本文件行数只降不升(`pnpm check:pm-skill-ratchet`);抬上限需维护者裁决引用在 PR 正文;⛔ re-wrap(折行合并)不得用作筹行 —— 棘轮治理的是内容体量,行数只是机读代理,新增以删减付账;密度优化仅随净减内容的 PR 顺带(维护者 2026-08-17 授权席裁)」.\n\n- **Added**: 1 line (edit 4). Edits 2–3 are in-sentence and line-neutral as scoped.\n- **Paid by**: deleting the Guardrails clause 「每个 dev agent 都在**每仓专属的自有 worktree** 里干活(hook 强制;os-dev 定义重申);」 and merging its bullet from 3 physical lines to 2. Least load-bearing by the grading's own preference criterion: the clause **self-declared** its redundancy — it is mechanically enforced (`guard-main-checkout` hooks), restated in the os-dev agent definition, and still carried inside this file by the mechanical-guard index row (`guard-main-checkout` / `guard-shared-stash` hooks | worktree-first 与 stash 禁令的机械面). The line saving is realized at the deletion point, not by re-wrapping untouched text; the bullet's remaining content (batch cap, file-face disjointness, seat rules) is unchanged.\n- **Mechanical provenance check** (standard the lane held PR #11334 to): date inventory (`grep -o` of `20xx-xx-xx`, uniq-counted) and bracketed-quote inventory (`grep -o '「[^」]*」'`, sorted) taken before and after — **both byte-identical** (19 distinct dates; 63 quotes). No dated ruling or verbatim quote deleted; the new lines add no dates and no bracketed quotes.\n- Result: `✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/SKILL.md is 682 lines (ceiling 682; headroom 0).`\n\n## Verification (union re-run at final commit `00f5c09b`)\n\nAll gates named by `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (no paths — change set derived by the script from merge-base) ran green at `00f5c09b`, exit codes captured directly (no pipe between command and `$?`):\n\n`check:pm-dispatch-gates` · `check:pm-governed-prose` · `check:pm-skill-id-lint` · `check:pm-skill-ratchet` · `check:skill-frame-sync` · `check:pm-governed-merges` · `check:doc-authoring` · `check:entry-guard` · `check:parse-guard` · `check:cross-package-test-inputs` · `check:pnpm-filter-targets` · `check-ci-filter-parity` · `check-cross-package-test-inputs` (ci.yml) · `@objectstack/lint check:doc-formula-expressions` — all EXIT=0. Plus `check:nul-bytes` (any-edit rule): `check-nul-bytes: OK`. Key verdict lines:\n\n- `✓ check-skill-id-lint: 19 file(s) clean (pattern /#[0-9]{3,}/g).` (no issue numbers in operative text)\n- `binding sentence present in all 4; 4 count mention(s) agree; 42 markdown files scanned for undeclared copies.` (frame copies did not move)\n- `✓ dispatch-gates self-test: 557 cases pass.`\n\n## Governed surface\n\nThis is a mixed governed diff (`.claude/skills/pm-dispatch/SKILL.md`): **this PR opens draft and stays draft — human (maintainer) merge only; no auto-merge, no queue entry.** `skip-changeset` applies (no published package is touched); label applied via the additive endpoint and read back.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01RMTpSRF5CjMmQBFfPtPCwJ)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RMTpSRF5CjMmQBFfPtPCwJ)_"
+}

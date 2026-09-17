@@ -1,0 +1,34 @@
+{
+  "number": 11036,
+  "kind": "issue",
+  "title": "finding: H8 只认 Part-of / closing-keyword 两种拼法，交付 PR 写 `Refs #N` 时静默漏报（现场标本 #10757）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-22T12:31:33Z",
+  "updated_at": "2026-08-22T17:40:47Z",
+  "closed_at": "2026-08-22T17:40:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11036",
+  "body": "`scripts/pm/check-half-states.mjs` 的 H8（「交付 PR 已合并、卡仍挂 `pm:dispatched`」）**按 PR 正文的关键词认交付**，认不出第三种拼法，于是一张真半状态可以在巡查眼皮底下静默过夜。\n\n未认领，只作记录。\n\n## 机制（读码）\n\n`h8MergedPrStillDispatched`（`scripts/pm/check-half-states.mjs:1158`）判定「PR 交付了卡 N」的唯一依据是正文：\n\n```js\nif (partOfTargets(body).has(n) || closingKeywordTargets(body).has(n)) {\n  delivering.push(pr);\n}\n```\n\n⇒ 只认 `Part of #N` 与 closing keyword。**分支名不读**，尽管每个 PR 行都带着 `head.ref`，而本仓的开发分支恒为 `claude/issue-<n>-<slug>`。\n\n## 标本：#10757\n\n| 事实 | 读数 |\n|:--|:--|\n| 交付 PR | **#10824**，`merged: true`，2026-08-21T14:00:28Z |\n| 分支 | `claude/issue-10757-dedupe-per-request-queries` |\n| 正文首行 | **`Refs #10757`** —— 两种被认拼法都不是 |\n| 卡状态 | 持续 `pm:dispatched`，直到 2026-08-22 约 12:40 被人工回标（约 22 小时） |\n| 巡查 2026-08-22T07:49:49Z（锚 #9857） | 对本卡**只报了 H2**（有 assignee 无认领评论），**无 H8 行** |\n\n同一轮 sweep 对 #9968 / #10497 / #10534 / #10556 / #10638 / #10678 都正常报出了 H8，所以谓词跑了 —— 只有这一笔交付对它不可见。\n\n## 用另一种口径复测总体\n\n对两仓所有仍挂 `pm:dispatched` 的开放卡，改用**分支前缀** `head:claude/issue-<n>-` 反查交付：\n\n- **objectstack**：9 张有已合并的交付。巡查 H8 点名 6 张；剩下 3 张里 2 张（#10994 07:54、#11028 10:31）是在 sweep 跑完之后才合并的 —— 属 H8 自述的窗口边界，**不是缺陷**；**#10757 是真漏报**。\n- **objectui**：3 张有已合并交付（#5662 / #5559 / #5629）。该仓的 sweep 覆盖本次没查。\n\n即：这一轮 H8 的漏报率是 1/7（把窗口外的两张排除后）。\n\n## 修法的形状（是建议，不是处方）\n\n给 H8 加一条**分支名兜底**：一个已合并 PR 的 head ref 命中 `claude/issue-<n>-` 时，即使正文没有任何被认拼法，也算交付卡 N。成本低 —— sweep 已经在列 closed PR，行里就带 `head.ref`。\n\n⚠️ 它**放宽了「交付」这个关系**：一个以某卡命名、后来被重新划范围的分支，从此会被算作那张卡的交付。所以两个方向都要进脚本自己的 self-test（H8 的用例在 `:4963`）：命中要报，改过范围的反例不能报。\n\n## 相邻但**不是**同一个缺陷\n\n`scripts/check-partof-closing-keyword.mjs` 无法区分「只写了 `Fixes` 的部分范围 PR」与「完整交付的 PR」—— services 席已在 #10534 的 `5377191597` 里作为 finding 记下（那条自述 `:246` 的 self-test 正好断言了反例是 clean）。**下手前先查它是否已立卡**，别造重复。\n\n## 没测的\n\n- 除本例外是否还有别的 `Refs #N` 拼法的交付：只查了**当前仍挂 `pm:dispatched`** 的卡。\n- 已关闭的卡上同形的漏报：H8 只读开放 issue（#10688 已记），那类本来就在它视野外。\n\n## 域标签\n\n刻意留空 —— `domain:*` 只由分诊席产出。我的读法是它的 SUBJECT 是**派发协议自身的门禁**（比照 `scripts/pm/check-governed-merges.mjs` 归 `domain:skills` 的先例），而不是一般开发工具面（`domain:devx`），但这一判归分诊。\n\n⛔ 顺带排除一个读法：这**不是** skills 文本要改的东西。pm-dispatch 的换班规则本身就写着「可机械化项 → 门禁/脚本卡，⛔ 不是散文」；把「记得 `Refs` 也算交付」写进技能文本，正是那条规则要退役的失效模式。"
+}

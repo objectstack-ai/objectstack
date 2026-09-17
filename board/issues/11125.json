@@ -1,0 +1,32 @@
+{
+  "number": 11125,
+  "kind": "issue",
+  "title": "The `primaryKeyReader` three-signal union in service-datasource has no `isPrimary` producer left once the driver lands — collapse it to the spec spelling",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-22T19:14:43Z",
+  "updated_at": "2026-08-22T19:18:19Z",
+  "closed_at": "2026-08-22T19:18:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11125",
+  "body": "Blocked-by: #10676\n\nFiled by the `domain:engine` execution seat (`session_01RfyXxZ2WPjcjhuXpiQQc3y`) as the consumer-side follow-up its own PR creates. **Recording only** — ⛔ no `domain:*` label; this lands in `packages/services/service-datasource`, which is not this seat's lane, and routing is triage's. The services seat asked for exactly this rather than an edit from the driver change.\n\n## What changes under it\n\nPR #11124 (#10676 + #10998) aligns `SqlDriver.introspectSchema()` to the `packages/spec` introspection contract: columns carry `primaryKey`, and the retired `isPrimary` spelling is **removed** rather than emitted alongside.\n\n`ExternalDatasourceService`'s `primaryKeyReader` currently reads a **three-signal union** — `col.primaryKey` OR `col.isPrimary` OR `table.primaryKeys.includes(col.name)` — shipped by PR #11001 as a deliberate transitional belt while the two contracts disagreed. The maintainer ruling that ordered the driver alignment (2026-08-22, live session, 「同意所有」 item 9) permitted that belt **for one release**.\n\nOnce #11124 merges, **the `isPrimary` arm has no in-tree producer.** The belt is not broken — it keeps working precisely because it reads through a local cast (`(col as { isPrimary?: unknown }).isPrimary`) rather than through the interface, which is why removing the member does not touch it. That is good engineering and it is also what makes this easy to forget: nothing goes red, nothing complains, and a dead arm quietly becomes permanent.\n\n## Why the driver PR deliberately did not do it\n\nThe engine seat's dispatch authorised exactly one narrow cross-lane touch — updating `external-introspection-seam.test.ts`'s producer-spelling assertion, which was built to redden on this flip — and ⛔ explicitly withheld authorisation to collapse the union read. Collapsing it is a judgement about how long the belt should outlive its producer, on a clock this lane does not own. The services seat's handoff note on #10676 says the same in the other direction: *\"Ping the services seat rather than editing it, or say so on this card and I will carve it.\"* This card is that.\n\n## What the taker should check, not assume\n\n- **The `isPrimary` arm is the only dead one.** `table.primaryKeys` remains a live, independent signal — the driver still emits it and it is the composite-key carrier (#10997). ⛔ Do not collapse the union to `col.primaryKey` alone without establishing what `primaryKeys` is doing for callers.\n- **`external-introspection-seam.test.ts` currently pins BOTH arms on purpose.** Its updated comment says so: the union \"no longer has an in-tree producer needing its `isPrimary` arm; collapsing it is this lane's call to make.\" Whichever way that call goes, that file is where it gets recorded.\n- **Out-of-tree producers.** In-tree there are none after #11124; whether any external driver implementation emits the old spelling is unmeasured here.\n- The `defaultValue` / `indexes` divergences the driver kept deliberately (`unknown` rather than `string`; `indexes` omitted rather than emitted empty) are **not** part of this — they are documented divergences, not drift.\n\n## Provenance\n\n- **#10676** / **#10998** — the driver alignment (this card's `Blocked-by:` fires when they close).\n- **PR #11124** — the change that empties the arm.\n- **PR #11001** — shipped the belt, with its own reasoning for a union rather than a precedence chain.\n- **#11000** — unrelated despite the shared word, and still unruled: `fields.<f>.primaryKey` authorability in a rendered object definition is a different key in a different place."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 11009,
+  "kind": "issue",
+  "title": "A compare-and-set `where` on a by-id `update` is silently inert — the extra predicate keys never reach the driver, and `SqlHttpOutbox.redeliver`'s status guard is one of them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-22T05:01:02Z",
+  "updated_at": "2026-08-22T22:33:13Z",
+  "closed_at": "2026-08-22T22:33:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11009",
+  "body": "Found while implementing #10740 (the `update`-op tenant classification on the delivery outboxes). Filed separately and unassigned: it is a different defect class from that card's tenant classification, it pre-dates it, and #10740's PR does not touch it.\n\n## The behaviour, measured\n\n`ObjectQL.update` resolves `{ where: { id: <scalar>, ...more }, multi: false }` to the **`by-id`** dispatch (`resolveEngineUpdateDispatch` → `{ kind: 'by-id', id }`) and then calls `driver.update(object, id, data, options)`. `SqlDriver.update` builds its statement as:\n\n```ts\nconst builder = this.getBuilder(object, options).where('id', id);\nthis.applyTenantScope(builder, object, options);\n```\n\nIt never applies `options.where`. So **every key in `where` other than `id` is silently discarded** — including a compare-and-set guard the caller wrote specifically to make the write conditional.\n\nMeasured on `better-sqlite3` through a real `ObjectQL` + `SqlDriver`, on `sys_http_delivery`:\n\n```ts\n// row p1 exists with status='pending', attempts=7\nawait engine.update(\n    SYS_HTTP_DELIVERY,\n    { attempts: 0 },\n    { where: { id: 'p1', status: { $in: ['success', 'failed', 'dead'] } }, multi: false },\n);\n// observed: attempts === 0\n```\n\nThe predicate demanded a terminal status. The row was `pending`. The write landed anyway.\n\n## Why it matters concretely\n\n`SqlHttpOutbox.redeliver` (`packages/services/service-messaging/src/sql-http-outbox.ts`) writes exactly that predicate:\n\n```ts\n{ where: { id, status: { $in: ['success', 'failed', 'dead'] } }, multi: false }\n```\n\nIt is there as the atomic half of a check-then-act: `redeliver` reads the row, refuses a non-terminal one via `assertRedeliverAllowed`, and then re-states the terminal requirement in the write so a row that changed underneath it is not reset. That second check does nothing.\n\nThe window is real rather than theoretical: the `HttpDispatcher` tick claims `pending` rows into `in_flight` continuously and independently of any request. A row claimed between `redeliver`'s read and its write is reset to `status: 'pending', attempts: 0` regardless, and the post-write readback — which only asks whether the row is now `pending` — sees `pending` and reports the redelivery as a success. The in-flight attempt keeps running, so the delivery can go out twice while the row's attempt counter reads 0.\n\nThe generic form is the more important half: **any caller in this repo who writes a conditional predicate alongside a scalar `where.id` gets a guard that silently evaluates to nothing**, with no diagnostic. It reads exactly like a working compare-and-set.\n\n## What a fix has to decide\n\nNot obvious, which is why this is a card and not an inline fix:\n\n1. **Apply the remaining `where` keys on the by-id path** in `SqlDriver.update` (and its `delete` twin, which has the same shape), so a stated predicate is honoured. This makes existing calls stricter — a write that currently lands might stop landing, which is the *point*, but it is a behaviour change on a shared write path.\n2. **Refuse the shape at the engine**, the way `resolveEngineUpdateDispatch` already refuses other silently-wrong ones (`#5748`'s operator-object `data.id` is the precedent): a by-id update carrying predicate keys it will not honour is a caller error, and refusing is the `declared = enforced` answer.\n3. **Leave the mechanism and fix the caller**, having `redeliver` do its compare-and-set some other way.\n\n(1) and (2) are contract changes on `ObjectQL.update`; (3) leaves the trap armed for the next caller. My read is that (2) is the shape this repo usually chooses — a silently-ignored option is the failure mode `ENGINE_UPDATE_OPTION_KEYS` and the dispatch predicate already exist to prevent — but the blast radius wants measuring first: `resolveEngineUpdateDispatch`'s case table and every by-id caller passing extra `where` keys.\n\n## Refs\n\n- `packages/metadata-core/src/engine-update-dispatch.ts` — `resolveEngineUpdateDispatch` / `scalarUpdateId`\n- `packages/drivers/driver-sql/src/sql-driver.ts` — `SqlDriver.update` (the builder that ignores `options.where`)\n- `packages/services/service-messaging/src/sql-http-outbox.ts` — `redeliver`, the measured caller\n- #5748, #6435 — prior corrections to the same dispatch predicate, both about a shape it read wrongly rather than one it dropped\n- #10740 — where this was found; that card's scope is the tenant classification only\n\nDuplicate search run before filing: nothing open. The nearest matches are #4419 (`findOne` dropping unsupported predicate keys — the READ side of the same family, closed) and #5748 / #6435, both closed."
+}

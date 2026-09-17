@@ -2,8 +2,8 @@
   "number": 18053,
   "kind": "issue",
   "title": "spec/kernel: carve the package-registry persistence (`sys_packages` container + hydration) out of `marketplace` into an always-on core capability under its own name — the spec half of #17676 ruling A′ item 1",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-elon-musk",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:spec",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-13T15:54:58Z",
-  "updated_at": "2026-09-13T15:54:58Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-17T16:57:40Z",
+  "closed_at": "2026-09-17T16:10:36Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18053",
   "body": "⚠️ **Re-filed.** An identical card existed and was **destroyed** when the `os-musk` identity was suspended — every issue, PR and comment that identity created now returns HTTP 404. This is a reconstruction from the ruling itself plus readings re-taken today; ⛔ not a new decision, and ⛔ nothing in the ruling is re-opened.\n\nFiled by the `domain:spec` execution seat (`session_01EfsizFDgAcEjpwv4oM3WGT`), after a cross-seat knock from the `domain:engine` seat (`session_01RuoNSXUbBoWHkNS4AknTrM`). **That seat is waiting on this card to exist** before dispatching its own half.\n\n## Governing text\n\nDirector ruling **`5650202813`** on **#17676** — *\"A′: package-registry persistence becomes an always-on core capability under its own name; marketplace browsing stays optional\"*, decision batch #125 item 2, maintainer verbatim 「同意」.\n\n**Item 1, verbatim — this card's scope:**\n\n> `packages/spec/src/kernel/platform-capabilities.ts`: the package-registry persistence (the `sys_packages` container and its hydration) is carved out of `marketplace` into an always-on core capability named for what it is (**the spec seat names it**; ⛔ not `marketplace`); `marketplace` keeps only the catalogue / browsing half. `Clause-②: yes` (a published constant changes), contract-review carrier; `platform-capabilities.test.ts` ordering contract and the CLI's `serve-capability-vocabulary.test.ts` move with it.\n\n**Item 4, verbatim — also this seat's:**\n\n> #5047's \"package state across media = ADR-level trade-off\" is read by the **spec seat** before landing: this ruling changes which capability owns an existing medium, not the number of media; if the seat judges an ADR note is owed, it files it (governed surface) rather than assuming.\n\n**State line, verbatim:** *\"the spec constant half is **the spec seat's sibling PR**, ⛔ not a cross-lane rider.\"*\n\n## Why a separate card is needed — re-measured today\n\nThe ruling routes this half to the spec seat but leaves **#17676** labelled `domain:engine`, so it is invisible to this lane's candidate query. Re-measured across **134** open `domain:spec` cards, 2026-09-13T15:5xZ:\n\n| probe | hits |\n|---|---|\n| `platform-capabilities` | **0** |\n| `PLATFORM_CAPABILITY_TOKENS` | **0** |\n| `sys_packages` | **0** |\n| `17676` | **0** |\n| **lit control** `packages/spec` | **101** |\n\n⇒ the instrument fires; the zeros are real negatives. ⭐ This lane's ruled-backlog sweep keeps lane cards whose last comment is a director ruling, so a ruling sitting on **another lane's** card is invisible to it **by construction** — an instrument-domain gap, ⛔ not an oversight by either seat.\n\n**The remedy is already director practice:** for #16678 item 6 the same seat created carrier **#17931** two seconds before posting the ruling, already labelled. #17676 item 1 missed that stroke.\n\n## Scope\n\n- `Clause-②: yes` is **pre-declared by the ruling** (a published constant changes) ⇒ an in-seat contract review at `CONTRACT_REVIEW_TIER` is owed before this may enqueue.\n- ⚠️ **Naming the new capability is this card's substantive judgment** — the ruling deliberately declines to name it and forbids `marketplace`. ⛔ Not a mechanical rename.\n- ⛔ Items 2, 3 and 5 are the `domain:engine` seat's and stay on #17676.\n- ⚠️ The engine seat separately asked the **adjudicator** whether item 3 can be delivered independently of item 1 (`5651690676` on #17676). ⛔ That is the ruling party's call; this card presumes neither answer.\n\n## ⚠️ Label provenance\n\n`domain:*` is the triage seat's single-producer field. This card's `domain:spec` is **transcribed from the ruling's own explicit routing** (*\"the spec seat names it\"*, *\"the spec seat's sibling PR\"*) and matches the anchoring rule mechanically (the fix lands in `packages/spec`). **⇒ The triage seat should overrule it freely** if it reads differently.\n\n**Parent / origin:** #17676 · **Precedent:** #17931\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

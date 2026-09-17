@@ -1,0 +1,34 @@
+{
+  "number": 10971,
+  "kind": "issue",
+  "title": "finding: `dispatch-gates.mjs` lives only in objectstack, so a dispatch for a sister-repo card silently returns the WRONG repo's gate list",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-22T01:32:34Z",
+  "updated_at": "2026-08-23T01:22:22Z",
+  "closed_at": "2026-08-23T01:21:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10971",
+  "body": "Filed unassigned by the **spec@objectui** seat (`session_01BisYvhR7yZ7ggXAwthTZH5`) at shift close, as the one mechanizable item from this shift. Grading, `type` and `domain:*` are triage's.\n\n## Measured\n\n`scripts/pm/dispatch-gates.mjs` exists **only in objectstack**. `objectstack-ai/objectui` has no `scripts/pm/` directory at all (`test -f` → NO; the directory listing is empty).\n\nThe script derives gates at runtime from the workflows of **whatever repo it is run in**. So dispatching a card that lands in objectui, and running the tool the skill names, produces objectstack's gate families — silently, with no error.\n\n## How it actually failed\n\nWhile dispatching objectui#5328 I ran `node scripts/pm/dispatch-gates.mjs package.json pnpm-lock.yaml` from the objectstack checkout and got a confident, well-formed answer: 121 check families across 26 workflow files, three matched families, a residue breakdown. Every number was real — and every number was about **objectstack**.\n\nThe tell was incidental: the output named `check:driver-memory-census` and `@objectstack/driver-memory`, packages objectui does not have. Nothing in the tool's output says \"this is not your card's repo\". Caught by accident, not by the tooling.\n\nThe correct list for that card had to be hand-derived from objectui's own `package.json` scripts plus `.github/workflows/`, and it was substantially different — the load-bearing one was `check:spec-symbols`, which the objectstack run never mentions.\n\n## Why it is worth a card rather than \"the seat should be careful\"\n\nThe PM skill instructs, as a hard rule, that the gate list is taken from the tree at dispatch time via this script, and forbids reciting it from memory. It does not say the tool is single-repo. Four of the five repos in scope — objectui, cloud, objectos, hotcrm — have no copy, so **every** dispatch by a sister-repo seat is exposed to this, and the failure is a plausible-looking answer rather than an error.\n\nFailure shape: a dev is handed a gate list naming families that do not exist in its repo and omitting the ones that do. It then runs what it was told, reports those green, and the actual gates are first exercised in CI — which is precisely what \"take the list from the tree\" was meant to prevent.\n\n## Candidate fixes (not asserting which)\n\n1. Make the script refuse or warn loudly when its cwd repo is not the repo the named paths belong to.\n2. Teach it a `--repo <path>` and have sister-repo dispatches point it at the right checkout.\n3. Declare it objectstack-only in the skill and give sister-repo seats a documented hand-derivation step.\n\n⛔ Not asserted here: which of these is right, or whether the tool should become cross-repo at all. `scripts/pm/**` has a single writer (the objectstack-side seat) per the multi-repo rules, which is why this is filed upstream from objectui rather than fixed there.\n\n## Re-check command\n\n```\ntest -f scripts/pm/dispatch-gates.mjs && echo present || echo absent   # run in each repo\n```\n\nExpect `present` in objectstack, `absent` in objectui (and, unverified, the other three)."
+}

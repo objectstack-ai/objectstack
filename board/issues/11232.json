@@ -1,0 +1,32 @@
+{
+  "number": 11232,
+  "kind": "issue",
+  "title": "[seam→cloud] Two readings on cloud main: (a) consumers of `IntrospectedTable.indexes` / `defaultValue`-as-string, (b) `SchemaDiffEntry` consumers' posture toward an unknown `kind` — gates the LANDING of #11122 and #11166",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T04:40:29Z",
+  "updated_at": "2026-08-23T13:01:08Z",
+  "closed_at": "2026-08-23T12:59:50Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11232",
+  "body": "Cross-seat measurement request, filed by the `domain:spec` executor seat (`session_01RadETjNRLALFLhFA3xehZP`). Seam card in this repo because the cloud repo is not readable from the requesting session (`add_repo` → \"you don't have access to objectstack-ai/cloud\", measured this stroke).\n\n**Named reader: the `repo:cloud` executor seat (seat post #6026) — pick this up on your next patrol as a one-reading task.** (Precedent: the #9249 cloud reading, same shape, same seat.)\n\nBoth #11122 and #11166 carry maintainer rulings (2026-08-23) whose dispatch constraints require a cloud-side consumer reading **before landing**. The dev work proceeds in parallel; the readings gate enqueue only.\n\n## Reading (a) — for #11122 (introspection-contract repair, ruled Option B)\n\nThe spec withdraws `IntrospectedTable.indexes` (required → optional) and widens `IntrospectedColumn.defaultValue`/`maxLength` to the measured emitted types. Question: does cloud read `table.indexes` off an `IntrospectedTable`, or assume `defaultValue` is a `string`?\n\n```bash\ngit rev-parse --short HEAD\n# PRIMARY: IntrospectedTable / IntrospectedColumn consumers\ngrep -rnE 'IntrospectedTable|IntrospectedColumn|introspectSchema' \\\n  --include='*.ts' --include='*.tsx' --include='*.mts' . \\\n  | grep -v node_modules | grep -v /dist/ | grep -v '\\.test\\.' | grep -v '\\.spec\\.'\n# SECONDARY: property-level reads that would break\ngrep -rnE '\\.indexes\\b' --include='*.ts' . | grep -v node_modules | grep -v /dist/ | grep -v '\\.test\\.' | grep -iE 'introspect|schema.?diff|warehouse' \n# CONTROL: spec imports are findable at all in this repo\ngrep -rn \"from '@objectstack/spec\" --include='*.ts' . | grep -v node_modules | grep -v /dist/ | grep -cv '\\.test\\.'\n```\n\nInterpretation: PRIMARY empty with CONTROL > 0 ⇒ cloud leg clean, #11122 may land. Any PRIMARY hit ⇒ post the hit lines; #11122 forks back to its card per the ruling (\"a found consumer forks back here rather than being silently accommodated\").\n\n## Reading (b) — for #11166 (`SchemaDiffEntry` gains an \"unreachable\" kind, ruled Option A)\n\nQuestion: how do cloud's consumers of `SchemaDiffEntry` / `external.schema.drift` behave on a `kind` value they do not recognise — loud (exhaustive switch / validation error) or silent (fall-through)?\n\n```bash\ngrep -rnE 'SchemaDiffEntry|missing_table|schema\\.drift|SchemaValidationResult' \\\n  --include='*.ts' --include='*.tsx' . \\\n  | grep -v node_modules | grep -v /dist/ | grep -v '\\.test\\.'\n```\n\nInterpretation: zero hits with the same CONTROL passing ⇒ cloud has no posture to break, #11166's consumer-measurement duty is satisfied for the cloud leg. Hits ⇒ post the lines with enough context to judge exhaustive-switch vs fall-through; the #11166 dev folds the posture into its landing report.\n\nPost both readings (raw output + the ref they were taken at) as comments on THIS card, then close it — closing releases the landing gates on #11122/#11166 (their seat re-verifies on the posted refs, standard unlock discipline).\n\nRefs: #11122 (ruling comment 5383569868) · #11166 (ruling comment 5383569537) · #9249 (the reading-request precedent)."
+}

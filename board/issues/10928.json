@@ -1,0 +1,35 @@
+{
+  "number": 10928,
+  "kind": "issue",
+  "title": "`UniqueScopeSchema`'s rejection message calls `'organization'` \"the explicit spelling of true\" on BOTH surfaces — on a declared index bare `true` means `'global'`, so the message prescribes a silent scope change",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T18:05:40Z",
+  "updated_at": "2026-08-23T04:16:21Z",
+  "closed_at": "2026-08-23T04:15:57Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10928",
+  "body": "Found while correcting a stale `@deprecated` prescription in objectui (objectstack-ai/objectui#4765, PR objectstack-ai/objectui#5614). Different repo and outside that card's declared file surface, so it is filed rather than fixed. Filed unassigned per finding discipline.\n\n## What\n\n`UniqueScopeSchema` is shared by the field-level `unique` and the declared-index `indexes[].unique`. Its rejection message is written from the field-level viewpoint only, but it fires on both surfaces. Measured against the installed `@objectstack/spec@17.0.0` (GA), parsing through **`IndexSchema`**:\n\n```\nIndexSchema.safeParse({ fields: ['a'], unique: 'nonsense_scope' })\n  success = false\n  issue.code = invalid_union   issue.path = [\"unique\"]\n  \"Invalid unique scope 'nonsense_scope'. Allowed: true/false, 'organization'\n   (one holder per organization — the explicit spelling of true), or 'global'\n   (one holder across the whole installation).\"\n```\n\nThe parenthetical is the problem: **on this surface `'organization'` is not the explicit spelling of `true`.** `'global'` is.\n\n## Why that is wrong here, measured\n\nThe spec's own driver-facing helpers, which are the single source of truth the drivers read:\n\n```\nunique=true            isUniqueDeclared=true  isGlobalUnique=false  isOrganizationUnique=false\nunique=\"global\"        isUniqueDeclared=true  isGlobalUnique=true   isOrganizationUnique=false\nunique=\"organization\"  isUniqueDeclared=true  isGlobalUnique=false  isOrganizationUnique=true\n```\n\nBare `true` sets neither flag, so no organization key part is prepended and the index materializes over exactly `fields`. `IndexSchema.unique`'s own `describe()` says so outright: \"bare true = deprecated positional spelling of 'global' (warned in 17.x by lint `unique/unscoped-declared-index`, rejected at protocol 18, #5082)\".\n\nAt field level the same value resolves through `isUniqueDeclared && !isGlobalUnique`, i.e. per-organization, and there `'organization'` genuinely is the synonym of `true`. The divergence is deliberate and load-bearing — it is the \"#4986 trap\", and #8463 / PR #8512 already corrected the parallel claim on `isOrganizationScopedUnique`'s JSDoc for exactly this reason.\n\n## Why it is worth fixing rather than shrugging at\n\nThe message is read at the one moment it is most likely to be obeyed: the author has just been refused and is looking for the accepted spelling. An author holding a working `unique: true` on a declared index, refused for some other reason on that key, is told that `'organization'` is what `true` spells. Taking that advice **changes materialization** — it asks the driver to prepend the NULL-safe organization key part at registration — and it does so silently, on an index that already exists on deployed databases.\n\nThat is the unannounced index reinterpretation the #8323 ruling (maintainer, 2026-08-13, option 1 ⛔ rejected) and the #5082 v18 sequencing exist to prevent. Here the reinterpretation is not proposed by a tidy-up edit but prescribed by the platform's own error text, so it reaches authors directly rather than at review time. It is also the \"guidance that claims more than the platform delivers\" class the strictness ledger's finding 18 tracks — the objectui card above was the fourth instance shipped in that campaign.\n\nNothing is currently broken at runtime: the parse and both drivers are correct. The defect is entirely in the rejection text.\n\n## Suggested shape, subject to the implementer's own measurement\n\nMake the parenthetical surface-aware rather than dropping it — it is genuinely useful on the field surface, which is the common one. Options, in the order I would rank them:\n\n1. **Give the index surface its own error map.** The union stays shared; `IndexSchema.unique` supplies a message whose parenthetical names `'global'` as the positional meaning of `true` and points at `unique/unscoped-declared-index` and #5082. Most precise, and it puts the migration warning in front of the author who needs it.\n2. **Make the shared message surface-neutral.** Drop the \"explicit spelling of true\" clause and state each scope on its own terms. Cheapest, loses a genuinely helpful hint at field level.\n3. Leave it and document. Not recommended — the whole point is that this text is read instead of the docs.\n\nI have not measured how `UniqueScopeSchema`'s error map is wired or whether a per-surface message is cheap there, so option 1's cost is unestimated. Whoever picks this up should re-measure against the installed spec at that moment rather than trusting the quotes here.\n\nBacklink: objectstack-ai/objectui#4765 · objectstack-ai/objectui#5614 · prior art #8463 / #8512 · rulings #8323, #5082"
+}

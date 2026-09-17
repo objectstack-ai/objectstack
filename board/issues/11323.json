@@ -1,0 +1,34 @@
+{
+  "number": 11323,
+  "kind": "pull_request",
+  "title": "test(dogfood): converge two-factor-lockout on the shared TOTP helper",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T11:27:03Z",
+  "updated_at": "2026-08-23T11:55:58Z",
+  "closed_at": "2026-08-23T11:55:57Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": "2026-08-23T11:55:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11323",
+  "body": "Fixes #11111\n\n`two-factor-lockout.dogfood.test.ts` carried a private `base32Decode` / `totp` pair. The shared `packages/qa/dogfood/test/totp.ts` was extracted **from** that file while adding a second caller (#10681) and deliberately did not rewrite its internals, so the package held two spellings of RFC 6238. This converges them. Mechanical: no assertion, timeout or fixture-semantics changes.\n\n## What changed\n\n- The lockout test now imports `secretFromTotpUri, totp` from `./totp.js` — the same import its sibling `two-factor-backup-code-reveal.dogfood.test.ts` already uses.\n- Its local `base32Decode` and `totp` are deleted, along with the `createHmac` import that only they used.\n- The inline otpauth URI parsing collapses into `secretFromTotpUri`.\n- The shared module's header carried a stale warning that the lockout file \"still carries its own private copy\". That stopped being true in this commit, so it is replaced with a note that this is now the package's single copy.\n\nNet: 48 lines deleted, 7 added.\n\n## Divergence check — the thing that could have made this unsafe\n\nBoth implementations were compared before anything was touched. Extracting the function bodies and diffing them yields exactly one difference each, the `export` keyword:\n\n```\nbase32Decode:  1c1   export function base32Decode(...)   vs   function base32Decode(...)\ntotp:          1c1   export function totp(...)           vs   function totp(...)\n```\n\nNo divergence. Nothing behavioural is being smuggled in under a dedupe.\n\n## The one semantic nuance, stated rather than hidden\n\nThe collapsed block previously guarded the URI with `expect(uriSecret, 'no secret in the otpauth URI').toBeTruthy()`. `secretFromTotpUri` instead throws `Error('no secret in the otpauth URI')` — same message, same red/green outcome, a thrown error rather than an assertion. The card sanctions this collapse explicitly (\"plus the `secret` param lookup and its `toBeTruthy` guard, so that block can collapse too\").\n\n## Why the green suite here is not a tautology\n\nA dedupe PR's real risk is not that the suite goes red — it is that the suite never exercised the helper, so repointing it at a different implementation proves nothing. Predicted in writing **before** running: mutating the SHARED `totp()` must fail inside `beforeAll`, at the enrolment confirmation, because that is the first consumer of a TOTP in the file.\n\nMeasured, with the shared `totp()` mutated to return a fixed wrong code:\n\n```\ninjected marker count : 1   (must be 1)\nremoved original count: 0   (must be 0)\nFAIL |isolated| test/two-factor-lockout.dogfood.test.ts (beforeAll hook)\nAssertionError: verify-totp (enrolment): {\"message\":\"Invalid code\",\"code\":\"INVALID_CODE\"}: expected 401 to be 200\nTest Files  1 failed (1)      Tests  5 skipped (5)\n```\n\nRestored byte-identically — `git hash-object` equal on both sides (`f5b906f55752e74ae4ba5c4be2d67891b621cbc9`), injected marker absent, original line back — and re-run to a real green: `Test Files 1 passed (1) / Tests 5 passed (5)`. The mutation ran under a `trap ... EXIT INT TERM` restore, so a cap kill mid-mutation could not have left the tree mutated.\n\nTwo honest deviations from the prediction: the rejection status is **401 INVALID_CODE**, not the 400 I guessed, and vitest accounts a `beforeAll` failure as *1 file failed / 5 skipped* rather than *5 failed*. Location and cause matched the prediction.\n\nPre-change the same mutation could not have moved this file at all — it referenced `./totp.js` nowhere, which is the contrast that makes the ablation a statement about the new wiring.\n\nNo dist preflight applies: `test/totp.ts` is a relative sibling module compiled from source by vitest, and `@objectstack/dogfood` declares no `build` script.\n\n## Verification\n\nBaseline on the same ref, before the change: `Test Files 1 passed (1) / Tests 5 passed (5)`. After the change: identical.\n\nGate union derived with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (no hand-supplied paths) and run at commit `3c6028f1b2`. 11 matched + 7 convention-triggered families, every one exit 0:\n\n`check:empty-state` · `check:liveness` · `check:published-files` · `check:slot-lookup` · `check:strictness-ledger` · `check:test-source-alias` · `check:type-source-resolution` · `check:variant-docs` · `check-ci-filter-parity` · `check-plugin-teardown-shape` · `check-affected-docs` · `check:query-options-erasure` · `check:type-check-coverage` · `check:type-check-debt` · `check:engine-double-contract` · `check:cross-package-test-inputs` · `check:where-matcher` · `check:nul-bytes` · `@objectstack/dogfood typecheck`\n\n`check:type-check-debt` first refused with `PREREQUISITE NOT MET` — `@objectstack/service-knowledge` had no built type entry point, and the gate is explicit that measuring from there measures a different world. That is NOT MEASURED, not a pass, so the closure was built and the gate re-run to its own verdict line:\n\n```\ncheck-type-check-coverage --re-measure: OK — 33 ledger entr(ies) re-measured in 449.8s,\n1897 raw tsc error(s) total, none above its recorded number.\n```\n\n## Changeset\n\n`skip-changeset`. `@objectstack/dogfood` is `\"private\": true` and this PR touches only two of its test files, so it publishes nothing — the textbook case the changeset workflow's own comments name.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01APWX2AwT3a4xDcjPCe8bk4)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01APWX2AwT3a4xDcjPCe8bk4)_"
+}

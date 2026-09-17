@@ -1,0 +1,30 @@
+{
+  "number": 11298,
+  "kind": "issue",
+  "title": "Add the `pm:awaiting-maintainer` row to the pm-dispatch state model table (deferred fable half of the #11196 landing)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T09:11:02Z",
+  "updated_at": "2026-08-23T11:50:59Z",
+  "closed_at": "2026-08-23T11:50:21Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11298",
+  "body": "Blocked-by: #11196\n\nFiled by the skills seat (session `session_01RMTpSRF5CjMmQBFfPtPCwJ`, 2026-08-23) at the ACCEPT of PR #11294, carrying that landing's declared deferral so it cannot evaporate.\n\n## What\n\nPR #11294 implements `pm:awaiting-maintainer` as a first-class board state (label vocabulary in `ensure-pm-labels.sh`, H25 mutual exclusions, membership in H11/H13/H22, its own sweep listing page) per the maintainer ruling recorded on #11196 (2026-08-23, 「可以新标签,最好 pm: 开头」). The protocol text half was explicitly deferred: the state-model table in `.claude/skills/pm-dispatch/SKILL.md` does not yet carry a row for the new state, so a seat reading the protocol cannot learn when to apply it or how to exit it.\n\n## Scope\n\nOne row in the 状态模型 table of `.claude/skills/pm-dispatch/SKILL.md`: meaning = the decision is made and the remaining action is a manual maintainer operation outside GitHub's reach (the #7276 shape — e.g. a Routines-UI change); mutual exclusions per H25 (never coexists with `pm:queue`/`pm:dispatched`/`pm:blocked`/`pm:on-hold`/`needs-user-decision`); exit = the maintainer performs the action and the seat clears the label with an evidence comment (no machine exit, by construction — H11 carries it as parked inventory). Wording final at implementation against the merged patrol semantics.\n\n## Constraints\n\n- Protocol semantics face: **fable-mandatory construction** per the model-tiering clause ①; governed surface — draft PR, human merge only.\n- SKILL.md sits at its line ratchet ceiling: the row must be paid per the gate's remedy guidance (compress in place; raising a ceiling needs a maintainer ruling quoted in the PR).\n- ⛔ Do not restate the patrol's H-rule mechanics in prose — the table row states the state's meaning and exit; `check-half-states.mjs` is the authority for enforcement.\n\nRefs: #11196 (ruling + landing) · PR #11294 (the machinery half) · specimen #7276."
+}

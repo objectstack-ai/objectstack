@@ -1,0 +1,36 @@
+{
+  "number": 11262,
+  "kind": "issue",
+  "title": "`packages/console/README.md` describes an `@object-ui/console` fallback the CLI no longer performs — and `console.ts` says the opposite in the same repo",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T07:04:22Z",
+  "updated_at": "2026-08-23T09:34:06Z",
+  "closed_at": "2026-08-23T09:33:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11262",
+  "body": "Found while fixing #10921 (in a file that card edits, but a different defect class — left alone deliberately, see the bottom).\n\nTwo documents in this repo make **contradictory** claims about how the Console SPA resolves, and one of them is a published README.\n\n`packages/console/README.md:27-31` (published to npm):\n\n> The framework CLI's `resolveConsolePath()` (in `packages/cli/src/utils/console.ts`) prefers `@objectstack/console` and **falls back to `@object-ui/console` when present** — so cloud's Docker overlay (which `cp -r`s its build over `node_modules/@object-ui/console`) keeps working.\n\n`packages/cli/src/utils/console.ts:26-31`, the header of the very function the README cites:\n\n> NOTE: the legacy `@object-ui/console` npm package was the upstream source-of-truth before the framework started vendoring its own copy. **It is no longer consulted** — cloud's Docker overlay and self-hosted installs both target `@objectstack/console` exclusively now.\n\n## What the code actually does\n\nMeasured on `98ea344`. `@object-ui/console` survives in exactly one place in `resolveConsolePath()` — step 3, the **sibling-repo dev fallback** (`console.ts:227-250`), which matches a `package.json` **name** inside a checked-out `../objectui/apps/console` directory:\n\n```ts\n// 3: sibling-repo dev fallback. … The objectui repo still names its workspace\n//    package `@object-ui/console` (that npm name is now upstream-only — the\n//    framework no longer consumes it as a dep) …\nif ((pkg.name === CONSOLE_PACKAGE || pkg.name === '@object-ui/console') && …)\n```\n\nThat is a **source-checkout** probe, not a `node_modules` resolution. There is no path in `resolveConsolePath()` that resolves the `@object-ui/console` *npm package* from `node_modules`. So the README's sentence is wrong as written, and the consequence it promises (\"so cloud's Docker overlay … keeps working\") does not follow from the code.\n\n## Why this needs a decision rather than an edit\n\nWhich side is stale is **not decidable from this repo**:\n\n- If cloud's Docker overlay really has moved to `@objectstack/console` (what `console.ts` asserts), the README is stale and should be corrected.\n- If cloud still `cp -r`s over `node_modules/@object-ui/console` (what the README asserts), then the **code** is the defect and an overlay is silently landing in a directory the CLI never reads — a broken Console in a cloud image, with nothing failing loudly.\n\nThe `cloud` repo is not in this session's authorization surface, so the deciding fact could not be taken here. Whoever picks this up should establish cloud's actual overlay target first, then fix whichever side is wrong.\n\n## Why #10921 did not fix it\n\n`packages/console/README.md` **is** in #10921's declared file surface, so the bounded in-place exemption was considered and declined on the \"mechanical, correct form already pinned by evidence\" criterion: the correct form depends on cloud's behaviour, which is exactly the fact that cannot be read from here. #10921's own defect class is *package names that cannot be installed*; this is a *resolution mechanism described wrongly*, and papering over it by picking a side would have been a guess.\n\nRefs: #10921 and its PR.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 10746,
+  "kind": "issue",
+  "title": "plugin-reports: the documented setInterval dispatcher fallback is unreachable on ObjectKernel, and the job fallback it takes instead never fires",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T10:21:43Z",
+  "updated_at": "2026-08-23T04:05:42Z",
+  "closed_at": "2026-08-23T04:05:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10746",
+  "body": "Found while fixing #10371 (teardown hook naming) in `plugin-reports`. **Different defect, filed rather than fixed** — that PR is one defect with one proof, and this one changes whether scheduled reports run at all.\n\n## The claim in the code\n\n`packages/plugins/plugin-reports/src/reports-plugin.ts:33-36`:\n\n> The dispatcher uses `IJobService.schedule` when one is registered; otherwise it falls back to a plain `setInterval` so single-kernel deployments work without `service-job`.\n\n`start()` implements exactly that: it tries `ctx.getService<IJobService>('job')` and only reaches `setInterval` when the lookup yields nothing with a `schedule` method.\n\n## Why the fallback can never be reached on `ObjectKernel`\n\n`ObjectKernel.preInjectCoreFallbacks()` (`packages/core/src/kernel.ts:261-275`) walks `ServiceRequirementDef` and registers a `CORE_FALLBACK_FACTORIES` entry for every unprovided `core` service **before Phase 2**, i.e. before any `kernel:ready` hook runs. `job` is one of the five (`packages/core/src/fallbacks/index.ts`). So `ctx.getService('job')` ALWAYS resolves on an `ObjectKernel`, and the `setInterval` branch is dead code there.\n\nAnd the thing it resolves to does not schedule. `createMemoryJob()` (`packages/core/src/fallbacks/memory-job.ts`) is honest about it in its own docblock:\n\n> `trigger()` really runs the registered handler, but nothing here owns a timer, so a `schedule()`d job **NEVER fires on its own**.\n\nIts `schedule()` is `jobs.set(name, { schedule, handler })` and nothing else.\n\n## Net effect\n\nOn an `ObjectKernel` stack without `@objectstack/service-job`, `ReportsServicePlugin` logs\n\n```\nReportsServicePlugin: dispatcher registered with job service {\"intervalMs\":60000}\n```\n\n…and then dispatches **nothing, ever**. `sys_report_schedule` is never polled, no scheduled report is ever emailed, and the log line reads like success. The `setInterval` path the docblock offers as the single-kernel answer is unreachable.\n\n## Measured\n\nBooting `ObjectKernel` + `ObjectQLPlugin` + `ReportsServicePlugin({ dispatchIntervalMs: 5000 })` with no job plugin and a real `SqlDriver`, then counting `engine.find('sys_report_schedule', …)` on the engine the plugin captured at `kernel:ready`: **0 reads in 5600 ms**, with the log line above present. The same stack on `LiteKernel` — which injects no fallbacks — takes the `setInterval` branch and reads on schedule. That contrast is what identifies the cause as the pre-injected fallback rather than anything in the reports plugin's own logic.\n\n(The `LiteKernel` half of that measurement is now pinned in `packages/plugins/plugin-reports/src/plugin-shutdown-releases-dispatcher.test.ts` as part of #10371, with the mechanism written down at `bootReportsLiteKernel`. #10371 pins that the dispatcher is *released* at shutdown; nothing pins that it *runs* on the kernel real deployments use.)\n\n## Not asserted here\n\nThree questions this finding does not decide:\n\n1. **Where the repair belongs.** Either `plugin-reports` stops treating \"a `job` service exists\" as \"a working scheduler\" (e.g. by reading `__serviceInfo.status === 'degraded'`, which the fallback already declares), or the `job` fallback stops advertising a `schedule()` it cannot honour, or `ServiceRequirementDef` stops classifying `job` as pre-injectable. These are materially different contracts.\n2. **How wide the class is.** Any plugin written as \"prefer the platform job service, else own a timer\" has the same shape against the same pre-injection. This finding measured only `plugin-reports`.\n3. **Whether the degraded-fallback surface is meant to be consulted.** `createMemoryJob()` publishes `__serviceInfo: { status: 'degraded', message }` — a declared, machine-readable \"I am not really scheduling\". If consumers are expected to read it, no consumer in this tree does; if they are not, it is inert.\n"
+}

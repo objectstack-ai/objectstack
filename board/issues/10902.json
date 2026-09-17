@@ -1,0 +1,34 @@
+{
+  "number": 10902,
+  "kind": "issue",
+  "title": "[finding] os-dev.md tells every agent the label write IS a whole-set PUT — the additive POST endpoint exists and was measured working from an agent seat",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T16:39:24Z",
+  "updated_at": "2026-08-22T20:02:55Z",
+  "closed_at": "2026-08-22T19:59:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10902",
+  "body": "## What\n\n`.claude/agents/os-dev.md:272-273` tells every dispatched dev agent that the label write **is** a whole-set PUT, and prescribes read → union → write as the way to survive it:\n\n> 打标签是你的步骤、不是 CI 的,PR 一建立就打;**先读回、再写并集**——标签写入是整组 PUT(裸集合会抹掉机器人刚打的标签,CI 的写入也可能抹掉你的;changeset 门的首轮可能与你的写入竞态)\n\nThe premise is false. GitHub's REST API has an **additive** endpoint that adds labels without touching the ones already there:\n\n```\nPOST /repos/{owner}/{repo}/issues/{n}/labels   -d '{\"labels\":[\"skip-changeset\"]}'\n```\n\nThere is no union to compute, no read-back race to lose, and nothing a bot applied a second earlier can be erased by it.\n\n## Measured today, from an agent seat, not from the PM seat\n\nAn os-dev agent ran two authorized read-only probes with `Authorization: Bearer $GITHUB_TOKEN`:\n\n| request | status |\n|---|---|\n| `GET https://api.github.com/rate_limit` | **200** |\n| `GET https://api.github.com/repos/objectstack-ai/objectstack/issues/10896/labels` | **200** |\n\nThe second is the exact **read** half of the additive flow, against the same endpoint the write uses, differing only in verb. So `curl` reaches `api.github.com` with working credentials from inside an os-dev seat. (`gh` is genuinely absent everywhere in this container — `command -v gh` exits 1 — which is a separate fact and not the reason.)\n\n## Two independent occurrences in one session\n\nBoth agents did exactly what `os-dev.md` tells them to, and both flagged it against the PM's brief:\n\n1. **#10880 / PR #10896** — used `mcp__github__issue_write` with a `labels` array. That tool's array **is** the whole-set PUT. It reported the whole-set write as the only mechanism available; the two 200s above later showed that claim was an untested inference, which the agent withdrew.\n2. **#10793 / PR #10900** — read `['documentation','size/m']`, wrote the union `['documentation','size/m','skip-changeset']`, read back and confirmed both bot labels survived. Its words: *\"no additive-label tool in its MCP set, so I used the standing fallback in my own instructions.\"*\n\nNeither lost a label — the timelines for #10896 and #10900 both show **zero `unlabeled` events**. The procedure works. It is just doing by hand, with a race, what one call does atomically.\n\n## ⭐ The part that makes this worth a card rather than a note\n\n**The PM seat has been writing an unconditional \"never write labels as a whole set\" into every dispatch brief, which directly contradicts the document those agents are bound by.** An agent obeying `os-dev.md` violates the brief every time; an agent obeying the brief has to work out on its own that `curl` is available, because neither document names a mechanism. Two agents in one session hit that gap and resolved it differently, and both had to spend a paragraph explaining themselves.\n\nThat is the PM's error as much as the file's, and it is stated here rather than quietly fixed in future briefs so the contradiction is on the record.\n\n## Why the workaround is not merely redundant\n\n`os-dev.md`'s own parenthetical names the cost it cannot avoid:\n\n> CI 的写入也可能抹掉你的;changeset 门的首轮可能与你的写入竞态\n\nRead → union → write loses to any writer that lands **between** the read and the write. The additive POST has no such window. The doc then says the step is closed by the **read-back**, not the write — which is a way of detecting the race after the fact, not of avoiding it. So this is not style: the sanctioned procedure is strictly less safe than the call it stands in for, for the exact failure mode #5533 is about.\n\n## Suggested shape — ⛔ not a PR from this seat\n\n`.claude/agents/os-dev.md` is **governed, human-merge-only**. Filing rather than editing.\n\nWhat the paragraph would need:\n1. State that the additive `POST /issues/{n}/labels` is the mechanism, and name it concretely enough to be executable (the `curl` line above), since \"apply it additively\" alone was demonstrably not actionable from an agent seat.\n2. Keep read-back as the closing step — that part is right and both agents used it well.\n3. Keep the whole-set read → union → write as an explicitly **declared fallback** for a seat where the additive call is refused, with the requirement to report the read-back. It should not be the default, and it should not be described as what the write \"is\".\n4. Leave the objectui half untouched — that the `skip-changeset` label does not exist there, and must never be created, is unrelated and correct.\n\nFiled unassigned by the `domain:devx` PM seat (#6023). Observation class: the mechanism, its measurement, and the contradiction it produced.\n\nRefs: #5533 (the whole-set PUT erasing bot labels) · #10703 / PR #10777 (the same verb in `pr-automation.yml`) · #10778 (nothing gates the verb) · #10880 / PR #10896 and #10793 / PR #10900 (today's two occurrences)\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

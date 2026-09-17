@@ -1,0 +1,36 @@
+{
+  "number": 11275,
+  "kind": "pull_request",
+  "title": "docs: name both causes of `next: null` in the state-introspection prose",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T08:16:40Z",
+  "updated_at": "2026-08-23T08:49:44Z",
+  "closed_at": "2026-08-23T08:49:43Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-23T08:49:43Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11275",
+  "body": "Fixes #11049\n\n## What\n\n`next: null` on the state-introspection route has **two** causes; both published prose sites named only the first. This names both, at each site.\n\nThe dispatcher computes the answer as:\n\n```ts\nconst next = from === undefined ? null : legalNextStates(schema, field, from);\n```\n\n(`packages/runtime/src/domains/meta.ts:245`, and the same line at `packages/rest/src/rest-server.ts:6279`.) So `null` means either *no `state_machine` rule governs the field* **or** *the caller omitted `?from=`*. A reader who calls without `from` got `null` and, from the docs, concluded the object declares no state machine. For the skill that misreading is the expensive one: it is the corpus an AI author works from, and the wrong conclusion is \"this object has no lifecycle to respect\".\n\n**Oracle:** the repo already asserts the correct semantics on the QA side — `docs/qa/platform-checklist/areas/api-backend.json` (clause on the dispatcher meta state route): *\"?from omitted returns next:null (no from ⇒ no transition table), a field with no FSM returns next:null\"*. This PR is prose catching up to a fact the checklist already pins, not an open question.\n\n## Scope refinement — the in-code bullet was already correct\n\nThe issue lists the `state-machine.mdx` **in-code** bullet as part of the defect. Verified against `main`: it is not. `legalNextStates` is declared\n\n```ts\nexport function legalNextStates(\n  objectSchema: { validations?: unknown[] } | undefined | null,\n  field: string,\n  currentState: string,\n): string[] | null\n```\n\n`currentState` is **required**, and the function returns `null` only when no matching `state_machine` rule exists. The `from`-omitted cause is created by the HTTP dispatcher short-circuiting *before* it calls the function — it is not a property of the function. Adding \"or when `?from=` is omitted\" to the in-code bullet would have made that line newly wrong. Only the **Over HTTP** bullet is edited.\n\n## Governed surface\n\nThis PR touches `skills/**` (the published skill catalog), so the whole PR is a **governed surface**: opened as draft, no auto-merge, human merge only. Review requested from @os-zhuang.\n\n### Skill file size readings\n\nBudget for the skill file was **≤3 net added lines**.\n\n| Reading | Before | After | Delta |\n|---|---|---|---|\n| `skills/objectstack-automation/SKILL.md` whole file (lines) | 984 | 985 | **+1** |\n| Published bundle, all 11 `SKILL.md` (lines) | 10505 | 10506 | **+1** |\n| `skills/objectstack-automation/SKILL.md` (tokens) | 12528 | 12541 | **+13** |\n| Published bundle (tokens) | 117907 | 117920 | **+13** |\n\nThe binding constraint here was **not** the line budget but `check-skills-token-ratchet` — the ceiling for this file is 12543 with only 60 bytes of headroom over the base. A first draft of the skill edit came in 66 bytes over and the ratchet failed it (`over by 17` tokens); the wording was tightened rather than the ceiling touched. Ceilings are shrink-only and maintainer-only to loosen — none was modified. Final verdict line:\n\n```\n✓ check-skills-token-ratchet: skills/objectstack-automation/SKILL.md is 12541 tokens (ceiling 12543; headroom 2).\n✓ check-skills-token-ratchet: 11 published SKILL.md within their ceilings.\n```\n\n## Changeset\n\nDocs/skills prose only — no package behavior changes, nothing to publish. Carried by the `skip-changeset` label per repo convention rather than a changeset file.\n\n## Gates\n\nFamilies derived with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` against the actual change set (2 paths) — **19 matched families**, all run locally plus `check:nul-bytes`. All 20 green, run **after** the final commit at `639babe` on a clean tree:\n\n`cross-package-test-inputs` · `doc-anchors` · `doc-authoring` · `doc-formula-expressions` · `doc-security-posture` · `docs-audit-scope` · `docs-redirects` · `spec check:empty-state` · `spec check:liveness` · `pm-governed-merges` · `published-readme-links` · `role-word` · `skill-compatibility` · `skill-frame-sync` · `spec check:strictness-ledger` · `spec check:variant-docs` · `check-cross-package-test-inputs.mjs` · `check-doc-frontmatter.mjs` · `check-skills-token-ratchet.mjs` · `check:nul-bytes`\n\n## Files changed\n\n- `content/docs/protocol/objectql/state-machine.mdx` (+1/-1) — the **Over HTTP** bullet only\n- `skills/objectstack-automation/SKILL.md` (+2/-1) — the existing Introspection parenthetical\n\n_Generated by [Claude Code](https://claude.ai/code/session_01RMTpSRF5CjMmQBFfPtPCwJ)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RMTpSRF5CjMmQBFfPtPCwJ)_"
+}

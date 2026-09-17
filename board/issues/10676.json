@@ -1,0 +1,36 @@
+{
+  "number": 10676,
+  "kind": "issue",
+  "title": "External object-draft drops the introspected primary key (isPrimary vs primaryKey seam)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T08:31:13Z",
+  "updated_at": "2026-08-22T19:38:20Z",
+  "closed_at": "2026-08-22T19:38:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10676",
+  "body": "Found by QA run #10663 driving `integration-system.external-schema-introspection` at framework `79ebb37`.\n\n## Symptom\n`POST /api/v1/datasources/showcase_external/object-draft {\"table\":\"customers\"}` → 200, but `definition.fields.id` is `{\"type\":\"text\"}` with **no `primaryKey: true`** anywhere in the draft or the rendered source — even though the remote table declares `primary key (id)` (`PRAGMA table_info` pk=1 on `id`). A user who follows the review-before-commit flow commits a federated object with **no primary key** — the addressing/upsert key for the federated table is dropped by the very codegen meant to produce it.\n\n## Root cause\nA contract-spelling collision at the introspection seam:\n- `SqlDriver.introspectSchema` sets `col.isPrimary = true` (`packages/drivers/driver-sql/src/sql-driver.ts:9698`) and populates `table.primaryKeys`.\n- `ExternalDatasourceService.generateObjectDraft` reads `col.primaryKey` (`packages/services/service-datasource/src/external-datasource-service.ts`).\n- The two `IntrospectedColumn` contracts disagree: `packages/objectql/src/util.ts:20` declares `isPrimary?: boolean` (what the driver returns); `packages/spec/src/contracts/schema-diff-service.ts:59` declares `primaryKey: boolean` (what the service reads).\n\nThe driver's result is handed straight to the service (`plugin.ts:67-74`), so on **every** SQL driver (sqlite/postgres/mysql) the PK is silently lost. Confirmed in the shipped `dist`; reproduced twice on both fixture tables; also reachable via `os datasource introspect`.\n\n## Why the pin misses it\n`external-datasource-service.test.ts` hand-writes its fake schema with `primaryKey: true` (the spec-contract spelling), so no test ever feeds it a real driver's `isPrimary` output.\n\n## Suggested fix\nRead both spellings at the seam (`col.primaryKey ?? col.isPrimary`, or better fall back to `table.primaryKeys?.includes(col.name)`), and add a pin that drives `generateObjectDraft` off a **real** `SqlDriver.introspectSchema()` result rather than a hand-written fake.\n\nQA-source: #10663 · integration-system.external-schema-introspection · clause 2 (object-draft reviewable/compilable, PK from introspected PK)"
+}

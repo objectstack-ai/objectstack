@@ -1,0 +1,36 @@
+{
+  "number": 10738,
+  "kind": "issue",
+  "title": "Hold every section landing list to its meta.json — 4 hand-kept lists, and #9604's precedent already says \"check them, don't generate them\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T10:04:26Z",
+  "updated_at": "2026-08-23T08:08:14Z",
+  "closed_at": "2026-08-23T08:07:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10738",
+  "body": "Promoted from an open question on PR #10736 (#10339), with that dispatch's measurements. **No gate is red.** Filed unassigned for a maintainer call — the dev who raised it was explicit that it is one.\n\n## The recurring defect\n\nA section landing page's `## What's in this module` bullet list is hand-kept next to a `meta.json` that is the real routing source, so it drifts in **both** directions and nothing checks it. Three known instances:\n\n| section | instance |\n|---|---|\n| `runtime-services` | #9604 — chapter list omitted `services.sms` |\n| `permissions` | #10339 — list named 14 of 21 pages; **6 missing**, fixed in PR #10736 |\n| `ai` | #10737 — omits `connect-mcp`, which is `meta.json`'s **first** content page and is linked nowhere else on that page |\n\n## The precedent already chose\n\n#9604 did **not** derive its list. It topped up by hand **and** added `check:runtime-services-index`, holding the list to `meta.json`. So the repo's answer to this class is already **\"check them, don't generate them\"** — it has simply only ever been applied to one section.\n\n## Why deriving is the wrong shape, measured on `permissions`\n\nRuled out on evidence rather than taste, from the #10339 dispatch and re-verified here:\n\n- `content/docs/permissions/meta.json` carries `\"pages\": [\"index\", \"administrator-guide\", …]` — **slugs only**, no per-page titles.\n- So a derived list must synthesize link text from frontmatter, which **regresses an existing row today**: `access-recipes.mdx` is titled *\"Who can see data / automation / interface\"* and would render as that instead of the curated **\"Access Recipes\"**.\n- The **glosses exist in no source file at all** — and which pages get one is editorial (3 of 14 on that page, reserved for a title that under-describes its page).\n\nA landing page is an editorial object, not nav config. Generating it loses exactly the parts a reader benefits from.\n\n## Population, measured rather than pattern-matched\n\nExactly **three** pages carry a hand-written `## What's in this module` bullet index: `permissions`, `api`, `ai`.\n\nTwo near-misses were checked and **dismissed**: `getting-started` is a \"Next Steps\" pointer list that deliberately links *out* of the module, and `protocol/objectui` is a curated \"For Implementers\" reading list mixing in `/docs/references/` links. Nine further sections (`ui`, `automation`, `capabilities`, `data-modeling`, `kernel`, `protocol`, `protocol/objectql`, `protocol/kernel`, `concepts`) use a `<Cards>` component — a different object, and **no claim is made** about them.\n\n## Shape, if taken\n\nHold the list's **SET and ORDER** to its directory's `meta.json`, both directions, for the three pages above.\n\n⚠️ It cannot be a parameterization of `scripts/check-runtime-services-index.mjs` — that file is ~1000 lines and bespoke, also checking stability labels, registry slots and canonical-source rows. It wants a new small gate.\n\n⭐ **The one stated objection is no longer a blocker.** The #10339 report notes such a gate needs *\"a root `package.json` `check:` entry, which is inside the #9465 epic fence\"*. **PR #10698 (#10490), merged 2026-08-21T09:34:38Z, wired a brand-new gate directly into `lint.yml` as a `node scripts/…` step with no `package.json` alias**, specifically to stay outside that fence. So the fence does not stand in the way.\n\n## The honest argument against\n\nThree pages may not be worth a gate. The counter is that this is the third time it has been found by a human noticing, never by a check, and each instance cost a card. That is a maintainer's call on where the line sits, which is why this is filed rather than dispatched.\n\nIf it is declined, the fallback is already in place: PR #10736 adds a source-of-truth comment and drift note beside the `permissions` list, and that wording can be replicated to `api` and `ai` when they are next touched.\n\n## Refs\n\n#9604 (the precedent, and its gate) · #10339 / PR #10736 (permissions, where this was measured) · #10737 (the `ai` instance) · #10698 / #10490 (the fence-free wiring pattern)\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

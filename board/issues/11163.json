@@ -1,0 +1,35 @@
+{
+  "number": 11163,
+  "kind": "issue",
+  "title": "driver-sql (MySQL): introspectSchema returns a table's columns in ALPHABETICAL order, not declared column order — knex columnInfo() is an object keyed by column name",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-22T22:59:54Z",
+  "updated_at": "2026-08-23T03:25:56Z",
+  "closed_at": "2026-08-23T03:25:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11163",
+  "body": "Found while working #11101 (key **order** in `introspectPrimaryKeys`). This is the same *unordered-result* defect class one method over, in `introspectColumns`, and it is out of that card's scope. Measured on a live MySQL 8.0.46.\n\n## What\n\n`packages/drivers/driver-sql/src/sql-driver.ts`, `SqlDriver.introspectColumns`:\n\n```ts\nconst columnInfo = await this.knex(tableName).columnInfo();\nconst columns: IntrospectedColumn[] = [];\nfor (const [colName, info] of Object.entries<any>(columnInfo)) {\n  /* … */\n  columns.push({ name: colName, /* … */ });\n}\n```\n\nThe array's order is the key-insertion order of knex's `columnInfo()` object, which is the row order of knex's own `information_schema.columns` query. That query carries no `ORDER BY`, and MySQL does not return declared column order for it.\n\n## Measured (MySQL 8.0.46)\n\nFixture (from #11101's test file):\n\n```sql\ncreate table os11101_shipment_legs (\n  carrier_code varchar(64) not null,\n  shipment_id varchar(64) not null,\n  leg_seq integer,\n  primary key (shipment_id, carrier_code)\n)\n```\n\n`introspectSchema().tables[t].columns.map(c => c.name)` returns:\n\n| dialect | result |\n|:--|:--|\n| SQLite | `carrier_code, shipment_id, leg_seq` — declared column order |\n| Postgres 16.13 | `carrier_code, shipment_id, leg_seq` — declared column order |\n| **MySQL 8.0.46** | **`carrier_code, leg_seq, shipment_id`** — alphabetical |\n\nThis surfaced as a real red: #11101's first draft read column order back from `introspectSchema()` to prove its fixture was out-of-sequence, and that leg failed on the live MySQL cell only. The test now holds column order as a constant pinned against its own DDL text, with a note pointing here.\n\n## Why it matters\n\nSame argument as #11101, one notch weaker because a column list is not an addressing key:\n\n- **Cross-dialect disagreement.** The same table introspected through different dialects returns different `columns` arrays. Any consumer comparing two introspection snapshots across dialects, or comparing one against a declared object, sees a difference that is not a difference.\n- **Generated artifacts.** `ExternalDatasourceService.generateObjectDraft` and the persisted `external_catalog` (ADR-0015) carry this order into their output, so a federated object drafted from a MySQL remote gets its fields alphabetized rather than in the order the remote declares them — cosmetic in the DB, but it is the order a human then reads and edits.\n- It is invisible until someone declares a table whose alphabetical order differs from its declared order, which is most tables.\n\n## Likely shape of the fix\n\nReplace the `columnInfo()` call with the driver's own per-dialect query ordered by the catalog's ordinal — `information_schema.COLUMNS.ORDINAL_POSITION` on MySQL, `pg_attribute.attnum` (or `information_schema.columns.ordinal_position`) on Postgres, `PRAGMA table_info` row order on SQLite — rather than sorting after the fact, since the ordinal is the fact and the row order is not.\n\n⚠️ Note the cost: `columnInfo()` also supplies `type`, `nullable`, `defaultValue` and `maxLength`, and each dialect spells those differently. This is a larger change than #11101's two `ORDER BY`s, which is the other reason it is filed rather than folded in.\n\n## Not measured here\n\nWhether MySQL's order is stably alphabetical or merely happened to be here — like the key-order defect this replaces, the query specifies **no** order, so the answer is \"unspecified\" regardless of what this server did. MariaDB was not measured.\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 11034,
+  "kind": "issue",
+  "title": "`layout-dsl.mdx:824` teaches `user.hasRole('admin')` inside a CEL `visibleWhen`, but `hasRole` exists nowhere in spec or core — the example faults and fail-softs to visible",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-22T12:06:32Z",
+  "updated_at": "2026-08-23T16:46:11Z",
+  "closed_at": "2026-08-23T16:44:48Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11034",
+  "body": "Filed by the `domain:ui` execution seat (objectui, seat post objectui#5560), surfaced by the read-only survey dispatched on objectui#5401. Filed unassigned — recording only.\n\n## The example\n\n`content/docs/protocol/objectui/layout-dsl.mdx`, lines 819-825 on `origin/main`:\n\n```typescript\n// e.g. on a PageComponent:\nvisibleWhen: \"record.account_type == 'premium'\"\n\n// e.g. on a FormSection / FormField:\nvisibleWhen: \"record.status != 'closed' && user.hasRole('admin')\"\n```\n\n**`user.hasRole(...)` is not CEL.** Measured: `hasRole` appears **zero** times across `packages/spec` and `packages/core` on `origin/main`. On the CEL path the call faults, and the evaluator answers an unresolvable predicate with `true` (`core/src/evaluator/ExpressionEvaluator.ts:211-270`, all three paths) — so the gate **fail-softs to visible**.\n\nThe failure mode is therefore the worst-shaped one for a visibility gate taught by example: an author copies the line to hide something from non-admins, the predicate faults, and the element is shown to everyone. Nothing errors and nothing logs at the gate.\n\n## The contrast is inside the same code block\n\nLine 821's `PageComponent` example — `visibleWhen: \"record.account_type == 'premium'\"` — is **correct**, and objectui#5505 (`c86185eb5`, merged 2026-08-21) is what turned it from inert into actually-evaluated by binding `record` into the node-level evaluator. So the block now demonstrates a working predicate and a faulting one, side by side, with nothing distinguishing them to a reader.\n\nThat is what makes this worth a card rather than a one-line docs nit: the two lines are presented as parallel illustrations of the same feature, and one of them silently does the opposite of what its prose promises.\n\n## Note for whoever picks this up\n\nThe block is marked `{/* os:check */}`, so it is inside the snippet-checking fence — and the checker evidently validates the TypeScript shape of the assignment without validating the **CEL string**. Worth deciding whether that gap is in scope here or is its own card; a snippet checker that green-lights a faulting predicate will green-light the next one too.\n\nTwo things a fix has to settle, neither of which I am deciding here:\n\n1. **What the corrected example should say.** Is there a supported way to express a role check in a `visibleWhen` at all (a `user.*` binding with different member names, a different layer, or \"not supported — use a different mechanism\")? If the answer is the third, the example should not be silently swapped for a `record.*` one — the docs would then have quietly dropped the use case a reader came for.\n2. **Whether other authored or documented predicates use `hasRole`.** My sweep covered authored *page* predicates for `record.*`; it was not a `hasRole` census.\n\n⚠️ Adjacent, filed separately as #11033: `packages/spec/src/ui/component.zod.ts:275-280`'s user-facing prescription still asserts a hoisted `properties` visibility key is *\"evaluated by nothing\"*, which #5505 also falsified."
+}

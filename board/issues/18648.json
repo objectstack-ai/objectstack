@@ -2,9 +2,9 @@
   "number": 18648,
   "kind": "pull_request",
   "title": "docs(os-regen): refuse the =false spelling, record the silent incoming-side drop, and scope os-regen-merge.sh to main",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "os-justin",
     "id": 323634890,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs-user-decision",
     "size/m",
     "skip-changeset"
   ],
@@ -20,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-17T12:12:14Z",
-  "updated_at": "2026-09-17T12:33:35Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-17T14:59:52Z",
+  "closed_at": "2026-09-17T14:59:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-17T14:59:50Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/18648",

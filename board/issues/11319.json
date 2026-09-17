@@ -1,0 +1,35 @@
+{
+  "number": 11319,
+  "kind": "pull_request",
+  "title": "fix(service-settings): tell operators where @objectstack/knowledge-turso comes from instead of naming a package this repo does not build",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T10:49:07Z",
+  "updated_at": "2026-08-23T11:13:09Z",
+  "closed_at": "2026-08-23T11:13:07Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": "2026-08-23T11:13:07Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11319",
+  "body": "Fixes #10920\n\n## The prior question, answered by measurement rather than assumed\n\nThe card turned on one prior fact and said so in its own body — *is `@objectstack/knowledge-turso` published anywhere?* — so this branch begins with the measurement, not the edit.\n\n**Absence in this repo, with a reverse control** (on `f24c90df3d`, the ref this branch was cut from):\n\n```\ngit ls-tree -r --name-only HEAD | grep -c \"/knowledge-turso/\"    # -> 0\ngit ls-tree -r --name-only HEAD | grep -c \"/knowledge-memory/\"   # -> 8   (control)\ngit ls-tree -r --name-only HEAD | grep -c \"/knowledge-ragflow/\"  # -> 8   (control)\n```\n\nIdentical command shape, so the zero is a fact about the package and not a broken pattern.\n\n**Publication, against the public npm registry** (2026-08-23, unauthenticated `GET https://registry.npmjs.org/@objectstack%2F<name>` — the method PR #11266 established, with the same control discipline):\n\n| package | HTTP | `latest` | role |\n|---|---|---|---|\n| `@objectstack/knowledge-turso` | 200 | **6.9.0** (2026-05-27, 9 versions from 6.4.0) | the subject |\n| `@objectstack/spec` | 200 | — | positive control |\n| `@objectstack/cli` | 200 | — | positive control |\n| `@objectstack/security-enterprise` | 404 | — | known-private negative control |\n| `@objectstack/knowledge-sqlite-vec` | 404 | — | negative control |\n\n**The answer: it IS published.** So this PR takes the *record-where-it-ships* branch. Dropping the `turso` adapter option — the other branch the card offered — would have deleted a working adapter on the strength of a package not being in this directory tree, which is not the same claim.\n\nOne thing the measurement adds that neither branch anticipated: `knowledge-turso@6.9.0` exact-pins `@objectstack/spec@6.9.0` (also `core` and `service-knowledge` at 6.9.0) while this repo ships **17.2.0**. It is published, and it is *not* co-installable with this platform version — mounting it resolves a second `@objectstack/spec` rather than reusing this one. An operator told only \"mount it\" walks into that.\n\n## What changed\n\nTwo sites in `packages/services/service-settings/src/manifests/knowledge.manifest.ts`, the two the card names.\n\n**The runtime operator message (`:158`)** — the sharp one, spoken inside Settings → AI &amp; Embedder. Before:\n\n> Turso adapter configured (…). Mount `@objectstack/knowledge-turso` to exercise live calls.\n\nAfter, it names the package, says this platform does not ship it, points at where it is built, and gives the operator the check to perform — the framework#3366 discipline that an install hint must carry its own edition/version boundary, applied here the way PR #11266 applied it to `@objectstack/organizations`.\n\n**The adapter-list comment (`:13-15`)** loses `Adapter list mirrors the plugin packages currently published:` — an undated, unowned claim that stopped being true with nothing to catch it — and gains the three-way split (built here / built here / NOT built here) plus the measurement above with its date and method, so the next reader can re-run it instead of inheriting it.\n\n**No behaviour change.** `ok` and `severity` are untouched on every branch of the test action. Leaving `severity: 'info'` as-is is deliberate: changing it is a change to what the Settings UI renders, which is outside what this card was graded for. Flagging it here rather than doing it.\n\n## Tests\n\nTwo added to `knowledge.manifest.test.ts`, pinned as **properties, not literals**, so the wording can improve without the guard going stale:\n\n- the turso hint must name the package **and** where it ships, and must not be the retired bare-mount form;\n- a contrast case — ragflow's plugin *is* built here, so its hint stays the plain mount line. Without it, the first assertion could be satisfied by blanket-rewording every hint in the file.\n\nVerified green on `7372c21015`:\n\n```\npnpm --filter @objectstack/service-settings test       -> Test Files 27 passed (27), Tests 483 passed (483)\npnpm --filter @objectstack/service-settings typecheck  -> tsc --noEmit, exit 0\n```\n\n(The package's `tsconfig.json` is `include: [\"src\"]` with no test exclusion, and the test file lives under `src/`, so `tsc --noEmit` really does read the new test code.)\n\nLocal gate union derived with `node scripts/pm/dispatch-gates.mjs` (no hand-supplied paths), run on `7372c21015`, exit codes captured before any pipe. All 18 green, each quoted from the gate's own verdict line — for example:\n\n```\ncheck-type-check-coverage: OK — 65/78 workspace packages type-checked (plus the root), 13 in the DEBT ledger …\ncheck-engine-double-contract: OK — 384 pinned, 133 in the DEBT ledger, 2 exempt.\n✓ check-changeset-no-major: This diff introduces no `major` bump.\nOK: all 88 declared cross-package glob(s) (76 unique) are covered by `core` or `crosspkg` …\n```\n\n`check:type-check-debt` (the 19th, which needs the whole workspace closure built first) is running as this PR is opened; its verdict is reported on the card.\n\n## Scope\n\nThe `packages/spec/src/contracts/embedder.ts` half of the original finding — the `IEmbedder` docblock naming `knowledge-turso` and `knowledge-sqlite-vec` — is **not touched here**, per the scope fence on the card. `#11318` is not addressed here either: it is the sibling case filed out of this work, where `ai.manifest.ts` prints the same un-followable mount instruction for `@objectstack/service-ai`, a package `PLATFORM_CAPABILITY_PROVIDERS` declares `edition: 'cloud'`.\n\nA note for triage, since the unlock scan's condition pointed at it: `PLATFORM_CAPABILITY_PROVIDERS` is present on this ref (PR #11266 merged as `a2ec377078`), but it does **not** answer this question in either direction. It is keyed by `requires:` platform *service* capability tokens and contains no knowledge adapter at all — not `knowledge-turso`, and not the two this repo does build. Its silence here is category silence, so reading \"absent from the roster\" as \"ships nowhere\" would have produced the wrong repair. The registry measurement above is what actually answered it.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01APWX2AwT3a4xDcjPCe8bk4)_"
+}

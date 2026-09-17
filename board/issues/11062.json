@@ -1,0 +1,36 @@
+{
+  "number": 11062,
+  "kind": "issue",
+  "title": "service-package's local `normalizeRows` never unwraps the mysql2 `[rows, fields]` tuple — a populated result reads as \"not installed\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-22T14:30:20Z",
+  "updated_at": "2026-08-23T03:44:55Z",
+  "closed_at": "2026-08-23T03:44:55Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11062",
+  "body": "Found while fixing #10965 (PR link below), by enumerating the dialect shapes **from the code** rather than from that card's summary. **Not fixed there** — different defect class, different blast radius.\n\n## The defect\n\n#10965 describes `packages/services/service-package/src/index.ts` as carrying \"the same three-dialect flattener `metadata-protocol` exports\". Read against the source, it does not. The local copy has exactly **two** accepting branches:\n\n```ts\nfunction normalizeRows(result: any): any[] {\n  if (Array.isArray(result)) return result;\n  if (result && Array.isArray(result.rows)) return result.rows;\n  return [];\n}\n```\n\n`metadata-protocol`'s copy (`src/migrations/seed-tenancy-backfill.ts:362`) has three — it unwraps the mysql2 tuple first:\n\n```ts\nif (Array.isArray(result)) {\n  // mysql2's `[rows, fields]`: the first element is itself the row array.\n  if (result.length > 0 && Array.isArray(result[0])) {\n    return result[0] as Record<string, unknown>[];\n  }\n  return result as Record<string, unknown>[];\n}\n```\n\n| # | shape | dialect | local copy |\n|---|---|---|---|\n| 1 | bare row array | better-sqlite3 through knex, Turso | flattened |\n| 2 | `{ rows, rowCount, … }` | pg | flattened |\n| 3 | `[rows, fields]` tuple | mysql2 | **not unwrapped** |\n\nThe doc comment above the local copy names three bullets, but bullets 2 and 3 are both `{ rows }` — so the prose reads as three-dialect coverage while the code implements two. That is likely how the gap survived.\n\n## Why it matters — traced by reading, NOT reproduced\n\nOn a mysql2-backed seam, `normalizeRows([[row], [fields]])` returns the whole 2-element tuple rather than the row array. `get()` then reads `rows[0]`, which is the *row array*, so `row.manifest` is `undefined` and `JSON.parse(undefined)` throws — into `get()`'s own catch, which returns `null`. `list()` maps over the tuple and throws in the same place, into its catch, which returns `[]`.\n\nSo the caller-visible answers are, again, **\"this package is not installed\"** and **\"no packages are installed\"** — over a driver that answered correctly with real rows.\n\n⚠️ This is **traced from the source, not reproduced**: no mysql2 driver was booted, and none is loaded by any suite that exercises this file. Someone should reproduce before sizing it. It is also worth checking whether a mysql2 seam reaches this service in any supported composition at all — if it cannot, this is latent rather than live.\n\n## Why this is a different card from #10965\n\n#10965 is *a seam that could not answer being read as empty*. This is *a seam that answered being misread* — the query ran, the rows came back, and the flattener dropped them. Different class, and the fix is a different line. #10965's fix does not touch it: its `isResultSet` guard correctly treats a tuple as an **answer** (it is an array), so no false refusal is introduced, and PR #REPLACE_PR pins exactly that non-misfire. It simply does not unwrap the tuple, because that was never in its scope.\n\n## Not measured here\n\n- Whether any supported composition puts a mysql2 seam behind `objectql.execute` for this service.\n- Whether the CLI's third copy (`packages/cli/src/commands/migrate/duplicates.ts:521` — an `isResultSet`, not a flattener) has a matching gap in whatever it uses to flatten.\n- Whether the right fix is to copy `metadata-protocol`'s branch into this local flattener or to unify the copies — the latter being the open question #10965 already raises for `isResultSet`, and this finding is a second data point for it.\n\n## Refs\n\n#10965 · #10677 / PR #10788 · #10789 / PR #10964\n"
+}

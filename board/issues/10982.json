@@ -1,0 +1,36 @@
+{
+  "number": 10982,
+  "kind": "issue",
+  "title": "sys_member's role projection ignores the ADR-0091 validity window while accessible_org_ids honours it — one row, two answers",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T02:04:40Z",
+  "updated_at": "2026-08-22T20:39:49Z",
+  "closed_at": "2026-08-22T20:39:49Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10982",
+  "body": "Found while building the row-equivalence control for #10825 (PR #10981). Not fixed there — out of that card's scope, and it is a semantic change rather than a scheduling one.\n\nIn `packages/core/src/security/resolve-authz-context.ts`, `resolveUserAuthzGrants` reads `sys_member` once and derives two facts from it. **Only one of them applies the ADR-0091 validity window.**\n\n```ts\n// (a) accessible_org_ids — HONOURS the window\nfor (const m of members) {\n  if (!isGrantActive(m, nowMs)) continue;\n  ...accessibleOrgIds.add(org);\n}\n\n// (b) org-administration roles → positions — does NOT\nconst activeMembers = tenantId\n  ? members.filter((m) => (m.organization_id ?? m.organizationId) === tenantId)\n  : members;\nfor (const m of activeMembers) {\n  if (m.role && typeof m.role === 'string') {\n    ...grants.positions.push(mapMembershipRole(raw));\n  }\n}\n```\n\nSo a membership row outside `[valid_from, valid_until)` still projects its better-auth role into `positions`. Under ADR-0095 D3 that role is the provisioning source for the `organization_admin` capability grant, which is what `derivePosture` reads for `TENANT_ADMIN` — while the very same row is (correctly) excluded from `accessible_org_ids`, the read reach of the `group` posture. A lapsed membership would therefore keep conferring the org-admin rung while granting no org access: two answers from one row.\n\n**Latent today, not exploitable today.** `sys_member` declares no `valid_from` / `valid_until` (`packages/platform-objects/src/identity/sys-member.object.ts` has neither), and `isGrantActive` treats an absent bound as unbounded, so both halves currently agree. The concern is the promise in the code comment beside (a):\n\n> the columns are absent on `sys_member` today, and `isGrantActive` treats an absent bound as unbounded, so this is a no-op until they exist and **correct the moment they do**.\n\nThat is true of (a) and false of (b). Whoever adds the columns will read that comment, see one call site honouring them, and have no reason to look for a second derivation from the same rows — which is the \"declared ≠ enforced\" shape AGENTS.md #10 names, one layer down at the call site rather than at the `switch`.\n\nTwo nearby facts, so the shape is not mistaken for an oversight in isolation: `sys_user_position` (§4) and `sys_user_permission_set` (§6) both call `isGrantActive`, and §6 goes out of its way to filter **before** any derivation so an expired `admin_full_access` cannot yield `platform_admin` either. Only the membership-role projection skips it.\n\n### Repro (already on `main`'s behaviour)\n\n`packages/core/src/security/resolve-authz-context.batch-equivalence.test.ts` (added by PR #10981) carries a fixture that pins the current answer — `lapsed-own-membership-among-active-peers`, whose golden was captured from `main` at `38bc74ed1`:\n\n- fixture: `{ user_id: 'u_lapsed', organization_id: 'org_a', role: 'member', valid_until: <past> }`\n- resolved: `accessible_org_ids: []` (window honoured) **and** `positions: ['org_member', 'everyone']` (window ignored)\n\nChange that row's `role` to `'owner'` and the resolved posture becomes `TENANT_ADMIN` off a lapsed membership.\n\n### Decision needed\n\nWhether the role projection should honour the window, i.e. whether a lapsed membership is *no membership* (making (b) match (a)) or merely *no org access*. If the former — the reading ADR-0091 D2's \"fail-closed\" language suggests — the fix is one `isGrantActive` call in the `activeMembers` filter, plus a test per direction. It changes authorization semantics, so it wants its own review and its own card, not a rider on a batching PR.\n"
+}

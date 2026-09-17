@@ -2,8 +2,8 @@
   "number": 18547,
   "kind": "issue",
   "title": "check-half-states H65 reads the ASCII literal `Tier:` but reports it as \"the seat named no tier\" — a round-open marker that names its tier in Chinese is counted as silence (46 rows in one sweep)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-sam",
@@ -13,20 +13,21 @@
   "labels": [
     "bug",
     "domain:devx",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-try-charles"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-17T00:10:14Z",
-  "updated_at": "2026-09-17T13:47:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-17T14:31:05Z",
+  "closed_at": "2026-09-17T14:29:27Z",
+  "closed_by": {
+    "login": "os-try-charles",
+    "id": 313893388,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18547",
   "body": "**Filed by the triage seat (objectstack#6015), round R+259, from a row the sweep fired on this seat's own artefacts.**\n\n## The declared question, and the answer it gives\n\n`scripts/pm/check-half-states.mjs` row **H65** reports, of a round-open marker:\n\n> a round-open marker (comment `…`) names **NO tier at all** — so the two-tier rule at `.claude/skills/pm-dispatch/SKILL.md` 〈分诊座位职责〉 (「选层按 fire 时刻,⛔ 不用计数器;**简报写明本轮跑的层**」) is satisfied by **SILENCE** here.\n\nSo the question the row asks is: *did the seat write down which tier this round ran?*\n\n## Measured false\n\nThe predicate is ASCII-literal (`scripts/pm/check-half-states.mjs:15372-15375`):\n\n    export const H65_TIER_LINE = /^[ \\t]*Tier:[ \\t]*(\\S*)/m;\n    export const H65_TIER_KEY  = /Tier:/;\n\nThe marker it fired on in the live sweep of 2026-09-17T00:00Z — objectstack#6015 comment `5706306387` — **does** name its tier, on its first line:\n\n> **Round-open marker** · triage seat · … · **R+259** · fire … · **objectstack 轮** · **层:小时层(增量)**\n\n「层:小时层(增量)」 *is* the declaration the clause asks for. The row reports it as silence because the seat wrote it in Chinese.\n\n**Control**: the same sweep's other H-rows fired correctly on the same carrier (H5 on its assignee, H6 on its body size, H44 on undated readings), so the sweep reached and parsed this artefact. The instrument is live; only H65's predicate misses.\n\n**Scale**: the row itself reports «45 further artefact(s) in this window carry the same defect» on this one carrier. That is the noise this costs.\n\n## Why the seat is not simply out of compliance\n\n`Tier` — the English word, in any casing — **appears nowhere in the charter**. Measured 2026-09-17T00:11Z on the loaded copy and on `origin/main`:\n\n    grep -n \"Tier\" .claude/skills/pm-dispatch/SKILL.md \\\n                   .claude/skills/pm-dispatch/references/dispatch-runbook.md\n    git show origin/main:.claude/skills/pm-dispatch/SKILL.md | grep -n \"Tier\"\n    # → no match in any of the three\n\nThe only clause is `SKILL.md:316`: 「选层按 fire 时刻,⛔ 不用计数器;简报写明本轮跑的层。」 — it requires the tier be **written**, and prescribes no spelling. And the protocol keeps four named Chinese channels, the round report among them, so a Chinese round-open marker is in-bounds by the same charter H65 cites as its authority.\n\n⇒ H65 measures *\"the ASCII string `Tier:` is present at the start of a line\"* and reports it as *\"the seat named its tier\"*. Those are different propositions, and the row's own wording («satisfied by SILENCE») asserts the second.\n\n## What this card is not\n\n- ⛔ Not an argument against the row's forcing function. A seat that must name its tier cannot skip choosing one; that reasoning is sound and the row should keep firing on genuine silence.\n- ⛔ Not a request to make the checker parse Chinese generally. The narrow fix is that **H65's predicate and the clause it cites must cover the same population** — either by accepting the Chinese spelling of the declaration alongside `Tier:`, or by the charter naming `Tier:` as the required spelling so the row is enforcing something that exists. ⛔ These are not equivalent and this card does not choose between them: the second makes new work for every seat, which is a protocol change, not a checker fix.\n- ⛔ Not a gate question. H65 is explicitly report-only; nothing is blocked. The cost is 46 false rows in one sweep drowning the true ones.\n\n## What the filing seat did meanwhile\n\n⛔ Waiting on this card is not the remedy for the noise: the triage seat adopts an explicit `Tier: hourly (since …)` / `Tier: daily (first fire of the day)` line at the start of a line in its round-open markers from R+260 onward, **in addition to** the Chinese declaration. That silences the row for this carrier without prejudging which way the card is fixed.\n\n## Re-check\n\n    grep -n \"H65_TIER_LINE\\|H65_TIER_KEY\" scripts/pm/check-half-states.mjs\n    grep -rn \"Tier\" .claude/skills/pm-dispatch/\n\nIf the first still matches an ASCII-only literal while the second prints nothing, this card still stands.\n\n---\nFiled by the triage seat (#6015), round R+259. ⛔ Not claimed, ⛔ not dispatched.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

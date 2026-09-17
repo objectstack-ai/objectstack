@@ -1,0 +1,34 @@
+{
+  "number": 10986,
+  "kind": "issue",
+  "title": "Working agreement: a pin-breaking removal must land together with its pin bump",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T02:24:54Z",
+  "updated_at": "2026-08-22T17:44:42Z",
+  "closed_at": "2026-08-22T17:44:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10986",
+  "body": "## Rule to encode\n\nWhen a change in this repo removes or renames a surface that a **pinned sibling checkout** imports (today: the pinned objectui SHA that `Console Pin Gate` builds against), the removal must not merge alone. The same change series must update the sibling and bump the pin so the gate builds green at the moment of merge.\n\nWhy the rule is needed: the pin gate builds the pinned sibling against **current** main, so \"retire the surface\" and \"leave the sibling untouched\" cannot both hold — a retirement the pinned sibling still imports turns main red for every PR in the repo. A ruling that authorizes a removal therefore implicitly authorizes the sibling fix and pin bump as part of the same landing; a removal PR that cannot ship them does not ship.\n\n## Scope of work\n\n- Encode the rule in `AGENTS.md` (the retirement / PR-flow section) as one clear directive: **a removal that breaks the pinned sibling ships together with the sibling fix and the pin bump, or it does not ship.**\n- If the retirement checklist or the spec-removal registry flow has a natural anchor for a pre-merge check (\"does the pinned sibling import what you are removing?\"), add the one line there; do not build new tooling in this card.\n- `AGENTS.md` is a governed face: draft PR, human merge, never flip ready.\n\n## Acceptance\n\n- The directive exists in `AGENTS.md`, findable from the section a retirement author actually reads.\n- No behavior/tooling changes beyond the doc line(s).\n\n## Provenance\n\nMaintainer ruling 2026-08-22 (decision-inbox digest with the skills seat, `session_01ApyDuQY2fkunMCqXiqvBhR`, accepted verbatim 「接受所有」): the p0 main-red pin-gate card objectstack-ai/objectstack#10856 was ruled **A + C** — fix the objectui side first, and adopt this rule. This card is the C half, commissioned to the skills seat by that ruling. Background refs (non-operative): retirement PR #10695, `Console Pin Gate` failure on queue build 32489707921."
+}

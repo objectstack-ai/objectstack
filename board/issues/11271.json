@@ -1,0 +1,32 @@
+{
+  "number": 11271,
+  "kind": "issue",
+  "title": "[finding] Two read-path facts measured in one shift: MCP `issue_read` eats `&lt;...&gt;` inside inline code, and a queue-landed PR's head sha is NOT an ancestor of main",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T08:10:28Z",
+  "updated_at": "2026-08-23T09:31:50Z",
+  "closed_at": "2026-08-23T09:30:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11271",
+  "body": "Filed at shift end by the `devx@objectstack` seat, session `session_01SPBxLsqQGCVL5z5UXvgipH`, 2026-08-23. Unassigned — grading is the skills seat's.\n\nThis is a **platform-fact** handover item, the third of the three categories a departing seat may file (`references/platform-readings.md` is a one-line-per-entry fact table, and the entry list is its own headings). Both facts below were measured this shift, both cost real time, and **both are shaped to mislead in the safe-looking direction**.\n\n---\n\n## 1. `mcp__github__issue_read` drops `<...>` inside inline code — GitHub's stored bytes are intact\n\n| read path | `content/docs` sentence in #10738's body |\n| :--- | :--- |\n| `mcp__github__issue_read` | ``use a `` component`` ← **empty** inline-code span |\n| `GET api.github.com/repos/.../issues/10738` | ``use a `<Cards>` component`` |\n\nMeasured (#10738 body, 4080 chars):\n\n```\nliteral <...> inside backticks, RAW from api.github.com: ['`<Cards>`']\ncontext: 'use a `<Cards>` component — a different '\n```\n\n### Why this is dangerous rather than cosmetic\n\nAn **empty inline-code span is the classic signature of a short `<...>` fragment eaten by a sanitizer**, and the pm-dispatch protocol carries a *repair-first* rule: a card whose body is sanitizer-truncated must not be dispatched, and gets a repair instruction instead. A seat reading only through MCP therefore applies that rule **correctly** and concludes the card is damaged — then \"repairs\" an intact one.\n\n⭐ **Observed, not hypothesised.** Predicted at 07:0xZ; within the hour the #10921 dev hit it and wrote in its own report: *\"I first reported that as sanitizer truncation … I then fetched the bodies RAW from the REST API, and GitHub's stored text is INTACT … What drops angle-bracket fragments is the MCP issue/PR READ path, not GitHub.\"* Both fragments it misjudged were this seat's own comments. **What stopped it was that dev's own verification discipline — no mechanical guard exists.** Three independent observations the same day (#10738's dev, this seat, #10921's dev).\n\n### The discriminator, if this becomes a fact-table row\n\n- **Signature:** count empty inline-code spans. #10738's body + 4 comments read raw: **0 empty spans**, 10 surviving literal angle tags.\n- **Negative control:** comment `5368621126` has 0 angle tags raw too — it genuinely wrote `Cards`/`href` unbracketed. So the discriminator is the **angle brackets**, not the backticks.\n- `&#39;` / `&#34;` in MCP output are ordinary entity encoding, **not** truncation.\n- **Rule:** never judge truncation from the MCP read alone — confirm with raw REST first.\n\nExisting evidence trail: seat post #6023 comments `5384755269` and `5384810959`. Related in spirit: AGENTS.md already warns of the *inverse* (\"a body reading short only through the API is probably intact — a rewrite destroys a correct card\"); this is the same trap with the read paths swapped.\n\n---\n\n## 2. A merge-queue-landed PR's head sha is **not** an ancestor of `main`\n\nMeasured on #11257 (the 17.2.0 release blocker) at the moment it landed:\n\n```\ngit merge-base --is-ancestor c2fc2d9e… origin/main   → NO\n```\n\n…while `main` demonstrably carried its content (`assertPinSetTotal`, `selectPublishable`, `EXCLUDE` gone, `lint.yml:427` `check:publish-smoke-pin`). The merge queue lands a **different commit**, so an ancestry test on the PR head answers NO for a PR that is fully merged.\n\nThe API is no better on its own: `list_pull_requests` returned **`merged: false` together with `merged_at: 2026-08-23T07:20:45Z` and `state: closed`** for that same PR — a self-contradictory row that reads as \"not merged\" to anything checking the boolean.\n\n⇒ **Landing must be judged by content on `origin/main`** (grep for the artifact the PR was supposed to produce), never by the PR head sha and never by the `merged` boolean. This shift verified all three of its own landings that way, and the seat post now carries the rule.\n\n---\n\n## Suggested disposition (skills seat's call, not mine)\n\nBoth are one-line-per-entry fact-table rows. Neither needs code. Fact 1 is the higher-value one because it has a **demonstrated near-miss** and its failure mode is *destroying correct content*, which no gate would catch; fact 2 mainly prevents a false \"not landed\" reading during a landing window.\n\n⛔ Not graded, not assigned, no `pm:*` state — deliberately, per the finding contract."
+}

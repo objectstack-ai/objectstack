@@ -1,0 +1,35 @@
+{
+  "number": 10826,
+  "kind": "issue",
+  "title": "resolveLocalizationContext reads the same sys_setting namespace three times per request",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T12:48:00Z",
+  "updated_at": "2026-08-23T04:21:28Z",
+  "closed_at": "2026-08-23T04:09:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10826",
+  "body": "Split out of #10757 (direction 5) by PM ruling on PR #10824, at **low priority** — see the calibration below.\n\n`resolveLocalizationContext` issues **three identical** `select * from sys_setting where namespace = ?` per request (queries 16–18 of 24, measured on a live rig in PR #10824). The function already batches its own direct fallback into one `$in`, but the settings-service path it prefers calls `SettingsService.get()` three times, and each call runs `loadRows(namespace, …)` over the whole namespace.\n\nThree reads of one question, inside one request. Replace them with one namespace read the three keys are picked out of.\n\n## Calibration — this is smaller than it looks\n\ncloud#1539 measured these three reads running **in parallel**: 3 queries but **1 leg**. Since that same work established that **legs, not queries, are the latency multiplier**, the win here is ~2 queries and ≈0 legs.\n\nSo this is **not** a latency fix, and should not be scheduled as one. It is worth doing because:\n\n- it is the same defect class as the two fixes in PR #10824 — one question, asked repeatedly, within a single request;\n- it is **independent of the caching decision** — correct whether or not #10757's direction 5 ever ships;\n- it **shrinks what direction 5 would have to cache**, which makes that card's invalidation design smaller and safer.\n\n## Constraints\n\n- **No caching.** One read instead of three, within the request. Anything surviving the request boundary is direction 5, a different card with a security review attached.\n- Preserve read-after-write. #10221 caches only failed reads deliberately, and a dogfood test pins analytics-timezone read-after-write; a single batched read within the request satisfies that, a cache would not without invalidation.\n- `packages/spec` is off limits.\n"
+}

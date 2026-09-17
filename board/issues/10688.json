@@ -1,0 +1,35 @@
+{
+  "number": 10688,
+  "kind": "issue",
+  "title": "[finding] H8's coverage is a function of timing — a card that CLOSES still carrying `pm:dispatched` leaves the patrol's view forever; 129 have",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T08:51:05Z",
+  "updated_at": "2026-08-22T17:40:55Z",
+  "closed_at": "2026-08-22T17:40:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10688",
+  "body": "Observation-class, measured tonight while reconciling the devx seat's label audit. **No gate is\nred.** Filed unassigned, no `pm:queue`.\n\n## The structural fact\n\n`scripts/pm/check-half-states.mjs` reads **only open issues**. Both of its collectors say so:\n\n- `:3771-3775` — `listIssues(label)` requests `/issues?state=open&labels=...`\n- `:3899` — the backlog sweep requests `/issues?state=open`\n\nSo every H rule is scoped to the live board by construction. That is defensible for most of\nthem. It is a gap for **H8** specifically, because H8's whole subject is a write that has not\nhappened yet:\n\n> `:885-886` — *\"delivering PR `<list>` is MERGED but the card still carries `pm:dispatched` —\n> the merge's paired write never landed. Drop `pm:dispatched` and re-grade the ...\"*\n\nH8 exists because dropping the label on merge is a **duty**. But the card is usually closed by\nthe same merge that discharges the PR — often by a `Closes #N` reference, in the same instant.\nOnce it is closed, no patrol run will ever look at it again.\n\n**So whether H8 ever gets to fire is decided by a race**: if the patrol happens to run in the\nwindow between \"PR merged\" and \"card closed\", the finding is raised; if the card closes first —\nwhich is the *normal* path, since `Closes #N` closes it at merge — the duty is silently\ndischarged by disappearance. A gate whose coverage depends on that timing is the dormant-gate\nshape this repo keeps re-finding, one level up from #4690: not a gate reading nothing, but a\ngate whose subject leaves the room before it can look.\n\n## Measured\n\nScanning the 500 most recently updated **closed** issues (2026-08-21T08:35Z):\n\n**129 closed cards still carry a live `pm:` label.**\n\n| label | count |\n|---|---|\n| `pm:dispatched` | 118 |\n| `pm:queue` | 7 |\n| `pm:blocking` | 4 |\n| `pm:blocked` | 2 |\n| `pm:on-hold` | 2 |\n\n| domain | count |\n|---|---|\n| `domain:skills` | 35 |\n| `domain:spec` | 28 |\n| `domain:devx` | 25 |\n| `domain:cli` | 18 |\n| `domain:services` | 11 |\n| `domain:engine` | 8 |\n| *(none)* | 4 |\n\n118 of 129 being `pm:dispatched` is the signature: this is not seats forgetting at random, it is\nthe specific write H8 was built to catch, unmet at scale because the card closed first. Every\none of these is a card H8 would have flagged had it still been open.\n\n**I have cleaned the 25 `domain:devx` ones** (all `state_reason=completed` except #6991, which\nis `not_planned`), and verified none remain in that domain. The other **104 belong to other\nseats** and I have deliberately not touched them.\n\n## The counterargument, and why it does not dispose of this\n\nA fair objection: labels on closed cards are historical metadata, and any query for \"what is in\nflight\" ought to filter on state anyway. True — and it is why nothing is red today.\n\nWhat it does not answer is that **`pm:dispatched` is not descriptive, it is a claim of\nin-flight-ness**, and this repo's own patrol treats leaving it set as a defect worth a named\nrule. If it is a defect at 09:00 while the card is open and not a defect at 09:01 once the card\ncloses, then the rule is about the board's tidiness rather than about the duty — and H8's text\n(\"the merge's paired write never landed\") says otherwise.\n\n## Directions (not a decision)\n\n- **A** — give the patrol a bounded closed-card sweep for `pm:*` residue: recently-closed issues\n  only (the same `sort=updated` window it already uses for closed PRs at `:3879`), reported as\n  its own H-row. Keeps the open-only default and closes the race.\n- **B** — make the drop automatic at close rather than patrolled: whatever closes the card drops\n  the label in the same write, so the duty cannot outlive the card.\n- **C** — decide the residue is harmless, and say so **in H8's docblock**, so the next person to\n  measure this does not re-file it. Cheapest, and still an improvement on silence.\n\nA is the one that matches what H8 already claims to be for.\n\n## Refs\n\n#8683 (H8's origin) · #4690 (the \"not measured\" reported as \"measured and clean\" shape) ·\n`scripts/pm/check-half-states.mjs:885`, `:3771`, `:3899`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

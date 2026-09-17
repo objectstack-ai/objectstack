@@ -1,0 +1,30 @@
+{
+  "number": 11339,
+  "kind": "issue",
+  "title": "Seeds cannot address an ActivityPointer: sys_activity.record_id is plain text, so a packaged app can load timeline rows that attach to nothing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T12:11:22Z",
+  "updated_at": "2026-08-23T16:01:45Z",
+  "closed_at": "2026-08-23T16:00:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11339",
+  "body": "## Summary\n\n`sys_activity` rows are the only thing the `record:activity` timeline renders, and a packaged app cannot ship a single usable one. Seeds load the rows happily — every gate reports success — but the rows attach to no record, so the timeline stays empty. The ActivityPointer model (ADR-0052 §5) is documented as the queryable drill from a one-line summary to the rich entity, and today no app can demonstrate it out of the box.\n\nFound while implementing objectstack-ai/hotcrm#1258 (seed demo interactions so the lead Activity tab shows something). Measured against 17.1.0.\n\n## What was measured\n\nThree `type: 'completed'` rows were seeded for a demo lead, then read back from the running server.\n\n**The write half works.** `build` is silent, the boot banner counts the rows (`Seeds: … 345 rows`, up from 342), and every column lands — readonly included, since seeds write under `{ isSystem: true }` and `sys_activity` declares every field `readonly`. `mode: 'upsert'` is accepted despite `managedBy: 'append-only'`; `cel` temporals resolve.\n\n**The addressing half does not.** `sys_activity.record_id` is `Field.text()`, not a lookup, and the seed loader resolves natural keys only for `lookup` / `master_detail` fields — everything else is stored verbatim. The target record's id is a nanoid that does not exist until first boot, so there is no value an author can write.\n\nUsing the filter the shipped console bundle actually issues — `sys_activity, { $filter: { object_name, record_id }, $orderby: { timestamp: 'desc' } }`:\n\n```\nfilter { object_name: 'crm_lead', record_id: 'tgIjpNhjlfmWU8YF' }  →  0 rows   (the real lead id)\nfilter { object_name: 'crm_lead', record_id: 'Lisa Thompson'    }  →  3 rows   (the literal natural key)\n```\n\n## Why this is a platform gap and not an app workaround\n\nThe app-side routes are all worse than the gap:\n\n- **A hook or flow that writes the pointer row at bootstrap** would be a second producer of interaction rows alongside the `log_call` / `log_meeting` / `send_email` action bodies — every action-created interaction would get two rows. That is the two-producer conflict hotcrm#702 already ruled against on `crm_forecast`.\n- **A post-boot script driving the shipped actions over HTTP** works, but then `demo:reset && dev` alone still shows an empty tab — the demo is no longer self-contained, which is the whole point of seed data.\n- **Widening the consumer** (having the timeline also match on `record_label`) is a tolerant-consumer fix for a producer-side gap, and would make the feed match unrelated records that happen to share a label.\n\nThe general rule is already settled and correct — *a seed cannot name an id that does not exist yet* — and reference resolution is its one sanctioned exemption. The gap is that the ActivityPointer pair is excluded from that exemption purely because it is typed as text.\n\n## Possible shapes (not a recommendation — needs a decision)\n\n1. **Make the pointer pair resolvable in seeds.** Teach the loader that `object_name` + `record_id` (and `source_object` + `source_id`) form a polymorphic reference, so `record_id` accepts the target's natural key and resolves it against the object named in the sibling column. Declared = enforced; no consumer change.\n2. **A polymorphic reference field type** that `sys_activity` adopts, making the pair a first-class relationship the loader already knows how to resolve — larger, but it also gives the pair referential integrity, which it has none of today.\n3. **Refuse the write instead of accepting it.** If seeding an ActivityPointer is not intended to be supported, the loader should reject a seed whose unresolvable text column is a declared pointer target, rather than storing a literal that silently renders nothing. This is the cheap half and is worth doing regardless of 1 or 2 — the current behaviour is a success receipt for configuration that does nothing.\n\n## Adjacent facts worth carrying into the decision\n\n- `sys_activity` is `lifecycle.class: 'telemetry'` with `retention: { maxAge: '14d' }` and day-shard rotation (`sys_activity__r<YYYYMMDD>` behind a view). Even with addressing solved, seeded demo history older than a fortnight is reaped by design — so \"seedable timeline\" may need a retention answer too, or demo rows need to stay inside the window.\n- `sys_activity` declares no `owner_id` / `organization_id`, so ownership scoping is *not* an obstacle here — the seeded rows read back fine over REST as the dev admin.\n\n## Downstream\n\nhotcrm shipped a guard rather than a workaround — objectstack-ai/hotcrm#1260 holds seeds inside the app's own object graph, with this measurement recorded in the test comment. If this card lands, that guard should be deleted deliberately.\n"
+}

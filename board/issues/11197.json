@@ -1,0 +1,35 @@
+{
+  "number": 11197,
+  "kind": "pull_request",
+  "title": "perf(core): batch resolveUserAuthzGrants' independent reads — 8 sequential legs become 4 waves (#10825)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T02:36:58Z",
+  "updated_at": "2026-08-23T03:04:34Z",
+  "closed_at": "2026-08-23T03:04:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-23T03:04:33Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11197",
+  "body": "## What\n\nWave 1 issues the five reads that depend only on `(userId, tenantId)` concurrently — `sys_user` (memoized, condition byte-mirrors the sequential path), `sys_member{user_id}`, `sys_user_position`, `sys_member{organization_id}`, `sys_user_permission_set`. The dependent chain (`sys_position` → `sys_position_permission_set` → `sys_permission_set`) stays sequential because it is data-dependent. **8 legs → 4** on the fullest path (2 lightest); per cloud#1539's prod model that is ~150–220ms off every authenticated request. No caching — nothing survives a request.\n\n## Equivalence proven, not asserted (the card's red line)\n\n`resolve-authz-context.batch-equivalence.test.ts`: 11-fixture differential matrix, goldens captured from the **sequential** implementation at main `795ea05a7` (post-#10982). Per fixture: (1) grants envelope deep-equal incl. array order, (2) query **multiset** identical — same objects/filters/limits/tenancy/`isSystem` (a widened `$in` or merged read fails even when the envelope agrees), (3) leg count matches a per-fixture table and beats sequential, with a wave-1-completeness check so a member-by-member await can't silently restore the cost.\n\n## #10982 handoff honored (all three items)\n\nGoldens re-captured from current `main`; the `lapsed-own-membership-among-active-peers` fixture kept — its job is pinning why the two `sys_member` reads are **not** merged into one `$or` (measured privilege escalation) — with its explanatory text rewritten to cite the 2026-08-22 ruling; the changed value is documented as #10982's, not this batch's.\n\n## Numbers\n\n`security/` suite 432 passed (17 files) incl. the 34 new differential assertions; tsc error count identical to main (99 — the +1 over the ledger's 98 pre-exists on main). Changeset included.\n\nCloses #10825. #10826 follows serially on this file per os-elon's ruling.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

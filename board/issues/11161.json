@@ -1,0 +1,36 @@
+{
+  "number": 11161,
+  "kind": "issue",
+  "title": "driver-sql: introspectPrimaryKeys / ForeignKeys / UniqueConstraints still swallow every error and report ABSENCE — the #7332 ruling was applied to introspectIndexes only",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-22T22:59:13Z",
+  "updated_at": "2026-08-23T03:25:56Z",
+  "closed_at": "2026-08-23T03:25:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11161",
+  "body": "Split out of #11101, which repaired the PG/MySQL key **ordering** and was explicitly forbidden from touching this. Filed with the evidence that card's work produced.\n\n## What\n\nThree sibling introspection methods in `packages/drivers/driver-sql/src/sql-driver.ts` wrap their entire body in a bare `catch` and return an empty collection:\n\n```ts\nprotected async introspectPrimaryKeys(tableName: string): Promise<string[]> {\n  const primaryKeys: string[] = [];\n  try {\n    /* … per-dialect query … */\n  } catch {\n    // silently ignore\n  }\n  return primaryKeys;   // ← [] is indistinguishable from \"this table has no primary key\"\n}\n```\n\n`introspectForeignKeys` (`// silently ignore introspection errors`) and `introspectUniqueConstraints` carry the same shape.\n\n## Why this is a finding and not a style note\n\n**The repo has already ruled on exactly this question, one method over.** #7332 fixed `introspectIndexes` and the ruling is still in the source, in its own words:\n\n```ts\nintrospectIndexes(tableName, opts: {\n  /**\n   * What a failed read means to THIS caller (#7332). `'throw'` (the\n   * default) surfaces it; `'partial'` returns whatever was read before the\n   * failure — correct only where a short read is self-correcting.\n   */\n  onFailure?: 'throw' | 'partial';\n} = {})\n```\n\nand at its one `'partial'`-shaped call site:\n\n```ts\n} catch {\n  // #7332's direction, for the same reason: a failed read is not evidence\n  // of an absent index, and this caller's whole output is a refusal.\n  return null;\n}\n```\n\n`introspectIndexes` therefore **throws by default**, and a caller that wants a short read must ask for it by name. The three methods above never got that treatment, so a failed read is still silently converted into a positive assertion of absence — the precise inference #7332 rejected.\n\n## Why it matters more for `primaryKeys` than for indexes\n\n`primaryKeys` is consumed as an **addressing / upsert-conflict-target** key: federated-object codegen, the persisted `external_catalog` under ADR-0015, and schema-drift comparison against a declared key. `[]` does not read there as \"introspection failed\" — it reads as *this table has no primary key*, which is a legal and meaningful answer. So the degradation is silent in both directions: no log line, no diagnostic, and a downstream consumer that behaves plausibly on the corrupted value.\n\n## Measured evidence from #11101\n\nThis is the concrete hazard the #11101 work ran into, and it is why that card's test had to be written the unusual way it was.\n\nWhile developing the Postgres rewrite (`unnest(i.indkey) WITH ORDINALITY`), any spelling a server rejects produces **no error, no log, and an empty key** — a rewritten `pg_index` query that is invalid on some PG version turns a cosmetic ordering gap into total, invisible loss of the key. Verified against a live PostgreSQL 16.13: a query against a non-existent relation raises `undefined_table`, which this `catch` converts to `[]`.\n\nThat is also why #11101's pin asserts the **exact ordered array** rather than \"does not throw\" or set membership — under this `catch`, a does-not-throw test stays green over total key loss. From that test file:\n\n```\nAn EMPTY result usually means the dialect arm's query was rejected by\nthe server and swallowed by the method's `catch { }` — read the query, not this fixture.\n```\n\nEvery test in the repo that touches these three methods has to be written defensively around this catch. That cost is paid per-test, forever, and it is the argument for fixing the producer instead.\n\n## Decision needed (not folded into #11101 on purpose)\n\nSwallow-to-throw is an **error-contract change with its own blast radius** — `introspectSchema` calls all four methods per table in a loop, so making these throw changes what a partially-readable database does to a whole-schema introspection. That deserves its own ruling rather than a rider on an ordering fix.\n\nOptions, roughly in the shape #7332 already established:\n\n- **A. Adopt the #7332 contract verbatim** — `onFailure?: 'throw' | 'partial'`, default `'throw'`, and let each `introspectSchema` call site declare what a failed read means to it. Consistent with the sibling method, and the precedent is already accepted. Most work.\n- **B. Keep returning `[]` but log at `error`** with the table name and the underlying error. Cheapest; removes the *invisibility* but not the false absence, so drift comparison and codegen still consume a wrong value.\n- **C. Distinguish \"read failed\" from \"no key\"** in the return type (e.g. `string[] | null`), forcing every consumer to handle it. Cleanest signal, widest call-site churn.\n\nA is the recommendation on consistency grounds alone: the question was answered next door and the answer is quoted in the same file.\n"
+}

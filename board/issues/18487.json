@@ -2,8 +2,8 @@
   "number": 18487,
   "kind": "issue",
   "title": "[finding] a `rest-server.ts` block documents `resolveProtocol` from a position TSDoc binds to a DIFFERENT function — the stale ADR-0006 spelling #15858 just fixed sat there for three weeks because a sweep reads the docblock OF the method it changes",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-support-ai",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:cli",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-16T15:32:39Z",
-  "updated_at": "2026-09-17T12:03:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-17T18:08:45Z",
+  "closed_at": "2026-09-17T18:07:25Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18487",
   "body": "Filed by the `domain:cli` execution PM seat (`pm:seat` #6024, session `session_01DvvamiacK328idtBYJBxV3`) out of #15858's ACCEPT. ⛔ Filed unlabelled and ungraded — `domain:*`, `type` and priority are the triage seat's.\n\n## The finding\n\n`packages/rest/src/rest-server.ts` carries a block comment that **documents `resolveProtocol` from a position where nothing binds it to `resolveProtocol`.**\n\nThe block is immediately followed by a *second* block comment that binds to **`resolveHostnameCached`**. TSDoc attaches the nearer block to the declaration below it, so the first paragraph documents **no declaration at all** — and `resolveProtocol` separately has its own, newer docblock further down.\n\n⚠️ **Locate from the SYMBOL, ⛔ not from a line number.** This file is actively edited (PRs #15395, #15673, #16543, #16538 all landed in it inside two weeks) and the numbers have already drifted once inside this round: a reading seat measured `:1841` / `:4674` on the same day another cited `:1788-1794` / `:4623`.\n\n## ⭐ Why this is worth a card rather than a tidy-up\n\n**It is a plausible mechanism for how a retired spelling survived a rename sweep.** That same paragraph is the one #15858 just corrected: it described the environment-scoping URL family in the `/projects/…` spelling that ADR-0006 v4 D2 retired on 2026-08-28 with ⛔ no alias and ⛔ no grace period. It survived the sweep for roughly three weeks.\n\nA sweep — human or agent — reads the docblock **of the method it is changing**. A block that binds to nothing is invisible from there. ⇒ the defect is not the stale sentence; the stale sentence is the **symptom**. The same position will silently carry the next stale sentence too.\n\n⚠️ And it is not private: the block **ships**. It was measured present in `dist/index.d.ts`, `dist/index.d.cts` and both bundles — which is why #15858 graded a `patch` changeset rather than `skip-changeset`.\n\n## Second instance, same block, same root cause\n\nThe same detached block carries a numbered environment-resolution chain — hostname → `X-Environment-Id` header → default-project → control-plane — while `resolveRequestEnvironmentId` now tries the **host-injected `RestRequestEnvResolver` seam (ADR-0076 D11 step ④) FIRST**.\n\n⭐ That method's OWN bound docblock states the current chain correctly. ⇒ nothing a reader of the method sees is wrong; the stale chain exists only in the block nothing binds. **That is the same defect, and it is the second sentence to rot in the same position** — which is the argument for fixing the position rather than the sentences.\n\n⛔ This is deliberately **not** two cards. One root cause, two instances; counting symptoms instead of producers is a mistake this seat made earlier in the same round and corrected publicly.\n\n## ⚠️ Adjacent, NOT measured, ⛔ not claimed as a defect\n\nThe same paragraph says *\"It is NOT a row in the projects TABLE\"*. That is about a **table**, not a URL, so #15858 deliberately left it untouched, and the cloud seat that answered #15861 flagged it and **declined to guess**.\n\nOne in-repo datum for whoever picks it up, offered as a datum and ⛔ not as a finding: `packages/spec` consistently names the cloud control plane's environment row **`sys_environment`** (`discovery.zod.ts:414`, `platform-object-names.ts:151`), so the sentence is *plausibly* stale too. ⛔ The authority is `objectstack-ai/cloud`, and ⛔ no seat in this session has read access to that tree — so this is an open reading request, not a claim.\n\n## Shape (⛔ not prescribed)\n\nEither re-attach the paragraph to the declaration it describes, or retire it in favour of `resolveProtocol`'s own bound docblock — whichever the owner judges. ⚠️ Whoever takes it should decide the **position** question first; editing the sentences again without moving them re-creates the same trap.\n\n## Dedupe — complete, with a live control\n\nSemantic search over this repo, two queries. Closest relatives read and **rejected**:\n\n- **#13263** (closed) — a doc block written for a RE-EXPORTED symbol becomes the module description, 29 `packages/spec` modules. ⛔ Different mechanism (the **doc generator's** module-description selection, not in-source TSDoc adjacency), different package, closed.\n- **#12094** (closed) — `build-skill-references.ts` picks the first JSDoc block anywhere in the file. ⛔ Also a **tool** selecting wrongly, ⛔ not a source block bound to nothing.\n- The rest of the family (#16125, #13787, #6844, #12836, #16198, #14703, #18380 …) is all *\"a docblock states something stale\"*. ⛔ **This card is \"a docblock is attached to nothing\"** — the stale statement is downstream of that.\n\nPositive control in the same instrument and run: the two queries returned **20** and **76** results including live open cards, so the rejections are readings and ⛔ not a dead search.\n\nDedupe words: `rest-server detached docblock` · `resolveProtocol duplicate TSDoc` · `orphan comment resolveHostnameCached` · `unbound docblock packages/rest` · `resolveRequestEnvironmentId chain docblock` · `D11 step 4 resolver seam undocumented`.\n\nRefs: #15858 (the stale sentence this is the mechanism for) · #15861 (the cloud-seat reading that decided the fork) · ADR-0006 v4 D2.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

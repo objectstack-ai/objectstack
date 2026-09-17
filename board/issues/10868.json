@@ -1,0 +1,35 @@
+{
+  "number": 10868,
+  "kind": "issue",
+  "title": "8 packages' `scripts/i18n-extract.config.ts` fail to type-check: TS2883 on an inferred `default` naming @objectstack/spec's hashed dist chunks",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T14:52:37Z",
+  "updated_at": "2026-08-23T14:09:22Z",
+  "closed_at": "2026-08-23T14:08:46Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10868",
+  "body": "Surfaced by the #10756 census (the source-coverage blind spot), not repaired there: that\ncard's surface is `scripts/check-type-check-coverage.mjs` plus the ledger seed, and this\nis eight packages' worth of real type errors that need a type annotation each.\n\n## The measurement\n\nEach of these directories is in `UNCHECKED_SOURCE_DEBT` because no tsc program its\npackage's `typecheck` script runs reads it. Compiled directly (package's own config,\n`rootDir` neutralised, dependency closure built, on `main` @ `5886ee6d22`):\n\n| directory | errors |\n| --- | --- |\n| `packages/platform-objects/scripts` | 1 |\n| `packages/plugins/plugin-approvals/scripts` | 3 |\n| `packages/plugins/plugin-audit/scripts` | 3 |\n| `packages/plugins/plugin-security/scripts` | 3 |\n| `packages/plugins/plugin-sharing/scripts` | 3 |\n| `packages/plugins/plugin-webhooks/scripts` | 3 |\n| `packages/services/service-messaging/scripts` | 3 |\n| `packages/services/service-realtime/scripts` | 3 |\n\nEvery one is the same shape, e.g.\n\n```\npackages/plugins/plugin-audit/scripts/i18n-extract.config.ts(24,1): error TS2883: The\ninferred type of 'default' cannot be named without a reference to\n'../node_modules/@objectstack/spec/dist/view.zod-Vrw2Wzfj.js'. This is likely not\nportable. A type annotation is necessary.\n```\n\nwith the three referenced symbols being `FormFieldInput` (`view.zod-<hash>`),\n`NavigationItemInput` (`app.zod-<hash>`) and `StateNodeConfig`\n(`state-machine.zod-<hash>`). `platform-objects` hits only the `StateNodeConfig` one.\n\n## Why it is worth a card\n\nTwo independent things are wrong and either could be the right repair:\n\n1. **The config files export an un-annotated `default`.** The immediate fix is a type\n   annotation on each export, which is what the diagnostic asks for.\n2. **`@objectstack/spec` leaks hash-named internal chunks into inferred types.** The\n   names in the diagnostic (`view.zod-Vrw2Wzfj.js`) are build artefacts whose hashes\n   change on rebuild, so any consumer inferring a type through them is non-portable by\n   construction. Note the extension differs across packages (`.js` for some, `.mjs` for\n   others), which is the chunk map, not the consumer.\n\nRepair (2) and (1) may become unnecessary; repair (1) alone leaves the next consumer to\nrediscover (2). Worth deciding rather than patching eight files.\n\nRelated: #4736 (closed) touched all nine of these configs for a different reason and\nrecords that there are nine repo-wide — the ninth,\n`packages/services/service-storage/scripts`, is not in the table because that package\ndoes not currently reach the census's \"covered\" scope.\n\n## Dedupe\n\n`search_issues` for the TS2883 wording, `i18n-extract`, and the spec-dist-chunk shape\nreturns only closed cards (#4736, #4963, #4570), none of which names this."
+}

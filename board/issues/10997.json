@@ -1,0 +1,36 @@
+{
+  "number": 10997,
+  "kind": "issue",
+  "title": "driver-sql: SQLite introspection reports only the FIRST column of a composite primary key (`pk === 1` vs SQLite's 1,2,3… numbering)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-22T03:42:35Z",
+  "updated_at": "2026-08-22T17:38:54Z",
+  "closed_at": "2026-08-22T17:38:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10997",
+  "body": "Found while fixing the introspection seam for #10676 (`packages/services/service-datasource`). The defect is upstream of that seam, in `driver-sql`, so it is filed separately rather than widened into that PR.\n\n## What\n\n`SqlDriver.introspectPrimaryKeys` (`packages/drivers/driver-sql/src/sql-driver.ts`, SQLite arm) collects primary-key columns with:\n\n```js\nconst result = await this.knex.raw(`PRAGMA table_info(${safeTableName})`);\nfor (const row of result) {\n  if (row.pk === 1) {\n    primaryKeys.push(row.name);\n  }\n}\n```\n\n`PRAGMA table_info` does not report `pk` as a boolean. It reports the column's **1-based position within the primary key** — `0` for \"not part of the key\", `1` for the first key column, `2` for the second, and so on. Filtering on `pk === 1` therefore keeps only the first member of a composite key and silently drops the rest.\n\n## Measured\n\nLive in-memory SQLite at `368e7a06f`, table created as `t.primary(['order_id', 'line_no'])`:\n\n`PRAGMA table_info(order_lines)`:\n\n| name | pk |\n| --- | --- |\n| `order_id` | 1 |\n| `line_no` | **2** |\n| `sku` | 0 |\n\n`SqlDriver.introspectSchema()` for that table:\n\n```json\n{\n  \"name\": \"order_lines\",\n  \"primaryKeys\": [\"order_id\"],\n  \"columns\": [\n    { \"name\": \"order_id\", \"isPrimary\": true },\n    { \"name\": \"line_no\",  \"isPrimary\": false },\n    { \"name\": \"sku\",      \"isPrimary\": false }\n  ]\n}\n```\n\n`line_no` is a declared member of the primary key and is reported as not being one. Note that **both** output signals are wrong together, and for the same reason: `introspectSchema` derives `col.isPrimary` from `primaryKeys` (`if (primaryKeys.includes(col.name)) col.isPrimary = true`), so a consumer cannot recover the missing member by cross-checking the two.\n\n## Why it matters\n\nEvery consumer of SQLite introspection sees a composite-keyed table as single-keyed:\n\n- the federated-object codegen and the persisted `external_catalog` (ADR-0015) record a partial addressing/upsert key;\n- schema-drift comparison against a declared composite key reads as drift on the missing member.\n\n`SqliteWasmDriver` extends `SqlDriver` and inherits this arm, so it is affected identically.\n\n## Fix direction\n\n`row.pk > 0` rather than `row.pk === 1`, and — since `pk` is an ordinal — push in `pk` order so `primaryKeys` reflects the declared key order rather than column order. Worth a pin over a real composite-keyed table; the current suite has none.\n\nThe Postgres and MySQL arms read from `pg_index` / `KEY_COLUMN_USAGE` and do not have this specific bug, though neither orders its result by key position either (`ORDER BY` is absent in both) — worth confirming in the same pass.\n\n## Not measured here\n\nOnly the SQLite arm was executed (better-sqlite3, in-memory). The Postgres and MySQL arms were read, not run — no server was reachable from this container.\n\nFiled unassigned as a finding awaiting first-touch grading. Discovered from #10676."
+}

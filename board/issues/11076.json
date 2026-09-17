@@ -1,0 +1,34 @@
+{
+  "number": 11076,
+  "kind": "issue",
+  "title": "Pin the measured `sys_file` metadata refusal, so a baseline change that grants members `sys_file` writes reddens a gate instead of shipping quietly",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T15:29:32Z",
+  "updated_at": "2026-08-23T11:47:03Z",
+  "closed_at": "2026-08-23T11:46:48Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11076",
+  "body": "Carved out of **#10702**, which the maintainer's routing correctly closed as a non-issue: as shipped, a non-admin cannot write `sys_file.mime_type`/`size` through the data API. This card is option **D** from that measurement — the rider that is correct under every disposition of the question #10702 left open.\n\nFiled **unassigned and ungraded** — `domain:*` and type are triage's to mint.\n\n⛔ **This changes no behaviour.** It is a pin. It does not decide the open posture question (whether `sys_file` should be engine-owned / the columns readonly); it makes the *current* answer defended by a gate rather than by an absence.\n\n## What was measured, and why a pin is worth its cost\n\nThe refusal is real — `403 PERMISSION_DENIED`, both the file owner and an authenticated non-owner, value write and null write, with a system-context read-back confirming nothing changed. A contrast control on the **same row and the same two columns** (seeded platform admin, `200`, persisted) proves that is a refusal and not a request that never landed.\n\nBut the refusal is **object-level RBAC**, not a protection of these columns. The server's own log names the mechanism:\n\n> `Access denied: operation 'update' on object 'sys_file' is not permitted for positions [everyone]`\n\nThe control is that the explicit-allow platform baseline (`member_default`, #5491) **names no `sys_file` grant**. Structurally, verified by content:\n\n- `sys_file` declares **no `managedBy` bucket** — while seven sibling platform objects do (`sys-attachment`, `sys-email`, `sys-job-queue`, `sys-job`, `sys-import-job`, `sys-email-template`, `sys-job-run`). It is in the writable `platform` bucket **by omission, not by decision**.\n- `mime_type` (`:50`) and `size` (`:54`) carry **no `readonly`**, while `:35` on the same object does — the mechanism is live on this row and simply does not cover these two.\n\nAnd the measurement's second posture: with an app-authored wildcard object grant union-merged onto the same baseline, **both** non-admin personas got `200` and the write **persisted** — the non-owner included, so neither ownership nor the ownership-floor RLS caught it.\n\n⇒ The accept/maxSize re-check is a declared security property whose inputs sit behind **an absence**. Nothing shipped opens it today. **An absence has no gate**, and that is exactly what this card adds.\n\n## What the pin must assert\n\n- a **non-admin** caller (both the file owner and a non-owner) is refused on `mime_type`/`size` — assert **`code` AND `status`** per ADR-0112, never status alone;\n- ⚠️ **the contrast control is part of the pin, not optional**: a platform admin still succeeds on the same row and columns. Without it, the pin passes just as well when the fixture never reaches the endpoint — which is how a refusal pin rots into a tautology. This lane has the scar: #10954's `get-session` answered `200` for anonymous;\n- the read-back is asserted, not the response — a write that answers `403` and lands anyway would satisfy a response-only assertion.\n\n## ⛔ Disclosure discipline — binding, and it shapes the implementation\n\nThe measurement's harness **is** the reproduction and was deliberately never committed, under the auth/authz carve-out. The full reproduction lives in **QA session #10663**.\n\n**Author this as a refusal pin, not as the harness.** It asserts the envelope and the persisted state; it must not restate the seeding steps, the request shapes, or the values. No reproduction recipe in the PR body, the card, any commit message or comment.\n\n## What this card does NOT decide\n\n⛔ Whether `sys_file` should be marked engine-owned (ADR-0103 `managedBy`) or its two columns readonly/system-managed post-commit. That removes an affordance from **app authors** — a platform posture call. It was recommended by both the measuring seat and the services PM, and it was **not** ruled; #10702's routing authorized the measurement only.\n\nThis pin is deliberately compatible with every outcome of that question: if the posture later tightens, the pin still holds; if it never does, the pin is what tells you when the absence stops holding.\n\n## Refs\n\n#10702 (closed — the measurement, the routing, and the full reading) · QA #10663 (holds the withheld reproduction) · #5491 (removed `member_default`'s `'*'` wildcard — the explicit-allow transition this leans on) · ADR-0103 (the engine-owned bucket) · ADR-0112\n"
+}

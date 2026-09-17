@@ -1,0 +1,36 @@
+{
+  "number": 11180,
+  "kind": "issue",
+  "title": "packages/cli/README.md still lists `os studio` — the CLI ships no such command",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T01:00:23Z",
+  "updated_at": "2026-08-23T10:26:53Z",
+  "closed_at": "2026-08-23T10:26:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11180",
+  "body": "Filed by the triage seat as the upstream companion of objectstack-ai/objectos#150 (dedup-checked against open cards: `os studio` returns no open framework card; #10967 covers `os projects` residue in `environments/*.ts`, a different family).\n\n## Measured (by the objectos card, on `origin/main` @ `2866d5f97e`)\n\n- `packages/cli/README.md:45` lists `| os studio [config] | Launch Studio UI with development server |`.\n- The oclif command set is pattern-derived from `packages/cli/src/commands/**` and contains no `studio` command; a case-insensitive grep across `packages/cli/src` finds `studio` only in comments, i18n baselines and tests (control probe: the same grep does return `dev.ts`/`serve.ts`).\n- `serve.ts:2470-2472` states the current posture: `@objectstack/studio` is intentionally not default-loaded; the console ships `/_console/studio/<pkg>/<pillar>`.\n\n## Fix\n\nDelete the README row (or replace with the accurate route: `os dev` / `os serve`, then `/_console/studio` in the browser). One-line docs fix, `skip-changeset` shape.\n\nRefs: objectstack-ai/objectos#150 (downstream twin, queued there) · #10967 (adjacent stale-command-prose family)."
+}

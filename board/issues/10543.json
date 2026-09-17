@@ -1,0 +1,34 @@
+{
+  "number": 10543,
+  "kind": "issue",
+  "title": "[finding] `gh` is not installed in the agent container, so the `gh … || echo &quot;none&quot;` idiom the docs invite returns a reassuring FALSE negative instead of an error",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T02:36:43Z",
+  "updated_at": "2026-08-22T17:34:41Z",
+  "closed_at": "2026-08-22T17:34:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10543",
+  "body": "Hit live while working #9955 (PR #10540). Filed unassigned.\n\n## The instance\n\nThe dispatch brief asks a dev to confirm no open PR holds the files it is about to edit. The natural spelling, and the one the agent harness itself prescribes (\"Use the `gh` CLI for GitHub operations\"), is:\n\n```bash\ngh pr view 10506 --json files -q '.files[].path' | grep -i 'check-test-source-alias' || echo \"  (none of my files)\"\n```\n\nRun five times across five PRs, that printed `(none of my files)` five times. It was not checking anything: `gh` does not exist in this container.\n\n```\n$ command -v gh          # exit 1\n$ type -a gh             # bash: type: gh: not found\n$ ls /usr/local/bin/gh /usr/bin/gh\nls: cannot access '/usr/local/bin/gh': No such file or directory\nls: cannot access '/usr/bin/gh': No such file or directory\n```\n\nThe same run also did `gh pr list … | grep -i alias || echo \"no overlapping PR titles\"` and got the clean answer. Two independent overlap checks, both green, both vacuous — and the conclusion nearly went into a PR body as a verified claim.\n\n## Why this is the #9914 class and not a missing-dependency ticket\n\nThe harm is not that `gh` is absent; the MCP GitHub tools cover everything it would have done. The harm is the **direction of the failure**. `command not found` exits 127, and `|| echo` treats 127 exactly like \"the grep found nothing\" — so a tool that is not installed is indistinguishable, in the output, from a search that ran and came back empty. That is the same shape as reading a gate's exit code through a pipe: the instrument returns the reassuring value for both outcomes, and no number of re-runs disagrees with itself.\n\nIt is worse than the pipe case in one respect: the pipe trap at least has a documented rule in the dev instructions. This one is invited by the harness's own guidance to use `gh`, so an agent following instructions exactly lands on it.\n\n## Candidates (none measured here, and the choice is the devx seat's)\n\n- **Install `gh`** in the agent image and let the documented idiom work.\n- **Retire the guidance**: if the MCP GitHub tools are the intended path, the instruction to use the `gh` CLI is a standing invitation to write a check that cannot fail. Note this would be a governed-file edit.\n- **State the idiom hazard** wherever the piped-exit-code rule already lives: a `|| fallback` on any command that may not exist is an unfalsifiable negative, and the safe spellings are `command -v <tool>` first, or capturing the status before the `||`.\n\nThe second and third are cheap and address the general case; the first fixes only this tool.\n\n## Related\n\n#9914 (piped exit codes — the same \"one value for both outcomes\" failure), #10395 (another in-flight pre-check from AGENTS.md that answers false for a mechanical reason), #9955 / #10540 (where this was hit)."
+}

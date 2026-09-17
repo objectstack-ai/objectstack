@@ -1,0 +1,35 @@
+{
+  "number": 11176,
+  "kind": "issue",
+  "title": "driver-sql: `updateMany()` never stamps `updated_at`, and `upsert()`'s merge branch does not advance it on Postgres/MySQL — on every deployment, DDL or not",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T00:38:22Z",
+  "updated_at": "2026-08-23T05:33:38Z",
+  "closed_at": "2026-08-23T05:33:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11176",
+  "body": "Found while fixing #11067 (deliberately out of that PR's scope — different mechanism, different fix).\n\n#11067 is about `updated_at` not being stamped on `skipSchemaSync` deployments, because `tablesWithTimestamps` is only filled by DDL. These two are **not** that: they are missing on *every* deployment, including a fully DDL-managed one where `tablesWithTimestamps` is correctly populated.\n\n## 1. `updateMany()` stamps nothing\n\n`packages/drivers/driver-sql/src/sql-driver.ts`:\n\n```ts\nasync updateMany(object: string, query: DriverQuery, data: any, options?: DriverOptions): Promise<number> {\n  this.auditMissingTenant(object, 'updateMany', options);\n  let total = 0;\n  for (const target of this.rotationShardsOf(object) ?? [object]) {\n    const builder = this.getBuilder(target, options);\n    this.applyTenantScope(builder, object, options);\n    if (query.where) this.applyFilters(builder, query.where);\n    total += (await builder.update(data)) || 0;\n  }\n  return total;\n}\n```\n\nNo `tablesWithTimestamps` consultation, no `updated_at`. `update()` and `rotatedUpdateById()` both stamp; `updateMany()` does not. A bulk edit therefore leaves every row it touched reading its previous `updated_at`.\n\nWorth noting separately during triage: `updateMany` also passes `data` straight through, without `formatInput` / `applyWriteColumnMap` — unlike every other write path. That may be deliberate or may be a second defect; it is not measured here.\n\n## 2. `upsert()`'s merge branch does not advance `updated_at` on Postgres/MySQL\n\nThe merge site carries this comment:\n\n> Everything else (incl. `updated_at`) merges as before, so an upsert that updates a row still advances `updated_at`.\n\nThat holds only when `updated_at` is present in `formatted`, which requires either the caller to supply it or `stampInsertTimestamps` to have put it there — and `stampInsertTimestamps` returns early on any non-SQLite dialect (`if (!this.isSqlite || …) return;`). So SQLite is accidentally correct and Postgres/MySQL are not. The `INSERT … DEFAULT now()` does not re-fire on the conflict path.\n\nThe neighbouring #8622 comment states the SQLite half of this from the other direction — *\"(SQLite never reached it: `stampInsertTimestamps` puts a mergeable `updated_at` in the payload there.)\"* — so the asymmetry is already known at the site; only its consequence for `updated_at` was not drawn.\n\n**Measured on live PostgreSQL 16.13**, through `initObjects` (so `tablesWithTimestamps` IS filled), 1.2 s between the two calls:\n\n```\nDDL path (tablesWithTimestamps filled), PG upsert-that-merges:\n  title      : second                      <- the merge landed\n  created_at : 2026-08-23T00:17:40.602Z\n  updated_at : 2026-08-23T00:17:40.602Z    <- unchanged: still the INSERT default\n  ADVANCED?  : false\n  update() ADVANCED? : true                <- same table, same driver, contrast\n```\n\n## Consequence\n\nSame shape as #11067 and the same consumers: list-view sorts, delta/incremental sync, cache invalidation and audit answers read `updated_at` as \"last modified\". Both paths leave it stale without erroring, so nothing is unavailable — the answers are just wrong. A bulk status change (`updateMany`) and a sync/import that upserts (the common shape for connector and seed writes) are exactly the operations most likely to be feeding a downstream delta consumer.\n\n## Not fixed in #11067's PR\n\nDeliberately: #11067's fix is about the DDL-coupling of `tablesWithTimestamps`, and it neither introduces nor widens either of these. Whether bulk and merge writes *should* advance `updated_at` is one decision covering both paths, which is why they are filed together rather than split.\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 11046,
+  "kind": "issue",
+  "title": "spec: replace the `slice(0, 6)` always-on pin with the derived rule, and retire the comment that invites the next author to grow the slate after the sixth entry",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T13:28:49Z",
+  "updated_at": "2026-08-23T17:31:26Z",
+  "closed_at": "2026-08-23T17:21:00Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11046",
+  "body": "Carved out of **#10250**, whose fix (PR #11044) could not land here: `packages/spec/src/kernel/platform-capabilities.test.ts` is spec surface, and the services lane has **zero `packages/spec` ownership**. Same shape as #10999.\n\nFiled **unassigned and ungraded** — `domain:*` and type are triage's to mint. The services seat carved it because it hit the boundary; it does **not** claim it.\n\n## What is there today\n\n`packages/spec/src/kernel/platform-capabilities.test.ts:140`:\n\n```ts\nexpect(PLATFORM_ALWAYS_ON_CAPABILITIES.slice(0, 6)).toEqual([ … ]);\n```\n\nA **literal** prefix assertion, with a comment telling the next author to *\"grow the slate AFTER these six.\"*\n\n## Why the comment is the part that matters\n\nThat instruction is what produced the defect #10250 fixes. `sms` sits at **index 6** — exactly one past the pinned prefix — and it reads settings. It was added after the six, exactly as the comment says to, and landed outside the thing that keeps the ordering true. Nothing objected.\n\n⛔ So this is **not** \"bump the 6 to a 7\". A literal boundary re-run is the same bug moved one position, and the comment would still be inviting the eighth entry to repeat it.\n\n## The rule to state instead\n\nPR #11044 derives the boundary rather than counting it: **every always-on entry that is not one of the services others bind into at `kernel:ready` must be mounted after all of them.** That covers `sms`, `sharing`, `messaging`, `analytics` and anything added tomorrow, without a number to keep in sync.\n\nThe derived pin already ships in `@objectstack/cli` (that was the only home available to the services lane). It is **strictly stronger** than the spec assertion — it reddens on everything the literal one does, plus everything it missed.\n\n## The work\n\n1. Replace the literal `slice(0, 6)` assertion with the same derivation.\n2. **Retire the \"grow the slate AFTER these six\" comment** and state the rule in its place.\n\n⚠️ The spec assertion **passes today and is still true** — this is not a red gate and there is no urgency beyond the comment continuing to give the wrong instruction. Nothing is blocked on it.\n\n## Two homes for one invariant, deliberately, until this lands\n\nOnce this lands, decide whether the `@objectstack/cli` pin stays as defence-in-depth or is removed as a duplicate. That is a judgement for whoever takes this; PR #11044 has no opinion, and it declared the split rather than leaving it to be discovered.\n\n## Refs\n\n#10250 (the defect and the ruling: A + C + the pin expansion) · PR #11044 (the derived pin, in `@objectstack/cli`) · #10999 (the previous spec slice carved out of this lane, same reason) · #11045 (adjacent: nothing *requires* the settings ordering declaration — `check:init-service-contract` walks `init()` only)\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 10542,
+  "kind": "issue",
+  "title": "[finding] 7 of 119 gate families enumerate the workspace at RUNTIME from pnpm-workspace.yaml, so they carry no population literal and dispatch-gates can never name them for any package",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T02:36:23Z",
+  "updated_at": "2026-08-23T02:16:19Z",
+  "closed_at": "2026-08-23T02:16:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10542",
+  "body": "Measured while fixing #9955 (PR #10540), which closed the *other* half of the same question. Filed unassigned; not fixed here.\n\n## The shape\n\n`scripts/pm/dispatch-gates.mjs` derives a gate's relevance from the path literals in the gate's own source. A gate that hardcodes its population can therefore be named (that is what #9955 / #10114 / #10314 / #10516 are all about, one literal at a time). A gate that **computes** its population at runtime by parsing `pnpm-workspace.yaml` names no literal at all — so it is not \"silent\", it is `undetermined`, permanently, for every workspace path in the tree.\n\nThis is strictly larger than the bare-literal class and nothing has measured it before.\n\n## The measurement\n\nOver the 119 families the workflows discover, against four layout specimens — `packages/cli/src/index.ts` (flat package), `packages/services/service-cache/src/index.ts` (nested package), `apps/docs/package.json`, `examples/showcase/package.json`:\n\n```\nfamilies whose gate script reads pnpm-workspace.yaml at runtime: 12\n  ... naming NONE of the four specimens:                          7\n  ... of those 7, rescued by CHANGE_KIND_GATES:                   2   (check:type-check-coverage, check:type-check-debt)\n  ... UNRESCUED:                                                  5\n```\n\nThe five unrescued:\n\n| family | hints it does carry |\n| --- | --- |\n| `pnpm check:published-files` | 4, none covering a workspace path |\n| `pnpm check:published-readme-exports` | 2, likewise |\n| `pnpm check:release-body` | 0 |\n| `node scripts/check-dev-prereqs.mjs` | 1 |\n| `node scripts/check-prerelease-pin-watch.mjs` | 0 |\n\nReproduce: build the family table the way `derive()` does, then ask `coveringKey(entry, specimen)` for each. The five come back `null` for all four layouts. `check:test-source-alias` and `check:type-source-resolution` were in this set until PR #10540 and now name all four — so the instrument moves when the tree does, rather than reporting a constant (the #8999 failure mode).\n\n## Triage this needs before it is a fix\n\nThe number above is an **upper bound on the actionable set**, not a defect count, and the difference matters:\n\n- `check:published-files` / `check:published-readme-exports` really do read every published package's manifest, so their population genuinely is the workspace and the #10114 escape (declare the subtree in a spelling with a separator) applies directly.\n- `check:prerelease-pin-watch` is different: what it watches is `pnpm-workspace.yaml` **itself** — a repo-root file spelled as a bare filename, which is the *second* documented refusal in `hintCovers`, not this one. Declaring `packages/**` for it would be a fabricated lead.\n- `check:release-body` carries zero hints for an unrelated reason already recorded in the `isNonPathNamespace` docblock.\n\nSo the work is per-gate, and the honest first step is reading each of the five and saying which refusal it is actually under.\n\n## The adjacent duplication, same root\n\nTwelve scripts each carry their own `pnpm-workspace.yaml` parser, several admitting it in a comment (\"Minimal pnpm-workspace.yaml block parsers (same approach as …)\", \"Same approach as …\"). Two of them — `check-test-source-alias.mjs` and `check-type-source-resolution.mjs` — carried byte-identical 11-entry `WORKSPACE_PARENT_DIRS` arrays, and the blind spot in #9955 existed identically in both while being reported for only one. A shared enumerator (the shape `scripts/i18n-bundle-surface.mjs` already sets) would make the population declarable in one place instead of twelve, which is the same refactor as the fix above rather than a separate one.\n\n## Related\n\n#9955 (the instance that surfaced this), #10314 and #10516 (the bare-literal class, one gate each), #10114 (the merged precedent for declaring a population), #9626 (why `hintCovers` refuses bare literals, with the +139084 measurement), #9883 / #10097 (the `unreachable` verdict, which does not fire for these because they declare nothing at all)."
+}

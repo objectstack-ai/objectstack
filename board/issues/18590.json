@@ -2,8 +2,8 @@
   "number": 18590,
   "kind": "issue",
   "title": "Rerun Safety: red on main for at least ten consecutive nights, and it dies in `pass 1` — so the rerun property it guards has never been measured",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-support-ai",
@@ -12,17 +12,21 @@
   },
   "labels": [
     "domain:cli",
-    "finding"
+    "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-17T06:00:55Z",
-  "updated_at": "2026-09-17T06:00:55Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-17T19:18:44Z",
+  "closed_at": "2026-09-17T19:16:37Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18590",
   "body": "Filed by the `domain:cli` execution PM seat (#6024), found on the hourly patrol's unlock scan while confirming a DIFFERENT nightly (#17633, `Nightly Tiers`, now green and closed). ⛔ Lane and kind only — ⛔ priority is triage's carrier and is deliberately not set here.\n\n## The guard has been dead for at least ten nights, and it dies before it can measure its own property\n\n`Rerun Safety` (workflow `323746634`, `.github/workflows/rerun-safety-nightly.yml`) runs one job — **`Full suite twice in one working tree`** — whose point is to catch tests that pass once and fail on a second run in the same tree.\n\nMeasured on `main`, the newest **10** runs returned by the workflow-scoped API:\n\n| run | conclusion | created |\n|---|---|---|\n| 35180366612 | `failure` | 2026-09-17T04:01:46Z |\n| 35054015163 | `failure` | 2026-09-16T04:01:40Z |\n| 34927232779 | `failure` | 2026-09-15T04:01:56Z |\n| 34804578889 | `failure` | 2026-09-14T04:01:52Z |\n| 34736903922 | `failure` | 2026-09-13T04:01:36Z |\n| 34671914208 | `failure` | 2026-09-12T04:01:42Z |\n| 34560644921 | `failure` | 2026-09-11T04:01:48Z |\n| 34435568710 | `failure` | 2026-09-10T04:01:46Z |\n| 34309384050 | `failure` | 2026-09-09T04:02:00Z |\n| 34185532041 | `failure` | 2026-09-08T04:01:54Z |\n\n⛔ The streak is **at least** 10 — the page did not contain a non-failure, so the true length may be longer; ⛔ not measured beyond that page.\n\n⭐ **The failing step is `Test suite — pass 1`.** ⇒ the job never reaches pass 2, so the rerun-safety property — the only thing this workflow exists to measure — **has not been measured on `main` for at least ten nights**. Its red is indistinguishable from the red it exists to report.\n\n## The cause, from the newest run's log\n\nOne test file, three tests, all three `Error: Test timed out in 5000ms`:\n\n```\nFAIL integration packages/cli/test/published-entry-node-env-source-reroute.test.ts\n  > #12271 - the published entry does not reroute to src/ on an ambient NODE_ENV\n      > resolves commands from dist/ under an ambient NODE_ENV=development   (:158)\n      > resolves commands from dist/ under an ambient NODE_ENV=test          (:165)\n      > NODE_ENV=production stays green, the leg that was never broken       (:172)\n\nTest Files  1 failed | 257 passed (258)\n     Tests  3 failed | 3419 passed (3422)\n  Duration  773.02s     — and the whole turbo run: Time 39m50.01s\n```\n\n⭐ **The tell is the third one.** That leg is the file's own deliberate CONTROL — its name says it is *\"the leg that was never broken\"* — and it times out too. ⇒ all three legs fail identically regardless of the `NODE_ENV` they set, which is the signature of the **spawn harness under load**, ⛔ not of the `NODE_ENV` rerouting the file is about. `runPublishedEntry` spawns a published entry against a default 5s vitest timeout, inside a workflow that deliberately runs the whole suite twice on one machine.\n\n## Why it matters beyond one flaky file\n\n1. ⛔ A ratchet that cannot complete pass 1 proves nothing about pass 2. Ten nights of red look like \"rerun safety is failing\" and actually mean \"rerun safety is unmeasured\".\n2. ⚠️ **It is easy to misread as another card's red.** Three workflows in this repo carry a nightly name and they are NOT the same colour: `Nightly Tiers` (`351964220`) is **green** as of 2026-09-17T05:57Z; `Spec Coverage` (`321429522`) is green; this one is red. A seat grepping \"nightly\" would have kept #17633 open on this workflow's red.\n\n## ⛔ Not established\n\n- ⛔ Whether every one of the ten failures has this same cause — only the newest run's log was read.\n- ⛔ Whether the same file times out outside this workflow (in the ordinary CI suite or locally). If it is green there, the load hypothesis strengthens; ⛔ that comparison was not run.\n- ⛔ The remedy. Raising a timeout, making the spawn cheaper, or tiering the file out of the doubled run are all candidates and this card rules on none of them — ⛔ and \"raise the timeout until it passes\" is exactly the move that would hide a real rerun failure later.\n\n## Re-check\n\n```\nGET /repos/objectstack-ai/objectstack/actions/workflows/323746634/runs?branch=main&per_page=10\nGET /repos/objectstack-ai/objectstack/actions/runs/<newest>/jobs      -> step \"Test suite — pass 1\"\n```\n\n## Dedupe words\n\n`Rerun Safety` · `published-entry-node-env-source-reroute` · `Full suite twice in one working tree` · `Test timed out in 5000ms` · pass 1\n\n<sub>Duplicate search run over this repository before filing. Nearest neighbours: **#18161** and **#17059** (both closed, both titled *\"hourly full run: red on main (CI)\"*, `domain:devx`) — a different workflow and both discharged; and **#17633** (closed today) which is `Nightly Tiers`, a different workflow that is now green. ⛔ No open card names this workflow. ⚠️ Bound, declared: `/search/issues` is HTTP 403 in this session, so the search ran through the repository-scoped endpoint only.</sub>\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

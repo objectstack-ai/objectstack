@@ -1,0 +1,34 @@
+{
+  "number": 11279,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): six measured platform-reading rows — search zeroing, labels AND/OR, the MCP read-path trap, landing by content",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T08:34:01Z",
+  "updated_at": "2026-08-23T09:30:47Z",
+  "closed_at": "2026-08-23T09:30:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-23T09:30:45Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11279",
+  "body": "Fixes #11193\nFixes #11271\n\nSix measured platform facts land as one-line-per-entry rows in\n`.claude/skills/pm-dispatch/references/platform-readings.md`. Dispatched as a **fold** of\ntwo graded cards, one PR, one commit per member.\n\n## Member commits\n\n| commit | card | rows |\n| :--- | :--- | :--- |\n| `39f6a6a1` | #11193 | `search_issues` session-level zeroing + control-term probe; REST list endpoints as the correct fallback (never MCP `list_issues` hand-scans); the labels AND/OR asymmetry; the qualifier-syntax candidate recorded as REFUTED |\n| `7fcab57f` | #11271 | the MCP read path eating angle-bracket fragments inside inline code, with its discriminator; landing judged by content on `origin/main` |\n\n## Folded into existing entries, not appended\n\nPer the grading note, the file was read in full first. Four of the six facts had an entry\nthat already owned their subject, so they were folded in rather than duplicated:\n\n- The labels row **already carried the OR half** (MCP `list_issues`). This adds the REST\n  `labels=a,b` AND counterpart and the two independent same-day measurements.\n- The `issue_read` row claimed read-side artifacts were **uniformly reversible**. The new\n  fact contradicts that in a way worth stating: a dropped fragment cannot be decoded back,\n  so that row gets the correction plus a pointer to the full rule.\n- The truncation-judgment row already described the API-reads-short direction. The new leg\n  is the same trap with the read paths swapped, so it extends that entry.\n- The landing-check row already required two readings; it now says the `origin/main`\n  reading is a **content** reading, and why the two tempting shortcuts are both wrong.\n\nOnly one genuinely new entry was needed (the search-zeroing operating procedure).\n\n## How the ceiling was paid\n\nThe file sits at its line-ratchet ceiling with **zero headroom** (134/134). Payment follows\nthe remedy guidance in `check-skill-line-ratchet.mjs`'s own header — compress in place,\nnever raise a ceiling (raising needs a maintainer ruling, and none was sought or given).\nEach commit adds exactly one physical line and pays for it by re-flowing one loosely\nwrapped bullet onto a single line, **no words dropped**; both re-flowed bullets land well\ninside the file's established line-length convention. The ceiling constant is untouched and\nthe file is 134 lines at **both** commits, so the ratchet is green at each one, not just at\nthe tip.\n\nGate verdict at the final head `7fcab57f`, quoted as the gate printed it:\n\n```\ncheck-skill-line-ratchet: .claude/skills/pm-dispatch/references/platform-readings.md is 134 lines (ceiling 134; headroom 0).\n```\n\n⛔ **#11106 remains open and is deliberately not addressed here.** The line-vs-byte metering\nquestion is in the decision inbox; this PR pays purely in lines per the current line-ratchet\nremedy and neither resolves nor preempts it.\n\n## Governed surface\n\n`.claude/**` is a governed surface: this PR opens as **draft**, is **not** to be flipped\nready by an agent, carries **no auto-merge**, and is for **human merge only**.\n`skip-changeset` applies by convention — the diff is one instruction-surface reference file\nand publishes nothing.\n\n## Verification\n\nGate families derived mechanically from the actual change set with\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (re-derived after the\nfinal commit; same six families, no new members). All seven run green at `7fcab57f`:\n\n| gate | verdict |\n| :--- | :--- |\n| `check:pm-skill-ratchet` | 134 lines, ceiling 134, headroom 0 |\n| `check:pm-skill-id-lint` | 17 file(s) clean (pattern for issue-number references) |\n| `check:doc-authoring` | 389 files clean — no bare metadata literals |\n| `check:skill-frame-sync` | 4 copies of the decision frame structurally isomorphic across 3 files |\n| `check:doc-formula-expressions` | 22 record-scoped formula example(s) across 416 files / 1447 TS blocks clean |\n| `check:pm-governed-merges` | self-test, 119 assertions |\n| `check:nul-bytes` | 6332 text file(s), no raw ASCII control bytes |\n\nThe new rows carry no issue numbers, per the file's own header rule and `check:pm-skill-id-lint`.\n\n### One fact verified first-hand while writing this PR\n\nFact 5 was confirmed in this session before it was written down, on this very fold: #11271's\nbody read through MCP showed an empty inline-code span and an identifier written without\nangle brackets, while `curl` against `api.github.com` returned the same body carrying five\nangle-bracket-bearing inline spans intact. The card was **not** damaged and was not\n\"repaired\" — which is exactly the near-miss the row exists to prevent.\n\n### Declared narrowings\n\n- The `@objectstack/formula` dependency closure was built with dts generation skipped. That\n  gate loads `formula` at runtime and consumes no `.d.ts`, and this diff contains no\n  TypeScript, so no type judgment rests on it.\n- Repo-wide `pnpm lint` was not run; CI owns that run. Nothing here is a narrowing of a\n  named family — all six derived families plus `check:nul-bytes` ran in full.\n\nReported at draft-PR time per the dispatch contract; CI convergence is the PM's to read.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01RMTpSRF5CjMmQBFfPtPCwJ)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RMTpSRF5CjMmQBFfPtPCwJ)_"
+}

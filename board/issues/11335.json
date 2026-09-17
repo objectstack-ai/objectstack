@@ -1,0 +1,34 @@
+{
+  "number": 11335,
+  "kind": "issue",
+  "title": "[finding] pm-dispatch 的 CONTRACT_REVIEW_TIER 门没有写下「在档位上复审」的解法,低档位席位只能眼看队列堆积 —— 今天堆到 4 张含一个 p0,后面串行约 10 张",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T12:06:27Z",
+  "updated_at": "2026-08-23T13:51:04Z",
+  "closed_at": "2026-08-23T13:49:52Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11335",
+  "body": "Filed unassigned by the `domain:services` execution seat (session `session_01APWX2AwT3a4xDcjPCe8bk4`) — recording a process gap measured in a live shift, not claiming the card. Triage's call.\n\n## 观察到的死锁\n\n`.claude/skills/pm-dispatch` 定义了条款②:改变契约接受/拒绝行为、或扩大公共接口面的卡,必须由 `CONTRACT_REVIEW_TIER`(`scripts/pm/dispatch-gates.mjs:2732`,当前 `claude-fable-5`)档位复审,并由 `needs:contract-review` 标签把门。低于该档位的执行席 **⛔ 不得清标、不得翻 ready、不得入队、不得降档**。\n\n这些约束都是对的。**缺的是:技能没有写下低档位席位该怎么让这些卡前进。** 结果是席位只能反复记录「已复审、CI 全绿、head 未动、等档位内复审者」,而卡继续堆。\n\n**今天实测的堆积**(2026-08-23,`domain:services`):\n\n| 卡 | PR | 状态 |\n|---|---|---|\n| #11082 | #11183 | 已复审 · CI 全绿 · draft |\n| **#11184** | **#11211** | **`priority:p0` `security`** · 已复审 · CI 全绿 · draft |\n| #11061 | #11241 | 已复审 · CI 全绿 · draft |\n| #10101 | #11311 | 已复审 · CI 全绿(35 check 零失败)· draft |\n\n四张全部**不是因为有问题**才停着,是因为没人在档位上看。其中 #11211 锁着 `plugin-security` / `plugin-auth`,本车道后面约 **10 张**卡要改这两个包,只要它不合就全部不能派——派了就是制造冲突。\n\n⚠️ **副作用值得单独记**:席位为了不撞热文件,会把选卡口径推向越来越边缘的卡。本轮(R4)靠绕开锁住的包拿到 4 张落地,**但被锁的那 10 张一张都没动**。产出数字好看,瓶颈一寸未移。这是一个会让度量与实际脱节的结构。\n\n## 维护者当场给出的解法,应当写进技能\n\n维护者(2026-08-23)指出:**本会话就有 Fable,派一个 `claude-fable-5` 子 agent 去审即可。** 随后明确:「审核的目的是确认,子 agent 审核没问题,你就可以修改」。\n\n关键区分,技能里现在没有:\n\n> **档位要求约束的是「复审在哪个档位上发生」,不是「哪个席位持有标签」。**\n\n由此分成两件事:\n\n1. **复审本身** —— 可以由席位派发一个**在档位上**的子 agent 完成。这是**满足**门,不是绕过门。\n2. **状态变更**(清标 / 翻 ready / 入队) —— 原文按席位约束。维护者已授权:档位内裁决为 APPROVE 时,席位可据以执行。\n\n⛔ **必须同时写死的反模式**,否则这条解法会被误用成后门:\n\n- 改 `CONTRACT_REVIEW_TIER` 的值 —— 永远禁止。\n- 席位在自己的档位上审完就放行 —— 永远禁止。\n- **在 CHANGES REQUIRED / REJECT 上执行状态变更** —— 永远禁止。\n- 复审 agent 的派发词必须**明确允许拒绝**。⚠️ 只能通过的复审是同义反复,和本仓反复治理的「拒绝 pin 烂成恒真」是同一个失败形状。本席在派发那四份复审时,把「你的裁决可以是 REJECT,且 CI 全绿不构成契约正确的证据」写在了任务开头。\n- 裁决必须**记在卡上并注明档位与授权来源**,让审计链能解释「为什么一个低档位席位动了这个标签」。\n\n## 建议写入的位置\n\n`.claude/skills/pm-dispatch` 条款②一节,紧接现有的「⛔ 不得清标/翻牌/入队/降档」之后,增补「如何在档位上取得复审」。\n\n⛔ 本席不自行修改:`skills/**` 是受管面,维护者专属。这里只提出内容与理由。\n\n## 一条更一般的观察\n\n这个门是**正确**的门——它挡住的是「让原本被拒绝的请求变成被接受」这类发布出去就收不回的改动。问题不在门,在于**技能定义了门却没定义钥匙**,于是一个本意为「谨慎」的规则,在多席位并发下退化成了产能上限。凡是「某档位专属」的规则,都应当同时写明该档位如何被取得。"
+}

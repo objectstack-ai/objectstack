@@ -1,0 +1,36 @@
+{
+  "number": 10998,
+  "kind": "issue",
+  "title": "driver-sql: `introspectSchema()` returns only `{ tables }` — the spec `IntrospectedSchema` contract's `dialect` and (required) `introspectedAt` are never emitted",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-22T03:42:51Z",
+  "updated_at": "2026-08-22T19:38:20Z",
+  "closed_at": "2026-08-22T19:38:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10998",
+  "body": "Found while fixing the introspection seam for #10676. Same seam, different key — filed separately so it does not ride that PR.\n\n## What\n\n`packages/spec/src/contracts/schema-diff-service.ts` declares:\n\n```ts\nexport interface IntrospectedSchema {\n  tables: Record<string, IntrospectedTable>;\n  dialect?: ...;\n  introspectedAt: string;   // required\n}\n```\n\n`SqlDriver.introspectSchema()` returns `{ tables }` and nothing else. `plugin.ts` hands that value straight to `ExternalDatasourceService`, which is typed against the spec contract — so the service reads two keys the producer never sets.\n\n## Measured\n\n`Object.keys()` of a real `SqlDriver.introspectSchema()` result, live in-memory SQLite at `368e7a06f`:\n\n```\n[\"tables\"]\n```\n\n`dialect` and `introspectedAt` are both `undefined`.\n\n## Consequences\n\nTwo, both silent:\n\n1. **Type mapping runs with no dialect.** `ExternalDatasourceService.generateObjectDraft` and `refreshCatalog` both call `suggestFieldTypeForSqlType(col.type, schema.dialect as SqlDialect)`. With `dialect` undefined every remote column is mapped by the dialect-agnostic fallback, so any dialect-specific mapping the function implements is unreachable on the federation path — exactly the path that needs it.\n2. **The persisted catalog records no dialect.** `refreshCatalog` writes `dialect: schema.dialect` into the `external_catalog` metadata record that Studio's schema browser and the boot gate read back.\n\n`introspectedAt` being absent while the contract declares it **required** is the sharper half: consumers are entitled to read it without a guard.\n\n## Relationship to #10676\n\nSame root shape as the `isPrimary` / `primaryKey` collision that card is about: `SqlDriver` implements the `IntrospectedSchema` in `packages/objectql/src/util.ts` (which declares neither key), while everything downstream of `plugin.ts` is typed against the `packages/spec` one. #10676's fix repairs the primary-key column of that table; this is another column of it.\n\nWhether the repair belongs in the driver (emit the spec shape) or in the spec (reconcile the two `IntrospectedSchema` declarations) is the same routing question #10676 raises for the column spelling, and the two should probably be decided together.\n\n## Not measured here\n\nOnly the SQLite arm was executed. `introspectSchema` builds its return value in one place for every dialect, so the omission is dialect-independent by construction — but Postgres/MySQL were read, not run.\n\nFiled unassigned as a finding awaiting first-touch grading. Discovered from #10676."
+}

@@ -2,7 +2,7 @@
   "number": 18647,
   "kind": "pull_request",
   "title": "fix(cli)!: report the named export the config default export already declares, instead of dropping it silently (#18419)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-17T12:06:13Z",
-  "updated_at": "2026-09-17T14:00:53Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-17T14:26:03Z",
+  "closed_at": "2026-09-17T14:26:01Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": "2026-09-17T14:26:01Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/18647",

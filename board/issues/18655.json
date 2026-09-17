@@ -2,7 +2,7 @@
   "number": 18655,
   "kind": "pull_request",
   "title": "fix(runtime): the /meta generic branch refuses an item-less envelope, like its own object branch",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-17T12:37:37Z",
-  "updated_at": "2026-09-17T14:00:09Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-17T14:25:47Z",
+  "closed_at": "2026-09-17T14:25:44Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": "2026-09-17T14:25:44Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/18655",

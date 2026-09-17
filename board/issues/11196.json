@@ -1,0 +1,32 @@
+{
+  "number": 11196,
+  "kind": "issue",
+  "title": "finding(pm): open+pm:queue+assignee 双向撒谎态,三仓 17 张——四条机器门修法(新 H 规则/配对写入补 assignee/巡查跨仓/H22 窗口),外加一个需裁决的「等人工动作」状态",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T02:30:54Z",
+  "updated_at": "2026-08-23T09:33:21Z",
+  "closed_at": "2026-08-23T09:31:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11196",
+  "body": "**Finding,只记录不认领**(skills 席 session `757f0dc0-5dae-51d7-9053-c15c57ebfe3b`,2026-08-23)。排查主体是另一 PM 席位(维护者转达其报告),本席**独立补全了普查**并采信其根因链;证据引文见该报告,本卡以可机判修法为主。\n\n## 精确普查(本席,2026-08-23,REST 全翻页,权威)\n\n**open + `pm:queue` + assignee 非空 = 17 张**(此前两份报告分别说 22 与 15,均不准——22 混入了无 pm 状态的卡,15 漏了 objectui 两张):\n\n| 仓 | open+pm:queue | 已 assign | 卡号 |\n|---|---|---|---|\n| objectstack | 135 | 6 | #10757 #10667 #10638 #9483 #9298 #7276 |\n| objectui | 146 | 10 | #5574 #5451 #5034 #4806 #4535 #3965 #2890 #2762 #2731 #2628 |\n| cloud | 19 | 1 | #1548 |\n\n矛盾:队列视图按 `pm:queue` 说「可派发」,认领规则按 assignee 说「已被占,永不碰」。两条规则同时生效,卡谁都动不了。\n\n## 根因(采信排查席,四条,均有实测证据)\n\n1. **主因:状态回退只翻标签不摘 assignee**——落地回标(H8)、解锁扫描(pm:blocked→pm:queue)、死认领回收三条路径里只有回收明写摘 assignee;前两条协议根本没提这个字段(objectstack#10638、#9298、objectui#2731 各是一条路径的活标本)。\n2. **巡查结构性盲区**:H2 抓「有 assignee 无 Claim 评论」、H3 抓双状态共存,「有 Claim + pm:queue + assignee」落在两规则之间;且 half-state-patrol.yml 用 `${{ github.repository }}` **只跑 objectstack**——objectui 10 张、cloud 1 张从未被机器扫过。\n3. **缺「等维护者人工动作」的合法状态**(objectstack#7276 活标本:剩余动作是维护者在 Routines UI 里的手工操作,needs-user-decision 与 pm:on-hold 的 `Restart-when:` 机器判据都不合身,卡来回摆)。\n4. **assignee 字段双语义**:本席普查实锤——objectui 已 assign 的 10 张里,`yinlianghui` ×3、`qq9340100` ×2、`os-sales` ×1 是非派发循环身份的**真所有权**,与 agent 死认领残留(os-zhuang/os-elon/os-project-manager)混在同一字段。\n\n另采信排查席的伴生量级读数:巡查本轮 94 条 findings 里 H22(已关闭卡残留 pm:*)独占 31 条;epic 子树(#9465 的 4 张 8-18 关闭子单)整批超出 H22 的 200-张窗口(~130 合并/天 ≈ 1.5 天),巡查报告零命中。\n\n## 修法(1–4 可机判,进 `scripts/pm/check-half-states.mjs` 与 patrol workflow;5 需裁决)\n\n1. **新 H 规则**:open ∧ `pm:queue` ∧ assignee 非空 ⇒ 红。零判断纯交集,17 张的唯一机器读法。⚠️ 与根因 4 的例外交互:规则先落,例外(若裁出真所有权语义)以显式标记豁免,不反过来。\n2. **配对写入补半条**:落地回标与解锁扫描的配对定义加「同笔摘 assignee」(现仅死认领回收有);或 H8/H19 的 remedy 文案直接点名这一笔。\n3. **巡查跨仓**:workflow 参数化仓名,objectui/cloud 各跑——单这条覆盖 17 张里的 11 张。\n4. **H22 窗口按合并速率重定**(200 张 ≈1.5 天,epic 批量收尾必超窗)。\n5. ⛔ **需维护者裁决**:「等人工动作」状态怎么给(扩 pm:on-hold 的 Restart-when 接受人工判据+定期点名 / 新标签 / 维持现状)。裁决另行请示,不阻塞 1–4。\n\n## 与 #11179 的关系\n\n同族不同形:#11179 是「已判未转」(判断做了标签没写),其两条 H 规则(pm:queue∧needs-user-decision 共存、pm:queue 零活动超期)**不覆盖**本卡 17 张;本卡规则 1 补上。两卡宜同一 PR 落(同文件同自测),派发时可并单。\n\n## 存量 17 张的清理\n\n不在本卡范围(本卡只落门)。清理需逐张判「死认领 vs 真所有权」:agent 身份残留(≈11 张)可按各自证据清;人类/他席身份(≈6 张)⛔ agent 不得代摘。"
+}

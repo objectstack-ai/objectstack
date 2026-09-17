@@ -1,0 +1,36 @@
+{
+  "number": 10921,
+  "kind": "issue",
+  "title": "[finding] Four `@objectstack/` packages this repo does not build are named in published docs with no declared roster — including one the CLI tells users to `pnpm add`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:blocking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T17:25:29Z",
+  "updated_at": "2026-08-23T08:08:23Z",
+  "closed_at": "2026-08-23T08:07:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10921",
+  "body": "Found while closing the member-existence blind spot in `check:published-readme-exports` (#10893). Filed unassigned, no `pm:queue` — triage's call. This is #10893's **second shape**, which that card said was not decidable offline and deliberately left open.\n\n## The observation\n\nThe #10893 sweep measured every `@objectstack/` token in the 60 published documents against the workspace member map. After the repairs, **four names remain that this repo does not build**, and all four are legitimate as written — they are prose, not runnable imports:\n\n| name | named in | what the tree says it is |\n|---|---|---|\n| `@objectstack/security-enterprise` | `packages/plugins/plugin-audit/README.md:365` | the enterprise hierarchy resolver. `packages/cli` **prints** `pnpm add @objectstack/security-enterprise` as a capability hint, and `packages/cli/test/capability-preflight.test.ts:74` pins that message |\n| `@objectstack/service-tenant` | (removed from READMEs by #10893, still in source) | the cloud control-plane runtime — `packages/spec/src/system/constants/platform-object-names.ts:132-134`: \"Objects contributed by the CLOUD runtime (`@objectstack/service-tenant`, defined in the separate `cloud` repository)\" |\n| `@objectstack/framework` | `packages/console/README.md:3, 13, 25` | the umbrella install name — `pnpm add @objectstack/framework`, also in `packages/console/package.json`'s `description` and `packages/cli/src/utils/console.ts:17` |\n| `@objectstack/organizations` | `packages/plugins/plugin-security/README.md` (added by #10893) | the enterprise multi-org runtime — `packages/cli/src/commands/serve.ts:2423` tells the operator to add it to their app |\n\nTwo more are **historical** names, correct because the sentence is about the past: `@objectstack/service-external-datasource` and `@objectstack/service-datasource-admin`, which `packages/services/service-datasource/README.md:11-12` names as the packages it used to be.\n\n## Why it is worth a card\n\nNothing declares any of this. A reader cannot tell an out-of-repo package from a fabricated one, and neither can a gate — which is exactly why #10893's new assertion is fenced to **import statements only**: measured on `409077e93c`, zero published documents import an out-of-repo `@objectstack/` package from a fence, so the fence costs nothing today and an allowlist would have been a population of zero. That fence holds only while the count stays zero.\n\nThe sharper half is `@objectstack/framework`. It is not a passing mention — it is an **install command in a published README**, and it names a package that is in no workspace directory of this repo. Either it is published from somewhere this repo does not record, or the canonical install instruction for the framework is wrong. Nothing here can tell which, and that is the finding.\n\n## The question that has to be answered before anything is built\n\n**May a published README name an `@objectstack/` package this repo does not build, and if so, where is that declared?** Three shapes, and picking one is a ruling rather than a scan:\n\n- **a declared roster** (`scripts/*.json`, one row per out-of-repo package with where it ships) — makes the gate able to admit a fenced example for an enterprise package, at the cost of a file that must be kept true;\n- **prose-only, enforced** — the status quo after #10893, which needs no roster but permanently forbids a runnable example for a package that really does ship elsewhere;\n- **a registry probe** — decides it from npm rather than from a declaration, and takes this family of gates online, which every other assertion in it deliberately is not.\n\n⛔ Not a rider on #10893: that card's PR closes the offline-decidable half and says in its body that this half wants its own card.\n\nRefs: #10893 / its PR (the offline half, and the measured fence) · #10920 (`knowledge-turso`, the same question on a runtime surface) · #9532 · #10368"
+}

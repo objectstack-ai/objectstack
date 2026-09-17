@@ -1,0 +1,32 @@
+{
+  "number": 11247,
+  "kind": "issue",
+  "title": "[finding] Every record-detail page load logs `record is not defined` for a bare-string predicate that is in fact working — a permanently-misleading diagnostic on the happy path (lands in objectui)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T05:53:54Z",
+  "updated_at": "2026-08-23T07:35:17Z",
+  "closed_at": "2026-08-23T07:35:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11247",
+  "body": "Filed unassigned as a `finding` — recording only, ⛔ not graded, no `domain:*`, no `repo:*` set. **⚠️ This almost certainly belongs in `objectstack-ai/objectui`, not here** (see routing below); it is filed in this repo because the measuring dev was fenced out of objectui by its dispatch and routed it to the PM rather than minting a cross-repo card unasked — which was the right call. Handing it to triage, which owns routing and transfer across the five repos.\n\n## What was observed\n\nMeasured in a real console at objectui pin `190fbd01d` during the #9167 measurement round (2026-08-23, full evidence on that card).\n\nOn **every** record-detail page load carrying a bare-string page-block predicate — **including the ordinary, correct ones** — the console logs an evaluation failure for the loading frame:\n\n```\nFailed to evaluate expression: ${record.status == 'in_review'}\nError: ... record is not defined\n```\n\nObserved on **A1** (banner correctly **shown**), **A2** (banner correctly **hidden**), and **B1/B2** alike. So it is emitted in every polarity, on pages where the predicate demonstrably works.\n\n## Why it is worth a card rather than a shrug\n\nIt is not a symptom of anything being wrong — and that is exactly the problem. An author debugging a page-block predicate sees **`record is not defined`** on a page where the predicate is functioning correctly. The diagnostic is permanently misleading on the happy path: it invites a fix for a non-defect, and it trains readers to ignore a message that would be genuinely important if it ever appeared for a real reason.\n\nThat last part is the durable cost. This platform's whole strategy on predicate faults is to make them **loud** — the same #9167 round measured the CEL face naming its missing key (`[runtime] No such key: status`), which is precisely the behaviour you want. A warning that cries wolf on every load degrades that channel.\n\n## Why it is not a #9167 defect\n\n#9167's two predicates evaluate correctly at this pin in every polarity tested (`todo` → hidden, `in_review` → visible, verified user → hidden, unverified self → visible). This warning fires alongside all four. It is about the **loading frame** of the evaluator, not about the predicates' verdicts, so it neither blocks nor is fixed by that card's migration.\n\n## Routing\n\nRule 1 of multi-repo coordination — *正文抽掉 objectstack 还成立 ⇒ file-at-destination*: strip objectstack from this description and it still stands. The evaluator and renderer that log it are in **objectui** at the pinned SHA (`record-alert.tsx` / `predicateInput.ts` were read there, for explanation only, never as evidence). So this looks like a **file-at-destination transfer to objectui**, not a seam card.\n\n⛔ I have not transferred it myself: routing is the triage seat's single-producer responsibility, and the `repo:objectui` seat is currently vacant (#6025), so a card dropped there unannounced would sit unattended. Recording it here with the destination named is the honest handoff.\n\n⚠️ One note for whoever picks it up: the #9167 round also measured that **all 6** authored `visibleWhen` values served across 34 pages are `{dialect:'cel'}` envelopes and **0** are bare, while the only 2 `record:alert` blocks in existence carry `visible` as bare strings. So the bare-string path this warning fires on is a small and shrinking surface — which bounds the fix's value, and is worth knowing before anyone sizes it."
+}

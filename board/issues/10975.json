@@ -1,0 +1,33 @@
+{
+  "number": 10975,
+  "kind": "issue",
+  "title": "ledger `POST /api/v1/auth/set-initial-password` as an `sdk` objectstack mount",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:blocked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T01:41:38Z",
+  "updated_at": "2026-08-23T16:17:24Z",
+  "closed_at": "2026-08-23T16:17:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10975",
+  "body": "Second half of the maintainer's **option C** ruling on the `set-initial-password` disposition (#10534 / #10660). #10974 binds the route into the SDK; this card records it in the ledger.\n\n**Blocked-by: #10974.** Not a preference — see *Ordering* below.\n\n## The row\n\n`packages/plugins/plugin-auth/src/auth-route-ledger.ts` gains one row, shaped like the two existing objectstack `sdk` mounts it will sit beside (`:179`, `:180`):\n\n```\n{ route: 'POST /api/v1/auth/set-initial-password', family: 'objectstack-mount',\n  source: 'objectstack', disposition: 'sdk', client: 'auth.setInitialPassword' }\n```\n\n`source: 'objectstack'` is measured, not assumed: `auth-plugin.ts:1716` is `rawApp.post(\\`${basePath}/set-initial-password\\`, …)` — a raw-app mount **ahead of the catch-all**, so better-auth's own wire table cannot publish it and the enumeration never sees it.\n\n## This card widens a hard-pinned list — argue it, do not just edit it\n\n`auth-route-ledger.conformance.test.ts:171` `the objectstack-mounted rows are the ones auth-plugin.ts serves itself` pins the `source: 'objectstack'` set to exactly three routes (`:179-:182`):\n\n```\n'GET  /api/v1/auth/bootstrap-status'\n'GET  /api/v1/auth/config'\n'POST /api/v1/auth/organization/add-member'\n```\n\nThe pin's own comment says why it is pinned: so the `source` split \"stays honest rather than becoming a place to park a row that failed the upstream check.\"\n\nThis card takes that list from 3 to 4, so the PR body must show the row belongs there on the pin's own terms:\n\n1. `auth-plugin.ts` mounts it directly (the `rawApp.post` above, with its line).\n2. `live.has(route)` is **false** — it does not come from better-auth. The test asserts this per-route; report the assertion, not just the suite's colour.\n\n⛔ This is a widening of an honest pin (a real ObjectStack mount that was missing from it), **not** a relaxation. It must not be reached by loosening the assertion, deleting the pin, or replacing the literal list with a computed one. If the pin cannot be extended by adding the route, stop and report — do not reshape the test.\n\n## Also confirm — the exact row should displace weak evidence\n\n#10974's method matches its URL through the dispatcher ledger's `* /auth/**` prefix row, which `client-url-conformance.test.ts:123-129` calls out by name as weak evidence. Once this exact row exists, the sort at `:132` puts it ahead of the wildcard family and the same URL should match on **this row** instead.\n\nReport the matched pattern by name before and after. A green suite either way does not show the change happened; the pattern name does.\n\n## Gates this touches\n\n- `auth-route-ledger.conformance.test.ts:152` — every `sdk` row names a client method. Satisfied only because #10974 landed first.\n- `auth-route-ledger.conformance.test.ts:160` — no route ledgered twice, every row under the auth base path.\n- `auth-route-ledger.conformance.test.ts:171` — the pin above.\n- `auth-route-ledger.conformance.test.ts:189` — `gap and mismatch counts only shrink`. This card must leave both at 0. Adding a `gap` row here is the option the maintainer ruled against, and would reverse a ratchet named for its own direction.\n- `client-url-conformance.test.ts:373` — the pattern-name check above.\n\n## Ordering — why Blocked-by is mechanical\n\n`auth-route-ledger.conformance.test.ts:152` requires every `sdk`-disposition row to name a client method. Landing this row before #10974 would put `client: 'auth.setInitialPassword'` in the ledger while no such method exists — a claim of coverage the SDK does not have. That is verbatim the failure `packages/client/src/route-ledger-coverage.test.ts` was written to catch; its header cites #3528, where \"the ledger equivalent of the day would have said `resume → automation.resume` while no such method existed.\"\n\n## Effect on #10534's census\n\n#10534 measured `set-initial-password` in **both** of its gap sets: 6-of-17 undocumented and 9-of-17 unledgered. This card clears its ledger leg. The docs leg is #10660's, and #10534 stays open until every one of its 17 mounts is accounted for.\n\n## Acceptance\n\n1. The row above is present, and the pinned list at `:171` is 4 entries.\n2. All five gates above reported individually, with the `client-url-conformance` pattern named before and after.\n3. Changeset present.\n4. `gap` and `mismatch` both still 0.\n\n## Refs\n\nBlocked-by #10974 · Part of #10534 · #10660 · #3656 (the ledger's charter) · #9941 (why `add-member` is the pin's third entry) · #3528 / #3563 (the coverage-lie failure this ordering avoids)\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 11316,
+  "kind": "pull_request",
+  "title": "spec(api): declare mappingName on ImportRequestSchema with the mutual-exclusion refine (#10330)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T10:11:27Z",
+  "updated_at": "2026-08-23T11:19:41Z",
+  "closed_at": "2026-08-23T11:19:40Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": "2026-08-23T11:19:40Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11316",
+  "body": "Fixes #10330\n\n## What\n\nDeclares `mappingName` on `ImportRequestSchema` (`packages/spec/src/api/export.zod.ts`), next to `mapping`, with a `.describe()` naming the artifact resolution and the mutual exclusion. `CreateImportJobRequestSchema` is the same object, so the async route's declaration lands in the same edit. Deletes the SDK warning callout from `content/docs/data-modeling/import-mappings.mdx` (the warning pointed at #10330; re-located after PR #11280's edits to the same page). Regenerated surfaces: `content/docs/references/api/export.mdx` and `packages/spec/authorable-surface/api.json` gained the key under both published names. Changeset: patch on `@objectstack/spec` (a published contract gains an expressible key).\n\nPer the triage determination (issue comment, reusing the maintainer's #11006 option-B sibling ruling, 2026-08-22): enforcement exists, declaration was missing — declare it. Both import routes read `body.mappingName` via `prepareImportRequest` (`packages/rest/src/import-prepare.ts`), which is untouched.\n\n## The refine question — argued FOR, and added\n\nThe triage left \"does the exclusion also become a schema refine?\" to this PR. Measured, then added:\n\n- **Cost is zero in this repo's Zod 4** (`zod ^4.4.3`): refinements live inside schemas, so `.refine()` returns the same `ZodObject` — `ImportRequestSchema.shape` access (pinned by the existing runAutomations describe test at `export.test.ts`) still works, the `CreateImportJobRequestSchema` aliasing is untouched, and `z.toJSONSchema` still converts (verified empirically; the custom check is simply not represented in the JSON Schema). The OpenAPI generator's component list does not include this schema, so `gen:openapi` is unaffected. No existing caller builds partial bodies through the schema: the only parse call sites (spec's own tests and rest's `import-run-automations-agreement.test.ts`) parse complete bodies, and all pass unchanged.\n- **Benefit is the authoring-time refusal**: anyone building the body through the published schema gets the conflict rejected at parse, instead of discovering it as a runtime 400. Consumer-side leniency is where generated mistakes hide; the schema now says what the wire enforces.\n- **Both layers stay pinned**: the schema-level refusal (message and path pinned in `export.test.ts`) AND the route-level `400 CONFLICTING_MAPPING` (already pinned in `packages/rest/src/import-integration.test.ts`, re-run green). The route parses the raw body itself, so its check never depended on callers using this schema — it stays, unchanged.\n\n## Zero-migration fact\n\n`ImportRequestSchema` is a plain `z.object` — it strips unknown keys rather than rejecting them, so before this change `mappingName` was silently stripped by schema-validating callers and the change is purely additive for every existing caller. The refine only fires on a body carrying **both** `mappingName` and an inline `mapping` — a body the wire has always refused with `400 CONFLICTING_MAPPING`, so no previously-working schema-built body changes outcome.\n\n## Tests\n\n- `packages/spec/src/api/export.test.ts`, new describe (7 tests): parse-through with the value surviving on **both** schema names; the issue's TS2353 repro inverted into a compile-time pin (typed `ImportRequest` literal + `expectTypeOf`; the file is compiled by `check:test-typecheck` and is not in the debt ledger); conflicting pair refused at parse with message and path pinned, on both names; each side alone still accepted; the describe prose pinned to mention the exclusion and `CONFLICTING_MAPPING`.\n- Reverse verification (schema): reverted `export.zod.ts` to the merge-base, confirmed on disk (grep count 0), re-ran the file — 5 of 7 new tests red (the compile-time literal is runtime-neutral and the each-side-alone guard holds on base, as expected); restored, 64/64 green.\n- Reverse verification (cross-package, rebuilt d.ts): after `pnpm --filter @objectstack/spec build`, a temporary probe in `packages/client` type-checked a literal with `mappingName` (accepted) beside a typo key — tsc reported exactly one TS2561 on the typo, itself suggesting `mappingName`, proving the client compiles against the rebuilt declarations. Probe deleted; client tsc green again.\n\n## Verification (all at `816391575`, the final commit)\n\n- `pnpm --filter @objectstack/spec build` → verdict `command-exit 0`; `grep mappingName packages/spec/dist/*.d.ts` now matches (the issue's measured zero, inverted).\n- `pnpm --filter @objectstack/spec check:generated` → after `gen:docs` regen, `command-exit 0`.\n- Spec full test suite: `Test Files 418 passed / Tests 11125 passed`. Spec typecheck: `check:test-typecheck: OK`.\n- Rest: `import-integration.test.ts` + `import-run-automations-agreement.test.ts` → `Test Files 2 passed / Tests 37 passed`; `tsc --noEmit` clean. Client: typecheck green (downstream consumers of the spec change; rest and client are the two packages that read this schema).\n- `node scripts/pm/dispatch-gates.mjs` (no paths; change set derived from merge base, 6 paths = this diff) → all 32 path-derived families run green, including the convention-triggered test-file family (`check:type-check-debt --re-measure`: 33 entries, none above ceiling; `check:engine-double-contract`, `check:where-matcher`, `check:query-options-erasure`, `check:cross-package-test-inputs` all green) and `check:nul-bytes`.\n\nClause-② yes (accept-set change) — `needs:contract-review` expected.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RadETjNRLALFLhFA3xehZP)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 11264,
+  "kind": "issue",
+  "title": "`@objectstack/docs#build` declares no input under `content/`, so a content-only commit is a turbo cache HIT — the production build command can replay a stale `.next`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T07:05:19Z",
+  "updated_at": "2026-08-23T17:04:09Z",
+  "closed_at": "2026-08-23T17:03:26Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11264",
+  "body": "Found while working #10642 (CI-vs-production docs build divergence). Out of that card's file surface: the fix is in the root `turbo.json`, which #10642 is fenced out of.\n\n## Measured\n\n`turbo.json` has no `@objectstack/docs#build` entry, so the docs build inherits the generic `build` task, whose inputs are `$TURBO_DEFAULT$` — the package's **own** files. Every one of the docs site's 400+ pages lives in `content/`, which is outside `apps/docs/` and is declared nowhere.\n\nOn `98ea344`, in a clean worktree:\n\n```\n$ pnpm turbo run build --filter=@objectstack/docs --dry=json\ndocs#build declared input file count: 35\nany input path under content/ : 0\nhash: 4e0c51cb3db203a8\ncache status: {\"local\":true,\"remote\":false,\"status\":\"HIT\",\"source\":\"LOCAL\",\"timeSaved\":110068}\n```\n\nand the direct probe — append one line to `content/docs/index.mdx`, re-derive, revert:\n\n```\nhash BEFORE content edit: 4e0c51cb3db203a8\nhash AFTER  content edit: 4e0c51cb3db203a8\n```\n\nThe hash does not move. Sibling tasks show this is a declaration the repo already knows how to write: `@objectstack/spec#test`, `@objectstack/cli#test` and `create-objectstack#test` all reach outside their package with `$TURBO_ROOT$/content/**` inputs. `build` never got one.\n\n## Why it matters\n\n`apps/docs/vercel.json` builds production with `cd ../.. && pnpm turbo run build --filter=@objectstack/docs`. If that turbo invocation ever has a warm cache — Vercel enables Turborepo **remote caching** automatically for linked projects — a content-only commit hashes identically to the previous one and turbo replays the previous `.next` instead of building the new content. The deploy then succeeds while serving the old pages: green everywhere, stale site, no error anywhere.\n\n**Honest split of what is measured:** the input set and the hash identity are measured here, locally, and they are the whole mechanism. Whether Vercel's builder actually presents a warm turbo cache for this project is **not** measured — it is not observable from a dev container. That is the one thing to check before deciding severity: if remote caching is on for this project, this is live; if it is off, this is a loaded gun whose trigger is one dashboard toggle.\n\n## Not the same hole as #10642's gate\n\n#10642 lands `TURBO_FORCE: 'true'` on the CI step so the **gate** cannot be satisfied by a replayed artifact. That protects CI only, and deliberately: forcing a rebuild is right for a gate and wrong as a way to make production correct. Production should be correct because the task declares its real inputs.\n\n## Suggested fix\n\nGive the docs build the declaration its inputs already have elsewhere:\n\n```json\n\"@objectstack/docs#build\": {\n  \"dependsOn\": [\"^build\"],\n  \"outputs\": [\".next/**\", \"!.next/cache/**\"],\n  \"inputs\": [\"$TURBO_DEFAULT$\", \"$TURBO_ROOT$/content/**\"]\n}\n```\n\nAcceptance: the same probe above must move the hash. Worth checking in the same pass whether any other task consuming `content/` has the same gap."
+}

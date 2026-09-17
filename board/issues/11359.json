@@ -1,0 +1,35 @@
+{
+  "number": 11359,
+  "kind": "issue",
+  "title": "`AUTH_ROUTE_LEDGER`'s `client` names are never resolved against a real client — the #3528 guard has an auth-shaped hole",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T14:04:35Z",
+  "updated_at": "2026-08-23T17:03:12Z",
+  "closed_at": "2026-08-23T16:18:13Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11359",
+  "body": "Found while implementing #10974 (binding `auth.setInitialPassword`). Not a live wire defect today — every `sdk` row in `AUTH_ROUTE_LEDGER` happens to name a method that does exist. What is missing is the check that keeps it that way.\n\n## The claim that does not hold\n\n`packages/plugins/plugin-auth/src/auth-route-ledger.conformance.test.ts:152` is the auth ledger's \"every `sdk` entry names its client method\" test. Read literally, it checks only that the **field is non-empty**:\n\n```ts\nconst sdkWithout = AUTH_ROUTE_LEDGER.filter((e) => e.disposition === 'sdk' && !e.client).map((e) => e.route);\n```\n\n`!e.client` is falsy-on-absent. A row spelled `client: 'auth.setInitialPasword'` (typo), or naming a method that was later renamed or deleted, passes this test unchanged.\n\n## The resolution check exists for every other ledger, and not this one\n\nThe sibling ledgers each have a client-side half that instantiates an `ObjectStackClient` and asserts `typeof resolve(e.client) === 'function'`:\n\n| ledger | resolution guard |\n|---|---|\n| `ROUTE_LEDGER` (dispatcher) | `packages/client/src/route-ledger-coverage.test.ts` |\n| `REST_ROUTE_LEDGER` | `packages/client/src/rest-route-ledger-coverage.test.ts` |\n| `STORAGE_ROUTE_LEDGER` | `packages/client/src/service-route-ledger-coverage.test.ts` |\n| `I18N_ROUTE_LEDGER` | same file |\n| `DATASOURCE_ROUTE_LEDGER` | same file |\n| **`AUTH_ROUTE_LEDGER`** | **none** |\n\nMeasured — every consumer of the symbol repo-wide:\n\n```\npackages/qa/dogfood/test/route-ledger-live-mount-parity.dogfood.test.ts\npackages/client/src/client-url-conformance.test.ts      → uses r.route only (compiled into PATTERNS)\npackages/client/src/route-ledger-response-schema.test.ts → uses rows for response-shape, not client resolution\npackages/plugins/plugin-auth/src/auth-route-ledger.conformance.test.ts\nscripts/check-ratchet-remedy-authority.mjs · scripts/check-auth-mount-ledger.mjs\n```\n\nNothing in that list resolves an auth row's `client` string against a client instance. `client-url-conformance.test.ts` imports `AUTH_ROUTE_LEDGER` but reads `r.route` exclusively — it matches URLs the SDK builds against routes, which is the opposite direction and does not read the `client` field at all.\n\n## Why it matters\n\n`AUTH_ROUTE_LEDGER` is the largest of the ledgers (56 rows, 54 of them `sdk`) and it is the one whose rows are written by hand alongside a vendor surface that moves under it. The failure this guard family was built for is stated in `route-ledger-coverage.test.ts`'s own header:\n\n> This is the direction #3528 shipped through: the ledger equivalent of the day would have said \"resume → automation.resume\" while no such method existed.\n\nThat exact shape is currently unguarded for auth.\n\n## Note for whoever picks this up\n\n#10974's body asserts that a `sdk` row naming a nonexistent method is \"the exact failure `packages/client/src/route-ledger-coverage.test.ts` was written for\". That test reads `ROUTE_LEDGER` (the dispatcher's), not `AUTH_ROUTE_LEDGER`, so it would not have caught an auth row. The sequencing argument in #10974 partly rests on that — worth reading together with it.\n\n## Likely shape of the fix\n\nAdd an `AUTH_ROUTE_LEDGER` leg to `packages/client/src/service-route-ledger-coverage.test.ts` (or a sibling file), reusing the `brokenIn` helper already there. The ledger is pure data with no imports, so the existing relative-source-import convention applies unchanged — no new package edge.\n\n## Refs\n\nFound during #10974 · #3528 (the originating failure) · #3563 / #3636 (the guard family) · #3656 (the auth ledger's charter)\n"
+}

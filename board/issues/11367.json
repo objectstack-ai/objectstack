@@ -1,0 +1,33 @@
+{
+  "number": 11367,
+  "kind": "pull_request",
+  "title": "docs(plugin-auth): rewrite the sys_member valid_from exclusion note for the post-#10982 window-filtered projection",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T14:32:49Z",
+  "updated_at": "2026-08-23T15:02:28Z",
+  "closed_at": "2026-08-23T15:02:26Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": "2026-08-23T15:02:26Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11367",
+  "body": "Fixes #11089\n\n## What this is\n\nA comment-only correction in the security-adjacent exclusion ledger of `packages/plugins/plugin-auth/src/last-admin-guard.ts`, re-verified against the merged ref (base `d39569239b`) per the triage instruction, plus the one matrix clause that pinned the stale prose.\n\nThe `valid_from` / `valid_until` entry under `sys_member` in `STANDING_KEY_EXCLUSIONS` said the org-administration role projection is \"NOT window filtered\". That was true when written and has been false since #10982 landed member-role window filtering.\n\n## Re-verification (the task itself)\n\nEstablished from the merged code on this branch's base, not from the card's description:\n\n- `packages/core/src/security/resolve-authz-context.ts:430-436` — the role projection now drops membership rows through `isGrantActive(m, nowMs)` BEFORE the derivation (\"Rows outside their validity window are dropped BEFORE the role derivation ... Maintainer ruling 2026-08-22 (live session, item 2): a lapsed membership is NO MEMBERSHIP\").\n- `packages/core/src/security/resolve-authz-context.ts:409` — `accessible_org_ids` applies the same predicate (this half was already filtered before #10982).\n- `packages/plugins/plugin-auth/src/last-admin-guard.ts:836` — the guard still counts org administrators by grade alone (`if (!isOrgAdminGrade(m.role)) continue;`), unchanged.\n- `packages/platform-objects/src/identity/sys-member.object.ts` fields block — `sys_member` still declares no `valid_from`/`valid_until` columns; `AUTH_MEMBER_SCHEMA` (`packages/plugins/plugin-auth/src/auth-schema-config.ts:207-214`) maps none.\n- `packages/objectql/src/engine.ts:1199` — `undeclaredWriteFieldErrors` (callers on both insert and update, the \"declared-field door\") refuses an undeclared write key, so no write can smuggle a bound onto a membership row today.\n\nSo the card's premise holds exactly as filed: the exclusion decision is right, the note's middle step described an unfiltered read that no longer exists, and its closing \"reconcile in the resolver first\" instruction was discharged by #10982.\n\n## The rewrite\n\nThe note (guard file, line 665) now states: the columns still do not exist and the engine refuses undeclared write keys — why the exclusion is still safe today; both derivations off the one `sys_member` read apply `isGrantActive` since #10982 (maintainer ruling 2026-08-22: a lapsed membership is NO membership); the guard still counts by grade alone; and the forward-looking instruction is inverted — the day the columns land, these four spellings must move into `MEMBER_STANDING_KEYS` and the member count must adopt the same predicate, because a `valid_until` write then becomes a revocation shape a grade-only count cannot see.\n\n## Files touched\n\n- `packages/plugins/plugin-auth/src/last-admin-guard.ts` — the note. The card's carrier.\n- `packages/qa/dogfood/test/authz-conformance.matrix.ts` — one clause of the grant-validity row's `note` string. This is the declared carrier's \"test that pins the note\": the clause (written in PR #11088) recorded that the guard notes \"still describe the role projection as unfiltered\" — a statement made false by this PR, i.e. the exact stale-explanation-beside-a-flipped-assertion shape this card is a specimen of, one generation later. No test in the repo reads the matrix `note` field (grep for `.note` across dogfood tests: zero hits), so that change is prose-only too.\n\n## Changeset\n\nNone, deliberately: this PR releases nothing (comment-only diff; per AGENTS.md, feature work needs a changeset and pure fixes do not — a fortiori prose). It takes the `skip-changeset` label per the changeset-check workflow's own route-2 prescription.\n\nClause-②: no — no accept/reject behaviour changes, no public surface widens.\n\n## Verification (all on `d4617137a0`, the final commit, after it was committed)\n\n- No ablation: a comment-only diff has no behaviour to ablate — stated per the dispatch instruction rather than performed as ritual.\n- `@objectstack/plugin-auth` build + full test suite: \"Test Files  70 passed (70)\" / \"Tests  1455 passed (1455)\".\n- `@objectstack/dogfood` full suite: \"Test Files  125 passed | 1 skipped (126)\" / \"Tests  905 passed | 3 skipped (908)\". (The intended single-file run widened to the whole suite: pnpm forwarded a literal `--` ahead of the vitest args, so the file filter was ignored — the result is a superset of the intended evidence. The one skipped file is the organizations `skipIf`, not `authz-conformance.test.ts`, which carries no skip construct.)\n- typecheck: `@objectstack/plugin-auth` and `@objectstack/dogfood`, both green (script echo lines confirmed both ran; verify-lock VERDICT command-exit 0).\n- Gate union from `node scripts/pm/dispatch-gates.mjs` (no hand-supplied paths; derivation stamped \"tree of 'objectstack-ai/objectstack' at commit d4617137a0\"): 11 families matched, each run to its own verdict, all exit 0 — e.g. `check:published-files` (\"69 publishable package(s) ... declare a `files` whitelist\"), `check:test-source-alias` OK, `check:slot-lookup` (\"ratchet holds ... none new\"), `check:liveness` (\"state-counts.md is current\"), affected-docs (\"self-test: 339 cases pass\").\n- `pnpm check:nul-bytes`: \"OK (scanned 6376 text file(s) ... no raw ASCII control bytes)\".\n\nFor the record: #10982 is referenced, not re-adjudicated; the guard file's other ADR-0091 window mentions concern the grant table and were verified accurate as they stand.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01APWX2AwT3a4xDcjPCe8bk4)_"
+}

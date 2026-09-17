@@ -1,0 +1,32 @@
+{
+  "number": 11134,
+  "kind": "issue",
+  "title": "pm-dispatch finding: the landing window ends at MERGED — no release-aftercare duties (placement re-draw physics, tourniquet rule for replayed state, orphaned-loop resumption)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-22T20:00:35Z",
+  "updated_at": "2026-08-23T11:50:23Z",
+  "closed_at": "2026-08-23T11:50:03Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11134",
+  "body": "## Gap\n\npm-dispatch's landing window ends at MERGED (入队跟到 MERGED、两读). Nothing in SKILL.md or the references covers **what a PM owes AFTER a production release rolls** — grep for 部署后/发版后/placement across the skill returns nothing. Two days of cloud release operations (v1.24.0 → v1.28.0, epic cloud#1521) hit the same three post-release traps repeatedly, each currently living only in one operator's memory.\n\n## Evidence (all from cloud, 2026-08-21/23)\n\n1. **Fleet rolls re-draw container placement, and bad draws eat the whole perf budget.** Every tagged deploy re-drew Cloudflare container placement; v1.27.0 landed the control plane in Houston (35.9ms/leg ≈ ~870ms/request vs the ≤200ms gate), v1.28.0 landed Atlanta (~18ms). Recovery has a written protocol with two non-obvious physics: placement follows the WAKER (re-rolls woken from a California operator machine drew Houston repeatedly; waking via a us-east CI runner drew Ashburn first try), and MEASURING contaminates the next draw (a probe mid-swap becomes the new instance's waker). Protocol: rollout → zero operator HTTP → wake via us-east runner (`gh workflow run keep-warm`) → read the CF instances API for the city → only then measure.\n2. **Hand-fixes to state that a replay layer owns get silently reverted.** The SSO outage remediation (cloud#1591) hand-flipped `sys_oauth_application.token_endpoint_auth_method` rows; a pre-fix deploy's reseed reverted them TWICE before the fix landed in the seed itself (cloud#1597). Rule worth stating: a DB hand-fix is a tourniquet — before applying one, name WHO replays that state and WHEN (seed, reseed, migration, boot binder), and treat the replay-layer fix as the real card. Corollary: the fixed code must ship before the next event that replays the state, or the outage re-opens.\n3. **Interrupted long-running loops leave production in an unknown intermediate state.** A backgrounded re-draw loop orphaned by a session restart left prod's control plane parked on its WORST draw (Houston, 40.8ms/leg) for hours. On resume, the first action must be re-reading live state, never continuing from the loop's last known intent.\n\n## Suggested shape (for the skills seat to judge)\n\nA short \"release aftercare\" section or reference page: after any prod roll — (a) placement/latency reading against the perf gate, with the waker-bias re-draw protocol; (b) one real user-path probe (the SSO outage hid for 5 weeks behind health-only monitoring); (c) the tourniquet rule for live-state hand-fixes; (d) orphaned-loop resumption = re-read reality first. Also a candidate honesty clause: when a later measurement falsifies an assertion made in a merged PR body (the cloud#1589 \"SQL DEFAULT backfills existing rows\" claim), the correction gets posted to the card, not just known privately.\n\nOrigin: maintainer directive 2026-08-23 「评估哪些需要更新cloud项目经理skills的，提交issue」. Details/receipts: cloud#1521 comments (release logs), cloud#1591/#1597, cloud#1586.\n"
+}

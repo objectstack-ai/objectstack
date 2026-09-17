@@ -1,0 +1,30 @@
+{
+  "number": 11329,
+  "kind": "issue",
+  "title": "DashboardRenderer keeps the header wrapper as a full blank grid row when the console chrome suppresses its content",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T11:57:56Z",
+  "updated_at": "2026-08-23T12:17:11Z",
+  "closed_at": "2026-08-23T12:17:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11329",
+  "body": "DashboardRenderer keeps the header wrapper as a full blank grid row when the console chrome suppresses its content\n\nMeasured on `@objectstack/console` 17.1.0 (`plugin-dashboard-*.js`), HotCRM's `executive_dashboard`, viewed inside the console at `/_console/apps/<app>/dashboard/<name>`.\n\n## Symptom\n\nBetween the console page header (title + description) and the dashboard's filter bar sits a blank band ~189 CSS px tall. Measured DOM in that band:\n\n```html\n<div class=\"col-span-full mb-4\"></div>   <!-- height: 64px, zero children -->\n```\n\nOne empty div, spanning the full grid width, occupying an entire grid row (the dashboard grid's row sizing gives it 64px) plus `mb-4`. On a 900px-tall viewport this pushes the KPI row halfway down the first screen; the user reads it as \"the dashboard forgot to load something\".\n\n## Cause, from the shipped bundle\n\nThe renderer builds the header wrapper on `e.header` alone, then gates each **child** on the embedded flag:\n\n```js\nde = e.header && jsxs(`div`, { className: `col-span-full mb-4`, children: [\n  !f && e.header.showTitle !== !1 && q && jsx(`h2`, …),          // suppressed when f (console chrome present)\n  !f && e.header.showDescription !== !1 && e.description && …,   // suppressed when f\n  e.header.actions && e.header.actions.length > 0 && …           // absent on this dashboard\n]})\n```\n\nWhen the console renders its own page chrome (`f` truthy), the title and description children evaluate to `false` — correctly, they would duplicate the chrome — but the **wrapper div renders regardless**, and an empty child in the dashboard grid still claims a full row.\n\n## Impact\n\nAny dashboard that declares `header:` (with no `actions`) shows the blank row when viewed inside the console. HotCRM declares `header: { showTitle: true, showDescription: true }` on **all five** of its dashboards, so every dashboard page in the flagship exemplar opens with a dead band above the filters. The app author has no lever: authoring `header` is correct (it is what renders in a standalone embed), and removing it to dodge the blank would trade a platform bug for lost standalone behaviour.\n\n## Expected\n\nCollapse the wrapper when every child is suppressed — compute the children first and render the `div` only if any survive (or gate the wrapper on `!f || actions.length`). The `header` declaration should cost zero pixels when the chrome already owns the title.\n\nFound while walking HotCRM's dashboards with the maintainer; back-link: filed from the hotcrm seat during the #1209 follow-up round.\n"
+}

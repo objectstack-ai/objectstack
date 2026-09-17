@@ -1,0 +1,35 @@
+{
+  "number": 11201,
+  "kind": "issue",
+  "title": "driver-sql (PG): introspectForeignKeys' information_schema query is not schema-scoped — a same-named table in another schema contributes its foreign keys",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T02:56:42Z",
+  "updated_at": "2026-08-23T12:01:20Z",
+  "closed_at": "2026-08-23T12:01:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11201",
+  "body": "Found while working #11161 (which repaired the error contract of this method, not its query). Not fixed there: the bounded in-place-fix exemption did not apply — this is a scoping defect, a different class from the swallowed-error defect that card owns. #11161 remains open on its own subject; this issue is not addressed by that PR.\n\n## What\n\n`packages/drivers/driver-sql/src/sql-driver.ts`, `SqlDriver.introspectForeignKeys`, Postgres arm. The query filters:\n\n```sql\nWHERE tc.constraint_type = 'FOREIGN KEY'\n  AND tc.table_name = ?\n```\n\nwith no `table_schema` predicate on `tc` at all. `information_schema.table_constraints` spans every schema the user can read, so for a table name that exists in more than one schema, the result merges foreign keys from **all** of them — including schemas the session's `search_path` never reaches.\n\n## Why this is a real hazard here, not a theoretical one\n\n- The repo's own live-dialect test isolation (#9350) gives **every test file its own schema in one database**, so identical table names across schemas is the normal state of a live-PG test run, not an edge case.\n- Federation (ADR-0015) points this driver at remote databases whose schema layout is not ours.\n- The same class was already fixed twice next door, with the pattern to follow: `introspectIndexes` resolves by `to_regclass(?)` (session resolution), `introspectSchema` lists `table_schema = ANY (current_schemas(false))`, and #11161 just applied the `current_schemas(false)` pin to `introspectUniqueConstraints` when its (previously always-failing) query was repaired. `introspectForeignKeys` is now the **only** introspection arm still unscoped.\n\n## Suggested shape\n\nAdd `AND tc.table_schema = ANY (current_schemas(false))` — the same pin `introspectSchema`'s table listing and `introspectUniqueConstraints` use, keeping one resolution rule across the four arms. (MySQL's arm already pins `TABLE_SCHEMA = DATABASE()`; SQLite has no schemas.)\n\n## Not measured here\n\nWhether any in-tree consumer currently hits the collision (the live suite's per-file tables mostly have per-file names). The defect is the unscoped read, which returns a wrong answer the moment names collide."
+}

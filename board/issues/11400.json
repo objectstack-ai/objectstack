@@ -1,0 +1,35 @@
+{
+  "number": 11400,
+  "kind": "pull_request",
+  "title": "fix(sdui-parser): keep the boundary space between a text run and a sibling element",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T15:42:10Z",
+  "updated_at": "2026-08-23T16:17:24Z",
+  "closed_at": "2026-08-23T16:17:23Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-23T16:17:22Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11400",
+  "body": "Fixes #11148\n\n## What was wrong\n\n`parseChildren` (`packages/sdui-parser/src/parse.ts`) collapsed each text run's\nwhitespace to a single space — correct, that is HTML's own whitespace model — and\nthen `.trim()`ed it, which is not: HTML collapses a whitespace run to one space, it\ndoes not delete it. What the trim deleted is exactly the space separating a text run\nfrom an adjacent sibling element, so this source\n\n```jsx\n<p>A <strong>x</strong> page</p>\n```\n\nparsed to `['A', {strong}, 'page']` and the words run together wherever that tree is\nrendered. The line was re-derived at `origin/main` `a872ce9` before any edit and was\nstill where the card names it (`parse.ts:168`).\n\n## The rule applied — triage ruling, option (b), adopted verbatim\n\nCollapse the run, then keep **one leading space when a sibling precedes** the run and\n**one trailing space when a sibling element follows** it; at the parent's own\nstart/end the edge space is still dropped, so a paragraph authored with padding\naround `Hello` still compiles to `['Hello']`.\n\nIt is deliberately mechanical — it invents no block/inline taxonomy for a schema tree\nthat has none (the rejected option (a)).\n\n## The rule's known cost, pinned rather than argued\n\nA whitespace-only run **between two siblings** survives as a single space, so a\npretty-printed list gains one `' '` string child per inter-item gap. That bound is\nthe required control in the test file, asserted as the thing that could have gone\nwrong: exactly one single-space child per gap, never the source's newline plus\nindentation, never at the container's own edges, and never inside an item's own text.\n\n## Not a cherry-pick\n\nThe downstream copy of this parser landed the same ruling first, but the two files\nhave drifted (the downstream one carries an html-tier provenance stamp: one import,\nan eight-line comment and a marking call), so the line numbers differ and are\nexpected to keep differing. The patch here is written against **this** tree; what the\ntwo copies share is the **behaviour**, which is what the new tests pin.\n\n## Non-vacuity — the tests fail on the unfixed parser\n\nWritten before the fix and run against it:\n\n```\n Test Files  1 failed (1)\n      Tests  7 failed | 1 passed (8)\n```\n\nThe single pre-fix pass is the parent-edge control (`still drops the edge space at\nthe parent's own start and end`) — the half of `.trim()` that was correct, and which\nmust stay green in both directions. The list-bound control fails before the fix too\n(`Full HTML tag set in thehtmltier.`), which is what makes it a pin rather than a\nrestatement.\n\n## Blast radius, re-measured on today's tree\n\nThe card graded this contract drift rather than a user-visible bug on the claim that\nthe one in-tree consumer's findings do not depend on the whitespace — measured on a\ndifferent tree (`acb4dbc`). Re-measured here at `a872ce9`:\n\n- Repo-wide sweep for importers of the package: **exactly one** source file,\n  `packages/lint/src/validate-jsx-pages.ts`, which reads `diagnostics` only and never\n  the tree. (`packages/cli/src/utils/sdui-manifest.ts` and the `packages/spec`\n  matches name it in comments only.)\n- No fixture or snapshot in `packages/lint` encodes the trimmed shape: its suite is\n  green unchanged against the rebuilt parser — 80 files, 2246 passed, 5 skipped.\n- The claim holds. No file outside `packages/sdui-parser` is touched by this PR.\n\n## Verification — all at `edc48fc`, the head of this branch\n\n| command | result |\n| --- | --- |\n| `pnpm --filter @objectstack/sdui-parser test --maxWorkers=2` | `Test Files 2 passed (2)` · `Tests 14 passed (14)` |\n| `pnpm --filter @objectstack/sdui-parser typecheck` | clean |\n| `pnpm --filter '@objectstack/lint^...' build` then `pnpm --filter @objectstack/lint test --maxWorkers=2` | `Test Files 80 passed (80)` · `Tests 2246 passed, 5 skipped (2251)` |\n| `pnpm --filter @objectstack/lint typecheck` | clean |\n| `eslint . --no-inline-config` (whole repo, not narrowed) | 4979 files linted, 0 errors, 0 warnings |\n\nGate families derived from the actual changed paths with\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (12 path-matched\nplus 6 convention-triggered by adding a test file) — all green at `edc48fc`:\n`check:nul-bytes`, `check:changeset-gate-self-tests`, `check:objectui-changeset`,\n`check:published-files`, `check:slot-lookup`, `check:test-source-alias`,\n`check:type-source-resolution`, `check-adr-0087-registration`,\n`check-changeset-no-major`, `check-ci-filter-parity`, `check-empty-changeset`,\n`check-plugin-teardown-shape`, `check-affected-docs`, `check:query-options-erasure`,\n`check:type-check-coverage`, `check:engine-double-contract`,\n`check:cross-package-test-inputs`, `check:where-matcher`.\n\nOne declared narrowing: `check:type-check-debt` (`--re-measure`) needs the whole\n`packages/*` closure built. `@objectstack/sdui-parser` carries no ledger entry at all\n(its own `typecheck` covers it, run above), and the only ledger entry this diff can\nreach is `@objectstack/lint`, the sole importer — measured directly with\n`pnpm --filter @objectstack/lint typecheck`, clean. The diff moves no type or\nsignature, only statement-level behaviour.\n\n## Changeset\n\n`patch` on `@objectstack/sdui-parser`: output values move, no API changes, no input's\nacceptance changes. `check-changeset-no-major` and `check-empty-changeset` both agree\n(`This diff introduces no major bump`; `No empty-frontmatter changeset introduced`).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015ahemw8RcTgqtxrj15PEZx)_"
+}

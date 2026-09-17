@@ -1,0 +1,36 @@
+{
+  "number": 11063,
+  "kind": "issue",
+  "title": "`GET /api/v1/packages` swallows a failed database read into a 200 registry-only answer — the caller cannot tell a partial listing from a complete one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-22T14:30:40Z",
+  "updated_at": "2026-08-22T20:43:34Z",
+  "closed_at": "2026-08-22T20:43:34Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11063",
+  "body": "Found while fixing #10965 (PR link below), by following that fix's refusal to its consumers. **Not fixed there** — different package, different door, and it wants its own triage.\n\n## The defect\n\n`packages/rest/src/package-routes.ts:642-657`, the `GET /api/v1/packages` handler:\n\n```ts\n// Database packages (published artifacts)\ntry {\n  const dbPackages = await packageService.list();\n  for (const pkg of dbPackages) { /* merge into packagesMap */ }\n} catch {\n  // Database query failed — continue with registry-only packages\n}\n\nconst packages = Array.from(packagesMap.values());\nsendOk(res, { packages, total: packages.length });\n```\n\nA failed durable read is absorbed, and the door answers **200** with `{ packages, total }` built from the registry alone. Nothing on the wire distinguishes:\n\n- \"these are all the packages\" — the durable read succeeded and returned these, from\n- \"these are the packages I could still see\" — the durable read **failed** and its contribution is missing.\n\n`total` is reported as a complete count either way. The registrar-sourced entries even keep `source: 'registry'`, which reads as provenance rather than as a warning that the database half is absent.\n\nThe sibling route is not affected: `GET /api/v1/packages/:id` (`:685`) lets `packageService.get()` throw out to `sendThrownError`, so a declared envelope reaches the client intact.\n\n## Why it surfaced now\n\n#10965 made `list()` **refuse** (`SERVICE_UNAVAILABLE` / 503) when the storage seam returns no result set, instead of answering `[]` over a driver it never queried. That refusal is correct at the producer — and this catch swallows it, so on that door the observable behaviour barely changes: previously a silent empty merge, now a silent skipped merge. The producer-side fix cannot close this; the door has to.\n\nIt is the same shape as the class #10965 belongs to (#10677 / PR #10788, #10789 / PR #10964): **a read that could not happen is being reported as a read that found nothing.** Here it is one level up, in a consumer-side catch rather than in a flattener.\n\n## Not measured here\n\n- **Whether the empty catch is load-bearing for any real deployment** — i.e. whether there is a supported composition where the durable read routinely fails and a degraded 200 is the deliberate posture. The comment says \"continue with registry-only packages\", which reads as intent, so this may be a deliberate degradation that simply needs to become *visible* rather than a bug to remove. That is the triage question and it changes the fix.\n- The right shape if it is a bug. Options, not decided here: refuse (fail the whole listing), or keep the 200 and carry a declared partial-result marker so the caller can tell. The second preserves the degradation the comment intends while ending the ambiguity; it is a response-shape change and therefore a contract decision, not a drive-by.\n- Whether the dispatcher's own `/packages` door has the same catch.\n\n## Refs\n\n#10965 · #10677 / PR #10788 · #10789 / PR #10964 · ADR-0112\n"
+}

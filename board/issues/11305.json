@@ -1,0 +1,30 @@
+{
+  "number": 11305,
+  "kind": "issue",
+  "title": "record:activity widens on a bad `types` filter: an unrecognised or empty kind list renders EVERY activity, not none",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T09:50:00Z",
+  "updated_at": "2026-08-23T14:36:20Z",
+  "closed_at": "2026-08-23T14:36:20Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11305",
+  "body": "`record:activity` sanitises its own `types` prop and turns an **unrecognised** or **empty** filter into **no filter** — so an author who names the wrong kind is served every activity on the record, with no diagnostic anywhere at runtime.\n\n## Measured\n\nExecuted out of the shipped bundle (`@objectstack/console` 17.1.0, `dist/assets/plugins-views-BaBStVok.js`) — this is the renderer's own code, not a reimplementation:\n\n```js\nfunction Qa(e){\n  if(!Array.isArray(e)) return;                                    // absent  -> undefined\n  let t = e.filter(e => typeof e === 'string' && Ja.includes(e));   // Ja = FeedItemType.options\n  return t.length > 0 ? t : void 0;                                // EMPTY REMAINDER -> undefined\n}\n// caller:\nlet i = Qa(t.types);\nif (i) { let e = new Set(i); r = r.filter(t => e.has(t.type)); }    // undefined => no filter at all\n```\n\nRunning it over a record's feed:\n\n```\nQa(undefined)      = undefined      -> unfiltered\nQa([])             = undefined      -> unfiltered\nQa([\"crm_task\"])   = undefined      -> unfiltered      <- every member unrecognised\nQa([\"task\"])       = [\"task\"]       -> filtered\n```\n\nSo three distinct authored intents collapse into one rendering:\n\n| authored | intent | rendered |\n| --- | --- | --- |\n| `types` omitted | \"show every kind\" | every kind |\n| `types: []` | \"show no kind\" | **every kind** |\n| `types: ['crm_task']` | \"show this kind\" (typo/wrong vocabulary) | **every kind** |\n\n## Why this is worth closing rather than documenting\n\n`PageComponentSchema.properties` is an open bag (`z.record(z.string(), z.unknown())`), so nothing rejects the value on the storage path — `build` says exactly that beside its own author-time warning: *\"the props bag is not parsed on the storage path either, so nothing rejects this today\"* (#5068). That is the known half. The half this card is about is what happens **after**: the renderer does not merely ignore the bad value, it **widens** on it. A tolerant consumer is where a wrong authored value hides and spreads, and here it hides behind a plausible-looking result — a populated timeline — rather than an empty one an author would investigate.\n\nMeasured consequence in a real app: HotCRM's lead page authored `types: ['crm_task']` (an object name where a feed kind belongs) and its Activity tab rendered the audit stream — `Created Lead …` / `Updated Lead …` — for as long as it shipped. The author-time warning existed and was one of 85; nothing at runtime said anything at all. (objectstack-ai/hotcrm#1209)\n\n## Suggested direction\n\nTwo independent decisions, both consumer-side tolerance to remove:\n\n1. **Unrecognised members must not widen.** Either keep only the recognised members and filter on those (an all-unrecognised list then renders empty — visibly wrong, which is the point), or drop the whole component to an error state. Silently falling back to \"everything\" is the one behaviour that cannot be noticed.\n2. **`types: []` should mean what it says.** If \"no kinds\" is not an intent worth honouring, reject it at the schema (`.min(1)`) rather than reinterpreting it at render time — declared = enforced.\n\nThe same question probably applies to `filterMode`, whose sanitiser (`Za`) folds any unrecognised value to `'all'` — the widest option, again.\n\nFound while fixing objectstack-ai/hotcrm#1209; not worked around there, per 「平台相关的功能应该在平台中实现」.\n"
+}

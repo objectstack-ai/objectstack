@@ -1,0 +1,35 @@
+{
+  "number": 11200,
+  "kind": "pull_request",
+  "title": "perf(service-settings): getMany resolves same-namespace keys with one grouped row load (#10826)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T02:45:09Z",
+  "updated_at": "2026-08-23T03:11:19Z",
+  "closed_at": "2026-08-23T03:11:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-23T03:11:18Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11200",
+  "body": "## What\n\n`SettingsService.getMany(namespace, keys, ctx)`: validate everything up front, resolve env overrides first (an override answers without touching the store, exactly as `get()` does), group the remaining keys by their scope's `loadRows` argument (`user` → `(ns, userId)`, else `(ns, null)`), **one load per group** (both in parallel), and walk each key's cascade over its group's rows. The cascade is **extracted** from `get()` into a shared `resolveKeyFromRows` — not copied — so per-key answers deep-equal `get()`'s by construction. `getNamespace` resolves through the same grouped path (N keys → ≤2 loads).\n\n## Why (the card's own calibration honored)\n\n`resolveLocalizationContext` issued three identical `sys_setting` namespace reads per request (queries 16–18/24, PR #10824's rig). They already ran parallel — 1 leg — so per cloud#1539 this is a **query-count fix, not a latency fix**, scheduled at the card's stated low priority as the same one-question-asked-repeatedly class as #10824's fixes. No caching; nothing survives the call (the #10221 failed-read TTL cache is untouched).\n\n## Tests\n\nNew `settings-getmany.test.ts` (6): per-key deep-equivalence with `get()` across scope mixes; read-count contract measured at the engine (same-scope → 1 find, mixed → 2, env-overridden → 0); unknown-key refusal parity; `getNamespace` through the grouped path with unchanged answers. Full `service-settings` suite **477 passed**, package tsc **0 errors**.\n\n## Serial note\n\nThe `resolve-authz-context.ts` caller switches to `getMany` in a follow-up commit on the #10825 branch after it lands (same-file serial ruling by the `domain:engine` seat — this PR touches only `service-settings`).\n\nPart of #10826.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

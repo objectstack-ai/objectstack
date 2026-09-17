@@ -1,0 +1,36 @@
+{
+  "number": 11087,
+  "kind": "issue",
+  "title": "SqlDriver org auto-scope makes SysMetadataRepository.listDrafts blind to env-wide drafts (organization_id IS NULL ∧ injected org = always empty); mode=draft saves drop package_id",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-22T16:16:02Z",
+  "updated_at": "2026-08-23T02:26:47Z",
+  "closed_at": "2026-08-22T21:44:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11087",
+  "body": "## Symptom (live staging tenant, cloud#1593)\n\n`GET /meta/_drafts` returns `{\"drafts\":[]}` while a `sys_metadata` row with `state='draft'`, `organization_id=NULL` demonstrably exists — the single-read `GET /meta/:type/:name?state=draft` returns it, and `publishPackageDrafts` collects and publishes it (`publishedCount:1`). Every ambient \"pending changes\" surface (Home banner, the new composer bar) counts via the list, so users see 0 pending while the publisher would publish 1.\n\n## Mechanism\n\n`protocol.listDrafts` (null-org caller — the rest route forwards no organizationId) → `SysMetadataRepository.listDrafts` builds `where: { state:'draft', organization_id: null }` and calls `engine.find('sys_metadata', …)`. On a tenant kernel the SqlDriver **auto-scopes any table carrying an `organization_id` column to the request's org** — the injected `organization_id='org_…'` ANDs with the repo's own `organization_id IS NULL` → contradiction → zero rows, deterministically, for every request carrying an active org. The publisher's reads run scoping-exempt, hence the list/publisher split.\n\nSame over-scope class as the earlier \"global object reads empty\" SqlDriver incident; this is that seam hitting the draft ledger.\n\n## Fix directions\n\n- Run the repository's `sys_metadata` reads under the scoping-exempt/system read context (the same posture `publishPackageDrafts` already has), or\n- exempt `sys_metadata` from SqlDriver org auto-scoping (it manages its own `organization_id` semantics — the ADR-0005 overlay order IS an org-aware contract the driver's blanket injection corrupts).\n\nSecond, independent defect on the same surface (also cloud#1593): a console `PUT /meta/:type/:name?mode=draft` save does **not inherit `package_id`** from the active row it overlays — the draft lands `package_id NULL`, unpublishable by any package publish. The draft-save path should inherit the overlaid row's package (or the item's `_packageId`).\n\nCross-links: cloud#1593 (full evidence chain), objectstack#10219 (draft-ledger unification), objectui#5694 (the standing bar this blinds).\n"
+}

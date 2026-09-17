@@ -1,0 +1,35 @@
+{
+  "number": 11162,
+  "kind": "issue",
+  "title": "driver-sql (PG): introspectPrimaryKeys reports a covering primary key's INCLUDE'd columns as key members — indkey is read whole, indnkeyatts is ignored",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-22T22:59:32Z",
+  "updated_at": "2026-08-23T03:25:56Z",
+  "closed_at": "2026-08-23T03:25:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11162",
+  "body": "Found while working #11101 (which repaired the **ordering** of the PG/MySQL key). This is a **membership** defect in the same method — a different defect class, so it was deliberately not folded in. Measured on a live PostgreSQL 16.13.\n\n## What\n\n`packages/drivers/driver-sql/src/sql-driver.ts`, `SqlDriver.introspectPrimaryKeys`, Postgres arm. The query reads **all** of `pg_index.indkey`. For a covering primary key, `indkey` holds the key columns *and* the `INCLUDE`d payload columns; `indnkeyatts` is the count of the leading entries that are actually key columns, and it is not consulted.\n\nPostgres reaches this via `CREATE UNIQUE INDEX … INCLUDE (…)` promoted with `ALTER TABLE … ADD CONSTRAINT … PRIMARY KEY USING INDEX`.\n\n## Measured (PostgreSQL 16.13)\n\n```sql\nCREATE TABLE covered (k1 text NOT NULL, k2 text NOT NULL, payload text);\nCREATE UNIQUE INDEX covered_pk ON covered (k2, k1) INCLUDE (payload);\nALTER TABLE covered ADD CONSTRAINT covered_pkey PRIMARY KEY USING INDEX covered_pk;\n```\n\n```\n indkey | indnatts | indnkeyatts\n--------+----------+-------------\n 2 1 3  |        3 |           2\n```\n\nThe declared key is `(k2, k1)`. `payload` (attnum 3) is a *payload* column, not a key column — `indnkeyatts = 2` says so.\n\nBoth the pre-#11101 query and the post-#11101 query report it as a key member:\n\n```\n--- OLD query (membership test, a.attnum = ANY(i.indkey)) ---\n k1\n k2\n payload\n\n--- NEW query (#11101, joins the ordinality of indkey) ---\n k2\n k1\n payload\n```\n\n**#11101 neither introduced nor worsened this** — the two arms agree on membership and differ only in order, which is why it was left alone there. The `payload` entry is wrong in both.\n\n## Why it matters\n\n`primaryKeys` is consumed as an addressing / upsert-conflict-target key (federated-object codegen, the persisted `external_catalog` under ADR-0015, schema-drift comparison). A key with an extra member is a *different key*: an upsert conflict target naming a non-key column does not match the constraint, and drift comparison against a correctly-declared `(k2, k1)` reports a phantom `unexpected_key_member:payload`.\n\n## Likely shape of the fix\n\nBound the join to the key attributes: `WHERE k.ord <= i.indnkeyatts` (or `unnest(i.indkey[0:i.indnkeyatts-1])` — note `int2vector` is 0-based). `indnkeyatts` exists in PG 11+; below that it equals `indnatts` and the bound is a no-op.\n\nWorth checking the MySQL and SQLite arms for the analogous question before fixing, so all three dialects keep the single answer #11101 just established. MySQL has no covering-index concept for a PRIMARY KEY, so it is likely PG-only.\n\n## Not measured here\n\nWhether any in-tree consumer currently introspects a covering primary key. The repo's own schema sync does not create them; this reaches a **remote** table under federation (ADR-0015), where the DDL is not ours.\n"
+}

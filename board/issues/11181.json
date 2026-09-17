@@ -1,0 +1,34 @@
+{
+  "number": 11181,
+  "kind": "issue",
+  "title": "pm 席位 GraphQL 限流:高频读改走 REST(curl+代理凭证),GraphQL 只留给 mutation-only 操作",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T01:19:05Z",
+  "updated_at": "2026-08-23T01:50:59Z",
+  "closed_at": "2026-08-23T01:50:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11181",
+  "body": "维护者 2026-08-23 指示:「项目经理经常被 GraphQL 限流……rest api 余额很多,排查哪些请求可用 REST,能用 REST 的尽量用 REST。」本卡由 skills 席(session `757f0dc0-5dae-51d7-9053-c15c57ebfe3b`)带实测立卡。\n\n## 实测(2026-08-23 01:1x UTC,共享身份,`GET /rate_limit` 免费端点)\n\n| 桶 | 本小时 used | limit |\n|---|---|---|\n| core(REST) | **~50** | 15000 |\n| graphql | **~4965** | 5000 |\n| search | 0 | 30/min(独立桶) |\n\n两个结构性证据(不受并发席位噪声影响):\n1. MCP `list_issues` 返回 `pageInfo.startCursor/endCursor` = GraphQL Connection 游标——issue 列表走 GraphQL;\n2. 夹逼测量:MCP 调用间 graphql used +7/+4,core 几乎不动。\n\n即:**所有席位共用一个身份,GraphQL 桶是公共牧场且已在天花板上;REST 桶几乎全空。**\n\n## 路由表(PM 循环高频操作)\n\n| 操作 | 现走 | 改走 REST |\n|---|---|---|\n| 拉 backlog(按标签列 issue) | `list_issues`(GraphQL 已证) | `GET /repos/{o}/{r}/issues?labels=…&state=open&per_page=…` |\n| 决策重读(评论翻页到最后) | `issue_read get_comments` | `GET /issues/{n}/comments?per_page=100&page=N` |\n| 卡正文/状态读 | `issue_read get` | `GET /issues/{n}` |\n| 标签读-改-写 | `get_labels` + POST | GET `/issues/{n}/labels` + POST(POST 两条已在 #11112 进 allowlist) |\n| PR 读(正文/文件/commits) | `pull_request_read` | `GET /pulls/{n}`、`/files`、`/commits` |\n| CI 判定 | `get_check_runs` | `GET /commits/{sha}/check-runs`(本席今日已用) |\n| PR 正文改写 | `update_pull_request` | `PATCH /pulls/{n}`(本席今日已用,含 sanitizer 尾读回) |\n\n**保留 MCP/GraphQL(无 REST 等价或语义缺失)**:`enable_pr_auto_merge`(mutation)、`resolve_review_thread` / `unresolve_review_thread`、`pull_request_read get_review_comments`(线程 isResolved 态 REST 不给)。`search_*` 独立桶,不动。\n\n## 交付物\n\n1. `.claude/settings.json` `permissions.allow` 增补 curl **GET/PATCH** 条目(比照 #11112 的两条 POST 形状,objectstack+objectui 双仓),使席位免弹窗走 REST。⚠️ `.claude/**` 属 governed:draft PR + 人工合并。\n2. 路由指引落在哪:`platform-readings.md` 134/134 零余量、SKILL.md 682/682 零余量——**允许以真删付账**(优先挖重复),付不起就只落 allowlist、prose 部分显式移交 #11086 全文重构轮(在 PR 正文声明)。\n3. 曾有席位汇报过被限流的现象记录可引用本卡实测,不必重测。\n\n## 验证\n\n- allowlist 生效:worktree 内以 seat 权限跑一条表内 curl GET 不弹窗;\n- 不回归:`.claude/hooks/*` selftest 全绿;若动 prose,line-ratchet 门绿并在 PR 正文给付账明细。"
+}

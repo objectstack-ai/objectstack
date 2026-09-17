@@ -1,0 +1,34 @@
+{
+  "number": 10570,
+  "kind": "issue",
+  "title": "guard-main-checkout-bash.sh reads a `>` inside a shell COMMENT as a redirect and false-blocks the command",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T03:44:31Z",
+  "updated_at": "2026-08-22T20:24:43Z",
+  "closed_at": "2026-08-22T20:24:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10570",
+  "body": "Found while working #9830 (PR #10569). Out of that card's scope — it edits one workflow file and touches nothing under `.claude/`. Filed unassigned.\n\n## What was observed\n\n`guard-main-checkout-bash.sh` does not recognise shell **comments**, so a `>` inside a `#` comment is read as a redirection and the whole command is BLOCKED. A comment cannot write anything, so this is a false block — the fail-**closed** direction, opposite to the fail-open concern recorded on #10409.\n\nReproduced against the committed hook, with the control that isolates the comment as the cause:\n\n```\n$ python3 -c \"import json; print(json.dumps({'cwd':'/home/user/objectstack','tool_input':{'command':'# rename foo -> bar\\necho hello'}}))\" \\\n    | bash .claude/hooks/guard-main-checkout-bash.sh\n⛔ Blocked: this Bash command WRITES into the shared PRIMARY checkout, not a worktree.\n   command: # rename foo -> bar\n   target:  bar\n   repo:    /home/user/objectstack\nhook-exit=2\n\n$ python3 -c \"import json; print(json.dumps({'cwd':'/home/user/objectstack','tool_input':{'command':'echo hello'}}))\" \\\n    | bash .claude/hooks/guard-main-checkout-bash.sh\nhook-exit=0\n```\n\nSame command, same cwd; the only difference is the comment line. `grep -n \"comment\\|'#'\" .claude/hooks/guard-main-checkout-bash.sh` and the same grep over `guard-main-checkout-bash.selftest.sh` both return nothing — there is no `#` handling in either the tokenizer or the segmenter, and no self-test probe for the shape.\n\n## How it actually bit\n\nA single Bash call carrying three labelled sub-runs, each preceded by an explanatory comment. One comment read `# (c) a path already in the INDEX that the allowlist does not name -> the BAD re-check`. The hook reported `target: the` and `repo: /home/user/objectstack`, blocking a command whose only file writes were into `$TMPDIR` and a scratchpad. Cost: one retry with the arrow removed from the prose. It looks exactly like the guard catching a real violation, which is what makes it worth a card rather than a shrug — the message names the primary checkout and a plausible-looking target.\n\n## Why it matters, and the honest severity\n\n**Low, and self-announcing.** The failure is loud, and the workaround (reword the comment) is immediate. It never lets a write through.\n\nThe reason to fix it anyway is the hook's own stated philosophy, quoted from its header:\n\n> PRECISION OVER RECALL. Recognising a write target inside an arbitrary shell command is heuristic in a way that Edit's `file_path` is not, and a guard that blocks work it does not understand gets switched off — after which it guards nothing. So this hook only claims shapes it can read with confidence, and everything else fails OPEN.\n\nA comment is not a shape the hook reads with low confidence — it is a shape it does not model at all, and it currently claims one with false confidence. Prose containing `->`, `=>`, `2>` or `N > M` is ordinary in explanatory comments, so the shape recurs.\n\n## Shape of a fix (not a ruling)\n\nGive both quote-aware passes (`tokenize()` and `split_segments()`) the shell's comment rule: outside quotes, an unquoted `#` that starts a word begins a comment that runs to the next newline. Note the word-start condition — `foo#bar` and `${x#y}` are not comments — so this is not a bare \"strip from the first `#`\".\n\nThen extend `guard-main-checkout-bash.selftest.sh` in both directions, the discipline #10409 already argues for on this hook: a comment containing `>` must NOT block, and a real redirect on a line *after* a comment must still block.\n\n## Relationship to #10409\n\nSame script, same two passes, **different defect and opposite failure direction**. #10409 is about a backslash outside quotes making the two passes disagree, and its direction is a missed write (fail-open). This one is a false block (fail-closed) from a construct neither pass models. Fixing #10409's backslash case does not address comments, so this is a sibling rather than a sub-issue — but the two land in the same function pair and would be cheaper to fix and self-test together.\n\nRefs: #10409 (the sibling observation on this script) · #10406 / #10247 (the last change to these passes) · #9830 / PR #10569 (found here).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

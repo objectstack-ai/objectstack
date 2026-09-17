@@ -2,8 +2,8 @@
   "number": 18620,
   "kind": "issue",
   "title": "[finding] PHASE2_IMPLEMENTATION.md carries four more copy-fails beyond the seven retired keys — including `blockedHosts`, which the sandbox runtime SILENTLY drops",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "huangyiirene",
@@ -11,17 +11,24 @@
     "type": "User"
   },
   "labels": [
-    "finding"
+    "domain:engine",
+    "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "huangyiirene"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-17T09:23:42Z",
-  "updated_at": "2026-09-17T09:23:42Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-17T17:14:14Z",
+  "closed_at": "2026-09-17T16:53:08Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18620",
   "body": "Filed by the `domain:engine` execution seat, `session_01CqmCgU5RGDoJYhHUMVp2af`, R1, out of the whole-file sweep PR #18615 (#18000) was ordered to perform. That PR repaired the **seven retired key spellings** in the two `registerPlugin` examples; everything below is stale for a **different reason** and was deliberately kept out of its diff under the dispatch's edit boundary. ⛔ No `domain:*` and no `priority:*` asserted — both have exactly one producer, the triage seat.\n\n⭐ **Every reading below was re-taken by the filing seat on `origin/main`, ⛔ not carried over from the dev report.**\n\n⭐ Filed as **one** card because it is one document, one sweep, and one PR's worth of work. ⛔ Splitting it would hand the same file to several devs.\n\n---\n\n## 1. ⭐ `blockedHosts` — a key the runtime SILENTLY DROPS, in a security example. Class (c), and the sharpest item here.\n\n`PHASE2_IMPLEMENTATION.md:235` writes:\n\n```ts\nblockedHosts: ['malicious.com'],\n```\n\n| reading | result |\n|:--|:--|\n| `blockedHosts` repo-wide | **exactly one** occurrence — this document line. Nothing reads it, anywhere |\n| what the schema declares | `deniedHosts` — `packages/spec/src/kernel/plugin-security-advanced.zod.ts:392` (`'Blacklisted hosts'`) |\n| what the runtime reads | `config.network.deniedHosts` — `packages/core/src/security/sandbox-runtime.ts:261-262` |\n\n⛔ **This is not a retired spelling.** There is no tombstone, so there is **no loud refusal** — the reporting dev measured that `safeParse` **succeeds** and the key is silently stripped (the parsed network keys come back as `mode`, `allowedHosts`, `maxConnections`).\n\n⇒ **A reader who copies that block gets a sandbox that does not block the host it names, and is told nothing.** TypeScript catches it as an excess property; anything that reaches the parse does not.\n\n⭐ This is class **(c)** on the rubric — 「AI 写元数据会被运行时拒收或**静默丢弃**的陷阱」 — and it is the silent-drop half, which is the worse half. It is also class (a): the example fails when copied, with a named repro. ⚠️ And it sits in a **security** example, where the failure mode is 「the wall you think you built is not there」. **One-word repair.**\n\n## 2. The `Integration with Kernel` block does not compile when copied. Class (a).\n\n`:319-323` passes `kernel.logger` to five constructors (`new PluginHealthMonitor(kernel.logger)` and four siblings).\n\n- `packages/core/src/kernel.ts:107` declares `private logger: ObjectLogger;`\n- `packages/core/src/kernel-base.ts:36` declares `protected logger: Logger;`\n- There is no public getter.\n\n⇒ The block does not compile. 「示例照抄即失败是 (a)」 — this is that, by member visibility rather than by key spelling, which is why PR #18615's boundary correctly left it alone.\n\n## 3. Two prose claims advertise a capability no runtime delivers.\n\n- `:13` — 「real-time health checking and **auto-recovery** for plugins」\n- `:18` — 「**Auto-restart** with backoff strategies (fixed, linear, exponential)」\n\nAgainst `packages/core/src/health-monitor.ts:160`, which states in as many words:\n\n> Monitors plugin health status. **It REPORTS; it does not act on what it finds.**\n\nThe three keys that configured this (`autoRestart`, `maxRestartAttempts`, `restartBackoff`) were retired by #12032 under ADR-0049 and **deleted from the examples by PR #18615**. ⇒ The document now advertises at `:18` a capability its own example no longer configures and its runtime never had.\n\n⚠️ **PR #18615 made this conspicuous rather than causing it** — its dev flagged it explicitly rather than smuggling a prose edit into a key-spelling diff. That was the right call and is why it is here instead of there.\n\n## 4. Observations in the same file — ⛔ lower confidence, fix only if cheap while in there\n\n- `:373` links `MICROKERNEL_IMPROVEMENT_PLAN.md` at the repo root; no such file exists (its sibling link `ARCHITECTURE.md` does).\n- `:343` tells the reader to run tests with `npm test`, in a pnpm workspace.\n- `:55` lists 「File watching integration points」 as a hot-reload feature, which after #12428 is true only of `scheduleReload`.\n\n## ⛔ What is NOT a defect here, recorded so the next sweeper does not re-derive it\n\nCross-checking every fenced-block key against `retiredKey(` tombstones repo-wide also turns up `enabled`, `actions`, `fields`, `mode`, and a second `interval` / `timeout` — **all on unrelated schemas** (`metadata-loader.zod.ts`, `manifest.zod.ts`, `ui/component.zod.ts`, `api/router.zod.ts`). Judged against the def each key is actually passed to, they are noise. ⚠️ A bare repo-wide key-name grep over this document **over-reports**; judge each key against the schema it is passed to.\n\n⚠️ Likewise, after PR #18615 a bare count of `interval` / `timeout` / `debounceDelay` in this file is **still not a verdict** — the replacements (`intervalMs`, `debounceDelayMs`) contain the old words as substrings, and the deleted keys are now named in explanatory comments. The verdict instrument is **key POSITION inside a fenced block**.\n\n## Dedupe words\n\n`blockedHosts` · `deniedHosts` · `SandboxConfigSchema` · `PHASE2_IMPLEMENTATION` · `kernel.logger private` · `auto-recovery` · `Auto-restart with backoff`\n\n## Re-check\n\n    git grep -n \"blockedHosts\" origin/main\n    git grep -n \"deniedHosts\" origin/main -- packages/spec/src/kernel/plugin-security-advanced.zod.ts packages/core/src/security/sandbox-runtime.ts\n    git show origin/main:packages/core/src/kernel.ts | sed -n '107p'\n    git grep -n \"It REPORTS\" origin/main -- packages/core/src/health-monitor.ts\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

@@ -1,0 +1,34 @@
+{
+  "number": 11140,
+  "kind": "issue",
+  "title": "[finding] Two GraphQL residue sites in package SOURCE comments outlive the removed /graphql route (spec object.zod.ts, adapters/hono index.ts)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T20:41:00Z",
+  "updated_at": "2026-08-23T17:31:25Z",
+  "closed_at": "2026-08-23T17:17:04Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11140",
+  "body": "Found while fixing #10846 (the five GraphQL residue sites in `skills/**`). Filed rather\nthan fixed: #10846's PR is a GOVERNED `skills/**` PR, and these two live in package\nsource — a different surface and a different gate family, so folding them in would be\nunreviewable scope creep on a human-merge-only diff.\n\nSame defect class as #10846 / #10710 / #10832 / #10583 / #10835, one surface further in:\nprose that still asserts a `/graphql` surface the runtime does not mount.\n\n## The residue\n\n| Site | Text | Why it is wrong |\n|:---|:---|:---|\n| `packages/spec/src/data/object.zod.ts:252` | `/** Enable REST/GraphQL API access */` (the doc comment on `apiEnabled`) | There is no automatic GraphQL API. `apiEnabled` gates REST and MCP — `packages/mcp/src/stdio-data-bridge.ts:260` reads `enable.apiEnabled === false`. Note the `.describe()` one line below is already correct (\"Expose object via automatic APIs\"), so only the JSDoc drifted. |\n| `packages/adapters/hono/src/index.ts:105-106` | `Only routes that need framework-specific handling (auth service, GraphQL raw result, discovery wrapper) are registered explicitly.` | `createHonoApp` registers auth (`app.all(prefix + '/auth/*')`) and discovery (`app.get(prefix)`, `/discovery`, `/.well-known/objectstack`), then one catch-all. No GraphQL route is registered — and this same file already carries the correct account of its own shape at line 423 (`// --- Storage: deliberately NOT mounted (#4087) ---`). |\n\n## Why it is worth recording\n\nThe second one is load-bearing beyond tidiness: the stale `skills/objectstack-platform/SKILL.md`\nline #10846 fixes (\"Mount explicit routes for auth, GraphQL, storage, discovery\") reads like a\ntranscription of exactly this JSDoc, storage included. The published catalog is being corrected\nin #10846; leaving the source comment it was copied from intact leaves the regeneration path\nopen.\n\nVerification at filing time (worktree at `origin/main` afe1c4e0a):\n\n- 0 hits for `createGraphQLDomain` under `packages/*/src`\n- `handleGraphQL` survives only in CHANGELOGs (27 hits, all historical)\n- `packages/runtime/src/http-dispatcher.ts:2069` — `// /graphql removed — GraphQL is not in the product plan (#2462 follow-on).`\n- `packages/spec/src/system/core-services.zod.ts:130-132` independently records that `graphql` was never a `CoreServiceName` and named \"a `/graphql` surface the dispatcher had already removed\"\n\nDedupe: `search_issues` on two phrasings (\"GraphQL residue in package source comments object.zod\napiEnabled REST/GraphQL hono adapter JSDoc stale\", \"createHonoApp doc comment GraphQL raw result\nstale storage mount removed adapters hono\") returned only CLOSED cards — #10835, #10710, #10832,\n#10583, #7707, #9436, #4117. None covers either site.\n\nBack-links: #10846, #10835, #10710, #10832, #10583\n"
+}

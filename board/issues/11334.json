@@ -1,0 +1,34 @@
+{
+  "number": 11334,
+  "kind": "pull_request",
+  "title": "Re-verify a cleared stop condition: the reviewer line and the brief-construction note",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T12:05:35Z",
+  "updated_at": "2026-08-23T12:42:34Z",
+  "closed_at": "2026-08-23T12:42:33Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-23T12:42:33Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11334",
+  "body": "Fixes #11251\n\nA stop condition whose only enforcement is the stopped party's self-report is not\nenforced. A dev that reasons past one produces an artifact indistinguishable from one\nthat honoured it: an on-scope diff, green gates, and prose asserting the check passed.\nThis PR lands the graded scope — the PM-side rule — as exactly two lines on the\nreferences face. `SKILL.md` is not touched.\n\n## What landed\n\n**`references/review-checklist.md`** — one new checklist item, placed directly after the\nfalsification item (`dev 验证过 issue 的前提吗?`) so the two read as a pair: falsification\nis good work, **and** a cleared stop condition is re-verified by the PM on `origin/main`,\nnever accepted from the dev's prose alone. Its verdict criterion is the reported evidence\nsurface (what was searched, what was found) plus the PM's own re-check; the incident is\ncompressed to the house one-line form.\n\n**`references/dispatch-runbook.md`** — one brief-construction note in `## 派发词构造细则`,\ndirectly after the three-partition clause it is a sibling of: a premise/stop-condition\ncheck in a brief must ask the dev to report **evidence**, not a verdict — the PM\nadjudicates the fork.\n\nOut of scope by the grading, and deliberately not attempted here: the separately-reported\nartifact as a hard gate, and forbidding a same-turn commit past a stop condition. Both\nchange the dispatch state machine and are recorded as inputs to the whole-text\nrestructuring round rather than decided piecemeal.\n\n## How the two lines were paid for\n\nBoth files sit at their line-ratchet ceilings with **zero headroom**. Payment is in-place\ncontent compression — no ceiling raise, no re-wrap as payment, and no dated ruling or\nverbatim maintainer quote deleted.\n\n| file | before | added | compressed | after / ceiling |\n|:--|--:|--:|--:|--:|\n| `references/review-checklist.md` | 82 | +4 | −4 | **82 / 82** |\n| `references/dispatch-runbook.md` | 243 | +2 | −2 | **243 / 243** |\n\nWhat was compressed, and what was removed from each:\n\n- `review-checklist.md` — the local-gate-union item drops its restated rationale, which\n  the preceding pin-to-head item and the dev-side contract already carry (−2); the\n  cross-the-boundary item drops its closing aphorism (−1); the scope-check item folds its\n  changeset-route tail (−1). Every operative branch survives: the contract requirement,\n  the `head.sha` comparison, both-directions rejection, the no-HEAD-quoted handling, and\n  both repos' tests/docs-only routes.\n- `dispatch-runbook.md` — the three-state recovery item folds its two parenthetical\n  incident retellings into the house one-line form, per that file's own 行文纪律 (−1);\n  the subagent fast-forward paragraph drops the redundant alternative spelling of the\n  command it already gives (−1).\n\nProvenance preservation was checked mechanically rather than asserted: both files carry an\nidentical date inventory before and after, and the runbook's bracketed-quote inventory is\nbyte-identical (same set, same count). The one bracketed span that leaves\n`review-checklist.md` is the scare-quoted phrase `「本地全绿」` inside the compressed\nsentence — not a ruling, not a maintainer quote.\n\n## Verification\n\nGate families derived on the actual change set with\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (2 paths, committed\n2 / working tree 0 / untracked 0), re-derived after the final commit — same 8 families, no\nnew one. The union below was run **after** the final commit, at HEAD `562cb567`, exit codes\ncaptured before any pipe:\n\n- `pnpm check:pm-skill-ratchet` — the two verdict lines this PR is accountable for:\n  - `✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/references/review-checklist.md is 82 lines (ceiling 82; headroom 0).`\n  - `✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/references/dispatch-runbook.md is 243 lines (ceiling 243; headroom 0).`\n- `pnpm check:pm-skill-id-lint` — `✓ check-skill-id-lint: 19 file(s) clean (pattern /#[0-9]{3,}/g).`\n- `pnpm check:doc-authoring` — `✓ doc authoring guard: 389 files clean — no bare metadata literals.`\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` — `✓ check:doc-formula-expressions: 22 record-scoped formula example(s) across 418 files / 1447 TS blocks judged clean by @objectstack/formula.` (needed its dependency closure built first)\n- `pnpm check:pm-governed-merges` — `✓ check-governed-merges --self-test: 129 assertions`\n- `pnpm check:required-contexts` and `node scripts/check-required-contexts.mjs` — `✓ check-required-contexts: 6 required context name(s) pinned across 2 workflow(s)`\n- `pnpm check:skill-frame-sync` — `✓ check-skill-frame-sync: 4 copies of the decision frame are structurally isomorphic across 3 files`\n\nControl-byte self-scan over both edited files: no match (escaped spellings only).\n\nNo changeset — this is instruction-surface text under `.claude/`, publishing nothing;\n`skip-changeset` per this repo's convention.\n\n## Governance\n\nThis PR edits `.claude/**`, a governed surface. It opens **draft**, it is for **human merge\nonly**, and **no auto-merge** is or should be enabled on it.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01RMTpSRF5CjMmQBFfPtPCwJ)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RMTpSRF5CjMmQBFfPtPCwJ)_"
+}

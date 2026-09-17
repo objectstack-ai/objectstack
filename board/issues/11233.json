@@ -1,0 +1,34 @@
+{
+  "number": 11233,
+  "kind": "issue",
+  "title": "release.yml 的 version-pr 车道改为「定时 + 按需」刷新——终结 Version Packages PR 被每次 main push 强刷、CI 永不收敛的合并竞态",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T04:44:06Z",
+  "updated_at": "2026-08-23T05:26:43Z",
+  "closed_at": "2026-08-23T05:26:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11233",
+  "body": "维护者 2026-08-23 拍板:「立卡派发 release.yml 的定时化改造」。skills 席 session `757f0dc0-5dae-51d7-9053-c15c57ebfe3b` 立卡并派发。\n\n## 问题(实测,非推断)\n\n`release.yml` 的 `version-pr` job 在**每次 main push** 上运行,changesets action 每次 `reset --hard` 到当前 sha 重算并 force-push `changeset-release/main`。在 ~18 合并/日的 main 上,#10183 的分支 CI 永不收敛、入队即被踢(`docs/releases-maintenance.md` 记录过 rc.6 被追四圈、估算需冻结两仓 ~40 分钟)。已核实:**升级 @changesets/cli 3.0 不解决**(本仓已在 ^3.0.0,行为如故——churn 是 action 算法 × 触发器,与 CLI 版本无关);cut-rc 快照道维护者明确不想再养。社区成熟解法即本卡:**changesets 官方 automating 文档的 schedule 模式**。\n\n## 改造(单文件为主:`.github/workflows/release.yml`)\n\n1. `on:` 增加 `schedule`(建议 `0 */6 * * *`,cron 只对默认分支生效);`version-pr` job 的 `if:` 从 `github.event_name == 'push'` 改为 schedule/按需——**push 不再刷新 version PR**。两次刷新之间 #10183 静止:分支 CI 可收敛,可正常走队列合并。\n2. **`release-integrity` 与 `publish` 两个 job 原样留在 push 上**。ADR-0125 的不变量一个都不许动:publish 仍只在「main 版本不在 npm」时启动、仍整体挂 `environment: release` 等人批;⛔ version-pr 仍不得获得任何 publish 能力(action 不带 `publish:` script 的结构性保证保留)。\n3. ⚠️ **按需刷新与修复道的 dispatch 冲突必须显式设计**:现有 `workflow_dispatch` 是 publish 修复道(带 `force` input)。若直接让 version-pr 也吃 dispatch,一次「刷新」会同时把 publish 审计拉起并在 environment 门挂一个待批部署(噪音),反之亦然。可行形状(dev 定夺,PR 正文论证):dispatch 增加 `refresh_version_pr` boolean input,`version-pr` 走 `schedule || (dispatch && inputs.refresh_version_pr)`,`publish` 走 `push || (dispatch && !inputs.refresh_version_pr)`——一个文件内分流,不新增 lane。\n4. `version-pr` 现有的 per-job concurrency(`release-version-pr-…`,cancel-in-progress: false)保留;release.yml 头部那段车道叙事(force-refresh 相关句子)与 `docs/releases-maintenance.md` 中「The standing Version Packages PR is force-refreshed on every main push」的前提句同步更新——文档描述的是机制,机制变了描述必须跟。\n5. 发版操作流从此收敛为:**(需要时 dispatch 刷新)→ 合并 #10183 → 批准 release 环境**。\n\n## 验证要求\n\n- `node scripts/pm/dispatch-gates.mjs` 派生并跑全族(至少 `check-ci-filter-parity`、`check:workflow-status-functions`、`check:required-contexts` 这类读 workflows 的门);\n- workflow 语法静态校验(仓内既有手段,勿引新依赖);\n- `check-governed-merges --test` 判落地类(`.github/workflows/**` 不在 governed 名录,预期普通队列,核实勿假设);\n- ⛔ 本卡不碰 publish/release-integrity 的任何步骤体、不碰 cut-rc.yml、不碰 environment 配置;release.yml 头部 2026-08-07「版本发布必须是人工的」裁决叙事一字保留。\n\n参考:[changesets automating 文档](https://github.com/changesets/changesets/blob/main/docs/automating-changesets.md)(schedule 模式)· changesets/action#215(auto-merge,⛔ 与 08-07 裁决冲突,不采)。"
+}

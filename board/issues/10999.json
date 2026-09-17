@@ -1,0 +1,32 @@
+{
+  "number": 10999,
+  "kind": "issue",
+  "title": "spec: widen the #8778 `tenancy.organizationField` scope pin by name, per the ruled cloud#1395 Option A",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T03:43:00Z",
+  "updated_at": "2026-08-23T02:07:10Z",
+  "closed_at": "2026-08-23T02:07:10Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10999",
+  "body": "Carved out of **#10101** because that card cannot start without it, and because it belongs to a different seat. Filed **unassigned and ungraded** — `domain:*` and type are triage's to mint. The services seat carved it (it is blocked by it) and does **not** claim it: this lane has **zero `packages/spec` ownership**.\n\nThis is the **first** of the two slices a three-day-old ruling splits into. Nothing in #10101 can land before it.\n\n## The ruling being implemented — ⛔ not re-litigable\n\nMaintainer, 2026-08-17T03:18Z, accepting the decision-inbox recommendations in full (「新进卡六张 同意你的建议」), recorded on cloud#1395:\n\n> **Ruled: Option A — `resolveRecordOrganizationField` is promoted to a shared resolver used by all three platform-row writers (approvals, automation runs, audit). A platform row's organization is the SUBJECT record's organization; actor context is the fallback, never the primary.**\n\nThe ruling names this slice explicitly, and names *why* it must be its own act:\n\n> **Scope pin change**: the #8778 scope pin … is widened **by this ruling** — the annotation next to it must name this ruling and the three sanctioned consumers, so the widening is **declared, not discovered**. That slice routes to the **spec seat**.\n\n## What the pin says today\n\n`packages/spec/src/data/object.zod.ts` carries, next to `tenancy.organizationField`:\n\n> Scope-pinned by the #8778 ruling: this is ONE stamp-only declaration key, not the opening move of a general field-roles mechanism — a consumer other than audit stamping needs its own ruling before reading it.\n\nThat pin is doing its job. It is why #10101 stopped instead of reading the key, and it is why PR #9132 landed only the unambiguous half. **The ruling above is the \"own ruling\" the pin demands** — so this card satisfies the pin's condition rather than overriding it.\n\n## The work\n\nWiden the annotation **by name**. It must state:\n\n1. the ruling that widens it (maintainer 2026-08-17, cloud#1395 Option A), and\n2. the **three sanctioned consumers** — audit stamping, approvals, automation runs — as an exhaustive list.\n\n⛔ **This is a widening of a scope pin, not its removal.** The pin's whole value is that a *fourth* consumer must come back for its own ruling. An annotation that says \"may be read by platform-row writers\" or otherwise generalises would delete the property the pin exists to hold, while looking like compliance. If the pin cannot be widened by naming three consumers, stop and report — do not reshape it.\n\n⛔ Do **not** implement the resolver promotion here. That is #10101 and it lands in `plugin-approvals` and the automation-run recorder, after this.\n\n## ⚠️ The fork this widening must not paper over\n\nPR #9132 declined to pick this silently, and it is real rather than procedural:\n\n- `tenancy.organizationField` answers **\"which column says who this row is ABOUT\"**\n- `tenantField` / `organization_id` answers **\"what is this object WALLED by\"**\n\nThey coincide for ordinary business objects and **deliberately do not** for `sys_api_key`. An approval row and an audit row about the same record landing in *different* organizations would be the same two-tables-disagree pathology this work exists to end.\n\nThe ruling picks the subject-record answer. If the annotation can say so without prejudging the divergent objects, say it; if writing it down surfaces a case the ruling does not cover, **report it rather than resolving it** — the implementation half (#10101) still has to not break the objects where the two diverge, and it needs the annotation to be honest about that, not silent.\n\n## Why this is worth its own card rather than a rider\n\nThe ruling is from **2026-08-17** and its unambiguous half (PR #9132) landed the same morning. The write-side half has had no card since. #10101 was filed to fix that, and then could not start — because this slice was never carved. It is being carved now so the chain is not blocked on an uncreated card.\n\nThe severity is on record at #10101 and is not hypothetical: an approval opened with no acting organization **locks the record it is about while being invisible in every inbox, its owner's included** — measured over HTTP, not inferred.\n\n## Blocks\n\n- **#10101** — the resolver promotion (approvals + automation runs). Cannot start until this lands.\n- cloud#1395 — the cloud-side pins, which additionally wait on a framework pin bump (`.objectstack-sha`) after #10101 merges.\n\n## Refs\n\n#10101 (the implementation half; add `Blocked-by:` pointing here) · cloud#1395 (the ruled card and its measurement) · PR #9132 (the landed half, and the `promote, never repair` pins) · #8778 / #8287 (the scope pin and the ruling that set it) · #8707 (`resolveRecordOrganizationField`) · cloud#1406 (the **read-side** arm — a different fork, must not be merged with this one)\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 10848,
+  "kind": "issue",
+  "title": "[devx] the `spec-property-retirement` skill still prescribes the withdrawn \"rewrite it automatically\" tombstone sentence — a pin test reds anything that follows it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T13:39:29Z",
+  "updated_at": "2026-08-22T17:30:15Z",
+  "closed_at": "2026-08-22T17:26:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10848",
+  "body": "Found while correcting the four docs-site pages that said `os migrate meta --from` rewrites your sources (PR #10847). That PR closed the hand-written docs residue; this is the one remaining **prescriptive** carrier, and it is upstream of all of them — it tells future agents to author the false sentence again.\n\n## The defect\n\n`.claude/skills/spec-property-retirement/SKILL.md:150`, in the \"guidance 字符串怎么写\" convention list that every new `retiredKey()` tombstone is authored from:\n\n> 5. ``Run `os migrate meta --from <N-1>` to rewrite it automatically.`` —— **仅当**有 conversion 重写 sources。\n\nThat sentence is the withdrawn claim, twice over:\n\n- **`os migrate meta --from` rewrites no file.** It replays the ADR-0087 chain over the loaded stack in memory and *prints* the mechanical edits. Both `writeFileSync` calls in `packages/cli/src/commands/migrate/meta.ts` are guarded by `if (flags.out)` (`:347`, `:394-396`), so the only file it writes is the `--out` JSON snapshot; the command header at `:155-157` declines the AST rewrite as \"unsafe and lossy\". The in-place codemod is #9591 (v18, `pm:on-hold`), unbuilt.\n- **\"automatically\" is the exact word** the class-wide reword was written to remove.\n\nThe skill's own condition — \"仅当有 conversion 重写 sources\" — describes a capability that does not exist for any conversion, so the guarded branch is unreachable as written.\n\n## Why this is worse than a stale doc line\n\n`packages/spec/src/shared/retired-key-migrate-sentence.test.ts` is a **class pin that holds both directions**. From its docblock:\n\n> This pin therefore holds BOTH directions — the new sentence is required where a prescription names the command, and the withdrawn claim is a hard RED wherever it reappears.\n\nThe house sentence it requires:\n\n>     Run `os migrate meta --from <N>` to list the mechanical edits for\n>     existing sources; apply them by hand.\n\nBut the pin's population is `packages/spec/src` plus one occurrence in `packages/lint/src/validate-expressions.ts`. `.claude/**` is outside it. So the skill and the pin now disagree, and the skill is the one agents read *first*:\n\nAn agent retiring a property follows the skill, writes the prescribed sentence into a new tombstone, and the pin reds the PR. Best case that costs a round. **Worst case the agent reads a red pin as the broken thing and weakens it to match the skill** — which is how the withdrawn promise gets restored across ~90 shipped prescriptions that #9529 cleaned.\n\n## Evidence the skill is the last live prescriptive carrier\n\nScanning the tree for `to rewrite it automatically` / `to rewrite existing sources automatically`:\n\n| carrier | status |\n|---|---|\n| `packages/spec/src/shared/retired-key-migrate-sentence.test.ts` | the deliberate pin — asserts the string is RED |\n| `packages/spec/CHANGELOG.md`, `packages/lint/CHANGELOG.md`, `packages/platform-objects/CHANGELOG.md`, `examples/app-todo/CHANGELOG.md` | historical release records, never edited |\n| `docs/qa/platform-checklist/areas/cli.json` | the ledger *describing* the correction |\n| **`.claude/skills/spec-property-retirement/SKILL.md:150`** | **live prescription — tells authors to emit it** |\n\n`packages/spec/src` carries no shipped prescription with the withdrawn wording; that half is clean. `cli.json` revision 3 states \"the only other carriers are the deliberate pin test and four CHANGELOGs\" — the skill was not counted in that census, which is likely why it survived.\n\n## Suggested disposition\n\nReplace convention 5 with the house sentence the pin requires, and drop the \"仅当有 conversion 重写 sources\" condition (no conversion rewrites sources). The pin's docblock also documents the ONE allowed variant, by shape, for conversions covering only part of a value — worth carrying into the skill so authors have both forms.\n\n⛔ Not actionable by a dev agent unassisted: `.claude/**` is governed, human-merge-only. Filed for maintainer routing rather than fixed in PR #10847.\n\nRefs: PR #10847 (the docs-site half) · #9529 (the class-wide reword) · #6856 (the original two-verb split) · #9591 (the unbuilt in-place codemod) · `packages/spec/src/shared/retired-key-migrate-sentence.test.ts` (the pin).\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_"
+}

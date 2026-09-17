@@ -1,0 +1,35 @@
+{
+  "number": 11321,
+  "kind": "issue",
+  "title": "driver-sql: on SQLite the builtin audit columns DEFAULT to zone-naive `CURRENT_TIMESTAMP` while a declared `Field.datetime` NOW() default in the SAME table gets the canonical ISO-8601 form",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T11:04:13Z",
+  "updated_at": "2026-08-23T16:17:51Z",
+  "closed_at": "2026-08-23T16:17:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11321",
+  "body": "Found while landing #11224 (the MySQL precision half of the same helper). Not fixed there: that card is about the UPDATE door's stamp on MySQL, this one is about the SQLite **column DEFAULT**, and fixing it changes DDL — a different verification surface.\n\n## The mismatch\n\n`packages/drivers/driver-sql/src/sql-driver.ts`:\n\n- `createAuditTimestampColumn`'s non-MySQL branch is `table.timestamp(name).defaultTo(this.knex.fn.now())`. On SQLite `knex.fn.now()` compiles to an unqualified `CURRENT_TIMESTAMP`, which SQLite renders as a **zone-naive, space-separated, second-precision** string.\n- `defaultDatetimeSql`'s SQLite branch — the one a **declared** `Field.datetime` with `defaultValue: 'NOW()'` gets — is `(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, the canonical zone-explicit ISO-8601 form with millis.\n\nSo one table carries two different default shapes for the same conceptual value.\n\n## Measured (better-sqlite3, in-memory, via the driver's own `initObjects`)\n\nObject declared as `{ id: text, title: string, when: datetime defaultValue 'NOW()' }`. Emitted DDL:\n\n```sql\nCREATE TABLE `probe_t` (\n  `id` varchar(255),\n  `created_at` datetime default CURRENT_TIMESTAMP,                            -- builtin audit\n  `updated_at` datetime default CURRENT_TIMESTAMP,                            -- builtin audit\n  `title` varchar(255),\n  `when` datetime default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),            -- declared field\n  primary key (`id`)\n)\n```\n\nAn insert that lets the DEFAULTs fire (`insert into probe_t (id, title) values ('x','y')`) stores:\n\n```\ncreated_at  \"2026-08-23 11:03:23\"          <- zone-naive, space-separated, no millis\nupdated_at  \"2026-08-23 11:03:23\"          <- same\nwhen        \"2026-08-23T11:03:23.611Z\"     <- canonical\n```\n\n## Why this is the shape the driver elsewhere calls a defect\n\n`updatedAtStamp()`'s own docblock says exactly what is wrong with that shape, about a form it was already fixed away from:\n\n> The previous `…replace('T',' ').replace('Z','')` wrote a zone-NAIVE, space-separated string that `Date.parse` reads as LOCAL time, silently shifting the instant by the host offset on a non-UTC runtime (the objectos freshness-probe miss).\n\nA row whose `created_at` came from this DEFAULT carries that exact string. It is also the pre-canonical storage form that `backfillCanonicalDatetimes` and `repairCanonicalDatetimes` exist to converge — reachable here through a path that is writing it *today*, not through legacy data.\n\n## Reachability — narrow, but real, and stated honestly\n\nOn the driver's own insert paths `stampInsertTimestamps` fills both audit columns explicitly with `new Date().toISOString()`, so the DEFAULT does not fire and the stored value is canonical. The DEFAULT is what a write **outside** the driver hits:\n\n- raw SQL / `knex(...)` inserts (including test fixtures and seed scripts),\n- a hand-written migration or another process writing the same file,\n- any future driver path that inserts without going through `stampInsertTimestamps`.\n\nWhether that population is worth DDL churn is a triage call, not something this card decides.\n\n## Corroborating signal already in the repo\n\nTwo live-matrix suites build \"a hand-written migration that got the schema right\" and spell the SQLite audit default as `strftime('%Y-%m-%dT%H:%M:%fZ','now')`, each with a docblock claiming those columns \"take the SAME physical types `createAuditTimestampColumn` produces\":\n\n- `packages/drivers/driver-sql/src/sql-driver-11176-bulk-and-merge-updated-at.test.ts`\n- `packages/drivers/driver-sql/src/sql-driver-timestamps-without-ddl.test.ts`\n\nOn MySQL that claim holds (`datetime(3) default current_timestamp(3)` both sides). On SQLite it does not: the fixtures model a **more correct** table than the driver itself creates. So the fixtures and the driver disagree, and only the fixtures are asserted — which is why nothing has failed.\n\n## Suggested shape (not decided here)\n\nGive `createAuditTimestampColumn`'s SQLite branch the same canonical expression `defaultDatetimeSql` already produces, so one table cannot carry two default shapes. Whoever takes it owns the DDL-change surface: existing SQLite databases keep their old DEFAULT until the column is rebuilt, so the card has to say what happens to them (leave them, or converge them the way `backfillCanonicalDatetimes` converges stored values) rather than only changing what new tables get.\n\n⚠️ Note for triage: `backfillCanonicalDatetimes` and `sqliteCanonicalDatetimeSql` are the restart conditions of the `pm:on-hold` card #6009, so a fix that reaches for them collides with that hold and should be sequenced against it.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RfyXxZ2WPjcjhuXpiQQc3y)_\n"
+}

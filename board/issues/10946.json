@@ -1,0 +1,35 @@
+{
+  "number": 10946,
+  "kind": "issue",
+  "title": "Boot seeds permission sets and positions one at a time: 4 sequential DB round trips each, 2 of them an unconditional UPDATE",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T19:50:43Z",
+  "updated_at": "2026-08-22T18:32:12Z",
+  "closed_at": "2026-08-22T18:32:12Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10946",
+  "body": "Every permission set and every position an environment declares costs **exactly 4 sequential database round trips on every kernel boot**, and 2 of those 4 are an UPDATE that fires even when nothing changed.\n\n## Measured\n\nReal per-environment kernel build (`ArtifactKernelFactory.create()`, hosted capability slate, real `TursoDriver` in remote transport with every `@libsql/client` call counted), measuring a REBUILD — tables present, rows already seeded, nothing to change:\n\n```\npermission sets   round trips        positions   round trips\n              0          242                 0          242\n              5          262                 5          262\n             10          282                10          282\n             20          322                20          322\n             40          402                40          402\n```\n\nLeast squares: **slope exactly 4.0000, R² = 1.000000** on both axes.\n\nDiffing the per-statement round-trip histogram between 0 and 40 of each names the four:\n\n```\nper permission set                          per position\n+2  SELECT * FROM sys_permission_set …LIMIT  +2  SELECT * FROM sys_position … LIMIT\n+1  UPDATE sys_permission_set SET …          +1  UPDATE sys_position SET …\n+1  SELECT * FROM sys_permission_set …       +1  SELECT * FROM sys_position …\n```\n\nFor contrast, on the same rig objects, views and artifact seed records add **0.00** round trips each (0 → 400 objects all boot in 242): schema sync is already batched through `TursoDriver.supports.batchSchemaSync`. Identity content is the one content axis that is not.\n\n## Why it costs what it costs\n\n`bootstrapDeclaredPermissionSets` (`packages/plugins/plugin-security/src/bootstrap-declared-permissions.ts:166`) awaits `upsertPackagePermissionSet` once per set inside a `for` loop; the position binder has the same shape. On a local file database the loop is invisible. On a remote libsql/Turso database — every hosted environment — each leg is its own HTTP request, and the legs are awaited one after another.\n\nThe same rig measures how much that matters: injecting a synthetic per-call latency grows the whole `bootstrap` step at **171.7 ms per ms of RTT (R² = 0.998)**, so ~172 of the 242 baseline round trips sit on the critical path. At that rate 40 permission sets plus 40 positions add 320 round trips — more than doubling a boot that a request will only wait 20 s for (objectstack-ai/cloud#1555).\n\n## Direction\n\nBoth loops are read-then-write per item over a set known in full before the loop starts:\n\n1. Replace the per-item existence `SELECT` with ONE `find({ name: { $in: [...] } })` before the loop.\n2. Skip the `UPDATE` when the stored row already equals what would be written — an idempotent reconcile that writes unconditionally is paying two round trips per item forever to change nothing.\n\nThat takes the steady-state rebuild cost of both loops to O(1) round trips, leaving writes only where something genuinely drifted.\n\n## Reproducing\n\n`objectstack-ai/cloud`:\n```\nnode scripts/dev-local/bootstrap-curve.mjs --hosted --permission-sets 0,5,10,20,40\nnode scripts/dev-local/bootstrap-curve.mjs --hosted --positions 0,5,10,20,40\nnode scripts/dev-local/bootstrap-curve.mjs --hosted --permission-sets 40 --positions 40 --sql-histogram\n```\n\nRefs objectstack-ai/cloud#1555\n"
+}

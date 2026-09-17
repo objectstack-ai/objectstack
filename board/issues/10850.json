@@ -1,0 +1,35 @@
+{
+  "number": 10850,
+  "kind": "issue",
+  "title": "release: switch the changesets version workflow (\"Version Packages\" PR refresh) from every-merge-to-main to manual dispatch before a release",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T13:50:59Z",
+  "updated_at": "2026-08-23T05:36:28Z",
+  "closed_at": "2026-08-23T05:35:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10850",
+  "body": "Filed by the skills seat (`session_01ApyDuQY2fkunMCqXiqvBhR`) on the maintainer's direct instruction. Dedup-searched (`\"Version Packages\"`, `changesets version workflow`): no existing card; the only neighbour is the epic noted under Coordination.\n\n## Provenance (maintainer, PM chat 2026-08-21, verbatim, untranslated)\n\n> 我每周才发一次版本,changeset 每个pr 都跑有必要吗\n\nAfter the assessment (keep per-PR changeset validation; cut the per-merge Version-Packages refresh):\n\n> 立卡吧,version 工作流改成发版前手动触发\n\n> 包括 objectui 仓库\n\n## What to change\n\nThe workflow that runs `changeset version` and creates/refreshes the **\"Version Packages\" PR** currently fires on every push to `main` (~18 merges/day at current cadence, each refresh burning a CI run) while releases are weekly. Change its trigger to **`workflow_dispatch` only** — the maintainer runs it right before cutting a release.\n\n- Locate the actual workflow first (likely `.github/workflows/release.yml`; measure, don't assume) and confirm which job half does the version-PR refresh vs the publish half.\n- Publish/release stays exactly as it is: releases are human-only in this repo (AGENTS.md \"release act\"), and this change strengthens that posture — the Version Packages PR appears only when a human asks for it.\n\n## Explicitly NOT in scope (ruled to keep)\n\nPer-PR changeset **validation** gates stay on every PR: `check-changeset-no-major`, `check-empty-changeset`, `check-adr-0087-registration`, `check:changeset-gate-self-tests`, `check:objectui-changeset`, and the requirement that each PR carries its changeset. The ruling cuts the per-merge version-PR refresh only, not authoring-time validation.\n\n## Acceptance criterion (one line, executable)\n\nAfter landing: the version-PR job's `on:` triggers contain `workflow_dispatch` and no push-to-`main` path, and a test merge to `main` starts **zero** Version-Packages refresh runs (verify in the Actions run list).\n\n## Coordination\n\n⚠️ Epic objectstack-ai/objectstack#9465 (changesets v3 migration) declares `.github/workflows/release.yml` and `cut-rc.yml` in its file territory for its duration; 4/5 sub-issues are complete and #9500 is parked on the next pre-mode window, while #9499 rules on `changesets/action` v1→v2 against `release.yml`'s pinned rationale. The executing seat must sequence this edit with the epic PM (or land it as agreed cleanup as the epic winds down) — two writers on one release machine is the shape that epic exists to prevent.\n\nSister card for the objectui repo follows (same ruling, that repo's own workflow); cross-link added when it exists."
+}

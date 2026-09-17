@@ -1,0 +1,34 @@
+{
+  "number": 10307,
+  "kind": "issue",
+  "title": "[finding] Console UX findings from a full app walkthrough (17.1.0): home todo mislabel, override prominence, feed noise, date/axis inconsistency, rating rendering",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "finding",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T15:36:30Z",
+  "updated_at": "2026-08-23T05:26:02Z",
+  "closed_at": "2026-08-20T16:06:46Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10307",
+  "body": "[finding] Console UX findings from a full app walkthrough (17.1.0)\n\nCollected while driving HotCRM end-to-end in a zh-CN session (`objectstack dev`, open edition). These are console-level behaviours, not app metadata — the app author cannot fix any of them. Each is independently actionable; split freely. Sharp single-topic defects from the same walkthrough are already filed (#10278, #10280, #10283, #10285, #10287, #10292, #10297, #10298); this card is the residue that is polish rather than defect.\n\n## 1. The home page says \"全部处理完毕\" while the app holds 19 open tasks\n\nConsole home renders `待办事项 / 全部处理完毕` for a user whose CRM task list has 19 open rows, 9 of them 紧急 · due tomorrow. The widget reads only the platform inbox/approvals, but its label claims to be *the* todo list. Either scope the label (\"平台通知\") or give apps a way to feed it (e.g. a declared \"my work\" view per app).\n\n## 2. Admin override is the most prominent action row on a locked record\n\nFor an admin, a record with a pending approval renders `越权通过 / 越权拒绝 / 越权转签 / 撤回` as the topmost action row — above the record's own actions, styled as primary. The override *dialog* is excellent (it explains seat-less override and attribution in plain language), but the placement trains admins to treat the exception as the default path. Secondary styling or a \"管理员…\" overflow menu fits the semantics.\n\n## 3. A fresh record's feed opens with two system entries\n\nEvery create immediately shows `Created X` + `Updated X` (the second from a same-transaction flow write). Meaningful entries — `Stage: Prospecting → Needs Analysis`, approval decisions — drown between them on active records. Collapse create-plus-immediate-update into one entry, and consider defaulting the feed filter to human/business activity with 系统 as an opt-in.\n\n## 4. Four date renderings coexist in one view\n\nAdjacent surfaces mix `明天` / `8月5日` / `2026/8/21上午7:00` / `2026/8/20 22:01:24`. Relative-recent is good; the inconsistency is the problem. One policy (relative ≤7d, drop current year, full timestamp on hover) applied by the renderer would fix every app at once.\n\n## 5. Chart axis units differ per dashboard in the same locale\n\nOne dashboard's revenue axis renders `20万 / 40万 / 60万`, another's renders `200,000 / 400,000` — same org, same locale, same currency-shaped measure. The unit rule should come from the locale + magnitude, not from which widget config happened to set it.\n\n## 6. `rating` fields render as bare digits\n\nSince the 9.11 removal of rating display props (`allowHalf` etc.) there is no replacement rendering: a lead list's 线索评分 column is `1 3 5 2 4` — unscannable. The type knows its own max; stars (or dots) in list cells is the whole ask.\n\n## 7. Breadcrumb/tab truncation is aggressive\n\n`Wei Zhang - Skybro…` at a width where `Wei Zhang - Skyline Media` would fit. Truncate the middle, keep the discriminating tail, full name on hover.\n\n## 8. The dev-instance login banner could fill the form\n\nThe banner prints `admin@objectos.ai / admin123` as text; every evaluator's first act is to retype it. Click-to-fill on the banner removes the first friction of every demo.\n"
+}

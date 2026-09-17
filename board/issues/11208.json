@@ -1,0 +1,35 @@
+{
+  "number": 11208,
+  "kind": "pull_request",
+  "title": "perf(core): resolveLocalizationContext reads its three keys through settings.getMany (#10826)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T03:22:17Z",
+  "updated_at": "2026-08-23T04:09:48Z",
+  "closed_at": "2026-08-23T04:09:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-23T04:09:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11208",
+  "body": "## What\n\nThe caller half of #10826 (service half merged as #11200): `resolveLocalizationContext` prefers **one** `settings.getMany('localization', [timezone, locale, currency])` over three per-key `get()`s. Feature-detected — an older service keeps the three parallel gets; a thrown `getMany` lands in the same direct `$in` fallback a thrown `get` did (`failed = true`, #10221's failure-only cache semantics untouched).\n\n## Calibration (the card's own)\n\nThe three reads already ran parallel (1 leg), so this is a **query-count** fix — 16–18/24 collapse to one — not a latency fix.\n\n## Serial constraint honored\n\nLanded after #11197 (#10825) on `resolve-authz-context.ts`, per the `domain:engine` seat's ruling.\n\n## Tests\n\n3 new pins (getMany preferred + per-key get never called + zero direct reads; no-getMany fallback keeps three gets; thrown getMany → direct `$in` fallback runs once). `security/` suite 63/63 in the file, full security dir green, core tsc unchanged vs main. Changeset included.\n\nCloses #10826.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

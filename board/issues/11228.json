@@ -1,0 +1,34 @@
+{
+  "number": 11228,
+  "kind": "issue",
+  "title": "settings: loadRows engine branch drops tenant/global rows for user-scope reads — cascade dies at the user level on every engine-bound deployment",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T04:33:39Z",
+  "updated_at": "2026-08-23T08:39:13Z",
+  "closed_at": "2026-08-23T08:39:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11228",
+  "body": "Found while implementing #10826's `getMany` (the extraction preserved the behavior faithfully; this predates it — flagging rather than silently widening that PR's scope).\n\n## The divergence\n\n`SettingsService.loadRows(namespace, userId)` answers differently by backend when `userId != null`:\n\n- **engine branch**: `if (userId !== null) where.user_id = userId` → the find returns ONLY rows with `user_id = <userId>`. Global-scope and tenant-scope rows carry `user_id = NULL`, so they are excluded.\n- **memory branch**: `userId === null || r.user_id === userId || r.scope === 'tenant' || r.scope === 'global'` → the user's rows PLUS tenant and global rows.\n\n## Consequence\n\n`resolveKey` cascades `user → tenant → global → default` **within the one rows array it was handed**. For a user-scope key on an engine-bound deployment — which is every real deployment — a user with no personal row never sees a persisted tenant or global value: the cascade falls straight through to the manifest default. The same read against the in-memory store resolves correctly, which is exactly why the suite is green over a live defect (the fake is looser than the engine — the #4434 class, this time in a WHERE clause rather than a verb).\n\n`getMany` (#11200) groups user-scope keys under the userId load and tenant/global keys under the null load, so *tenant/global keys* resolve fine either way; the broken path is specifically the **user-scope key's fallback**.\n\n## Fix shape\n\nMake the engine WHERE mirror the memory predicate — e.g. `{ namespace, $or: [{ user_id: userId }, { scope: 'tenant' }, { scope: 'global' }] }` — and pin it with a test that runs the same fixture through BOTH branches and asserts identical resolution (the differential harness in `settings-getmany.test.ts` is most of the scaffolding).\n\nEvidence: `packages/services/service-settings/src/settings-service.ts`, `loadRows`, verified on origin/main today."
+}

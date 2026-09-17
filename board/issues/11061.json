@@ -1,0 +1,34 @@
+{
+  "number": 11061,
+  "kind": "issue",
+  "title": "`importObject`'s `opts.name` override bypasses the namespace prefix and persists an unprefixed federated object",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-22T14:18:51Z",
+  "updated_at": "2026-08-23T13:02:51Z",
+  "closed_at": "2026-08-23T13:02:32Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11061",
+  "body": "Found while working #10712 (PR #11059), which gave `generateObjectDraft` a\n`${namespace}_` prefix derived from the datasource's owning package. Filed rather than\nfixed there: #10712 is scoped to the **draft output**, and this is a different path with\na different question behind it. Unassigned, awaiting first-touch grading.\n\n## What\n\n`ExternalDatasourceService.importObject` reuses the draft pipeline, so it inherits the\nprefix — but only when the caller does not name the object itself:\n\n```ts\nconst name = opts.name ?? draft.name;\n```\n\n`opts.name` is taken verbatim. A caller passing `{ \"name\": \"customers\" }` gets an object\npersisted as `customers`, with no `${namespace}_` prefix, via\n`persistObject` → `metadata.register('object', name, definition)`.\n\n## Reachable today\n\nNot hypothetical, and not dependent on #10712's change. `ImportObjectOpts extends\nGenerateDraftOpts` with `name?: string` (\"Override the auto-derived object name\"), and\n**the import route forwards the request body as opts unfiltered** —\n`packages/rest/src/external-datasource-routes.ts:462`:\n\n```ts\nconst result = await svc.importObject(\n  req.params.name,\n  /* remote */ …,\n  (req.body as Record<string, unknown>) ?? {},\n);\n```\n\nSo `POST /api/v1/datasources/:name/external/tables/:remote/import` with\n`{\"name\": \"customers\"}` reaches it.\n\n## Why this is not simply \"the caller owns the name\"\n\nThat reading is defensible on its own, and may well be the right ruling — but the\nruntime write path this lands on does **not** apply the check that would catch it.\n`validateObjectNamespacePrefix` runs in two places: `defineStack()` (compile time) and\n`MetadataManager.publishPackage` / the protocol's publish pre-flight (the Studio\n\"publish\" path, `NAMESPACE_PREFIX`). `metadata.register('object', …)` is neither. So an\nimported object with an explicitly unprefixed name is registered and served without any\ngate having looked at the name.\n\nNote the in-tree callers do **not** currently exercise this: objectui's\n`ImportObjectDialog` posts no `name`, and `os datasource introspect` does not import at\nall. The exposure is the route body.\n\n## The question a first-touch should answer\n\nThree shapes, none of which a dev should pick unilaterally:\n\n- **A.** Apply the prefix to `opts.name` too (same `validateObjectNamespacePrefix`\n  treatment as the derived name). Consistent, but silently rewrites a name the caller\n  explicitly asked for.\n- **B.** Refuse an `opts.name` that fails the prefix rule, with the rule's own actionable\n  message. Contract-first, and matches what the publish gate does with the same\n  violation — but it turns a currently-accepted request into a 4xx.\n- **C.** Leave it: an explicit override is the caller's decision. Then the gap worth\n  closing is arguably the broader one — that `metadata.register('object', …)` applies no\n  namespace check at all — which is a much wider question than this seam.\n\nRelated: #10712 / PR #11059 (the draft half, where the prefix derivation lives),\n#11000 (the unauthorable `primaryKey` key in the same generator).\n"
+}

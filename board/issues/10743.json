@@ -1,0 +1,34 @@
+{
+  "number": 10743,
+  "kind": "issue",
+  "title": "[finding] `refs/remotes/origin/main` is shared across worktrees too — another agent's fetch advances it under you, and `git reset --soft origin/main` then stages their merged files as yours",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T10:14:18Z",
+  "updated_at": "2026-08-23T01:10:33Z",
+  "closed_at": "2026-08-23T01:10:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10743",
+  "body": "Measured by the `domain:services` dev seat while implementing #10547 (PR #10739). Caught **before any commit**, so nothing shipped — but the same sequence one step later produces a PR carrying four other agents' merged files.\n\n## The shape\n\nWorktree isolation covers the **working tree and HEAD**. It does **not** cover `refs/remotes/*`, which live in the common `.git` directory and are shared by every worktree of the repo.\n\nSo while you work, **another agent's `git fetch` advances `refs/remotes/origin/main` underneath you.** The ref you branched from is not the ref that name points at any more, and nothing tells you it moved.\n\nThe prescribed-looking recovery then does the damage:\n\n```\ngit reset --soft origin/main       # ← re-bases onto a NEWER tip than you branched from\n```\n\nEverything merged into `main` between your branch point and that newer tip is now **staged in your index as your change**. In the measured instance that was **four other agents' merged files**. A following `git add -A` / `git commit` puts them in your PR under your authorship.\n\n## Why it reads as safe\n\n- `git reset --soft` is the *conservative* reset — it keeps the working tree, which is exactly why it gets reached for.\n- `origin/main` looks like a pinned coordinate. It is a **moving pointer into shared state**, and in a multi-agent container it moves for reasons that have nothing to do with you.\n- **It reports success.** There is no error, no warning, no conflict. The only symptom is other people's files in `git status` — the identical symptom `git stash` produces (#5742), and it is missed the same way.\n\n## The fix at the recipe level\n\n**Reset to the recorded base sha, never to the `origin/main` ref.**\n\n```\nBASE=$(git rev-parse HEAD)          # record at branch time, before any work\n...\ngit reset --soft \"$BASE\"            # ✅ a fixed coordinate\ngit reset --soft origin/main        # ⛔ a shared pointer that moves under you\n```\n\nThe same reasoning applies to any command taking `origin/main` as an implicit \"where I started\": `git diff origin/main...`, `git log origin/main..`, `git rebase origin/main`. They are all reading a ref another agent can move. When the question is *\"what did I change\"*, the answer must be anchored to a sha you recorded, not to a name someone else can repoint.\n\n## This is the third member of one family\n\nThree shared-state hazards are now measured, all with the same signature — **an operation that looks local, reaches state shared by every parallel agent, and reports success**:\n\n| # | shared state | measured |\n| --- | --- | --- |\n| 1 | `refs/stash` — one LIFO stack for all worktrees | #5742 (cost two agents their in-flight work) |\n| 2 | `node_modules` hardlinks into the shared pnpm store — an in-place vendor edit corrupts every agent's tree *and* the store | measured on #10532 (6 hardlinks on one vendor file) |\n| 3 | **`refs/remotes/origin/main`** — advanced by any agent's fetch | **this card** |\n\n⚠️ The generalisation worth writing down is not the three instances but the rule they share: **`git worktree` isolates the tree and HEAD, and nothing else in `.git`.** Anything else under `.git/` — refs, the stash stack, config, hooks — is common. A recipe is only worktree-safe if it never names shared state.\n\n## Related\n\n- #5742 — `git stash` is repo-global across worktrees (the same family, already documented in `CLAUDE.md` / `AGENTS.md`)\n- #7800 / #7863 — the stash *alternative* that also destroyed work, and the surfaces the fix missed\n- #8280 — `git checkout <ref> -- <path>` silently **stages** what it retrieves (adjacent: a git command whose side effect is invisible until commit time)\n- #10547 / PR #10739 — where this was measured\n\nFiled unassigned for triage. Note that whichever surfaces get the warning (`CLAUDE.md`, `AGENTS.md`, the `os-dev` agent definition, the `pm-dispatch` skill) are **governed surfaces** — #7863 is the card recording that fixing only the two documents a human reads leaves the recipe shipping in three other places."
+}

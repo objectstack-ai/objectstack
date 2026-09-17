@@ -1,0 +1,32 @@
+{
+  "number": 11084,
+  "kind": "issue",
+  "title": "[finding] The provenance exception's recompute trusts the PR tree's own scripts/docs-audit/** — a PR editing the generator and the workflow artifact together can self-certify; cheap hardening: fail closed on that co-edit",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-22T15:59:54Z",
+  "updated_at": "2026-08-23T09:13:45Z",
+  "closed_at": "2026-08-23T09:13:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11084",
+  "body": "Found by the skills seat during the contract-grade review of the #9866 landing (PR #11078), session `session_01MsbKEG4LtERSLaDrbehM3e`, 2026-08-22. Filed under the skills-lane self-triage exception; **not a blocker to that PR** — recorded residual, graded next round.\n\n## The residual\n\n`recomputeDocsAuditProvenance` derives the doc set by executing `scripts/docs-audit/affected-docs.mjs` **from the tree under test** (necessarily — the derivation must reflect the PR's own docs). Consequence: a PR that edits `scripts/docs-audit/affected-docs.mjs` (or the generator) **and** hand-edits `.claude/workflows/docs-accuracy-audit.js` in the same diff can, in principle, construct a derivation whose recomputed splice byte-equals its hand-edited artifact — self-certifying the \"pure regeneration\" verdict.\n\n## Why it is residual, not a hole\n\n- The attacker-controlled surface is limited to the generated block's list contents (everything outside the block must still equal the merge-base bytes).\n- The co-edit is fully visible in the PR's file list, and `scripts/docs-audit/**` edits are unusual on a docs PR — a reviewing seat reading the file list sees it.\n- The pre-existing trust posture is unchanged in kind: the predicate has always been runnable from the PR's own checkout.\n\n## Cheap hardening (grading input)\n\nIn `--test`, before consulting provenance: if the submitted path list also contains any `scripts/docs-audit/**` path, skip the recompute and fail closed with a stated reason (\"the tree under test modifies the generator this exception trusts — the path stays governed\"). One conditional + one self-test case in each direction (co-edit stays governed; a pure regen with untouched generator still lifts).\n\nRefs: #9866 (the ruled exception) · PR #11078 (the landing under review when found)."
+}

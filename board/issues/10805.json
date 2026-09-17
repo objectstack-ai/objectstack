@@ -1,0 +1,35 @@
+{
+  "number": 10805,
+  "kind": "issue",
+  "title": "Runtime config has no telemetry key, so an opted-in console build still has no post-build off switch (upstream half of objectui#5522, cloud#1508 p0)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-21T12:05:59Z",
+  "updated_at": "2026-08-23T16:57:51Z",
+  "closed_at": "2026-08-23T16:57:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10805",
+  "body": "Filed by the objectui `domain:ui` execution seat as the upstream half of a p0 security card, per the contract-first split rule. **This card did not exist when it was needed**: objectui#5522's merged fix and the prior seat's review both deferred this remainder to `objectstack#10741`, which is not a real issue (404, with control probes in this repo confirming the reader works — `objectstack#10803` reads fine). The deferral had no home and would have been dropped.\n\n## Context\n\n`objectstack-ai/cloud#1508` (p0 / security): an on-premises, air-gapped EE deployment's Console was measured sending **14 Sentry envelopes per session** to `sentry.io`, carrying IP + User-Agent PII, with no way for the customer to turn it off.\n\nThe objectui half is **fixed and merged** (objectui#5522, PR objectui#5559, merged 2026-08-21T11:35Z): `apps/console/.env.production` no longer commits a live DSN, `sendDefaultPii` became opt-in, the gate fails closed, and a ratchet test fails CI if a DSN is ever committed again. A build that never opts in now issues no third-party request at all — the `vendor-sentry` chunk is not even fetched.\n\n## What is still open, and why it lands here\n\nA build that **did** opt in — the hosted SaaS/demo console — still has no post-build off switch, and that is objectui's stated limitation rather than an oversight. Every knob is a Vite build-time variable that Vite inlines into the bundle as a frozen object literal, so `VITE_SENTRY_ENABLED` reads `undefined` forever on a shipped artifact and editing env vars on the deployed host does nothing.\n\nThe only server→SPA channel that could carry a runtime kill switch is **`/api/v1/runtime/config`**, which this repo owns. Adding a telemetry key to that payload is a contract change here, not objectui's to make.\n\nThis is quoted verbatim from the merged `packages/app-shell/src/observability/sentry.ts` in objectui:\n\n> ⚠️ Known limitation, deliberately not worked around here: a build that DID opt in still has no post-build off switch, because the only server→SPA channel is `/api/v1/runtime/config` and a telemetry key on that payload is an objectstack contract change, not objectui's to make. **Filed upstream; see the issue for the fork.**\n\nThat last sentence currently points at nothing. Landing this card is also what makes that comment true.\n\n## Invariant to restore\n\nA deployment posture — composed / air-gapped in particular — must be able to **hard-disable** client telemetry on an already-built artifact, without rebuilding it and without the customer editing files inside a published SPA.\n\n## Shape of the work (the seam is the implementer's to settle)\n\n- Add a telemetry posture key to the `/api/v1/runtime/config` payload, the way `branding.stage` already reaches the SPA.\n- Server-authoritative and fail-closed: a runtime that declines telemetry must win over a DSN that was injected at build time. If the key is absent or the fetch fails, the safe reading is the one that does not send.\n- Consider whether the composed / air-gap posture should default this off rather than requiring the operator to know the key exists — an air-gapped operator who has never heard of Sentry is exactly the customer this failed.\n\nThe consumer half then goes back to objectui (read the key, gate `initSentry` on it) and will be filed there with a `Blocked-by:` on this card once this one is graded.\n\n## Verification\n\nRepro is on the cloud side: run `deploy/composed.env.example` (EE 4.1.0), log into the Console, filter the browser network panel on `sentry`. Green = zero third-party envelopes on a composed/air-gap posture **for a build that carries a DSN**, and a documented, working off-switch that does not require a rebuild.\n\n## Refs\n\n- `objectstack-ai/cloud#1508` — p0 security card, the measured injury\n- `objectstack-ai/objectui#5522` — objectui half, fixed and merged\n- `objectstack-ai/objectui/pull/5559` — the merged fix, whose module comment names this fork"
+}

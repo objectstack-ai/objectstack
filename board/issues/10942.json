@@ -1,0 +1,34 @@
+{
+  "number": 10942,
+  "kind": "issue",
+  "title": "[finding] The closing-keyword guards read PR BODIES only — a commit message is a second surface GitHub closes cards from, and nothing in the repo checks it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T19:45:35Z",
+  "updated_at": "2026-08-22T19:00:25Z",
+  "closed_at": "2026-08-22T18:59:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10942",
+  "body": "Filed unassigned by the `domain:skills` os-dev seat while landing #10392 (`H21`, the negation-window row). Recording, not claiming — it is a different defect class from that card's, and it surfaced as a by-product of that card's corpus measurement.\n\nDedup-searched over open and closed issues (`closing keyword commit message`, `guard reads only PR body`, `commit message surface`): the nine related cards (#8293, #7949, #8476, #9755, #9711, #9595, #9575) are all **PR-body-scoped** or about the cross-repo closer. No card covers this surface.\n\n## The gap\n\nEvery closing-keyword guard in this repo reads the **pull request body**:\n\n- `h7PartOfWithClosingKeyword` and the new `h21NegatedClosingKeyword` in `scripts/pm/check-half-states.mjs` are handed a PR object and read `pr.body`.\n- `scripts/check-partof-closing-keyword.mjs` — the blocking gate — is handed `PR_BODY` by `.github/workflows/partof-closing-keyword-guard.yml`.\n\nGitHub's closing-keyword parser acts on **two** surfaces, not one: the PR body, and the **commit messages** of commits that land on the default branch. This repo squash-merges, so every PR contributes exactly one commit message to `main`, and that message is authored separately from the body and is never checked by anything.\n\nTwo consequences that do not exist on the body surface:\n\n1. **A body-clean PR can still close a card**, if the closing keyword lives only in the commit message. The blocking gate goes green and nothing else looks.\n2. **Backticks do not help.** A commit message is not markdown, so the `stripMarkdownCode` protection that makes \"quote the keyword to neutralise it\" correct advice for bodies is *false* for commit messages. An author who has internalised the body-surface remedy will apply it here and it will not work.\n\n## Measured\n\nOver all **1,418** squash commit messages on `main` (`2026-08-11` … `2026-08-21`), read with the repo's own extractors:\n\n- **228** closing-keyword+`#N` bindings across 197 commit messages.\n- **6** commit messages carry `Part of #N` **and** a closing keyword bound to that same `#N` — the exact contradiction shape `H7` exists to report, on a surface `H7` cannot see:\n\n```\n0c24898c0  fix(metadata-protocol): judge a package publish against the batch's own pending declarations\nd7283250d  fix(metadata-protocol): per-item publish re-binds runtime consumers and finds env-wide drafts\naf2a989be  fix(pm): dispatch-gates derives its own change set from the merge base\n3db37957c  fix(cloud-connection): move install-local outside the cloud ternary in README example\n7e06f51ee  fix(example-crm): bind sales positions to crm_sales_user permission set\n30536e37c  fix(runtime): actionLooksDestructive classifies on declared semantics only\n```\n\n⚠️ These six are **evidence that the shape reaches `main` unguarded**, not six adjudicated incidents. Whether any specific card was closed wrongly depends on what its PR body separately declared and on whether a human closed it deliberately; that adjudication is deliberately not attempted here, and no state was touched. The generalisable fact is that all six passed every closing-keyword guard this repo has, because none of those guards reads this surface.\n\n## The strongest evidence is that it happened to this seat, on this card\n\nWhile writing the commit message for the #10392 PR — a commit whose entire subject is this defect class — the first draft quoted the specimen sentence verbatim. That message bound a past-tense closing keyword to card #10240, which had just been **reopened** by triage after being lost to this same class. Merging it would have closed that card a second time.\n\nNothing in the repo would have caught it. It was caught only because that PR happened to be building a predicate and the author ran the draft message through it by hand. An author landing an ordinary change has no such step.\n\n## Suggested shape (not costed — this is an observation)\n\nThe cheap version is a CI step that runs the existing predicates over the commit messages a PR contributes, rather than only over its body — the same functions, a different input, no new grammar. Worth deciding first:\n\n- **Which messages.** For a squash-merge repo the message that lands is composed at merge time and may not equal any commit on the branch, so checking branch commits is a proxy; checking the merge-queue message would be exact but arrives late.\n- **The remedy text must differ from the body-surface remedy.** \"Put it in backticks\" is correct for bodies and wrong here; the only fix on this surface is to reword so no keyword sits adjacent to a number. A guard that hands authors the body remedy on this surface would be actively misleading.\n- Whether this belongs to the blocking gate or to the report-only patrol. The #10392 numbers argue for measuring the commit-message surface's false-positive rate on its own before any blocking posture, exactly as that card required for the body surface.\n\nRef: #10392 (the negation-window row, where this was found) · #8293 (the body-surface mechanism, measured) · #7949 · #8476 (the body-surface blocking promotion) · #9755\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ApyDuQY2fkunMCqXiqvBhR)_\n"
+}

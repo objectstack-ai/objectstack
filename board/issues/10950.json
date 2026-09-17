@@ -1,0 +1,34 @@
+{
+  "number": 10950,
+  "kind": "issue",
+  "title": "Already-stranded `sys_file` orphans need a one-off reconciliation — the predicate-delete tombstone fix is forward-only",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T20:25:00Z",
+  "updated_at": "2026-08-23T15:02:57Z",
+  "closed_at": "2026-08-23T15:02:57Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10950",
+  "body": "Filed while implementing #10240 (predicate-delete tombstoning). Deliberately kept out of that PR — see \"Why not there\" below.\n\nBlocked-by: #10240\n\n## The gap\n\n#10240 repairs the tombstone write so that a `multi: true` delete of `sys_attachment` join rows marks the orphaned `sys_file` `status='deleted'` + `deleted_at=now`. That repair is **forward-only**: it changes what happens on the next predicate delete, and touches no row already written.\n\nEvery attachments-scope file orphaned by a predicate delete **before** the fix is still sitting at `status='committed'` with `deleted_at` NULL and zero `sys_attachment` join rows. That backlog is not merely late — it is permanent, for the reason #10240 documents: `sys_file`'s declared lifecycle nominates a sweep candidate only via `ttl { field: 'deleted_at' }` or `retention { maxAge: '7d', onlyWhen: { status: 'pending' } }` (`system-file.object.ts`), and an untombstoned orphan matches **neither**. The platform sweep never nominates it, the reap guard (`createSysFileReapGuard`) is never asked about it, and the storage bytes are never reclaimed.\n\nThe same backlog exists for the update verb from before #10171 landed, for the identical reason — the two cards fixed the same terminal state through two different verbs.\n\n## What a fix would need to decide\n\nNot designed here, because the shape is a real decision and not a mechanical one:\n\n1. **Where it runs.** A `os` CLI subcommand an operator invokes deliberately, versus a one-shot migration, versus a bounded self-healing pass inside the existing platform sweep. ADR-0057 §3.3 says detection and scheduling stay inside the single platform sweep and forbids a bespoke sweeper — that constraint should probably decide this, but it was written about ongoing detection, not backfill.\n2. **What it may do on its own.** Writing a tombstone starts a 30d grace window and ends in an irreversible byte delete. A pass that only *reports* candidates is strictly safer than one that tombstones them; whether the safe version is useful enough is the question.\n3. **How it separates a real orphan from a hook bypass.** A file with zero join rows may still be owned through the `ref_*` ownership columns (field-file lineage, ADR-0104/#3459 PR-5b), which the reap guard already re-verifies. A backfill has to ask the same question, not a weaker one.\n4. **Whether the scope filter is enough.** Only `scope === 'attachments'` files are reachable through the join-row count at all — the other scopes have their own seam (`releaseOwnership` in `file-reference-lifecycle.ts`).\n\n## Why not there\n\n#10240's PR carries the behaviour repair only. Backfilling existing data is a different blast radius (it writes tombstones that become byte deletes 30 days later, against rows nobody has looked at), it needs the design decision above rather than a mechanical edit, and folding it in would put an irreversible data operation into a bug-fix PR reviewed for a hook-context change.\n\nRelated: #5180 asks the broader platform question for the whole `sys_record_share` / `sys_attachment` / `sys_comment` family of polymorphic weak-reference tables; this card is the narrow `sys_file` byte-reclamation half.\n\nBacklinks: #10240 (the forward-only fix), #10171 (the update verb's twin), #2755 (where the tombstone flow landed), #3459 / #4797 (the reap guard's ownership and gate re-verification).\n"
+}

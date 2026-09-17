@@ -1,0 +1,32 @@
+{
+  "number": 9965,
+  "kind": "issue",
+  "title": "finding: CLAUDE.md carries no line-ratchet ceiling, while AGENTS.md does — same read path, same governance",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T10:30:49Z",
+  "updated_at": "2026-08-23T08:49:25Z",
+  "closed_at": "2026-08-23T08:48:35Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9965",
+  "body": "Filed unassigned while implementing #9923 (ratchet header boundary honesty). Out of that card's scope, which was ruled to be header wording about the published `skills/` root and explicitly not a coverage extension.\n\n## Measured\n\n`scripts/pm/check-skill-line-ratchet.mjs` `CEILINGS` on `origin/main` at merge base `5989b0de9` covers 18 files. Root `AGENTS.md` is covered at 958 lines. Root `CLAUDE.md` is **not** covered, at 86 lines.\n\n## Why the two look alike\n\nBoth are repo-root agent instruction files, both are read by every seat session, both are governed surfaces under Prime Directive #14. The reasoning that added the `AGENTS.md` ceiling — largest, most-read, most-binding instruction file with no ceiling — applies to `CLAUDE.md` in kind, differing only in degree.\n\n`CLAUDE.md` is also structurally growth-prone in a way the ratchet is built for: it exists to inline the rules that must never be missed, so every new must-never-miss rule is an argument for appending to it. It currently inlines four.\n\n## The honest counter-argument\n\nAt 86 lines it is small, and its own framing caps it: it is an excerpt of `AGENTS.md`, not an independent surface. A ceiling on it may be a control with nothing to control.\n\nThe card this was found on now makes the fact visible either way — the ratchet's header states that `CLAUDE.md`, `.claude/hooks/` and `.claude/settings.json` carry no ceiling, so absence reads as a fact to check rather than an oversight to infer. This card is only about whether the fact should change.\n\n## Decision needed, not an implementation\n\nAdding a `CEILINGS` row is a one-line change; whether it should exist is a policy question of exactly the kind #9923 was ruled on. Note the sibling repo `objectui` has its own `CLAUDE.md` and `AGENTS.md`, neither reachable from this ratchet at all, so a maintainer may prefer to answer the root-instruction-file question once rather than per file.\n"
+}

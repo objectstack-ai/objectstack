@@ -1,0 +1,35 @@
+{
+  "number": 10856,
+  "kind": "issue",
+  "title": "p0: main is RED — #10695 retired six spec/ui theme schemas that the PINNED objectui still imports, so Console Pin Gate cannot build the SPA",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T14:16:05Z",
+  "updated_at": "2026-08-23T00:56:08Z",
+  "closed_at": "2026-08-23T00:53:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 16,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10856",
+  "body": "⛔ **`main` is red right now.** Filed by the `domain:devx` PM seat (#6023, session `session_01DdCnBGcHeufjrq7drTD3wt`) from a merge-queue triage comment on PR #10839. Every claim below is measured on the refs, not inferred. (Correction on the thread: the gate is measured NON-blocking — red on every queue build, but merges proceed.)\n\nBlocked-by: objectstack-ai/objectui#5710\n\n## The failure\n\n`Console Pin Gate` → step *\"Build the Console SPA at the pinned objectui SHA\"*:\n\n```\n✗ Build failed in 6.04s\nerror during build:\nBuild failed with 6 errors:\n\n[MISSING_EXPORT] \"ColorPaletteSchema\" is not exported by \"../../../../packages/spec/dist/ui/index.mjs\".\n    ╭─[ ../../packages/types/src/zod/theme.zod.ts:18:10 ]\n```\n\nAll six, from one import line in the **pinned objectui** (`.cache/objectui-9a3daf8d37ad`), `packages/types/src/zod/theme.zod.ts:18`:\n\n`ColorPaletteSchema` · `TypographySchema` · `BorderRadiusSchema` · `ShadowSchema` · `ThemeModeSchema` · `ThemeSchema`\n\n## The cause, established rather than assumed\n\n**PR #10695** (merged **2026-08-21T14:12:50Z**) deleted `packages/spec/src/ui/theme.zod.ts` (**−503**) and edited the `ui` barrel (`packages/spec/src/ui/index.ts`, +11/−1). Counted on `origin/main`, all six names now have **0** exports anywhere under `packages/spec/src`:\n\n```\nThemeSchema: 0 · ColorPaletteSchema: 0 · TypographySchema: 0\nBorderRadiusSchema: 0 · ShadowSchema: 0 · ThemeModeSchema: 0\n```\n\n⇒ the pinned objectui imports six symbols the framework no longer exports, so the SPA cannot build.\n\n**Current state:** `origin/main` = `08318f7c0e`, `Console Pin Gate` = **failure**. This is a required-looking gate on every PR, so the blast radius is the whole repo — the same shape as today's earlier p0 (#10807), which also evicted queued PRs on rebuild. *(See the correction comment: non-blocking in fact.)*\n\n## ⭐ Why this slipped through, and why it is not a mistake in the diff\n\nThis is **not** a case of nobody thinking about objectui. #10695's own body records the ruling:\n\n> **B：退役授权面** — 收掉 `themes` 载体键与 schema，`app.branding` 留作唯一颜色面；**objectui 引擎代码与单测保留**。\n\nand again:\n\n> **Retained, per the ruling**: objectui's `ThemeEngine`/`ThemeContext` and their unit tests (**objectui untouched**); `app.branding` end to end.\n\nThe ruling accounted for objectui's **engine code and unit tests**. It did not account for objectui's **type package** — `packages/types/src/zod/theme.zod.ts` — *importing the retired schemas from `@objectstack/spec/ui`*.\n\n⚠️ *\"Leave objectui untouched\"* and *\"remove the exports objectui imports\"* cannot both hold, because **`Console Pin Gate` builds the pinned objectui against the CURRENT framework**. The gate is not a bystander to the ruling; it is the thing that makes \"untouched\" impossible. That interaction is the gap, and it is a ruling-level gap rather than a defect in the diff — which is why this card is for a human and not a dispatch.\n\n## What I have NOT done, deliberately\n\n⛔ Not dispatched. ⛔ No revert. ⛔ No touch to `packages/spec`. The three candidate remedies are all decisions a maintainer owns, and two of them modify or reinterpret an already-merged ruling:\n\n1. **Change objectui and bump the pin** — the shape the retirement implies, but it contradicts *\"objectui untouched\"* and is **cross-repo**: this session's GitHub access is scoped to `objectstack-ai/objectstack` and there is no `objectui` checkout on disk (today's `check-governed-merges` sweep reports the same three repos unaudited for the same reason).\n2. **Restore the six exports** as a compatibility surface until the pin moves — directly contradicts the retirement #10695 just landed.\n3. **Rule on what `Console Pin Gate` should do for a deliberate retirement** — e.g. whether a pin-breaking removal must land together with its pin bump. This is the general fix and the only one that stops the class.\n\n## Requested\n\nA ruling on which of the three, and — if 1 — someone with objectui access. Until then `main` stays red and `Console Pin Gate` fails on every PR.\n\n**RULED 2026-08-22 (see comments): A + C. The objectui first leg is objectui#5710 (Blocked-by above); this card's remaining scope after it lands = the Console pin bump. C = #10986.**\n\nRefs: PR #10695 (the retirement) · PR #10839 (where the queue triage surfaced it) · queue build `32489707921`, job `96794300524` · #10807 (today's earlier main-red p0, same blast radius)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 11253,
+  "kind": "issue",
+  "title": "publish-smoke 的 tarball 钉表按 @objectstack/* 作用域构造,漏掉无作用域的 create-objectstack——17.2.0 候选烟测假红,钉表应从可发布集派生",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T06:28:08Z",
+  "updated_at": "2026-08-23T07:21:09Z",
+  "closed_at": "2026-08-23T07:20:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11253",
+  "body": "维护者 2026-08-23 裁决(发版现场,原文):「A:先修烟测再发(推荐)」。skills 席 session `757f0dc0-5dae-51d7-9053-c15c57ebfe3b` 立卡即派发。**本卡阻塞 17.2.0 发版,最高优先。**\n\n## 实测(run `32622283383`,job `Packed-tarball smoke (release candidate)`)\n\n```\n[ERR_PNPM_NO_MATCHING_VERSION] No matching version found for create-objectstack@17.2.0\nThis error happened while installing the dependencies of @objectstack/cli@17.2.0\nThe latest release of create-objectstack is \"17.1.0\".\n```\n\n三个已核事实:\n1. 钉表按作用域构造(publish-smoke.yml:17 自述「@objectstack/* to the tarballs via the project's own pnpm [overrides]」)——**无作用域**的 `create-objectstack` 不被打包/钉住,pnpm 对它落回 registry,17.2.0 未发布 → 必红(鸡生蛋)。\n2. 该依赖是**本轮新增**:npm 上 `@objectstack/cli@17.1.0` 的 dependencies **无** create-objectstack(registry 实测),所以既往发版烟测从未踩到。\n3. 候选本身健康:create-objectstack 在 69 包 fixed 组、`private:false`,17.2.0 与 cli 同批发布——这是烟测盲区,非发布缺陷。\n\n## 修法\n\n`scripts/publish-smoke-pack.mjs`(+ 必要时 `scripts/publish-smoke.sh` / publish-smoke.yml):tarball 打包集与 override 钉表**从可发布集派生**——workspace 成员 ∧ `private:false`(或等价地从 `.changeset/config.json` 的 fixed 组读,择一并论证哪个是真源头),⛔ 不再用 `@objectstack/*` 作用域过滤,⛔ 不加手写名单——下一个无作用域包不得重蹈。派生处加断言:钉表集合 ≡ 可发布集(双向),缺一员即红并点名。\n\n## 验证要求\n\n- 本地复现先行:在 17.2.0 候选树上跑现钉表构造,证明 create-objectstack 缺席;修后同一构造包含它,并且**本地跑通烟测安装段**(pack 全集 + 脚手架安装,能跑多远跑多远,跑不动的部分说明并留给 CI);\n- 若脚本带 self-test,扩自测钉住「无作用域包在集合内」与「集合≡可发布集」两个方向;\n- `dispatch-gates` 派生并跑全族;`check-governed-merges --test` 判落地类(scripts/** + workflows 预期普通面);changeset 按门的处方(scripts-only 预期 skip-changeset);\n- PR 正文附:失败 run 链接、修前/修后钉表集合差、以及给发版现场的一句话——**合并后如何再触发一轮烟测拿真绿**(读 publish-smoke.yml 的触发器写清楚)。\n\n## 时序\n\n本卡合并 → 重跑烟测真绿 → 维护者合 #10183(17.2.0)→ 批准 release 环境。#10183 无需重刷(本卡 scripts-only,不进发布集)。"
+}

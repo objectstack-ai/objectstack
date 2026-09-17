@@ -1,0 +1,34 @@
+{
+  "number": 11089,
+  "kind": "issue",
+  "title": "[finding] `last-admin-guard.ts`'s `sys_member.valid_from` exclusion note says the role projection is not window-filtered — true until #10982, stale after it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T16:19:30Z",
+  "updated_at": "2026-08-23T15:02:41Z",
+  "closed_at": "2026-08-23T15:02:28Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11089",
+  "body": "Recorded while implementing #10982 (PR #11088). **Not fixed there** — `plugin-auth` is outside that card's lane, and PR #11038 is open on the package.\n\n`packages/plugins/plugin-auth/src/last-admin-guard.ts`, in `STANDING_KEY_EXCLUSIONS` under the `sys_member` entry, justifies excluding `valid_from` / `valid_until` from the administrator-standing key set like this:\n\n> ADR-0091 windows are not columns on `sys_member` today. The resolver calls isGrantActive on membership rows only when building `accessible_org_ids` (the group posture read reach); **the org-administration role projection it feeds `positions` from is NOT window filtered**, and this guard counts org administrators by GRADE alone (isOrgAdminGrade). So no reader of administrator standing consults these bounds, and writing one cannot revoke a grade. If the columns ever land on `sys_member`, the resolver is where the two halves have to be reconciled first — this list follows it, it does not lead.\n\nThe bolded clause was accurate when written. PR #11088 makes it false: `resolveUserAuthzGrants`'s role projection now drops out-of-window membership rows before the derivation, per the maintainer ruling of 2026-08-22 (live session, item 2 — a lapsed membership is *no membership*).\n\n### What is and is not affected\n\n- **The exclusion decision itself is unaffected.** That guard counts org administrators by grade alone (`isOrgAdminGrade`), so it still consults neither bound, and writing one still cannot revoke a grade. The entry belongs where it is.\n- **What is stale is the reasoning's middle step**, and it now *under-states* the enforcement — it describes an unfiltered read that no longer exists.\n- The note's closing sentence (\"the resolver is where the two halves have to be reconciled first — this list follows it, it does not lead\") is the instruction that has now been carried out, so it reads as pending when it is done.\n\nThis is prose accuracy in a security-adjacent exclusion ledger, not a live defect: no behaviour depends on the stale clause. Filing rather than fixing because the shape — an explanation left standing beside an assertion that changed under it — is exactly what #11046 was filed over, and it is invisible to every gate.\n\nSuggested edit: replace the bolded clause with a statement that both derivations off the principal's membership read now apply the predicate, and mark the reconciliation instruction as discharged by #10982.\n\nThe sibling ledger, `packages/qa/dogfood/test/authz-conformance.matrix.ts`, was updated in PR #11088 itself and needs nothing further; this is the second copy of the same claim, in a package that PR could not touch.\n\n### Refs\n\n#10982 (the ruling and the behaviour change) · PR #11088 (the implementation) · #11046 (the stale-explanation-beside-a-flipped-assertion precedent) · PR #11038 (open on `plugin-auth`; sequence after it)\n"
+}

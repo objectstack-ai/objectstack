@@ -1,0 +1,32 @@
+{
+  "number": 11083,
+  "kind": "issue",
+  "title": "[finding] The governed-PR review-request notification channel fails for PRs authored by the os-zhuang seat — \"Review cannot be requested from pull request author\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-22T15:58:53Z",
+  "updated_at": "2026-08-23T11:50:55Z",
+  "closed_at": "2026-08-23T11:50:19Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11083",
+  "body": "Measured by the skills seat (session `session_01MsbKEG4LtERSLaDrbehM3e`, 2026-08-22) on the first governed PR of its batch. Filed as `finding` under the skills-lane self-triage exception; grading next round.\n\n## Measured\n\nThe ACCEPT path for a governed-surface PR requires requesting review from `os-zhuang` (the maintainer's notification account — draft-PR review requests push to their phone; ruling 2026-08-19). On PR #11077, authored by a dev dispatched from an `os-zhuang` seat session, the call fails hard:\n\n```\nupdate_pull_request(reviewers: [\"os-zhuang\"]) → 422\n\"Review cannot be requested from pull request author.\"\n```\n\nGitHub forbids requesting review from a PR's author. Seats run as several accounts (os-elon, os-warren, huangyiirene, os-sales, os-zhuang…) — so the channel works for most lanes but structurally fails for every governed PR authored under `os-zhuang`, which includes any seat the maintainer runs interactively under their own account.\n\n## Impact\n\nThe \"awaiting a human merge\" push notification never fires for exactly this class; the PR is visible only via the round report and the assignee fallback (assigning the PR to `os-zhuang` does work and was applied to #11077 as the interim).\n\n## Directions (grading input)\n\n1. Record the assignee fallback as the standing alternative in the ACCEPT-path clause: request review where possible; on the author-identity failure, assign the PR to the maintainer's account instead, and say so in the round report. (Cheapest; protocol text, ratchet-paid.)\n2. Route os-zhuang-seat governed dispatches to a different authoring identity so the review-request channel always works. (Fleet-shape change — maintainer territory.)\n\nRefs: the ACCEPT 路径分叉 clause in `.claude/skills/pm-dispatch/SKILL.md` · PR #11077 (where measured)."
+}

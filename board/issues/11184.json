@@ -1,0 +1,37 @@
+{
+  "number": 11184,
+  "kind": "issue",
+  "title": "Walled postures must not elevate the first self-registrant: platform admin comes ONLY from an env-declared owner email; self-signups never join the Default Organization — ruled fix for cloud#1509",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p0",
+    "security"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T01:26:26Z",
+  "updated_at": "2026-08-23T13:02:49Z",
+  "closed_at": "2026-08-23T13:02:32Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11184",
+  "body": "Filed by the triage seat as the framework leg of objectstack-ai/cloud#1509 (measured p0: on a walled multi-tenant SaaS with `OS_TENANCY_POSTURE=isolated` + `OS_AUTH_MEMBERSHIP_POLICY=invite-only`, the FIRST self-registrant received `platform_admin` + `isPlatformAdmin: true` and was merged into the deployment's Default Organization — full curl evidence on the cloud card).\n\n**Maintainer ruling (2026-08-23, live PM chat, verbatim: 「1509 选择 env 指定 owner 邮箱」— option A with the env-owner-email bootstrap):**\n\n1. Under walled postures (`isolated` / `group`), the \"first registrant becomes owner/platform admin\" path is REMOVED. Platform admin is granted only to the account matching an **env-declared owner email** (exact variable name is the implementer's to propose in the PR — follow existing `OS_*` naming conventions and document it in the composed template).\n2. Under walled + `invite-only`, NO self-registrant is auto-merged into the Default Organization — it belongs to the operator only. (Second registrant behavior measured today — 0 orgs, routed to create-workspace — is the correct shape for ALL self-registrants including the first.)\n3. Single-org posture keeps \"first user is owner\" — that default is ruled reasonable and out of scope here.\n4. Fail-closed clause: walled posture + no owner email declared ⇒ refuse startup with a message naming the variable (matching the existing walled \"undeclared knob ⇒ refuse\" style), rather than silently reverting to first-registrant elevation.\n\n## Establish-first\n\nLocate the elevation site(s) (plugin-auth bootstrap / first-user logic) and the Default-Org auto-join site before writing; report the map in the PR. Pin both directions: (a) walled + declared owner email ⇒ only that account elevates, self-signups get `positions: [\"user\"]` and no org; (b) single-org posture unchanged.\n\nSecurity surface: dispatch per lane discipline at judgment tier; refusal cases carry `code`+`status`.\n\nDownstream: objectstack-ai/cloud#1509 is the acceptance leg (blocked on this card) — composed template docs (`composed.env.example` wording) and the live re-verification happen there after the pin bump.\n\nRefs: objectstack-ai/cloud#1509 (measurement + ruling record)."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 11060,
+  "kind": "issue",
+  "title": "Flow field expressions can call no function but `NOW()`/`TODAY()` — every other identifier is rewritten to `null`, so a computed money value can never be rounded to its field's declared `scale`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-22T14:17:46Z",
+  "updated_at": "2026-08-23T17:03:07Z",
+  "closed_at": "2026-08-23T16:38:46Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11060",
+  "body": "## Summary\n\nThe value-producing expression surface in flows — `create_record.config.fields`, `update_record.config.fields`, `assignment.config.assignments` — supports **no function calls at all** except the two hard-coded date tokens `NOW()` / `TODAY()`. Every other identifier is rewritten to the literal `null` before evaluation, so `round(...)`, `ROUND(...)`, `Math.round(...)`, `.toFixed(2)` and `Number(...)` all silently evaluate to `undefined`.\n\nConsequence: **a flow cannot write a rounded value into a field that declares a `scale`.** Any flow that multiplies a currency by a percentage produces a raw IEEE-754 double, which the (correctly) enforced field scale then refuses at insert time.\n\nMeasured on `@objectstack/spec` **17.1.0**.\n\n## Where\n\n`packages/service-automation` → `src/builtin/template.ts`, `resolveToken()`. After the `NOW|TODAY` regex and the `$User.` / bare-path branches, the fallback path does:\n\n```js\nsafe = safe.replace(/([A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*)/g, (match) => {\n  if (match === \"true\" || match === \"false\" || match === \"null\" || match === \"undefined\") return match;\n  // ... resolve against flow variables ...\n  if (val === void 0 || val === null) return \"null\";   // <-- every function name lands here\n  ...\n});\nconst fn = new Function(`\"use strict\"; return (${safe});`);\n```\n\nAn identifier that is not a bound flow variable becomes `null`, so `round(x, 2)` compiles to `null(x, 2)`, throws `TypeError`, and is swallowed by the surrounding `catch { return void 0; }`. The failure is **silent** — the field is simply written as `undefined`.\n\n`create_record` and `update_record` both reach this via `interpolate(cfg.fields ?? {}, variables, context)`; `assignment` reaches the same `interpolate` for its values.\n\n## Measured\n\nDriving the real `AutomationEngine` + `installBuiltinNodes` (17.1.0) with `amount = 180000`, `discount = 30`:\n\n```\nraw            => 125999.99999999999   (number)   <- the unrounded product\nROUND(...)     => undefined\nround(...)     => undefined\nMath.round(...)=> undefined\n(...).toFixed(2) => undefined\nNumber((...).toFixed(2)) => undefined\n```\n\nOnly pure operator arithmetic evaluates, because operators need no identifier:\n\n```\n(x * 100 + 0.5 | 0) / 100                                  => 126000\n(x * 100 + 0.5 - ((x * 100 + 0.5) % 1)) / 100              => 126000\n```\n\nNeither is an acceptable authoring pattern: the `| 0` form is an int32 coercion that **silently overflows above ~21.5M** (any amount over `2147483647 / 100`), and the `%` form has to repeat the entire product three times inside one expression.\n\n## The asymmetry\n\nThe platform already **has** a rounding primitive. `@objectstack/formula`'s CEL stdlib exports 35 functions including `round`, `floor`, `ceil`, `abs`, `min`, `max`:\n\n```\nnow, today, daysFromNow, daysAgo, daysBetween, addDays, addMonths, date, datetime,\nabs, round, floor, ceil, min, max, upper, lower, trim, contains, startsWith, endsWith,\nmatches, joinNonEmpty, isBlank, isEmpty, coalesce, len, size, has, int, string, bool,\ndouble, timestamp, duration\n```\n\nBut `service-automation` imports `ExpressionEngine` for exactly **one** call site — `evaluateCondition()` — and coerces its result with `Boolean(result.value)`. So CEL is wired in as a *predicate* surface only (edge conditions, `decision` conditions, start gates). The *value-producing* surfaces run the separate bespoke `new Function` mini-evaluator above, which has no function vocabulary.\n\nThe result is that the same flow file can call `round()` in an edge condition and cannot call it in a field value.\n\n## Why this matters\n\n`scale` enforcement on number/currency fields is correct and landed deliberately (#7501). With it enforced and no rounding reachable from the expression surface, **any flow computing money from a percentage is unshippable** — the write is refused at insert time and the flow node fails.\n\nStanding example, found by driving the flagship exemplar app in a browser: objectstack-ai/hotcrm#1206 — `Generate Quote` fails for most non-zero discounts because the flow hands `180000 * (1 - 30/100)` = `125999.99999999999` to two `scale: 2` currency fields. That card is blocked on this gap; there is no app-side fix that is not a workaround for a missing platform primitive.\n\n## Suggested direction (not ruled)\n\nOptions, roughly in increasing order of scope:\n\n1. **Extend the template evaluator's known-function table** beyond `NOW`/`TODAY` with a small numeric set (`round`, `floor`, `ceil`, `abs`, `min`, `max`). Smallest change, but grows a second, divergent function vocabulary next to CEL's.\n2. **Route value-producing expressions through the CEL `ExpressionEngine`** that already backs conditions, so one dialect and one stdlib serve both predicate and value positions. Larger, and needs a compatibility story for the `{var}` template dialect the existing flows use.\n3. **Coerce on write** — have the data layer round to the declared `scale` instead of refusing. Rejected on its face here for surfacing: silent coercion of money is worse than a loud refusal, and it would undo #7501's intent.\n\nOption 2 looks right for \"declared = enforced, one dialect\", but the migration surface is the real cost and this needs a ruling rather than an agent's pick.\n"
+}

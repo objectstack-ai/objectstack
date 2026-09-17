@@ -1,0 +1,34 @@
+{
+  "number": 11326,
+  "kind": "pull_request",
+  "title": "tests(attachments): pin unscoped-multi-delete clause C3 end to end, and correct the ledger that still calls it broken",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T11:41:51Z",
+  "updated_at": "2026-08-23T12:04:00Z",
+  "closed_at": "2026-08-23T12:03:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-23T12:03:58Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11326",
+  "body": "Fixes #9483\n\nQA run #9401 listed `attachments-storage.attach-requires-parent-edit` clause C3 —\n*\"an unscoped multi-delete (no id AND no where) is refused outright (#4757)\"* — as\nunpinned. #9724 correctly declined to pin it: measured end to end, the refusal did\nnot fire, and pinning the behaviour of the day would have turned the eventual fix\nred. That product gap (#9719) was closed by PR #9797 and widened to the update verb\nby #9974.\n\n**So the first deliverable here was re-verification, not test-authoring.** Walking\nthe card's clause list against the merged ref:\n\n| clause set | verdict on `main` | evidence |\n|---|---|---|\n| `download-authz-both-sides` C3 | pinned already (#9724) | `attachments-public-read-acl.dogfood.test.ts`, ref accurate |\n| `download-authz-both-sides` C4 | manual by design | browser denial copy; ref's scope note says so |\n| `read-inherits-parent-rls` C1 + C3 | pinned already (#9724) | count-parity + scan-cap pins, refs accurate |\n| `attach-requires-parent-edit` C3 | **behaviour pinned, ledger stale, dogfood blind** | this PR |\n\nNothing #9724 landed is re-pinned.\n\n## The ledger was wrong in the dangerous direction\n\n`automated.ref` and `knownGaps` still read **\"⛔ CLAUSE 3 IS NOT PINNED … the #4757\n'refused outright' rule does NOT fire through ObjectQL.delete\"**. That has been false\nsince 2026-08-19. The next Tier-1 runner would have been told that a shipped, working\nsafety guard is broken.\n\n## The measured detection gap — why a new pin was needed at all\n\n\"Refused outright\" and \"the per-row gate refused one of the rows\" answer with the\n**same code**, so they are indistinguishable on a fixture whose rows split\nentitled/not — which is exactly the fixture the landed block uses.\n\nMeasured, not argued: with `dispatchUnscopedMultiWrite` removed from **both**\n`sys_attachment` registrations, `service-storage` rebuilt and the ablation proven\nlive in `dist/` (`ablation-dist-preflight.mjs` → *\"marker absent from all 6 built\nfiles\"*), the existing block stays **5/5 GREEN**. It cannot see the clause it is\nnamed for.\n\nThe new block seeds the one fixture that separates them — a caller who uploaded\n**every** matched row, whom the per-row gate would wave through — plus the\nempty-table (zero-match) limb, which no handler-only fix could ever reach.\n\n## Ablation (both legs rebuilt, both dist-preflighted)\n\nSame mutation, against the extended suite: **3 failed | 7 passed**, exactly as\npredicted, each red for its predicted reason — a matching count alone is not a pass.\n\n| case | predicted | observed |\n|---|---|---|\n| block 1 · \"refused OUTRIGHT\" | red — wrong message | `expected Error: Cannot delete attachment … to match object` (the per-row gate answered) |\n| block 2 · uploader of every row | red — resolves, the wipe | `promise resolved \"2\" instead of rejecting` — #9719's measurement reproduced |\n| block 2 · empty table | red — resolves | `promise resolved \"+0\" instead of rejecting` |\n| block 2 · scoped sweep (both sides) | green — no cascade | green |\n\nRestore leg: *\"marker present in 2 built files\"*; tree clean, `src` count back to 2.\n\n## Also corrected in the item\n\n- **`oracle` `api` → `test`, and step 6 rewritten.** The step prescribed a REST probe\n  the item's own `knownGaps` says the HTTP lane cannot express\n  (`DeleteManyDataRequestSchema` requires an ids list, #3897). A runner following it\n  would score a schema rejection as the refusal — green for the wrong reason.\n- **`where: {}` re-documented.** It reaches the same verdict by a *different* rule;\n  the whole-operation dispatch is deliberately scoped to a delete with no `where` at\n  all. The case now asserts the **per-row** message, so that boundary goes red rather\n  than silently agreeing if #4757's refusal ever widens.\n- Source list: `MULTI_DELETE_AUTH_LIMIT` → `MULTI_WRITE_AUTH_LIMIT`.\n\n## Verification — union at `e3da4cda` (the final commit)\n\n`Test Files 1 passed (1)` / `Tests 10 passed (10)`.\n\nGates green, each read from its own verdict line: `check:platform-checklist` (15\nareas, 205 items) · `check:nul-bytes` (6349 files) · `check:engine-double-contract` ·\n`check:where-matcher` · `check:test-source-alias` · `check:cross-package-test-inputs` ·\n`check:type-check-coverage` · `check:query-options-erasure` · `check:doc-authoring` ·\n`check:doc-formula-expressions` · `check:published-files` · `check:slot-lookup` ·\n`check:type-source-resolution` · `check-ci-filter-parity` · `check-plugin-teardown-shape` ·\n`check-affected-docs` · spec `check:empty-state` / `check:liveness` /\n`check:strictness-ledger` / `check:variant-docs` · `@objectstack/dogfood typecheck`.\n\n`check:type-check-debt --re-measure` **refused first** on an unbuilt closure — recorded\nas NOT MEASURED, then the closure was built exactly as `lint.yml` does and it re-ran\ngreen: *\"33 ledger entr(ies) re-measured in 233.9s, 1897 raw tsc error(s) total, none\nabove its recorded number.\"* No baseline moved.\n\nESLint narrowed to the diff and the narrowing is measured, not assumed: 2 files\nsubmitted, `--format json` reports the `.ts` file linted with **0 errors / 0 warnings**\nand the `.json` *\"ignored because no matching configuration was supplied\"* — so eslint's\nown config puts it outside the linted population. Type-aware linting is not enabled\n(`eslint.config.mjs` states no `parserOptions.project`, no typed rules), so this diff\ncannot move the verdict on any untouched file.\n\nNo changeset: `@objectstack/dogfood` is `private: true` and the diff is tests plus\nchecklist prose, so this releases nothing — `skip-changeset` applied, per this repo's\nroute 2 (an empty-frontmatter changeset is explicitly the wrong route here).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019siH5jDmk5hrayvfyojUqR)_"
+}

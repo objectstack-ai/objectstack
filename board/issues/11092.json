@@ -1,0 +1,38 @@
+{
+  "number": 11092,
+  "kind": "pull_request",
+  "title": "fix(skills): teach the house migrate-sentence in spec-property-retirement and widen the pin's population by that one file",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-22T16:42:30Z",
+  "updated_at": "2026-08-22T17:26:15Z",
+  "closed_at": "2026-08-22T17:26:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-22T17:26:03Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11092",
+  "body": "Fixes #10848\n\nImplements the maintainer's ruling of 2026-08-22 (Option A, recorded verbatim on the card): replace convention 5 of the retirement skill with the house sentence the pin test requires, drop the unreachable \"only when a conversion rewrites sources\" condition, carry the pin docblock's one allowed variant shape into the skill, and extend the pin test's population by exactly this one file — deliberately not the whole `.claude` tree.\n\n**Governed surface notice: this PR touches `.claude/skills/`** — draft, human-merge only (Prime Directive 14). It is never to be queued, armed, or flipped ready by any AI seat.\n\n## The two ruled files\n\n- `.claude/skills/spec-property-retirement/SKILL.md` — convention 5 now teaches the house sentence (\"Run the migrate-meta command to list the mechanical edits for existing sources; apply them by hand\", with the skill's usual N-minus-1 placeholder as the from-operand) plus the partial-conversion two-clause variant, and states why: the command replays the chain and prints the change list, and writes no source file until the in-place codemod (#9591, which remains open and is not addressed here) lands. The still-true tail of the old convention (the message never names the conversion id) is kept. File readings: 328 lines before, 334 after — net +6, inside the card's budget of about six.\n- `packages/spec/src/shared/retired-key-migrate-sentence.test.ts` — a new judged block covering the skill file. It cannot ride the existing corpus walk, for three mechanical reasons stated in the code: the walk yields only TypeScript files; the marker and house anchors require a numeric from-operand and a closing string-literal quote, while the skill spells a placeholder and ends sentences at a code-span close; and the reconstruction step drops any line opening with an asterisk, which in markdown is bold text, not a comment. So the skill is judged raw and whitespace-normalised with placeholder-aware anchors; the withdrawn-claim direction reuses the existing `WITHDRAWN_CLAIM` regex verbatim. Three tests: every taught prescription is house-form or MIXED; anti-vacuity (both shapes present, at least two judged sites); and the withdrawn claim is absent in every spelling.\n\n## Both directions verified (reverse verification from the committed state)\n\nStanding main's copy of the skill file up against the widened pin (tree-only restore, fix already committed): exactly the 3 new tests go red, all 9 pre-existing tests stay green. Observed direction: red, as predicted. Failure excerpt names the exact defect:\n\n```text\nAssertionError: Run `os migrate meta --from N-1` to rewrite it automatically. ... expected [ Array(1) ] to deeply equal []\n```\n\n(spelling of the placeholder adjusted here for the body sanitizer; the log carries the angle-bracket original). Restored from the committed branch afterwards; working tree clean.\n\n## Fabricated-match measurement (triage-flagged risk)\n\nCensus of the fixed skill file: 4 total mentions of the migrate-meta command; exactly 2 are judged — the two taught templates in convention 5; the 2 unjudged mentions are descriptive prose (the section-3 `retiredFromLoadPath` bullet naming the command with an \"old\" placeholder, and one bare naming of the tool), correctly outside the marker because they carry no \"Run ...\" prescription shape; 0 withdrawn-claim hits anywhere in the file. No false positives on unrelated content.\n\n## Gate-forced extra files (4, each named by a red gate's own remedy text)\n\n- `scripts/check-cross-package-test-inputs.mjs` + `turbo.json` — the new read escapes `packages/spec`, so `check:cross-package-test-inputs` requires the declared glob and the matching turbo `$TURBO_ROOT$` input (one file, not a subtree).\n- `.github/workflows/ci.yml` — `check:ci-filter-parity` requires the declared glob verbatim in the `crosspkg` scheduling filter so a skill-only diff still starts spec's suite.\n- `scripts/pm/check-skill-line-ratchet.mjs` — ceiling 328 to 334. The ratchet's own failure text says a raise requires a maintainer ruling quoted in the PR; the ruling is the card's, 2026-08-22, recorded by the skills seat: 「the maintainer ruled: 同意 (Option A)」 — Option A being \"replace convention 5 ... with the house sentence the pin test requires ... and carry the pin docblock's one allowed variant form into the skill so authors have both shapes\", which is precisely the +6 lines.\n\n## Verification (union at head 61adbc2c)\n\n- `pnpm --filter @objectstack/spec test` — \"Test Files 415 passed (415) · Tests 11065 passed (11065)\" (includes the widened pin: 12/12 in the pin file).\n- `pnpm --filter @objectstack/spec typecheck` — \"check:test-typecheck: OK — @objectstack/spec's test layer compiles under packages/spec/tsconfig.test.json\".\n- `pnpm check:type-check-debt` — \"check-type-check-coverage --re-measure: OK — 33 ledger entr(ies) re-measured in 232.1s, 1908 raw tsc error(s) total, none above its recorded number\".\n- `pnpm check:cross-package-test-inputs` — \"OK: 13 package(s) read outside themselves, all declared, and turbo.json hashes every declared glob\".\n- `node scripts/check-ci-filter-parity.mjs` — \"OK: all 84 declared cross-package glob(s) (73 unique) are covered by core or crosspkg\".\n- `pnpm check:pm-skill-ratchet` — \"✓ check-skill-line-ratchet: .claude/skills/spec-property-retirement/SKILL.md is 334 lines (ceiling 334; headroom 0)\".\n- `pnpm lint` (repo-wide eslint, no-inline-config) — exit 0 at head.\n- Full derived battery (36 light families from `dispatch-gates` over the actual change set: doc-authoring, skill-frame-sync, pm-governed-merges, required-contexts, node-version, shard-attestation, workflow-status-functions, aggregator-roster, step-collectors, liveness family, engine-double-contract, where-matcher, query-options-erasure, nul-bytes, type-check-coverage, and the rest) — all exit 0 at head 61adbc2c; every exit captured by redirect-then-capture, never through a pipe.\n\nNo changeset: this PR publishes nothing (internal skill, a test, root gate scripts, turbo and workflow config) — declared via the `skip-changeset` label per this repo's mechanism.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01MsbKEG4LtERSLaDrbehM3e)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01MsbKEG4LtERSLaDrbehM3e)_"
+}

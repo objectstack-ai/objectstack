@@ -1,0 +1,32 @@
+{
+  "number": 11155,
+  "kind": "issue",
+  "title": "finding: `check:ratchet-remedy-authority` sweeps every gate in `scripts/` and `dispatch-gates` can derive it for none of them",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-22T21:48:41Z",
+  "updated_at": "2026-08-23T08:35:48Z",
+  "closed_at": "2026-08-23T08:35:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11155",
+  "body": "Found while adding a new gate under #10534 follow-up 4 (PR #11149). Filed unassigned; not fixed there, because it is a different defect class from that card and its landing surface is another gate.\n\n## The shape\n\n`scripts/check-ratchet-remedy-authority.mjs` (#8435) sweeps `scripts/*.{mjs,mts}` — **every gate script in the repo** — and fails a new one that offers a ratchet-expanding remedy without declaring its authority. So *every* PR that adds a gate script is in its population, by construction.\n\n`scripts/pm/dispatch-gates.mjs` names it for none of them. Measured on `47ced12bf`:\n\n```\nnode scripts/pm/dispatch-gates.mjs scripts/check-auth-mount-ledger.mjs   | grep -c ratchet-remedy-authority  -> 0\nnode scripts/pm/dispatch-gates.mjs scripts/check-brand-new-gate.mjs      | grep -c ratchet-remedy-authority  -> 0\n```\n\nPositive control that the expression is not simply broken: the same grep returns non-zero for the file the gate *is* derivable from — its own source — and other `scripts/**`-declaring families (`check:entry-guard`, `check:cross-package-test-inputs`) are named for both paths above. So the zeros are real zeros.\n\n`--residue` puts it in the **undetermined** bucket: *\"their sources name no path at all — NOT known irrelevant.\"*\n\n## Why\n\n`extractWatchHints` reads module-scope string literals and refuses any literal with no path separator as too generic. This gate's population is assembled at runtime by `readdirSync` over the scripts directory, and the only filename-ish literals it carries are its `CONTROL` corpus keys — bare basenames (`'check-engine-double-contract.mjs'`), no separator. So it declares no derivable path.\n\nThe `CONTROL` roster is also the shape `dispatch-gates`' own residue note already warns about: *\"a list of the files that already exist can never contain one added tomorrow, so its silence is a fact about the roster rather than about your paths.\"* Here it is not even silence — it is undetermined.\n\n## What it cost\n\nPR #11149 went red on this gate at head `b86bd9e76`. The derived union for that change set (27 families) did not name it, and the author did not think to add it by hand. It is the first instance on #10534 where a derivation miss produced an actual red rather than being covered by a hand-named gate — the case the #10309 class is really about, since a gate nobody can derive *and* nobody thinks to name runs for the first time in CI.\n\n## Suggested remedy (not applied here)\n\nThe residue note names the escape itself: a gate whose population is a subtree reaches it by declaring the subtree spelling. A module-scope literal carrying a separator — e.g. the glob `scripts/*.{mjs,mts}` the header already states in prose, or `scripts/**` — would make it derivable for every gate-script diff. Worth checking in the same pass whether other `readdirSync`-populated gates share the shape; this was found by tripping over one, not by a sweep, so the extent is unmeasured.\n\n⚠️ Not verified by me: whether `hintCovers` accepts a brace glob (`{mjs,mts}`). Whoever takes this should measure that rather than assume it, since a hint that matches nothing is the same silent failure one level down.\n\n## Refs\n\n#8435 (the convention) · #10309 (the derivation-miss class) · #10534 / PR #11149 (where it surfaced) · `dispatch-gates.mjs` `hintCovers` / `extractWatchHints` docblocks (the refusal rule and its measurements)\n"
+}

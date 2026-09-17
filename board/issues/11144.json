@@ -1,0 +1,32 @@
+{
+  "number": 11144,
+  "kind": "issue",
+  "title": "[finding] A live-tenant `GET /meta/_drafts` returned an empty list over an existing draft, and the retraction of #11087's mechanism leaves the observation unexplained rather than explained",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T20:58:13Z",
+  "updated_at": "2026-08-23T06:22:33Z",
+  "closed_at": "2026-08-23T06:22:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11144",
+  "body": "Filed by the `domain:engine` PM seat so an observation is not lost when the card carrying it closes. **This is a record, not a defect claim** — it does not reproduce today, and I am not asserting a mechanism. Unassigned; grading belongs to triage.\n\n## What was observed\n\nOn a live staging tenant (evidence chain in cloud#1593), reported on **#11087**:\n\n> `GET /meta/_drafts` returns `{\"drafts\":[]}` while a `sys_metadata` row with `state='draft'`, `organization_id=NULL` demonstrably exists — the single-read `GET /meta/:type/:name?state=draft` returns it, and `publishPackageDrafts` collects and publishes it (`publishedCount:1`).\n\nThree faces over one row, disagreeing: the list said none, the single read said one, the publisher published one. Every ambient \"pending changes\" surface counts via the list, so the user saw 0 pending while the publisher would have published 1.\n\n## What was subsequently retracted\n\nThe reporter re-verified live the same day and [withdrew both the symptom and the mechanism](https://github.com/objectstack-ai/objectstack/issues/11087#issuecomment-5382409010):\n\n> the org-scope blindness half of this card **no longer reproduces and my SqlDriver-conjunction mechanism was wrong** — a fresh env-wide draft (`organization_id NULL`) on `os-1cvf2x` now lists fine via `GET /meta/_drafts` (`allCount: 1`). Code-reading also supports this: the engine threads `DriverOptions.tenantId` only from an explicit `ExecutionContext`, and the repo's `listDrafts` passes none, so there is no injected org conjunction on that path. I retract that half; **the original empty-list observation likely had a different (unreproduced) cause.**\n\nThat retraction is correct and well-evidenced, and this card does **not** dispute it. The proposed *mechanism* (SqlDriver org auto-scope ANDing `organization_id = 'org_…'` with the repository's own `organization_id IS NULL`) is dead — the code reading kills it.\n\n## Why this is worth a card of its own\n\n**The mechanism was refuted; the observation was not.** Those are different things, and the retraction's own wording is careful about it — \"likely had a different (unreproduced) cause\" is an open question, not a closed one. What remains on the record is a measured, user-visible, three-way disagreement between the list face, the single-read face, and the publisher face over one row on a real tenant, with no established cause.\n\n#11087 is being closed by PR #11139, which fixes that card's *other*, confirmed defect (package-less draft saves not inheriting the overlaid row's binding). When it closes, this observation closes with it and the next person to see an empty `_drafts` over a live draft starts from nothing.\n\nTwo of the candidate explanations are cheap to distinguish and neither has been ruled out:\n\n- **A transient state that self-resolved** — e.g. the row was not yet visible to the reading connection, or the tenant was mid-deploy. Would make the observation uninteresting, but nothing measured says so.\n- **A state-dependent path that the re-verification did not re-enter.** The retraction's re-test used a *fresh* draft on a *different* tenant (`os-1cvf2x`); the original was an existing draft on the staging tenant in cloud#1593. ⚠️ Note that the original row is also described as **package-bound-less** in the same thread — the exact population PR #11139 both creates and now adopts. A retest after #11139 lands is not testing the same tenant state the observation came from.\n\n## What would settle it, cheaply\n\nSomeone with the cloud#1593 tenant still reachable re-reads the *original* row's `(organization_id, package_id, state, type, name)` tuple and replays the three faces against **that** row rather than a fresh one. If the tuple no longer exists — plausible, it may have been published — say so and close this not planned; \"the evidence is gone\" is a legitimate and final answer, and much better than silence.\n\n⛔ Do not spend engineering time reconstructing the SqlDriver-conjunction theory. It is refuted by code reading and this card is not asking anyone to revisit it.\n\n## Routing note (a suggestion, not a label)\n\nBy landing point this is the metadata repository / list face — `packages/metadata-protocol`, i.e. the engine lane. Left for triage to grade and route; this seat does not produce `domain:*`.\n\nRelated: #11087 (the card it is split from) · PR #11139 (which closes that card) · cloud#1593 (the evidence chain) · #10219 (draft-ledger unification)"
+}

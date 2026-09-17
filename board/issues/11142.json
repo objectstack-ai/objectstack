@@ -1,0 +1,35 @@
+{
+  "number": 11142,
+  "kind": "issue",
+  "title": "A scalar `data.id` beside a DIFFERENT scalar `where.id` silently drops the `where.id` predicate — the one unhonoured-predicate shape #11009's refusal deliberately left standing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-22T20:50:00Z",
+  "updated_at": "2026-08-23T05:10:30Z",
+  "closed_at": "2026-08-23T05:10:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11142",
+  "body": "Found while implementing #11009 (the unhonoured by-id predicate refusal). Filed separately and unassigned: acting on it would reverse a pinned #5748 verdict, which is a maintainer decision, not a rider on that card.\n\n## The shape\n\n```ts\nawait engine.update(obj, { id: 'rec_1', title: 'x' }, { where: { id: 'rec_2' } });\n```\n\n`resolveEngineUpdateDispatch` rules `by-id` with `expectId: 'rec_1'` — the payload id outranks `where` (#5748, pinned in `ENGINE_UPDATE_DISPATCH_CASES` as `'a SCALAR data.id still wins over a scalar where.id'`). The `where.id = 'rec_2'` predicate is then discarded by the by-id driver path exactly the way #11009's extra keys were: the caller wrote \"update rec_1 where id = rec_2\" — a condition that can never hold — and the write lands on `rec_1` anyway, with no diagnostic.\n\n## Why #11009 did not cover it\n\n#11009's refusal fires on `where` keys **beyond `id`** (\"a by-id dispatch carrying predicate keys beyond `id`\", per its triage route). Here the only `where` key IS `id`, so the refusal does not reach it — and making it reach would flip a case the shared case-set pins with an explicit `expectId` assertion, i.e. a partial rollback of #5748's ruling A. The #6435 block in `engine.ts` records the same boundary from the other side: widening beyond the ruled scope \"is a separate decision, not a rider\".\n\nWhen the two ids are EQUAL the shape is redundant-but-honoured (the REST ingress folds the path id into the payload, so `data.id === where.id` is a normal spelling); only the UNEQUAL case is a silently-dropped declaration.\n\n## What a fix has to decide\n\n1. Refuse a by-id dispatch whose `where.id` is a truthy scalar different from the bound payload id (same loud-refusal family as #5748 / #11009). Cheap, but changes a pinned verdict — needs a ruling.\n2. Leave it, on the grounds that the payload id is the row address and a conflicting `where.id` is a caller bug too rare to arm. That keeps one silently-inert predicate shape in a family that has otherwise been made loud.\n\nRefs: `packages/metadata-core/src/engine-update-dispatch.ts` (case `'a SCALAR data.id still wins over a scalar where.id'`), #5748, #6435, #11009."
+}

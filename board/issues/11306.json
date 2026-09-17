@@ -1,0 +1,30 @@
+{
+  "number": 11306,
+  "kind": "issue",
+  "title": "record:activity drops every `sys_activity.type: \"scheduled\"` row, and 10 of FeedItemType's 13 kinds have no producer at all",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T09:50:07Z",
+  "updated_at": "2026-08-23T14:36:18Z",
+  "closed_at": "2026-08-23T14:36:18Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11306",
+  "body": "`record:activity` maps `sys_activity.type` onto feed-item kinds through a hardcoded table, and **`scheduled` has no entry** — so a scheduled (not-yet-held) meeting is discarded before any filter runs and can never appear on any activity timeline, whatever the page authors.\n\n## Measured\n\nFrom the shipped bundle (`@objectstack/console` 17.1.0, `dist/assets/plugins-views-BaBStVok.js`):\n\n```js\nYa = { created:'field_change', updated:'field_change', deleted:'field_change',\n       assigned:'field_change', shared:'field_change', system:'system',\n       completed:'task',\n       commented:undefined, mentioned:undefined, login:undefined, logout:undefined };\n\nfunction to(e,t){ let n = Ya[String(e?.type)]; return n ? {…} : null; }  // unmapped -> dropped\n```\n\n`'scheduled'` is not a key, so `Ya['scheduled']` is `undefined` and the row is dropped by `to()` — upstream of `showCompleted`, upstream of `types`, upstream of everything a page can configure.\n\nExecuted over a lead's real rows:\n\n```\ncreated    -> field_change\nupdated    -> field_change\ncompleted  -> task\nscheduled  -> undefined        <- dropped, 1 of 6 rows never reaches the timeline\nsystem     -> system\n```\n\n## Who writes `scheduled`\n\nHotCRM's `schedule_meeting` action — shipped for `crm_lead`, `crm_contact`, `crm_account`, `crm_opportunity` and `crm_case` — writes `sys_activity` rows with `type: EVENT_STATUS === 'held' ? 'completed' : 'scheduled'`. The held branch reaches the timeline; the scheduled branch is written, stored, queryable, and invisible on the surface built to display it. `commented` and `mentioned` are unmapped the same way, which is more surprising still on a component whose own props include `showCommentInput` / `enableMentions`.\n\n## The other half: declared kinds nothing can produce\n\n`FeedItemType` (`@objectstack/spec/ui`) publishes 13 kinds:\n\n```\ncomment | field_change | task | event | email | call | note | file |\nrecord_create | record_delete | approval | sharing | system\n```\n\nOnly **three** are reachable through `Ya` from `sys_activity`: `field_change`, `task`, `system`. The other ten are authorable — they parse, they typecheck, `build` accepts them — and no data path produces them. An author filtering to `types: ['event']` to show meetings gets an empty tab and no diagnostic; that is a declared surface enforced by nothing, and it reads to an author (or to an AI writing metadata) as a working feature.\n\n## Suggested direction\n\nEither extend the map so the vocabulary `sys_activity` actually stores reaches the timeline (`scheduled` → `event` is the obvious pairing and would make the declared `event` kind reachable at the same time), or narrow `FeedItemType` to the kinds a producer exists for. The present state is the worst of both: the enum promises ten kinds that cannot arrive, and a real stored row silently does not.\n\nFound while fixing objectstack-ai/hotcrm#1209; not worked around there, per 「平台相关的功能应该在平台中实现」.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 11223,
+  "kind": "issue",
+  "title": "driver-sql: `updateMany()` bypasses `formatInput` / `applyWriteColumnMap` — json and array writes are refused, a federated `columnMap` object's bulk update names a column that does not exist, and SQLite datetime writes land non-canonical",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T04:00:16Z",
+  "updated_at": "2026-08-23T10:05:08Z",
+  "closed_at": "2026-08-23T10:05:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11223",
+  "body": "Measured while implementing #11176, which noted the gap without measuring it (\"That may be deliberate or may be a second defect; it is not measured here\"). It is a second defect, and it is three defects wearing one cause. Deliberately not fixed in that PR: it changes which VALUES a caller may write, not whether `updated_at` advances.\n\n## The cause, one line\n\n`packages/drivers/driver-sql/src/sql-driver.ts` — `updateMany()` passes the caller's `data` straight to `builder.update(data)`. Every other write door in the file goes through `this.applyWriteColumnMap(object, this.formatInput(object, data))` first: `create`, `update`, `bulkCreate`, `upsert`, `rotatedUpdateById`. `updateMany` is the only one that does not.\n\nNote the WHERE side of the same call IS translated — `applyFilters` maps logical field to physical column. So on a federated object the filter finds the row and the SET clause then names a column that is not there.\n\n## Measured, live\n\nPostgreSQL 16.13 and MySQL 8.0.46 in-container, plus SQLite, through the driver's own `initObjects`.\n\n### 1. json / array values are REFUSED (loud) — live Postgres\n\nObject with `payload: { type: 'json' }` and `tags: { type: 'string', multiple: true }`.\n\n```\nupdate()     payload = {\"a\":2}  tags = [\"y\",\"z\"]        <- correct\nupdateMany() threw 22P02:\n  update \"probe_json\" set \"payload\" = $1, \"tags\" = $2, \"updated_at\" = CURRENT_TIMESTAMP where \"id\" = $3\n  - invalid input syntax for type json\n```\n\nSame shape on SQLite, with the dialect's own words:\n\n```\nupdateMany() threw: SQLite3 can only bind numbers, strings, bigints, buffers, and null\nstored value unchanged: {\"a\":1}\n```\n\n`formatInput` is what stringifies a structured value for the bind; without it node-postgres and better-sqlite3 each bind the raw JS object.\n\n### 2. A federated `columnMap` object's bulk update names a column that does not exist (loud) — every dialect\n\nADR-0015 section 18 fixture shape: `external.columnMap` binding local `name` to remote `full_name`.\n\n```\nupdate()     -> {\"cust_id\":\"c1\",\"full_name\":\"Aurora\"}    <- mapped, correct\nupdateMany() threw: update `legacy_p` set `name` = 'Bulk' where `full_name` = 'Renamed'\n                    - no such column: name\n```\n\nThe WHERE is mapped and the SET is not, in one statement. So `updateMany` is unusable on every federated object that remaps any column — the objects federation exists to serve.\n\n### 3. SQLite datetime values are stored NON-CANONICAL (silent) — the dangerous one\n\n`Field.datetime` column, same object, same value shape:\n\n```\nupdate()     when = \"2026-03-04T05:06:07.000Z\"     <- canonicalized by formatInput\nupdateMany() when = \"2026-05-06 07:08:09\"          <- stored raw\n```\n\nNo error. That second form is exactly the zone-naive, space-separated pre-#3912 storage form `needsLegacyDatetimeRepair` exists to repair on read, and it is being NEWLY written today. It also contradicts `canonicalDatetimeFields`, whose whole claim is \"proven to hold ONLY canonical UTC text — either backfilled by `backfillCanonicalDatetimes` or created empty in this process\": a table that satisfies that claim can be pushed out of it by one `updateMany`, after which the driver has dropped the read-side repair expression for it. `Date.parse` reads the naive form as LOCAL time, so the instant shifts by the host offset — the objectos freshness-probe miss, re-armed.\n\n`date` and `time` fields have the same coercion in `formatInput` and are presumably affected the same way; only `datetime` was measured.\n\n## Why this is not \"deliberate\"\n\nNothing in the file says so, and the three consequences above are not a coherent policy: two are hard failures on inputs the other doors accept, and the third is a silent regression of a storage-form invariant the driver asserts elsewhere. The likeliest reading is that `updateMany` predates the coercion registries and was never revisited.\n\n## Suggested shape (not decided here)\n\nRoute `updateMany`'s payload through the same pair the other doors use. That is accept-set widening on legs 1 and 2 (calls that fail today would start working) and a storage-form correction on leg 3. Worth checking whether any consumer depends on the raw pass-through before assuming it is free — and worth deciding whether the `NOW()` token and the runtime-default token, which `formatInput` also resolves, should resolve on this door too.\n\n## Not this card\n\nThe `updated_at` stamp itself, which #11176 adds to this door, is unaffected: it is written as the literal post-map column name (the same spelling `created_at` carries everywhere in this file) and is applied after the payload is assembled, so it is correct with or without this fix. The emitted SQL above shows it landing correctly in all three probes.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RfyXxZ2WPjcjhuXpiQQc3y)_"
+}

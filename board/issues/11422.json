@@ -1,0 +1,33 @@
+{
+  "number": 11422,
+  "kind": "pull_request",
+  "title": "docs(qa): revise cli.doctor-health-report to revision 2 — the monorepo-anchored expected-fail is now a pass",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T16:48:32Z",
+  "updated_at": "2026-08-23T17:15:49Z",
+  "closed_at": "2026-08-23T17:15:48Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-23T17:15:47Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11422",
+  "body": "Fixes #10798\n\nRevises `cli.doctor-health-report` in `docs/qa/platform-checklist/areas/cli.json` to **revision 2**. One item, one revision, one `history` entry — no other item in that file is touched (it is the hot shared file of the #10663 QA-run lane).\n\n## Why now\n\nThe item's last acceptance clause was an EXPECTED-FAIL recording a live product defect: `findMissingTests` / `findDeprecatedUsages` walked only `<cwd>/packages/spec/src` and printed `✓ Test coverage` / `✓ Deprecations` about a tree they never opened. #10679 landed the fix, so the clause had to invert or the item would instruct a runner to record a failure that no longer happens.\n\n## Written against a real run, not against the source\n\nThe clause a runner executes is an instruction, so the text was written from observed output. The shipped CLI was built from this base and driven in a real `create-objectstack -t blank` scaffold, and again from a monorepo checkout for the counterpart. Scaffold, verbatim:\n\n```\n  ℹ Test coverage         Skipped — no packages/spec/src in this directory (monorepo-only check)\n  ℹ Deprecations          Skipped — no packages/spec/src in this directory (monorepo-only check)\n```\n\nand under `-v`, beneath each:\n\n```\n      → Looked for <cwd>/packages/spec/src and found nothing to walk. This check reads the\n        monorepo's own spec sources, so outside that checkout it has no subject — and a ✓ here\n        would be a claim about files doctor never opened.\n```\n\nNeither old `✓` appears, neither `→ Checking…` step line appears, and the `@objectstack/spec  Not built` row is absent — its probe is now gated on `<cwd>/packages/spec/package.json`. From the monorepo the scanned arm still runs: `✓ @objectstack/spec    Built`, the step lines, and the real `⚠` findings all print.\n\n## The measurement corrected more than the card predicted\n\nThe card expected one row in the first acceptance clause's enumeration to have become conditional (`@objectstack/spec`). The real report shows the enumeration was wrong about a second row too, and had been since revision 1: **`Installed packages` was never unconditional** — `installedPackageLedgerChecks` returns `[]` on a clean ledger, so the row appears only on a ledger failure or a skipped entry. That also contradicted the item's own clause 4, which describes it as a *failure* row. `NODE_ENV` and `Tenancy posture` are finding-only for the same reason.\n\nSo the clause now splits **unconditional** rows (Node.js, pnpm, TypeScript, Dependencies, Git, Environment files) from **finding-only** rows, each with the condition that produces it, rather than naming a single exception.\n\n## What changed in the item\n\n- **title** — the tail declared the two `✓`s an expected-fail; rewritten to the skip behaviour.\n- **acceptance[0]** — row enumeration split unconditional vs finding-only; `verify` re-anchored.\n- **acceptance[7]** — EXPECTED-FAIL inverted into an ordinary pass clause, with the `printInfo`-not-`printWarning` invariant stated (withholding a false `✓` must not manufacture a false `⚠`).\n- **steps[0]** and **steps[6]** — the enumeration, and the old \"capture the two `✓` lines\" step, rewritten to capture the skip rows and assert three absences.\n- **negative** — the `@objectstack/spec  Not built` entry flipped from an accepted note into a regression; two negatives added for the skip row's own wrong shapes (a `⚠` instead of a `ℹ`, and the row vanishing instead of printing).\n- **fixtures** — the `requires` note now says both cwds must be run; the `knownGaps` `configExists()` anchor re-derived.\n- **source** — `doctor-unexamined-spec-tree.test.ts` added to the unit pins.\n- **every line anchor in the item re-derived at this base.** `doctor.ts` grew ~90 lines, so every number quoted at revision 1 had moved — including the ones in clauses this card did not otherwise touch.\n\n## Verification — union run at `0e833d5`\n\n| gate | verdict line |\n|---|---|\n| `pnpm check:doc-authoring` | `✓ doc authoring guard: 389 files clean — no bare metadata literals.` |\n| `pnpm --filter @objectstack/lint run check:doc-formula-expressions` | `✓ check:doc-formula-expressions: 22 record-scoped formula example(s) across 420 files / 1447 TS blocks judged clean` |\n| `pnpm check:nul-bytes` | `check-nul-bytes: OK (scanned 6400 text file(s) … no raw ASCII control bytes).` |\n| `pnpm lint` (repo-wide `eslint . --no-inline-config`, not narrowed) | exit 0 |\n| `pnpm check:platform-checklist` | `1 problem(s)` — **pre-existing**, see below |\n\nGate families derived from the tree with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` against the actual change set, not from a recalled list.\n\n`check:platform-checklist` reports exactly one problem, `coverage.json · manifest: UNCLASSIFIED`, and it is **not from this change**: reverting `cli.json` to `bb006446` and re-running produced the identical single problem and the identical exit 1, and the problem names a file this PR does not touch. Filed separately as #11421. Nothing in the run names `cli.json`, so the revision bookkeeping this gate does enforce is well-formed.\n\n## Scope\n\n- No `packages/cli/**` — the code fix already landed.\n- No changeset: this publishes nothing. `skip-changeset` applied, matching the precedent for checklist-maintenance PRs (#7636, #7638, #7716, #7717).\n- Out of scope, filed rather than folded in: #11420 (the sibling item `cli.doctor-deprecation-scan` is stale on the same two counts — a hint that #10680 already rewrote, and a full anchor set moved by #10679) and #11421.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015ahemw8RcTgqtxrj15PEZx)_"
+}

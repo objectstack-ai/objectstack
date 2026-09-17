@@ -1,0 +1,32 @@
+{
+  "number": 11135,
+  "kind": "issue",
+  "title": "pm-dispatch finding: queue-entry eligibility is all-checks-green, not required-green (objectui main went red through the queue); per-repo true-green invocations are tribal",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-22T20:00:58Z",
+  "updated_at": "2026-08-23T11:50:56Z",
+  "closed_at": "2026-08-23T11:50:20Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11135",
+  "body": "## Gap\n\npm-dispatch's landing discipline gates on the merge queue's own checks and tracks to MERGED, but says nothing about **queue-entry eligibility beyond required checks**, and the fake-green catalog in review-checklist covers only the stale-`dist` case. Two same-day incidents in the cloud/objectui pair show both halves biting.\n\n## Evidence (2026-08-22)\n\n1. **Queued on required-green while a non-required gate was red → main went red for ~an hour.** objectui#5696 had `build-and-test`-equivalents green but the **Type Check job (i18n call-site key gate) and one test shard red** — neither is in the merge queue's required set, so `gh pr merge` happily queued it and it landed. objectui main then failed on every subsequent PR until the fix-forward (#5697). The reviewing PM (me) had run the component tests but never looked at the PR checks page as a whole. Rule worth stating: **queue-entry eligibility = every check on the PR green, not the required subset** — the required set is the floor the queue enforces, not the bar the PM applies; a red non-required check is either a real defect or a broken gate, and both are the PM's business before entry.\n2. **Per-repo \"how to run tests so green means green\" is tribal.** objectui's vitest guard refuses package-dir runs precisely because they used to fake-green (22 unrelated console files pass, 0 of yours run — counted as passed); cloud has `preflight-workspace-dist` + the strict `check-test-typecheck` zone whose failures don't appear as `error TS` lines in CI logs (the turbo summary names only `#typecheck` failed — you must run the package's own `typecheck` script locally to see the ledger message). Each repo's true-green invocation is currently learned by stepping on it.\n\n## Suggested shape (for the skills seat to judge)\n\n- One sentence in the landing section: all-checks-green (not required-green) as queue-entry eligibility, with the objectui#5696 incident as the case.\n- A per-repo \"true green\" index — likely a compile-surfaces.md sibling or extension — one entry per repo: canonical test invocation (objectui: repo root only), the gates that don't surface in CI log greps (cloud: check-test-typecheck ledger), and the local preflight each repo's own guard output teaches.\n\nOrigin: maintainer directive 2026-08-23 「评估哪些需要更新cloud项目经理skills的，提交issue」. Receipts: objectui#5696/#5697, cloud#1598's typecheck round.\n"
+}

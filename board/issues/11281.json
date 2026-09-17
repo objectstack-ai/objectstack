@@ -1,0 +1,34 @@
+{
+  "number": 11281,
+  "kind": "pull_request",
+  "title": "docs(console): README describes the real Console resolution, not a removed npm fallback",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T08:44:03Z",
+  "updated_at": "2026-08-23T09:33:00Z",
+  "closed_at": "2026-08-23T09:32:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-23T09:32:59Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11281",
+  "body": "Fixes #11262\n\n`packages/console/README.md` is in this package's `files` array, so it is the page\nnpm renders for `@objectstack/console`. It described a resolution mechanism the CLI\nno longer performs.\n\n## The stale claim\n\nAt `origin/main` (base `1fa05a6`), `packages/console/README.md:31-35`:\n\n> The framework CLI's `resolveConsolePath()` (in `packages/cli/src/utils/console.ts`)\n> prefers `@objectstack/console` and **falls back to `@object-ui/console` when\n> present** — so cloud's Docker overlay (which `cp -r`s its build over\n> `node_modules/@object-ui/console`) keeps working.\n\n## What the code actually does\n\nRead from `packages/cli/src/utils/console.ts` at the same base — **unchanged by this\nPR**, and deliberately so:\n\n| Strategy | Line | Name it accepts |\n|---|---|---|\n| 1 · `require.resolve('@objectstack/console/package.json')`, from the app and from the CLI itself | `:194-204` | `pkg.name === CONSOLE_PACKAGE` only |\n| 2 · direct `<cwd>/node_modules/@objectstack/console` | `:214-221` | `pkg.name === CONSOLE_PACKAGE` only |\n| 3 · sibling-repo dev fallback, `../objectui/apps/console` | `:233-250` | `CONSOLE_PACKAGE` **or** `@object-ui/console` |\n\n`CONSOLE_PACKAGE` is `'@objectstack/console'` (`:48`). So:\n\n1. **There is no `node_modules` fallback to the `@object-ui/console` npm package.**\n   Both npm-facing strategies reject any resolved `package.json` not named\n   `@objectstack/console`. The function's own header says the legacy package \"is no\n   longer consulted\" (`:28-31`).\n2. **The one surviving mention is not a package resolution.** Strategy 3 reads the\n   `name` field of a checked-out `../objectui/apps/console` **source tree** — objectui\n   still names that workspace package `@object-ui/console`. It is a source-checkout\n   dev probe, and flattening it into \"the CLI still falls back to `@object-ui/console`\"\n   would leave the README false in a new way.\n3. **The trailing consequence was the load-bearing half.** Cloud and objectos Docker\n   images overlay into `@objectstack/console`'s `dist/` — `console.ts:19-22` states\n   this from the framework side, and triage measured the same in the `cloud` repo\n   (its Dockerfiles and `extract-console-assets.mjs`). The old sentence told an\n   operator their overlay works by a mechanism that does not exist.\n\n## The change\n\n`packages/console/README.md:31-47` (was `:31-35`) — the paragraph is replaced with the\nreal resolution order, the source-checkout distinction stated explicitly, and the false\noverlay consequence replaced by the actual overlay target.\n\n⛔ **The npm fallback is not restored in code.** Its removal was deliberate; the README\nwas the stale side.\n\nDeliberately left alone: the `@object-ui/console` rows in the comparison table\n(`:25-29`) and the `Updating` steps (`:41,45,47`) describe the objectui package and its\nbuild, which genuinely exist and are correctly described.\n\n## Changeset, not `skip-changeset`\n\nA real patch changeset on `@objectstack/console`. `README.md` is in the package's\n`files` array, so this text ships to npm — and the repo's own practice for a\npublished-README correction is a changeset, not the label: #10968, #10929 and #10816\nwere each a README-prose-only PR carrying `.changeset/*.md`.\n\n## Verification\n\nGate union re-run **after** the final commit, at `c26f8957`. All 13 green, each read\nfrom the gate's own verdict line:\n\n```\ncheck:changeset-gate-self-tests   ✓ 118 + 212 + 116 assertions over real temp git repos\ncheck:objectui-changeset          ✓ objectui-range --self-test: all checks passed\ncheck:published-files             ✓ 69 publishable package(s) of 78 declare a covering `files` whitelist\ncheck:slot-lookup                 ✓ ratchet holds: 107 unswept site(s), none new; baseline verified against 1fa05a6\ncheck:test-source-alias           OK — 72 packages with tests scanned\ncheck:type-source-resolution      OK — 77 packages with a tsconfig.json scanned\ncheck-adr-0087-registration       ✓ this PR adds no declared-breaking changeset\ncheck-changeset-no-major          ✓ This diff introduces no `major` bump\ncheck-ci-filter-parity            OK: all 88 declared cross-package glob(s) covered\ncheck-empty-changeset             ✓ No empty-frontmatter changeset introduced by this diff\ncheck-plugin-teardown-shape       ✓ 63 Plugin implementation(s) across 4514 source(s)\ncheck-affected-docs               ✓ affected-docs self-test: 339 cases pass\ncheck-nul-bytes                   OK (scanned 6334 text file(s); no raw ASCII control bytes)\n```\n\nFamily list re-derived at the final head with\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (no paths passed —\nthe script takes its own change set from the merge base); it named the same 12 families,\nall of which were run.\n\n**Repo-wide `pnpm lint` narrowing — measured, not assumed.** This diff contributes\n**zero** files to eslint's population, so a repo-wide run cannot move:\n\n1. *Population, read from eslint's own config:* `ESLint#calculateConfigForFile` returns\n   no `rules` for either changed file, and `lintFiles` reports `File ignored because no\n   matching configuration was supplied.` Every `files:` block in `eslint.config.mjs`\n   names only `{ts,tsx,mts,cts,js,jsx,mjs,cjs}`.\n2. *Count, from `--format json`:* 2 results, **0** non-ignored, 0 errors.\n3. *Invariance for untouched files:* `eslint.config.mjs` is not in this diff\n   (`git diff --name-only HEAD -- eslint.config.mjs` → 0), and the diff adds no TS/JS,\n   so no untouched file's configuration or program membership changes.\n\nThere is no prettier or markdownlint gate in this repo, so no formatter applies to\neither file.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019siH5jDmk5hrayvfyojUqR)_"
+}

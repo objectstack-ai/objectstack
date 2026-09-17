@@ -1,0 +1,36 @@
+{
+  "number": 11101,
+  "kind": "issue",
+  "title": "driver-sql: the Postgres and MySQL introspectPrimaryKeys arms return the key in UNSPECIFIED row order — neither orders by key position",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-22T16:56:35Z",
+  "updated_at": "2026-08-22T23:27:35Z",
+  "closed_at": "2026-08-22T23:27:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11101",
+  "body": "Split out of #10997 (SQLite composite-key truncation). #10997 repaired the SQLite arm — completeness *and* key ordering. The PG and MySQL arms of the same method do not carry that completeness defect, but **neither orders its result by key position**, so the composite key they return is in unspecified row order.\n\n`packages/drivers/driver-sql/src/sql-driver.ts`, `SqlDriver.introspectPrimaryKeys`.\n\n## What\n\n**Postgres arm:**\n\n```sql\nSELECT a.attname as column_name\nFROM pg_index i\nJOIN pg_attribute a ON a.attrelid = i.indrelid\n  AND a.attnum = ANY(i.indkey)\nWHERE i.indrelid = ?::regclass\n  AND i.indisprimary\n```\n\n`i.indkey` is an `int2vector` holding the key's attnums **in key order**. `a.attnum = ANY(i.indkey)` is a *membership* test — it reads the vector as a set and discards the position. With no `ORDER BY`, the row order is whatever the plan yields (in practice `pg_attribute` scan order, i.e. **column** order). So the set is right and the order is not the declared key order whenever the key is declared out of column sequence.\n\n**MySQL arm:**\n\n```sql\nSELECT COLUMN_NAME as column_name\nFROM information_schema.KEY_COLUMN_USAGE\nWHERE TABLE_SCHEMA = DATABASE()\n  AND TABLE_NAME = ?\n  AND CONSTRAINT_NAME = 'PRIMARY'\n```\n\n`KEY_COLUMN_USAGE.ORDINAL_POSITION` is exactly the key ordinal and is selected by neither the projection nor an `ORDER BY`. InnoDB tends to return ordinal order in practice, but nothing in the query requires it.\n\n## Why it matters\n\nSame reason the ordering half of #10997 mattered: `primaryKeys` is consumed as an **addressing / upsert-conflict-target key** (federated-object codegen, the persisted `external_catalog` under ADR-0015, and schema-drift comparison against a declared key). For those consumers a key in the wrong order is a different key. After #10997 the SQLite arm reports declared key order and these two do not, so the same table introspected through different dialects can disagree.\n\n## Likely shape of the fix\n\n- MySQL: add `ORDER BY ORDINAL_POSITION`.\n- Postgres: join against the ordinality of `indkey` rather than testing membership — e.g. `unnest(i.indkey) WITH ORDINALITY` (or `generate_subscripts`) joined to `pg_attribute`, with `ORDER BY` on the ordinal.\n\n## Why this was NOT fixed in #10997's PR\n\nTwo reasons, both about verification rather than difficulty:\n\n1. **Neither arm is executable in the agent container** — no listener on 5432/3306, no DSN in the environment, no `mysql` client, and the Docker CLI is present but has no daemon socket (`/var/run/docker.sock` absent). The original filer of #10997 hit the same limit. Landing a rewritten `pg_index` query that has never been parsed by a real server is a guess, not a fix.\n2. **The whole method body is wrapped in `catch { /* silently ignore */ }` and returns `[]` on error.** A rewritten query that is syntactically invalid on some PG version does not fail loudly — it degrades to *no primary key at all*, with no diagnostic. That turns a cosmetic ordering gap into total, invisible loss of the key. Unexecuted SQL behind a silent catch is the wrong risk to take for an ordering improvement.\n\nSo this needs a seat with a reachable Postgres and MySQL. Worth pairing with a look at whether that silent `catch` should stay swallowing, which is arguably the more serious finding here and is deliberately not folded in.\n\n## Not measured here\n\nBoth arms were **read, not run**. No claim is made about what a live server actually returns for either query — only about what the SQL as written does and does not guarantee.\n"
+}

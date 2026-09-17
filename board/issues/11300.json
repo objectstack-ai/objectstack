@@ -1,0 +1,35 @@
+{
+  "number": 11300,
+  "kind": "issue",
+  "title": "[finding] Corepack's per-job pnpm download crashes Node's bundled undici parser (`assert(!this.paused)`), ejecting PRs from the merge queue before any test runs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T09:17:25Z",
+  "updated_at": "2026-08-23T15:07:09Z",
+  "closed_at": "2026-08-23T15:06:07Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11300",
+  "body": "Filed unassigned, not routed, not graded — triage's call. Surfaced while triaging PR #11281's queue ejection (`domain:cli` seat). ⛔ No fix proposed here; the remedy is a judgement about CI toolchain provisioning that this seat does not own.\n\n## The signature\n\nQueue build [32629872070](https://github.com/objectstack-ai/objectstack/actions/runs/32629872070), job [Test Core (5/6)](https://github.com/objectstack-ai/objectstack/actions/runs/32629872070/job/97170912164), 2026-08-23 09:02:30Z:\n\n```\n! Corepack is about to download https://registry.npmjs.org/pnpm/-/pnpm-10.31.0.tgz\nnode:internal/assert/utils:77\n    throw err;\n    ^\nAssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:\n\n  assert(!this.paused)\n\n    at Parser.finish (node:internal/deps/undici/undici:6165:9)\n    at TLSSocket.<anonymous> (node:internal/deps/undici/undici:6499:36)\n    at TLSSocket.emit (node:events:531:35)\n    at endReadableNT (node:internal/streams/readable:1698:12)\n  code: 'ERR_ASSERTION', actual: false, expected: true, operator: '=='\nNode.js v22.23.2\n##[error]Process completed with exit code 1\n```\n\nNode **v22.23.2**, runner-provisioned. The crash is inside Node's **bundled undici** HTTP parser finishing a TLS response — i.e. in the download, not in anything the repo authored.\n\n## Where it happens, and why it is invisible as a test failure\n\nThe failing step is `Verify pnpm version` (`.github/workflows/ci.yml:294-295`, and the same pair at `:1074` and `:1213`):\n\n```yaml\n- name: Verify pnpm version\n  run: pnpm --version\n```\n\nThat step asserts nothing of its own — the `AssertionError` comes from Corepack materialising pnpm on first invocation. The job dies in setup, and the run's own guard confirms it never reached the suite:\n\n```\nNo test log — the test step did not get far enough to produce one.\n```\n\n## Why this is worth a card rather than a shrug\n\n⚠️ **It presents as a test failure and is not one.** The merge-queue triage bot reported it as *\"failed step: Verify pnpm version\"* attached to a bare `AssertionError` excerpt, with no test file name. Its own guidance says a **timeout** implies load while an **AssertionError** implies a real behaviour change — a good heuristic that **inverts here**, because the assertion comes from Node's HTTP parser rather than from test code. A reader following the template lands on \"real regression, fix the PR\" for a PR that cannot possibly have caused it.\n\n⚠️ **Cross-PR aggregation was unavailable for this ejection**, and the bot says so explicitly: *\"这不是「没有同签名的其他 PR」，是这一轮没测到\"* — no FAIL line carried a parseable test file, so the aggregator had nothing to group on. This signature is therefore **structurally invisible to the existing same-signature machinery**, which keys on test files. That is the part that makes it accrete silently.\n\n**Context, not a claim:** the same comment reports **71 queue failures in the previous 24h** excluding this one. ⛔ I have not measured how many share this signature and am not asserting a proportion — establishing that is exactly what the aggregator cannot currently do for this shape.\n\n## Blast radius\n\nEvery queue build downloads pnpm through Corepack per job. A failure here ejects the PR **and re-builds every PR behind it in the queue**, so the cost is not confined to the unlucky run.\n\n## Dedup\n\nSearched before filing: no open card carries this signature (`corepack` / `undici` / `Parser.finish` all return zero), and the zero-hit was reverse-checked against a control query that returns 43 — so the index is live and the absence is real, not a broken search. Nearest neighbours, all closed and all different causes: #10125 (queue-wide `Test Core` red), #9371 (vitest teardown race), #10447 (a named test's flake anchor).\n\n## Disposition of the PR that surfaced it\n\n#11281 re-queued **once**, unmodified, on the \"died before any test body ran\" ground. If it ejects again on this same signature it will be treated as a real blocker rather than retried. ⛔ Nothing was skipped, disabled or quarantined, and this signature was **not** added to the flaky ledger — ledger entries are a human escalation."
+}

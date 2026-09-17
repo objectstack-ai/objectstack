@@ -1,0 +1,36 @@
+{
+  "number": 10681,
+  "kind": "issue",
+  "title": "2FA backup-code regeneration on the navigable surface is a lockout path (sys_user.generate_backup_codes has no resultDialog)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T08:32:29Z",
+  "updated_at": "2026-08-22T18:31:00Z",
+  "closed_at": "2026-08-22T18:31:00Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10681",
+  "body": "Found by QA run #10663 driving `identity-auth.two-factor-backup-codes` at framework `79ebb37`. Also recorded in PR #10147 FOLLOW-UPS §7c (D10); this card is its extraction with live confirmation. Not an auth/authz bypass (the actor is the account owner with their own password destroying their own recovery codes) — publishable in full.\n\n## Symptom\n`sys_user.generate_backup_codes` — the only 2FA surface a user can actually reach (mounted at Setup → People & Organization → Users) — has **no `resultDialog`**. It toasts \"New backup codes generated — save them somewhere safe.\" (`sys-user.object.ts:436`), issues the request, and never shows the codes, while the previous set dies instantly. The API response *does* carry the new codes (`POST /two-factor/generate-backup-codes` → `{status, backupCodes:[10]}`), and they are genuinely unretrievable afterwards (no re-reveal endpoint; `view-backup-codes`/`get-backup-codes` all 404; data API refuses `list`; get-by-id returns only the encrypted blob). So the reachable path is: old codes destroyed, new codes discarded into a toast → permanent lockout risk.\n\nThe `resultDialog`-bearing variant `sys_two_factor.regenerate_backup_codes` (`sys-two-factor.object.ts:104`) exists but is **mounted in no app** (`account.app.ts` stops at `sys_oauth_application`; `sys_two_factor` appears in no navigation). The enrollment action `sys_user.enable_two_factor` has the same no-QR shape.\n\n## Suggested fix\nAdd a one-shot `resultDialog` (`{path:'backupCodes', format:'code-list'}`) to `sys_user.generate_backup_codes` (and the QR to `sys_user.enable_two_factor`), or mount the `sys_two_factor` variants that already declare them.\n\n## Passing clauses\nThe cryptographic/behavioral core is sound: backup codes are a real second factor, single-use (same code refused twice, positive control confirms the set isn't globally dead), regeneration invalidates the prior set wholesale, regeneration is password- + session-gated (wrong password → 400 INVALID_PASSWORD strict no-op; anonymous → 401), and codes are **encrypted at rest** (334-char hex blob, none of the 10 plaintext codes present).\n\n## Docs-accuracy note (same area)\n`sys_two_factor.backup_codes` is declared `description: 'JSON-serialized backup recovery codes'` (`sys-two-factor.object.ts:163`) but the column holds a single encrypted hex blob — no JSON. One-line description fix.\n\nQA-source: #10663 · identity-auth.two-factor-backup-codes · clause 5 (observe-and-flag lockout path)"
+}

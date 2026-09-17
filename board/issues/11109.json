@@ -1,0 +1,32 @@
+{
+  "number": 11109,
+  "kind": "issue",
+  "title": "[finding] 「误标不自行改、留言上报」literally instructs the thing another rule forbids — and `pm:blocked` with no `Blocked-by:` line is mechanically detectable, so the fix belongs in the patrol not the prose",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-22T17:23:45Z",
+  "updated_at": "2026-08-23T11:50:54Z",
+  "closed_at": "2026-08-23T11:50:19Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11109",
+  "body": "Filed unassigned by the `domain:engine` execution seat (`session_01RfyXxZ2WPjcjhuXpiQQc3y`). **Recording only** — ⛔ no `domain:*` label; routing and grading are triage's. Raised by the maintainer after this seat made the mistake described below.\n\n## What happened, concretely\n\nThis seat found #11017 mislabeled: it is `pm:blocked`, its body's first paragraph says 「**这是 `packages/spec` 契约变更，需要维护者裁决**」, and it carries **no `Blocked-by:` line** — so nothing can ever fire to unblock it, and it is invisible in the maintainer's decision inbox (`needs-user-decision` returns **zero** open cards repo-wide; the label exists, reverse-checked, so that zero is a real reading and #11017 is its counter-example).\n\nThe seat reported it **as a comment only**. That report was worthless: the triage sweep matches three shapes — a fully bare card, `pm:queue` without `domain:*`, and `domain:*` without a pm-state — and `pm:blocked` + `domain:engine` matches **none** of them. A request for triage, recorded as prose on a card triage has no reason to re-read.\n\n⚠️ **The seat is not claiming it could not have known.** It attached `pm:retriage` correctly to #11020 roughly twenty minutes earlier, in the same round, for the same class of dispute. The wording below raises the probability of the miss; it is not an excuse for it.\n\n## The prose defect (SKILL.md, `pm-dispatch`)\n\nThree passages, and the most locally-visible one points the wrong way:\n\n| where | text | points to |\n|---|---|---|\n| Guardrails / 多仓协调 4 | 「误标**不自行改**、**留言上报**」 | leave a comment |\n| 跨座位转移 | 「⛔ …裁决评论**永不作唯一载体**（散文对候选查询、sweep、老化告警全不可见）」 | a comment is not enough |\n| state-model table (`pm:retriage`) | 「挂标者 = 提出异议的席位，挂标与异议评论同笔」 | label **and** comment |\n\nA seat that disputes a grading reads rule 1, does exactly what it says, and produces an invisible report. The correction lives in a section headed 跨座位转移, which does not look like it governs \"I disagree with this label\" and will not be consulted on the way.\n\n**Candidate fix (cheap, one line):** replace 「留言上报」 with 「挂 `pm:retriage` + 异议评论同笔」 at both occurrences, so the locally-visible instruction is the composed rule rather than half of it.\n\n## ⭐ The better fix — this failure is mechanically detectable\n\nPer the skill's own principle (「防错归门禁，判断归档位」), prose is the weaker answer here. The defect has a machine-checkable signature:\n\n> a card labeled `pm:blocked` whose body **and** comments contain no `Blocked-by:` line\n\nThat is a state nobody can legally exit — structurally the same error the state model already names for `pm:on-hold` without a restart condition (「hold 没有可点火的出口 = 谁都无法合法退出的状态」). `scripts/pm/check-half-states.mjs` is already a report-only patrol over label/assignee/PR half-states; this is one more predicate in it, and it would have caught #11017 **with no seat noticing anything**.\n\nWorth considering in the same pass, since they are the same shape:\n- `pm:blocked` carrying a `Blocked-by:` that points at an already-closed card (the unlock scan should have fired and did not).\n- A card whose body says it needs a maintainer ruling while carrying no `needs-user-decision` label — harder, since it needs text matching rather than a structural predicate, and probably not worth the false-positive rate.\n\n⛔ Deliberately **not** proposing that execution seats be allowed to set `needs-user-decision` themselves. The single-producer guarantee for gradings is what makes 「domain X 归谁管」 answerable, and trading it away to fix a visibility bug would be the wrong trade. `pm:retriage` already reconciles the tension — a dissenting seat makes the dispute machine-visible without becoming a second producer, because attaching and clearing belong to different parties. **The gap is not that the mechanism is missing; it is that the prose does not point at it.**\n\n## One residual worth a ruling, not fixed here\n\n`pm:retriage` makes the dispute visible to **triage**, not to the **maintainer**. For a card that is genuinely waiting on a person, that inserts one hop whose only justification is protecting the grading producer — unrelated to whether the card belongs in the maintainer's inbox. Whether that hop should exist for decision cards specifically is a question for the skills seat or the maintainer, not something this seat should resolve by relabelling.\n\n## Provenance\n\n- #11017 — the card that surfaced it; `pm:retriage` now attached, with the dispute and this seat's self-correction in its thread.\n- #11020 — the same seat doing it correctly in the same round, which is why this is filed as a wording/patrol defect rather than a knowledge gap.\n- `scripts/pm/check-half-states.mjs` — the existing patrol the predicate would join."
+}

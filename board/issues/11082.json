@@ -1,0 +1,36 @@
+{
+  "number": 11082,
+  "kind": "issue",
+  "title": "`controlled_by_parent` derivation does not compose across a chain — a child whose master is itself `controlled_by_parent` is readable and writable org-wide",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "security"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-22T15:54:39Z",
+  "updated_at": "2026-08-23T14:20:27Z",
+  "closed_at": "2026-08-23T14:05:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11082",
+  "body": "Measured on `@objectstack/* 17.1.0` against a real booted kernel (ObjectQL + `plugin-security` + `plugin-sharing`), driving the HotCRM app metadata.\n\n## Summary\n\nobjectstack#5386 fixed the single-level case: a `controlled_by_parent` child is now filtered to masters the caller can actually read, folding in the master's ownership and `sys_record_share` grants. That fix does **not recurse**. When the master is *itself* `controlled_by_parent`, both halves of the master-set resolution return \"no restriction\", the derived id set becomes **every master row**, and the child goes org-wide — for **read and for write**.\n\nSo a two-level chain `grandchild -> child -> root` is enforced at level one and unenforced at level two.\n\n## Mechanism\n\n`computeControlledByParentFilter` (plugin-security) resolves the reachable master set from exactly two layers:\n\n```js\nconst masterRlsFilter   = await this.computeRlsFilter(permissionSets, rel.master, \"find\", context);\nconst masterSharingFilter = await this.resolveSharingReadFilter(rel.master, context, permissionSets);\nconst masterFilter = andComposeLayers(masterRlsFilter, masterSharingFilter);\nconst rows = await this.ql.find(rel.master, { where: masterFilter ?? {}, fields: [\"id\"],\n                                              context: { isSystem: true } });\nreturn { [rel.fk]: { $in: masterIds } };\n```\n\nIt never consults the master's own `controlled_by_parent` derivation. And the sharing half opts out for exactly this model — `plugin-sharing.buildReadFilter`:\n\n```js\nif (effectiveSharingModel(schema) !== \"private\") return null;\n```\n\nwith `effectiveSharingModel` mapping `controlled_by_parent` to `public`. So for a `controlled_by_parent` master with no authored RLS policy: RLS half `null`, sharing half `null`, composed filter `null`, `find(master, {})` runs as **system** and returns every row.\n\nThe write half fails the same way. `assertControlledByParentWrite` asks `resolveSharingCanEdit` on the master row, and `checkEdit` opts out on the same test:\n\n```js\nconst model = effectiveSharingModel(schema);\nif (model === \"public\") return \"abstain\";\n```\n\n`abstain` is not `deny`, so `canEdit` answers `true` for every master row, and the child write is permitted.\n\n## Reproduction and measurement\n\nFixture: two accounts (`acct_US`, `acct_JP`) owned by another user; a `sales_rep` who owns none of them and receives `acct_US` only through a territory sharing rule (`sys_record_share`, `access_level: edit`). Chain under test: `crm_quote_line_item` -> `crm_quote` -> `crm_account`.\n\n| `crm_quote` OWD | rep reads `crm_quote` | rep reads `crm_quote_line_item` | rep writes `line_JP` (its quote unreadable) |\n|:--|:--|:--|:--|\n| `private` | `quote_own` | `line_own` | DENIED (`PermissionDeniedError`) |\n| `controlled_by_parent` (master `crm_account`) | `quote_US`, `quote_own` — correct, level one narrows | **`line_JP`, `line_US`, `line_own` — org-wide** | **ALLOWED** |\n\nThe decisive pair, same run, converted config:\n\n```\nREAD  quote_JP by id  = []                                  <- master NOT readable\nREAD  line_JP  by id  = [{\"unit_price\":10,\"quantity\":3}]    <- its child IS readable\nWRITE line_JP (grandmaster NOT readable) = ALLOWED          <- and writable; quantity 3 is the landed write\n```\n\nLevel one is correct in the same measurement (`crm_quote` narrows to the territory-shared account's quote), which isolates the defect to the second hop rather than to the fixture.\n\nControl: `crm_opportunity_line_item` is `controlled_by_parent` under `crm_opportunity`, which stays `private` — it reads `[]` throughout, so the leak tracks the master's model, not the object.\n\n## Why this matters beyond the one app\n\nThe exposed data here is per-line quote pricing, but the shape is general: any app that models a three-level master-detail chain gets silent org-wide exposure at the bottom level, with metadata that reads as if it were narrowed. That is the same class objectstack#5386 was filed for, one level down, and it is invisible to the app author — the declaration looks identical to the enforced case.\n\nIt also blocks a real consumer decision: HotCRM issue 549 has a maintainer ruling to convert `crm_quote` to `controlled_by_parent`, and this defect is the reason it cannot land as ruled.\n\n## Suggested directions (not deciding)\n\n1. **Make the derivation compose recursively** — resolve the master set through the master's own effective read filter, including its `controlled_by_parent` derivation, with cycle protection and a depth bound.\n2. **Fail closed on an unsupported chain** — if a `controlled_by_parent` master is itself `controlled_by_parent`, deny rather than return everything, matching the fail-closed branch already present for an unresolvable master sharing filter.\n3. **Publish-time lint** — report a chained `controlled_by_parent` declaration loudly, in the spirit of issue 7503, so silence stops being the default while (1) is unimplemented.\n\n(2) or (3) is worth having even before (1), because the current failure mode is the dangerous direction: unenforced, and indistinguishable from enforced.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WzS6NUXo5A5KEwj1KjvPHk)_"
+}

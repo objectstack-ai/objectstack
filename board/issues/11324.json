@@ -1,0 +1,35 @@
+{
+  "number": 11324,
+  "kind": "issue",
+  "title": "driver-sql (PG): introspectForeignKeys' JOIN correlations are wrong in two ways — a cross-schema FK target vanishes, and a composite FK is returned as a cartesian product",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T11:27:30Z",
+  "updated_at": "2026-08-23T16:06:39Z",
+  "closed_at": "2026-08-23T16:06:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11324",
+  "body": "Found while working #11201 (which schema-scoped this query's `WHERE`, not its `JOIN`s). Not fixed there: the bounded in-place-fix exemption did not apply — these are join-correlation defects, a different class from the unscoped-read defect that card owns, and each needs its own fixture. #11201 is a separate subject and is not addressed by this issue.\n\nBoth facts below were **measured on a live PostgreSQL 16.13**, against the query as it stands *after* #11201's fix — so neither is caused by, nor repaired by, that change.\n\n## What\n\n`packages/drivers/driver-sql/src/sql-driver.ts`, `SqlDriver.introspectForeignKeys`, Postgres arm. The query joins:\n\n```sql\nFROM information_schema.table_constraints AS tc\nJOIN information_schema.key_column_usage AS kcu\n  ON tc.constraint_name = kcu.constraint_name\n  AND tc.table_schema = kcu.table_schema\nJOIN information_schema.constraint_column_usage AS ccu\n  ON ccu.constraint_name = tc.constraint_name\n  AND ccu.table_schema = tc.table_schema\n```\n\nFor a FOREIGN KEY constraint, `constraint_column_usage` describes the **referenced** (parent) side — that is exactly why the projection aliases it `ccu.table_name AS referenced_table`. Its `table_schema` is therefore the *parent's* schema, not the constraint's. Two consequences:\n\n### 1. A foreign key whose target lives in another schema is dropped entirely\n\n`ccu.table_schema = tc.table_schema` demands parent and child sit in the same schema. When they do not, the constraint contributes **zero rows** and disappears from the answer.\n\nMeasured, `search_path = os11201_probe`:\n\n```sql\ncreate table os11201_probe_far.remote_parent (id varchar(64) primary key);\ncreate table cross_child (\n  id varchar(64) primary key, p varchar(64),\n  constraint fk_cross foreign key (p) references os11201_probe_far.remote_parent(id));\n```\n\n→ the arm's query returns **0 rows** for `cross_child`. The table has a declared foreign key and `introspectForeignKeys` reports it has none.\n\nThis is the #7332 failure mode arriving through a different door: `[]` does not read downstream as \"I could not see it\", it reads as *this table has no foreign keys*, and federated-object codegen, the persisted `external_catalog` (ADR-0015) and schema-drift comparison all act on that. Cross-schema references are the normal shape for the federated remotes ADR-0015 points this driver at.\n\nThe sibling arm already spells the correct correlation: `introspectUniqueConstraints` joins `ccu` on `tc.constraint_schema = ccu.constraint_schema` — the *constraint's* schema, which is invariant to where the parent lives.\n\n### 2. A composite foreign key comes back as the cartesian product of its columns\n\nThe `kcu` ↔ `ccu` join carries no `ordinal_position` correlation, so an N-column foreign key yields N x N rows pairing every child column with every parent column.\n\nMeasured:\n\n```sql\ncreate table comp_parent (a varchar(64), b varchar(64), primary key (a, b));\ncreate table comp_child (\n  id varchar(64) primary key, x varchar(64), y varchar(64),\n  constraint fk_comp foreign key (x, y) references comp_parent(a, b));\n```\n\n→ **4 rows** returned for a 2-column key:\n\n```\nx -> comp_parent.a\nx -> comp_parent.b\ny -> comp_parent.a\ny -> comp_parent.b\n```\n\nThe correct answer is `x -> a`, `y -> b`. `IntrospectedForeignKey` is a flat per-column record, so the two phantom pairs are indistinguishable from real ones to every consumer.\n\nThis is the same class the primary-key arm already paid for twice: #11101 (row order unspecified because the key ordinal was neither selected nor ordered on) and #10997 (SQLite composite key truncated). The FK arm never got that pass.\n\n## Suggested shape\n\nOne rewrite likely closes both, and the in-tree precedent is `introspectPrimaryKeys`: drop `information_schema` for `pg_constraint`, whose `conkey` / `confkey` are parallel `int2vector`s, and join them **by shared ordinality** — the `unnest(...) WITH ORDINALITY` shape #11101/#11162 already established in this file. That yields the ordered, correctly-paired column list directly, carries the parent's schema without constraining it, and removes the `information_schema` privilege-view layer these correlations were fighting.\n\nAlternatively, and more conservatively: correlate `ccu` on `constraint_schema` (as `introspectUniqueConstraints` does) and add the `kcu.ordinal_position` ↔ referenced-ordinal correlation. Note `constraint_column_usage` exposes no ordinal, so the composite half probably cannot be fixed inside `information_schema` at all — which is the argument for the `pg_constraint` rewrite.\n\n## Scope note\n\nWhether `IntrospectedForeignKey` needs a shape change is **not** settled here and should not be assumed: the flat per-column record can express a composite key correctly as ordered sibling rows, but nothing currently pins their order. That interface is being edited by #11270, so a fix touching its declaration needs to be sequenced against that PR rather than racing it.\n\n## Not measured here\n\nWhether any in-tree consumer currently hits either shape. Both were reproduced directly against the driver's own query on a live server; neither depends on a consumer to be wrong."
+}

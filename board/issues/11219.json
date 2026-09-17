@@ -1,0 +1,32 @@
+{
+  "number": 11219,
+  "kind": "issue",
+  "title": "[finding] A `Blocked-by:` target parked in `pm:on-hold` or `needs-user-decision` can never fire the unlock — 6 measured cards waiting on a card that will not close",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T03:50:49Z",
+  "updated_at": "2026-08-23T09:33:25Z",
+  "closed_at": "2026-08-23T09:31:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11219",
+  "body": "**Finding — recording only, not claimed.** Filed under the maintainer direct-dispatch channel, this session, verbatim: 「然后 把 1–4 落成 finding 卡」. PM session `session_0124Qg8rLvpXnQDwCmpKUmaJ`.\n\n## The mechanism\n\nThe unlock predicate is **\"the `Blocked-by:` target CLOSED\"**. `pm:on-hold` and `needs-user-decision` are, by definition, states a card sits in *while open*. A block naming such a target is therefore structurally indefinite: nothing in the machinery can ever fire it, and no predicate reports that.\n\nIt is not the same as H9 (a hold with no fireable `Restart-when:`). H9 audits the **held** card. This is about the **waiting** card, which looks perfectly well-formed — it has its machine-readable line, its target resolves, the target is open. Every check passes and the card still cannot move.\n\n## Measured, 2026-08-23\n\n| waiting card | target | target's state |\n|:--|:--|:--|\n| cloud#1119 | cloud#987 | `pm:on-hold` |\n| cloud#799 | cloud#987 | `pm:on-hold` |\n| cloud#861 | cloud#855 | `pm:on-hold` |\n| objectos#75 | objectos#68 | `needs-user-decision` |\n| objectos#135 | objectos#68 (prose only — no machine line in either channel) | `needs-user-decision` |\n| cloud#1332 | cloud#1331 | `pm:queue`, but titled `[Decision]` — a decision card wearing a work label |\n\nTwo structural notes fall out of that table:\n\n- **objectos's entire blocked inventory (2 of 2) traces to one unanswered decision card**, #68 — which is also the only item in the whole fleet's decision inbox. One ruling clears the repo.\n- **cloud#987 blocks two cards at once**, and both (#799, #1119) are eval-infrastructure cards that have been parked since July.\n\n## A third variant found in the same sweep: the stale chain\n\n`cloud#1395` → `objectstack#10101`, which is open — so the block looks live. But #10101 was itself an H19 finding on the same sweep: **both** of its own blockers had already closed. The block was real one level up and false two levels up, and a single-level predicate cannot see that.\n\n## Shape of the fix\n\nA predicate over data the patrol already holds — it fetches the target's state to answer H19, so the target's *labels* are one field further:\n\n> an open `pm:blocked` card whose `Blocked-by:` target is open **and** carries `pm:on-hold` / `needs-user-decision` ⇒ name it.\n\nReport-only, like everything else there. It does not say the block is wrong — sometimes waiting on a deferred card is exactly right. It says *this block has no mechanism that will ever release it*, which is the thing a human should see rather than discover in a hand sweep.\n\nOptional second leg, cheap on the same data: flag when the target is itself `pm:blocked` (the chain case).\n\n## Re-check\n\n```\n# for each open pm:blocked card, resolve its Blocked-by target and read the target's labels\n```"
+}

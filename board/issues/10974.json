@@ -1,0 +1,36 @@
+{
+  "number": 10974,
+  "kind": "issue",
+  "title": "bind `set-initial-password` into the SDK: add `auth.setInitialPassword` to ObjectStackClient",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:blocking",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T01:40:53Z",
+  "updated_at": "2026-08-23T16:17:24Z",
+  "closed_at": "2026-08-23T16:17:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10974",
+  "body": "Maintainer ruling on the `set-initial-password` disposition question raised by #10534 / #10660: **option C — bind the route into the SDK, then ledger it as `sdk`.** This card is C's first half. The ledger row is the second half and is deliberately a separate card (ordering argued below).\n\n⚠️ **Public-surface widening ⇒ Clause-② contract review.** This card adds a method to `ObjectStackClient`, which is published surface. It must not be merged on a dispatching seat's own authority.\n\n## What is measured\n\nAll three readings taken on `origin/main` at `81845c65a`.\n\n**1. The route has no SDK binding, and the zero is a real zero.**\n\n```\npackages/client/src   setInitialPassword    = 0\npackages/client/src   set-initial-password  = 0\n  positive controls, same corpus, same expression:\n    getConfig      = 1\n    auth.me        = 1\n    accounts       = 10\n    changePassword = 1\n```\n\nBoth spellings return nothing while four sibling auth members return non-zero, so the absence is an absence and not a broken pattern.\n\n**2. `sdk` is the ledger's rule, not one of several equals.**\n\n```\ndisposition distribution in AUTH_ROUTE_LEDGER:\n  sdk 54 · server-only 1 · disabled 1 · gap 0\n```\n\n54 of 56. `server-only` is a single reviewed exception, not a co-equal category to fall into by default.\n\n**3. The `gap` disposition is behind a shrink-only ratchet.**\n\n`packages/plugins/plugin-auth/src/auth-route-ledger.conformance.test.ts`\n\n```\n:189  it('gap and mismatch counts only shrink', () => {\n:192  expect(AUTH_ROUTE_LEDGER.filter((e) => e.disposition === 'gap').length).toBeLessThanOrEqual(0);\n```\n\nThe test is named for its own direction. Filing this route as `gap` would not be \"recording a number\" — it would be reversing a ratchet, which is the thing the ratchet exists to refuse.\n\n## Why C and not the alternatives\n\n- **Not A (`server-only`).** The route is reachable by clients; recording it as server-only to make the table close would be a false statement about the surface, which is the failure mode #10240's triage named as \"the state machine lying\".\n- **Not B (`gap`).** See measurement 3 — it reverses a shrink-only ratchet.\n- **C's cost, stated plainly:** it widens published SDK surface. That cost is why this card carries Clause-② review rather than being folded into #10660.\n\n## Scope\n\nAdd `setInitialPassword` to the `auth` namespace in `packages/client/src/index.ts`, shaped like its siblings already in that namespace (`getConfig`, `changePassword`, `changeEmail` — all `this.getRoute('auth')` + `this.fetch(...)`), hitting the route the plugin already mounts.\n\n⛔ **Out of scope, and a maintainer floor if attempted:** any change to the route's own accept/reject behaviour, its admit set, or its server-side guards. This card binds a client to an already-mounted route. It does not touch what that route allows. A permission-boundary loosening is not this card's to make.\n\n⛔ **Not in this card:** the `AUTH_ROUTE_LEDGER` row. That is the follow-up card, which will name this method.\n\n## Gates this touches — confirm both legs, do not assume\n\n`packages/client/src/client-url-conformance.test.ts` sweeps the SDK surface automatically, so a new method lands inside two live assertions:\n\n- `:363` `every client method is classified — driven or explicitly non-HTTP` — the new method is enumerated by `enumerateMethods`; it must either drive cleanly or be declared in `NON_HTTP` (it should drive, like its siblings).\n- `:373` `every URL the SDK builds matches a route some surface mounts` — the URL this method builds must match the compiled ledger union.\n\nOn leg `:373`, note what it will and will not prove here. The dispatcher ledger still carries a `* /auth/**` prefix row, and `client-url-conformance.test.ts:123-129` says in its own words that exact rows are sorted ahead of wildcard families precisely because otherwise \"every `/api/v1/auth/*` URL would still be absorbed by the dispatcher's `* /auth/**` row and keep counting as weak evidence\". Until the follow-up card adds the exact row, this method's URL matches on that weak evidence. **Report which pattern it matched, by name, rather than reporting only that the test was green.** A green here is not yet proof the wire path is right.\n\n## Ordering — why this card is first\n\n`packages/plugins/plugin-auth/src/auth-route-ledger.conformance.test.ts:152` requires every `sdk`-disposition row to name a client method. The `**` fallback above is what makes the reverse order safe: this method can land while its exact ledger row does not yet exist, but a `sdk` row naming a method that does not exist would be a claim of coverage the SDK does not have — the exact failure `packages/client/src/route-ledger-coverage.test.ts` was written for (its header cites #3528, where \"the ledger equivalent of the day would have said `resume → automation.resume` while no such method existed\").\n\nSo: this card, then the ledger card.\n\n## Acceptance\n\n1. `auth.setInitialPassword` exists on `ObjectStackClient` and resolves to a function.\n2. Both conformance legs above pass, with the matched pattern named in the report.\n3. Changeset present.\n4. PR stays draft until contract review PASSes; the reviewing seat must not be the dispatching seat.\n\n## Refs\n\nPart of #10534 · #10660 (the ledger/docs PR that surfaced the question; its body must not close #10534 while this remains open) · #10050 · #3563 / #3642 (the conformance guards above) · #3656 (the auth ledger's own charter)\n"
+}

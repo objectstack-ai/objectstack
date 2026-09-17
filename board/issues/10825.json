@@ -1,0 +1,33 @@
+{
+  "number": 10825,
+  "kind": "issue",
+  "title": "Batch resolveUserAuthzGrants: 8 sequential round trips could be 2-3, with no caching and no staleness",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T12:47:59Z",
+  "updated_at": "2026-08-23T04:21:25Z",
+  "closed_at": "2026-08-23T03:04:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10825",
+  "body": "Split out of #10757 (direction 4) by PM ruling on PR #10824.\n\n`resolveUserAuthzGrants` (`packages/core/src/security/resolve-authz-context.ts` ~330–560) issues **8 sequential round trips** — legs 6–13 of an authenticated data request:\n\n```\n6.  sys_member {user_id}\n7.  sys_user_position\n8.  sys_member {organization_id}          (fellow-org, limit 1000)\n9.  sys_user_permission_set\n10. sys_position {name $in}\n11. sys_position_permission_set\n12. sys_permission_set {id $in}\n13. sys_user {id}                          (ai_seat)\n```\n\nThey could be 2–3. **No caching, no invalidation contract, no staleness** — every read stays live, so this is independent of #10757's tranche 2 (caching) and cannot drift from whatever invalidation design that lands.\n\n## Why this is likely the highest-leverage no-risk work left\n\ncloud#1539 measured, causally by latency injection (R² = 0.9994), that an authenticated request is **23.4 sequential legs** and that:\n\n> **L, not N, is the multiplier. Batching is worth exactly as much as deleting.**\n\nSo collapsing 8 legs into 2–3 removes ~5–6 of 23.4 — **roughly a quarter of the whole request** — without touching a single authorization semantic.\n\nAgainst the measured prod model `server_ms ≈ 33 + L × 36.6`:\n\n| | legs | prod server time |\n|---|---|---|\n| today | 23.4 | ~890 ms |\n| after this card | ~18 | ~690 ms |\n\nNot sufficient alone (cloud#1521's gate is ≤200 ms, and placement is the lever that clears it — cloud#1546 is testing that now), but it is the largest block available that carries no staleness risk whatsoever.\n\n## Why batching beats caching here, stated plainly\n\nA batched read returns the same rows or **fails loudly**. A cache returns **stale grants silently** — a permission revoked at T still honoured until a TTL expires. On the authorization path that difference is the whole ballgame, which is why this is separable from tranche 2 and worth doing whether or not tranche 2 ever ships.\n\n## Constraints\n\n- **Do not change authorization semantics.** A batched query must return exactly the rows the sequential reads returned — same filters, same tenancy scoping, same ordering guarantees where any are relied on. Prove equivalence rather than asserting it; this is the one way this card could ship a security bug behind a green suite.\n- **No caching.** Nothing may survive a request. That is tranche 2, and it is deliberately a different card with a different review.\n- `packages/spec` is off limits — stop and report if a batch needs a contract change.\n- Legs 9 and 13 duplicate reads made earlier in the request (see #10757). **They are not free to remove here** — PR #10824 measured that the removable half of each pair belongs to directions 1 and 2. Batch them; do not delete them.\n\n## Measuring the result\n\n`X-OS-Debug-Timing: json` on an admin principal returns `Server-Timing: db;dur=…;desc=\"N queries\"`. That gives the query count directly, but **the number that matters here is legs, not queries** — report both, and say how you established the leg count (a batch that runs 3 queries in parallel is 1 leg; 3 sequential is 3).\n"
+}

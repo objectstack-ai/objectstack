@@ -1,0 +1,35 @@
+{
+  "number": 11160,
+  "kind": "pull_request",
+  "title": "fix(rest): GET /meta/_drafts reads in the caller's org scope — closes the write-org/read-null split (#11087 layer 2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-22T22:57:47Z",
+  "updated_at": "2026-08-22T23:30:12Z",
+  "closed_at": "2026-08-22T23:30:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-22T23:30:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11160",
+  "body": "## What\n\nThe `_drafts` route threads `ctx?.tenantId` into `protocol.listDrafts` — symmetric with the save route's `organizationId: ctx?.tenantId`. `SysMetadataRepository.listDrafts`'s existing `$or` contract then surfaces BOTH the caller's org overlay and env-wide drafts.\n\n## Why (live staging measurement, cloud#1593)\n\nA view draft saved through the console landed `org=org_mt42…` (the session carries an active org), while `GET /meta/_drafts` read with NO org — `getOverlayRepo(null)` matches only `organization_id IS NULL` — so the draft was invisible to every pending-changes surface while the single read and the publisher (each threading its own scope) saw it fine. This is the second, orthogonal layer of #11087: layer 1 (merged, #11139) fixed the `package_id NULL` orphan; this fixes org-scope invisibility. Both are required before the pending-changes bar can count what a console session actually drafts.\n\n## Tests\n\nNew pin in `rest-server-meta-org-scope-url-spelling.test.ts` (drafts read carries the caller org); suite file 12/12. Full `rest` package: 1681/1681 executed tests pass locally (39 file-level load failures are unbuilt-sibling-dist noise on the local rig — service-analytics/service-package dists absent — CI builds the graph).\n\nPart of #11087 / cloud#1593.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

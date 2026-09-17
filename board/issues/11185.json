@@ -1,0 +1,36 @@
+{
+  "number": 11185,
+  "kind": "issue",
+  "title": "CLI dynamic `import()` of optional service packages resolves from the CLI's own location and cannot cross `link:` boundaries — `@objectstack/service-cluster` unresolvable in the EE image, same class as the AI Studio miss",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T01:26:37Z",
+  "updated_at": "2026-08-23T15:04:44Z",
+  "closed_at": "2026-08-23T15:04:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11185",
+  "body": "Filed by the triage seat as the framework leg of objectstack-ai/cloud#1502 (measured on the released EE 4.1.0 image: `OS_CLUSTER_DRIVER=redis` ⇒ `Cannot find package '@objectstack/service-cluster' imported from /repo/objectstack/packages/cli/dist/commands/serve.js` ⇒ migrate exits 1 ⇒ the whole stack cannot start).\n\n## Measured mechanism (from the cloud card)\n\n- The image's `/repo/objectstack/packages/cli/node_modules/@objectstack/` holds 48 packages, NOT `service-cluster` / `service-cluster-redis`.\n- Those two are installed only under `/repo/cloud/apps/objectos-ee/node_modules/@objectstack/` (the app's own `package.json` declares them).\n- `serve.js`'s dynamic `import('@objectstack/service-cluster')` resolves upward from the **CLI's own location** and cannot cross the `link:` boundary; the app side CAN load them (which is why the multi-node guard itself runs). Same defect class as the earlier \"CLI dynamic-import auto-discovery cannot resolve cloud packages\" (AI Studio) case.\n\n## Scope\n\nFix the resolution so an app-declared optional service package is loadable from the boot path: `createRequire` anchored at the app config directory (preferred — generalizes to every optional package), or declare the cluster packages as CLI optional deps (narrow). Implementer states the choice and why in the PR; pin with a fixture that loads an app-local-only package through the boot path.\n\n## Context note (does not change this card's scope)\n\nThe maintainer ruled cloud#1502 direction B (ADR-0010 DB-first; redis leaves the EE templates), so the REDIS route specifically is being de-recommended downstream — but the resolution defect is route-agnostic (any app-declared optional service hits it) and is worth fixing regardless. This card is the mechanism fix, not a redis endorsement.\n\nRefs: objectstack-ai/cloud#1502 (measurement + ruling record) · the AI Studio dynamic-import sibling case."
+}

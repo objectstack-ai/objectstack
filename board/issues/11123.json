@@ -1,0 +1,32 @@
+{
+  "number": 11123,
+  "kind": "issue",
+  "title": "service-datasource: the `primaryKeyReader` docblock now describes a producer that no longer exists, and the union read's `isPrimary` arm has no in-tree producer left",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T19:10:16Z",
+  "updated_at": "2026-08-23T15:04:05Z",
+  "closed_at": "2026-08-23T15:04:05Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11123",
+  "body": "Recorded by the engine lane while landing #10676 / #10998, and deliberately **not** repaired there: the file is the services lane's, and the three-signal union read that PR #11001 shipped is on that lane's own one-release clock. The engine change makes two statements in it false; carving the read is the services seat's decision, not the driver change's.\n\n## What moved\n\n`SqlDriver.introspectSchema()` now emits the `packages/spec` spelling (`primaryKey` on every column, plus `dialect` and `introspectedAt`) and no longer emits `isPrimary` at all. Maintainer ruling, 2026-08-22 (live session, 「同意所有」 item 9 = 驱动侧对齐 spec 契约).\n\n## What is now stale in `external-datasource-service.ts`\n\nThe `primaryKeyReader` docblock, which is the one place this seam's reasoning is written down:\n\n1. **Its producer table is wrong.** It reads:\n\n   | producer | per-column | table-level |\n   | --- | --- | --- |\n   | `SqlDriver` (+ `SqliteWasmDriver`, which extends it) | `isPrimary` | `primaryKeys` |\n\n   `SqlDriver` now spells the per-column signal `primaryKey`, so the table records the collision the union read exists to bridge as if it were still live.\n\n2. **Its `#10997` note is out of date.** It says the SQLite composite-key truncation \"is upstream of this seam and is not repaired here\". #10997 merged (PR #11104): `introspectPrimaryKeys` now reports every member of a composite key in declared key order. The engine seat flagged this exact sentence as going stale when that PR merged.\n\n3. **The `isPrimary` arm of the union now has no in-tree producer.** The read still takes `col.primaryKey || col.isPrimary || table.primaryKeys.includes(col.name)`. Nothing in the tree writes `isPrimary` any more except two deliberately hand-built fixtures in `external-introspection-seam.test.ts` that stage a disagreement no live database can produce. That is the belt's clock coming due — collapsing it to the spec spelling is a decision for this lane.\n\n## What the engine PR did and did not touch in this package\n\nTouched, minimally, and only because leaving it red blocks the merge (authorised at dispatch):\n\n- `src/__tests__/external-introspection-seam.test.ts` — the producer-spelling case, which was written to redden on exactly this change. Its title, its two producer assertions (now `primaryKey === true` / `isPrimary === undefined`), and the docblock's tense. The staged-disagreement cases and the file's second `describe` are untouched.\n\nAdded (new file, no existing behaviour touched):\n\n- `src/__tests__/external-object-draft-real-introspection.test.ts` — the pin the ruling requires: `generateObjectDraft` driven off a real `SqlDriver.introspectSchema()` result.\n\n⛔ Not touched: `primaryKeyReader` itself, its docblock, and every consumer of it.\n\nFiled unassigned as an observation. No behaviour is broken by any of the above — the union read keeps working; what is wrong is what a reader is told.\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 11212,
+  "kind": "issue",
+  "title": "pm 席位把 AskUserQuestion 当裁决通道,维护者不在场即整席人质——规则:先落 needs-user-decision 卡,弹窗仅作在场加速器",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T03:42:17Z",
+  "updated_at": "2026-08-23T04:34:43Z",
+  "closed_at": "2026-08-23T04:33:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11212",
+  "body": "维护者 2026-08-23 报告(附另一 PM 会话截图为证):「项目经理干活时经常弹出需要我决策的问题,如果我不在旁边工作就卡住了。」skills 席 session `757f0dc0-5dae-51d7-9053-c15c57ebfe3b` 立卡。\n\n## 诊断\n\npm-dispatch 的自我描述本来就规定裁决通道是卡:「filing `needs-user-decision` issues for anything that requires the maintainer's confirmation instead of guessing」。但技能正文没有明说 **AskUserQuestion 与决策卡的优先序**,于是席位把阻塞式弹窗当成了默认通道:\n\n1. 弹窗挂起期间**该席位整个 PM 回合停摆**(在飞 dev 无人验收、队列无人推进),维护者不在场即无限期人质;\n2. 弹窗内容**不进任何可查询面**——不在卡上、兄弟席看不见、巡查扫不到、维护者回来无法批量处理;\n3. 异步通道的消费端早有先例:decision-inbox + 维护者 2026-08-18 的批量「同意」(见 #7276 卡面记录)。\n\n## 规则(进 `.claude/skills/pm-dispatch/` 技能文本)\n\n1. **先落卡,后弹窗**:凡需维护者裁决,第一动作是落 `needs-user-decision` 卡(选项 + 推荐 + 证据,与弹窗同内容);被阻塞的执行卡同笔挂 `pm:blocked`,`Blocked-by:` 指向决策卡;队列其余部分继续消化,永不整席等待。\n2. **弹窗仅作加速器,带在场判据**:仅当「维护者最近 ~30 分钟内在本会话有过人类输入」才允许 AskUserQuestion;每问必带推荐项;被 Skip 或长挂 → 转卡通道,不重弹。卡先于弹窗存在,所以弹窗无论怎么死,盘面都是诚实的。\n3. **回批入口**:维护者以一句「处理决策卡」触发席位扫 `needs-user-decision` 批量呈报,一次交互清积压(把 08-18 的批量「同意」先例升格为常规动作)。\n\n## 落地成本\n\n规则文字的自然落点 SKILL.md(682/682)与 references/decision-analysis.md(38/38)均零余量:真删付账,或并入 #11086 全文重构轮(该轮已裁、待队列排空触发,输入清单里已有多笔同类)。⛔ 提天花板为 MAINTAINER-ONLY。\n\n## 与在场事实的对账\n\n本席今日多轮 AskUserQuestion 均在维护者在场时使用且秒级回批——规则 2 的在场判据保留了这条快路径;要禁的只是「不在场也弹、弹了就死等」。"
+}

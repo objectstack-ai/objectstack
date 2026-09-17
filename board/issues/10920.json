@@ -1,0 +1,35 @@
+{
+  "number": 10920,
+  "kind": "issue",
+  "title": "[finding] The knowledge settings manifest tells an operator at runtime to mount `@objectstack/knowledge-turso`, a package in no directory of this repo",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:services"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T17:25:05Z",
+  "updated_at": "2026-08-23T11:13:33Z",
+  "closed_at": "2026-08-23T11:13:08Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10920",
+  "body": "Found while repairing published-README member-existence claims (#10893). Filed unassigned, no `pm:queue` — triage's call. ⛔ Deliberately NOT folded into #10893: that card's remedy is scoped to **published markdown**, and this is a **runtime operator message plus a spec docblock**, which is a different surface and a different fix.\n\n## The observation\n\n`@objectstack/knowledge-turso` is in no directory of this repo. Measured on `origin/main` at `409077e93c`:\n\n```\ngit ls-tree -r --name-only origin/main | grep -c \"/knowledge-turso/\"   # -> 0\n```\n\nThe knowledge adapters this repo actually builds are `@objectstack/knowledge-memory` and `@objectstack/knowledge-ragflow`.\n\nThree in-repo sources nonetheless present it as a shipping package, and one of them says so **to an operator, at runtime**:\n\n| where | what it says |\n|---|---|\n| `packages/services/service-settings/src/manifests/knowledge.manifest.ts:13-15` | `Adapter list mirrors the plugin packages currently published:` … `turso  @objectstack/knowledge-turso` |\n| `packages/services/service-settings/src/manifests/knowledge.manifest.ts:158` | validation message: ``Turso adapter configured (${u}). Mount @objectstack/knowledge-turso to exercise live calls.`` |\n| `packages/spec/src/contracts/embedder.ts:9, 44` | names `@objectstack/knowledge-turso` and `@objectstack/knowledge-sqlite-vec` as the adapters that consume `IEmbedder` |\n\nThe middle row is the sharp one: an operator who selects the `turso` knowledge adapter in **Settings → AI & Embedder** is told, by the running product, to install a package. If that package is not published anywhere, the instruction is unfollowable; if it *is* published from a sibling or private repo, nothing in this repo records that.\n\n## Why it is worth a card\n\n`IEmbedder` currently has **no consumer in this repo at all**: `KnowledgeMemoryPluginOptions` is `{ id?: string }` and `KnowledgeRagflowAdapterOptions` has no embedder field, so neither in-repo adapter computes vectors through one. The contract's stated consumers are exactly the two packages that are not here. That makes the embedder surface either (a) an interface awaiting an out-of-repo implementation, which should be said plainly, or (b) a published capability with no consumer, which is the shape ADR-0049's enforce-or-remove reasoning applies to.\n\nDeciding between those is not a documentation edit, which is why this is filed rather than fixed.\n\n## What was already fixed, so it is not re-found\n\nPR for #10893 repaired `packages/plugins/embedder-openai/README.md`, whose fenced ```` ```ts ```` block imported `KnowledgeTursoPlugin` from that package — the paste-and-run hazard. That README now states the gap explicitly. **The runtime message and the spec docblock are untouched.**\n\n## Suggested disposition\n\nAnswer the prior question first — is `@objectstack/knowledge-turso` published anywhere? — then either record where it ships (and make the manifest comment say so instead of \"currently published\"), or drop the `turso` adapter option and the docblock's claim.\n\nRefs: #10893 (where this was found, and the README half) · #9532 / #10368 (the member-existence class)"
+}

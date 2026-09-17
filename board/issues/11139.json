@@ -1,0 +1,35 @@
+{
+  "number": 11139,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): package-less draft saves inherit the overlaid active row's package binding (#11087)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-22T20:30:27Z",
+  "updated_at": "2026-08-22T21:44:15Z",
+  "closed_at": "2026-08-22T21:44:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-22T21:44:11Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11139",
+  "body": "## What\n\n`SysMetadataRepository.put()` resolves a `state='draft'` save's package binding as: explicit `opts.packageId` (never overridden, ADR-0048) → the overlaid **active** row's `package_id` → NULL (brand-new item drafted first, unchanged semantics). Plus **orphan adoption**: an inherited-binding save whose scoped existing-row lookup misses re-reads the package-less draft row for the same `(org, type, name)` and updates it in place — adopting the pre-fix orphan instead of forking a second draft row.\n\n## Why\n\nLive tenant measurement (cloud#1593): a console `PUT /meta/:type/:name?mode=draft` over a row owned by `app.k9qk` landed `package_id NULL` — `GET /meta/_drafts` listed 1 draft, `GET /meta/_drafts?packageId=app.k9qk` listed **0**. Every package-scoped consumer (the AI build surface's standing pending-changes bar objectui#5696, inline publish counts, `publishPackageDrafts`) is blind to such drafts, and per-package publish can never promote them.\n\nNote: the issue's original first half (org-scope list blindness) was **retracted after live re-verification** — see the correction comment on #11087; this PR is the confirmed second half.\n\n## Tests\n\n4 pins in `sys-metadata-repository.draft-package-inherit.test.ts` (inheritance + scoped listDrafts counts it; explicit package untouched; new-item NULL; orphan adopted not forked). Full `metadata-protocol` suite: **1857 passed**.\n\nCloses #11087. Cloud consumer: cloud#1593 (pin bump to follow).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

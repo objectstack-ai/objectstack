@@ -1,0 +1,35 @@
+{
+  "number": 11171,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): draft package inheritance reads the active base across scopes (#11087 layer 1b)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T00:25:26Z",
+  "updated_at": "2026-08-23T01:10:00Z",
+  "closed_at": "2026-08-23T01:09:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-23T01:09:59Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11171",
+  "body": "## What\n\nThe #11139 inheritance resolved the overlaid active row through `whereFor`, which pins `organization_id` to the repo's own scope. A console session carries an active org → its draft saves land in the ORG overlay scope → the inheritance looked for an org-scoped active row — but the active base is ENV-WIDE (ADR-0005 overlay order), so for exactly the saves this inheritance exists for it found nothing and the draft stayed `package_id NULL` (measured live on staging after the layer-1 deploy: org-scoped view draft over an env-wide active row bound to `app.k9qk`, `_drafts?packageId=` still 0). The base is now resolved with the same `$or` two-scope reach `listDrafts` applies; null-org repos keep the env-wide equality.\n\n## Tests\n\nNew pin (org repo + env-wide bound active → org-scoped draft inherits `app.k9qk`); suite now 5/5, full `metadata-protocol` green, tsc at the frozen DEBT count.\n\nPart of #11087 (final layer). Cloud pin bump + live bar verification to follow.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

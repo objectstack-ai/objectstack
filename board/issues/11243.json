@@ -1,0 +1,33 @@
+{
+  "number": 11243,
+  "kind": "issue",
+  "title": "The record page's lifecycle path looks like a control and is inert: `stageField` renders as a segmented button group with no handler, no cursor, and no tab stop",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T05:21:23Z",
+  "updated_at": "2026-08-23T06:17:09Z",
+  "closed_at": "2026-08-23T06:17:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11243",
+  "body": "The record page's lifecycle path looks like a control and is inert: it renders `stageField` as a segmented button group with no handler, no cursor, and no tab stop\n\nMeasured on `17.1.0` (open edition, `objectstack dev`), HotCRM `crm_quote` — but it is the generic record chrome, so it applies to every object that declares a `stageField`.\n\n## What renders\n\nThe record page draws the object's lifecycle across the top:\n\n```\n[ 草稿 ] [ 审核中 ] [ 已提交 ] [ 已接受 ] [ 已拒绝 ] [ 已过期 ]\n   ▲ current, filled\n```\n\nPill-shaped segments, the current one filled in the accent colour, the rest in a resting state — visually a segmented button group, and positioned exactly where a CRM user expects the stage control to be.\n\n## What it is\n\n```js\ndocument.querySelectorAll('main [role=\"listitem\"]')   // ← listitem, not button/tab\ngetComputedStyle(el).cursor        // \"auto\"\nel.getAttribute('tabindex')        // null\nel.closest('button,[role=button],[role=tab],a')   // null\n```\n\nA full pointer sequence (pointerdown → mousedown → pointerup → mouseup → click) on the target segment changes nothing; the record's status is still `draft` afterwards. Advancing the record needs 编辑 → the status `<select>` → 更新, or a bulk action.\n\n## Why it is worth changing\n\nThe path is the affordance every CRM user reaches for first — in the products this chrome is modelled on, clicking the next segment *is* how you advance a record. Rendering it as buttons and wiring nothing is the shape that costs a user two or three clicks before they conclude it is decoration, and it teaches them to distrust the rest of the chrome.\n\nTwo directions, either defensible:\n\n1. **Make it a control.** Clicking a segment writes `stageField`, subject to the same permission/validation path an edit takes (so a locked or unauthorised record refuses with the normal envelope). This is what the visual promises.\n2. **Make it look like a readout.** If advancing must stay in the form, drop the button styling — a progress rail without pill-and-fill reads as status, not as a control, and nobody loses a click to it.\n\nWhat it should not keep doing is looking like (1) and behaving like (2).\n\n## Accessibility note\n\nThe segments carry `role=\"listitem\"` with no `tabindex`, so a keyboard user cannot reach them at all — which is *correct* for a readout and wrong for a control. Whichever direction is taken, the role should follow: `listitem` for a readout, `tab`/`button` with a tab stop for a control.\n"
+}

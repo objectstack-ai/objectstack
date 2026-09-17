@@ -1,0 +1,35 @@
+{
+  "number": 11272,
+  "kind": "pull_request",
+  "title": "fix(service-settings): user-keyed loadRows includes tenant/global rows on the engine branch (#11228)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T08:11:35Z",
+  "updated_at": "2026-08-23T08:39:14Z",
+  "closed_at": "2026-08-23T08:39:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-23T08:39:12Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11272",
+  "body": "Closes #11228.\n\n## The defect\n\n`loadRows(namespace, userId)` on the engine branch built `where.user_id = userId`, excluding every upper-scope row (they carry `user_id NULL`), while the in-memory branch's predicate includes them. Two consumers search the ONE result set a user-keyed load returns, so on every engine-bound deployment — i.e. every real one:\n\n1. **read cascade**: a user-scope key with no personal row fell straight through to the manifest default, silently ignoring persisted tenant/global values;\n2. **Phase-2 locks**: the upper-scope lock check found no locked tenant/global row, so a lock that should refuse user-scope writes never fired — a policy bypass, not just a stale read.\n\n## The fix\n\nOne WHERE clause: `{ namespace, $or: [{ user_id }, { scope: 'tenant' }, { scope: 'global' }] }`, mirroring the memory predicate exactly. Both call sites (resolveKey / setMany's lock pre-flight) heal at once; `getMany`'s grouped loads only ever get MORE rows, which its per-scope resolution already filters.\n\n## Why the suite was green over it\n\nThe shared fake engine matcher did bare field equality — the #4434 class (a double looser than the engine), in a WHERE clause — and would ALSO have silently matched nothing against the new `$or`. Both harnesses (this suite + `settings-getmany.test.ts`) now implement `$or` and THROW on any other combinator, per the WHERE-matcher gate convention. New suite pins: the global fallback, other-user exclusion, an engine/memory differential over three contexts, and the lock refusal on the engine path. 481/481 package tests green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

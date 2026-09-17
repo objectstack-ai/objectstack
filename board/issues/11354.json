@@ -1,0 +1,34 @@
+{
+  "number": 11354,
+  "kind": "pull_request",
+  "title": "fix(spec): make check:skill-examples's orphan scan fence-aware",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T13:39:07Z",
+  "updated_at": "2026-08-23T14:09:58Z",
+  "closed_at": "2026-08-23T14:09:57Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": "2026-08-23T14:09:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11354",
+  "body": "Fixes #10791\n\n## The defect\n\n`packages/spec/scripts/check-skill-examples.ts`'s orphan-marker scan had no fence\nawareness. `extractFromFile` walks every line looking for `os:check` marker text; the\n\"is this claimed by a real block\" check only looks one line up (is the *previous* line a\nts/tsx/typescript fence-open), but the *orphan* scan afterwards runs over **every** line\nin the file with no notion of being inside some other fence. A marker shown as example\ntext inside a `` ```md `` illustration of the convention (e.g. \"put this exact line above\nyour fence: `<!-- os:check -->`\") is not adjacent to any real fence, so it was never\n`claimed` — and the orphan scan flagged it as a misplaced marker, failing the gate. The\n`os:check` convention could not be documented in the very roots it governs (`skills/`,\n`content/docs/`).\n\n## Confirming run — premise re-measurement\n\nThe card's premise is source-derived and was latent: today's corpus has all 192 (now 246,\nafter the #10969 SDK surface landed) markers at top level, so the gate is green on `main`\nwith nothing exercising this path.\n\nReproduced against `origin/main`'s script by adding a temporary fixture\n(`skills/tmp-fence-repro.md`, not part of this PR) with two markers:\n1. a marker shown literally inside a `` ```md `` fence, illustrating the convention\n2. a genuine top-level misplaced marker (blank line breaks adjacency)\n\n```\n✗ Found an os:check marker not directly above a ```ts / ```tsx / ```typescript fence\n  - skills/tmp-fence-repro.md:8    ← the FALSE orphan (marker shown as doc text)\n  - skills/tmp-fence-repro.md:13   ← the REAL orphan (genuinely misplaced)\nEXIT=1\n```\n\nBoth were reported — the false orphan confirms the defect exactly as described.\n\n## The fix\n\nLifted the fence-awareness shape from `scripts/check-role-word.mjs`'s #10533 fix (the\nmaintainer-accepted precedent for the same \"this gate's own convention must be\ndocumentable in the roots it governs\" problem): a new `fenceSpans()` walks every line\nonce, recognizing **any** CommonMark-shaped opening fence (any language, backtick run\nlength 3+, with a run-length-aware matching closer — a `````` fence wrapping a ` ```ts `\nexample closes on its own fence, not the inner one; an unclosed fence runs to EOF per\nCommonMark). The orphan scan in `extractFromFile` now skips any line inside such a span.\n\nThe real marked-block extraction loop is untouched — it still only recognizes bare\n` ```ts `/` ```tsx `/` ```typescript ` fences for compilation, so this fix is scoped\nexactly to the orphan-scan defect the card describes, not to a broader \"nested fence\"\nextraction concern.\n\nRe-running the same repro with the fix:\n\n```\n✗ Found an os:check marker not directly above a ```ts / ```tsx / ```typescript fence\n  - skills/tmp-fence-repro.md:13   ← ONLY the real orphan — line 8 no longer flagged\nEXIT=1\n```\n\nThe false orphan (line 8) is gone; the genuine orphan (line 13) still fails — the gate's\nhard-error posture is unweakened. The temporary fixture was then deleted (not part of\nthis PR).\n\n## Self-test coverage\n\nAdded a new fixture to the existing `--self-test` suite in the same file, asserting both\ndirections in one run: a marker shown inside a `` ```md `` illustration must extract 0\nblocks and report 0 orphans for that line, while a genuine top-level misplaced marker in\nthe same fixture must still be reported. Composing both in one fixture catches an\nover-wide fix (treating every marker as \"documented\") as readily as an under-wide one.\n\n## Changeset\n\nNone — `packages/spec/scripts/**` is dev/CI tooling, not published (`packages/spec`'s\n`files` allowlist is `dist`, `json-schema`, `liveness`, `prompts`, `llms.txt`,\n`README.md`, `src/**/*.zod.ts`, `CHANGELOG.md`, `api-surface`, `spec-changes.json` — no\n`scripts/`). Matches the precedent for this exact shape of fix, #10787\n(`fix(gate): let check:role-word exempt marked vendor-wire fences`), merged with the\n`skip-changeset` label and no changeset. `skip-changeset` label applied to this PR via the\nadditive labels endpoint per repo convention, and read back after size-labeler settled.\n\n## Gates\n\nDerived via `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` against\nthe actual diff (`packages/spec/scripts/check-skill-examples.ts` only).\n\n| gate | verdict |\n|---|---|\n| `pnpm --filter @objectstack/spec check:skill-examples` (self-test + full run) | ✅ `246 prose examples type-check across 2 surface(s)` |\n| `pnpm --filter @objectstack/spec typecheck` | ✅ |\n| `pnpm --filter @objectstack/spec run check:empty-state` | ✅ |\n| `pnpm --filter @objectstack/spec run check:liveness` | ✅ |\n| `pnpm --filter @objectstack/spec run check:strictness-ledger` | ✅ |\n| `pnpm --filter @objectstack/spec run check:variant-docs` | ✅ |\n| `pnpm check:merge-driver` | ✅ |\n| `pnpm check:published-files` | ✅ |\n| `pnpm check:slot-lookup` | ✅ |\n| `pnpm check:test-source-alias` | ✅ |\n| `pnpm check:type-source-resolution` | ✅ |\n| `node scripts/check-ci-filter-parity.mjs` | ✅ |\n| `node scripts/check-dev-prereqs.mjs` (needed a full `pnpm build` first — 67/67 package artifacts) | ✅ |\n| `node scripts/check-plugin-teardown-shape.mjs` | ✅ `0 known-unreached` |\n| `node scripts/docs-audit/check-affected-docs.mjs` | ✅ (pre-existing `UNREACHABLE` sdk-route-bridge rows are unrelated to this diff) |\n| `node scripts/check-nul-bytes.mjs` | ✅ |\n\nExit codes captured before any pipe (`cmd > file 2>&1; EXIT=$?`); each command run through\n`scripts/pm/os-verify-lock.sh`, verdict read from its own printed `VERDICT command-exit N` line.\n\nUnion re-run at final HEAD `01ade5594` (clean tree) — every family above re-run and green at\nthat exact commit.\n\n⛔ Not enabled for auto-merge and not marked ready — CI convergence and merge are the PM's.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01RadETjNRLALFLhFA3xehZP)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RadETjNRLALFLhFA3xehZP)_"
+}

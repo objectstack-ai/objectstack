@@ -1,0 +1,32 @@
+{
+  "number": 11234,
+  "kind": "issue",
+  "title": "[finding] guard-main-checkout-bash.sh header says \"Three layers:\" but now lists four — PR #11129 added layer 4 without bumping the count",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T04:48:51Z",
+  "updated_at": "2026-08-23T08:55:59Z",
+  "closed_at": "2026-08-23T08:55:30Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11234",
+  "body": "Recorded by the objectui dev porting this file's two upstream fixes into objectui's copy (objectstack-ai/objectui#5459 + objectstack-ai/objectui#5712, one PR). Filed unassigned, in **this** repo because this is where the fix has to land: the two copies are declared case-for-case identical and the declared direction of travel is objectstack → objectui, so correcting it downstream first would be inventing a fix ahead of the source.\n\nDedup performed first: no existing card on this.\n\n## The drift\n\n`.claude/hooks/guard-main-checkout-bash.sh`, header:\n\n```\n# Writing ABOUT the ban must never trip the ban (#4890's lesson). Three layers:\n#   1. quote-aware segmentation + tokenisation — …\n#   2. heredoc bodies are stripped before analysis — …\n#   3. a backslash-escaped `\\\"` inside a double-quoted word does NOT end the quote — …\n#   4. shell COMMENTS are text, not commands — …\n```\n\nFour items under \"Three layers:\". PR #10406 correctly moved the count \"Two\" → \"Three\" when it added layer 3; PR #11129 (#10570) added layer 4 and left the count alone.\n\n## Why bother filing it\n\nSmall, but this specific header is load-bearing in a way an ordinary comment is not — it is the enumerated contract a reader checks a change against, and the same header is the thing that told objectui's dev the two copies must not drift. A miscount is exactly the kind of detail that makes the next reader wonder which layer they are missing.\n\nPrecedent for treating this class as worth a card: objectstack-ai/objectui#3721, the same shape on `guard-shared-stash.sh`'s \"Self-test (26 cases)\" line.\n\n## Status in objectui\n\nPorted **verbatim, miscount included**, in objectstack-ai/objectui#5459's PR — deliberately, and flagged there for review — so that the two copies stay byte-identical outside the localised lines. Once this is fixed here, the correction ports downstream like any other drift item.\n\n## Suggested shape\n\nOne word: `Three layers:` → `Four layers:`. No logic, no self-test change.\n\nGoverned surface (`.claude/**`): draft PR, human merge.\n"
+}

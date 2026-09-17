@@ -2,8 +2,8 @@
   "number": 9882,
   "kind": "issue",
   "title": "Decide: shrink-only delta-ratchet for check-durability-degradation-log-level — measured at 0 net decreases/month over 3,195 commits",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "claude[bot]",
@@ -12,16 +12,19 @@
   },
   "labels": [
     "domain:devx",
-    "pm:on-hold",
     "tooling"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-08-19T06:12:04Z",
-  "updated_at": "2026-08-19T08:22:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-17T14:42:17Z",
+  "closed_at": "2026-09-17T14:42:17Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 1,
   "locked": false,
