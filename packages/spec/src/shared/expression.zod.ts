@@ -418,8 +418,26 @@ export type PredicateInput = z.input<typeof PredicateInputSchema>;
 /**
  * Construct an Expression literal from a CEL source string. Used by DX
  * shorthand (`cel\`...\``) and by codegen tools.
+ *
+ * ## Why these four constructors return {@link EvaluatedExpression}
+ *
+ * `expression`, {@link cel}, {@link tmpl} and {@link cron} each assign a
+ * `string` to `source` unconditionally — read their four bodies — so the wider
+ * `Expression` return type they used to carry was never a statement about what
+ * they PRODUCE. It was slop, and the evaluated-slot narrowing of #15811 is what
+ * made it cost something: an evaluated slot requires `source`, `Expression`
+ * does not carry it, and so ``visibleWhen: P`…` `` stopped type-checking at the
+ * one spelling this file's own docblock tells authors to use.
+ *
+ * `EvaluatedExpression` is assignable to `Expression`, so every
+ * persistence-contract slot still accepts these values unchanged; what the
+ * narrower type adds is that an evaluated slot accepts them too.
+ *
+ * ⛔ Never widen these back to buy a call site. A caller that genuinely has no
+ * `source` is constructing an `ast`-only envelope — it does not come from here,
+ * it writes the object literal, and an evaluated slot refuses it on purpose.
  */
-export function expression(source: string, dialect: ExpressionDialect = 'cel', meta?: ExpressionMeta): Expression {
+export function expression(source: string, dialect: ExpressionDialect = 'cel', meta?: ExpressionMeta): EvaluatedExpression {
   return { dialect, source, ...(meta ? { meta } : {}) };
 }
 
@@ -458,8 +476,12 @@ function renderTemplate(strings: TemplateStringsArray, values: readonly unknown[
   return out;
 }
 
-/** Tagged template — produces a CEL Expression envelope. */
-export function cel(strings: TemplateStringsArray, ...values: unknown[]): Expression {
+/**
+ * Tagged template — produces a CEL Expression envelope.
+ *
+ * Returns {@link EvaluatedExpression} — see {@link expression} for why.
+ */
+export function cel(strings: TemplateStringsArray, ...values: unknown[]): EvaluatedExpression {
   return { dialect: 'cel', source: renderTemplate(strings, values) };
 }
 
@@ -474,7 +496,7 @@ export const P = cel;
  * notification subjects, prompt bodies, titleFormat strings, etc. Variable
  * scope is the same as CEL (`{{record.x}}`, `{{os.user.id}}`).
  */
-export function tmpl(strings: TemplateStringsArray, ...values: unknown[]): Expression {
+export function tmpl(strings: TemplateStringsArray, ...values: unknown[]): EvaluatedExpression {
   // Templates do not get JSON.stringify on substitution — interpolation happens
   // at evaluate time via `{{path}}` markers, so we keep raw substitutions here.
   let out = strings[0] ?? '';
@@ -486,7 +508,7 @@ export function tmpl(strings: TemplateStringsArray, ...values: unknown[]): Expre
 }
 
 /** Tagged template — produces a cron Expression envelope. */
-export function cron(strings: TemplateStringsArray, ...values: unknown[]): Expression {
+export function cron(strings: TemplateStringsArray, ...values: unknown[]): EvaluatedExpression {
   let out = strings[0] ?? '';
   for (let i = 0; i < values.length; i++) {
     out += String(values[i]);
