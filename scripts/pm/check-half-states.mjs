@@ -15564,6 +15564,9 @@ export const H65_TIER_KEY = /Tier:/;
  * a dialect and reports as `unknown-tier`, not as a tolerated third tier.
  * Neither word is a prefix of the other, so the scan order carries no meaning.
  */
+/** How the Chinese key is NAMED in a row, so the row never claims `Tier:`. */
+export const H65_TIER_KEY_CN_LABEL = '层:';
+
 export const H65_TIER_WORDS_CN = Object.freeze([
   Object.freeze({ word: '小时层', tier: 'hourly' }),
   Object.freeze({ word: '每日层', tier: 'daily' }),
@@ -15710,6 +15713,11 @@ export function h65TierlessRoundArtefact(body) {
     return {
       shape,
       reason: 'unknown-tier',
+      // ⛔ The row must name the key it actually read: a `层:全量层` field
+      // reported as 「carries a `Tier:` line」 would be this row asserting a
+      // spelling the artefact does not carry — the same class of false
+      // statement #18547 was filed on, one layer down.
+      key: declared ? 'Tier:' : H65_TIER_KEY_CN_LABEL,
       detail: dialect ? dialect.slice(0, H44_FRAGMENT_ECHO_CAP) : '(nothing)',
     };
   }
@@ -15756,7 +15764,7 @@ export function h65TierlessRoundArtefactRow(hit, comment, total = 1) {
   const id = String(comment?.id ?? 'an unread id');
   const because =
     hit.reason === 'unknown-tier'
-      ? `carries a \`Tier:\` line naming ${hit.detail === '(nothing)' ? 'NOTHING' : `\`${hit.detail}\``}, which is not one of \`${H65_TIER_WORDS.join('` / `')}\``
+      ? `carries a \`${hit.key ?? 'Tier:'}\` declaration naming ${hit.detail === '(nothing)' ? 'NOTHING' : `\`${hit.detail}\``}, which is not one of \`${[...H65_TIER_WORDS, ...H65_TIER_WORDS_CN.map((entry) => entry.word)].join('` / `')}\``
       : hit.reason === 'not-at-line-start'
         ? 'spells `Tier:` somewhere that is NOT the start of a line — decorated or mid-paragraph, where neither a reader nor this row looks for a declaration'
         : 'names NO tier at all';
@@ -23132,7 +23140,7 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // discharge). A negative with no live control beside it is how a repair
   // becomes a silencer, so the controls are inside the same floored battery.
   'H19 judged-set founding': 34,
-  // Registered with the second-spelling repair (#18547); the pin sits just
+  // Registered with the second-spelling repair (#18547): 45 cases, the pin just
   // under the count on the same grounds as its two neighbours. What this
   // battery floors is a WIDENING — the row stopped reporting a Chinese
   // declaration as silence — so the FIRING CONTROLS are inside it: the three
@@ -23140,7 +23148,7 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // declaration, a dialect word, a bare key and a key-less mention. A widening
   // whose controls can drift out of the suite is how a repair becomes a
   // silencer, which is the failure this row was filed for in the first place.
-  'H65 tier declaration spelling': 34,
+  'H65 tier declaration spelling': 42,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
@@ -32998,6 +33006,10 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY65, 'H65 #18547 control: ⛔ a BLOCKQUOTED Chinese declaration is this artefact quoting another', h65reason(withTier65(MARKER65, '> 层:每日层(当日首 fire)')), 'absent');
   b(BATTERY65, 'H65 #18547 control: ⛔ the WORD SET is closed — a Chinese dialect is a finding', h65reason(withTier65(MARKER65, '层:全量层')), 'unknown-tier');
   b(BATTERY65, 'H65 #18547 control: …and the row echoes the word it refused', h65row(withTier65(MARKER65, '层:全量层')).includes('`全量层`'), true);
+  b(BATTERY65, 'H65 #18547 control: …naming the key it ACTUALLY read', h65row(withTier65(MARKER65, '层:全量层')).includes('carries a `层:` declaration'), true);
+  b(BATTERY65, 'H65 #18547 control: ⛔ …and never claiming a `Tier:` the artefact does not carry', h65row(withTier65(MARKER65, '层:全量层')).includes('`Tier:` declaration'), false);
+  b(BATTERY65, 'H65 #18547 control: …while an English dialect still names `Tier:`', h65row(withTier65(MARKER65, 'Tier: full')).includes('carries a `Tier:` declaration'), true);
+  b(BATTERY65, 'H65 #18547 control: …and the refusal lists all four legal words, not two', ['hourly', 'daily', '小时层', '每日层'].every((w) => h65row(withTier65(MARKER65, 'Tier: full')).includes(`\`${w}\``)), true);
   b(BATTERY65, 'H65 #18547 control: …a bare 「层:」 naming nothing reports as naming nothing', h65row(withTier65(MARKER65, '层:')).includes('naming NOTHING'), true);
   b(BATTERY65, 'H65 #18547 control: ⛔ the KEY is closed — 「层」 with no colon declares nothing', h65reason(withTier65(MARKER65, '本轮跑 小时层 增量')), 'absent');
   b(BATTERY65, 'H65 #18547 control: ⛔ …nor does another key carrying the same word', h65reason(withTier65(MARKER65, '本轮:小时层(增量)')), 'absent');
