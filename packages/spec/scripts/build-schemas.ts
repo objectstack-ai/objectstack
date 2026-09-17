@@ -1108,11 +1108,13 @@ if (surfaceDoc) {
 //      file did before #4650. The manifest deletion gate below now anchors that
 //      comparison on the merge base and demands a declared removal, and it runs
 //      BEFORE this check so the deferral resolves to a real verdict;
-//   4. the guidance route (#18301) — the base entry was NOT `[RETIRED]`, and the
-//      def's shape is CLOSED and NAMES the key in its `strictObject` `guidance`
-//      table (or an enumerated `guidanceSets` entry), so an author who keeps
-//      writing it is answered with the upgrade prescription instead of a silent
-//      parse. This is the retirement route that deletes the key from the shape
+//   4. the guidance route (#18301) — the base entry was NOT `[RETIRED]`, and
+//      writing the key at this build's own instance for the def is REFUSED as an
+//      unrecognized key carrying the prescription its `strictObject` `guidance`
+//      table (or an enumerated `guidanceSets` entry) declares for it, so an
+//      author who keeps writing it is answered with the upgrade prescription
+//      instead of a silent parse. This is the retirement route that deletes the
+//      key from the shape
 //      rather than tombstoning it in place, so it never earns the `[RETIRED]`
 //      mark proof 1 starts from — proof 1 cannot apply to it at all, which is
 //      why it needed a proof of its own rather than a relaxation of that clock.
@@ -1306,15 +1308,32 @@ function computeSurfaceReachability(): SurfaceReachability {
   };
 }
 
-/** Check (c) proof 4's lookup: which keys a def's authoring shape prescribes for. */
+/** Check (c) proof 4's reading: what a def really does with a key it no longer declares. */
+type GuidanceVerdict =
+  /** The def REFUSES the key as unrecognized, and the refusal carries the exact
+   *  prescription its `strictObject` declaration owes it. */
+  | 'prescribed'
+  /** A declaration promises a prescription for the key and this def does not
+   *  deliver it — an open door, or an error map that is not the one holding
+   *  that table. The promise is the only part that was ever checkable from the
+   *  registry alone, and it is not the part an author meets. */
+  | 'declared-but-silent'
+  /** Nothing this gate can read prescribes for this key on this def. */
+  | 'none';
+
+/** Check (c) proof 4's lookup: which keys a def answers with a prescription. */
 interface GuidanceRoutes {
   /**
-   * The keys `defKey`'s own authoring shape answers with a PRESCRIPTION rather
-   * than a silent strip — or `null` when this gate cannot establish that for the
-   * def at all. Never `null` to mean "none": an empty set and "no evidence" would
-   * then read alike, and only one of them is a safe thing to waive a deletion on.
+   * What an author who keeps writing `leaf` on `defKey` actually gets.
+   *
+   * THREE answers rather than a boolean, because "nothing prescribes for this
+   * key" and "something prescribes for it and the author never hears it" are
+   * different facts about the tree — the second is a declaration that is not
+   * being kept, and a verdict that folded it into the first would report the
+   * deletion in words that send its author looking for a `guidance` entry they
+   * have already written.
    */
-  prescribedKeys(defKey: string): ReadonlySet<string> | null;
+  verdictFor(defKey: string, leaf: string): GuidanceVerdict;
 }
 
 /**
@@ -1339,19 +1358,55 @@ interface GuidanceRoutes {
  *
  * ## What is proved, and from where
  *
- * The prescription has to be read from the TREE, not from a PR description, on
- * the same discipline as the other three proofs. Two tree facts, and both are
- * required:
+ * What proof 4 waives a deletion on is a claim about the AUTHOR: someone who
+ * keeps writing the key is answered with the upgrade prescription instead of
+ * having the value dropped in silence. So it is established the way the author
+ * meets it — by writing the key at this build's own instance for the def and
+ * reading what comes back. Two halves, both required:
  *
- *   - **The door is closed.** This build's own emitted JSON Schema for the def
- *     carries `additionalProperties: false`. On an OPEN shape the author's write
- *     is stripped in silence and no error map is ever consulted, so a `guidance`
- *     entry on it prescribes to nobody — which is the #1535 failure this whole
- *     campaign exists to kill, not a retirement route. Read off `generatedSchemas`
- *     rather than re-walked, so the fact is the one that SHIPPED.
- *   - **The prescription names the key.** The def resolves to exactly one
- *     {@link StrictObjectDeclaration}, and that declaration's `guidance` names the
- *     exact key, or one of its `guidanceSets` ENUMERATES it.
+ *   - **A declaration promises the prescription.** The def resolves to exactly
+ *     one {@link StrictObjectDeclaration}, and that declaration's `guidance`
+ *     names the exact key, or one of its `guidanceSets` ENUMERATES it. This half
+ *     says which text is owed, and it is read from the tree.
+ *   - **The def keeps that promise.** `safeParse` of `{ [key]: … }` against the
+ *     schema `zodByDefKey` holds raises an `unrecognized_keys` issue naming the
+ *     key, and that issue's message carries the declared text verbatim.
+ *
+ * ## ⚠️ Two things that look like door tests and are not
+ *
+ * Both of these were load-bearing in the first cut of this proof, and the repo's
+ * own measurements say neither separates a closed door from a silent strip:
+ *
+ *   - **`additionalProperties: false` on the emitted artifact.** This generator
+ *     converts with the default `io: 'output'`, and in output mode zod emits
+ *     `additionalProperties: false` for a `.strip()` object too — the post-parse
+ *     shape genuinely has no extra keys, whether they were refused or dropped.
+ *     Measured and written down in
+ *     `docs/audits/2026-07-unknown-key-strictness-ledger.md` ("strictness does
+ *     not change the published JSON Schema", verified there by regenerating both
+ *     ways to a byte-identical artifact). A condition that answers the same for
+ *     both cases cannot be the thing that excludes one of them, so the artifact
+ *     read is GONE from this proof rather than restated more carefully.
+ *   - **Shape identity against the declaration registry.** `strictObjectError()`
+ *     registers a declaration WITHOUT closing the shape (`view.zod.ts`'s
+ *     `FormFieldBaseSchema` is the shipped case), and `Strict.strip()` /
+ *     `z.object(Strict.shape)` build a clone that shares every shape ENTRY with a
+ *     closed declaration while leaving the door open. Either one satisfies the
+ *     identity match while the author's write is dropped in silence — the one
+ *     direction this gate must not err in. The match stays, because it is how the
+ *     owed text is found; what it is no longer asked to prove is closure.
+ *
+ * ## Why the probe reads `unrecognized_keys`, and why it reads the message
+ *
+ * `unrecognized_keys` is the ONLY issue code a `guidance` table is ever consulted
+ * from — `strictUnknownKeyError` returns undefined for every other code — and the
+ * prescription is appended to that message verbatim, one bullet per key. So the
+ * issue's presence is exactly "the door refused this write", and the declared
+ * text appearing in its message is exactly "the map this def parses through is
+ * the one holding that table" — which shape identity alone cannot tell, since a
+ * clone can share a shape without sharing an error map. ⛔ No message WORDING is
+ * pinned by this: the needle is read out of the tree, from the very declaration
+ * the first half matched, so a rewritten prescription moves both sides together.
  *
  * ## Why `strictObjectDeclarations()` and not the built schema
  *
@@ -1370,22 +1425,24 @@ interface GuidanceRoutes {
  *     (`.strict()` clones again). An EMPTY shape is excluded outright: it matches
  *     every other empty shape, and on the shipped graph that alone was 6 defs
  *     answering to 9 declarations each. Where two declarations still answer, this
- *     returns `null` rather than unioning them — a wrong table here waives a
- *     deletion silently, which is the one direction this gate must not err in.
+ *     returns "no evidence" rather than unioning them — a wrong table here waives
+ *     a deletion silently, which is the one direction this gate must not err in.
  *   - **A `guidanceSets` PATTERN does not count.** `keySetMatches` decides
  *     membership for both forms, but only an enumerated `keys: [...]` list NAMES
  *     the key; a `RegExp` claims a family whose members were never written down,
  *     so it cannot distinguish "this key was retired with a prescription" from
- *     "this key happens to be spelled like a wrong-layer pointer". 55 of the 103
- *     declared sets are enumerated and are honoured; the 48 pattern sets prove
- *     nothing here and still prescribe to authors exactly as before.
+ *     "this key happens to be spelled like a wrong-layer pointer". The pattern
+ *     sets prove nothing here and still prescribe to authors exactly as before.
  *
- * Measured on the shipped graph at #18301: 1525 emitted defs, 1117 of them
- * closed, 144 carrying a route at all, naming 772 keys between them — an
- * enumerable set written down key by key, which is what makes this a proof and
- * not a blanket waiver. `integration/DataSyncConfig` deliberately has NO route
- * (its shape is not a `strictObject` and nothing prescribes for `schedule`), so
- * this proof does not reach the 2026-09-10 ruling that withheld that tombstone.
+ * Everything else fails closed by construction: a def with no shape, an empty
+ * shape, an ambiguous match, a probe that throws, a parse that SUCCEEDS with the
+ * key in it, or a refusal whose message does not carry the declared text all read
+ * as "no evidence", never as "proved".
+ *
+ * Measured on the shipped graph at #18301 with THIS instrument — see the PR body
+ * for the census run: `integration/DataSyncConfig` has NO route (its shape is not
+ * a `strictObject` and nothing prescribes for `schedule`), so this proof does not
+ * reach the 2026-09-10 ruling that withheld that tombstone.
  */
 function computeGuidanceRoutes(): GuidanceRoutes {
   const shapeSignature = (shape: Record<string, unknown>): string =>
@@ -1399,43 +1456,94 @@ function computeGuidanceRoutes(): GuidanceRoutes {
     if (list) list.push(decl);
     else bySignature.set(signature, [decl]);
   }
-  const cache = new Map<string, ReadonlySet<string> | null>();
-  const compute = (defKey: string): ReadonlySet<string> | null => {
-    const emitted = generatedSchemas.get(defKey);
-    if (!emitted || emitted.additionalProperties !== false) return null;
-    const schema = zodByDefKey.get(defKey);
-    if (!schema) return null;
-    const shape = zodShapeOf(schema);
-    if (!shape || Object.keys(shape).length === 0) return null;
-    const matched = (bySignature.get(shapeSignature(shape)) ?? []).filter((decl) =>
-      Object.entries(decl.shape).every(([name, prop]) => shape[name] === prop));
-    if (matched.length !== 1) return null;
-    const { options } = matched[0]!;
-    const prescribed = new Set<string>();
-    // `name in shape` drops an entry filed under a key the shape DECLARES. Such an
-    // entry is a false claim about its own schema — `guidance` is consulted only
-    // from the `unrecognized_keys` path, which a declared key never reaches — so
-    // it prescribes about a door no author arrives at and must prove nothing
-    // here. The `alias-integrity` audit says the same from the other side; this
-    // gate computes it rather than importing the guarantee. (What keeps proof 4
-    // disjoint from proof 1 is the un-marked gate at the CALL SITE, not this
-    // line: a tombstone is in the shape at HEAD but its baseline entry is what
-    // check (c) reads, and the two can disagree.)
-    for (const name of Object.keys(options.guidance ?? {})) {
-      if (!(name in shape)) prescribed.add(name);
-    }
-    for (const set of options.guidanceSets ?? []) {
-      if (set.keys instanceof RegExp) continue;
-      for (const name of set.keys) {
-        if (!(name in shape) && keySetMatches(set, name)) prescribed.add(name);
+  /** defKey -> key -> the prescription its declaration OWES for that key. */
+  const promised = new Map<string, ReadonlyMap<string, string> | null>();
+  const verdicts = new Map<string, GuidanceVerdict>();
+
+  const promisesFor = (defKey: string): ReadonlyMap<string, string> | null => {
+    if (promised.has(defKey)) return promised.get(defKey) ?? null;
+    const computed = ((): ReadonlyMap<string, string> | null => {
+      const schema = zodByDefKey.get(defKey);
+      if (!schema) return null;
+      const shape = zodShapeOf(schema);
+      if (!shape || Object.keys(shape).length === 0) return null;
+      const matched = (bySignature.get(shapeSignature(shape)) ?? []).filter((decl) =>
+        Object.entries(decl.shape).every(([name, prop]) => shape[name] === prop));
+      if (matched.length !== 1) return null;
+      const { options } = matched[0]!;
+      const owed = new Map<string, string>();
+      // `name in shape` drops an entry filed under a key the shape DECLARES. Such an
+      // entry is a false claim about its own schema — `guidance` is consulted only
+      // from the `unrecognized_keys` path, which a declared key never reaches — so
+      // it prescribes about a door no author arrives at and must prove nothing
+      // here. The `alias-integrity` audit says the same from the other side; this
+      // gate computes it rather than importing the guarantee. (What keeps proof 4
+      // disjoint from proof 1 is the un-marked gate at the CALL SITE, not this
+      // line: a tombstone is in the shape at HEAD but its baseline entry is what
+      // check (c) reads, and the two can disagree.)
+      for (const [name, prescription] of Object.entries(options.guidance ?? {})) {
+        if (!(name in shape)) owed.set(name, prescription);
       }
-    }
-    return prescribed;
+      // Precedence, as `strictUnknownKeyError` resolves it: an exact `guidance`
+      // entry wins over every set, and among sets the first declared one answers.
+      // Read the same way here so the text this gate expects is the text that
+      // surface really emits.
+      for (const set of options.guidanceSets ?? []) {
+        if (set.keys instanceof RegExp) continue;
+        for (const name of set.keys) {
+          if (!(name in shape) && !owed.has(name) && keySetMatches(set, name)) {
+            owed.set(name, set.prescription);
+          }
+        }
+      }
+      return owed;
+    })();
+    promised.set(defKey, computed);
+    return computed;
   };
+
+  /**
+   * Write the key at the def and read the answer.
+   *
+   * The value is irrelevant and never parsed — a key the shape does not declare
+   * is rejected before its value is looked at — so `null` is used rather than
+   * anything that could accidentally satisfy a declared key if the shape ever
+   * regains one.
+   *
+   * A throw is an answer too, and it is "no evidence": a def whose parse cannot
+   * be driven from here has not been shown to refuse anything.
+   */
+  const delivers = (defKey: string, key: string, prescription: string): boolean => {
+    const schema = zodByDefKey.get(defKey);
+    if (!schema) return false;
+    try {
+      const result = schema.safeParse({ [key]: null });
+      if (result.success) return false;
+      const issue = result.error.issues.find(
+        (candidate) =>
+          candidate.code === 'unrecognized_keys' &&
+          ((candidate as { keys?: readonly string[] }).keys ?? []).includes(key),
+      );
+      return issue !== undefined && issue.message.includes(prescription);
+    } catch {
+      return false;
+    }
+  };
+
   return {
-    prescribedKeys(defKey: string): ReadonlySet<string> | null {
-      if (!cache.has(defKey)) cache.set(defKey, compute(defKey));
-      return cache.get(defKey) ?? null;
+    verdictFor(defKey: string, leaf: string): GuidanceVerdict {
+      const cacheKey = `${defKey}:${leaf}`;
+      const cached = verdicts.get(cacheKey);
+      if (cached !== undefined) return cached;
+      const prescription = promisesFor(defKey)?.get(leaf);
+      const verdict: GuidanceVerdict =
+        prescription === undefined
+          ? 'none'
+          : delivers(defKey, leaf, prescription)
+            ? 'prescribed'
+            : 'declared-but-silent';
+      verdicts.set(cacheKey, verdict);
+      return verdict;
     },
   };
 }
@@ -2451,14 +2559,30 @@ let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
           // aging clock — measured, in the two #5898 cases that reddened. A key that
           // WAS marked is a tombstone; it stays on the clock, and a `guidance` line
           // written beside it may not shorten that.
-          const prescribed = guidanceRoutes.prescribedKeys(defKey);
-          if (prescribed?.has(leaf)) {
+          const verdict = guidanceRoutes.verdictFor(defKey, leaf);
+          if (verdict === 'prescribed') {
             allowed.push(
-              `${key} — def ${how}, and its shape is CLOSED and prescribes for\n` +
-                `       '${leaf}' by name (\`strictObject\` \`guidance\`/\`guidanceSets\`, this build's\n` +
-                `       own declaration registry): an author who keeps writing the key gets the\n` +
-                `       upgrade prescription, not a silent parse, so the retirement is audible\n` +
-                `       without a \`retiredKey()\` tombstone to age out (#18301).`,
+              `${key} — def ${how}; writing '${leaf}' on it is REFUSED as an unrecognized key\n` +
+                `       and the refusal carries the prescription its \`strictObject\` declaration owes\n` +
+                `       it (\`guidance\` / \`guidanceSets\`, probed against this build's own instance):\n` +
+                `       an author who keeps writing the key gets the upgrade prescription, not a\n` +
+                `       silent parse, so the retirement is audible without a \`retiredKey()\`\n` +
+                `       tombstone to age out (#18301).`,
+            );
+            continue;
+          }
+          if (verdict === 'declared-but-silent') {
+            // A declaration that is not being kept. Reported apart from the plain
+            // "was LIVE" verdict because the two send their reader to different
+            // places: this one's `guidance` entry already exists, and what is
+            // missing is the door it was written for.
+            violations.push(
+              `${key} — def ${how}; a \`strictObject\` declaration NAMES '${leaf}', but writing it\n` +
+                `       on this def raises NO such prescription — the value is dropped in silence (an\n` +
+                `       open door, or an error map that is not the one holding that table), so the\n` +
+                `       entry prescribes to nobody and the retirement is inaudible. Probed against\n` +
+                `       this build's own instance; the entry at ${baseRev} was LIVE (never\n` +
+                `       tombstoned) (#18301).`,
             );
             continue;
           }
@@ -2524,15 +2648,20 @@ let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
             `     3. its whole def stopped being emitted — adjudicated by the manifest deletion\n` +
             `        gate above (#4725), which demands the removal be declared in\n` +
             `        RETIRED_DEFS_BY_MAJOR (src/migrations/registry.ts); or\n` +
-            `     4. its baseline entry was NOT \`[RETIRED]\`, and its def's shape is CLOSED and\n` +
-            `        NAMES the key in its \`strictObject\` \`guidance\` table — an enumerated\n` +
-            `        \`guidanceSets\` entry counts, a RegExp one does not — so writing the key\n` +
-            `        raises the upgrade prescription instead of parsing clean. That is the\n` +
-            `        retirement route that removes the key from the shape rather than leaving\n` +
-            `        a \`retiredKey()\` tombstone in it, and it is the only one of the four with\n` +
-            `        no \`[RETIRED]\` mark to age (#18301). A key that IS marked is a tombstone\n` +
-            `        and stays on route 1's clock. This gate computes all of that too (it\n` +
-            `        would have said so above).\n\n` +
+            `     4. its baseline entry was NOT \`[RETIRED]\`, and writing the key on its def is\n` +
+            `        REFUSED as an unrecognized key carrying the prescription its\n` +
+            `        \`strictObject\` \`guidance\` table declares for it — an enumerated\n` +
+            `        \`guidanceSets\` entry counts, a RegExp one does not. Both halves are\n` +
+            `        probed against this build's own instance, because neither the published\n` +
+            `        \`additionalProperties: false\` nor the declaration registry can tell a\n` +
+            `        closed door from a shape that merely STRIPS the key: in \`io: 'output'\`\n` +
+            `        zod emits \`false\` for a stripping shape too, and a \`.strip()\` clone\n` +
+            `        shares its source's shape entries. That is the retirement route that\n` +
+            `        removes the key from the shape rather than leaving a \`retiredKey()\`\n` +
+            `        tombstone in it, and it is the only one of the four with no \`[RETIRED]\`\n` +
+            `        mark to age (#18301). A key that IS marked is a tombstone and stays on\n` +
+            `        route 1's clock. This gate computes all of that too (it would have said\n` +
+            `        so above).\n\n` +
             `   Restore the line(s) — \`pnpm --filter @objectstack/spec gen:schema\` regenerates\n` +
             `   the file — or complete the retirement route (#4650, ADR-0104, and the\n` +
             `   spec-property-retirement skill in .claude/skills/).`,
