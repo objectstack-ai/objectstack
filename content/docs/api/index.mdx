@@ -65,8 +65,10 @@ permission model grants anonymous users. Two ways to authenticate:
   `curl -c cookies.txt` / `-b cookies.txt`. On a fresh dev database the seeded
   admin is `admin@objectos.ai` / `admin123`.
 - **API key** (scripts, CI, headless agents): mint one with `POST /api/v1/keys`
-  (the key is shown once), or from **Setup → Connect an Agent** in the Console.
-  Send it as `x-api-key: osk_…` or `Authorization: Bearer osk_…`.
+  (the key is shown once), or from the **Connect an Agent** page in the Console
+  — **Account → Developer** for any signed-in user, **Setup → Connect an Agent**
+  for platform admins. Send it as `x-api-key: osk_…` or
+  `Authorization: Bearer osk_…`.
 
 See [Authentication](/docs/permissions/authentication) for the full identity
 surface (OAuth flows, sessions, providers) and
