@@ -55,13 +55,6 @@
         "platform-core.docs-portal-render"
       ]
     },
-    "capability": {
-      "items": [
-        "access-security.capability-declaration-lifecycle",
-        "ai.console-ai-surface-gating",
-        "platform-core.marketplace-install-local-lifecycle"
-      ]
-    },
     "connector": {
       "items": [
         "integration-system.connector-declarative-boot",
@@ -324,6 +317,13 @@
     "webhook": {
       "items": [
         "integration-system.webhook-lifecycle"
+      ]
+    },
+    "capability": {
+      "items": [
+        "access-security.capability-declaration-lifecycle",
+        "ai.console-ai-surface-gating",
+        "platform-core.marketplace-install-local-lifecycle"
       ]
     }
   }
