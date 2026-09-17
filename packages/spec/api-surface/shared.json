@@ -104,7 +104,6 @@
     "canonicalMetaUrlType (function)",
     "cel (function)",
     "cron (function)",
-    "evaluatedExpressionUnionRefusal (function)",
     "expression (function)",
     "findClosestMatches (function)",
     "formatSuggestion (function)",
