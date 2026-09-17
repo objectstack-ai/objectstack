@@ -245,8 +245,9 @@ await client.auth.refreshToken('refresh-token-string');
 // Package Management
 await client.packages.list();
 await client.packages.install({
-  name: 'vendor_plugin',
-  label: 'Vendor Plugin',
+  id: 'com.vendor.plugin',
+  type: 'plugin',
+  name: 'Vendor Plugin',
   version: '1.0.0',
 });
 await client.packages.enable('plugin-id');
