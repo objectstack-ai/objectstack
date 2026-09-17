@@ -44,8 +44,18 @@
  *     name the exact knob rather than warning in the abstract.
  *   - HOW MANY tests were skipped is read from the run's own results. Those are
  *     reported as the raw skip counts they are; the block does not claim each
- *     one is a backend skip (two in this package are not). The causal sentence
- *     is attached to the per-dialect lines, which are exact.
+ *     one is a backend skip. Measured on this package with no servers: 167 of
+ *     the 168 are, and the one that is not is skipped on the SQLite cell
+ *     (`schema-drift.base-type-mismatch.test.ts`, `skipIf(!corrupts)`). The
+ *     causal sentence is attached to the per-dialect lines, which are exact.
+ *
+ * Attribution is deliberately NOT attempted per test. The reporter runs in the
+ * main process, where a skipped task carries no `meta` and no skip note (only
+ * `ctx.skip(note)` sets one, and a skipped test never reaches its body), so the
+ * only per-test channel left is the test's own NAME. Nine files in this package
+ * guard their live cells with a hand-rolled `skipIf` whose names the testkit
+ * never wrote, so a name matcher would silently report a smaller number than the
+ * truth — which is this card's own disease.
  *
  * With a backend provisioned the block says so and the counts fall, so the
  * signal is not the same text in both states.
@@ -122,14 +132,29 @@ function census(testModules: ReadonlyArray<TestModule>): SkipCensus {
 }
 
 const PG_RECIPE = [
-  "  PGBIN=/usr/lib/postgresql/16/bin   # Debian/Ubuntu: not on PATH, and initdb refuses root",
-  '  $PGBIN/initdb -D /tmp/os-pg -U postgres --auth=trust',
-  "  $PGBIN/pg_ctl -D /tmp/os-pg -l /tmp/os-pg/server.log -w start \\",
-  "      -o '-p 54988 -c timezone=Asia/Shanghai'",
-  '  OS_TEST_POSTGRES_URL=postgres://postgres@127.0.0.1:54988/postgres TZ=America/New_York \\',
-  '      pnpm --filter @objectstack/driver-sql test',
-  '  $PGBIN/pg_ctl -D /tmp/os-pg -m fast stop && rm -rf /tmp/os-pg    # teardown',
+  '    PGBIN=/usr/lib/postgresql/16/bin   # Debian/Ubuntu: off PATH, and initdb refuses root',
+  '    $PGBIN/initdb -D /tmp/os-pg -U postgres --auth=trust',
+  '    $PGBIN/pg_ctl -D /tmp/os-pg -l /tmp/os-pg/server.log -w start \\',
+  "        -o '-p 54988 -c timezone=Asia/Shanghai'",
+  '    OS_TEST_POSTGRES_URL=postgres://postgres@127.0.0.1:54988/postgres TZ=America/New_York \\',
+  '        pnpm --filter @objectstack/driver-sql test',
+  '    $PGBIN/pg_ctl -D /tmp/os-pg -m fast stop && rm -rf /tmp/os-pg    # teardown',
 ];
+
+/** Terminal-friendly wrapping, so a long sentence does not arrive as one ragged line. */
+function wrap(text: string, indent = '  ', width = 92): string[] {
+  const out: string[] = [];
+  let line = indent;
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    if (line.length > indent.length && line.length + 1 + word.length > width) {
+      out.push(line);
+      line = indent;
+    }
+    line += line.length > indent.length ? ` ${word}` : word;
+  }
+  if (line.length > indent.length) out.push(line);
+  return out;
+}
 
 function report(testModules: ReadonlyArray<TestModule>): string {
   const live = DIALECT_CELLS.filter((cell) => cell.live);
@@ -138,19 +163,20 @@ function report(testModules: ReadonlyArray<TestModule>): string {
   const c = census(testModules);
   const lines: string[] = [''];
 
+  const filesWithSkips = c.filesFullySkipped + c.filesPartlySkipped;
+
   if (missing.length === 0) {
     lines.push(
-      `  driver-sql live-dialect coverage: all ${DIALECT_CELLS.length} dialects were exercised ` +
-        `(${ran.map((cell) => cell.label).join(', ')}).`,
+      ...wrap(
+        `driver-sql live-dialect coverage: all ${DIALECT_CELLS.length} dialects were ` +
+          `exercised (${ran.map((cell) => cell.label).join(', ')}).` +
+          (c.skippedTests > 0
+            ? ` ${c.skippedTests} test(s) were still skipped, in ${filesWithSkips} of ` +
+              `${c.files} files, for reasons other than a missing backend.`
+            : ''),
+      ),
+      '',
     );
-    if (c.skippedTests > 0) {
-      lines.push(
-        `  ${c.skippedTests} test(s) were still skipped, in ` +
-          `${c.filesFullySkipped + c.filesPartlySkipped} of ${c.files} files, for reasons other ` +
-          `than a missing backend.`,
-      );
-    }
-    lines.push('');
     return lines.join('\n');
   }
 
@@ -159,12 +185,14 @@ function report(testModules: ReadonlyArray<TestModule>): string {
     // turned each missing cell into a named FAILURE. Repeating the warning here
     // would compete with a red the run is already carrying; name the cause once.
     lines.push(
-      `  driver-sql live-dialect coverage: OS_EXPECT_LIVE_DIALECT_MATRIX=1, but ` +
-        `${missing.map((cell) => `${cell.label} (${cell.env})`).join(' and ')} ` +
-        `${missing.length === 1 ? 'was' : 'were'} not provisioned — this run reported that as a ` +
-        `named failure, not as a skip.`,
+      ...wrap(
+        `driver-sql live-dialect coverage: OS_EXPECT_LIVE_DIALECT_MATRIX=1, but ` +
+          `${missing.map((cell) => `${cell.label} (${cell.env})`).join(' and ')} ` +
+          `${missing.length === 1 ? 'was' : 'were'} not provisioned — this run reported that ` +
+          `as a named failure, not as a skip.`,
+      ),
+      '',
     );
-    lines.push('');
     return lines.join('\n');
   }
 
@@ -177,31 +205,50 @@ function report(testModules: ReadonlyArray<TestModule>): string {
   for (const cell of DIALECT_CELLS) {
     const label = cell.label.padEnd(width);
     lines.push(
-      cell.available
-        ? `       ${label}  RAN`
-        : `       ${label}  NOT RUN -- set ${cell.env} to run it`,
+      cell.available ? `     ${label}  RAN` : `     ${label}  NOT RUN -- set ${cell.env} to run it`,
     );
   }
   lines.push(
     '',
-    `  The counts above this block are NOT coverage of the dialect(s) marked NOT RUN.`,
-    `  This run skipped ${c.skippedTests} test(s) across ` +
-      `${c.filesFullySkipped + c.filesPartlySkipped} of its ${c.files} files: ` +
-      `${c.filesFullySkipped} file(s) vitest reported as skipped, and ${c.filesPartlySkipped}`,
-    `  more it reported as PASSED with skipped tests inside them. Every ` +
-      `${missing.map((cell) => cell.label).join(' and ')} cell in this package is in that`,
-    '  population, and a green above says nothing about any of them.',
+    ...wrap(
+      `The counts above this block are NOT coverage of the dialect(s) marked NOT RUN. This ` +
+        `run skipped ${c.skippedTests} test(s) across ${filesWithSkips} of its ${c.files} ` +
+        `files: ${c.filesFullySkipped} vitest reported as skipped, and ${c.filesPartlySkipped} ` +
+        `more it reported as PASSED with skipped tests inside them — the least visible skip ` +
+        `in the output. Every ${missing.map((cell) => cell.label).join(' and ')} cell in this ` +
+        `package is in that population, and a green above says nothing about any of them.`,
+    ),
     '',
-    '  CI runs those cells in `Temporal Conformance (live PG + MySQL)`, which sets',
-    '  OS_EXPECT_LIVE_DIALECT_MATRIX=1 -- there an unprovisioned cell is a named failure',
-    '  rather than a skip. To run the postgres half here (measured: ~1 min to provision):',
-    '',
-    ...PG_RECIPE,
-    '',
-    '  The server zone, TZ and UTC must all differ: the matrix asserts that skew, because',
-    '  identical answers from a UTC server are answers no timezone could have perturbed.',
-    '',
+    ...wrap(
+      'CI runs those cells in `Temporal Conformance (live PG + MySQL)`, which sets ' +
+        'OS_EXPECT_LIVE_DIALECT_MATRIX=1 — there an unprovisioned cell is a named failure ' +
+        'rather than a skip.',
+    ),
   );
+  if (missing.some((cell) => cell.id === 'pg')) {
+    lines.push(
+      ...wrap('To run the postgres half here (measured: ~1 min to provision):'),
+      '',
+      ...PG_RECIPE,
+      '',
+      ...wrap(
+        'The server zone, TZ and UTC must all differ: the matrix asserts that skew, because ' +
+          'identical answers from a UTC server are answers no timezone could have perturbed.',
+      ),
+    );
+  } else {
+    // Only MySQL is left, and provisioning one means installing a server package
+    // into whatever container this is running in. That is not a step to put in
+    // front of a reader as a casual next line; naming the variable is enough.
+    lines.push(
+      ...wrap(
+        `Only the live mysql cell is left. Provisioning MySQL means installing a server into ` +
+          `this environment, so no recipe is offered here — set OS_TEST_MYSQL_URL if you ` +
+          `already have one, otherwise CI is where that cell runs.`,
+      ),
+    );
+  }
+  lines.push('');
   return lines.join('\n');
 }
 
