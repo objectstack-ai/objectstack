@@ -734,6 +734,34 @@ describe('HttpDispatcher extracted domains (PR-6: automation)', () => {
             status: 'active', triggerType: 'on_create', object: 'sales_lead',
         });
     });
+
+    /**
+     * [#18235] Ruled item 6's third surface is this door. The engine records WHY
+     * a flow is unarmed; this route is the only way that sentence reaches a
+     * console, and it reaches it by passing the row through — so the pin is that
+     * `reason` is NOT dropped on the way out, beside a row that carries none.
+     */
+    it('/automation/_status carries the unbound reason, and omits it where there is none', async () => {
+        const automation = {
+            listFlows: vi.fn(),
+            getFlow: vi.fn(),
+            getFlowRuntimeStates: vi.fn().mockReturnValue([
+                {
+                    name: 'daily_digest', enabled: true, bound: false, status: 'active', triggerType: 'schedule',
+                    reason: 'disabled by deployment policy — package-authored scheduled work is off on this deployment',
+                },
+                { name: 'nurture', enabled: true, bound: true, status: 'active', triggerType: 'on_create', object: 'sales_lead' },
+            ]),
+        };
+        const result = await makeDispatcher({ automation, auth }).dispatch('GET', '/automation/_status', undefined, {}, {} as any);
+        expect(result.response?.status).toBe(200);
+        const flows = result.response?.body?.data?.flows as Array<Record<string, unknown>>;
+        expect(flows?.[0]?.reason, 'the policy sentence must survive the door').toMatch(/deployment policy/);
+        expect(String(flows?.[0]?.reason)).not.toMatch(/binding failed/);
+        // ⭐ DARK control: the healthy row is unchanged — no key appears on a
+        // row the producer did not put one on.
+        expect(Object.keys(flows?.[1] ?? {})).not.toContain('reason');
+    });
 });
 
 // ---------------------------------------------------------------------------

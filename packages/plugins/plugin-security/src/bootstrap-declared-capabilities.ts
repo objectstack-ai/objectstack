@@ -99,6 +99,17 @@ import {
   reportCapabilityNameCollisions,
   type CapabilityNameCollisionDiagnostic,
 } from './capability-name-collision.js';
+// [#18091] The three remaining refusals of this seeder, each with its OWN
+// wording, token and record. They share exactly one thing — `reportThroughSink`,
+// the delivery rule — because the alternative measured here was five more
+// hand-written copies of the two lines #17516 and #18023 each wrote out.
+import {
+  capabilityDeclarationUnownedDiagnostic,
+  capabilityPlatformNameRefusedDiagnostic,
+  reportCapabilityDeclarationUnowned,
+  reportCapabilityPlatformNameRefused,
+  reportCapabilityRowsUnreadable,
+} from './seed-refusal-diagnostics.js';
 import { PLATFORM_CAPABILITY_NAMES } from '@objectstack/spec/security';
 
 /** The only shape this seeder reads off a permission set: who grants what. */
@@ -244,25 +255,10 @@ function indexGrantors(sets: readonly GrantingPermissionSet[] = []): Map<string,
   return byCapability;
 }
 
-/**
- * [#4967 Part 3] The unowned-declaration diagnostic. Stays at `warn` per the
- * #4632 rule — this is FUNCTIONAL degradation (a declaration that does not
- * carry its provenance), not a durability failure. What changes is the payload:
- * it names the permission set(s) that GRANT the capability, and the real
- * consequence of the refusal, which differs by whether a row already exists and
- * whether anything grants the name at all.
- */
-function unownedRefusalMessage(name: string, grantors: readonly string[], hasRow: boolean): string {
-  const granted = grantors.length > 0
-    ? `granted by ${grantors.join(', ')}`
-    : 'granted by no bootstrap permission set';
-  const consequence = hasRow
-    ? 'an existing sys_capability row already resolves it and is left as-is — the declaration adds no package provenance'
-    : grantors.length > 0
-      ? 'falls back to the back-compat derived placeholder — the grant resolves, but with no package provenance (ADR-0086 D3: uninstall undefined)'
-      : 'nothing derives it either — the capability is materialized nowhere';
-  return `[security] declared capability "${name}" has no owning package (${granted}): ${consequence}`;
-}
+// [#4967 Part 3 / #18091] The unowned-declaration wording — the grantor names
+// and the three-way consequence — moved WHOLE into
+// `capabilityDeclarationUnownedDiagnostic`, so the record and the sentence are
+// one derivation instead of a message here and a record somewhere else.
 
 /**
  * Upsert ONE declared capability into `sys_capability` under the owning
@@ -313,7 +309,18 @@ async function upsertPackageCapability(
   // claim one (that would let it silently redefine `manage_users`, `setup.access`, …).
   if (PLATFORM_CAPABILITY_NAMES.has(cap.name)) {
     out.skippedPlatform += 1;
-    logger?.warn?.('[security] capability name is a curated platform capability — not materialized as package', { name: cap.name });
+    // [#18091] ⛔ The refusal is unchanged; what changed is that it is no longer
+    // invisible. The old line was optionally chained TWICE, so a caller that
+    // injected no logger got no output at all — measured on the pre-fix tree at
+    // this exact site: `skippedPlatform = 1`, author-visible console lines = 0
+    // across all five channels. Its own wording, because this consequence is
+    // not the foreign-owner one: the curated row answers for the name, so
+    // nothing is denied and the remedy is rename-only.
+    reportCapabilityPlatformNameRefused(logger, capabilityPlatformNameRefusedDiagnostic({
+      name: String(cap.name),
+      declaredBy: packageId ?? null,
+      grantedBy: grantors,
+    }));
     return true;
   }
 
@@ -340,10 +347,15 @@ async function upsertPackageCapability(
   // never a swallowed failure — `unknown` returned above.
   if (!packageId) {
     out.skippedUnowned += 1;
-    logger?.warn?.(unownedRefusalMessage(cap.name, grantors, Boolean(existing?.id)), {
-      name: cap.name,
-      grantedBy: [...grantors],
-    });
+    // [#18091] Same refusal, now delivered: measured mute at this site on the
+    // pre-fix tree (`skippedUnowned = 1`, author-visible lines = 0 with no
+    // logger). The three-way consequence is preserved verbatim — `hasRow` is
+    // why the existence read happens above this branch.
+    reportCapabilityDeclarationUnowned(logger, capabilityDeclarationUnownedDiagnostic({
+      name: String(cap.name),
+      grantedBy: grantors,
+      hasRow: Boolean(existing?.id),
+    }));
     return Boolean(existing?.id);
   }
 
@@ -521,10 +533,12 @@ export async function bootstrapDeclaredCapabilities(
     // not state one — these names were left ENTIRELY alone, so a genuinely new
     // declaration among them has not been created and a drifted one has not
     // been healed; the next boot with a readable database does both.
-    options.logger?.warn?.(
-      '[security] declared capabilities left untouched — their sys_capability rows could not be read',
-      { unreadable: out.unreadable, total: caps.length },
-    );
+    // [#18091] …and said even when no logger was injected. An unreadable
+    // database that reports nothing reads exactly like a healthy boot.
+    reportCapabilityRowsUnreadable(options.logger, {
+      unreadable: out.unreadable,
+      total: caps.length,
+    });
   }
   options.logger?.info?.('[security] declared capabilities seeded into sys_capability (ADR-0066 D1)', {
     ...out, total: caps.length,

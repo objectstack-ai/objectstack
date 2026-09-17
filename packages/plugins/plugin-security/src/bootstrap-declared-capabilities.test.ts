@@ -1,9 +1,21 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { describe, it, expect, vi } from 'vitest';
 import { bootstrapDeclaredCapabilities } from './bootstrap-declared-capabilities.js';
 import { bootstrapSystemCapabilities } from './bootstrap-system-capabilities.js';
 import { CAPABILITY_NAME_COLLISION } from './capability-name-collision.js';
+import {
+  CAPABILITY_DECLARATION_UNOWNED,
+  CAPABILITY_PLATFORM_NAME_REFUSED,
+  CAPABILITY_ROWS_UNREADABLE,
+} from './seed-refusal-diagnostics.js';
+
+/** [#18091] Seeded from this file, for the class pin at the bottom. */
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 /** Minimal in-memory ql for sys_capability seeding with a registry stub. */
 function makeQl(declared: any[] = []) {
@@ -703,5 +715,203 @@ describe('[#18023] a capability-name collision reaches the author', () => {
     // The key stays ABSENT rather than empty: `undefined` and `[]` would
     // otherwise be the same fact to a caller inspecting the outcome.
     expect(out.collisions).toBeUndefined();
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#18091] The three refusals #18023 left behind in this seeder. Same defect,
+// same reading: driven with NO logger the author-visible line count was 0 at
+// every one of them while the already-repaired collision path in the harness
+// above read 1. Each case below asserts THAT SITE'S OWN sentence, so a future
+// regression to one generic "declaration skipped" line is caught by name.
+// ───────────────────────────────────────────────────────────────────────────
+
+/** `makeQl` with a read that cannot answer — the `unreadable` branch's only entry. */
+function unreadableQl(declared: any[]) {
+  const ql = makeQl(declared);
+  (ql as any).find = async () => { throw new Error('sys_capability is unreachable'); };
+  return ql;
+}
+
+describe('[#18091] the three remaining capability refusals reach the author', () => {
+  it('CURATED PLATFORM NAME: prints with NO LOGGER INJECTED, and names what is lost', async () => {
+    const ql = makeQl([{ name: 'manage_users', label: 'Evil', description: 'Hijack.', _packageId: 'com.acme.evil' }]);
+
+    const cap = captureAllConsole();
+    let out: Awaited<ReturnType<typeof bootstrapDeclaredCapabilities>>;
+    try {
+      out = await bootstrapDeclaredCapabilities(ql, null, {
+        permissionSets: [{ name: 'acme_ops', systemPermissions: ['manage_users'] }],
+      });
+    } finally {
+      cap.restore();
+    }
+
+    // ── The reading this card moves: 0 → 1 ──────────────────────────────────
+    expect(out.skippedPlatform).toBe(1);
+    expect(cap.seen).toHaveLength(1);
+    expect(cap.seen[0]!.startsWith('warn: ')).toBe(true);
+    expect(cap.seen[0]).toContain(CAPABILITY_PLATFORM_NAME_REFUSED);
+    expect(cap.seen[0]).toContain('manage_users');
+    expect(cap.seen[0]).toContain('com.acme.evil');
+    // ── THIS site's consequence, not the foreign-owner one. The curated row
+    //    answers for the name, so nothing is denied — an author sent hunting
+    //    for a broken grant is the failure this wording prevents.
+    expect(cap.seen[0]).toContain('CURATED PLATFORM capability');
+    expect(cap.seen[0]).toContain('The name still resolves');
+    expect(cap.seen[0]).toContain('acme_ops');
+    // ⛔ And the remedy is rename-only: a curated name is not co-ownable, so
+    // the ADR-0130 D1 escape the collision diagnostic offers must NOT appear.
+    expect(cap.seen[0]).toContain('not co-ownable');
+
+    // ── ⛔ The refusal itself is UNCHANGED ───────────────────────────────────
+    expect(ql.rows.find((r) => r.name === 'manage_users')).toBeUndefined();
+    expect(out.seeded).toBe(0);
+    // …and the name is still reported materialized: the curated pass owns it.
+    expect(out.materializedNames).toEqual(['manage_users']);
+  });
+
+  it('UNOWNED DECLARATION: prints with NO LOGGER INJECTED, keeping its three-way consequence', async () => {
+    const ql = makeQl([{ name: 'showcase.export_data', label: 'Export Data' }]);
+
+    const cap = captureAllConsole();
+    let out: Awaited<ReturnType<typeof bootstrapDeclaredCapabilities>>;
+    try {
+      out = await bootstrapDeclaredCapabilities(ql, null, {
+        permissionSets: [{ name: 'showcase_ops', systemPermissions: ['showcase.export_data'] }],
+      });
+    } finally {
+      cap.restore();
+    }
+
+    expect(out.skippedUnowned).toBe(1);
+    expect(cap.seen).toHaveLength(1);
+    expect(cap.seen[0]!.startsWith('warn: ')).toBe(true);
+    expect(cap.seen[0]).toContain(CAPABILITY_DECLARATION_UNOWNED);
+    expect(cap.seen[0]).toContain('has no owning package');
+    // [#4967 Part 3] The grantor and the ACTUAL consequence, both preserved —
+    // this arm is "a row will be derived", which is not the other two arms.
+    expect(cap.seen[0]).toContain('showcase_ops');
+    expect(cap.seen[0]).toContain('derived placeholder');
+    expect(cap.seen[0]).not.toContain('materialized nowhere');
+    // ⛔ Unchanged: no row is written for an unowned declaration.
+    expect(ql.rows.find((r) => r.name === 'showcase.export_data')).toBeUndefined();
+  });
+
+  it('UNREADABLE ROWS: prints with NO LOGGER INJECTED, with the count and the consequence', async () => {
+    const ql = unreadableQl([
+      { name: 'a.one', _packageId: 'com.a' },
+      { name: 'a.two', _packageId: 'com.a' },
+    ]);
+
+    const cap = captureAllConsole();
+    let out: Awaited<ReturnType<typeof bootstrapDeclaredCapabilities>>;
+    try {
+      out = await bootstrapDeclaredCapabilities(ql, null);
+    } finally {
+      cap.restore();
+    }
+
+    expect(out.unreadable).toBe(2);
+    expect(cap.seen).toHaveLength(1);
+    expect(cap.seen[0]!.startsWith('warn: ')).toBe(true);
+    expect(cap.seen[0]).toContain(CAPABILITY_ROWS_UNREADABLE);
+    // The count, and the consequence "unreadable" alone does not state.
+    expect(cap.seen[0]).toContain('2 of 2');
+    expect(cap.seen[0]).toContain('keeps the stale value');
+    expect(cap.seen[0]).toContain('nothing is lost');
+    // ⛔ Unchanged: a name whose row could not be read is left ENTIRELY alone,
+    // and stays out of `materializedNames` so the derivation gets its attempt.
+    expect(ql.rows).toHaveLength(0);
+    expect(out.materializedNames).toEqual([]);
+  });
+
+  it('⭐ each site keeps its OWN sentence — ⛔ never one generic refusal line', async () => {
+    // The discriminating case for R3: two different refusals in ONE pass.
+    const ql = makeQl([
+      { name: 'manage_users', _packageId: 'com.acme.evil' },
+      { name: 'orphan_cap' },
+    ]);
+
+    const cap = captureAllConsole();
+    try {
+      await bootstrapDeclaredCapabilities(ql, null);
+    } finally {
+      cap.restore();
+    }
+
+    expect(cap.seen).toHaveLength(2);
+    const curated = cap.seen.find((l) => l.includes(CAPABILITY_PLATFORM_NAME_REFUSED));
+    const unowned = cap.seen.find((l) => l.includes(CAPABILITY_DECLARATION_UNOWNED));
+    expect(curated).toBeDefined();
+    expect(unowned).toBeDefined();
+    // ⛔ Two tokens, two consequences. A generic sentence would make these two
+    // assertions pass against ONE wording, so each names a phrase only its own
+    // site can produce.
+    expect(curated).toContain('The name still resolves');
+    expect(curated).not.toContain('derived placeholder');
+    expect(unowned).toContain('materialized nowhere');
+    expect(unowned).not.toContain('CURATED PLATFORM capability');
+  });
+
+  it('an INJECTED logger takes all three, and the console stays clean', async () => {
+    const warn = vi.fn();
+    const cap = captureAllConsole();
+    try {
+      await bootstrapDeclaredCapabilities(makeQl([{ name: 'manage_users', _packageId: 'com.a' }]), null, { logger: { warn } });
+      await bootstrapDeclaredCapabilities(makeQl([{ name: 'orphan_cap' }]), null, { logger: { warn } });
+      await bootstrapDeclaredCapabilities(unreadableQl([{ name: 'a.one', _packageId: 'com.a' }]), null, { logger: { warn } });
+    } finally {
+      cap.restore();
+    }
+
+    // ⚠️ FOUR, not three: the third pass ALSO trips the batched existence
+    // oracle's own read-failure line, which is a different diagnostic in a
+    // different module (`seed-name-lookup.ts`) and outside this card. Pinning
+    // three here would have made that line's removal invisible; filtering by
+    // this card's own tokens keeps the assertion about this card.
+    expect(warn).toHaveBeenCalledTimes(4);
+    const events = warn.mock.calls.map((c) => (c[1] as any)?.event).filter(Boolean);
+    expect(events).toEqual([
+      CAPABILITY_PLATFORM_NAME_REFUSED,
+      CAPABILITY_DECLARATION_UNOWNED,
+      CAPABILITY_ROWS_UNREADABLE,
+    ]);
+    expect(cap.seen).toEqual([]);
+  });
+
+  it('a HOST SINK THAT LIES about its shape is reported to the console, never thrown at', async () => {
+    // ⚠️ `ProjectionLogger.warn` is non-optional, but the type cannot reach a
+    // plain-JS embedder or a cast. The old `logger?.warn?.()` bought safety here
+    // with silence; `if (logger) logger.warn()` would buy noise with a throw
+    // inside a seeding pass. The `typeof` guard buys neither.
+    const liar = { info: () => {} } as any;
+    const cap = captureAllConsole();
+    let out: Awaited<ReturnType<typeof bootstrapDeclaredCapabilities>>;
+    try {
+      out = await bootstrapDeclaredCapabilities(makeQl([{ name: 'orphan_cap' }]), null, { logger: liar });
+    } finally {
+      cap.restore();
+    }
+    expect(out.skippedUnowned).toBe(1);
+    expect(cap.seen).toHaveLength(1);
+    expect(cap.seen[0]).toContain(CAPABILITY_DECLARATION_UNOWNED);
+  });
+
+  it('⛔ CLASS PIN: the doubly-optional warn survives in this seeder only as PROSE', async () => {
+    // The reason this card exists: the shape was repaired one instance at a
+    // time twice before. A grep that reds when a sixth call site appears is the
+    // difference between a third instance repair and a class that is closed.
+    const source = readFileSync(resolve(HERE, 'bootstrap-declared-capabilities.ts'), 'utf8');
+    // Positive control — the pin is reading the file it thinks it is.
+    expect(source).toContain('export async function bootstrapDeclaredCapabilities');
+    const hits = source.split('\n').filter((line) => line.includes('logger?.warn?.('));
+    for (const line of hits) {
+      expect(line.trimStart().startsWith('//') || line.trimStart().startsWith('*')).toBe(true);
+    }
+    // ⚠️ The INFO channel keeps its outer `?.` deliberately and is NOT part of
+    // this class: a pass that refused nothing must stay silent on every console
+    // channel with no sink, which is the control above.
+    expect(source).toContain("options.logger?.info?.(");
   });
 });

@@ -18,8 +18,18 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
  * DEPENDS ON this package — importing it back would cycle. So this mock engine
  * reproduces the exact insert-time guard (reject a state ∉ initialStates UNLESS the
  * write carries `context.seedReplay`) to regression-test the loader's end of the
- * contract in isolation. Revert the `seedReplay` flag in `SEED_OPTIONS` and both
- * cases below go red — 4 of 5 rows rejected, the flag absent from the writes.
+ * contract in isolation.
+ *
+ * FALSIFY IT — the lever is one package away: `SEED_OPTIONS` no longer spells the
+ * flags inline, it is `{ context: SEED_WRITE_EXECUTION_CONTEXT }` (seed-loader.ts).
+ * Delete `seedReplay: true` from the `SEED_WRITE_EXECUTION_CONTEXT` VALUE in
+ * `packages/spec/src/kernel/execution-context.zod.ts`, rebuild `@objectstack/spec`
+ * (nothing aliases that dep back to source here, so this suite reads its `dist/`),
+ * and both cases below go red — 4 of 5 rows rejected, the flag absent from the
+ * writes. ⛔ NOT the `seedReplay: z.boolean().optional()` SCHEMA FIELD higher up in
+ * that same file: it governs what is ACCEPTED, not what the loader SENDS, and
+ * editing it leaves both cases green — measured, and the reason it is named here:
+ * a debugger who reaches for it reads a vacuous pass as a completed falsification.
  */
 
 function createLogger() {
