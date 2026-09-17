@@ -872,6 +872,13 @@ export const QueryWithTransportSchema: z.ZodType<QueryAST, QueryWithTransportInp
   ]) as unknown as z.ZodType<QueryAST, QueryWithTransportInput>,
 );
 
+/**
+ * What a transport-aware query slot PARSES TO — the canonical QueryAST, in
+ * every spelling. The declared output is deliberately the AST alone: a
+ * consumer reading a parsed query never sees a transport key.
+ */
+export type QueryWithTransport = z.infer<typeof QueryWithTransportSchema>;
+
 
 export const DataEngineFindRequestSchema = lazySchema(() => z.object({
   method: z.literal('find'),
