@@ -514,6 +514,34 @@ export interface FlowRuntimeState {
     triggerType?: string;
     /** Object the trigger binds to, for object-bound trigger types. */
     object?: string;
+    /**
+     * WHY this flow is not armed, in one sentence — present only on a row that
+     * is `enabled`, `bound: false` and declares a trigger, absent on every
+     * other row. `bound: false` alone cannot be read as a defect: the states
+     * behind it have different owners and different remedies, and this is the
+     * field that tells them apart on the wire.
+     *
+     * [#17396 ruling G item 6] A flow left unarmed because package-authored
+     * scheduled work is switched OFF on this deployment carries a DISTINCT
+     * sentence — `SCHEDULED_WORK_DISABLED_REASON` (`@objectstack/types`),
+     * which names the switch and its remedy — and ⛔ never reads as "binding
+     * failed": a binding failure is a defect with an engineering remedy, while
+     * this is a deployment policy with an operator one, and the two send the
+     * reader to different places. Before this field existed the two reached
+     * Studio as the same `enabled: true, bound: false` row (#18235).
+     *
+     * ⛔ Not a new vocabulary: the producer answers the same sentence the
+     * engine's `getTriggerBindingAudit()` reports for the same flow — one
+     * computation, two doors — so the status door and the boot-time audit
+     * cannot drift. The policy sentence is read from the RECORDED refusal, ⛔
+     * never re-derived from a live environment read: the status door is called
+     * long after the bind, so an environment that moved in between would
+     * otherwise report a binding failure for a trigger that was never called.
+     *
+     * A free-form sentence, deliberately — the shape the two surfaces that
+     * already carry this reason use. Consumers RENDER it; ⛔ do not parse it.
+     */
+    reason?: string;
 }
 
 export interface IAutomationService {
