@@ -2232,8 +2232,8 @@ function buildFixtureTree() {
   // recursive wildcard; a reader that anchors the literal compiles it to a
   // pattern matching only a FILE named `src`, and the program's file set comes
   // back EMPTY — which is silent, because an empty program reports nothing.
-  fixture(root, 'packages/bare-include', {
-    'package.json': ARTIFACT_MANIFEST('@fx/bare-include'),
+  fixture(root, 'packages/bare-dir-include', {
+    'package.json': ARTIFACT_MANIFEST('@fx/bare-dir-include'),
     'tsconfig.json': JSON.stringify({ include: ['src'] }, null, 2),
     'src/thing.ts': "import { alive } from '@fx/spec';\nexport const t = alive;\n",
     'src/nested/deep.ts': "export const d = 1;\n",
@@ -2244,8 +2244,8 @@ function buildFixtureTree() {
   // explicit way. "The gate still passes" is NOT the test: what has to hold is
   // that the two spellings report the SAME THING, because to tsc they ARE the
   // same program.
-  fixture(root, 'packages/bare-include-twin', {
-    'package.json': ARTIFACT_MANIFEST('@fx/bare-include-twin'),
+  fixture(root, 'packages/wildcard-twin', {
+    'package.json': ARTIFACT_MANIFEST('@fx/wildcard-twin'),
     'tsconfig.json': JSON.stringify({ include: ['src/**/*'] }, null, 2),
     'src/thing.ts': "import { alive } from '@fx/spec';\nexport const t = alive;\n",
     'src/nested/deep.ts': "export const d = 1;\n",
@@ -2255,8 +2255,8 @@ function buildFixtureTree() {
   // `src` + recursive wildcard, NOT a blanket "everything in the package": the
   // sibling directory here imports a DIFFERENT artifact package, so an
   // over-broad expansion shows up as an extra dep rather than as a silence.
-  fixture(root, 'packages/bare-include-scope', {
-    'package.json': ARTIFACT_MANIFEST('@fx/bare-include-scope'),
+  fixture(root, 'packages/bare-dir-scope', {
+    'package.json': ARTIFACT_MANIFEST('@fx/bare-dir-scope'),
     'tsconfig.json': JSON.stringify({ include: ['src'] }, null, 2),
     'src/thing.ts': "import { alive } from '@fx/spec';\nexport const t = alive;\n",
     'outside/tool.ts': "import { tools } from '@fx/spec-tools';\nexport const s = tools;\n",
@@ -2410,25 +2410,25 @@ function selfTest() {
     // are what stop the repair from being "match everything".
   battery("a bare-directory `include` is tsc's implicit glob (#18373)");
     expect(
-      reported(bare, 'packages/bare-include'),
+      reported(bare, 'packages/bare-dir-include'),
       '`"include": ["src"]` was read as a literal — the program came back EMPTY, and an empty program '
         + 'reports nothing, so the package went silent instead of red',
     );
     expect(
-      reported(bare, 'packages/bare-include-twin'),
+      reported(bare, 'packages/wildcard-twin'),
       'the explicit-wildcard twin of the identical files was not reported',
     );
     expect(
-      JSON.stringify(bare.measured.get('@fx/bare-include')) ===
-        JSON.stringify(bare.measured.get('@fx/bare-include-twin')),
+      JSON.stringify(bare.measured.get('@fx/bare-dir-include')) ===
+        JSON.stringify(bare.measured.get('@fx/wildcard-twin')),
       'the bare-directory spelling and the explicit-wildcard spelling of the SAME files reported '
-        + `differently: ${JSON.stringify(bare.measured.get('@fx/bare-include'))} vs `
-        + `${JSON.stringify(bare.measured.get('@fx/bare-include-twin'))}`,
+        + `differently: ${JSON.stringify(bare.measured.get('@fx/bare-dir-include'))} vs `
+        + `${JSON.stringify(bare.measured.get('@fx/wildcard-twin'))}`,
     );
     expect(
-      JSON.stringify(bare.measured.get('@fx/bare-include-scope')) === JSON.stringify(['@fx/spec']),
+      JSON.stringify(bare.measured.get('@fx/bare-dir-scope')) === JSON.stringify(['@fx/spec']),
       'the expansion escaped the directory the entry names — a sibling directory outside `src` entered the '
-        + `program: ${JSON.stringify(bare.measured.get('@fx/bare-include-scope'))}`,
+        + `program: ${JSON.stringify(bare.measured.get('@fx/bare-dir-scope'))}`,
     );
     expect(
       JSON.stringify(bare.measured.get('@fx/dotted-include')) === JSON.stringify(['@fx/spec']),
@@ -2501,9 +2501,9 @@ function selfTest() {
       '@fx/build-config-twin': ['@fx/spec'],
       // #18373 — the bare-directory `include` and its explicit-wildcard twin,
       // plus the two scope guards, all measuring the one dep `src/` imports.
-      '@fx/bare-include': ['@fx/spec'],
-      '@fx/bare-include-twin': ['@fx/spec'],
-      '@fx/bare-include-scope': ['@fx/spec'],
+      '@fx/bare-dir-include': ['@fx/spec'],
+      '@fx/wildcard-twin': ['@fx/spec'],
+      '@fx/bare-dir-scope': ['@fx/spec'],
       '@fx/dotted-include': ['@fx/spec'],
     };
     const registered = check(root, measuredNames);
