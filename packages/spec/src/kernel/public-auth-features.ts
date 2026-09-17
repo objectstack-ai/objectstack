@@ -333,6 +333,15 @@ type WithRequiresFeature = {
  *   Drop one of the two rather than shipping a gate that reads as load-bearing.
  * - Existing `visible` that is non-CEL or AST-only → loud parse error
  *   (ADR-0078 no-silently-inert); write the combined predicate by hand.
+ * - Existing CEL `visible` whose `source` is blank after trimming → loud parse
+ *   error, for the same reason one step further in. `source` is `min(1)` on the
+ *   persistence contract and whitespace clears it, so a blank one is a *string*
+ *   and would compose: the result parenthesises nothing (`( ) && <gate>`) and
+ *   faults at CEL parse on every scope, so the gate decides nothing wherever
+ *   the consuming surface is fail-soft and hides the element regardless of the
+ *   flag wherever it is fail-closed — the inert arrival again, reached through
+ *   the one spelling that passes the type test above. The notion of blank is
+ *   `source.trim()`, the one the engine's own helpers apply.
  *
  * Designed as a zod `.transform((v, ctx) => lowerRequiresFeature(v, ctx))`
  * appended after the schema's refinements.
@@ -373,6 +382,21 @@ export function lowerRequiresFeature<T extends WithRequiresFeature>(
       message:
         '`requiresFeature` composes only with a CEL `visible` carrying a `source` string; ' +
         'this expression is AST-only or non-CEL — write the combined predicate by hand.',
+    });
+    return rest as Omit<T, 'requiresFeature'>;
+  }
+  if (existing.source.trim().length === 0) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['requiresFeature'],
+      message:
+        '`requiresFeature` composes only with a CEL `visible` carrying a NON-BLANK `source`; this '
+        + '`source` is blank after trimming, so the composition would parenthesise nothing — '
+        + `\`( ) && ${gate}\` — which no CEL parse accepts on any scope. The gate would fault at `
+        + 'evaluation instead of gating: shown regardless of the flag where the surface is fail-soft, '
+        + 'hidden regardless of it where it is fail-closed. Either way the flag decides nothing, which '
+        + 'is the inert arrival ADR-0078 rejects. Drop the blank `visible` and `requiresFeature` emits '
+        + `\`${gate}\` alone, or put the predicate the gate should compose with in \`source\`.`,
     });
     return rest as Omit<T, 'requiresFeature'>;
   }
