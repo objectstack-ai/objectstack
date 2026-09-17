@@ -125,12 +125,23 @@ export type BatchOptionsParsed = z.infer<typeof BatchOptionsSchema>;
  */
 export const BatchUpdateRequestSchema = lazySchema(() => z.object({
   operation: BatchOperationType.describe('Type of batch operation'),
-  // [#3939] No `.max()` here: the batch-size cap is DEPLOYMENT policy
-  // (`RestServerConfig.batch.maxBatchSize`, 1..1000, default 200), enforced at
+  // [#3939] No `.max()` here: the batch-size cap is
+  // `RestServerConfig.batch.maxBatchSize` (1..1000, default 200), enforced at
   // the route so one place decides it. A hardcoded bound in the spec was a
   // second source of truth that never matched — it said 200 while the routes
   // enforced nothing at all. `.min(1)` is gone too: an empty batch is a no-op
   // (`total: 0`), not a client error.
+  //
+  // Reachability: EMBEDDER-ONLY (#15543, #16801). ⛔ The cap is NOT DEPLOYMENT
+  // policy — this comment said exactly that until now, and no shipped boot path
+  // makes it true. It is written only by a host that constructs the
+  // `RestServerConfig` itself, never by `os serve` or the dev plugin, so a
+  // CLI-started deployment always gets the default of 200 and no flag, config
+  // file or CLI option moves it; only the embedding host reaches the 1..1000
+  // span above. See the WHO CAN WRITE THIS CONFIG (#15543) header in
+  // `packages/spec/src/api/rest-server.zod.ts`, which names `batch` among the
+  // embedder-only sub-objects, and the per-key REACHABILITY row in
+  // `packages/spec/liveness/batch_endpoints.json`.
   records: z.array(BatchRecordSchema).describe('Array of records to process (server caps the count — see batch.maxBatchSize)'),
   options: BatchOptionsSchema.optional().describe('Batch operation options'),
 }));
