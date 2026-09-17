@@ -8,15 +8,29 @@
  *   node scripts/pm/check-harness-current.mjs [--shared <dir>] [--ref origin/main]
  *   node scripts/pm/check-harness-current.mjs --self-test
  *
- * Measured for `.claude/settings.json` ONLY: the harness reads it from the PRIMARY checkout when
- * a session starts and does not reload it, so a deny-roster change that lands on `origin/main`
- * after that clone is inert for the running session -- a session whose primary checkout predated
- * the MCP-write deny list still carried every denied tool. The load moment of `.claude/hooks/*`
- * and `.claude/agents/*.md` is UNMEASURED: whether the harness reads them once at start or from
- * disk at each use is not known, and this tool asserts neither. Worktrees do not help (the
- * harness never reads them) and the primary checkout is not advanced in place (worktree-first).
+ * Measured for `.claude/settings.json` and `.claude/skills/**`: the harness reads both from the
+ * PRIMARY checkout when a session starts and does not reload them. For settings.json, a deny-roster
+ * change that lands on `origin/main` after that clone is inert for the running session -- a session
+ * whose primary checkout predated the MCP-write deny list still carried every denied tool. For the
+ * skills tree, `scripts/pm/check-skill-line-ratchet.mjs`'s header states the same load moment
+ * («`.claude/skills/pm-dispatch/SKILL.md` is read in full by every seat session and every Routine
+ * fire»), and the realised case is recorded on #18544: a seat ran a whole shift enforcing a
+ * stand-down rule that had already left `origin/main`, while this tool -- which then watched three
+ * paths and not the skills tree -- reported on the other paths in the same invocation and never
+ * named the charter. The load moment of `.claude/hooks/*` and `.claude/agents/*.md` is UNMEASURED:
+ * whether the harness reads them once at start or from disk at each use is not known, and this tool
+ * asserts neither. Worktrees do not help (the harness never reads them) and the primary checkout is
+ * not advanced in place (worktree-first).
  * A STALE verdict is a REPORT, not a prescription: the seat notes it on its seat post and picks
  * it up at its next natural shift boundary; ⛔ it never interrupts a batch.
+ *
+ * TWO readings per watched path, both printed, each path counted once. (1) PLACEMENT: is the
+ * commit that last touched the path on `ref` an ancestor of the shared HEAD? (2) CONTENT: does the
+ * shared HEAD's copy of the path equal `ref`'s? Reading 2 exists because reading 1 -- and the
+ * round-open marker comparison built on it -- are both blind to a checkout that was ALREADY behind
+ * when the seat sat down: the touch sha is then identical from one marker to the next. See
+ * `contentReading` below. A path is STALE if EITHER reading places it behind; ⛔ a reading is never
+ * removed or narrowed to obtain a green verdict.
  *
  * Reads git only -- fetch first. Exit 0 = current; 1 = stale (each stale path printed with its
  * touch); 2 = undecidable: the ancestry test is negative on a SHALLOW clone and the touch is not
@@ -55,7 +69,16 @@ import process from 'node:process';
 
 import { isShallow, touchIsProvable } from './git-history.mjs';
 
-const PATHS = ['.claude/settings.json', '.claude/agents/*.md', '.claude/hooks/*'];
+/**
+ * The watched population. `.claude/skills/**` is a DIRECTORY surface, not a file list: naming the
+ * charters one by one is how a predicate ends up guarding less than it claims (the population it
+ * covers must be the population that is loaded). Every entry here is a git PATHSPEC, and the
+ * default pathspec magic matches `*` across `/` -- measured on this repo at `e81c4e5f3`, where
+ * `.claude/skills/**`, `.claude/skills/*` and `.claude/skills` all select the same 9 files and the
+ * same `git log -1` sha, while `.claude/hooks/*` (the firing control, a term unchanged by that
+ * reading) keeps selecting its own 2. ⛔ Never narrow an entry to buy a green verdict.
+ */
+const PATHS = ['.claude/settings.json', '.claude/agents/*.md', '.claude/hooks/*', '.claude/skills/**'];
 const argv = process.argv.slice(2);
 const opt = (flag, fallback) => (argv.includes(flag) ? argv[argv.indexOf(flag) + 1] : fallback);
 const git = (dir, ...args) => {
@@ -86,6 +109,29 @@ function provenance(cwd, sha, ci, path) {
   return `${v.boundary ? 'boundary' : 'unprovable'} (${ci}) [${v.reason}]`;
 }
 
+/**
+ * SECOND READING -- content, not placement. The touch reading above answers "is the COMMIT that
+ * last touched this path under the shared HEAD?", and a seat's round-open marker answers "has that
+ * sha moved since my last marker?". Both are blind to the same case: a checkout that was ALREADY
+ * behind when the seat sat down. The sha is then identical from one marker to the next -- nothing
+ * moved, because the thing that is wrong never moves -- and on a shallow clone the placement test
+ * can even read `✓` off a graft boundary that is genuinely an ancestor. This reading asks the
+ * header's question directly of the BYTES: does the shared HEAD's copy of this path equal `ref`'s?
+ * It needs no history at all, so it answers where the placement test is UNDECIDED, and it fires
+ * alone whenever HEAD carries content `ref` does not. Pure read -- no fetch, no deepen.
+ */
+function contentReading(shared, ref, path) {
+  const diff = git(shared, 'diff', '--name-only', 'HEAD', ref, '--', path);
+  if (!diff.ok) {
+    return { state: 'unreadable', line: `? ${path}: content of HEAD cannot be compared with ${ref} from ${shared} (unfetched ref, or an unreadable tree) -- UNDECIDED` };
+  }
+  const files = diff.out ? diff.out.split('\n').filter(Boolean) : [];
+  if (files.length === 0) return { state: 'same', line: `= ${path}: HEAD content is identical to ${ref}` };
+  const shown = files.slice(0, 5).join(' ');
+  const more = files.length > 5 ? ` +${files.length - 5} more` : '';
+  return { state: 'differs', line: `✗ ${path}: HEAD content differs from ${ref} in ${files.length} file(s) (${shown}${more}) -- STALE` };
+}
+
 function main() {
   const common = git(process.cwd(), 'rev-parse', '--path-format=absolute', '--git-common-dir');
   const shared = opt('--shared', common.ok ? common.out.replace(/\/\.git$/, '') : undefined);
@@ -96,15 +142,34 @@ function main() {
   const shallow = git(shared, 'rev-parse', '--is-shallow-repository').out === 'true';
   let stale = 0;
   let undecided = 0;
+  // Two readings per path, both printed, counted ONCE per path: a path is stale if EITHER reading
+  // places it behind. The touch lines below are byte-for-byte the ones seats have always read.
   for (const path of PATHS) {
+    let pathStale = false;
+    let pathUndecided = false;
     const touch = git(shared, 'log', '-1', '--format=%H %ct %cI', ref, '--', path);
-    if (!touch.ok || !touch.out) { undecided += 1; console.log(`? ${path}: no touch of ${ref} visible from ${shared} (unfetched ref, or a shallow window) -- UNDECIDED`); continue; }
-    const [sha, ct, ci] = touch.out.split(' ');
-    const prov = provenance(shared, sha, ci, path);
-    if (git(shared, 'merge-base', '--is-ancestor', sha, 'HEAD').ok) { console.log(`✓ ${path}: latest touch ${prov} is in the shared HEAD`); continue; }
-    if (Number(ct) > headTime || !shallow) { stale += 1; console.log(`✗ ${path}: latest touch ${prov} is NOT in the shared HEAD ${short(head.out)} -- STALE`); continue; }
-    undecided += 1;
-    console.log(`? ${path}: touch ${prov} is not under HEAD in a SHALLOW clone and not newer than HEAD -- UNDECIDED, deepen and rerun`);
+    if (!touch.ok || !touch.out) {
+      pathUndecided = true;
+      console.log(`? ${path}: no touch of ${ref} visible from ${shared} (unfetched ref, or a shallow window) -- UNDECIDED`);
+    } else {
+      const [sha, ct, ci] = touch.out.split(' ');
+      const prov = provenance(shared, sha, ci, path);
+      if (git(shared, 'merge-base', '--is-ancestor', sha, 'HEAD').ok) {
+        console.log(`✓ ${path}: latest touch ${prov} is in the shared HEAD`);
+      } else if (Number(ct) > headTime || !shallow) {
+        pathStale = true;
+        console.log(`✗ ${path}: latest touch ${prov} is NOT in the shared HEAD ${short(head.out)} -- STALE`);
+      } else {
+        pathUndecided = true;
+        console.log(`? ${path}: touch ${prov} is not under HEAD in a SHALLOW clone and not newer than HEAD -- UNDECIDED, deepen and rerun`);
+      }
+    }
+    const content = contentReading(shared, ref, path);
+    console.log(content.line);
+    if (content.state === 'differs') pathStale = true;
+    if (content.state === 'unreadable') pathUndecided = true;
+    if (pathStale) stale += 1;
+    else if (pathUndecided) undecided += 1;
   }
   const verdict = stale
     ? `STALE -- ${stale} harness-loaded path(s) on ${ref} are not in ${shared} HEAD ${short(head.out)}: note it on the seat post and pick it up at the seat's next natural shift boundary; ⛔ never interrupt a batch for it`
@@ -121,7 +186,7 @@ function main() {
  * inside the fixture block leaves the same silence. Adding cases is ordinary work; a run BELOW
  * this floor means cases stopped running, and the floor names that rather than passing.
  */
-const SELF_TEST_CASE_FLOOR = 15;
+const SELF_TEST_CASE_FLOOR = 26;
 
 const FIXTURE_EPOCH = '2026-06-01T12:00:00Z';
 const FIXTURE_COMMITS = 40;
@@ -155,6 +220,7 @@ function selfTest() {
     const up = join(root, 'up');
     mkdirSync(join(up, '.claude', 'agents'), { recursive: true });
     mkdirSync(join(up, '.claude', 'hooks'), { recursive: true });
+    mkdirSync(join(up, '.claude', 'skills', 'pm-dispatch'), { recursive: true });
     g(['init', '--quiet', '--initial-branch=main', '.'], up);
     g(['config', 'user.email', 'selftest@objectstack.ai'], up);
     g(['config', 'user.name', 'selftest'], up);
@@ -165,6 +231,9 @@ function selfTest() {
         writeFileSync(join(up, '.claude', 'settings.json'), '{}\n');
         writeFileSync(join(up, '.claude', 'agents', 'a.md'), 'agent 0\n');
         writeFileSync(join(up, '.claude', 'hooks', 'h.sh'), 'hook 0\n');
+        // The skills tree moves ONLY at c0 here, so every expectation below keeps the count it
+        // had before this path joined PATHS; the skills READINGS get their own fixtures further down.
+        writeFileSync(join(up, '.claude', 'skills', 'pm-dispatch', 'SKILL.md'), 'charter 0\n');
       }
       if (i === 1) writeFileSync(join(up, '.claude', 'hooks', 'h.sh'), 'hook 1\n');
       if (i === 38) writeFileSync(join(up, '.claude', 'agents', 'a.md'), 'agent 38\n');
@@ -258,11 +327,13 @@ function selfTest() {
     // at all -- there is no sha to prove or withhold.
     const bare = join(root, 'bare-up');
     mkdirSync(join(bare, '.claude', 'agents'), { recursive: true });
+    mkdirSync(join(bare, '.claude', 'skills', 'pm-dispatch'), { recursive: true });
     g(['init', '--quiet', '--initial-branch=main', '.'], bare);
     g(['config', 'user.email', 'selftest@objectstack.ai'], bare);
     g(['config', 'user.name', 'selftest'], bare);
     writeFileSync(join(bare, '.claude', 'settings.json'), '{}\n');
     writeFileSync(join(bare, '.claude', 'agents', 'a.md'), 'agent\n');
+    writeFileSync(join(bare, '.claude', 'skills', 'pm-dispatch', 'SKILL.md'), 'charter\n');
     g(['add', '-A'], bare);
     g(['commit', '--quiet', '-m', 'c0'], bare);
     const noHooks = join(root, 'no-hooks');
@@ -276,6 +347,126 @@ function selfTest() {
     t('and that run\'s summary line is the UNDECIDED one, byte for byte',
       summaryOf(noHooksRun.stdout) === `check-harness-current: UNDECIDED -- 1 path(s) could not be placed; fetch/deepen ${noHooks} and rerun`,
       summaryOf(noHooksRun.stdout));
+
+    // ── the skills tree: the watched population, and the CONTENT reading ─────────────────────
+    // Everything above proves the three original paths still read exactly as they did. These
+    // sections cover what was added: `.claude/skills/**` in PATHS, and the second reading.
+
+    t('the watched population covers the skills tree: the full-clone run places `.claude/skills/**` '
+      + 'by name, so a charter change is inside the question this tool answers',
+      /^[✓✗?] \.claude\/skills\/\*\*: /m.test(fullRun.stdout), fullRun.stdout);
+    // FIRING CONTROL — the count is read off the same run that keeps naming the original three,
+    // with a term ('latest touch', unchanged by this fix) counted the same way on the same output.
+    t('and BOTH readings run for EVERY watched path — 4 placement lines and 4 content lines on one run',
+      fullRun.stdout.split('\n').filter((l) => / latest touch /.test(l)).length === 4
+        && fullRun.stdout.split('\n').filter((l) => /: HEAD content /.test(l)).length === 4,
+      fullRun.stdout);
+
+    // A charter fixture: the skills tree moves at c2 and nothing else does after c0, so a HEAD at
+    // c1 is a checkout that was ALREADY behind on the charter when the seat sat down.
+    const skUp = join(root, 'skills-up');
+    mkdirSync(join(skUp, '.claude', 'agents'), { recursive: true });
+    mkdirSync(join(skUp, '.claude', 'hooks'), { recursive: true });
+    mkdirSync(join(skUp, '.claude', 'skills', 'pm-dispatch', 'references'), { recursive: true });
+    g(['init', '--quiet', '--initial-branch=main', '.'], skUp);
+    g(['config', 'user.email', 'selftest@objectstack.ai'], skUp);
+    g(['config', 'user.name', 'selftest'], skUp);
+    const skCommit = (msg) => { g(['add', '-A'], skUp); g(['commit', '--quiet', '-m', msg], skUp); return g(['rev-parse', 'HEAD'], skUp); };
+    writeFileSync(join(skUp, 'f.txt'), 'c0\n');
+    writeFileSync(join(skUp, '.claude', 'settings.json'), '{}\n');
+    writeFileSync(join(skUp, '.claude', 'agents', 'a.md'), 'agent\n');
+    writeFileSync(join(skUp, '.claude', 'hooks', 'h.sh'), 'hook\n');
+    writeFileSync(join(skUp, '.claude', 'skills', 'pm-dispatch', 'SKILL.md'), 'charter 0\n');
+    writeFileSync(join(skUp, '.claude', 'skills', 'pm-dispatch', 'references', 'rest-channel.md'), 'channels 0\n');
+    skCommit('c0');
+    writeFileSync(join(skUp, 'f.txt'), 'c1\n');
+    const skSeat = skCommit('c1');
+    writeFileSync(join(skUp, '.claude', 'skills', 'pm-dispatch', 'references', 'rest-channel.md'), 'channels 2\n');
+    const skCharterTouch = skCommit('c2');
+
+    // The seat's checkout: cloned when origin/main was c2, seated at c1 — behind on the charter
+    // from its first minute, and nothing about the charter moves during the shift.
+    const skBehind = join(root, 'skills-behind');
+    g(['clone', '--quiet', `file://${skUp}`, skBehind], root);
+    g(['checkout', '--quiet', skSeat], skBehind);
+    const markerOf = (dir) => g(['log', '-1', '--format=%H', 'origin/main', '--', '.claude/skills/**'], dir);
+    const markerOne = markerOf(skBehind);
+    // The round rolls: `origin/main` advances by a commit that does NOT touch the charter.
+    writeFileSync(join(skUp, 'f.txt'), 'c3\n');
+    skCommit('c3');
+    g(['fetch', '--quiet', 'origin'], skBehind);
+    const markerTwo = markerOf(skBehind);
+
+    t('ALREADY-STALE-AT-SEATING — the charter touch sha is IDENTICAL across two round-open markers '
+      + 'taken either side of a ref advance, so the marker-to-marker comparison is structurally '
+      + 'blind here: nothing moved, because the thing that is wrong never moves',
+      markerOne === markerTwo && markerOne === skCharterTouch,
+      `marker1 ${markerOne.slice(0, 9)} marker2 ${markerTwo.slice(0, 9)} charter touch ${skCharterTouch.slice(0, 9)}`);
+
+    const skBehindRun = run(['--shared', skBehind], root);
+    t('and the CONTENT reading catches exactly that: the skills path is NAMED, with the differing '
+      + 'file listed, and `-- STALE` line-terminal',
+      /^✗ \.claude\/skills\/\*\*: HEAD content differs from origin\/main in 1 file\(s\) \(\.claude\/skills\/pm-dispatch\/references\/rest-channel\.md\) -- STALE$/
+        .test(skBehindRun.stdout.split('\n').find((l) => l.startsWith('✗ .claude/skills/**: HEAD content')) ?? ''),
+      skBehindRun.stdout);
+    t('the run exits 1 and its summary counts the skills path ONCE, though both readings fired on it',
+      skBehindRun.code === 1
+        && summaryOf(skBehindRun.stdout) === `check-harness-current: STALE -- 1 harness-loaded path(s) on origin/main are not in ${skBehind} HEAD ${g(['rev-parse', 'HEAD'], skBehind).slice(0, 10)}: note it on the seat post and pick it up at the seat's next natural shift boundary; ⛔ never interrupt a batch for it`,
+      `exit ${skBehindRun.code} :: ${summaryOf(skBehindRun.stdout)}`);
+    // FIRING CONTROL — the same run, the three paths this fix does not move: all three read clean,
+    // so the ✗ above is a reading of the charter and not a blanket failure of the new reading.
+    t('FIRING CONTROL — on that same run the three original paths still read `✓` placement and '
+      + '`=` content, so the skills verdict is a reading of that path and not a blanket failure',
+      ['.claude/settings.json', '.claude/agents/*.md', '.claude/hooks/*'].every((path) =>
+        skBehindRun.stdout.includes(`✓ ${path}: latest touch `)
+        && skBehindRun.stdout.includes(`= ${path}: HEAD content is identical to origin/main`)),
+      skBehindRun.stdout);
+
+    // The other direction on the same fixture family: a checkout that IS current reads clean.
+    const skCurrent = join(root, 'skills-current');
+    g(['clone', '--quiet', `file://${skUp}`, skCurrent], root);
+    const skCurrentRun = run(['--shared', skCurrent], root);
+    t('BOTH DIRECTIONS — a checkout whose skills tree matches origin/main reads CURRENT at exit 0, '
+      + 'with the summary line seats already read, byte for byte',
+      skCurrentRun.code === 0 && summaryOf(skCurrentRun.stdout) === expectedSummary(skCurrent),
+      `exit ${skCurrentRun.code} :: ${summaryOf(skCurrentRun.stdout)}`);
+
+    // The reading the placement test structurally cannot make: the touch commit IS under HEAD and
+    // the loaded bytes are still not origin/main's.
+    const skLocal = join(root, 'skills-local');
+    g(['clone', '--quiet', `file://${skUp}`, skLocal], root);
+    g(['config', 'user.email', 'selftest@objectstack.ai'], skLocal);
+    g(['config', 'user.name', 'selftest'], skLocal);
+    writeFileSync(join(skLocal, '.claude', 'skills', 'pm-dispatch', 'SKILL.md'), 'charter LOCAL\n');
+    g(['add', '-A'], skLocal);
+    g(['commit', '--quiet', '-m', 'local charter edit'], skLocal);
+    const skLocalRun = run(['--shared', skLocal], root);
+    t('CONTENT READING FIRES ALONE — the placement reading passes (the last touch on origin/main IS '
+      + 'an ancestor of HEAD) while the loaded charter is not origin/main\'s, and the path is still '
+      + 'named STALE at exit 1',
+      skLocalRun.code === 1
+        && (skLocalRun.stdout.split('\n').find((l) => l.startsWith('✓ .claude/skills/**: latest touch')) ?? '')
+          .endsWith('is in the shared HEAD')
+        && /^✗ \.claude\/skills\/\*\*: HEAD content differs from origin\/main in 1 file\(s\) \(\.claude\/skills\/pm-dispatch\/SKILL\.md\) -- STALE$/
+          .test(skLocalRun.stdout.split('\n').find((l) => l.startsWith('✗ .claude/skills/**: HEAD content')) ?? ''),
+      `exit ${skLocalRun.code} :: ${skLocalRun.stdout}`);
+    t('and the three original paths are untouched by that second reading too — `=` on all three',
+      ['.claude/settings.json', '.claude/agents/*.md', '.claude/hooks/*'].every((path) =>
+        skLocalRun.stdout.includes(`= ${path}: HEAD content is identical to origin/main`)),
+      skLocalRun.stdout);
+
+    // ⛔ An unreadable comparison must never read as "identical": that is the silent-green failure
+    // this whole tool exists to refuse. An unresolvable ref makes BOTH readings refuse.
+    const noRefRun = run(['--shared', skCurrent, '--ref', 'origin/no-such-branch'], root);
+    t('⛔ a comparison that could not be made is UNDECIDED, never `identical` — no `=` line is '
+      + 'printed for any path when the ref does not resolve',
+      !noRefRun.stdout.includes('HEAD content is identical to')
+        && PATHS.every((path) => noRefRun.stdout.includes(`? ${path}: content of HEAD cannot be compared with origin/no-such-branch`)),
+      noRefRun.stdout);
+    t('and that run is UNDECIDED at exit 2 for all four watched paths',
+      noRefRun.code === 2
+        && summaryOf(noRefRun.stdout) === `check-harness-current: UNDECIDED -- ${PATHS.length} path(s) could not be placed; fetch/deepen ${skCurrent} and rerun`,
+      `exit ${noRefRun.code} :: ${summaryOf(noRefRun.stdout)}`);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
