@@ -169,7 +169,9 @@ export const OBJECT_PERMISSION_VERB_NAMES: readonly string[] = Object.freeze(
  * to something truthy when the verb arrives from an authored expression.
  */
 export function resolveObjectPermissionVerb(verb: string): ObjectPermissionVerbTarget | undefined {
-  return Object.hasOwn(OBJECT_PERMISSION_VERBS, verb) ? OBJECT_PERMISSION_VERBS[verb] : undefined;
+  return Object.prototype.hasOwnProperty.call(OBJECT_PERMISSION_VERBS, verb)
+    ? OBJECT_PERMISSION_VERBS[verb]
+    : undefined;
 }
 
 /**

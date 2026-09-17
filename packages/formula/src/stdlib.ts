@@ -206,7 +206,7 @@ export function registerPermissionPredicate(
           'apart from a real denial.',
         );
       }
-      const entry = Object.hasOwn(binding.permissions, object)
+      const entry = Object.prototype.hasOwnProperty.call(binding.permissions, object)
         ? binding.permissions[object]
         : undefined;
       return objectPermissionGrants(entry, target);
