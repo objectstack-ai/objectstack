@@ -219,15 +219,14 @@ function report(testModules: ReadonlyArray<TestModule>): string {
         `package is in that population, and a green above says nothing about any of them.`,
     ),
     '',
-    ...wrap(
-      'CI runs those cells in `Temporal Conformance (live PG + MySQL)`, which sets ' +
-        'OS_EXPECT_LIVE_DIALECT_MATRIX=1 — there an unprovisioned cell is a named failure ' +
-        'rather than a skip.',
-    ),
   );
+  const ciNote =
+    'CI runs those cells in `Temporal Conformance (live PG + MySQL)`, which sets ' +
+    'OS_EXPECT_LIVE_DIALECT_MATRIX=1 — there an unprovisioned cell is a named failure ' +
+    'rather than a skip.';
   if (missing.some((cell) => cell.id === 'pg')) {
     lines.push(
-      ...wrap('To run the postgres half here (measured: ~1 min to provision):'),
+      ...wrap(`${ciNote} To run the postgres half here (measured: ~1 min to provision):`),
       '',
       ...PG_RECIPE,
       '',
@@ -242,9 +241,9 @@ function report(testModules: ReadonlyArray<TestModule>): string {
     // front of a reader as a casual next line; naming the variable is enough.
     lines.push(
       ...wrap(
-        `Only the live mysql cell is left. Provisioning MySQL means installing a server into ` +
-          `this environment, so no recipe is offered here — set OS_TEST_MYSQL_URL if you ` +
-          `already have one, otherwise CI is where that cell runs.`,
+        `${ciNote} Provisioning MySQL locally means installing a server into this ` +
+          `environment, so no recipe is offered here — set OS_TEST_MYSQL_URL if you already ` +
+          `have one, otherwise CI is where that cell runs.`,
       ),
     );
   }
