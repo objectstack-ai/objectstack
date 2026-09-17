@@ -14,14 +14,34 @@
  *   node scripts/pm/check-clause2-carriers.mjs --template   # the record, copyable; no network
  *   node scripts/pm/check-clause2-carriers.mjs --help       # usage; no network
  *
+ * ## Every run STATES what it judged from (#18456)
+ *
+ * Every run past the board resolution closes with a fenced `clause2 input
+ * record` block on stderr: the board and which of the three sources answered,
+ * the read path and every request it issued, the pair and the evidence it was
+ * derived from, the comments read, the claim comment SELECTED as the carrier
+ * with the rule that selected it and every candidate it rejected, each pooled
+ * claim's body fingerprint, and this file's own blob hash and path.
+ *
+ * ⭐ Two runs that DISAGREE about one pair are settled by DIFFING their two
+ * blocks — ⛔ never by re-running until one side wins. The block has the same
+ * field roster on every exit (0, 4, a refusal, a transport failure) precisely
+ * so the diff is line for line, and the blob line says whether the two runs
+ * were even the same instrument. The full reasoning is at INPUT_RECORD_VERSION.
+ *
  * ## Which board this answers about, and how a reader can tell (#16623)
  *
  * The board is a PARAMETER, resolved once per run by `resolveSweepRepo`
  * (imported): `PM_SWEEP_REPO`, else `GITHUB_REPOSITORY`, else the default. It
- * is not a property of this checkout -- this file reads no file in the tree at
- * all, so an environment variable really does retarget it, and a sibling repo's
+ * is not a property of this checkout -- this file reads no BOARD DATA out of a
+ * tree, so an environment variable really does retarget it, and a sibling repo's
  * seat runs `PM_SWEEP_REPO=<its repo> node scripts/pm/check-clause2-carriers.mjs
  * --pair N` to get an answer about its own board.
+ *
+ * ⚠️ Since #18456 it reads exactly ONE file out of the checkout: its OWN source,
+ * for the blob hash the input record prints. That is provenance and nothing
+ * else -- no state, row, count or exit consults it -- so the sentence above
+ * holds where it matters and is amended rather than quietly left false.
  *
  * ⚠️ That was TRUE before this file said so, and saying so is the fix (#16623).
  * The filing seat grepped THIS file for a repo flag, found nothing, and
@@ -629,6 +649,7 @@
 
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
@@ -676,8 +697,10 @@ import { CONTRACT_REVIEW_TIER } from './dispatch-gates.mjs';
 // that this gate "reads no file in the tree at all; its whole input is the
 // GitHub API (PRs, their labels, and the claim comments on their cards), so no
 // card's file surface can predict it" (#13519). The INPUT half of that is still
-// exactly true -- nothing here opens a tracked file, and the three read paths
-// above are the whole of what this gate consumes.
+// exactly true -- no BOARD DATA is read out of a tree, and the three read paths
+// above are the whole of what this gate consumes. (#18456 opens one tracked
+// file, this one, to hash it for the input record; it feeds no reading, so the
+// prediction argument is untouched.)
 //
 // ⭐ The OTHER half stopped being true, and a declaration that stopped being
 // true is the shape C7 itself exists against. C7 compares against
@@ -742,6 +765,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18141: the head sha sits in a span of ITS OWN — the key-in-span spelling, refused and NAMED': 19,
   '#17919: the correction remedy names THIS card\'s claim comment, never another card\'s': 24,
   '#16833: an UNJUDGED refusal names the CHANNEL that answered, what it answered, and which carrier': 30,
+  '#18456: the `--pair` input record — the same block on every exit, so two runs that disagree can be diffed': 38,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -752,8 +776,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // effect, and once more by the one #17149 adds, by the one #17098 adds, by the
 // one #17915 adds, by the one #17959 adds, by the one #18042 adds, and by the
 // one #18174 adds, and by the one #18141 adds, and by the one #17919 adds, and
-// by the one #16833 adds.
-const SELF_TEST_BATTERY_FLOOR = 26;
+// by the one #16833 adds, and by the one #18456 adds.
+const SELF_TEST_BATTERY_FLOOR = 27;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1475,6 +1499,65 @@ function applicableCorrection(commentRows, pool) {
 }
 
 /** The key as prose, for the sentences above — declared once, beside the regex that reads it. */
+/**
+ * The rule that picks the declaration limb's CARRIER, written out once.
+ *
+ * It is a sentence and not a comment because the record below PRINTS it: a
+ * reader diffing two runs has to be able to tell "the two runs selected
+ * different comments" from "the two runs applied different rules", and a rule
+ * that lives only in a docblock cannot be compared against a run.
+ */
+export const CLAIM_SELECTION_RULE =
+  'the GOVERNING claim — the NEWEST comment whose body carries a line beginning `Claim:`/`Claimed:` '
+  + 'AND whose `Branch:` line parses at least one protocol-shaped branch (newest by `created_at`; an '
+  + 'unreadable stamp or a tie falls back to thread order, later row wins). The pool is every claim '
+  + 'comment sharing that `created_at`; when NO claim names a branch at all, every claim comment is '
+  + 'the pool. ⛔ Not earliest, ⛔ not a session match, ⛔ not the one whose body mentions the key.';
+
+/**
+ * WHICH claim comment this reading is built from, and which it is not — the
+ * input half of the declaration limb (#18456).
+ *
+ * ⭐ ONE derivation, and that is the whole point. `cardDeclaration` used to
+ * compute the governance and the pool inline, so nothing outside it could
+ * state which comment had been selected without RE-deriving it — and a second
+ * derivation of a selection rule is exactly how a record ends up describing a
+ * reading the verdict did not take. This function is that derivation;
+ * `cardDeclaration` calls it and the record renders it, so the two cannot
+ * disagree about the carrier by construction.
+ *
+ * ⛔ It resolves no state, no row and no exit code: it reports WHICH comments
+ * the reading is built from and WHY each other claim is not one of them. The
+ * declaration itself is still read by `readClause2Line` from the pool, exactly
+ * as before, and this function is a pure function of the rows it is handed.
+ *
+ * @param {{ id?: number|string, body?: string, created_at?: string }[]|null} commentRows
+ * @returns {{ readable: boolean, rule: string, claims: object[], pool: object[],
+ *   governing: { branches: string[], createdAt: string|null }|null,
+ *   malformed: object|null, rejected: { row: object, reason: string }[] }}
+ */
+export function claimCarrierSelection(commentRows) {
+  const rule = CLAIM_SELECTION_RULE;
+  if (!Array.isArray(commentRows)) {
+    return { readable: false, rule, claims: [], pool: [], governing: null, malformed: null, rejected: [] };
+  }
+  const governance = claimGovernance(commentRows);
+  const claims = commentRows.filter((row) => CLAIM_COMMENT_MARKER.test(String(row?.body ?? '')));
+  const governing = governance.governing;
+  const matched = governing ? claims.filter((row) => (row?.created_at ?? null) === governing.createdAt) : [];
+  const pool = governing && matched.length > 0 ? matched : claims;
+  const rejected = claims
+    .filter((row) => !pool.includes(row))
+    .map((row) => ({
+      row,
+      reason:
+        `a SUPERSEDED claim — it is not the newest claim that parses a branch, so it is not the `
+        + `governing claim (this one is stamped ${row?.created_at ?? 'with no readable date'}; the `
+        + `governing claim is stamped ${governing?.createdAt ?? 'unreadably'})`,
+    }));
+  return { readable: true, rule, claims, pool, governing, malformed: governance.malformed, rejected };
+}
+
 const CLAUSE2_CORRECTION_KEY_TEXT = 'Clause-②-correction';
 
 /**
@@ -1532,7 +1615,12 @@ const CLAUSE2_CORRECTION_KEY_TEXT = 'Clause-②-correction';
  */
 export function cardDeclaration(commentRows, { card = null } = {}) {
   if (!Array.isArray(commentRows)) return { state: 'unreadable' };
-  const governance = claimGovernance(commentRows);
+  // ⭐ ONE derivation of the carrier, shared with the input record (#18456):
+  // the governance, the claim rows and the pool below are this function's
+  // return, so the block that STATES which comment was selected and the
+  // reading that was taken FROM it cannot describe two different comments.
+  const selection = claimCarrierSelection(commentRows);
+  const governance = { governing: selection.governing, malformed: selection.malformed };
   // ⛔ FIRST, and ahead of the correction read (#17366) as well as of every
   // line read below. When the newest claim comment parses to zero branches,
   // `governing` is an OLDER claim or nothing at all — so the pool the reads
@@ -1548,16 +1636,12 @@ export function cardDeclaration(commentRows, { card = null } = {}) {
       governingClaim: governance.governing,
     };
   }
-  const claim = governance.governing;
-  const claimRows = commentRows.filter((row) => CLAIM_COMMENT_MARKER.test(String(row?.body ?? '')));
   // The governing claim is the one the board is waiting on; when no comment
   // names a branch, every claim-marked comment is still a claim carrier and is
   // read, so a claim written without a branch cannot make the declaration
-  // invisible.
-  const governing = claim
-    ? claimRows.filter((row) => (row?.created_at ?? null) === claim.createdAt)
-    : claimRows;
-  const pool = governing.length > 0 ? governing : claimRows;
+  // invisible. Both sets come from the selection above.
+  const claimRows = selection.claims;
+  const pool = selection.pool;
   // WHICH comment id a remedy printed below may name, resolved from the SAME
   // pool the readings are built from and from nowhere else (#17919). It rides
   // alongside exactly as `correctionNote` does: the rows below print it, and
@@ -3886,7 +3970,31 @@ const readPathState = {
   rate: null,
   /** the path id that last served a read, for the cap/short-read diagnosis. */
   lastServed: null,
+  /**
+   * EVERY read this run issued, in order — the run's own statement of what it
+   * judged from (#18456). Written by the readers, read only by the record.
+   * ⛔ Never consulted by a predicate: a request ledger is provenance.
+   */
+  requests: [],
 };
+
+/**
+ * File one request — the channel, the exact path, what came back, and how many
+ * rows it carried.
+ *
+ * ⭐ The row COUNT is the field that earns its place: a page requested with
+ * `per_page=100` that answers with exactly 100 rows is indistinguishable, in
+ * every other line this file prints, from a thread that simply ends there.
+ */
+function noteRequest(channel, path, answer, rows = null) {
+  readPathState.requests.push({
+    n: readPathState.requests.length + 1,
+    channel,
+    path,
+    answer,
+    rows: typeof rows === 'number' ? rows : null,
+  });
+}
 
 function noteServed(pathId) {
   readPathState.served.set(pathId, (readPathState.served.get(pathId) ?? 0) + 1);
@@ -4097,16 +4205,20 @@ async function restOnce(path, token) {
     // exactly the reading a seat behind a refusing proxy needs, and it is the
     // one a status-only diagnosis would render as silence.
     noteAttempt(channel, `no HTTP response (${err?.message ?? 'transport error'})`);
+    noteRequest(channel, path, `no HTTP response (${err?.message ?? 'transport error'})`);
     throw err;
   }
   noteRateLimit(res);
   if (!res.ok) {
     noteAttempt(channel, `HTTP ${res.status}`);
+    noteRequest(channel, path, `HTTP ${res.status}`);
     const err = new Error(`GET ${path} -> HTTP ${res.status}`);
     err.status = res.status;
     throw err;
   }
-  return res.json();
+  const json = await res.json();
+  noteRequest(channel, path, `HTTP ${res.status}`, Array.isArray(json) ? json.length : null);
+  return json;
 }
 
 /**
@@ -4377,8 +4489,17 @@ export function pairJsonReader(doc, { source = 'the --pair-json document' } = {}
         'PR row is the minimum a pair can be formed from (number, draft, body, head.ref, head.sha, labels).',
     );
   }
-  const serve = (value) => {
+  const serve = (value, what) => {
     noteServed(READ_PATH_PAIR_JSON);
+    // The document is a read path like any other, so it files the same request
+    // ledger entry the network paths do (#18456) — a record whose `requests`
+    // block went empty on this path would read as a run that read nothing.
+    noteRequest(
+      READ_PATH_PAIR_JSON,
+      `${source} -> ${what}`,
+      value === null || value === undefined ? 'absent from the document' : 'present',
+      Array.isArray(value) ? value.length : null,
+    );
     return value;
   };
   // ⭐ The document's own refusal, in the same register the network channels
@@ -4394,12 +4515,12 @@ export function pairJsonReader(doc, { source = 'the --pair-json document' } = {}
         },
       ]);
     }
-    return serve(value);
+    return serve(value, `${bag}[${id}]`);
   };
   return Object.freeze({
     id: READ_PATH_PAIR_JSON,
     repo: typeof doc.repo === 'string' && doc.repo.trim() ? doc.repo.trim() : null,
-    listOpenPulls: () => serve(pulls),
+    listOpenPulls: () => serve(pulls, 'pulls'),
     readCard: (_repo, n) => served(readDiagnosisKey('card', n), 'cards', n, fromDocument(doc.cards, n)),
     readCardComments: (_repo, n) => {
       const rows = fromDocument(doc.comments, n);
@@ -4467,6 +4588,13 @@ async function gather(repo, prFilter = null, reader = NETWORK_READER, { landingR
         draft: Boolean(pr.draft),
         card: Number(n),
         headSha: pr?.head?.sha ?? null,
+        // ⭐ The pairing's own inputs, carried for the input record (#18456)
+        // and read by nothing else: the evidence kind is the SAME call
+        // `prDeliversCard` just made, so the block states the derivation that
+        // actually formed this pair rather than a second opinion about it.
+        evidence: deliveryEvidence(pr, n),
+        prBody: body,
+        headRef: pr?.head?.ref ?? null,
         prLabels: Array.isArray(pr.labels) ? labelNames(pr) : null,
         cardLabels: card && Array.isArray(card.labels) ? labelNames(card) : null,
         cardComments: Array.isArray(comments) ? comments : null,
@@ -4558,7 +4686,452 @@ async function gather(repo, prFilter = null, reader = NETWORK_READER, { landingR
   return { pulls, pairs };
 }
 
-function renderSweep({ repo, pulls, pairs }, { json = false } = {}) {
+// ---------------------------------------------------------------------------
+// The INPUT RECORD — what this run judged FROM, stated (#18456)
+// ---------------------------------------------------------------------------
+
+/**
+ * ## The defect: `--pair` was not reproducible, and nothing it printed could
+ * settle which of two disagreeing runs had read what
+ *
+ * Measured on ONE pair — PR #17917 / card #17425 — on 2026-09-13, three
+ * first-hand runs of the same command with an identical script blob: **0 at
+ * 02:57Z, 4 (MISPLACED) at 03:04:09Z, 0 at 03:58:33Z**. Two explanations were
+ * ruled out with controls: no comment on that thread was ever edited (all 16
+ * rows carry `created_at == updated_at`), and this file resolves its board from
+ * the environment alone, so the working directory cannot retarget it. ⇒ The
+ * cause is still UNKNOWN, and the two runs could not be compared because
+ * neither had SAID what it read.
+ *
+ * ⭐ That is the gap this block closes, and it is deliberately not a fix for
+ * the non-determinism: it makes the INPUT of a run a printed artefact, so two
+ * runs that disagree are settled by DIFFING their two blocks — ⛔ never by
+ * re-running until one side wins, which is what the board did three times and
+ * learned nothing from. A verdict a second reader cannot reproduce is not a
+ * clearance, and the landing pre-check ② is exactly where that costs something.
+ *
+ * ## What it states, and why each field is in it
+ *
+ *   · the BOARD and which of the three sources answered — a report about the
+ *     wrong repo reads exactly like a report about this one;
+ *   · the READ PATH and the API surface behind it, plus EVERY request the run
+ *     issued, in order, with its channel, its answer and its ROW COUNT — a page
+ *     asked for with `per_page=100` that answers with exactly 100 rows is the
+ *     one shape a truncated read and a complete one share;
+ *   · the PAIRING: which PR, which card, and the evidence `prDeliversCard`
+ *     derived it from, quoted off the body line that carried it;
+ *   · the COMMENTS read, by count, id list and newest id — the set the
+ *     declaration limb is judged over;
+ *   · the CLAIM COMMENT selected as the carrier, the RULE that selected it,
+ *     and every other claim it rejected WITH the reason — so "the two runs
+ *     selected different comments" is distinguishable from "the two runs
+ *     applied different rules";
+ *   · a BODY FINGERPRINT (bytes + `sha256:`) on each claim in the pool. ⭐ This
+ *     is the field the measured 0/4/0 actually needs: the 4 was `misplaced`,
+ *     which on that thread requires the governing claim to have carried NO
+ *     readable declaration while the superseded one did — and the governing
+ *     claim's line 3 is `Clause-②: no` in the fixed spelling. Same ids and a
+ *     different verdict is only possible if the BYTES differed, and nothing
+ *     printed the bytes;
+ *   · the PR-BODY line, read by the same reader — ⚠️ stated as an input and
+ *     ⛔ not as a limb: no row here judges the PR body, and this field changes
+ *     that by not one character;
+ *   · this file's own blob hash and the path it ran from, plus a UTC stamp —
+ *     "the blob was identical on both sides" was a CLAIM in the measured
+ *     incident, and this makes it a printed fact a seat can check with
+ *     `git hash-object` against the path the block names.
+ *
+ * ## Where it goes, and its shape
+ *
+ * STDERR, in every mode, beside the board provenance line and the read-path
+ * report and for the same reason those are there: stdout is contractually the
+ * ANSWER, and provenance on stdout travels into a round report that pastes it
+ * as though it were part of the finding. The `--json` sweep carries the same
+ * record under `inputs` — ⭐ the same record, never a second format.
+ *
+ * The block is fence-delimited and line-oriented: `key: value`, one declared
+ * key per line, in roster order, on EVERY exit — 0, 4, a refusal, a transport
+ * failure. A field this run could not fill renders an explicit token; ⛔ a
+ * field is never dropped, because a block whose shape moves with the verdict
+ * cannot be diffed against the other one. A value too long for one line
+ * continues on indented lines below its key.
+ *
+ * ⛔ Nothing here resolves a state, a row, a count or an exit code, and the
+ * record reads no verdict. It is what the run READ, never what it concluded.
+ */
+export const INPUT_RECORD_VERSION = 1;
+export const INPUT_RECORD_OPEN = `----- clause2 input record v${INPUT_RECORD_VERSION} -----`;
+export const INPUT_RECORD_CLOSE = '----- end clause2 input record -----';
+
+/** What a declared field renders as when this run never filled it. */
+export const INPUT_RECORD_UNSET = '(not set by this run — ⛔ a declared field is never dropped)';
+
+/**
+ * The RUN half of the roster: the fields every block carries, in order.
+ *
+ * ⭐ Pinned as NAMES, the same call `SELF_TEST_BATTERIES` and `KNOWN_FLAGS`
+ * make one family over: a renderer that walks a declared roster cannot lose a
+ * field by dropping the code that filled it — the field renders unset and
+ * SAYS so — and a field added to the builder without an entry here is named by
+ * this file's own self-test instead of appearing in half the blocks.
+ */
+export const INPUT_RECORD_RUN_FIELDS = Object.freeze([
+  'record.version',
+  'run.utc',
+  'run.mode',
+  'run.script.path',
+  'run.script.blob',
+  'run.script.bytes',
+  'run.node',
+  'board.repo',
+  'board.source',
+  'read.plan',
+  'read.api',
+  'read.token',
+  'read.served',
+  'read.pair-json',
+  'run.requests',
+  'pairs.derived',
+]);
+
+/** The PAIR half of the roster — repeated per derived pair, in order. */
+export const INPUT_RECORD_PAIR_FIELDS = Object.freeze([
+  'pr',
+  'card',
+  'derivation',
+  'head-sha',
+  'card-comments',
+  'card-comment-ids',
+  'card-comment-newest',
+  'pr-comments',
+  'pr-comment-ids',
+  'pr-comment-newest',
+  'claim.rule',
+  'claim.selected',
+  'claim.rejected',
+  'claim.clause2-line',
+  'pr-body.clause2-line',
+]);
+
+/**
+ * The git blob sha1 of some bytes — the hash `git hash-object` prints.
+ *
+ * Git's, and not a plain digest, precisely so a reader can CHECK it:
+ * `git hash-object scripts/pm/check-clause2-carriers.mjs` against the path the
+ * block names is a one-command verification of "same blob on both sides",
+ * which was asserted rather than shown in the incident this record exists for.
+ *
+ * ⚠️ The NUL separator git's format requires is written as a byte rather than
+ * as a literal in this source: `check:nul-bytes` refuses a raw control byte in
+ * a tracked file, and an escape that renders to one is the same byte.
+ */
+export function gitBlobSha1(bytes) {
+  const body = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes ?? ''), 'utf8');
+  return createHash('sha1')
+    .update(Buffer.from(`blob ${body.length}`, 'utf8'))
+    .update(Buffer.from([0]))
+    .update(body)
+    .digest('hex');
+}
+
+/** Bytes + a short content digest — the "same ids, different bytes" field. */
+export function bodyFingerprint(body) {
+  const buf = Buffer.from(String(body ?? ''), 'utf8');
+  return { bytes: buf.length, sha256: createHash('sha256').update(buf).digest('hex').slice(0, 12) };
+}
+
+let selfProvenanceCache = null;
+
+/**
+ * This file, as it is ON DISK in the tree this run was invoked from.
+ *
+ * ⚠️ The ONE file this gate reads out of a checkout, and the header's sentence
+ * upstairs is amended rather than quietly falsified: it reads its own source
+ * for PROVENANCE and reads no board data from any tree. Nothing about the
+ * verdict moves — no state, row, count or exit consults this — so an
+ * environment variable still retargets the board exactly as before, and an
+ * unreadable file yields a stated absence rather than a refusal.
+ */
+export function selfProvenance() {
+  if (selfProvenanceCache === null) {
+    try {
+      const bytes = readFileSync(SELF_PATH);
+      selfProvenanceCache = { path: SELF_PATH, blob: gitBlobSha1(bytes), bytes: bytes.length };
+    } catch (err) {
+      selfProvenanceCache = {
+        path: SELF_PATH,
+        blob: null,
+        bytes: null,
+        reason: err?.message ?? 'unreadable',
+      };
+    }
+  }
+  return selfProvenanceCache;
+}
+
+/** An id list, whole while it is short and first/last/count once it is not. */
+export function renderIdList(rows, cap = 12) {
+  const ids = (Array.isArray(rows) ? rows : []).map((r) => String(r?.id ?? '(no id)'));
+  if (ids.length === 0) return 'none';
+  if (ids.length <= cap) return ids.join(',');
+  return `${ids[0]} … ${ids[ids.length - 1]} (${ids.length} ids; the middle ${ids.length - 2} are elided)`;
+}
+
+/**
+ * The NEWEST row of a thread, by the SAME recency rule the carrier selection
+ * uses — `created_at`, ties and unreadable stamps by thread order, later wins.
+ * ⛔ Not "the last row the API returned": that is what a re-ordered page would
+ * change, and telling the two apart is half of what this record is for.
+ */
+export function newestRow(rows) {
+  let best = null;
+  (Array.isArray(rows) ? rows : []).forEach((row, index) => {
+    const parsed = Date.parse(row?.created_at ?? '');
+    const stamp = Number.isFinite(parsed) ? parsed : null;
+    const candidate = { row, stamp, index };
+    if (best === null) best = candidate;
+    else if (candidate.stamp === null || best.stamp === null) {
+      if (candidate.index > best.index) best = candidate;
+    } else if (candidate.stamp >= best.stamp) best = candidate;
+  });
+  return best?.row ?? null;
+}
+
+/** `<id> at <created_at>` — one row named the way every field here names one. */
+function namedRow(row) {
+  if (!row) return 'none';
+  return `${String(row?.id ?? '(no id)')} at ${row?.created_at ?? '(no readable date)'}`;
+}
+
+/** What `readClause2Line` read out of one body, stated as an INPUT. */
+function clause2Reading(body) {
+  const read = readClause2Line(body);
+  if (read === null) return 'no line in this body reaches the reader — neither a declaration nor a near miss';
+  if (read.kind === 'declared') {
+    return `DECLARED \`${read.value}\`${read.arm ? ` (arm: ${read.arm})` : ''} — ${quoteLine(read.line)}`;
+  }
+  return `${read.kind.toUpperCase()}${read.reason ? `/${read.reason}` : ''} — ${quoteLine(read.line)}`;
+}
+
+/** The PR body line that carried the pairing, quoted — or what stood in for it. */
+function derivationLine(pair) {
+  const kind = pair?.evidence ?? null;
+  const note = deliveryEvidenceNote(kind);
+  if (kind === 'branch-name') {
+    return `\`branch-name\` (${note}) — head.ref: ${pair?.headRef ?? '(unread)'}`;
+  }
+  const body = String(pair?.prBody ?? '');
+  const marker = `#${pair?.card}`;
+  const line = body.split('\n').find((l) => l.includes(marker)) ?? null;
+  return `\`${kind ?? 'unread'}\` (${note})${line === null ? ' — no body line naming this card was found' : ` — body line: ${quoteLine(line)}`}`;
+}
+
+/**
+ * ONE pair's input half, as a flat map of declared keys.
+ *
+ * Every key in `INPUT_RECORD_PAIR_FIELDS` is filled, including the ones a
+ * given path does not buy: `--pair` reads the PR's own thread and a sweep does
+ * not, and "this path does not read it" is a different fact from "it came back
+ * unread" — the two render as two sentences and ⛔ never as one silence.
+ */
+export function pairInputRecord(pair) {
+  const selection = claimCarrierSelection(pair?.cardComments ?? null);
+  const pool = selection.pool ?? [];
+  const out = {
+    pr: String(pair?.pr ?? '(none)'),
+    card: String(pair?.card ?? '(none)'),
+    derivation: derivationLine(pair),
+    'head-sha': pair?.headSha ?? '(unread)',
+    'card-comments': Array.isArray(pair?.cardComments)
+      ? `${pair.cardComments.length} row(s)`
+      : 'UNREAD — the thread could not be read, so this pair is UNJUDGED',
+    'card-comment-ids': Array.isArray(pair?.cardComments) ? renderIdList(pair.cardComments) : '(unread)',
+    'card-comment-newest': Array.isArray(pair?.cardComments) ? namedRow(newestRow(pair.cardComments)) : '(unread)',
+    'pr-comments':
+      pair?.prComments === undefined
+        ? '(not read on this path — the sweep buys the PR thread only for a pair that owes a record)'
+        : Array.isArray(pair.prComments)
+          ? `${pair.prComments.length} row(s)`
+          : 'UNREAD — the PR thread could not be read',
+    'pr-comment-ids': Array.isArray(pair?.prComments)
+      ? renderIdList(pair.prComments)
+      : pair?.prComments === undefined ? '(not read on this path)' : '(unread)',
+    'pr-comment-newest': Array.isArray(pair?.prComments)
+      ? namedRow(newestRow(pair.prComments))
+      : pair?.prComments === undefined ? '(not read on this path)' : '(unread)',
+    'claim.rule': selection.rule,
+  };
+
+  if (!selection.readable) {
+    out['claim.selected'] = 'none — the card thread is UNREAD, so no carrier could be selected';
+  } else if (selection.malformed) {
+    out['claim.selected'] =
+      `NONE — the newest claim comment (${selection.malformed.id ?? '(no readable id)'} at `
+      + `${selection.malformed.createdAt ?? '(no readable date)'}) parses ZERO branches, so governance `
+      + 'is unresolvable and no declaration is read from any comment (state `claim-branch-unparsed`)';
+  } else if (pool.length === 0) {
+    out['claim.selected'] = 'none — no comment on this thread carries a line beginning `Claim:`';
+  } else {
+    out['claim.selected'] = [
+      `${pool.length} comment(s) in the pool`,
+      ...pool.map((row) => {
+        const fp = bodyFingerprint(row?.body);
+        return `${namedRow(row)} — ${fp.bytes} bytes, sha256:${fp.sha256}`;
+      }),
+    ];
+  }
+
+  const rejected = selection.rejected ?? [];
+  out['claim.rejected'] = rejected.length === 0
+    ? 'none — every claim comment on this thread is in the pool'
+    : [
+      `${rejected.length} claim comment(s) rejected`,
+      ...rejected.map((r) => `${namedRow(r.row)} — ${r.reason}`),
+    ];
+
+  out['claim.clause2-line'] = pool.length === 0
+    ? '(no carrier, so no line was read from one)'
+    : pool.length === 1
+      ? clause2Reading(pool[0]?.body)
+      : [
+        `${pool.length} carriers; the FIRST that declares wins`,
+        ...pool.map((row) => `${String(row?.id ?? '(no id)')}: ${clause2Reading(row?.body)}`),
+      ];
+
+  out['pr-body.clause2-line'] = `${clause2Reading(pair?.prBody)} `
+    + '⚠️ stated as an INPUT only — ⛔ no row here judges the PR body; the declaration limb is '
+    + 'judged from the card, and `check-changeset-no-major.mjs` is what reads this line.';
+
+  return out;
+}
+
+/**
+ * The whole record — the run half plus one map per derived pair.
+ *
+ * Pure in its arguments, so the self-test drives every shape of it offline and
+ * a block can never claim a path, a request or a pair that did not happen.
+ */
+export function buildInputRecord({
+  repoRes = null,
+  mode = null,
+  state = null,
+  pairs = null,
+  self = null,
+  now = null,
+  node = process.version,
+} = {}) {
+  const served = state?.served instanceof Map ? state.served : new Map();
+  const count = (id) => served.get(id) ?? 0;
+  const requests = Array.isArray(state?.requests) ? state.requests : [];
+  const plan = readPathPlan({
+    token: state?.tokenPresent ? 'present' : '',
+    pairJson: Boolean(state?.pairJsonSource),
+  });
+  const run = {
+    'record.version': String(INPUT_RECORD_VERSION),
+    'run.utc': (now instanceof Date ? now : new Date()).toISOString(),
+    'run.mode': mode ?? '(unstated)',
+    'run.script.path': self?.path ?? '(unstated)',
+    'run.script.blob': self?.blob
+      ? `${self.blob} (git blob sha1 — check it with \`git hash-object\` on the path above)`
+      : `UNREAD — ${self?.reason ?? 'this run could not read its own source'}`,
+    'run.script.bytes': self?.bytes === null || self?.bytes === undefined ? '(unread)' : String(self.bytes),
+    'run.node': String(node),
+    'board.repo': repoRes?.repo ?? '(the board was never resolved on this run)',
+    'board.source': repoRes
+      ? repoRes.source === 'default'
+        ? 'default — NEITHER PM_SWEEP_REPO NOR GITHUB_REPOSITORY answered'
+        : `${repoRes.source} — this run was deliberately targeted`
+      : '(the board was never resolved on this run)',
+    'read.plan': plan.map((id) => READ_PATH_LABELS[id] ?? String(id)).join(' then '),
+    'read.api': state?.pairJsonSource
+      ? `no network: every read is served from ${state.pairJsonSource}`
+      : `${API} (REST, accept application/vnd.github+json)`,
+    'read.token': !state?.tokenPresent
+      ? 'absent from this environment (GITHUB_TOKEN / GH_TOKEN)'
+      : state.tokenRetired
+        ? `present but REFUSED (HTTP ${state.tokenRetired.status}) — retired for the rest of this run`
+        : 'present',
+    'read.served': `${READ_PATH_TOKEN}=${count(READ_PATH_TOKEN)}, ${READ_PATH_PUBLIC}=`
+      + `${count(READ_PATH_PUBLIC)}, ${READ_PATH_PAIR_JSON}=${count(READ_PATH_PAIR_JSON)}`,
+    'read.pair-json': state?.pairJsonSource ?? '(not named — this run read the network)',
+    'run.requests': requests.length === 0
+      ? '0 — this run issued no read at all'
+      : [
+        `${requests.length} read(s), in the order they were issued`,
+        ...requests.map((r) => {
+          const label = READ_PATH_LABELS[r.channel] ?? `(?) ${String(r.channel)}`;
+          const rows = r.rows === null ? '' : ` (${r.rows} row(s))`;
+          return `#${r.n} ${label} ${r.path} -> ${r.answer}${rows}`;
+        }),
+      ],
+    'pairs.derived': pairs === null
+      ? 'NONE — no pair was formed on this run, so nothing below was judged'
+      : `${pairs.length} pair(s)`,
+  };
+  return { run, pairs: (pairs ?? []).map((pair) => pairInputRecord(pair)) };
+}
+
+/**
+ * Keys the builder produced that the roster does not declare — ⛔ empty, or
+ * the block has a field nothing pins. Read by the self-test, and printed in
+ * the block itself so a live run cannot hide one either.
+ */
+export function undeclaredRecordFields(record) {
+  const out = [];
+  for (const key of Object.keys(record?.run ?? {})) {
+    if (!INPUT_RECORD_RUN_FIELDS.includes(key)) out.push(key);
+  }
+  for (const pair of record?.pairs ?? []) {
+    for (const key of Object.keys(pair ?? {})) {
+      if (!INPUT_RECORD_PAIR_FIELDS.includes(key) && !out.includes(`pair.${key}`)) out.push(`pair.${key}`);
+    }
+  }
+  return out;
+}
+
+/** One declared field, plus its indented continuation lines when it has any. */
+function recordFieldLines(key, value) {
+  if (value === undefined) return [`${key}: ${INPUT_RECORD_UNSET}`];
+  if (Array.isArray(value)) {
+    return [`${key}: ${value[0] ?? INPUT_RECORD_UNSET}`, ...value.slice(1).map((line) => `  ${line}`)];
+  }
+  return [`${key}: ${value}`];
+}
+
+/**
+ * The block, rendered from the roster and from nowhere else.
+ *
+ * ⭐ It walks the DECLARED keys rather than the record's own: that is what
+ * makes the shape the same on exit 0, exit 4 and every refusal, which is the
+ * property the whole card turns on — two blocks are diffable line for line,
+ * and a field that stopped being filled shows up as an unset field rather than
+ * as a line that is simply not there.
+ */
+export function renderInputRecord(record) {
+  const lines = [INPUT_RECORD_OPEN];
+  for (const key of INPUT_RECORD_RUN_FIELDS) lines.push(...recordFieldLines(key, record?.run?.[key]));
+  const pairs = Array.isArray(record?.pairs) ? record.pairs : [];
+  pairs.forEach((pair, i) => {
+    for (const key of INPUT_RECORD_PAIR_FIELDS) lines.push(...recordFieldLines(`pair.${i + 1}.${key}`, pair?.[key]));
+  });
+  const undeclared = undeclaredRecordFields(record);
+  if (undeclared.length > 0) {
+    lines.push(
+      `record.undeclared: ${undeclared.join(', ')} — field(s) this run filled that the roster does `
+        + 'not declare, so nothing pins them. Add them to the roster.',
+    );
+  }
+  lines.push(
+    'record.how-to-read: two runs that DISAGREE about one pair are settled by diffing their two '
+      + 'blocks — ⛔ never by re-running until one side wins. The blob line says whether the two '
+      + 'runs were even the same instrument.',
+    INPUT_RECORD_CLOSE,
+  );
+  return lines;
+}
+
+function renderSweep({ repo, pulls, pairs, inputs = null }, { json = false } = {}) {
   const rows = [];
   const notes = [];
   const unjudged = [];
@@ -4570,7 +5143,10 @@ function renderSweep({ repo, pulls, pairs }, { json = false } = {}) {
   }
   const declarationLimb = declarationLimbTally(pairs);
   if (json) {
-    console.log(JSON.stringify({ repo, openPrs: pulls.length, pairs: pairs.length, declarationLimb, rows, notes, unjudged }, null, 2));
+    // ⭐ The SAME record the block on stderr renders, in the SAME shape, under
+    // one key — ⛔ never a second format (#18456). A round report that pastes
+    // this JSON carries what the run read beside what it found.
+    console.log(JSON.stringify({ repo, openPrs: pulls.length, pairs: pairs.length, declarationLimb, rows, notes, unjudged, inputs }, null, 2));
   } else {
     console.log(
       `check-clause2-carriers: ${pairs.length} card/PR pair(s) derived from ${pulls.length} open ` +
@@ -6515,6 +7091,118 @@ export function selfTest() {
   t('…and the reading is the same with and without the card number — the guard reads no verdict', cardDeclaration([CLAIM('Clause-②: no')]).value === cardDeclaration([CLAIM('Clause-②: no')], { card: 13476 }).value);
   t('⛔ …an ABSENT thread\'s row is untouched: it names no claim comment to correct in the first place', C19_ROW([{ body: 'a triage note, and nothing that begins a line with the claim key', created_at: '2026-08-31T10:00:00Z' }]) === noClaim);
 
+  // -- #18456: the `--pair` input record ------------------------------------
+  //
+  // The pins are about the BLOCK's shape rather than about any verdict: what
+  // the card measured was two runs that disagreed and could not be compared,
+  // so what must not rot is (a) every declared field is present on every exit,
+  // (b) the exit-0 and exit-4 blocks carry the SAME keys, and (c) the fields a
+  // diff actually turns on — the selected carrier, its body fingerprint and the
+  // line read from it — say what they read.
+  battery('#18456: the `--pair` input record — the same block on every exit, so two runs that disagree can be diffed');
+  const R56_REPO = { valid: true, repo: 'objectstack-ai/objectstack', source: 'default' };
+  const R56_TARGETED = { valid: true, repo: 'objectstack-ai/objectui', source: 'PM_SWEEP_REPO' };
+  const R56_SELF = { path: '/w/scripts/pm/check-clause2-carriers.mjs', blob: 'a'.repeat(40), bytes: 1234 };
+  const R56_NOW = new Date('2026-09-17T12:00:00Z');
+  const R56_REQ = [
+    { n: 1, channel: READ_PATH_TOKEN, path: '/pulls?state=open&per_page=100&page=1', answer: 'HTTP 200', rows: 100 },
+    { n: 2, channel: READ_PATH_PUBLIC, path: '/issues/17425/comments?per_page=100', answer: 'HTTP 403', rows: null },
+  ];
+  const R56_STATE = (extra = {}) => ({
+    tokenPresent: true,
+    tokenRetired: null,
+    served: new Map([[READ_PATH_TOKEN, 5], [READ_PATH_PUBLIC, 1]]),
+    pairJsonSource: null,
+    rate: null,
+    lastServed: READ_PATH_TOKEN,
+    requests: R56_REQ,
+    ...extra,
+  });
+  const R56_CLAIM = (id, createdAt, extra) => ({
+    id,
+    created_at: createdAt,
+    body: `Claim: PM loop round R1\nBranch: \`claude/issue-17425-x\`\n${extra ?? ''}`,
+  });
+  const R56_GOVERNING = R56_CLAIM(5650083758, '2026-09-13T01:57:23Z', 'Clause-②: no');
+  const R56_SUPERSEDED = R56_CLAIM(5622080790, '2026-09-10T16:34:31Z', 'Clause-②: yes');
+  const R56_PAIR = (extra = {}) => ({
+    pr: 17917,
+    card: 17425,
+    headSha: 'd7d22bf4bebc4f0065b932556b07a9330d7822b2',
+    evidence: 'closing-keyword',
+    prBody: 'Fixes #17425\n\nClause-②: no',
+    headRef: 'claude/issue-17425-x',
+    cardComments: [R56_SUPERSEDED, R56_GOVERNING],
+    prComments: [],
+    ...extra,
+  });
+  const R56_BUILD = (pairs, extra = {}) =>
+    buildInputRecord({
+      repoRes: R56_REPO, mode: '--pair 17917', state: R56_STATE(), pairs, self: R56_SELF, now: R56_NOW,
+      node: 'v22.0.0', ...extra,
+    });
+  // Exit 0 shape (a declaring governing claim), exit 4 shape (the same thread
+  // with the governing claim's line unreadable — the MISPLACED state), and a
+  // refusal that formed no pair at all.
+  const R56_OK = R56_BUILD([R56_PAIR()]);
+  const R56_MISPLACED = R56_BUILD([R56_PAIR({
+    cardComments: [R56_SUPERSEDED, R56_CLAIM(5650083758, '2026-09-13T01:57:23Z', 'Domain: `domain:spec`')],
+  })]);
+  const R56_REFUSAL = R56_BUILD(null);
+  const R56_LINES = (rec) => renderInputRecord(rec);
+  const R56_KEYS = (rec) => R56_LINES(rec).filter((l) => /^[a-z]/.test(l)).map((l) => l.slice(0, l.indexOf(':')));
+  const R56_FIELD = (rec, key) => {
+    const lines = R56_LINES(rec);
+    const at = lines.findIndex((l) => l.startsWith(`${key}: `));
+    if (at === -1) return null;
+    const out = [lines[at].slice(key.length + 2)];
+    for (let i = at + 1; i < lines.length && lines[i].startsWith('  '); i++) out.push(lines[i].trim());
+    return out.join('\n');
+  };
+
+  t('the block is fenced, so a seat can cut exactly it out of a log', R56_LINES(R56_OK)[0] === INPUT_RECORD_OPEN && R56_LINES(R56_OK).at(-1) === INPUT_RECORD_CLOSE);
+  t('every declared RUN field is present, in roster order, on exit 0', INPUT_RECORD_RUN_FIELDS.every((f, i) => R56_KEYS(R56_OK)[i] === f));
+  t('…and on a refusal that formed NO pair — the same run half, ⛔ never a shorter block', INPUT_RECORD_RUN_FIELDS.every((f, i) => R56_KEYS(R56_REFUSAL)[i] === f));
+  t('every declared PAIR field is present once per derived pair, prefixed by its index', INPUT_RECORD_PAIR_FIELDS.every((f) => R56_KEYS(R56_OK).includes(`pair.1.${f}`)));
+  t('⭐ the exit-0 block and the exit-4 (MISPLACED) block carry an IDENTICAL key list — the diffability property this card exists for', R56_KEYS(R56_OK).join('|') === R56_KEYS(R56_MISPLACED).join('|'));
+  t('…and the refusal block\'s run half is that same key list, so all three diff against each other', R56_KEYS(R56_REFUSAL).slice(0, INPUT_RECORD_RUN_FIELDS.length).join('|') === R56_KEYS(R56_OK).slice(0, INPUT_RECORD_RUN_FIELDS.length).join('|'));
+  t('⛔ a declared field this run never filled RENDERS, with a token saying so — it is never dropped', says(renderInputRecord({ run: {}, pairs: [] }).join('\n'), INPUT_RECORD_UNSET));
+  t('…and a block with nothing in it still carries every declared key', INPUT_RECORD_RUN_FIELDS.every((f) => renderInputRecord({ run: {}, pairs: [] }).some((l) => l.startsWith(`${f}: `))));
+  t('the roster declares EVERY key the builder fills — a field outside it is a field nothing pins', undeclaredRecordFields(R56_OK).length === 0);
+  t('…and one that is outside it is NAMED in the block rather than printed in silence', says(renderInputRecord({ run: { 'run.invented': 'x' }, pairs: [] }).join('\n'), 'record.undeclared: run.invented'));
+  t('the board is stated with WHICH source answered — a fallback and a deliberate target are two sentences', says(R56_FIELD(R56_OK, 'board.source'), 'NEITHER PM_SWEEP_REPO') && says(R56_FIELD(R56_BUILD([R56_PAIR()], { repoRes: R56_TARGETED }), 'board.source'), 'PM_SWEEP_REPO — this run was deliberately targeted'));
+  t('…and the board VALUE is printed beside it', R56_FIELD(R56_BUILD([R56_PAIR()], { repoRes: R56_TARGETED }), 'board.repo') === 'objectstack-ai/objectui');
+  t('the read path is named from the SAME labels every refusal uses', says(R56_FIELD(R56_OK, 'read.plan'), READ_PATH_LABELS[READ_PATH_TOKEN]));
+  t('a `--pair-json` run names that path AND the document it was served from', (() => { const r = R56_BUILD([R56_PAIR()], { state: R56_STATE({ pairJsonSource: 'pair.json', served: new Map([[READ_PATH_PAIR_JSON, 6]]) }) }); return says(R56_FIELD(r, 'read.plan'), READ_PATH_LABELS[READ_PATH_PAIR_JSON]) && R56_FIELD(r, 'read.pair-json') === 'pair.json'; })());
+  t('…and says the network was not read at all on that path', says(R56_BUILD([R56_PAIR()], { state: R56_STATE({ pairJsonSource: 'pair.json' }) }).run['read.api'], 'no network'));
+  t('every request is numbered and carries its channel, its path and the answer', says(R56_FIELD(R56_OK, 'run.requests'), '#1') && says(R56_FIELD(R56_OK, 'run.requests'), '/pulls?state=open&per_page=100&page=1') && says(R56_FIELD(R56_OK, 'run.requests'), 'HTTP 200'));
+  t('⭐ a page that came back FULL states its row count — a truncated read and a complete one differ nowhere else', says(R56_FIELD(R56_OK, 'run.requests'), '(100 row(s))'));
+  t('a refused request states the status it was refused with', says(R56_FIELD(R56_OK, 'run.requests'), 'HTTP 403'));
+  t('⛔ a run that issued NO read says so, rather than rendering an empty field', says(R56_BUILD(null, { state: R56_STATE({ requests: [] }) }).run['run.requests'], 'issued no read at all'));
+  t('the SELECTION RULE is printed, not merely applied — two runs must be comparable on the rule too', says(R56_FIELD(R56_OK, 'pair.1.claim.rule'), 'NEWEST') && says(R56_FIELD(R56_OK, 'pair.1.claim.rule'), '`Branch:`'));
+  t('…and it is the one constant, so the printed rule cannot drift from the applied one', R56_OK.pairs[0]?.['claim.rule'] === CLAIM_SELECTION_RULE && claimCarrierSelection([]).rule === CLAIM_SELECTION_RULE);
+  t('the SELECTED carrier is named by id and by date', says(R56_FIELD(R56_OK, 'pair.1.claim.selected'), '5650083758') && says(R56_FIELD(R56_OK, 'pair.1.claim.selected'), '2026-09-13T01:57:23Z'));
+  t('⭐ …with a BODY FINGERPRINT: the one field that tells "same ids, different bytes" apart', says(R56_FIELD(R56_OK, 'pair.1.claim.selected'), 'sha256:') && says(R56_FIELD(R56_OK, 'pair.1.claim.selected'), ' bytes,'));
+  t('⭐ …and it MOVES when only the bytes move: same ids, same count, same newest, different verdict', R56_FIELD(R56_OK, 'pair.1.card-comment-ids') === R56_FIELD(R56_MISPLACED, 'pair.1.card-comment-ids') && R56_FIELD(R56_OK, 'pair.1.claim.selected') !== R56_FIELD(R56_MISPLACED, 'pair.1.claim.selected'));
+  t('every REJECTED candidate is named, with the reason it is not the carrier', says(R56_FIELD(R56_OK, 'pair.1.claim.rejected'), '5622080790') && says(R56_FIELD(R56_OK, 'pair.1.claim.rejected'), 'SUPERSEDED'));
+  t('…and a thread whose claims are all in the pool says THAT, rather than going quiet', says(R56_BUILD([R56_PAIR({ cardComments: [R56_GOVERNING] })]).pairs[0]?.['claim.rejected'], 'none — every claim comment'));
+  t('a claim that parses ZERO branches leaves NO carrier, and the block names that claim', (() => { const r = R56_BUILD([R56_PAIR({ cardComments: [{ id: 7, created_at: '2026-09-13T05:00:00Z', body: 'Claim: round R2\nClause-②: no' }] })]); return says(r.pairs[0]?.['claim.selected'], 'parses ZERO branches') && says(r.pairs[0]?.['claim.selected'], '7'); })());
+  t('an UNREAD thread reads UNREAD, ⛔ never 0 rows', says(R56_BUILD([R56_PAIR({ cardComments: null })]).pairs[0]?.['card-comments'], 'UNREAD'));
+  t('the line READ from the carrier is stated — declared, near miss or nothing', says(R56_FIELD(R56_OK, 'pair.1.claim.clause2-line'), 'DECLARED `no`') && says(R56_MISPLACED.pairs[0]?.['claim.clause2-line'], 'no line in this body reaches the reader'));
+  t('a short id list is printed whole; a long one keeps its FIRST, its LAST and the true count', renderIdList([{ id: 1 }, { id: 2 }]) === '1,2' && says(renderIdList(Array.from({ length: 40 }, (_, i) => ({ id: i + 1 }))), '1 … 40 (40 ids'));
+  t('the NEWEST row is the newest by `created_at`, ⛔ not the last row the API returned', newestRow([{ id: 2, created_at: '2026-09-13T09:00:00Z' }, { id: 1, created_at: '2026-09-13T01:00:00Z' }])?.id === 2);
+  t('…and an unreadable stamp falls back to thread order, the recency rule the carrier selection uses', newestRow([{ id: 1, created_at: 'nonsense' }, { id: 2, created_at: 'nonsense' }])?.id === 2);
+  t('the PAIRING quotes the body line it was derived from', says(R56_FIELD(R56_OK, 'pair.1.derivation'), 'closing-keyword') && says(R56_FIELD(R56_OK, 'pair.1.derivation'), 'Fixes #17425'));
+  t('…and the branch-name fallback names the head ref instead of quoting a line that does not exist', says(R56_BUILD([R56_PAIR({ evidence: 'branch-name', prBody: 'no declaration at all' })]).pairs[0]?.derivation, 'head.ref: claude/issue-17425-x'));
+  t('the PR-BODY line is read and stated — ⛔ and stated as an INPUT, never as a limb', says(R56_FIELD(R56_OK, 'pair.1.pr-body.clause2-line'), 'DECLARED `no`') && says(R56_FIELD(R56_OK, 'pair.1.pr-body.clause2-line'), '⛔ no row here judges the PR body'));
+  t('the blob hash is git\'s, so `git hash-object` on the path the block names verifies it', gitBlobSha1('') === 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391' && gitBlobSha1('hello') === 'b6fc4c620b67d95f953a5c1c1230aaab5db5a1b0');
+  t('…and this run states the file it ran FROM, which is what "the same blob on both sides" needs', says(R56_FIELD(R56_OK, 'run.script.path'), 'check-clause2-carriers.mjs') && says(R56_FIELD(R56_OK, 'run.script.blob'), 'git hash-object'));
+  t('a source this run could not read says so, rather than printing a hash of nothing', says(buildInputRecord({ self: { path: '/x', blob: null, bytes: null, reason: 'ENOENT' } }).run['run.script.blob'], 'UNREAD'));
+  // ⛔ CONTROLS — the record reads no verdict and derives no second selection.
+  t('⛔ CONTROL: the selection the block prints IS the pool `cardDeclaration` judged — ONE derivation', (() => { const rows = [R56_SUPERSEDED, R56_GOVERNING]; const sel = claimCarrierSelection(rows); return sel.pool.length === 1 && sel.pool[0] === R56_GOVERNING && cardDeclaration(rows).value === 'no'; })());
+  t('⛔ CONTROL: building the record changes no reading — the same rows read the same way after it', (() => { const rows = [R56_SUPERSEDED, R56_GOVERNING]; const before = cardDeclaration(rows).state; buildInputRecord({ pairs: [R56_PAIR()] }); return cardDeclaration(rows).state === before; })());
+  t('⛔ CONTROL: the record carries no verdict, no exit code and no finding row', !says(R56_LINES(R56_OK).join('\n'), 'exit ') && !says(R56_LINES(R56_OK).join('\n'), 'PASS'));
+
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -6581,7 +7269,9 @@ export function selfTest() {
       + 'refusal, the board provenance line, the claim whose `Branch:` line parses to ZERO '
       + 'branches — reported as an unresolvable carrier rather than discarded, the key-INITIAL '
       + 'line that QUOTES the spelling held apart from one that declares a value in BOTH halves '
-      + 'of that property — and the exit register).',
+      + 'of that property, the input record whose field roster is the same on exit 0, on exit 4 '
+      + 'and on a refusal — with the selected carrier, its body fingerprint and the rejected '
+      + 'candidates each stated — and the exit register).',
   );
 
   selfTestReachedVerdict = true;
@@ -6836,6 +7526,40 @@ async function main(argv) {
   // said which board it was about -- the state the filing seat was in.
   console.error(boardProvenanceLine(repoRes));
 
+  // ⭐ Everything from here on runs inside ONE try/finally, so the input record
+  // (#18456) and the read-path report reach a reader on EVERY exit past the
+  // board -- a usage refusal on `--pair-json` included. A block that printed
+  // only beside a verdict would be missing from exactly the refusals two seats
+  // most need to compare.
+  let record = null;
+  const pairFlagIdx = flagIndex(argv, '--pair');
+  const mode = pairFlagIdx === -1
+    ? (flagIndex(argv, '--json') === -1 ? 'sweep' : 'sweep --json')
+    : `--pair ${argv[pairFlagIdx + 1] ?? '(no value)'}`;
+  try {
+    return await runBoard(argv, repo, repoRes, (built) => { record = built; });
+  } finally {
+    console.error(renderReadPathReport(readPathState));
+    for (const line of renderInputRecord(
+      record ?? buildInputRecord({
+        repoRes, mode, state: readPathState, pairs: null, self: selfProvenance(), now: new Date(),
+      }),
+    )) {
+      console.error(line);
+    }
+  }
+}
+
+/**
+ * The board half of `main` -- everything that needs a resolved repo.
+ *
+ * Split out for one reason: the input record and the read-path report are owed
+ * on every exit below, and a `finally` around the whole of it is the only shape
+ * that cannot be lost by a `return` added later (#18456). `keepRecord` hands
+ * the built record back so the caller's `finally` prints the SAME one `--json`
+ * emitted rather than a second reading of the same run.
+ */
+async function runBoard(argv, repo, repoRes, keepRecord) {
   const pairFlag = flagIndex(argv, '--pair');
   let only = null;
   if (pairFlag !== -1) {
@@ -6889,9 +7613,18 @@ async function main(argv) {
   }
 
   let swept = 0;
+  const mode = only === null
+    ? (flagIndex(argv, '--json') === -1 ? 'sweep' : 'sweep --json')
+    : `--pair ${only}`;
   try {
     const { pulls, pairs } = await gather(repo, only, reader, { landingReads: only !== null });
     swept = pairs.length;
+    // Built ONCE, after every read this run makes and before anything is
+    // printed: `--json` emits it and the caller's `finally` renders it.
+    const built = buildInputRecord({
+      repoRes, mode, state: readPathState, pairs, self: selfProvenance(), now: new Date(),
+    });
+    keepRecord(built);
     if (only !== null) {
       if (pairs.length === 0) {
         console.error(
@@ -6913,15 +7646,9 @@ async function main(argv) {
       }
       return worst;
     }
-    return renderSweep({ repo, pulls, pairs }, { json: flagIndex(argv, '--json') !== -1 });
+    return renderSweep({ repo, pulls, pairs, inputs: built }, { json: flagIndex(argv, '--json') !== -1 });
   } catch (err) {
     return reportTransportFailure(err, { swept });
-  } finally {
-    // On stderr in every mode, including `--json`: the budget is a fact about
-    // the RUN, and folding it into the machine channel would change a shape
-    // round reports already read. A verdict that does not say which path
-    // answered is a verdict a seat cannot reproduce.
-    console.error(renderReadPathReport(readPathState));
   }
 }
 
