@@ -2631,6 +2631,45 @@ export function logUnexpectedRouteError(error: any, resolved: { status: number; 
 }
 
 /**
+ * [#18402] Would the classification door answer this caught value `404`?
+ *
+ * ## Why a predicate rather than a second reading of the error
+ *
+ * A handler that owns ONE absence answer has to recognise the absences its
+ * producers THROW, and the tempting spelling — `error?.status === 404 &&
+ * error?.code === 'RESOURCE_NOT_FOUND'` — is a second opinion about what a
+ * caught value means. It disagrees with this door on every shape the door
+ * classifies rather than reads: a producer that declares a status and no code,
+ * an unregistered spelling that {@link thrownCodeFields} demotes to
+ * `declaredCode` while deriving `code` from the status, a structured arm that
+ * owns its own envelope. Each disagreement is one arm of one route quietly
+ * answering a different body again — the exact class the caller was fixing.
+ *
+ * So this ASKS the door. `resolveErrorResponse` is the function that would
+ * have rendered the value one line later; reading its verdict means the
+ * handler's fork and the fallback it forks away from can never drift apart.
+ * The function is pure and this runs on an error path, so the second
+ * classification pass costs nothing worth naming — the same argument
+ * {@link resolveErrorResponse} already makes for its own `mapDataError`
+ * re-entry.
+ *
+ * ⛔ Deliberately the STATUS alone, not `status` plus a `code` test. The
+ * `code` a 404 carries is derived by this door from the status whenever the
+ * producer named none, so testing both narrows nothing while adding a second
+ * place for the vocabulary to be restated. A caller that needs "absent, and
+ * the producer named it so" is asking a different question and should not use
+ * this.
+ *
+ * ⚠️ This predicate does NOT decide what a route answers — it only recognises
+ * an answer. The 503 an unreadable metadata store throws (#5532) resolves to
+ * 503 and is false here, which is the distinction that must never be
+ * flattened.
+ */
+export function thrownAnswerIsNotFound(error: any, object?: string): boolean {
+    return resolveErrorResponse(error, object).status === 404;
+}
+
+/**
  * The single door a route catch block should use: resolve the response once,
  * log it only if it is a real fault, then send it. Wire behaviour is identical
  * to a bare `sendThrownError(res, error, object)` — this only decides whether the log

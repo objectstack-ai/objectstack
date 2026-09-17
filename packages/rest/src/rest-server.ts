@@ -335,6 +335,7 @@ import {
     sendDeclaredFault,
     sendFieldVisibilityFault,
     handleRouteError,
+    thrownAnswerIsNotFound,
     logUnexpectedRouteError,
     isExpectedRouteError,
     applyDroppedFieldsHeader,
@@ -7189,6 +7190,65 @@ export class RestServer {
                             ));
                         }
                     } catch (error: any) {
+                        // [#18402] THE one absence answer, whichever arm
+                        // produced it — the last half of #18066.
+                        //
+                        // #18066 gave this route a single absence EMITTER
+                        // ({@link sendMetaItemAbsent}) and reached it from the
+                        // two conditions that RETURN nothing. The conditions
+                        // that THROW one were left on the classification door
+                        // below, which renders the flat `{ error: '<message>',
+                        // code }` — so `body.error.code`, the accessor #8013
+                        // settled on and objectui#4252 reads, was `undefined`
+                        // on exactly those. Which one a caller got was decided
+                        // by two things it cannot see:
+                        //
+                        //  - `metadata.enableCache` (default TRUE). The cached
+                        //    arm's `getMetaItemCached` THROWS
+                        //    `metadataItemNotFoundError` on a falsy `item`; the
+                        //    uncached arm resolves item-less and returns. One
+                        //    request, one missing name, two envelopes, chosen
+                        //    by a server setting — the #7035 failure class.
+                        //  - which protocol implementation is mounted. The
+                        //    in-repo `metadata-protocol` resolves item-less
+                        //    from `getMetaItem`, but a protocol that throws the
+                        //    miss instead reached the same flat door
+                        //    (pinned in `rest-meta-outage-vs-miss.test.ts`).
+                        //
+                        // Recognised by the STATUS this repo's own
+                        // classification door would have answered — see
+                        // {@link thrownAnswerIsNotFound}, which asks that door
+                        // rather than re-reading the error, so this fork and
+                        // the `handleRouteError` it forks away from cannot
+                        // drift. Every 404 out of this handler is absence:
+                        // ordering and arity refusals are 400, the audience
+                        // gate 401/403, the app gate 403, field visibility 503,
+                        // an unreadable store 503 (#5532 — false here, and that
+                        // distinction is the one this must never flatten).
+                        //
+                        // ⭐ It STRENGTHENS the ADR-0045 §3 property rather
+                        // than merely preserving it. The unpublished app and
+                        // the service-gated one answer through the emitter, so
+                        // an absence that kept the thrown dialect was a
+                        // response pair that told them apart — by envelope
+                        // shape, and by the producer's `Metadata item
+                        // <type>/<name> not found` prose where the emitter says
+                        // one fixed sentence. Four arms, one body now; the
+                        // byte-identity is pinned in
+                        // `meta-item-absent-404.test.ts` §2 and §5.
+                        //
+                        // ⛔ NOT a convergence of the flat dialect itself. The
+                        // audience gate's `sendDeclaredFault` 401/403 beside
+                        // this, and the door in `error-response.ts`, still
+                        // answer flat: that position is the live ratchet
+                        // #9559 owns repo-wide (`check:route-envelope`), and
+                        // converting two of its four emissions here would mint
+                        // a new divergence — the same refusal answering two
+                        // shapes depending on which ROUTE served it.
+                        if (thrownAnswerIsNotFound(error)) {
+                            sendMetaItemAbsent(res);
+                            return;
+                        }
                         handleRouteError(res, error);
                     }
                 },
