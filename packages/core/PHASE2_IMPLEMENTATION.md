@@ -28,14 +28,15 @@ const monitor = new PluginHealthMonitor(logger);
 
 // Register a plugin for monitoring
 monitor.registerPlugin('my-plugin', {
-  interval: 30000,           // Check every 30 seconds
-  timeout: 5000,             // 5 second timeout
+  intervalMs: 30000,         // Check every 30 seconds
+  timeoutMs: 5000,           // 5 second timeout
   failureThreshold: 3,       // Mark unhealthy after 3 failures
   successThreshold: 1,       // Mark healthy after 1 success
-  autoRestart: true,         // Auto-restart on failure
-  maxRestartAttempts: 3,     // Max 3 restart attempts
-  restartBackoff: 'exponential',
 });
+// The monitor REPORTS; it does not act. `autoRestart`, `maxRestartAttempts`
+// and `restartBackoff` were removed in @objectstack/spec 18 (ADR-0049) because
+// nothing ever restarted a plugin — poll the two calls below instead and act
+// at the level that owns the plugin's lifetime.
 
 // Start monitoring
 monitor.startMonitoring('my-plugin', pluginInstance);
@@ -67,14 +68,19 @@ const hotReload = new HotReloadManager(logger);
 // Register plugin for hot reload
 hotReload.registerPlugin('my-plugin', {
   enabled: true,
-  watchPatterns: ['src/**/*.ts'],
-  debounceDelay: 1000,
+  debounceDelayMs: 1000,
   preserveState: true,
   stateStrategy: 'memory',
   shutdownTimeout: 30000,
   beforeReload: ['plugin:beforeReload'],
   afterReload: ['plugin:afterReload'],
 });
+
+// File watching is the host's job: `watchPatterns` was removed in
+// @objectstack/spec 18 (ADR-0049) because no watcher was ever constructed. Run
+// your own watcher, declare your globs where it reads them, and call
+// `hotReload.scheduleReload('my-plugin', reloadFn)` when a change matches —
+// that is the debounced integration point this class does implement.
 
 // Trigger reload
 await hotReload.reloadPlugin(
