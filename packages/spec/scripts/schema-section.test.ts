@@ -657,3 +657,118 @@ describe('externalVocabulary — the published half of the duration-rule exempti
     }
   });
 });
+
+/**
+ * [#18500] The PUBLISHED half of the `dimensionless` exemption — the sibling of
+ * the block above, ruling B on #14478: the marker is one the gate honours AND
+ * the docs generator publishes. `check:duration-unit-keys` shipped the reader
+ * first; this is the other half.
+ *
+ * The argument is its sibling's, one step further. A bare `maxAge` leaves the
+ * reference-page reader guessing seconds from milliseconds; a bare
+ * `recentFailures` described as `Failures seen in the last 5 minutes` leaves
+ * them guessing whether the number IS that span. The marker says it is not —
+ * it counts failed attempts — and that reason reaches the page only if the
+ * page prints it.
+ *
+ * The marker reaches this renderer as a property of the JSON-Schema node,
+ * riding `z.toJSONSchema` verbatim (measured on zod 4.4.3 against
+ * `z.number().meta({ dimensionless: 'failed attempts' })`: the key arrives on
+ * the emitted node unchanged) — the same channel `externalVocabulary` / `xRef`
+ * / `xExpression` / `xEnumDeprecated` use.
+ *
+ * MEASURED (reverse verification): deleting the `dimensionlessNote(prop)` term
+ * from the description cell turns the first four cases below red and leaves the
+ * last two green — the last two assert the note's ABSENCE, which is what keeps
+ * it from decorating every row in the reference.
+ */
+describe('dimensionless — the published half of the duration-rule exemption', () => {
+  const withMarker = (marker: unknown) => ({
+    type: 'object',
+    properties: {
+      recentFailures: {
+        type: 'number',
+        description: 'Failures seen in the last 5 minutes',
+        ...(marker === undefined ? {} : { dimensionless: marker }),
+      },
+    },
+  });
+
+  it('prints what the number counts, beside the prose whose unit belongs to something else', () => {
+    const md = renderSchemaSection('HealthSignal', withMarker('failed attempts'));
+
+    expect(md).toContain(
+      'Failures seen in the last 5 minutes (dimensionless — counts failed attempts)',
+    );
+  });
+
+  it('keeps the describe prose — the note QUALIFIES the number, it does not replace it', () => {
+    const md = renderSchemaSection('BackoffPolicy', withMarker('retry attempts'));
+
+    expect(md).toContain('Failures seen in the last 5 minutes');
+    expect(md).toContain('(dimensionless — counts retry attempts)');
+  });
+
+  it('renders inside a nested shape table too — one grammar, not two', () => {
+    const md = renderSchemaSection('RetryConfig', {
+      type: 'object',
+      properties: {
+        backoff: {
+          type: 'object',
+          description: 'Backoff options',
+          properties: {
+            multiplier: {
+              type: 'number',
+              description: 'Growth applied to the previous 30 second delay',
+              dimensionless: 'the factor each delay is multiplied by',
+            },
+          },
+        },
+      },
+    });
+
+    expect(md).toContain(
+      'Growth applied to the previous 30 second delay (dimensionless — counts the factor each delay is multiplied by)',
+    );
+  });
+
+  it('composes with the sibling marker — a key declaring both publishes both reasons', () => {
+    // Nothing in the gate makes the two exemptions exclusive, so the cell is
+    // built by appending both notes rather than choosing between them. Pinned
+    // because a renderer that picked one would look identical on every key that
+    // carries only one.
+    const md = renderSchemaSection('CacheStats', {
+      type: 'object',
+      properties: {
+        maxAge: {
+          type: 'number',
+          description: 'Entries seen in the last 60 seconds',
+          externalVocabulary: 'HTTP Cache-Control `max-age`',
+          dimensionless: 'cached entries',
+        },
+      },
+    });
+
+    expect(md).toContain(
+      'Entries seen in the last 60 seconds (unit per HTTP Cache-Control `max-age`) (dimensionless — counts cached entries)',
+    );
+  });
+
+  it('prints nothing for a key that declares no marker — the note is not decoration', () => {
+    const md = renderSchemaSection('HealthSignal', withMarker(undefined));
+
+    expect(md).toContain('Failures seen in the last 5 minutes');
+    expect(md).not.toContain('dimensionless');
+  });
+
+  it('prints nothing for an empty or non-string marker — an unverifiable claim publishes nothing', () => {
+    // The gate refuses these too (they exempt no key), so the page must not
+    // name a count the contract never declared. Held on the SAME inputs from
+    // both sides so the two halves cannot drift into disagreeing about what
+    // counts as a declaration.
+    for (const marker of ['', '   ', 42, null, { counts: 'failed attempts' }]) {
+      const md = renderSchemaSection('HealthSignal', withMarker(marker));
+      expect(md, `marker ${JSON.stringify(marker)}`).not.toContain('dimensionless');
+    }
+  });
+});

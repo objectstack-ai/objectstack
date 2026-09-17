@@ -260,6 +260,42 @@ function externalVocabularyNote(prop: any): string {
 }
 
 /**
+ * The published half of the `dimensionless` exemption (#15676, ruling B on
+ * #14478) — the sibling of {@link externalVocabularyNote}, and one grammar with
+ * it rather than a second one.
+ *
+ * A key that carries `.meta({ dimensionless: '<what it counts>' })` is a count,
+ * a multiplier or a ratio whose describe prose happens to name a time unit
+ * belonging to something else in the sentence: `Failures seen in the last 5
+ * minutes` is a number of failures, not a number of minutes. The marker rides
+ * `z.toJSONSchema` verbatim, the same channel `externalVocabulary` / `xRef` /
+ * `xExpression` / `xEnumDeprecated` use, so it arrives here as a property of
+ * the JSON-Schema node.
+ *
+ * Printing it is what makes THIS exemption honest, on exactly the argument its
+ * sibling rests on. `check:duration-unit-keys` exists because a naked number
+ * beside prose naming a unit leaves the reader guessing; the rename is waived
+ * here because the number HAS no unit, and that reason is invisible on the
+ * page unless the page says it. A key exempted silently publishes the same
+ * guess the gate was built to remove — with the marker printed, the answer is
+ * stated: no unit, and here is what it counts instead.
+ *
+ * Both halves read the SAME declaration the gate reads — a non-empty string
+ * literal — so an empty or non-string marker, which exempts no key there,
+ * publishes nothing here. The page must never name a count the contract did
+ * not.
+ *
+ * Appended to the description cell for the reason its sibling is: it qualifies
+ * the prose already in that cell, and a marker on a handful of keys does not
+ * earn a column on every table in the reference.
+ */
+function dimensionlessNote(prop: any): string {
+  const counts = prop?.dimensionless;
+  if (typeof counts !== 'string' || counts.trim() === '') return '';
+  return ` (dimensionless — counts ${counts.trim()})`;
+}
+
+/**
  * Render one schema's section, heading included.
  *
  * `category` is not a parameter: everything category-scoped reaches this
@@ -465,7 +501,9 @@ export function renderSchemaSection(schemaName: string, schema: any, ctx: Sectio
           // pipe), then pipes — an unescaped `|` (even inside a code span)
           // splits the cell.
           const desc = escapeMdxDescription(
-            ((prop.description || '') + externalVocabularyNote(prop)).replace(/\n/g, ' '),
+            ((prop.description || '')
+              + externalVocabularyNote(prop)
+              + dimensionlessNote(prop)).replace(/\n/g, ' '),
           )
             .replace(/\\/g, '\\\\')
             .replace(/\|/g, '\\|');
