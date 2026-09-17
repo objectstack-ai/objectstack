@@ -6,7 +6,8 @@
  *
  *  1. String shorthand input is replaced by `{ dialect: 'cel', source }`.
  *  2. The persisted envelope carries an `ast` field produced by the dialect
- *     engine (M9.2 deliverable). Source is retained for round-trip / debug.
+ *     engine, beside the canonical `source` the engine evaluates. `ast` is an
+ *     optional opaque structured value; it never replaces `source`.
  *
  * Spec layer cannot do step 2 because it must remain dependency-free; this
  * package owns the engine import and therefore the AST step.

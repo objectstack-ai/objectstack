@@ -125,6 +125,15 @@ function docblockOf(iface: string, member: string): string {
   return body.slice(docStart, memberAt);
 }
 
+/** The docblock immediately above an exported interface, from the contract source. */
+function interfaceDocblockOf(iface: string): string {
+  const declaredAt = CONTRACT_SOURCE.indexOf(`export interface ${iface} `);
+  expect(declaredAt, `interface ${iface} is declared`).toBeGreaterThanOrEqual(0);
+  const docStart = CONTRACT_SOURCE.lastIndexOf('/**', declaredAt);
+  expect(docStart, `${iface} carries a docblock`).toBeGreaterThanOrEqual(0);
+  return CONTRACT_SOURCE.slice(docStart, declaredAt);
+}
+
 describe('[#16559] ResumeFailureReport — the resume failure a success answer carries (batch #76)', () => {
   it('1. the wire schema parses a report and hands the three shared members back out (declared once, measured)', () => {
     // A strip-mode object drops undeclared keys silently and would parse
@@ -134,6 +143,33 @@ describe('[#16559] ResumeFailureReport — the resume failure a success answer c
     const parsed = ResumeFailureDetailsSchema.parse(strandedParent);
     expect(parsed).toEqual({ runId: 'run_parent_001', status: 'stranded', repairable: true });
     expect(Object.keys(strandedParent).sort()).toEqual([...Object.keys(parsed), 'code'].sort());
+  });
+
+  it('1. the wire schema strips that code SILENTLY, and the docblock no longer sends a caller down that path', () => {
+    // [#17929] The type docblock used to invite a caller to parse this member
+    // with the wire schema. The invitation deleted the one member the same
+    // docblock calls indispensable, and the deletion is the quiet kind: a
+    // non-strict `z.object` reports an undeclared key nowhere. Both halves of
+    // the repair are pinned, because each rots on its own -- the silence is
+    // the behaviour the prose must keep describing, and the prose is the only
+    // thing standing between a reader and the path that loses the code.
+    const parsed = ResumeFailureDetailsSchema.safeParse(strandedParent);
+    expect(parsed.success, 'parsing a full report SUCCEEDS -- the strip does not refuse').toBe(true);
+    expect(parsed.error, 'and it raises nothing: no `unrecognized_keys`, no issue at all').toBeUndefined();
+    expect(parsed.data && 'code' in parsed.data, 'yet the failure class is gone from the output').toBe(false);
+
+    const reportDoc = interfaceDocblockOf('ResumeFailureReport');
+    expect(reportDoc, 'the docblock warns that the schema strips the code')
+      .toContain('SILENTLY STRIPS');
+    expect(reportDoc, 'and names what the schema must not be used for')
+      .toContain('never as a way to obtain the report');
+    // The regression guard proper: the sentence that caused the card is gone.
+    expect(reportDoc, 'the bare invitation to parse this member with the wire schema is gone')
+      .not.toContain('a caller that parses this member with');
+    // Anti-vacuity: the docblock this reads is the real one, still making the
+    // claim the warning is about.
+    expect(reportDoc, 'the docblock still says the code is the member a success envelope cannot leave to its envelope')
+      .toContain('cannot leave to its envelope');
   });
 
   it('1. the wire schema keeps refusing what the report refuses — repairable is required, status is the two terminal failures', () => {

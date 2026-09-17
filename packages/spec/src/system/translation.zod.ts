@@ -574,9 +574,16 @@ const TRANSLATION_KEY_GUIDANCE: Record<LegacyObjectFirstKey | 'validationMessage
  * {
  *   "objects": { "account": { "label": "Account" } },
  *   "apps": { "crm": { "label": "CRM" } },
- *   "messages": { "common.save": "Save" }
+ *   "messages": { "commonSave": "Save" }
  * }
  * ```
+ *
+ * `messages` ids are single-segment. `t()` resolves a key by walking its dot
+ * path into this structure, and `messages` is a flat `Record<string, string>`,
+ * so an id that itself contains a dot (`'common.save'`) is looked up as a
+ * nested `common` object and resolves to nothing; `messages.commonSave`
+ * resolves. Both implementations walk identically — see
+ * `content/docs/protocol/kernel/i18n-standard.mdx`.
  */
 /**
  * The translation groups, as a shape rather than a schema.
@@ -1414,6 +1421,10 @@ export type TranslationConfig = z.input<typeof TranslationConfigSchema>;
  * sync skips an item whose locale it cannot resolve, and a skip is invisible
  * to whoever — or whatever — authored it.
  *
+ * `messages` ids are single-segment, for the reason spelled out on
+ * {@link TranslationDataSchema}: `t()` walks the dot path, so an id containing
+ * a dot resolves to nothing.
+ *
  * @example
  * ```typescript
  * const zhCN = defineTranslation({
@@ -1427,7 +1438,7 @@ export type TranslationConfig = z.input<typeof TranslationConfigSchema>;
  *     },
  *   },
  *   apps: { crm: { label: '客户关系管理' } },
- *   messages: { 'common.save': '保存' },
+ *   messages: { commonSave: '保存' },
  * });
  * ```
  */

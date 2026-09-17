@@ -256,6 +256,13 @@
         "platform-core.seed-mode-matrix"
       ]
     },
+    "sharing_rule": {
+      "items": [
+        "access-security.sharing-rules-widen",
+        "access-security.sharing-rule-authoring-ui",
+        "access-security.record-share-grant-revoke"
+      ]
+    },
     "skill": {
       "items": [
         "ai.agent-tool-skill-metadata-roundtrip",

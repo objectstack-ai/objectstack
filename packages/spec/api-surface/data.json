@@ -802,6 +802,7 @@
     "redactableConfigKeys (function)",
     "reduceFilterKeyVerdict (function)",
     "reduceFilterVerdict (function)",
+    "referenceCarrierOf (function)",
     "referenceTargetOf (function)",
     "referencedFields (function)",
     "refusedCredentialKeys (function)",

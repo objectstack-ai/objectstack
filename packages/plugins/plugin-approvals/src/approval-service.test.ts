@@ -3140,9 +3140,16 @@ describe('ApprovalService — a graph approver that expands to nobody warns (#38
     return { svc, warnings };
   };
 
-  const approverInput = (type: string, value: string) => ({
+  // `value` is OPTIONAL because `manager` omits it (it is resolved from the
+  // submitter's `sys_user.manager_id`, never authored) — and the literal it
+  // falls back to interpolates that absence, which is the row below.
+  const approverInput = (type: string, value?: string) => ({
     ...openInput([]),
-    config: { approvers: [{ type, value }], behavior: 'first_response' as const, lockRecord: false },
+    config: {
+      approvers: [value === undefined ? { type } : { type, value }],
+      behavior: 'first_response' as const,
+      lockRecord: false,
+    },
   });
 
   it.each([
@@ -3150,6 +3157,12 @@ describe('ApprovalService — a graph approver that expands to nobody warns (#38
     ['department', 'bu_gone'],
     ['position', 'nobody_holds_this'],
     ['org_membership_level', 'member'],
+    // `manager` is in GRAPH_APPROVER_TYPES like the four above, and the row was
+    // missing from this table. It is the worst of the set, not the mildest: it
+    // authors no `value`, so the dead literal it leaves is `manager:undefined`
+    // — a slot that names a person who does not exist AND reads like a bug in
+    // the platform to whoever finds it in `pending_approvers`.
+    ['manager', undefined],
   ])('%s: the dead literal is logged with its type, value and org', async (type, value) => {
     const engine = makeFakeEngine();
     const { svc, warnings } = svcWithWarnings(engine);
@@ -3179,6 +3192,180 @@ describe('ApprovalService — a graph approver that expands to nobody warns (#38
 
     expect(req.pending_approvers).toEqual(['u_unknown']);
     expect(warnings.filter(([msg]) => String(msg).includes('expanded to nobody'))).toEqual([]);
+  });
+});
+
+// The empty-slate policy that NAMES people. Before it, an empty
+// `{ type: 'manager' }` rung had three endings and all three were bad: open on
+// `manager:undefined` and wait for an admin (`admin_rescue`), kill the run
+// (`fail`), or wave the record through (`auto_approve`). `fallback` adds the
+// fourth — open on someone who can actually decide.
+//
+// The rung is not special. Every graph approver type ends at the same literal;
+// `manager` is just the one that reaches it without anybody authoring a wrong
+// value, which is why it is the proving case here.
+describe("ApprovalService — onEmptyApprovers: 'fallback' (node-level named rescue)", () => {
+  const svcWithWarnings = (engine: any) => {
+    const warnings: any[] = [];
+    let n = 0;
+    const svc = new ApprovalService({
+      engine,
+      clock: { now: () => new Date(1757000000000 + (n++) * 1000) },
+      logger: { warn: (msg: any, meta: any) => warnings.push([msg, meta]) },
+    });
+    return { svc, warnings };
+  };
+
+  /** A node whose only approver is an unset manager rung — the empty slate. */
+  const managerNode = (configExtra: Record<string, any> = {}) => ({
+    ...openInput([]),
+    config: {
+      approvers: [{ type: 'manager' as const }],
+      behavior: 'first_response' as const,
+      lockRecord: false,
+      ...configExtra,
+    },
+  });
+
+  const OWNER_BACKSTOP = { type: 'user' as const, value: 'u_backstop' };
+  const said = (warnings: any[], needle: string) =>
+    warnings.some(([msg]) => String(msg).includes(needle));
+
+  it('opens the request on the declared fallback, never on the manager:undefined literal', async () => {
+    const engine = makeFakeEngine();
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(managerNode({
+      onEmptyApprovers: 'fallback',
+      fallbackApprovers: [OWNER_BACKSTOP],
+    }), CTX) as any;
+
+    expect(req.status).toBe('pending');
+    expect(req.pending_approvers).toEqual(['u_backstop']);
+    expect(req.pending_approvers).not.toContain('manager:undefined');
+    expect(said(warnings, "onEmptyApprovers: 'fallback'")).toBe(true);
+    // The request is decidable by a person, so the admin-takeover warning must
+    // NOT fire — it would be false about this request.
+    expect(said(warnings, 'decidable only by a privileged admin')).toBe(false);
+  });
+
+  // "the same resolver as ordinary approver entries" is the ruled requirement,
+  // so the fallback must expand a GRAPH type, not just literal ids.
+  it('resolves the fallback through the same expansion approvers use', async () => {
+    const engine = makeFakeEngine();
+    engine._tables['sys_team_member'] = [{ id: 'tm1', team_id: 'team_ok', user_id: 'u5' }];
+    const { svc } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(managerNode({
+      onEmptyApprovers: 'fallback',
+      fallbackApprovers: [{ type: 'team', value: 'team_ok' }],
+    }), CTX) as any;
+
+    expect(req.pending_approvers).toEqual(['u5']);
+  });
+
+  it('namespaces the fallback resolution inputs in the audit snapshot, keeping the primary ones', async () => {
+    const engine = makeFakeEngine();
+    const { svc } = svcWithWarnings(engine);
+    await svc.openNodeRequest({
+      ...openInput([]),
+      variables: { primary: [], rescue: ['u7'] },
+      config: {
+        approvers: [{ type: 'expression' as const, value: 'vars.primary' }],
+        behavior: 'first_response' as const,
+        lockRecord: false,
+        onEmptyApprovers: 'fallback',
+        fallbackApprovers: [{ type: 'expression' as const, value: 'vars.rescue' }],
+      },
+    } as any, CTX);
+
+    const snapshot = JSON.parse(engine._tables['sys_approval_request'][0].node_config_json);
+    // WHY the fallback fired, and WHO it picked — both answerable later.
+    expect(snapshot.__resolvedFrom).toEqual({
+      'expression#0': [],
+      'fallback:expression#0': ['u7'],
+    });
+  });
+
+  // A fallback is a rescue path: when it too finds nobody the run must not die
+  // and the record must not be waved through. It degrades to the default.
+  it('degrades to admin_rescue when the fallback ITSELF resolves to nobody', async () => {
+    const engine = makeFakeEngine();
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(managerNode({
+      onEmptyApprovers: 'fallback',
+      fallbackApprovers: [{ type: 'team', value: 'team_also_gone' }],
+    }), CTX) as any;
+
+    expect(req.status).toBe('pending');
+    expect(req.pending_approvers).toEqual(['manager:undefined']);
+    expect(said(warnings, 'resolved to nobody either')).toBe(true);
+    expect(said(warnings, 'decidable only by a privileged admin')).toBe(true);
+  });
+
+  // The spec refuses this pairing at authoring time; a STORED node written
+  // before the policy existed can still reach the service.
+  it('degrades to admin_rescue when the policy is declared with no fallbackApprovers', async () => {
+    const engine = makeFakeEngine();
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(managerNode({ onEmptyApprovers: 'fallback' }), CTX) as any;
+
+    expect(req.status).toBe('pending');
+    expect(req.pending_approvers).toEqual(['manager:undefined']);
+    expect(said(warnings, 'with no fallbackApprovers')).toBe(true);
+    expect(said(warnings, 'decidable only by a privileged admin')).toBe(true);
+  });
+
+  it('never consults the fallback when the primary slate resolved someone', async () => {
+    const engine = makeFakeEngine();
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest({
+      ...openInput([]),
+      config: {
+        approvers: [{ type: 'user' as const, value: 'u9' }],
+        behavior: 'first_response' as const,
+        lockRecord: false,
+        onEmptyApprovers: 'fallback',
+        fallbackApprovers: [OWNER_BACKSTOP],
+      },
+    } as any, CTX) as any;
+
+    expect(req.pending_approvers).toEqual(['u9']);
+    expect(said(warnings, "onEmptyApprovers: 'fallback'")).toBe(false);
+  });
+
+  // ── negative controls ─────────────────────────────────────────────
+  //
+  // The other three policies are untouched by this change — including when a
+  // `fallbackApprovers` list is present on the row (the spec refuses that
+  // pairing at authoring time; the runtime simply does not read it).
+
+  it("'fail' still fails loudly, fallbackApprovers on the row or not", async () => {
+    const engine = makeFakeEngine();
+    const { svc } = svcWithWarnings(engine);
+    await expect(svc.openNodeRequest(managerNode({
+      onEmptyApprovers: 'fail', fallbackApprovers: [OWNER_BACKSTOP],
+    }), CTX)).rejects.toThrow(/NO_APPROVERS/);
+    expect(engine._tables['sys_approval_request'] ?? []).toHaveLength(0);
+  });
+
+  it("'auto_approve' still waves through, fallbackApprovers on the row or not", async () => {
+    const engine = makeFakeEngine();
+    const { svc } = svcWithWarnings(engine);
+    const outcome = await svc.openNodeRequest(managerNode({
+      onEmptyApprovers: 'auto_approve', fallbackApprovers: [OWNER_BACKSTOP],
+    }), CTX);
+    expect(outcome).toEqual({ autoApproved: true, reason: 'empty_approvers' });
+    expect(engine._tables['sys_approval_request'] ?? []).toHaveLength(0);
+  });
+
+  it("'admin_rescue' still opens on the dead literal and warns", async () => {
+    const engine = makeFakeEngine();
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(managerNode({
+      onEmptyApprovers: 'admin_rescue', fallbackApprovers: [OWNER_BACKSTOP],
+    }), CTX) as any;
+    expect(req.pending_approvers).toEqual(['manager:undefined']);
+    expect(said(warnings, 'decidable only by a privileged admin')).toBe(true);
+    expect(said(warnings, "onEmptyApprovers: 'fallback'")).toBe(false);
   });
 });
 

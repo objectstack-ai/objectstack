@@ -480,6 +480,58 @@
  * which `surfaceFlags` puts off the contract source surface. It is a different
  * reading's card on the day that population is not zero.
  *
+ * ## The remedy with no reader — #17848, and a pin the shape never had
+ *
+ * #17848 filed two halves against this family. Re-measuring both on the tree
+ * that answers today is the whole of what this round changed.
+ *
+ * ⭐ HALF ONE DID NOT REPRODUCE. The card measured three parked PRs and read
+ * nine T1 tells on keys that had existed for releases — a key re-declared
+ * because the diff hung a zod `{ error: … }` param on it (#17846, seven doors),
+ * or rewrote its `.describe()` (#17796), or moved beside a retirement (#17638).
+ * Re-run against all three PR diffs, this matcher reports NO tell on any of
+ * them — and neither does it AS IT STOOD AT THE CARD'S OWN FILING COMMIT
+ * (`758ac409`, seventeen minutes before the card was written). The repair had
+ * landed three days EARLIER, in #16943's replacement budget above: a key
+ * re-declared in place removes a T1 line and adds one, and the removal pays.
+ *
+ * ⛔ So no matcher change was made for half one, and the reason is not that the
+ * change would have been small. The shapes the card floated — pairing across a
+ * HUNK, or diffing the file's key SET instead of the block's lines — are the
+ * silence `changeBlocks`'s own docblock refuses, and buying them would have
+ * traded a loud failure for a quiet one to repair a defect that was not there.
+ *
+ * What half one did leave is a gap in the INSTRUMENT rather than in the reader:
+ * the `{ error: … }` shape had no case of its own, and it is arithmetically
+ * distinct from the `.describe()` pair #16943 pinned — one removed line against
+ * THREE added, of which exactly one is a key. A budget counting LINES instead
+ * of KINDS comes up short precisely there. Its battery is below, carrying the
+ * dark control that shows the silence is bought by the removal and never by the
+ * shape, and the surplus control that shows a real new key riding along still
+ * fires.
+ *
+ * ⭐ HALF TWO REPRODUCED EXACTLY, and it is what this round repairs. The
+ * refusal sentence offered two doors and only one was real: "explain in the
+ * claim why this addition does not widen" has NO READER — `c5WideningTell()`
+ * compares the declaration against the diff's tells and stops there. The
+ * sections above had recorded that twice, at #16822 and again at #16943,
+ * without ever changing the string a refused author actually reads; so this
+ * file knew, and the author could not. ⇒ the only door that moved the exit code
+ * was `Clause-②: no` → `yes`, which on a FALSE tell is the one thing the
+ * standing rule forbids outright: 「⛔ 永不把 `no` 翻成 `yes` 去过门」.
+ *
+ * A declared-but-unenforced remedy is a shape this repo removes rather than
+ * documents, so the sentence now names the two doors that work — re-declare
+ * when the diff really widens, and repair the MATCHER when the tell is false —
+ * and states the explanation's uselessness outright, so nobody spends a round
+ * rediscovering it. ⛔ Giving the explanation a READER was refused rather than
+ * overlooked: an author-written sentence that clears the author's own gate is
+ * 自查放行, and it would need exactly the new claim-line syntax #16448 forbids.
+ *
+ * ⛔ No exit code moves for either half. The register below is unchanged, every
+ * tell fires where it fired, and `--self-test` GREW cases in both directions
+ * rather than losing any.
+ *
  * ## Where the surfaces come from — imported, never hand-copied
  *
  * The contract SOURCE surface is `SUSPECT_TIER_GLOBS`, imported from
@@ -694,11 +746,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#17618 — a PARAMETER is not a key, and a closed set RE-SPELLED around fewer values is not a new one': 24,
   '#17300 — the retirement ledger is a record of REMOVALS, not a set that gained a value': 27,
   '#17955 — a `retiredKey()` tombstone declares a key UNWRITABLE, and never adds a spelling': 29,
+  '#17848 — a key RE-DECLARED with a zod `error` param is not a key ADDED': 8,
   'T3 — a new row in a published entry point': 8,
   'T4 — a new registration in a registry': 10,
   '#16448 acceptance: the four positive controls, each with its file:line': 8,
   '#16448 acceptance: the negative controls a widening gate must let through': 10,
-  'the refusal sentence, and the two prohibitions it must keep': 8,
+  'the refusal sentence, and the two prohibitions it must keep': 11,
   'the exit register is distinct in every direction it must be': 6,
   'the declared registry rows still exist in this tree': 4,
   '#17112 — the count is split: examined is not examinable': 23,
@@ -721,15 +774,36 @@ export const EXIT_INCOMPLETE = 2;
 export const EXIT_REFUSED = 4;
 
 /**
- * The sentence #16448 fixes, quoted from the card and NOT paraphrased.
+ * The sentence a refused author reads — the two doors that MOVE THE EXIT CODE,
+ * and the one that never did (#17848).
  *
- * It is a constant because the whole point of the refusal is that the author
- * knows the two ways out of it — re-declare, or explain — without reading this
- * file. A row renders it once; ⛔ never a second wording per tell.
+ * ⚠️ It is no longer #16448's wording, and the change is measured rather than
+ * editorial. That wording read "re-declare `yes` or explain in the claim why
+ * this addition does not widen", and the header above has twice recorded that
+ * its second branch has NO READER: `c5WideningTell()` compares the declaration
+ * against the diff's tells and nothing else, so an author who followed the
+ * instruction got the identical exit 4 with no way to learn that the remedy was
+ * never implemented. What that left standing was the branch the standing rule
+ * forbids outright — 「⛔ 永不把 `no` 翻成 `yes` 去过门」 — a widening written
+ * into a governance ledger that did not happen and afterwards indistinguishable
+ * from one that did. ⛔ A gate whose only working door is a lie teaches the lie.
+ *
+ * ⛔ The repair is NOT to give the explanation a reader. An author-written
+ * sentence that clears the author's own gate is 自查放行, and it would need the
+ * new claim-line syntax #16448 forbids. The repair is to name the door this
+ * file has said was the right one since #16822: a DEMONSTRATED false positive
+ * is repaired HERE, in the matcher, with a `--self-test` case pinning the
+ * shape — and to say plainly that the claim is not where it gets repaired.
+ *
+ * It stays a constant for #16448's reason: the author knows the ways out
+ * without opening this file. A row renders it once; ⛔ never a second wording
+ * per tell.
  */
 export const REFUSAL_SENTENCE =
-  'a widening tell with `Clause-②: no` — re-declare `yes` or explain in the claim why this ' +
-  'addition does not widen';
+  'a widening tell with `Clause-②: no` — re-declare `yes` if the diff really widens; if the tell ' +
+  'is FALSE, repair it here in the matcher (`scripts/pm/check-widening-tells.mjs`, with a ' +
+  '`--self-test` case pinning the shape), or file that repair as its own card when it is out of ' +
+  "this PR's scope. ⛔ An explanation in the claim moves no exit code — nothing reads one";
 
 // ---------------------------------------------------------------------------
 // The surfaces
@@ -2823,6 +2897,71 @@ export function selfTest() {
   // that reds when it does.
   t('⚠️ QUIET — a multi-line tombstone whose CLOSING line chains a live arm is not reported; population 0, and the header carries the overturn condition', tells({ filename: TOMBSTONE_FILE, status: 'modified', patch: '@@ -30,0 +30,3 @@\n+  legacy: retiredKey(\n+    LEGACY_PRESCRIPTION,\n+  ).or(z.string()),' }).length === 0);
 
+  // -- #17848 -----------------------------------------------------------------
+  //
+  // The card behind this battery read nine T1 tells across three PRs on keys
+  // that had existed for releases. Re-measured, none of the three fires — and
+  // none fired at the card's own filing commit either, because #16943's
+  // replacement budget above had already landed. ⭐ These cases therefore pin a
+  // repair that was ALREADY HERE rather than one this round made, which is
+  // exactly why they earn their lines: the shape had no case of its own, so
+  // nothing would have reported the day it stopped being paid for.
+  //
+  // ⚠️ It is arithmetically distinct from the `.describe()` pair #16943 pinned.
+  // The block removes ONE line and adds THREE, of which exactly one is a key —
+  // a budget counting LINES instead of KINDS comes up short right here. The
+  // specimen is #17846's, written seven times in one diff.
+  battery("#17848 — a key RE-DECLARED with a zod `error` param is not a key ADDED");
+  const REDECLARED_WITH_ERROR_PARAM = {
+    filename: 'packages/spec/src/ui/component.zod.ts',
+    status: 'modified',
+    patch: [
+      '@@ -2491,7 +2502,12 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({',
+      '   dataSource: ElementDataSourceSchema.optional(),',
+      ' ',
+      '-  filter: z.array(ViewFilterRuleSchema).optional()',
+      '+  filter: z.array(ViewFilterRuleSchema, {',
+      "+    error: ruleArrayFilterError({ surface: 'object_grid', migration: 'rule-array' }),",
+      '+  }).optional()',
+      "     .describe('Filter rules'),",
+    ].join('\n'),
+  };
+  // The SAME added lines with nothing removed to pay for them. ⛔ Without this
+  // control the case above proves only that something declined, never that the
+  // REPLACEMENT is what declined it.
+  const ERROR_PARAM_UNPAID = {
+    ...REDECLARED_WITH_ERROR_PARAM,
+    patch: REDECLARED_WITH_ERROR_PARAM.patch
+      .split('\n')
+      .filter((l) => !l.startsWith('-'))
+      .join('\n'),
+  };
+  // One genuine new key riding along with the re-declaration: the removal pays
+  // for the key it replaced and has nothing left for this one.
+  const ERROR_PARAM_PLUS_NEW_KEY = {
+    ...REDECLARED_WITH_ERROR_PARAM,
+    patch: [
+      '@@ -2491,7 +2502,13 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({',
+      '   dataSource: ElementDataSourceSchema.optional(),',
+      ' ',
+      '-  filter: z.array(ViewFilterRuleSchema).optional()',
+      '+  filter: z.array(ViewFilterRuleSchema, {',
+      "+    error: ruleArrayFilterError({ surface: 'object_grid', migration: 'rule-array' }),",
+      '+  }).optional()',
+      "+    .describe('Filter rules'),",
+      '+  filterLogic: z.string().optional(),',
+      ' ',
+    ].join('\n'),
+  };
+  t('⭐ the card’s specimen — key, optionality and element schema byte-identical, an `error` param added — is not a new key', tells(REDECLARED_WITH_ERROR_PARAM).length === 0);
+  t('…and the pair reads CLEAN end to end, which is the exit code the card reported as unreachable', wideningRefusal({ declaration: 'no', files: [REDECLARED_WITH_ERROR_PARAM] }).state === 'clean');
+  t('⛔ DARK CONTROL — the same three added lines with NO removal still fire: the silence is bought by the replacement, never by the shape', tells(ERROR_PARAM_UNPAID).length === 1 && tells(ERROR_PARAM_UNPAID)[0]?.tell === 'T1');
+  t('…at the line that declares the key, not at the param that chooses a refusal message', at(ERROR_PARAM_UNPAID)[0] === 'packages/spec/src/ui/component.zod.ts:2504');
+  t('⛔ an `error:` param is not a key on a shape — its value is not schema-shaped, so it neither fires nor SPENDS the budget', memberTellKind("    error: ruleArrayFilterError({ surface: 'object_grid' }),", { onContractSource: true }) === null);
+  t('⭐ SURPLUS CONTROL — a genuinely new key added in the SAME block still fires: one removal pays for one key', tells(ERROR_PARAM_PLUS_NEW_KEY).length === 1 && tells(ERROR_PARAM_PLUS_NEW_KEY)[0]?.tell === 'T1');
+  t('…and the row it reports is the new key, never the re-declared one', at(ERROR_PARAM_PLUS_NEW_KEY)[0] === 'packages/spec/src/ui/component.zod.ts:2508');
+  t('⛔ and the re-declaration does not license the block: a THIRD key with no removal behind it is reported too', tells({ ...REDECLARED_WITH_ERROR_PARAM, patch: `${REDECLARED_WITH_ERROR_PARAM.patch}\n+  extra: z.string(),` }).length === 1);
+
   // -- T3 --------------------------------------------------------------------
   battery('T3 — a new row in a published entry point');
   t('a new export row is a tell', tells(FILE_API_SURFACE)[0]?.tell === 'T3');
@@ -2882,7 +3021,10 @@ export function selfTest() {
 
   // -- the sentence and the prohibitions ------------------------------------
   battery('the refusal sentence, and the two prohibitions it must keep');
-  t('the sentence names both ways out', says(REFUSAL_SENTENCE, 're-declare `yes`') && says(REFUSAL_SENTENCE, 'explain in the claim'));
+  t('the sentence names both ways out', says(REFUSAL_SENTENCE, 're-declare `yes`') && says(REFUSAL_SENTENCE, 'repair it here in the matcher'));
+  t('⛔ #17848 — and BOTH are doors this file can open: the one with no reader is gone', !says(REFUSAL_SENTENCE, 'explain in the claim'));
+  t('…and its uselessness is stated outright, so no author spends a round rediscovering it', says(REFUSAL_SENTENCE, 'moves no exit code'));
+  t('…while the matcher door names the file to open and the case that must come with it', says(REFUSAL_SENTENCE, 'scripts/pm/check-widening-tells.mjs') && says(REFUSAL_SENTENCE, '`--self-test` case pinning the shape'));
   t('…and quotes the declaration in the spelling the reader uses', says(REFUSAL_SENTENCE, '`Clause-②: no`'));
   t('⛔ no label name appears anywhere in this file\'s outputs — a checker that hung one would be issuing the verdict', !says(REFUSAL_SENTENCE, 'needs:') && refusalLines(refusedAll).every((l) => !l.includes('needs:')));
   t('⛔ no new claim-line syntax is invented: the two values are the sibling\'s two', wideningRefusal({ declaration: 'maybe', files: positives }).state === 'not-applicable');
@@ -3093,6 +3235,7 @@ export function selfTest() {
       'each bracketed by the control that still fires, ' +
       '#17300\'s retirement-ledger licence with the firing controls that bracket it on every side, ' +
       '#17955\'s tombstone decline — read before the budget so a rename is still paid for, and requiring the value to BE the call — with the un-retiring control, the two chained-arm controls that fire, and the multi-line chained close pinned as the residual quiet direction, ' +
+      "#17848's re-declared key with a zod `error` param — declined by #16943's budget, bracketed by the dark control that fires when nothing paid and the surplus control that fires on a real new key beside it, " +
       "#16448's four positive controls each with its file:line, its negative controls — " +
       'the same diffs with `yes`, and a removal-only diff with `no` — the local path composed end ' +
       'to end so a binary change to a tell surface cannot read as clean, #17112\'s split count with ' +

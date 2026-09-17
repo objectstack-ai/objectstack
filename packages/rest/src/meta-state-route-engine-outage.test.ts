@@ -7,8 +7,18 @@
  *
  * ## The defect this file refuses
  *
- * `objectQLProvider` has two consumers in `rest-server.ts`. #13476 repaired
- * one, the `computeExecCtx` authorization-input seam, by reaching the provider
+ * ⚠️ CORRECTED [#18546] — the superseded sentence kept so the change is legible
+ * rather than lost. This file opened with *"`objectQLProvider` has two consumers
+ * in `rest-server.ts`"*, and #14251's phase-1 census table counted the same two.
+ * There are **THREE**, and the third was already on the tree both readings were
+ * taken against: `POST /batch` reads the field directly. Nothing below is wrong
+ * — this route IS the consumer #13904's repair did not reach, and that repair
+ * holds — but "the second of two" was "the second of three". The census is
+ * mechanical now, in `objectql-slot-consumer-census.test.ts`, which also drives
+ * the third consumer; ⛔ do not restate the count here in prose again.
+ *
+ * `objectQLProvider` is read at three call sites in `rest-server.ts`. #13476
+ * repaired one, the `computeExecCtx` authorization-input seam, by reaching the provider
  * through `wiredEngineOrLoud` — which keeps "no engine is wired" and "the
  * engine WAS wired and could not be resolved" as two facts rather than one
  * `undefined`. This route, the other consumer, reached it through
@@ -396,7 +406,11 @@ describe('[#15405] §3 a healthy engine is untouched — the negative control', 
 //    transcribed beside it.
 // ---------------------------------------------------------------------------
 
-describe('[#15405] §4 the two consumers of the `objectQLProvider` slot now agree', () => {
+// ⚠️ [#18546] Title corrected from "the two consumers of the `objectQLProvider`
+//    slot now agree": what this section measures is THIS consumer agreeing with
+//    the `computeExecCtx` sibling, and there is a third (`POST /batch`) that
+//    agrees with neither. The agreement pinned here is the pair it drives.
+describe('[#15405] §4 this consumer agrees with the `computeExecCtx` consumer of the same slot', () => {
     it('⭐ the route\'s answer is DERIVED from the sibling seam\'s own error object', async () => {
         // The sibling is `computeExecCtx`'s data-engine seam, reached publicly
         // through `resolvePackageRouteExecutionContext`, which raises the

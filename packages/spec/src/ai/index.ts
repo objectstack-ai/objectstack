@@ -19,6 +19,7 @@
  * - Embedding       — embedding model + vector store references
  * - Usage           — token accounting + per-call cost
  * - MCP             — references and bindings to external MCP servers
+ * - Build Progress  — phase vocabulary for the agent loop's `data-build-progress` frames
  */
 
 export * from './agent.zod';
@@ -35,6 +36,7 @@ export * from './mcp.zod';
 export * from './knowledge-source.zod';
 export * from './knowledge-document.zod';
 export * from './solution-blueprint.zod';
+export * from './build-progress.zod';
 
 // [#12414] entry-nameability: these factories' return types expand to mention
 // `/data`'s `FilterCondition` and `/automation`'s `StateNodeConfig` — both

@@ -789,6 +789,7 @@
     "redactableConfigKeys": "src/data/datasource-credential-redaction.ts#redactableConfigKeys (function)",
     "reduceFilterKeyVerdict": "src/data/filter-verdict.ts#reduceFilterKeyVerdict (function)",
     "reduceFilterVerdict": "src/data/filter-verdict.ts#reduceFilterVerdict (function)",
+    "referenceCarrierOf": "src/data/field-value.zod.ts#referenceCarrierOf (function)",
     "referenceTargetOf": "src/data/field-value.zod.ts#referenceTargetOf (function)",
     "referencedFields": "src/data/autonumber-format.ts#referencedFields (function)",
     "refusedCredentialKeys": "src/data/datasource-credential-redaction.ts#refusedCredentialKeys (function)",

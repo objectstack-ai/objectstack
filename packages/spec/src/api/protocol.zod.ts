@@ -2788,9 +2788,19 @@ export const MarkAllNotificationsReadResponseSchema = lazySchema(() => z.object(
 //
 // The AI service itself is a Cloud/EE package (`service-ai`, in the `cloud`
 // repo) — this repo's dispatcher only proxies `/api/v1/ai/**` to whatever
-// `buildAIRoutes()` mounted, or 404s "AI service is not configured". So these
-// schemas deliberately describe **the wire**, not a protocol this repo serves:
-// they are the one shape `client.ai.*` and cloud's route handlers both read.
+// `buildAIRoutes()` mounted. With the service absent (the open-source
+// default) the mount stays, so a request reaches a handler with nothing
+// behind it and the answer is **501**, not 404 — 404 would mean the path does
+// not exist, which for `/ai/*` is false. Two arms are narrower, and a caller
+// branching on status needs both: an **anonymous** caller is refused **401**
+// first (the 501 and the courtesy below are both capability disclosures), and
+// `GET /ai/agents` answers **200** with an empty list (`{ agents: [] }` under
+// the envelope's `data`) — a deliberate console courtesy. The 501 body is no
+// local string: it comes from the shared `serviceUnavailableMessage`, the
+// same sentence `discovery.services.ai` reports for the slot, so the two
+// cannot drift into naming different remedies. So these schemas deliberately
+// describe **the wire**, not a protocol this repo serves: they are the one
+// shape `client.ai.*` and cloud's route handlers both read.
 // The mounted table's reviewed dispositions live in `cloud`
 // (`packages/service-ai/src/ai-route-ledger.ts`), which drives this SDK
 // against the routes it really returns.

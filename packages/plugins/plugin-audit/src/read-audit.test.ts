@@ -597,3 +597,195 @@ describe('#8992 shutdown drains the tail', () => {
     expect(writer.pending()).toBe(0);
   });
 });
+
+describe('read-audit failure reporting — once per CAUSE, not once per process (#18247)', () => {
+  interface LogLine {
+    level: string;
+    message: string;
+    meta?: Record<string, any>;
+  }
+
+  const driverError = (message: string, code?: string): Error => {
+    const e = new Error(message) as Error & { code?: string };
+    if (code !== undefined) e.code = code;
+    return e;
+  };
+
+  const NO_SUCH_TABLE = () => driverError('no such table: sys_audit_log', 'SQLITE_ERROR');
+  const ORG_REQUIRED = () =>
+    driverError('system write requires an organization', 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED');
+
+  /**
+   * A REAL engine whose ledger write fails with a caller-chosen error.
+   *
+   * The engine stays real for the reason this file's header gives — the hook
+   * dispatch and the field-presence probe are the engine's behaviour, not
+   * ours. Only `insert` is replaced, and only AFTER install, so the probe has
+   * already run against the real registry exactly as it does in production.
+   *
+   * `omitError: true` drops the OPTIONAL `error` sink (#9657) so the degrade
+   * path can be exercised on its own.
+   */
+  async function makeCauseHarness(
+    nextError: (n: number) => unknown,
+    omitError = false,
+  ): Promise<{ view: () => Promise<void>; at: (level: string) => LogLine[] }> {
+    const engine = await makeEngine();
+    await engine.insert(
+      'contact',
+      { id: 'c1', full_name: 'Wei Zhang', organization_id: 'org_a' },
+      { context: { isSystem: true } },
+    );
+    const logs: LogLine[] = [];
+    const logger: Record<string, unknown> = {
+      warn(message: string, meta?: Record<string, any>) {
+        logs.push({ level: 'warn', message, meta });
+      },
+      debug(message: string, meta?: Record<string, any>) {
+        logs.push({ level: 'debug', message, meta });
+      },
+    };
+    if (!omitError) {
+      logger.error = (message: string, _err?: Error, meta?: Record<string, any>) => {
+        logs.push({ level: 'error', message, meta });
+      };
+    }
+    const writer = installReadAuditWriter(engine, {
+      objects: ['contact'],
+      timers: makeManualTimers(),
+      logger: logger as any,
+    })!;
+    let n = 0;
+    (engine as any).insert = async () => {
+      throw nextError(n++);
+    };
+    /** One record view, drained immediately — one failed batch per call. */
+    const view = async (): Promise<void> => {
+      await engine.findOne('contact', { where: { id: 'c1' }, context: viewerCtx });
+      await writer.flush();
+    };
+    return { view, at: (level: string) => logs.filter((l) => l.level === level) };
+  }
+
+  it('reports a SECOND, DIFFERENT cause at error — a new cause is a new degradation', async () => {
+    // THE DEFECT. On the process-wide boolean this file carried, a second,
+    // unrelated fault produced one `debug` and no `error` at all: the first
+    // cause of the process had silenced every later cause for the life of the
+    // process, on a seam `DURABILITY_CRITICAL_CALLEES` already names.
+    let phase = 0;
+    const { view, at } = await makeCauseHarness(() => (phase === 0 ? NO_SUCH_TABLE() : ORG_REQUIRED()));
+
+    await view();
+    phase = 1;
+    await view();
+
+    const errors = at('error');
+    expect(errors).toHaveLength(2);
+    expect(errors[0].message).toMatch(/no such table: sys_audit_log/);
+    expect(errors[1].message).toMatch(/ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED/);
+    expect(at('debug')).toHaveLength(0);
+    expect(at('warn')).toEqual([]);
+  });
+
+  it('still degrades a REPEAT of an already-reported cause to debug', async () => {
+    // ⚠️ THE DISCRIMINATING CONTROL. Deleting the boolean outright would also
+    // make the test above pass, and would be the falsifier AGENTS.md names
+    // ("log every failure at `error`"). This is the half that must NOT change:
+    // the same cause on the same ledger still says it once.
+    const { view, at } = await makeCauseHarness(() => NO_SUCH_TABLE());
+
+    for (let i = 0; i < 5; i += 1) await view();
+
+    expect(at('error')).toHaveLength(1);
+    expect(at('debug')).toHaveLength(4);
+    // The repeats name the cause they were folded into, so a `debug` sweep can
+    // tell "the same fault, 4 more times" from "four different faults".
+    expect(at('debug')[0].meta?.cause).toBe(at('debug')[3].meta?.cause);
+  });
+
+  it('keys on the error CODE, never its message, so a per-row fault cannot flood `error`', async () => {
+    // ⚠️ THE ANTI-NOISE PIN (AGENTS.md; #4420). A driver names the offending
+    // ROW in its message, so a message-keyed dedupe would grow one `error`
+    // line per lost batch. 200 batches, 200 distinct messages, ONE code ⇒ one
+    // line.
+    const BATCHES = 200;
+    const { view, at } = await makeCauseHarness((i) =>
+      driverError(`UNIQUE constraint failed: sys_audit_log.id (row aud_${i})`, 'SQLITE_CONSTRAINT_UNIQUE'),
+    );
+
+    for (let i = 0; i < BATCHES; i += 1) await view();
+
+    expect(at('error')).toHaveLength(1);
+    expect(at('debug')).toHaveLength(BATCHES - 1);
+  });
+
+  it('folds a fault carrying NO code into ONE bucket rather than growing one', async () => {
+    // The other half of the bound: "the code, or its ABSENCE" is a single key
+    // value, so an uncoded driver — the shape with nothing bounded to key on —
+    // still says it once instead of once per flush.
+    const BATCHES = 200;
+    const { view, at } = await makeCauseHarness((i) => driverError(`insert failed for batch ${i}`));
+
+    for (let i = 0; i < BATCHES; i += 1) await view();
+
+    expect(at('error')).toHaveLength(1);
+    expect(at('debug')).toHaveLength(BATCHES - 1);
+  });
+
+  it('carries the underlying code and message in the first line it prints', async () => {
+    // The information was computed one line above the branch and dropped on
+    // the floor: the `error` path built a fixed string and never read `err`.
+    const { view, at } = await makeCauseHarness(() => ORG_REQUIRED());
+
+    await view();
+
+    const msg = at('error')[0].message;
+    expect(msg).toMatch(/ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED/);
+    expect(msg).toMatch(/system write requires an organization/);
+    // The consequence half is unchanged — it is still owed, and still first.
+    expect(msg).toMatch(/compliance trail is now INCOMPLETE/);
+    expect(msg).toMatch(/who viewed this record/);
+  });
+
+  it('prints the datasource remedy for the cause it is the remedy FOR, and not for others', async () => {
+    // ⛔ Not a deletion: the ADR-0057 §3.6 routing text is genuinely correct
+    // for the "no such table" cause it was written for, so it must still print
+    // there. What is fixed is that it used to print for EVERY cause.
+    const missing = await makeCauseHarness(() => NO_SUCH_TABLE());
+    await missing.view();
+    const forMissingTable = missing.at('error')[0].message;
+    expect(forMissingTable).toMatch(/telemetry/);
+    expect(forMissingTable).toMatch(/OS_TELEMETRY_DB=0/);
+
+    // The misdirection: the cause is an organization refusal and the text sent
+    // the operator to check a datasource that was working.
+    const refused = await makeCauseHarness(() => ORG_REQUIRED());
+    await refused.view();
+    const forRefusal = refused.at('error')[0].message;
+    expect(forRefusal).not.toMatch(/OS_TELEMETRY_DB/);
+    expect(forRefusal).not.toMatch(/telemetry/i);
+    // It still owes a fix — it just owes the RIGHT one.
+    expect(forRefusal).toMatch(/Fix:/);
+  });
+
+  it('[#9657] the `warn` fallback is per-cause too — a sink with no `error` hears the second fault', async () => {
+    // `ReadAuditLogger.error` is OPTIONAL, so the degrade path is the only
+    // channel a host without one ever gets. Fixing the dedupe on the `error`
+    // branch alone would leave that host exactly where it started.
+    let phase = 0;
+    const { view, at } = await makeCauseHarness(
+      () => (phase === 0 ? NO_SUCH_TABLE() : ORG_REQUIRED()),
+      true,
+    );
+
+    await view();
+    phase = 1;
+    await view();
+
+    const warns = at('warn');
+    expect(warns).toHaveLength(2);
+    expect(warns[0].message).toMatch(/no such table: sys_audit_log/);
+    expect(warns[1].message).toMatch(/ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED/);
+    expect(at('error')).toEqual([]);
+  });
+});

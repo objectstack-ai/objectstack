@@ -118,7 +118,8 @@
  * credit belongs to the schema's closed enum.
  */
 
-import { describeAnchorForbiddenBits } from '@objectstack/spec/security';
+import { referenceCarrierOf } from '@objectstack/spec/data';
+import { describeAnchorForbiddenBits, type AnchorBindingContext } from '@objectstack/spec/security';
 import { indexObjectGraph, recordsOf, type ObjectGraph } from './object-graph.js';
 
 export const SECURITY_OWD_UNSET = 'security-owd-unset';
@@ -276,10 +277,19 @@ function labelHasRoleWord(label: unknown): boolean {
  * `reference` is the only spelling `FieldSchema` declares; `reference_to` (like
  * `referenceTo` / `relatedTo` / `target`) is a rejected alias the strict error
  * map renames for the author, so a field carrying it does not parse (#5017).
+ *
+ * A NON-STRING carrier now THROWS rather than reading as "no target" (#13053).
+ * This function was the reader in that incident: a fixture spelled
+ * `reference: { object: … }`, `ObjectSchema.safeParse` refused it where it was
+ * written, and this returned `undefined` where it was consumed — so the suite
+ * was blind in both directions at once and green. The refusal is the spec's
+ * single carrier accessor, so this rule and the runtime give one answer.
  */
 function refOf(def: AnyRec): string | undefined {
-  const r = def.reference as unknown;
-  return typeof r === 'string' && r ? r : undefined;
+  // The read stays HERE, on `def.reference`, so the #5017 receiver meta-test
+  // below keeps its subject: this rule reads `reference` and never the alias.
+  // Only the SHAPE judgment moves out, to the spec's one carrier accessor.
+  return referenceCarrierOf({ reference: def.reference }, 'validate-security-posture refOf');
 }
 
 /**
@@ -417,6 +427,20 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
 
   const objects = recordsOf(stack.objects);
   const permissionSets = recordsOf(stack.permissions);
+  // [#18535, ADR-0090 D5 / ADR-0066 D1] The stack's own capability
+  // declarations, handed to the anchor predicate as
+  // `AnchorBindingContext.declaredCapabilities` — the authoring-time half of
+  // the source the runtime reads at boot. A `systemPermissions` token this
+  // stack DECLARES is the app's own gate and does not make an `isDefault` set
+  // unbindable (the runtime agrees, so the lint and the gate stay one rule);
+  // an UNDECLARED token still offends, and the platform floor is applied by
+  // the predicate itself, so declaring `manage_users` excuses nothing.
+  // No declarations ⇒ `undefined` ⇒ the pre-#17811 verdict verbatim.
+  const declaredCapabilities = recordsOf(stack.capabilities).filter(
+    (cap) => typeof cap.name === 'string' && cap.name.length > 0,
+  );
+  const anchorContext: AnchorBindingContext | undefined =
+    declaredCapabilities.length > 0 ? { declaredCapabilities } : undefined;
 
   // ── D1/D4/D11: per-object OWD posture ────────────────────────────────
   for (let i = 0; i < objects.length; i++) {
@@ -768,7 +792,7 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
     // this rule to key off, so that binding is outside what a package-time
     // linter can see and is judged by the bind-time gate alone (#16110).
     if (ps.isDefault === true) {
-      const offending = describeAnchorForbiddenBits(ps, 'everyone');
+      const offending = describeAnchorForbiddenBits(ps, 'everyone', anchorContext);
       if (offending) {
         findings.push({
           severity: 'error',

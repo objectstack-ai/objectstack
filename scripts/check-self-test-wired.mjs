@@ -161,9 +161,13 @@ const ROOT_DIR_WATCH_HINTS = ['scripts/**/*.mjs', 'scripts/**/*.mts', 'scripts/*
  *
  * ## The LEFT boundary, and why the prefix is read rather than cut off (#15342)
  *
- * This repo has a package-local gate lane, and `lint.yml` really does run one
- * of its gates by path: `node packages/lint/scripts/check-reference-carrier-
- * shape.mjs --self-test`. The pattern used to open on the bare literal
+ * This repo has a package-local gate lane, and `lint.yml` ran one of its gates
+ * by path: `node packages/lint/scripts/check-reference-carrier-shape.mjs
+ * --self-test`. That gate has since been retired by maintainer ruling and the
+ * lane currently has NO live member, so the boundary below is held by the
+ * synthetic cases rather than by a specimen; the grammar stays because the next
+ * such invocation must be keyed WHOLE on the day it lands, not one release
+ * later. The pattern used to open on the bare literal
  * `scripts/` with nothing to its left, so it matched that path as a SUBSTRING
  * and filed the gate under `scripts/check-reference-carrier-shape.mjs` — a key
  * with no file behind it. Both directions of that were silent: the real file
@@ -1006,12 +1010,23 @@ function selfTest() {
       'a path this gate keys an invocation to has NO file behind it. Every audit downstream then runs '
         + 'against a script that does not exist, and passes for the wrong reason, in both directions (#15342)',
     );
-    // Named BY NAME on purpose: it is this tree's only package-local gate
-    // invocation, so it is the whole specimen set for the widening above.
+    // The live specimen this pin used to name BY NAME was
+    // `packages/lint/scripts/check-reference-carrier-shape.mjs`, and it was the
+    // tree's ONLY package-local gate invocation. That gate was retired by
+    // maintainer ruling, so the lane did not move — it EMPTIED. Measured at the
+    // retirement: `packageLocal` goes 1 → 0 while `population` goes 214 → 213.
+    //
+    // A live pin on an empty lane can only be a pin on zero, so what is asserted
+    // here instead is that the widening still ADMITS the shape — driven by the
+    // synthetic `battery('left boundary')` above, which keys a package-local path
+    // WHOLE and refuses the phantom root key beside it, with no live member
+    // needed. ⛔ Do not re-add a live-specimen pin on a hopeful path: the first
+    // author to invoke a package-local gate by path from a workflow makes this
+    // lane live again, and THAT is the moment to name a specimen here.
     ok(
-      keys.includes('packages/lint/scripts/check-reference-carrier-shape.mjs'),
-      "lint.yml's package-local gate is not in the live population. Either the lane moved — re-point this "
-        + 'pin at the new specimen — or the anchor regressed to a root-only one and the widening is untested',
+      keys.length > 0 && keys.every((p) => !p.startsWith('..')),
+      'the anchor minted a key that climbs out of the root — a path this ROOT cannot resolve is exactly '
+        + 'the phantom identity #15342 was about, and every audit downstream then passes for the wrong reason',
     );
   }
 
@@ -1137,10 +1152,24 @@ function selfTest() {
       live.refusal === null && live.population.length > 0,
       `the live population could not be read (${live.refusal ?? 'empty'}), so the cases below prove nothing (#4690)`,
     );
+    // #15414's subject is the EXPORT: a consumer that gets back a population with
+    // no package-local half is in the root-walk-only world this card exists to
+    // end. That used to be read off a live member; the tree's only one retired
+    // with `check-reference-carrier-shape`, so the live lane now measures ZERO.
+    //
+    // The DERIVATION is pinned instead, and it holds at zero exactly as it holds
+    // at one: `packageLocal` is the part of `population` the root walk did not
+    // produce, so dropping the field, hard-coding it empty, or re-deriving it
+    // from a `startsWith` on a re-spelling of the root all red here. The control
+    // for the zero is the `population.length > 0` pin immediately above — an
+    // empty `packageLocal` beside an empty `population` is a broken reader, and
+    // that case is already refused.
     ok(
-      live.packageLocal.length > 0
-        && live.population.includes('packages/lint/scripts/check-reference-carrier-shape.mjs'),
-      'the EXPORT dropped the package-local half. A consumer of it is then back in the root-walk-only '
+      Array.isArray(live.packageLocal)
+        && live.packageLocal.length === live.population.filter((s) => !live.walked.has(s)).length
+        && live.packageLocal.every((s) => live.population.includes(s) && !live.walked.has(s)),
+      'the EXPORT dropped the package-local half, or derives it as something other than "the part of the '
+        + 'population the root walk did not produce". A consumer of it is then back in the root-walk-only '
         + 'population this card exists to end, and nothing on either side would redden (#15414)',
     );
     ok(

@@ -63,4 +63,5 @@ for both corollaries.
 | `batch_endpoints` | 5 | 0 | 0 | 2 | 0 | 7 |
 | `route_generation` | 0 | 0 | 0 | 4 | 0 | 4 |
 | `realtime_subscription` | 0 | 0 | 0 | 6 | 0 | 6 |
-| **total** | **862** | **5** | **1** | **96** | **10** | **974** |
+| `sharing_rule` | 16 | 0 | 0 | 0 | 1 | 17 |
+| **total** | **878** | **5** | **1** | **96** | **11** | **991** |

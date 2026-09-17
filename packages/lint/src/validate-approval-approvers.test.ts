@@ -327,6 +327,37 @@ describe('unset-manager dead-end (#16748)', () => {
     expect(finding.message).toContain('does not assert the slate IS empty');
   });
 
+  it("names the node-level escape — onEmptyApprovers: 'fallback' with fallbackApprovers", () => {
+    const [finding] = validateApprovalApprovers(managerOnly());
+    expect(finding.hint).toContain("onEmptyApprovers: 'fallback'");
+    expect(finding.hint).toContain('fallbackApprovers');
+    // It is offered as a route that needs NO write to the column — the point
+    // of naming it beside an endpoint the operator may not be able to reach.
+    expect(finding.hint).toContain('needs no write to the column');
+    // ⛔ And the pre-existing routes are not displaced by it.
+    expect(finding.hint).toContain('/api/v1/auth/admin/set-user-manager');
+    expect(finding.hint).toContain("org_membership_level', value: 'owner'");
+  });
+
+  // ⛔ The load-bearing negative: declaring the policy must NOT silence the
+  // finding. This rule reads SHAPE, and a `fallbackApprovers` list can itself
+  // resolve to nobody at runtime — which a static check cannot see either. A
+  // silencer here would be a claim the rule is not allowed to make.
+  it('KEEPS FIRING when the node declares the fallback policy — the rule reads shape', () => {
+    const stack = managerOnly();
+    const cfg = (stack.flows as any)[0].nodes[1].config;
+    cfg.onEmptyApprovers = 'fallback';
+    cfg.fallbackApprovers = [{ type: 'org_membership_level', value: 'owner' }];
+
+    const findings = validateApprovalApprovers(stack);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY);
+    expect(findings[0].severity).toBe('info');
+
+    // The one silencer stays the one silencer.
+    expect(validateApprovalApprovers(withSeededManagerChain(stack))).toEqual([]);
+  });
+
   // ── negative controls ──────────────────────────────────────────────────
 
   it('NEGATIVE: a populated manager chain in the stack emits nothing', () => {
@@ -510,6 +541,27 @@ describe('expression approvers (#3447 P2)', () => {
     expect(findings[0].rule).toBe(APPROVAL_EXPRESSION_NO_EMPTY_POLICY);
     expect(findings[0].severity).toBe('info');
     expect(findings[0].hint).toContain('admin_rescue');
+  });
+
+  // The nudge enumerates the vocabulary, so it goes stale the moment the
+  // vocabulary widens. All four members, or an author picks from three.
+  it('enumerates every empty-slate policy in the nudge, fallback included', () => {
+    const [finding] = validateApprovalApprovers(stackWithConfig({
+      approvers: [{ type: 'expression', value: 'vars.picked' }],
+    }));
+    for (const member of ['admin_rescue', 'fail', 'auto_approve', 'fallback']) {
+      expect(finding.hint, `nudge omits ${member}`).toContain(member);
+    }
+    expect(finding.hint).toContain('fallbackApprovers');
+  });
+
+  it("accepts 'fallback' as an explicit empty policy — no nudge", () => {
+    const findings = validateApprovalApprovers(stackWithConfig({
+      approvers: [{ type: 'expression', value: 'vars.picked' }],
+      onEmptyApprovers: 'fallback',
+      fallbackApprovers: [{ type: 'user', value: 'u_backstop' }],
+    }));
+    expect(findings).toEqual([]);
   });
 
   it('errors on reserved decisionOutputs keys', () => {
