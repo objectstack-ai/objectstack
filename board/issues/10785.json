@@ -1,0 +1,35 @@
+{
+  "number": 10785,
+  "kind": "issue",
+  "title": "[finding] Nothing gates the ref'd-timer/`await` class after five instances — and #10661's `toBeLessThanOrEqual` repair can still hide a real leak behind foreign expiries",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T11:31:20Z",
+  "updated_at": "2026-08-22T17:04:34Z",
+  "closed_at": "2026-08-22T04:12:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10785",
+  "body": "Two observations from #10685, both about the same class and both left undone there deliberately. Filing together because they share one remedy shape.\n\n## 1. Nothing stops the sixth site\n\nThe class — \"a process-global `getActiveResourcesInfo()` timer count scored with `toBe` across an `await`\" — has now been found five times over four cards:\n\n| where | how it surfaced |\n|---|---|\n| `kernel.test.ts` (#4813) | latent |\n| `health-monitor.test.ts` (#6329) | **red in the merge queue** — the window stretched past the runner's own non-unref'd 100 ms `throttle(sendTasksUpdate, 100)` timer, measured at 105 ms |\n| `timeout-guard.test.ts` (#10604 / PR #10661) | **red in CI** — `expected 2 to be 4`, two foreign timers expiring mid-test |\n| `kernel.test.ts` x2, `hot-reload.test.ts` (#10685) | latent, fixed in PR for #10685 |\n| `service-automation/src/engine.test.ts` (#10783) | latent, still open |\n\nEach was repaired at the site. Nothing prevents the next one, and the failure it produces is a shard-only intermittent red whose message points at a timer count rather than at the change that caused it — which blocks every lane's merge queue at once.\n\nA gate would close the class. The rule it needs to express is roughly: *a test that derives a count from `process.getActiveResourcesInfo()` may compare two readings only across a window that contains no `await`.*\n\n### Why #10685's PR did not add one\n\nThree costs it could not pay inside an S card, all worth stating so the next attempt starts informed:\n\n- **Registration.** New `check:*` gates are registered in root `package.json`, which is fenced territory of the @changesets/cli v3 migration lane (#9465) while it runs. There is a precedent for the workaround — `lint.yml` already invokes several gates as `node scripts/...` directly, for exactly this reason, and `dispatch-gates.mjs` derives gate families from either spelling — so this is a cost, not a blocker.\n- **Detection fidelity.** Deciding \"is there an `await` between these two readings\" is an AST question, and a text scan that gets it approximately right is the failure mode AGENTS.md already documents for source-scanning gates: it sees only the spellings it knows, and an unrecognised one produces no flag, *silently*. The cheaper and more robust formulation is to ban the raw probe outside one approved helper, which is a grep-level rule with a tiny allowlist.\n- **Where the helper lives.** That formulation needs a home reachable from every package with such a test. #10685's PR put one in `packages/core/src/refd-timer-probe.testkit.ts`; `service-automation` (#10783) cannot import it without either publishing a test helper on `@objectstack/core`'s public surface — which the `api-surface` ratchet would rightly notice — or a cross-package test input, which `check:cross-package-test-inputs` requires to be spelled so it can see it.\n\nSo: a gate is the right end state, and it is its own card rather than a rider.\n\n## 2. `toBeLessThanOrEqual` on a process-global count can hide a real leak\n\nPR #10661's repair for `timeout-guard.test.ts` was to assert non-increase:\n\n```ts\nbefore = refd();\nawait expect(\n    raceWithTimeout(new Promise(() => {}), 10, () => new Error('hung')),\n).rejects.toThrow('hung');\nexpect(refd()).toBeLessThanOrEqual(before);\n```\n\nThe reasoning in that file is sound as far as it goes — a leak is a growth, so the direction that matters survives and foreign expiry stops being a signal. But the reading is still the **whole process**, and this leg deliberately spends ~10 ms of real time on the loop, so foreign timers really do expire inside the window. The arithmetic composes:\n\n```\nsubject leaks   +1\ntwo foreign timers expire   -2\nreading         before - 1   =>   toBeLessThanOrEqual passes\n```\n\nA real leak, green. The ablation cited in that PR (which reds on a real leak) was presumably run without ambient noise; under shard load the detection becomes probabilistic rather than certain. **Nothing is red today and this is not a regression** — it is a narrower detection guarantee than the comment above it claims, in the one pin of the family that spends real time on the loop and is therefore most exposed.\n\nThe remedy is the instrument #10685's PR added: record the handles the subject arms and ask how many of *those* are still pinning the loop, across a window that is synchronous by construction. That leg's guard is *supposed* to fire, so the conversion needs a little care — which is the other reason it was left out of #10685's scope rather than done as a drive-by rewrite of another card's deliberate, documented decision.\n\nNot urgent; nothing is red.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

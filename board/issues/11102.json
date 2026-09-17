@@ -1,0 +1,35 @@
+{
+  "number": 11102,
+  "kind": "pull_request",
+  "title": "perf(objectql): index short name to FQN so registry lookups stop scanning the whole registry",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-22T16:57:22Z",
+  "updated_at": "2026-08-22T17:25:17Z",
+  "closed_at": "2026-08-22T17:24:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-22T17:24:46Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11102",
+  "body": "Fixes #10945\n\n`SchemaRegistry.resolveObjectKey` answered the short-name direction by walking **every** key of `objectContributors` and calling `parseFQN` on each. It is reached from seven call sites — `getObject` among them — so a kernel boot that registers N objects and resolves O(N) names did O(N²) string work.\n\nThe consequence was a silence, not a failure: boot got slower purely by an environment accumulating metadata, and once bootstrap outgrew the request waiter every request answered `kernel_warming` and the environment could never be opened, with no error anywhere. Refs objectstack-ai/cloud#1555.\n\n## The change\n\n`resolveObjectKey` now reads a short-name to FQN index `Map` maintained beside `objectContributors`.\n\nBoth containers are mutated only through two private choke points — `openObjectEntry` / `closeObjectEntry` — so they cannot drift apart by construction rather than by discipline. After this change `objectContributors.set` / `.delete` appear **only** inside those two methods, plus the paired `.clear()` in `reset()`. A future caller cannot add a contributor list and forget the index half.\n\nResolution is deliberately unchanged. The index array holds the same members in the same order as the list the scan built, so:\n\n- an ambiguous short name still resolves to the **first** key registered under it,\n- the ambiguity warning still fires and still names every match, in registry order,\n- the legacy `ns__name` fallback and the explicit-full-key form still work.\n\n## Behaviour change check (dispatch Zone 2, item 2)\n\nThe pre-fix scan returned `matches[0]`, i.e. first-registered-wins for an ambiguous bare name. An index could as easily have become last-writer-wins with nothing failing, so **that is not asserted by hand** — the pin re-implements the old loop as an oracle and asserts exact equivalence with it across **all 24 permutations** of a name set mixing a plain key, two legacy keys colliding on one short name, and a plain key colliding with a legacy one. Any future drift in which FQN wins reds there.\n\nNet: no observable behaviour change, and the winner is now pinned rather than incidental.\n\n## Verification\n\nThree-leg ablation, with the mutation confirmed on disk at every leg by marker counts (not by an editor's exit code):\n\n| leg | `objectKeysByShortName` occurrences | full-registry scan present | new pin file |\n|---|---|---|---|\n| fixed (HEAD) | 10 | 1 (`getAllObjects`, legitimate) | 12 passed |\n| ablated (`registry.ts` from `origin/main`) | 0 | 2 (the scan is back) | **7 failed / 5 passed** |\n| restored | 10 | 1 | 12 passed |\n\nNo rebuild is involved in that ablation and none is owed: the pin imports its subject as `./registry.js`, a same-package relative specifier, which never resolves through package `exports` and therefore never reads `dist/`. Independent proof that vitest read the edited source: the structural assertions compare `objectKeysByShortName`, a field that exists only in this diff and in no built artifact, and they pass.\n\nMeasured on this container, resolving one name per registered object (32,000 lookups over 4,000 objects vs 4,000 over 500):\n\n| registry | big window | scaling ratio at 8x input |\n|---|---|---|\n| full-registry scan | 4,888 ms | **62.5x** (8x input, 64x cost — quadratic) |\n| short-name index | 2.3 ms | **5.7x** |\n\nThe scaling pin asserts a ceiling of 30x, placed between the two measured populations (~2.7x above the worst healthy sample, ~2x below the ablated one) rather than close to either.\n\n⚠️ The card's own evidence rig lives in `objectstack-ai/cloud` (`scripts/dev-local/bootstrap-curve.mjs`) and was **not** re-run — it is not reachable from this container. The numbers above are the local scaling substitute, which triage named as an acceptable alternative.\n\n## Gates\n\n`pnpm --filter @objectstack/objectql test` — 228 files / 4034 tests passed, at the final commit.\n`pnpm --filter @objectstack/objectql typecheck` — exit 0.\n\n18 gate families green, derived from the actual changed paths with `node scripts/pm/dispatch-gates.mjs` (which named five the dispatch list did not: `check:query-options-erasure`, `check:type-check-coverage`, `check:type-check-debt`, `check:engine-double-contract`, `check:where-matcher`).\n\n`check:type-check-debt` is the one family not run in its CI form — its `--re-measure` needs the whole ledgered dependency closure built. It is probed directly instead, which answers the only question this diff can move: tsc over objectql **with tests included** reports **0** diagnostics naming the new test file and **0** naming `registry.ts`. The probe's total (355) is the ledger's 354 plus exactly one `TS6059` rootDir diagnostic, which is an artifact of probing through the package's own `rootDir: src` config rather than the gate's generated project — the same one the ledger note records leaving when it went 355 to 354.\n\nRepo-wide `pnpm lint` is CI's run. Locally it is narrowed to the two changed files and the narrowing is measured, not assumed: population taken from eslint's own config, file count read from `--format json` (2 files, 0 errors, 0 warnings), and the config declares no `parserOptions.project` — type-aware linting is off, so this diff cannot move the verdict on any file it does not touch.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RfyXxZ2WPjcjhuXpiQQc3y)_"
+}

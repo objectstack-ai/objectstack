@@ -1,0 +1,35 @@
+{
+  "number": 10705,
+  "kind": "issue",
+  "title": "[finding] the escapable-literal species has no ledger — 4 gates found one at a time over 4 cards, and nothing tracks whether the escape was taken",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T09:10:57Z",
+  "updated_at": "2026-08-21T14:23:33Z",
+  "closed_at": "2026-08-21T14:12:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10705",
+  "body": "Observation-class, measured while reviewing the fourth instance tonight. **No gate is red**, and\n`hintCovers`' refusal is correct and correctly priced — this is not a request to change it.\nFiled unassigned, no `pm:queue`.\n\n## The root cause, and why it should stay\n\n`scripts/pm/dispatch-gates.mjs:920`:\n\n```js\nif (!hint.includes('/') && !plain.startsWith('.')) return false;\n```\n\nA bare single-segment literal is refused unless dot-prefixed. `hintCovers`' own docblock carries\nthe measurement: accepting bare top-level directory words was priced at **+139084 fabricated\npairs**, because `packages`, `apps` and `examples` are path *components* in dozens of gates that\nnever read those roots. **The refusal buys more than it costs and should stay.**\n\nThe sanctioned escape exists and the tool names it in its own residue text:\n\n> *\"That second one is escapable, and gates have escaped it: a gate whose population really is a\n> root file reaches it by declaring the subtree spelling (`AGENTS.md/**`), after which it is no\n> longer silent for that file.\"*\n\nPR #10114 took that escape for `check-role-word.mjs` (`ROOT_DIR_WATCH_HINTS = ['skills/**']`),\nand #10662 / #10687 took it for `check:doc-authoring` and `check:doc-formula-expressions`.\n\n## What is missing: nothing tracks who still needs to take it\n\nMeasured on `origin/main` = `47cd3ec1f8` (2026-08-21T09:09:54Z), `node scripts/pm/dispatch-gates.mjs <path>`:\n\n**4 unreachable BY CONSTRUCTION**, and they are two different species:\n\n| family | literal | species |\n|---|---|---|\n| `check:examples-live-imports` | `examples` | ⚠️ **escapable** — *\"the tree HAS it; the covering rule refuses the literal as too generic\"* |\n| `check:parse-guard` | `scripts` | ⚠️ **escapable** — same |\n| `check:driver-memory-census` | `@objectstack/driver-memory` | genuinely dead — *\"never was a repo path\"* |\n| `check-test-completeness.mjs` | `@objectstack/types`, `@objectstack/example-showcase`, `@objectstack/embedder-openai` | genuinely dead — same |\n\nThe residue block also states that the **same escapable shape lives inside the `silent` bucket**\n(79 of 125 families), for a gate whose population is a repo-root file spelled as a bare\nfilename. So the population of this class is *not* bounded by the 4 named above, and no one\nknows its size.\n\n## Why this is worth a card rather than four more cards\n\nEach instance has been found by a different person, on a different card, by happening to read the\nresidue block on the way past:\n\n- #10648 — `check:doc-authoring` (bare `docs` / `skills` / `content`), landed #10662\n- #10664 — `check:doc-formula-expressions` (same), landed #10687\n- #10314 — `check:examples-live-imports` (bare `examples`), still open\n- **`check:parse-guard`** (bare `scripts`) — found tonight by the dev on #10653, who noticed that\n  *the gate family their card was about* could not be named by the derivation, and ran it by hand\n\nThat fourth one is the tell. The card was *about* parse-guard's blind spot, and the dispatch\nderivation for it could not name parse-guard. The per-gate remedy is right, but discovering who\nneeds it depends on a human reading a diagnostic block that is printed on every run and skimmed\non most.\n\n## Direction (not a decision)\n\nMake the escapable species a **declared, ⛔ shrink-only ledger**, exactly the shape #10665 landed\nfor `KNOWN_IMPORT_UNSAFE`: a gate whose population literal is separator-less and whose first\nsegment the tree *does* have must either declare its subtree spelling or appear on the ledger.\nNothing new can join; entries leave as gates take the escape.\n\nThat turns \"N gates are silently unnameable, discovered one at a time\" into a bounded list with a\nverdict, and — unlike widening `hintCovers` — it costs nothing in fabricated pairs. It also\nanswers the population question the residue block currently leaves open, since building the\nledger requires enumerating the `silent`-bucket instances too.\n\n⛔ Explicitly **not** proposed: changing the `:920` refusal. The +139084 measurement stands.\n\n## Refs\n\n#10114 (the first escape, and the precedent) · #10662 / #10687 (two more) · #10314 (the third,\nstill open — a valid individual fix, not superseded by this) · #10665 (the shrink-only ledger\nshape) · #10653 (where the fourth was found) · `dispatch-gates.mjs:920` and `hintCovers`' docblock\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

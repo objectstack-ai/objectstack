@@ -1,0 +1,35 @@
+{
+  "number": 10458,
+  "kind": "issue",
+  "title": "eslint-fatal-guard's checkGuardAdoption reads a DOCBLOCK MENTION as adoption — deleting a gate's real import leaves the self-test printing \"both gates still routed through it\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T22:06:07Z",
+  "updated_at": "2026-08-21T08:44:25Z",
+  "closed_at": "2026-08-21T05:07:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10458",
+  "body": "Filed unassigned from the #10449 dev seat (session `session_01DdCnBGcHeufjrq7drTD3wt`, branch\n`claude/issue-10449-ratchet-stack-headroom`). Found while building a *parallel* adoption check next to\nthis one — the new check had the same bug, an ablation caught it, and the same ablation applied to the\nexisting one reproduces below. Not fixed there: #10449 is stop-the-bleed on parser stack headroom, a\ndifferent defect class, and this file is load-bearing enough to deserve its own diff.\n\n## The claim that is not true\n\n`scripts/eslint-fatal-guard.mjs`'s `checkGuardAdoption()` (L190+) exists because *\"a guard imported once\nis not a guard still called\"*, and its result is asserted by\n`check-query-options-erasure-ratchet.mjs --self-test`, which CI runs ahead of the gate itself. On success\nthe self-test prints:\n\n```\n✓ self-test: … fatal-parse guard proved both ways over real ESLint output, both gates still routed through it.\n```\n\nThat last clause is the one this card is about. It is produced by two source-text tests:\n\n```js\nif (!/eslint-fatal-guard\\.mjs/.test(src)) { …problem… }\nif (/\\.lintFiles\\s*\\(/.test(src))         { …problem… }\n```\n\nNeither is applied to *code*. `src` is the raw file, comments included.\n\n## Measured, on `origin/main` @ `46cfa5b`\n\n`scripts/check-slot-lookup-ratchet.mjs` mentions the guard **twice** — once in prose, once for real:\n\n```\n27:// on the same input. scripts/eslint-fatal-guard.mjs carries the measurement and\n48:import { lintFilesStrict } from './eslint-fatal-guard.mjs';\n```\n\nDelete line 48 only, leaving the docblock at line 27 exactly as it is:\n\n```\nON-DISK: real import lines=0 ; docblock mentions=1\n\n$ node scripts/check-query-options-erasure-ratchet.mjs --self-test\n✓ self-test: … fatal-parse guard proved both ways over real ESLint output, both gates still routed through it.\nexit=0\n```\n\n**Green, and the sentence it printed is false.** The prose satisfies the regex. The second test does not\nsave it either: that gate no longer calls anything, so there is no `.lintFiles(` to catch, and a gate that\ncounted messages from `lintText()` instead would clear both tests while doing zero guarding.\n\n## Two distinct holes\n\n1. **Comments count as code.** Any `//` mention of the filename — including the one already sitting in\n   `check-slot-lookup-ratchet.mjs` — satisfies the import test on its own. The repo's answer to\n   comment-vs-code is `scripts/js-comment-mask.mjs` (\"the ONE answer\", written for exactly this class in\n   #9367); this file predates its adoption and still scans raw text. `stripComments` is the right pick\n   here — the check reports gate names, never offsets.\n2. **Nothing asserts the guard is CALLED.** The tests are \"the name appears\" + \"the unguarded call does\n   not\". There is no positive `lintFilesStrict(` assertion, so \"imports it and never uses it\" is a hole\n   the docblock's own thesis names and the code does not close.\n\nBoth are the failure direction AGENTS.md calls worse than no verifier: it reports success. And it is\nspecifically a *false green on the meta-check* — the thing whose whole job is noticing that a gate went\nquiet.\n\n## Severity: latent today\n\nBoth gates really do route through `lintFilesStrict()` on `main` right now, so nothing is currently\nunguarded. This is the guard that would fail to notice if that stopped being true — and #10123's whole\nargument is that the symptom of losing it is *identical output*.\n\n## Suggested shape (the taking seat's call)\n\nMirror what landed for the sibling check in the #10449 PR:\n\n```js\nsrc = stripComments(readFileSync(...));          // js-comment-mask, not raw text\nif (!/eslint-fatal-guard\\.mjs/.test(src))  …     // import, now comment-proof\nif (!/lintFilesStrict\\s*\\(/.test(src))     …     // and it must actually be CALLED\nif (/\\.lintFiles\\s*\\(/.test(src))          …     // unchanged\n```\n\n⚠️ Whoever takes it should ablate it, not just run it: this bug is invisible to a green run by\nconstruction. Delete the import line, leave the docblock, and require the self-test to red.\n\n⚠️ Adjacent but not the same: #10453 (#9367's naive strip surviving in two `packages/cli` contract tests)\nand #10427 (`scanSource` desyncing on nested template literals). This site does not strip comments *at\nall*, so it is a third population rather than a residue of either.\n\nRefs: #10123 (the card that created the guard) · #9367 (the comment-mask conversion) · #10449 (where this\nwas found).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 10869,
+  "kind": "issue",
+  "title": "`plugin-auth/examples/basic-usage.ts` imports `@objectstack/plugin-hono-server`, which the package declares in no dependency block",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T14:52:52Z",
+  "updated_at": "2026-08-22T17:04:17Z",
+  "closed_at": "2026-08-22T07:53:41Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10869",
+  "body": "Surfaced by the #10756 census (the source-coverage blind spot), not repaired there: the\nrepair is a manifest change (or an example rewrite), which is a different surface from\nthat card's gate work.\n\n## The measurement\n\n`packages/plugins/plugin-auth/examples/basic-usage.ts` line 12:\n\n```ts\nimport { HonoServerPlugin } from '@objectstack/plugin-hono-server';\n```\n\nCompiled against the package's own config with the dependency closure built, on `main` @\n`5886ee6d22`:\n\n```\npackages/plugins/plugin-auth/examples/basic-usage.ts(12,34): error TS2307: Cannot find\nmodule '@objectstack/plugin-hono-server' or its corresponding type declarations.\n```\n\n`packages/plugins/plugin-auth/package.json` declares `@objectstack/plugin-hono-server` in\n**none** of `dependencies`, `devDependencies` or `peerDependencies`. (It does declare\n`hono` itself, which is a different package.) So the import cannot resolve, and the\nexample as written cannot run or compile for anybody who copies it.\n\n## Why nothing caught it\n\n`packages/plugins/plugin-auth/tsconfig.json` selects `include: [\"src/**/*\"]`, so\n`examples/` is in no tsc program the package's `typecheck` script runs — the exact\nblind spot #10756 measures. Nothing else reads the directory either: it is not a test,\n`tsup` builds only `src`, and no file imports it. It is the census's single instance of\nsource that is in **no** tsc program at all rather than merely outside its package's own.\n\n## The two repairs, both defensible\n\n1. **Add the dependency** (`devDependencies`, `workspace:*`) so the example compiles.\n   Right if the example is meant to be a working reference for the hono pairing.\n2. **Rewrite or delete the example.** Right if it is stale — it is the only file in the\n   directory and nothing references it.\n\nNot choosing here. Whichever is taken, `packages/plugins/plugin-auth/examples` is an\nentry in `UNCHECKED_SOURCE_DEBT` (`scripts/check-type-check-coverage.mjs`), and putting\nthe directory in a tsc program means deleting that entry — which `RECONCILED` forces.\n\n## Dedupe\n\n`search_issues` for the import, the example path, and the missing-dependency shape\nreturns nothing."
+}

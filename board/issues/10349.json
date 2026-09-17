@@ -1,0 +1,34 @@
+{
+  "number": 10349,
+  "kind": "issue",
+  "title": "[finding] Anonymous callers to every better-auth-native /admin/ route get a bodyless 401 — no envelope, no machine-readable code",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T16:10:34Z",
+  "updated_at": "2026-08-22T17:05:26Z",
+  "closed_at": "2026-08-21T14:42:20Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10349",
+  "body": "Found while implementing #9968 (impersonation half). Filed unassigned.\n\nSame class as #10345 (`a refusal reaches the client with the status but no machine-readable code`), different surface: that one is the `/api/v1/data` write path, this one is the auth `/admin/` namespace.\n\n## Measured\n\nStock `better-auth@1.7.1` + its `admin` plugin, anonymous POST, no session:\n\n```text\n/admin/impersonate-user  anonymous -> 401 body=\"\"\n/admin/set-role          anonymous -> 401 body=\"\"\n```\n\nThe body is the empty string — not an empty JSON object. It comes from the vendor's `adminMiddleware`, which is `getAuthoritativeSessionFromCtx(ctx)` followed by `APIError.fromStatus(\"UNAUTHORIZED\")`, and every `/admin/` route that mounts that middleware inherits it.\n\n## Why it is worth recording\n\nThe `/api/v1/auth/admin/` namespace answers the same question in two different shapes depending on which lane a route happens to be on:\n\n- **ObjectStack raw mounts** (`create-user`, `set-user-password`, `unlock-user`, `import-users`, `ban-user`, `unban-user`, `oauth2/toggle-disabled`, `sso/*`) answer `401` with the ADR-0112 envelope and `code: 'UNAUTHENTICATED'` (see `platform-admin-gate.ts`).\n- **better-auth-native routes** answer `401` with nothing at all.\n\nA client cannot branch on the refusal without knowing, per route, which implementation happens to serve it — and that split is an implementation detail, not a contract.\n\nThis asymmetry is already *known* and encoded in `packages/qa/dogfood/test/admin-route-nonadmin-refusal.dogfood.test.ts`: the ObjectStack bucket asserts `anon.status === 401 && anon.code === 'UNAUTHENTICATED'`, while the better-auth bucket can only assert `[401, 403].includes(anon.status)` — there is no code to assert. So the suite documents the gap rather than closing it, and nothing tracks closing it.\n\n## Not fixed by #9968, deliberately\n\n#9968 re-authorizes `/admin/impersonate-user` as a better-auth plugin endpoint, changing only the **authorization** predicate. `adminMiddleware` (authentication) is passed through untouched, so the bodyless 401 is unchanged there and is pinned as-is rather than dressed up.\n\nOptions, no recommendation made unilaterally — this is a public refusal contract:\n\n- **A.** Accept the split as vendor-lane behaviour and document it in the route ledger, so consumers are told rather than left to discover it.\n- **B.** Normalize the vendor lane's refusals into the ADR-0112 envelope at the `AuthManager.handleRequest` seam (one place, all vendor routes) — this changes a public response shape for every better-auth route, so it is a contract change, not a fix.\n- **C.** Narrow to the `/admin/` namespace only, leaving the rest of the vendor surface alone."
+}

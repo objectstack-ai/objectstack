@@ -1,0 +1,34 @@
+{
+  "number": 10779,
+  "kind": "issue",
+  "title": "[finding] The TEST_DEBT re-measure bills @objectstack/objectql for a TS6059 about its own generated config — the case remeasureProject's docstring calls \"measuring the tape measure\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T11:21:24Z",
+  "updated_at": "2026-08-21T15:44:49Z",
+  "closed_at": "2026-08-21T15:43:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10779",
+  "body": "Measured while repairing PR #10755 (the `Type Check · debt ledger` failure on #10269).\nNot repaired there: that card's surface is one entry guard, and this is a property of\nthe generated re-measure project.\n\n## The measurement\n\n`remeasureProject` (`scripts/check-type-check-coverage.mjs`) neutralises the package's\n`rootDir` **only when it has to widen `include`**:\n\n```js\nif (include) {\n  project.include = (unreachable.length > 0 ? [...include, ...unreachable] : include).map(absolutise);\n  if (unreachable.length > 0) compilerOptions.rootDir = pkgAbs;\n}\n```\n\n`@objectstack/objectql` has all 225 of its test files under `src/`, so `unreachable` is\nempty, no widening happens, and the generated project inherits `rootDir: \"src\"` from\n`packages/objectql/tsconfig.json`. But dropping the test globs from `exclude` puts\n`src/dry-run-hash-compat.test.ts` into the program, and its line 5 imports\n`../scripts/dry-run-hash-compat` — a file tsc then pulls in transitively, from outside\n`rootDir`. Re-measure output, verbatim, with the dependency closure built:\n\n```\npackages/objectql/src/dry-run-hash-compat.test.ts(5,51): error TS6059: File\n'.../packages/objectql/scripts/dry-run-hash-compat.ts' is not under 'rootDir'\n'.../packages/objectql/src'. 'rootDir' is expected to contain all source files.\n```\n\nThat line is counted, and it is inside the frozen `TEST_DEBT['@objectstack/objectql']`\nof 355.\n\n## Why this is a finding rather than a shrug\n\nThe function's own docstring already rules on this exact diagnostic, in the branch it\ndoes neutralise:\n\n> `rootDir` goes with them. It is `src` in most of these packages, so widening\n> `include` past it makes tsc answer with one TS6059 per added file and nothing\n> else [...] Under `--noEmit` there is no output layout for it to protect, so a\n> TS6059 here is a diagnostic about this generated config rather than about the\n> package, and counting it would be measuring the tape measure.\n\nThe reasoning does not depend on how the file entered the program. A file reached\n**transitively** from a test is outside `rootDir` for exactly the same reason a file\nadded to `include` is, produces exactly the same TS6059, and is just as much a\nstatement about the generated config rather than about the package — but it is billed,\nbecause the neutralisation is gated on `unreachable.length > 0` rather than on the\ndiagnostic.\n\nConsequences are small and entirely in the \"number means what it says\" direction:\n\n- the ledgered number is one higher than the debt it names, and the entry's `note`\n  cannot account for the extra error;\n- it is **frozen** that way, so the fix is a `--lower` opportunity (355 to 354 for\n  objectql), never a ratchet break;\n- an author paying down that package's test-layer debt cannot make this one go away by\n  fixing code, which is the property the ratchet is supposed to have.\n\n## Not proposing the remedy here\n\nAt least three shapes exist — always set `compilerOptions.rootDir = pkgAbs` in the\ngenerated project (it protects no output layout under `--noEmit`); drop TS6059 in\n`countTscErrors` for the generated project only; or leave it and say so in the\ndocstring. Which is right depends on how many ledgered packages are in this state, and\nnobody has counted: it needs a transitively-imported file outside `rootDir`, so it is\ninvisible to any scan of `include` globs alone. Filed so the count gets made rather\nthan guessed.\n\n## Dedupe\n\n`search_issues` was unavailable to this seat, so all 301 open issues (PRs excluded)\nwere fetched through the REST list endpoint and their titles and bodies grepped for\n`TS6059`, `rootDir`, `remeasureProject`, `tape measure`, `re-measure`, `TEST_DEBT`,\n`debt ledger` and `type-check-coverage`. `TS6059` matches only #8249 (dist-resolved\ndeclarations) and #4311 (the framework typecheck-debt card); `rootDir` matches only\nthose and #10756. Nothing names this billing.\n\nRelated, not duplicated: #10756 (the same package's `scripts/` is invisible to its own\n`tsc -p`), #10722 (nothing reads a ledger `note`), #10615 and #10723 (individual\nentries disagreeing with their measurement).\n\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

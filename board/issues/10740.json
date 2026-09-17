@@ -1,0 +1,35 @@
+{
+  "number": 10740,
+  "kind": "issue",
+  "title": "tenant-audit, the `update` half: `ack` is a dispatcher sweep but `redeliver` is request-reachable — two sites on one object with OPPOSITE classifications",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T10:07:38Z",
+  "updated_at": "2026-08-22T17:04:16Z",
+  "closed_at": "2026-08-22T07:53:58Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10740",
+  "body": "Found while implementing #10673 (PR #10725), which classified the **`updateMany`** half of the tenant-audit surface on `sys_http_delivery` / `sys_notification_delivery`. Filed separately rather than widened into that PR: one of the two sites here needs a **contract decision**, which fails the bounded-inline-fix test.\n\n⛔ **Read the two classifications before touching either. They are opposite, and the dangerous mistake is to treat this as one sweep.**\n\n## The surface\n\nThe same two objects carry **three single-record (`multi: false`) writes** that the SQL driver audits under the **`update`** op — a different op from the `updateMany` one #10673 covered:\n\n| site | reachable from | classification |\n| --- | --- | --- |\n| `SqlNotificationOutbox.ack` | dispatcher tick only | **global sweep** — same warrant as #10673's six |\n| `SqlHttpOutbox.ack` | dispatcher tick only | **global sweep** — same warrant |\n| **`SqlHttpOutbox.redeliver`** | **`POST /api/v1/webhooks/redeliver`** | ⛔ **request-contextual — a bypass must NEVER be put here** |\n\n`plugin-webhooks`' own comment on that route says **any authenticated user can reach it**. So on a deployment with `OS_TENANCY_POSTURE=isolated`, `redeliver` is an unscoped write reachable by an authenticated user — **exactly the case the tenant audit exists to catch**, and the one case where silencing the audit line would convert a detectable hole into an undetectable one.\n\n## Why this is not simply \"finish the job from #10673\"\n\n#10673's six sites earned `bypassTenantAudit` on a **structural** warrant, not a judgement call: their only callers are the dispatchers' `setInterval` tick under a cluster lock (no request context exists on that path); `ClaimOptions` / `HttpClaimOptions` are `{nodeId, limit, partition, claimTtlMs, now}` and carry no tenant **even in principle**; partitioning is `hash(refId|notificationId|digestKey) mod N` — a load-spreading key, not an org key, so a partition holds every org's rows by construction; and one outbox per environment drains the whole queue, so a per-org predicate would strand every other org's deliveries forever and leave a crashed node's rows permanently `in_flight`.\n\n**`redeliver` satisfies none of that.** It has a request context, it is reachable by a user, and the remedy is to *thread a tenant*, not to declare a sweep — which changes the `IHttpOutbox.redeliver` contract. That is the decision this card exists to get made.\n\n## ⚠️ Why the startup log did not show it — the evidence surface is narrower than it looks\n\n#10673's card quotes a composed-boot startup log showing exactly two `[tenant-audit]` lines. That is **not** evidence that the `update` op is clean:\n\n> The reap `UPDATE` runs **unconditionally on every dispatcher tick**, while `ack` / `redeliver` only run **once a delivery is actually processed**. A startup log taken on an empty queue therefore shows exactly the two `updateMany` lines and says nothing at all about the `update`-op surface.\n\nAnyone re-measuring this should drive an actual delivery through, not read a boot log.\n\n## What a fix must decide\n\n1. `ack` × 2 — carry the same documented warrant (the helper `packages/services/service-messaging/src/outbox-dispatcher-scope.ts`, added by PR #10725, already holds the reasoning; note its return type is `& { multi: true }`, so it cannot be reused here as-is and that is deliberate).\n2. **`redeliver`** — thread the request's tenant. This changes `IHttpOutbox.redeliver`'s signature, so it is a contract change and wants the contract-review tier. ⛔ It must not be given `bypassTenantAudit` to make the line go away — the audit's whole purpose is to force this classification, and this is the site it was built for.\n\n## Refs\n\n- #10673 / PR #10725 — the `updateMany` half, and the structural warrant the two `ack` sites inherit\n- `packages/services/service-messaging/src/sql-http-outbox.ts`, `sql-outbox.ts` — the three sites\n- `packages/drivers/driver-sql/src/sql-driver.ts` — `auditMissingTenant`, the instrument\n- objectstack-ai/cloud#1512 — the upstream card; its `crm_contract` half is not this and is not reached for here\n\nFiled unassigned for triage. Duplicate search run before filing (nothing open beyond #10673 itself)."
+}

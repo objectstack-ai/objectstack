@@ -1,0 +1,35 @@
+{
+  "number": 10861,
+  "kind": "issue",
+  "title": "A cross-object dataset-level `filter` reaches `engine.aggregate` unrefused on the ObjectQL path — both doors accept what the engine cannot join",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T14:19:55Z",
+  "updated_at": "2026-08-22T17:03:48Z",
+  "closed_at": "2026-08-22T15:47:23Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10861",
+  "body": "Found while implementing #10759 (which repairs the *other* half of this blind spot). Filed rather than widened into that PR: #10759 restores an invariant the strategy already declared for itself, and this one is not covered by it — see \"Why this is not #10759\" below.\n\n## What is measured\n\nExecuted on `origin/main` at `5f2e54cc6` (with PR #10758 merged), one fixture, both doors in one run. A compiled dataset whose **definition-level `filter` is itself cross-object**:\n\n```ts\nDatasetSchema.parse({\n  name: 'xobj_scoped_sales', object: 'opportunity', include: ['account'],\n  filter: { 'account.region': 'West' },\n  dimensions: [{ name: 'stage', field: 'stage', type: 'string' }],\n  measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],\n});\n```\n\n`svc.query({ cube: 'xobj_scoped_sales', dimensions: ['stage'], measures: ['revenue'] })` on a service whose capabilities are `{ nativeSql: false, objectqlAggregate: true }`:\n\n```\nexecute()      ACCEPTED\ngenerateSql()  ACCEPTED\nengine.aggregate received filter: {\"$and\":[{\"account.region\":\"West\"}]}\n```\n\n`engine.aggregate` cannot join. `account.region` is not a column of `opportunity`, so the predicate matches nothing on any driver that evaluates it honestly, and the widget answers a number that is not the scoped number and not the unscoped number either. That is the silent mis-bucket #3654's loud refusal exists to prevent, arriving through a producer #3654 predates.\n\n## Where the blind spot is\n\n`ObjectQLStrategy.planCrossObject` is the envelope check, and **neither** call site's member view contains the dataset scope:\n\n- `execute()` (since #10759) judges `filterMemberView(cube, query)` — the leaves of the caller's `where`, flattened.\n- `generateSql()` judges the same view.\n\nThe dataset scope is read separately, after that view is built: in `execute()` it is lowered by `filterNodeToCondition` and pushed onto `conjuncts`, and in `generateSql()` it is rendered by a separate `renderFilterNodeSql` call over `getDatasetScope(...)?.filter`. It is a member of neither door's inventory, so no envelope check ever sees it.\n\n## Why this is not #10759\n\n#10759 is a **disagreement** between the two doors: the preview refused what the execution door accepted, contradicting the invariant the file states for itself (*\"`generateSql()` calls this too, so the preview accepts/rejects the same set\"*). Here the two doors **agree** — both accept. There is no divergence to restore, so refusing this shape is a new decision about the refusal set rather than the recovery of a declared one, and it was deliberately left out of that PR.\n\nPR #10758 (#10413 phase 1) created this instance by giving the dataset's definition-level `filter` a route onto the ObjectQL door at all. Before it, the filter never reached `engine.aggregate` from this door — a different bug, with a different wrong answer.\n\nThe behaviour is pinned as-is in `packages/services/service-analytics/src/__tests__/crossobject-conjunct-refusal.test.ts` (the last test in the file), written to the behaviour as it *is*, with the paragraph above it explaining why. When this is fixed that pin goes red and points at the explanation.\n\n## The decision this needs\n\nTwo placements, and they are not equivalent:\n\n- **Query-time refusal**, in `planCrossObject`: fold the dataset scope's leaves into the member view both doors are judged on. Mechanically small, symmetrical with what #10759 just did, and refuses at the moment the engine would have been misled. But it refuses a *saved dataset* through an error about a request the caller did not write, on a dataset that may be perfectly valid on the native-SQL deployment next door.\n- **Compile-time rejection**, in `dataset-compiler.ts`: reject the dataset when it is registered. This is the contract-first placement under Prime Directive #12 — reject at authoring, loudly, rather than tolerate at consumption — and `dataset-compiler.ts` already refuses author-shaped dataset defects there (`DATASET_INVALID` for a join crossing datasources, an absent `include` relationship, an over-limit hop). But the compiler does not know which driver will serve the dataset, and a cross-object dataset filter is entirely legal on a native-SQL driver, so rejecting at compile time would refuse a valid dataset on capability the compiler cannot see.\n\nA third possibility worth pricing: serve it, by treating a cross-object dataset filter the way `executeCrossObject` treats a cross-object dimension.\n\nNot sized here — the placement question is the whole of it.\n\n## Reproduction\n\n`packages/services/service-analytics/src/strategies/objectql-strategy.ts`, with a stub `executeAggregate` recording its arguments and `queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false })`. The fixture above and both doors are already assembled in `crossobject-conjunct-refusal.test.ts`.\n\nRelated: #10759 · #10413 · PR #10758 · #3654.\n"
+}

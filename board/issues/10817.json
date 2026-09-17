@@ -1,0 +1,34 @@
+{
+  "number": 10817,
+  "kind": "pull_request",
+  "title": "docs(ci): correct the shard-classifier comment to describe the post-#6589 classifier",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T12:23:51Z",
+  "updated_at": "2026-08-21T13:45:39Z",
+  "closed_at": "2026-08-21T13:45:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-21T13:45:38Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10817",
+  "body": "Fixes #10713\n\nThe *Compute this shard's package set* step in `.github/workflows/ci.yml` justified its\n`git cat-file -e` spelling with three claims about `scripts/check-shard-attestation.mjs`.\nAll three describe the classifier as it stood **before #6589**. This corrects the comment\nonly — the step's behaviour is untouched and `git cat-file -e` stays.\n\nThe comment was authored in `e4737b6ac2` (#6195) and the classifier was rewritten later\nthe same day in `4e271b2c67` (#6589), so the text has described a classifier that no\nlonger exists ever since.\n\n## The three claims, re-derived from the classifier source\n\nEach row was settled against the code, not against the script's docblock (which is prose\nand could itself have gone stale) and not against the card's table.\n\n| The comment claimed | What the current source does | Verdict |\n|---|---|---|\n| classification reads \"the job's **joined** `run:` text\" | `scanWorkflow` builds `jobInvokes = (job, flag) => stepsOf(job).some((step) => invokesScript(step?.run, flag))` and classifies with `if (!jobInvokes(job, '--verify')) continue;` | **false** — applied per STEP |\n| the flag counts \"**as a bare substring**\" | `invokesScript` lexes the text into commands, locates the token equal to `SCRIPT_BASENAME` (or ending `/` + it), then requires `token === flag \\|\\| token.startsWith(flag + '=')` among the tokens **after** it in that same command | **false** — an exact argument token, adjacent within one command |\n| \"**including in a comment**, since comments are part of `run:`\" | `shellCommands` hits `if (ch === '#' && atWordStart)`, skips to the newline and flushes | **false** — `#` comments are dropped |\n\nTwo details worth recording, because neither is visible from the docblock alone:\n\n- The joined text has not disappeared — `runTextOf(job)` is still built, but only *after*\n  a job has already been classified as a gate, and only to extract its `--leg` tokens. It\n  no longer participates in classification at all.\n- Per-STEP and per-COMMAND are belt-and-braces here: `runTextOf` joins with a newline, and\n  the lexer already treats a newline as a command boundary. Either guard alone would defeat\n  the #6589 shape.\n\n## Why the corrected comment now spells `--verify` literally\n\nThe old comment went out of its way to write \"dash-dash-verify\" instead of the flag. That\navoidance is no longer necessary, and demonstrating it is the point — so the replacement\nnames the flag three times, in the very step that already carries the script's basename in\nits `--emit` step. That makes this the load-bearing measurement rather than a vacuous one:\n\n```\nWITH MY EDITED ci.yml on disk:\n  joined run: text contains \"check-shard-attestation.mjs\" : true\n  joined run: text contains \"--verify\"                    : true\n  PRE-#6589 co-occurrence rule  => job `test` is a GATE ?  : true\n  CURRENT invocation classifier => job `test` is a GATE ?  : false\n  still classified an attesting SHARD (--emit)            : true\n```\n\nThe pre-#6589 rule quoted there (`text.includes(BASENAME) && text.includes('--verify')`) is\nthe one the classifier's own docblock records as the defect #6589 removed. The safety of\nthis text is pinned upstream by two `--self-test` assertions — a `--verify`-in-a-comment\nfixture and a trailing-comment fixture.\n\n## Evidence\n\n`pnpm check:shard-attestation`, before and after, verdict lines quoted — the shard job's\nclassification is unchanged:\n\n```\nBEFORE  exit=0\n  ✓ check-shard-attestation --self-test: 92 assertions (dominance experiment + both #6082 counter-examples + the #4928 guard + the #6589 classifier pins).\n  ✓ check-shard-attestation: 2 aggregate gate(s) count 3 declared leg(s) across 3 attesting job(s).\n\nAFTER   exit=0\n  ✓ check-shard-attestation --self-test: 92 assertions (dominance experiment + both #6082 counter-examples + the #4928 guard + the #6589 classifier pins).\n  ✓ check-shard-attestation: 2 aggregate gate(s) count 3 declared leg(s) across 3 attesting job(s).\n```\n\nGate union re-derived by `node scripts/pm/dispatch-gates.mjs` (no paths passed — it takes\nits own change set) and re-run at final commit `db6e53c3bd`. Exit codes captured with\n`cmd > file 2>&1; ec=$?`, never through a pipe:\n\n| Gate | Exit |\n|---|---|\n| `pnpm check:node-version` | 0 |\n| `pnpm check:required-contexts` | 0 |\n| `pnpm check:shard-attestation` | 0 |\n| `pnpm check:workflow-status-functions` | 0 |\n| `node scripts/check-aggregator-roster.mjs` | 0 |\n| `node scripts/check-required-contexts.mjs` | 0 |\n| `node scripts/check-shard-attestation.mjs` | 0 |\n| `pnpm check:nul-bytes` | 0 |\n\n`dispatch-gates` named exactly the four workflow-parsing families the card predicted, plus\nthe shard/required-contexts duplicates from their other workflows; it added nothing my diff\ndid not touch. No `scripts/**` path is touched, so the `check:entry-guard` /\n`check-parse-guard.mjs` blind spot does not apply here.\n\n**No ablation applies.** A comment correction has no guard under test — there is no mutation\nwhose removal could turn anything red, and the counterfactual above is the honest substitute:\nit shows the edit would have flipped the classification under the classifier the comment\ndescribes.\n\n## Scope\n\n- No behaviour change. `git cat-file -e` vs `git rev-parse` was explicitly out of review;\n  the command is byte-identical.\n- The FILTER CONTRACT (#4928) governs the `filter` job; this is the `test` shard job, and\n  nothing inside that contract's boundary is touched.\n- `scripts/check-shard-attestation.mjs` is not edited. The classifier is correct; the\n  comment describing it was not.\n- Workflow comment only, so nothing publishes — no changeset, `skip-changeset` applied.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_"
+}

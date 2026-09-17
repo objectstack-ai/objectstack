@@ -1,0 +1,35 @@
+{
+  "number": 10840,
+  "kind": "issue",
+  "title": "[finding] the INVISIBLE half of the bare-root species is ~33 gates, not 4 — a population literal with no separator never reaches the hint set at all",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T13:14:13Z",
+  "updated_at": "2026-08-22T17:04:27Z",
+  "closed_at": "2026-08-22T04:25:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10840",
+  "body": "Observation-class, measured while implementing #10705 (the escapable-literal ledger, PR #10839).\n**No gate is red.** Filed unassigned, no `pm:queue`. ⛔ This is **not** a request to change\n`hintCovers`' `:920` refusal — the +139084 measurement stands.\n\n## The distinction #10705 does not draw\n\n#10705 bounds the species where a bare root literal **reaches the hint set**: a source spelling\ncarrying a separator somewhere (`'scripts/'`), which `extractWatchHints` trims to the bare word\n`scripts`. That population is small and is now enumerated and gated — measured on\n`a7ea3289eb`, **4 literals**, 2 escaped and 2 on the shrink-only ledger.\n\nThere is a strictly larger species beside it, and the ledger **cannot see it**. `looksPathy`\nrequires a separator:\n\n```js\nconst looksPathy = s.includes('/') || /^\\.(claude|changeset|github|gitattributes)\\b/.test(s);\n```\n\nSo a gate whose population is spelled with **no separator at all** builds no hint whatsoever:\n\n```\nextractWatchHints(\"const POPULATION = 'packages';\")   -> []          <- invisible\nextractWatchHints(\"const POPULATION = 'packages/';\")  -> [\"packages\"] <- #10705's species\nextractWatchHints(\"const POPULATION = 'packages/**';\")-> [\"packages/**\"] <- nameable\n```\n\nThis is the same shape #10107 recorded and #10114 fixed for `check-role-word.mjs`' `skills`\nroot — but as a one-instance card. Nothing ever enumerated the class.\n\n## The measurement\n\nSwept over all 128 discovered families on `a7ea3289eb`, restricted to quoted literals bound to\na **population-declaring constant name** (`*_ROOT`, `*_ROOTS`, `*_DIR`, `*_DIRS`, `POPULATION`,\n`*_SCOPE`) whose value is a bare top-level tracked directory, with comments and self-test\nbodies masked: **34 (family, constant, word) triples, 33 of them undeclared.**\n\nThe single declared one is `check:examples-live-imports`' `EXAMPLES_ROOT = 'examples'`, which\ntook the escape in #10314 — i.e. the sweep finds exactly the shape the two landed fixes\naddressed, and 33 more of them. A sample:\n\n| family | constant | word |\n|---|---|---|\n| `check:engine-double-contract` | `SCAN_ROOTS` | `packages`, `examples` |\n| `check:error-code-casing` | `SCAN_ROOTS` | `packages` |\n| `check:skill-compatibility` | `PACKAGE_ROOTS`, `SKILLS_DIR` | `packages`, `apps`, `examples`, `skills` |\n| `check:skill-frame-sync` | `SCAN_ROOTS` | `skills` |\n| `check:verify-stand-in` | `SCAN_ROOTS` | `packages`, `examples` |\n| `check:driver-conformance` | `DRIVERS_DIR`, `CASE_SETS_DIR` | `packages` |\n| `check:resume-authority-declared` | `DEFAULT_SCAN_ROOTS` | `packages`, `examples` |\n| `scripts/check-skills-token-ratchet.mjs` | `SKILLS_DIR` | `skills` |\n\n(Full 33-row listing reproducible with the probe described below.)\n\n## Why this was NOT folded into #10705\n\nTwo reasons, both measured rather than argued:\n\n1. **The recognizer would be a third idiom.** #10705's dispatch is explicit that the\n   `ROOT_DIR_WATCH_HINTS` subtree declaration is the idiom to lift, not to reinvent. Detecting\n   this species needs a *new* heuristic over constant NAMES, which is a judgement call baked\n   into a regex, on a gate that runs on every PR.\n2. **The obvious wider sweep is unenforceable.** Dropping the constant-name restriction and\n   flagging any bare top-level-dir literal yields **73 (family, word) pairs across 52 of 128\n   families** — overwhelmingly `join(ROOT, 'packages', …)` path components in gates that never\n   read those roots. Demanding a subtree declaration for those is the +139084 fabrication\n   re-introduced one level up, and a shrink-only ledger seeded with 73 rows is an allowlist\n   nobody re-reads rather than a debt list.\n\n## Why it is worth a card anyway\n\nThe remedy per gate is known, cheap and already precedented twice (#10114, #10314): declare the\nsubtree spelling beside the constant and pin the coupling in that gate's own self-test, the way\n`check-role-word.mjs` does. What is missing is the **worklist**. Left alone, this class keeps\nbeing re-found one gate at a time — which is precisely the discovery cost #10705 was filed to\nend, still running in the half its ledger cannot reach.\n\nNote the asymmetry that makes it worth doing deliberately: the remedy for a gate whose real\npopulation is `packages/**` names that gate for every `packages/**` card. Whether that is\nwanted is a per-gate judgement with fleet-wide blast radius on dispatch prompts, so this wants\ntriage as a batch, not 33 self-dispatched one-liners.\n\n## Reproducing\n\nThe probe is ~40 lines against the tool's own exported predicates (`discoverFamilies`,\n`extractWatchHints`, `collapseHint`, `trackedFiles`, `maskSelfTests`) plus `maskComments`; it\nreads nothing from memory. Both numbers above (33 and 73) came from the same sweep with the\nconstant-name restriction on and off.\n\n## Refs\n\n#10705 / PR #10839 (the visible half, now gated) · #10107 and PR #10114 (`skills`, first\ninstance) · #10314 (`examples`, second) · #10662 / #10687 (two more) · `hintCovers`' docblock\nand `extractWatchHints`' `looksPathy`\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_\n"
+}

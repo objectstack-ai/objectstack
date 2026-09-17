@@ -1,0 +1,34 @@
+{
+  "number": 10718,
+  "kind": "pull_request",
+  "title": "docs(adr): correct ADR-0082 addendum 2's carrier census for the sdui:manifest reminder",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T09:32:28Z",
+  "updated_at": "2026-08-21T14:16:07Z",
+  "closed_at": "2026-08-21T14:15:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-21T14:15:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10718",
+  "body": "Closes #10142\n\n## What\n\nOne-bullet prose sync in ADR-0082's **Addendum 2 (2026-08-07, #5960)**, in the\n\"Where the line lives\" list. The list enumerates where the `pnpm sdui:manifest`\ndeclaration-parity ratchet reminder is carried. Its third bullet named **two**\ncarriers inside `docs/releases-maintenance.md`; only one of them still exists.\n\n**Before:**\n\n> - `docs/releases-maintenance.md` carries it as prose, in the pin-bump procedure and in the pin-freshness \"fix when it fires\" step.\n\n**After:**\n\n> - `docs/releases-maintenance.md` carries it as prose, in the pin-bump procedure — the pin-freshness \"fix when it fires\" step that used to carry it too went with the `Console Pin Freshness` gate itself (#10134).\n\nNothing else in the ADR is touched: no restructuring, no renumbering, no\nsurrounding prose edits. Decision 4's mechanism, the on-demand-gate verdict and\nthe trigger all stand exactly as ruled.\n\n## Verification — re-derived at this branch's merge base, not taken from the card\n\nThe card's measurement predated today's tip, so all four claims were re-checked\nagainst merge base `53a48c93f4`:\n\n1. **The quoted line is byte-exact at `:167`.** Confirmed by content, not line\n   number.\n2. **The `Console Pin Freshness` gate is genuinely gone.** All four carriers are\n   absent from this tree: `.github/workflows/objectui-pin-freshness.yml`,\n   `scripts/check-objectui-pin-fresh.mjs`, the root `package.json` entry, and the\n   `release.yml` publish-path step (deleted in `5a2ce6c0dc`). The phrase\n   \"fix when it fires\" now appears **nowhere** in the repo except the stale ADR\n   line this PR corrects.\n   ⚠️ **Not to be confused with `Console Pin Gate`** (`ci.yml` job `console-pin`),\n   which is a *different and still-live* gate — it proves the pinned SHA still\n   builds. Left untouched.\n3. **What the doc carries now.** `docs/releases-maintenance.md` still carries the\n   reminder as prose under `#### After the pin moves: run the declaration-parity ratchet (#5960)`\n   — the pin-bump procedure. The pin-move process names it again as step 4, but\n   explicitly as a back-reference (\"see 'After the pin moves' above\"), so the\n   corrected bullet deliberately does **not** re-enumerate sub-steps that can be\n   reorganised — that enumeration habit is what produced this card.\n   That file also now carries its own tombstone for the removed gate.\n4. **The other two bullets are still accurate.** `scripts/bump-objectui.sh` prints\n   the NEXT STEP on both exit paths (its own comment: \"Printed on BOTH exits\n   below: --no-commit still moved the pin\"), and `scripts/build-console.sh` closes\n   with the reminder. Both verified in source; both left unchanged.\n\n## Gates\n\nRun at final commit `f860296183` (the sha this PR pushes):\n\n| Gate | Verdict line |\n| --- | --- |\n| `check:adr-anchors` | `OK (51 anchored file(s) ... 27051 citation(s) across 3336 file(s) resolve)` |\n| `check:doc-authoring` | `doc authoring guard: 389 files clean` |\n| `check:pm-governed-merges` | `--self-test: 90 assertions` |\n| `check:doc-formula-expressions` | `22 record-scoped formula example(s) across 416 files / 1443 TS blocks judged clean` |\n| `check-adr-links.mjs` | `551 relative link destination(s) under docs/adr/ resolve` |\n| `check:nul-bytes` | `OK (scanned 6222 text file(s) ... no raw ASCII control bytes)` |\n\nThe first five are the families `node scripts/pm/dispatch-gates.mjs` derives for\nthis change set (re-run after the final commit; it named no new family).\n`check:nul-bytes` was reasoned in rather than derived — any edit triggers it.\n\n`check:doc-formula-expressions` first failed with `ERR_MODULE_NOT_FOUND` on\n`@objectstack/formula/dist` — the unbuilt-dependency trap, not a real failure. It\npasses after `pnpm --filter '@objectstack/lint^...' build`.\n\n## Changeset\n\nNone — docs-only, publishes nothing. Carried by the `skip-changeset` label instead.\n\n## ⛔ Governed surface — leave this draft\n\n`docs/adr/**` is governed (Prime Directive #14). This card is the deliberate\nexception because the ADR text **is** the deliverable, and triage graded it on that\nbasis. Per that dispatch: **this PR stays a draft and waits for a human.** Neither\nthe dev seat nor the PM will mark it ready or arm auto-merge.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_"
+}

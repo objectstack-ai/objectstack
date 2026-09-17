@@ -1,0 +1,35 @@
+{
+  "number": 10893,
+  "kind": "issue",
+  "title": "[finding] Three published READMEs tell readers to install packages that are in no directory of this repo — and check:published-readme-exports is blind to it by construction",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T16:05:24Z",
+  "updated_at": "2026-08-22T17:04:32Z",
+  "closed_at": "2026-08-22T04:12:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10893",
+  "body": "Found while repairing dead repo-relative links in published READMEs (#10813 / PR #10892). Filed unassigned, no `pm:queue` — triage's call. This is the **member-existence** class (#9532 / #10368), not the path-existence one that card owns.\n\n## The observation\n\nThree published READMEs name `@objectstack/*` packages that exist in **no** directory of this repo. Measured on `origin/main` at `0b4e2b7356`:\n\n| README | line | names | in the tree? |\n|---|---|---|---|\n| `packages/plugins/plugin-security/README.md` | 40, 44 | `@objectstack/plugin-org-scoping` | no |\n| `packages/plugins/plugin-security/README.md` | 95 | `@objectstack/service-tenant` | no |\n| `packages/services/service-package/README.md` | 108 | `@objectstack/service-marketplace` | no |\n\nReproduce:\n\n```\nfor n in plugin-org-scoping service-tenant service-marketplace; do\n  git ls-files \"*/$n/package.json\" | grep . >/dev/null \\\n    && echo \"EXISTS  $n\" || echo \"MISSING $n\"\ndone\n```\n\nThree for three missing. All three existed once and were removed (`3a630b6a4a` split org-scoping out; `6eafa885b0` added the marketplace service; multi-tenant work landed and was reverted across several commits). In the live tree `OrgScopingPlugin` survives only as a prose comment in `packages/runtime/src/app-plugin.ts` and as a **`SimulatedOrgScopingPlugin`** stand-in in `packages/verify/src/harness.ts` — i.e. nothing ships it.\n\nPR #10892 repaired the dead *links* on those lines (that was its defect class) by de-linking and keeping the names as code spans, which leaves every prose claim exactly as it was. **The claims themselves are untouched and unverified**, which is why this is filed rather than folded in.\n\n## Why it is worth a card\n\nThe sharp part is not the three instances — it is that the gate commissioned for exactly this class cannot see them.\n\n`check:published-readme-exports` checks a documented import against **the package's built type surface**, resolved through the workspace member map (`publishedDocs()` builds `byName` from `workspaceDirs()`). An import from a specifier that is not a workspace member at all therefore has no type entry to compare against, and the gate reads no further. So this fenced block in `plugin-security/README.md`:\n\n```typescript\nimport { OrgScopingPlugin } from '@objectstack/plugin-org-scoping';\n```\n\npasses the exports gate green — not because the symbol was verified, but because the *package* was never resolvable. The gate is strict about a member that exists and silent about one that does not, which is the inverse of the useful direction. That asymmetry is invisible in its output: the run at `cc222637a3` reports `214 import statement(s), 49 workspace type entr(ies)` with no line for specifiers it could not place.\n\nTwo shapes to separate before anything is built, and only the first is decidable offline:\n\n- **the specifier is not a workspace member and never was published from here** — decidable from `workspaceDirs()` plus git history, no network;\n- **the specifier is published from a sibling repo** (`cloud`, `objectui` — `@object-ui/console` is a real precedent) — that needs a registry probe or a declared roster of out-of-repo packages, so it is a policy question first: may a published README name a package this repo does not build, and if so, where is that allowlist declared?\n\n⛔ Deliberately NOT folded into #10368: its fence forbids widening that gate, and this needs a new population (unresolvable specifiers), not a wider read of the existing one.\n\nRefs: #9532 (the symbol half) · #10368 (member-existence drift) · #10813 / PR #10892 (where this was found) · #9870 (the `NOT read:` visibility line this would extend)."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 10462,
+  "kind": "issue",
+  "title": "publishPackageDrafts answers success:false for a publish that refused nothing, and leaves no trace of that exit",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T22:35:42Z",
+  "updated_at": "2026-08-21T14:16:25Z",
+  "closed_at": "2026-08-21T14:12:51Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10462",
+  "body": "## What\n\n`publishPackageDrafts` (`packages/metadata-protocol/src/protocol.ts`) ends with\n\n```ts\nreturn {\n    success: failed.length === 0 && published.length > 0,\n    publishedCount: published.length,\n    ...\n};\n```\n\nso a publish that had **nothing to promote** — no pending drafts for the requested `packageId` — resolves\n\n```json\n{ \"success\": false, \"publishedCount\": 0, \"failedCount\": 0, \"published\": [], \"failed\": [] }\n```\n\nThat is the same `success:false` a genuine ADR-0067 D2 refusal answers with. One boolean is carrying two facts (\"nothing was refused\" and \"nothing landed\") and the caller cannot tell them apart from `success` alone.\n\n## Why it matters\n\nThe no-op path is also the only `publishPackageDrafts` exit that leaves **no trace at all**. Both refusal returns (the pre-flight block and the Phase-1 unwind) write `recordMetadataAudit` refusal rows; this one writes nothing. So a caller that reads `success:false` as a refusal reports a rollback, and an operator who then goes looking for the rollback in the audit trail and the server log finds neither.\n\nMeasured on the cloud side (objectstack-ai/cloud#1488, fixed consumer-side in objectstack-ai/cloud#1492): the AI Studio publish tools graded that shape as a rollback and told users \"发布被拒绝并整体回滚\" over turns whose metadata was entirely `state='active'`, then burned two automatic repair rounds re-authoring artifacts that were already correct. The cloud fix discriminates on `failed.length > 0` — which works only because *today* both refusal returns happen to build a non-empty `failed[]`. That is an invariant no test states and nothing pins.\n\n## Suggested shape (not a ruling)\n\nMake the answer say which of the two it is, rather than making every caller infer it from `failed[]`:\n\n- a distinct field on the response (e.g. `publishedCount === 0 && failedCount === 0` given a first-class name), or\n- a `reason` / discriminant on the envelope, or\n- pin the current invariant explicitly (\"every non-success return carries at least one `failed[]` entry\") with a test, so consumers may rely on it.\n\nAny of the three is fine; the thing worth deciding is that the distinction becomes part of the contract instead of a shape consumers reverse-engineer. Worth pairing with a log line on the no-op path so the exit is not invisible.\n\nFiled from cloud#1488 by the dev agent that fixed the consumer half. No assignee.\n"
+}

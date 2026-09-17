@@ -1,0 +1,35 @@
+{
+  "number": 10453,
+  "kind": "issue",
+  "title": "#9367's naive comment strip survives in two `packages/cli` contract TESTS — the fix converted the six gates, not the scans that live beside `serve.ts`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "tests"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T20:11:28Z",
+  "updated_at": "2026-08-21T09:43:35Z",
+  "closed_at": "2026-08-21T09:43:07Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10453",
+  "body": "Filed unassigned from the #9863 dev seat (session `session_01DdCnBGcHeufjrq7drTD3wt`, PR #10450). Found by walking into it: a new scan in that PR copied the local idiom and lost the code it was measuring.\n\n## The residue\n\n#9367 (closed by PR #9445) converted **six `scripts/check-*.mjs` gates** from a private naive `stripComments` to the shared string-aware `maskComments`. Two files carrying the identical spelling were outside that scope because they are tests, not gates:\n\n- `packages/cli/src/commands/serve-verify-security-parity.contract.test.ts`\n- `packages/cli/src/commands/serve-email-config-parity.contract.test.ts`\n\nBoth define:\n\n```ts\nfunction stripComments(source: string): string {\n  return source.replace(/\\/\\*[\\s\\S]*?\\*\\//g, ' ').replace(/(^|[^:])\\/\\/[^\\n]*/g, '$1');\n}\n```\n\nand both run it over `packages/cli/src/commands/serve.ts`.\n\n## Measured on today's `serve.ts` (`e502a6a8e`)\n\n`serve.ts`'s `5d.` header comment contains the route wildcard `/api/v1/auth/*` — the very literal #9367 used as its example. Its `/*` opens a phantom block comment that closes against `import(/* webpackIgnore: true */ authPkg)` **ten lines below**, deleting the region in between, which contains the `hasAuthPlugin` computation and the `if (!hasAuthPlugin && tierEnabled('auth'))` gate.\n\nCode-bearing lines of `serve.ts` surviving each order:\n\n| strip | lines kept |\n|---|---|\n| block pass first (what these two files do) | **1895** |\n| line pass first | 2098 |\n| shared `maskComments` | 2098, and the line count is preserved (4638 → 4638) because it blanks rather than deletes |\n\nThe 203-line difference is code.\n\n## Is it live today? No — and that is the whole reason to fix it now\n\nBoth scans currently measure `new SecurityPlugin(…)` constructions, and every one of them sits **outside** the swallowed region, so their verdicts are unaffected and both are green for the right reason. This is a latent hazard with a proven mechanism, exactly as #9367 classified its own six.\n\nWhat makes it worth closing anyway is that it is **contagious**, which is not a hypothetical: writing #9863's new `serve-audit-registration.contract.test.ts` meant reading these two files as the local pattern and copying their `stripComments` verbatim. The copy's first run failed — loudly, because the new scan asserts its anchors exist — with `the auth-gate anchor ... is gone from serve.ts`. The anchor had not moved; the stripper had eaten it. A scan whose anchors happened to sit elsewhere would simply have passed.\n\nThe blast radius also grows on its own: any future assertion in either file about a construction inside lines ~2132–2142 of `serve.ts`, or any edit that moves a measured construction into a swallowed span, converts this from latent to live silently.\n\n## Fix\n\nSwap both private copies for `maskComments` from `scripts/js-comment-mask.mjs`, as #9445 did for the gates. Two notes for whoever takes it:\n\n- The import escapes the package, so it needs a `CROSS_PACKAGE_TEST_INPUTS` entry for `@objectstack/cli` plus the matching `$TURBO_ROOT$` input on `@objectstack/cli#test`. PR #10450 already added exactly that for `scripts/js-comment-mask.mjs`, so after it lands there is nothing to add. ⚠️ `check-cross-package-test-inputs` will **not** tell you this is needed — see #10452.\n- `maskComments` blanks rather than deletes, so byte offsets and line numbers survive. `serve-verify-security-parity.contract.test.ts`'s paren-walking `securityPluginConstructions` is offset-based and benefits; check the email scan for the same property before swapping.\n- #10427 (open) has `maskComments` desyncing on nested template literals in 16 files. Cross-check that neither subject is among them, the way #10450 did for its pair (masker and naive strip agreeing on every anchor count is what rules it out).\n"
+}

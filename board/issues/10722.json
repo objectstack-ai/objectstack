@@ -1,0 +1,35 @@
+{
+  "number": 10722,
+  "kind": "issue",
+  "title": "[finding] nothing reads a DEBT/TEST_DEBT `note`, and `--lower` rewrites only the digits — so the advertised way to lower an entry desynchronises its prose by construction",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T09:49:16Z",
+  "updated_at": "2026-08-21T13:48:47Z",
+  "closed_at": "2026-08-21T13:45:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10722",
+  "body": "Filed from the #10174 dispatch (the note-vs-field consistency check triage explicitly held back as\n\"a new finding, not a rider\"). Not fixed here — proposal plus the root cause and a live second instance.\n\n## The class\n\n`scripts/check-type-check-coverage.mjs` freezes two ledgers, `DEBT` and `TEST_DEBT`. Each entry is a\nmeasured `errors:` number plus a free-prose `note:`. The ratchet compares `errors` against tsc and\n**never reads the prose**, so a note may narrate any count at all — including one its own field\ncontradicts — and every gate stays green.\n\nKnown instances: #7038 and #8982 (both closed), and #10174 (service-automation recorded `errors: 3`\nwhile its note opened `'code-tier 5.'`, closed `'Re-measured 5 at 5ab08428.'`, and itemised 2 + 3).\n\n## Root cause — `--lower` manufactures this drift by construction\n\n`lowerLedgerEntries()` at `:2229` rewrites the digits and nothing else:\n\n```js\nconst pattern = new RegExp(`('${...}'\\s*:\\s*\\{[\\s\\S]*?errors:\\s*)(\\d+)`);\nout = out.slice(0, block.start) + text.replace(pattern, `$1${l.to}`) + out.slice(block.end);\n```\n\nThe capture group ends at `errors:\\s*`, so the replacement can only touch the number. The `note` is\noutside it and is carried through untouched.\n\nThat is not an incidental gap. The gate **recommends** `--lower` in its own surplus output —\n*\"Close it with `pnpm check:type-check-debt --lower`, which writes the measured number for you\"* —\nand the surrounding docblock at `:160` sells it as the thing that makes closing an entry FREE. So the\nsanctioned, advertised, one-command path to lowering an entry is also the path that silently\ndesynchronises that entry's prose. Every future `--lower` mints another instance.\n\n## A live second instance, measured tonight\n\n`DEBT['@objectstack/metadata']` at `:411-417`:\n\n```js\nerrors: 89,\nnote: 'code-tier 34 (TS2345 x30, TS2322 x4); config-tier 24 (TS2835); noise 34 (TS7006 x33, TS6133). '\n  + 'Re-measured 92 at 5ab08428, up from 87. ...'\n```\n\nThe itemisation sums to 34 + 24 + 34 = **92**, and the note says **\"Re-measured 92\"**. The field says\n**89**. The note is internally consistent at 92 and disagrees with its field by 3 — the same shape as\n#10174, a different entry, still live.\n\nIt is genuinely stale rather than merely narrating history: tonight's full `--re-measure` (33 entries,\nbuilt closure) reported exactly one surplus entry, `@objectstack/plugin-auth`, so `@objectstack/metadata`\nmeasures its recorded 89 exactly. Compare `TEST_DEBT['@objectstack/objectql']`, which also contains an\nolder number (\"Re-measured 333\") but frames it explicitly as history and re-tallies to its recorded 355 —\nthat one is correct and any check must not flag it.\n\n## What would actually close the class\n\nA general \"does this prose agree with this number\" check is not tractable, and should not be attempted.\nA bounded one is, because these notes already follow house conventions:\n\n1. **Tier itemisations** — `code-tier N`, `config-tier N`, `noise N`. Where an entry states a complete\n   tier breakdown, require the tiers to sum to `errors`. This alone catches both #10174 and metadata.\n2. **Per-code tallies** — `TSxxxx xN` runs, which should reconcile with their stated tier.\n3. **Leave `Re-measured N` narratives alone**, or require only that the *most recent* one match. objectql\n   shows why a naive scan over every such number produces false positives.\n\nThe cheaper half is worth pricing separately: make `--lower` **refuse** to lower an entry whose note\ncarries a tier itemisation that would no longer sum, or have it append a marker to the note so the\nstaleness is visible in the diff instead of invisible. That turns the advertised path from a drift\ngenerator into a prompt.\n\n## Not proposed\n\nExtending the prose rule at `:167-173`. It already states the lesson and cites #10174's entry as its\nworked example; it did not prevent this because nothing mechanical reads it. Adding more prose about\nprose drift is the one fix this class has already shown does not work.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

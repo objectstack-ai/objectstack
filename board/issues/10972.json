@@ -1,0 +1,34 @@
+{
+  "number": 10972,
+  "kind": "issue",
+  "title": "pm-dispatch: `needs:contract-review` hangs on BOTH the PR and the card — symmetric hang and clear, so the gate is visible in the PR list",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T01:33:32Z",
+  "updated_at": "2026-08-22T16:08:42Z",
+  "closed_at": "2026-08-22T16:06:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10972",
+  "body": "Filed by the skills seat (`session_01ApyDuQY2fkunMCqXiqvBhR`) recording a maintainer ruling from live PM chat, 2026-08-22.\n\nBlocked-by: objectstack-ai/objectstack#10822\n\n(Serialization only, not a semantic dependency: both cards edit the same hot file, `.claude/skills/pm-dispatch/SKILL.md`'s 复审链 bullet, and the fold-or-serial answer on that file is serial. When #10822's PR lands and closes it, this card returns to queue.)\n\n## The ruling (maintainer, verbatim, untranslated)\n\n> 需要复审的 pr 是否应该直接打上 label,这样我在列表中能看出来。也可以直接要求复审。\n\n> 简化一点是否可以直接挂 PR 侧\n> 两边都挂好\n\n## Context — the measured inconsistency this fixes\n\nPractice on 2026-08-21 was carrier-by-habit: the dispatching seat hung `needs:contract-review` on PR #10800 **and** its card, but on cards #10716/#10759/#10701 the label went issue-side only. The review sub-round therefore queries both sides defensively, and the maintainer's PR list showed nothing for three PRs that were in fact gated. The clearing side already runs the four-step read-modify-write against both carriers (a PR-side leftover was caught and cleared on #10800); the hanging side is what this ruling makes symmetric.\n\n## What the SKILL.md edit does\n\nIn the 复审链 / 条款②闸门 bullets of `.claude/skills/pm-dispatch/SKILL.md`: the parking act hangs the label on **both the PR (as soon as it exists) and the card, in the same stroke**; a PASS clears **both in the same stroke**, each side by the standing read-modify-write hard steps. The label remains the gate carrier exactly as the 2026-08-18 载体不迁移 ruling holds — this changes where it is visible, not what enforces it. A dev report arriving before the PR exists parks issue-side first and the dispatching seat completes the PR side at ACCEPT.\n\nConstraints: the file sits at its line-ratchet ceiling (682/682 after the pending clause-② PR) — the wording must be paid for by tightening elsewhere in the same file; id-lint (no issue numbers in operative text); ruling carried as date + verbatim quote; governed face ⇒ draft PR, human merge; protocol-semantics face ⇒ fable dispatch per clause ①.\n\n## Discussed, deliberately not commissioned here\n\nThe maintainer's first message also raised requesting review natively on the PR (「也可以直接要求复审」) as a notification channel. Left out of this card's scope pending an explicit shape ruling (who the requested reviewer account is, and whether the request is notification-only or the maintainer wants to revisit the 2026-08-18 decision that the gate itself does not migrate to PR review). If ruled later, it is a separate one-sentence addition."
+}

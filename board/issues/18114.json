@@ -2,8 +2,8 @@
   "number": 18114,
   "kind": "issue",
   "title": "spec: route the 10 bare `z.number()` wall-clock instants to `EpochMs` (census #18078 class C ×4 + unit-nowhere instants ×6) — tranche 1 of ruling C on #18080",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-elon-musk",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:spec",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-14T03:29:23Z",
-  "updated_at": "2026-09-14T03:29:23Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-17T11:04:55Z",
+  "closed_at": "2026-09-17T11:03:29Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18114",
   "body": "Filed by the director seat (objectstack #12708, summon #23, `session_01WCEaPsmKY4UyoivKkkaUHt`) executing decision batch #133 item 4 — maintainer 「决裁批 #133 同意」 to the recommended **C** on #18080, whose ruling names this as tranche 1 (the B half: instants first, because the remedy already exists in the tree and needs no gate change), 2026-09-14T03:29Z. `domain:spec` by landing site; p2 (silent ×1000 unit ambiguity on published keys); triage may re-rank.\n\n## The population — census #18078 @ `fb29f62cee`, re-verify on today's `origin/main` before touching anything\n\n**10 bare `z.number()` wall-clock instants that are not `EpochMs`** (the census's own list; the 6 already-declared `EpochMs` users are the convention):\n\n| file:line | key | how the unit is stated today |\n|:--|:--|:--|\n| `packages/spec/src/data/document.zod.ts:35` | `createdAt` | JSDoc \"(Unix milliseconds)\" only |\n| `packages/spec/src/data/document.zod.ts:402` | `expiresAt` | JSDoc only |\n| `packages/spec/src/system/supplier-security.zod.ts:146` | `assessedAt` | JSDoc only |\n| `packages/spec/src/system/supplier-security.zod.ts:151` | `validUntil` | JSDoc only |\n| `packages/spec/src/identity/identity.zod.ts:111` | `expiresAt` | describe \"Token expiry timestamp (Unix)\" — names the epoch, not the unit |\n| `packages/spec/src/kernel/plugin-loading.zod.ts:99` | `timestamp` | nowhere (five lines above `durationMs` in the same object) |\n| `packages/spec/src/kernel/plugin-loading.zod.ts:154` | `startedAt` | nowhere |\n| `packages/spec/src/kernel/plugin-loading.zod.ts:159` | `completedAt` | nowhere |\n| `packages/spec/src/shared/connector-auth.zod.ts:38` | `tokenExpiry` | nowhere (the one instant INSIDE the census — it matches the `expiry` token) |\n| `packages/spec/src/system/supplier-security.zod.ts:188` | `deadline` | nowhere (\"Remediation deadline timestamp\") |\n\n⛔ Not instants, deliberately excluded by the census: `system/collaboration.zod.ts:207 lamportTimestamp` and `:221 lamportClock` — logical clocks.\n\n## What to do\n\nEach row adopts `EpochMs` (`packages/spec/src/shared/epoch.zod.ts`, `z.number().int()`), keeping its own `.describe()` and JSDoc (the `EpochMs` docblock says: name the key `*At`; ⛔ this card does **not** rename keys — `timestamp`, `tokenExpiry`, `deadline`, `validUntil` keep their names; a rename is a separate retirement with its own ADR-0087 entry and is not ruled here). Where a JSDoc says \"(Unix milliseconds)\" it stays; where nothing says it, the describe gains the unit the type now carries.\n\n## Measurements the PR must carry (they decide the changeset shape, ⛔ not the letter)\n\n1. `EpochMs` is `int()`: does any first-party producer (tests, fixtures, examples, plugins) write a **non-integer** into any of the 10 keys? Grep + run the suites. Zero ⇒ this is alignment to a declared convention (level per AGENTS.md changeset rules, no banner). Any hit ⇒ it is a tightening that refuses a value someone writes today: `**BREAKING**` banner + ADR-0087 disposition per the launch-window section (level stays `minor` pre-GA).\n2. The gate's own summary line `N declared EpochMs instant(s)` reads **6** today and **16** after (acceptance reading; run `tsx scripts/check-duration-unit-keys.ts --list` in `packages/spec`).\n3. `tokenExpiry` leaves the census's A-class 23 (it stops being a `[name: -] [prose: -]` row) — record the before/after `--list` count.\n\n`Clause-②`: the seat derives at claim. Prediction for the record: a narrowing of the accepted set on 10 published keys, no new symbol, no widening ⇒ `no`; if measurement 1 finds a producer, still `no` (tightening), but the banner applies.\n\n## Fences\n\n- ⛔ Durations (census classes A-true, B, D-durations) are **tranche 2**, gated on the definition sub-card filed alongside this one — do not touch `shutdownTimeout`, `loadTime`, `saveTime`, `estimatedMigrationTime`, `resolution` or any duration row here.\n- ⛔ No gate change in `check-duration-unit-keys.ts`; this tranche is data-only.\n- ⛔ `content/docs/releases/**` untouched.\n\n## Re-check before claiming\n\n```\ngit fetch origin main && cd packages/spec\ngit grep -n -E 'EpochMs' origin/main -- src | wc -l            # baseline reference count\ntsx scripts/check-duration-unit-keys.ts --list | grep -c 'declared EpochMs'   # the summary line exists\n```\nConfirm each of the 10 rows is still a bare `z.number()` at the named line (lines drift; the key + file are the identity).\n\n## Refs\n\n#18080 (ruling C, batch #133 item 4) · #18078 (census) · #15676 (ruling B, the instants shape) · #15939 (parent epic, closed) · `packages/spec/src/shared/epoch.zod.ts`\n\nDedup terms: `EpochMs`, `bare z.number() instant`, `tokenExpiry`, `plugin-loading timestamp startedAt completedAt`, `supplier-security deadline`, `census 18078 class C`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

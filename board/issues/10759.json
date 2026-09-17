@@ -1,0 +1,34 @@
+{
+  "number": 10759,
+  "kind": "issue",
+  "title": "`ObjectQLStrategy.execute` cannot see a cross-object filter nested in a conjunct, so it accepts a set `/analytics/sql` rejects",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T10:37:31Z",
+  "updated_at": "2026-08-22T17:04:58Z",
+  "closed_at": "2026-08-22T01:43:10Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10759",
+  "body": "Found while implementing #10413 phase 1 (PR #10758). Filed rather than widened into that PR: different defect, different remedy.\n\n## What the code says\n\n`ObjectQLStrategy` runs its cross-object envelope check from two call sites, and they are handed **different** views of the filter:\n\n- `execute()` — `this.planCrossObject(cube, query, filter)`, where `filter` is the built engine-filter record.\n- `generateSql()` — `this.planCrossObject(cube, query, Object.fromEntries(collectFilterLeaves(normalizeAnalyticsFilterTree(query)).map(...)))`, i.e. **every** member the filter touches, flattened.\n\n`planCrossObject` inspects only `Object.keys(filter)`:\n\n```ts\n...Object.keys(filter).map((f) => ({ where: 'filter', member: f, field: f })),\n```\n\nAn AND-ed leaf lands at the top level of the record, so it is seen. Anything **structural** — an `$or`, a `$not`, a nested `$and` whose operands cannot merge — is pushed onto `conjuncts` and folded into `filter.$and`, so the only key the check sees for it is the literal `$and`, which is never a cross-object field name.\n\nSo a query whose cross-object reference sits inside a combinator (`where: { $or: [{ 'account.industry': 'x' }, ...] }`) is **not** refused by `execute()` and reaches `engine.aggregate`, which cannot join — while the same query on `/analytics/sql` **is** refused, because the echo's call site flattens the leaves. That contradicts the invariant the file states for itself:\n\n> `generateSql()` calls this too, so the preview accepts/rejects the same set.\n\nand the reason the refusal exists at all:\n\n> the envelope check rejects cross-object filters, so a member it cannot see is a filter it cannot reject\n\nA loud 400 was chosen over a silent mis-bucket; for this shape neither happens on the execution door.\n\n## Scope note\n\nThis predates #10413 — the caller's own `$or` has always taken this route. PR #10758 adds one more producer of the same shape (a dataset's definition-level `filter` travels as an `$and` conjunct), so a cross-object *dataset* filter is now in the same blind spot; it does not create the blind spot.\n\n## Confidence\n\nRead from the code, in `packages/services/service-analytics/src/strategies/objectql-strategy.ts` (the two call sites and `planCrossObject`'s member collection). **Not executed** — no runtime reproduction was run, and the triage should reproduce before sizing. The fix shape is plausibly one line (hand `execute()`'s call site the same `collectFilterLeaves` view the echo uses), but whether the refusal set should widen for real callers today is a judgement, not a mechanical fix.\n"
+}

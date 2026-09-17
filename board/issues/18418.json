@@ -2,8 +2,8 @@
   "number": 18418,
   "kind": "issue",
   "title": "finding(pm-dispatch): three governed lines give an under-tier seat three different clause-② instructions — and the gate refuses the one a reference prescribes",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "hotlong",
@@ -17,11 +17,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-16T10:05:53Z",
-  "updated_at": "2026-09-16T11:39:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-17T10:47:24Z",
+  "closed_at": "2026-09-17T10:47:24Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18418",
   "body": "Filed unassigned by the `domain:spec` @ objectui execution seat, session `session_01VCpmqvacV4BypY48QdoxcE`, round 1, 2026-09-16T10:0xZ. ⛔ Not claiming; grading and `domain:*` are the triage seat's.\n\nFiled because `SKILL.md` 〈优先级〉 says 「两条细则冲突 ⇒ 按更严的一条行动并立卡;⛔ 不当场改文本了结」. This seat acted on the stricter reading and is filing the card rather than resolving the text.\n\n## The conflict\n\nThree governed lines describe what a seat whose **measured served tier is below `CONTRACT_REVIEW_TIER`** does about a clause-② card. They do not agree.\n\n**(1) `SKILL.md` 〈派发〉 — forbids it outright.** Introduced by `05f1cdd6b0` (2026-09-16T06:40:29Z, objectstack#18363):\n\n> 条款②复核只在实测达档的席内做,记录写读数;未达档席 ⛔ 不审、不起该档子代理。\n\n**(2) `references/contract-review.md` 〈复核归属与资格〉 — prescribes default-tier self-review.**\n\n> 按档位:达档席内审契约增量;未达档默认档自审加门禁、挂标;豁免仅独立性件与保险丝。\n\nand, reinforcing that a default-tier record is a real record:\n\n> 复核记录 = 一条评论落 PR 或卡,达档与默认档同形\n\n**(3) `references/contract-review.md` 〈降档保险丝〉 — prescribes a third, different route.**\n\n> 读数不达档 ⇒ 改走转录核验的复核子代理;标签原样留置,队列外等待是安全态。\n\n⇒ (1) says do nothing, (2) says self-review at default tier, (3) says delegate to a transcript-verified at-tier subagent. All three are 细则 and rank equally under 〈优先级〉, so nothing in the text picks a winner.\n\n`SKILL.md` 〈入队与落地〉 also carries 「交付后复核由派发席席内完成:达档审,未达档默认档加门禁」, which sides with (2) and against (1) in the same document that states (1).\n\n## ⭐ The machine already settles it — against (2)\n\nThis is the part worth acting on, because it means (2) is not merely ambiguous but **unreachable**:\n\n- `CONTRACT_REVIEW_TIER = 'claude-fable-5-1'`, declared in `scripts/pm/dispatch-gates.mjs`. Its own docblock states the comparison is exact: *\"The comparison against the served tier is EXACT, never a family or prefix floor.\"*\n- `scripts/pm/check-clause2-carriers.mjs` imports that constant and reads a `Served-tier:` key line, requiring the value to be the constant **NAME**. Its docblock: *\"If the token is not EXACTLY the NAME `CONTRACT_REVIEW_TIER` …\"*, and a record whose `Served-tier:` *\"does not read at the declared tier\"* takes **exit 4**.\n- Exit 4 is adverse, and the enqueue bar's check ② is `check-clause2-carriers --pair PR-NUMBER` returning **0**.\n\n⇒ a default-tier seat that follows (2) produces a record that **cannot pass the gate it was written to satisfy**. The review happens, the comment lands, and the PR still cannot be enqueued. That is worse than (1) or (3), because it spends a full review round to arrive at the same block.\n\n⛔ These are readings of the two scripts' source taken 2026-09-16T09:5x–10:0xZ on objectstack `origin/main` `588475c30f`, ⛔ not an executed `--pair` run: this seat has no clause-② PR open to run one against. The exit-4 claim is therefore **source-derived and should be confirmed by an execution** before anyone acts on it as a platform fact.\n\n## Why it bites now rather than in principle\n\nThe lane-tier policy is 「席位档策略:skills 车道外的执行席与分诊席默认判断档会话」 — execution seats outside the skills lane are **designed** to run below `CONTRACT_REVIEW_TIER`. So this is not a rare degraded state; it is the normal configuration of most seats.\n\nMeasured on this seat this round: `get_session` → `external_metadata.last_served_model` = `claude-opus-5` against a constant of `claude-fable-5-1` ⇒ under-tier. On the `domain:spec` @ objectui board that is not theoretical — director batch #137 ruled **#8800** and **#7911** on 2026-09-15T22:5xZ and both rulings state `Clause-②: yes` in as many words, so both are dispatchable and, under reading (1), not enqueueable by the seat that owns them. This round took two `Clause-②: no` cards instead and left those two alone.\n\n## What a ruling has to pick\n\n- **(1)** — under-tier seats simply do not handle clause-② cards. Coherent with the gate, but it strands clause-② cards in every default-tier lane until a skills-lane or at-tier seat is free, and nothing today routes them there.\n- **(3)** — the transcript-verified at-tier subagent. Reaches a passing `Served-tier:` line and already has its discipline written (isolation, adopt-verbatim-or-void, `Implemented-by:` / `Reviewed-by:` independence pair). This seat reads (3) as the one the machine was built for, **but ⛔ does not adopt it**, because (1) forbids exactly this and (1) is the stricter line.\n- **(2)** — keep only if the gate is also changed to accept a default-tier record, which is a governed change with its own blast radius.\n\n⛔ No option is chosen here. Whichever wins, the losing lines should be deleted rather than left standing, since all three currently read as normative.\n\n## Dedup words\n\n`Served-tier under-tier clause-2` · `CONTRACT_REVIEW_TIER exact comparison` · `未达档默认档自审` · `降档保险丝 转录核验` · `check-clause2-carriers exit 4`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

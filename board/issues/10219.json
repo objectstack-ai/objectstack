@@ -1,0 +1,34 @@
+{
+  "number": 10219,
+  "kind": "issue",
+  "title": "per-item publish（POST /meta/:type/:name/publish）不广播 metadata:reloaded：flow 发布后在存活 kernel 上永不绑定；view drafts 对按项发布还不可见",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T13:59:14Z",
+  "updated_at": "2026-08-22T17:04:03Z",
+  "closed_at": "2026-08-20T16:03:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10219",
+  "body": "## 现象（P1：按项发布后 flow 永不重绑；view drafts 两套账本）\n\n2026-08-20 cloud 本地 rig（objectstack `4389fe932`），AI 授权的元数据经 `POST /api/v1/meta/:type/:name/publish`（per-item ADR-0033 publish）逐项发布后：\n\n**缺陷 A：per-item publish 不广播 `metadata:reloaded`，flow 在存活 kernel 上永不绑定。**\n\n- 对象发布后正常注册（物理表创建、data API 可写）；\n- 两个 flow（record-change + time-relative）发布为 `state='active'` 后，**没有任何 bind 日志**，实测翻记录状态自动化不触发；\n- 直到强制 kernel 重建（bump freshness → eviction），`syncFlowsFromProtocol` 在 `kernel:ready` 才把它们绑上，此后执行完全正常。\n\nservice-automation 的 rebind 依赖 `metadata:reloaded`，而该 hook 的两个触发点（`plugin.ts` 注释自述）是 dev artifact recompile 和 **`publishPackageDrafts`** 之后的 dispatcher 广播——per-item 的 `promoteDraft` 路径漏掉了。#2560 修过冷启动，这是同类缺口的热路径按项版本。\n\n**缺陷 B：per-item publish 看不见 view drafts，UI 批量发布却能发。** 同一批 AI 产出的 4 个 view（`sys_metadata` 里 `state='draft'` 清晰可见），per-item 端点全部答：\n\n```\n404 {\"error\":\"[no_draft] No pending draft exists for view/customer.list — nothing to publish.\",\"code\":\"NO_DRAFT\"}\n```\n\n而 console 首页的「你有 4 项未发布的更改 → 发布」一键成功把这 4 个 view 发布为 active。同一份 draft，两个发布面一个看得见一个看不见——draft 账本存在两套视角。\n\n## 修复要求\n\n1. per-item publish 成功后与 `publishPackageDrafts` 走同一条 `metadata:reloaded` 广播（让 service-automation 的 `resyncFlowsFromProtocol` 收到）；\n2. 排查 per-item 发布的 draft 定位逻辑为何对 view 类型失明（名字含 `.` 的组合名？类型注册差异？），与批量路径对齐；\n3. 回归测试：REST 逐项发布一个 record-change flow → 不重启 kernel 直接写记录 → 断言 flow 执行。\n\n## 复现\n\nrig 上任意 draft flow 走 `POST /api/v1/meta/flow/<name>/publish`，然后在不触发 kernel 重建的情况下写记录：flow 不执行；grep 日志无 `[record-change] bound flow`。\n"
+}

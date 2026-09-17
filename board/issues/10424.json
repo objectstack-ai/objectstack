@@ -1,0 +1,34 @@
+{
+  "number": 10424,
+  "kind": "issue",
+  "title": "Security posture: a metadata-store OUTAGE is reported as an absent declaration — getDiagnosed's verdict is computed and discarded",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T18:37:58Z",
+  "updated_at": "2026-08-22T17:05:55Z",
+  "closed_at": "2026-08-21T09:40:28Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10424",
+  "body": "## What\n\n`SecurityPlugin.getObjectSecurityMeta` resolves an object's posture with:\n\n```\nlet obj = this.ql?.getSchema(object);\nif (!obj) { try { obj = await this.metadata?.get?.('object', object); } catch { obj = null; } }\n…\nunresolved: !obj\n```\n\n`IMetadataService.get` is documented as **ambiguous by construction** — its own TSDoc\n(`packages/spec/src/contracts/metadata-service.ts:305`) says `undefined` means \"not found\"\n*and* \"every loader that could hold it failed\", and directs callers to `getDiagnosed`\n(#5840) \"wherever the difference could change a decision\". `getDiagnosed` returns a\n`degraded` verdict alongside the data; `MetadataManager` already computes it and `get`\ndiscards it.\n\nHere the difference does change something: a **metadata-store outage** and a\n**genuinely absent declaration** collapse into one `unresolved: true` and, since #10401,\ninto one message — *\"neither the live schema nor the metadata service returned a\ndeclaration for it … Check that the object is declared and published on this runtime.\"*\nThat advice is correct for an absent object and misleading during an outage, where the\nremedy is to look at the store, not at the declaration. Same defect class as #10401, one\ninput over.\n\n## Not an access question\n\nThe **deny is right either way** and must stay fail-closed (#3545) — a degraded read\nmust never resolve to a grant. This is about the *explanation* and the *log line* only,\nexactly like #10401: `unresolvedCause` (added by #10401, `security-plugin.ts`) already\ncarries an explanation-only discriminator with a `'unknown'` fail-safe default, so a\nthird cause (`'metadata_unavailable'`) would slot into the existing\n`unresolved-posture.ts` wording module rather than needing new plumbing.\n\n## Why it is filed rather than fixed in #10401\n\n#10401's scope is the unpublished-draft/unresolvable split. This is a different input\n(the read's own trustworthiness), it needs the optional `getDiagnosed?` capability probed\nand a fallback for services that do not implement it, and the \"outage\" wording deserves\nits own review. Filed unassigned.\n\n## Where\n\n- `packages/plugins/plugin-security/src/security-plugin.ts` — `getObjectSecurityMeta`,\n  the `metadata.get` call and `unresolved: !obj`\n- `packages/plugins/plugin-security/src/unresolved-posture.ts` — where a third cause\n  would be worded\n- `packages/spec/src/contracts/metadata-service.ts` — `get` vs `getDiagnosed` (#5840)\n\nFound while implementing #10401 (PR #10423).\n"
+}

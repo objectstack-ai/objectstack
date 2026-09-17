@@ -10,16 +10,20 @@
     "id": 328766734,
     "type": "User"
   },
-  "labels": [],
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-14T08:47:53Z",
-  "updated_at": "2026-09-14T08:47:53Z",
+  "updated_at": "2026-09-17T14:01:51Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18163",
   "body": "## Gap\n\n`@objectstack/spec` 17.4.0 exports no type for the `ctx.api` a `*.hook.ts` body receives. Checked on the installed package: `grep -rhoE \"export (type|interface) (HookApi|HookContext|HookObjectApi)\" node_modules/@objectstack/spec/dist/data/*.d.ts` returns nothing. A hook therefore casts `ctx.api as HookApi | undefined` against a type the **app** wrote.\n\n## Evidence (hotcrm, `origin/main` `c716a2c`)\n\n- `src/objects/_hook-api.ts` — ~2,358 authored tokens declaring `HookQuery`, `HookCountQuery`, `HookUpdateDoc`, `HookUpdateOptions`, `HookDeleteOptions`, `HookObjectApi`, `HookApi`; imported by all 17 hook files in the app.\n- The file exists to make the `where` / `filter` mixing hazard a compile error (`HookQuery` omits `filter`; `test/hook-query-predicate.test.ts` pins the engine per method) — i.e. it encodes engine behaviour the platform knows and the app re-derived.\n- Under the ADR-0130 package split (objectstack-ai/hotcrm#1904) it is the largest source file more than one package needs, and it is a compensation for a platform gap, which hotcrm's AGENTS.md forbids keeping once the platform supplies the type.\n\n## Ask\n\nExport the hook API surface from `@objectstack/spec/data` (or wherever the hook contract lives) so that an app's hook can `import type { HookApi } from '@objectstack/spec/data'` and delete its own copy. The `where`-only query shape (no `filter` key) should be the exported shape, since the engine folds `filter` to `where` and refuses both.\n\nDedupe words: HookApi, hook ctx.api type, _hook-api.ts, HookQuery, HookObjectApi."

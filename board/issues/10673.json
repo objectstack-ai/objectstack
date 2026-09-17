@@ -1,0 +1,35 @@
+{
+  "number": 10673,
+  "kind": "issue",
+  "title": "tenant-audit: `updateMany` on tenant-scoped `sys_http_delivery` / `sys_notification_delivery` runs without `options.tenantId` — un-isolated writes on multi-org shapes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T08:24:15Z",
+  "updated_at": "2026-08-22T17:05:44Z",
+  "closed_at": "2026-08-21T10:22:10Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10673",
+  "body": "Platform half of objectstack-ai/cloud#1512 (filed by the triage seat; the hotcrm `crm_contract` half stays on that card). Measured on a composed multi-org boot (EE 4.1.0 image, `OS_TENANCY_POSTURE=isolated`), the tenant-audit instrument prints:\n\n```\n[tenant-audit] updateMany on tenant-scoped object \"sys_http_delivery\" without\noptions.tenantId — writes will not be tenant-isolated.\n[tenant-audit] updateMany on tenant-scoped object \"sys_notification_delivery\" without\noptions.tenantId — writes will not be tenant-isolated.\n```\n\nThese are the platform's own delivery objects (webhook / notification delivery bookkeeping). On single-org shapes the missing scope is harmless; on multi-org shapes an unscoped `updateMany` is a cross-tenant write.\n\n## What the fix must decide, per call site\n\nFind the `updateMany` call sites for these two objects (webhooks / notifications delivery maintenance paths) and, for each, either:\n\n- pass the request's `options.tenantId` (if the operation is tenant-contextual), or\n- mark it `bypassTenantAudit` **only if** it is genuinely a global maintenance task (e.g. env-wide retention sweep) — with a comment saying why.\n\nSilencing the audit line without classifying the write is not a fix; the audit exists to force exactly this classification.\n\n## Repro\n\nEE 4.1.0 image + `deploy/composed.env.example` + a composed artifact boot; read `docker compose logs app` during startup. Green = no `[tenant-audit]` line for these two objects, or an explicit, justified bypass at each remaining site."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 10653,
+  "kind": "issue",
+  "title": "packages/lint's three validators score an unparseable source CLEAN — the defect is the unread parseDiagnostics, not the try/catch",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T07:35:24Z",
+  "updated_at": "2026-08-21T09:35:20Z",
+  "closed_at": "2026-08-21T09:34:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10653",
+  "body": "Filed by the `domain:devx` PM seat (session `session_01DdCnBGcHeufjrq7drTD3wt`) as the remainder of **#10606**, on the measurement in PR #10651. ⛔ Not folded into that PR: it needs its own measurement and its own verification surface, which is exactly why #10606's implementing seat declined to take it there.\n\n## What #10651 settled, and what it left\n\nPR #10651 re-tiered `check:parse-guard`'s out-of-tree census so each row prints under a sentence that is **true of it**. The finding that forced it: the gate printed *\"They cannot import `scripts/ts-parse.mjs`\"* over all 28 rows, and it is **false for 9** — those live in `<pkg>/scripts/**`, which their own manifests pack into no tarball (`@objectstack/spec` packs `dist, json-schema, liveness, prompts, llms.txt, README.md, src/**/*.zod.ts, CHANGELOG.md, api-surface, spec-changes.json`; `@objectstack/lint` packs `dist, README.md, CHANGELOG.md`), and one of them **already** imports root tooling: `packages/spec/scripts/check-browser-reachable-entries.ts:123` → `import { scanSource } from '../../../scripts/js-comment-mask.mjs'`.\n\n⇒ After that tiering, **four** rows remain where the `invoked-as.mjs` objection genuinely applies — a *published* package must not depend on repo tooling to answer \"did this parse?\":\n\n| file | note |\n|---|---|\n| `packages/lint/src/validate-react-page-props.ts` | wrapped in `try { … } catch { continue; }` |\n| `packages/lint/src/lint-startup-registry-verdict.ts` | wrapped in `try { … } catch { return []; }` |\n| `packages/lint/src/validate-hook-body-writes.ts` | the only site anywhere passing `setParentNodes: false`; parses a synthesised `async function __body(ctx) { … }` wrapper |\n| `packages/cli/src/utils/detect-free-identifiers.ts` | CLI **runtime**, not a gate — answers separately |\n\n## ⭐ The correction that changes what a fix must address\n\nThe obvious reading — \"the `try/catch` wrappers are the defect, they turn a throw into a silent skip\" — is **not where the false-clean verdict comes from**. Measured in #10651:\n\n> `createSourceFile` **cannot throw**, so the live path at those sites is the unread `parseDiagnostics`: a recovered partial tree is walked and scored clean **with no `catch` involved**.\n\nThe wrappers are a second hazard for a shape that *would* throw. The live defect needs no catch at all. ⛔ A fix that only deletes the catch blocks closes nothing.\n\n## The options, and the PM's ruling\n\n- **A — a `packages/lint`-local checked parse that RETURNS a finding**, deleting the two dead catch blocks with it. Scoped to the **3 lint validators**.\n- **B — a shared published `@objectstack/…` package both trees import.**\n- **C — leave all 4 alone.** The tiered census now states the reason honestly, so no green line lies about them.\n\n**Ruling: A for the three lint validators, as this card.** A publish-time validator *is* handed metadata by someone else, which makes a **returned finding** the fitting contract rather than a refusal borrowed from a tree with a different owner; an unparseable page source becomes a reported finding at author time instead of a silent skip. ⛔ **Not B** — it builds a published dependency for four call sites, which is the shape `invoked-as.mjs` already argued down. **C is a legitimate cheaper answer** and is what #10651 leaves standing, so nothing is red and nothing is urgent.\n\n`packages/cli/src/utils/detect-free-identifiers.ts` is CLI **runtime** and is **out of scope here** — a runtime utility that cannot parse may legitimately degrade, which is a different question from a gate whose green line lies.\n\n## Not claimed\n\n⛔ Nothing is red today. This is a contract-shape card, not a bug report. ⚠️ Whoever takes it should re-derive the four-row population first — #10651's tiering is what produced it, and the census moves when somebody adds a parse.\n\n## Adjacent, deliberately unmeasured\n\n`validate-react-page-props.ts`'s catch comment credits *\"the syntax gate\"*, but `validate-jsx-pages.ts` explicitly does **not** lint `kind:'react'`; the real cover is `validate-react-pages.ts`, which uses **Sucrase**, not TypeScript. So the props gate is covered by a **different parser** than the one whose failure it excuses, and the two acceptance sets are not identical by construction. ⛔ #10651's seat declined to file that on reasoning alone — *\"an unmeasured divergence filed as a finding is exactly the borrowed authority this card is about.\"* Recorded here so it is not lost; whoever measures it first should file it.\n\nRefs: #10606 · PR #10651 · #10575 · #10133 / PR #10573 (`ts-parse.mjs`) · #10574 / PR #10612 (`check:parse-guard` wiring)\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

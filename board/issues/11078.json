@@ -1,0 +1,33 @@
+{
+  "number": 11078,
+  "kind": "pull_request",
+  "title": "feat(pm): provenance-aware exception for the docs-audit --write artifact in the governed-fence predicate",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-22T15:47:23Z",
+  "updated_at": "2026-08-22T16:07:00Z",
+  "closed_at": "2026-08-22T16:06:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-22T16:06:59Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11078",
+  "body": "Fixes #9866\n\n## What\n\nImplements the maintainer-ruled **shape 2 — the provenance-aware exception** — in `scripts/pm/check-governed-merges.mjs` (rulings on the card, verbatim: 「10277 同意 C」 2026-08-20, re-confirmed over the same day's earlier shape-1 ruling: 「A:按方案 2(最新裁定)」 2026-08-22).\n\nThe `--test` predicate now lifts exactly one path — `.claude/workflows/docs-accuracy-audit.js` — from the governed hit set, and only when that file's diff **byte-equals what `node scripts/docs-audit/check-audit-scope.mjs --write` produces on the tree under test**: the tree's copy must equal `replaceBlock(baseFileAtMergeBase, docsDerivedFromThisTree)`, computed with the generator's own exported `replaceBlock` and this tree's own docs derivation. So a page-adding docs PR whose only `.claude/**` touch is the gate's own regeneration no longer forks to a human merge, while every hand edit to the same file still does.\n\n## The four ruled constraints, where each lands\n\n1. **Recompute, never a stored baseline** — `recomputeDocsAuditProvenance` produces the expected bytes at verdict time from the tree under test (`git merge-base origin/main HEAD` → `git show` for the base file; `affected-docs.mjs --all --json` on this tree for the derivation; the generator's own `replaceBlock` for the splice). Nothing stored or cached is consulted.\n2. **Byte-exact, no shape heuristics** — the only pass is string equality against the recomputed output; a reordered-but-set-equal block rejects (pinned).\n3. **A NAMED single-file exception** — `GENERATED_SURFACE_EXCEPTIONS` is structurally a per-surface list, seeded with only this entry per the ruling; `GOVERNED_SURFACES` and every other judgment are unchanged (a verdict that never consults the exception renders byte-identically, pinned).\n4. **Self-test shipped** — 29 new assertions (90 → 119) covering the four ruled cases against the generator's real `renderBlock`/`replaceBlock` (pure regen passes · in-block hand edit rejects · out-of-block edit rejects · mixed regen+hand-edit rejects), plus byte-exactness on reorder, fail-closed on every unverifiable input (no base version / unreadable file / empty derivation / splice failure / absent provenance), single-file-not-a-class (a sibling `.claude/workflows/*.js` never consults provenance), and the untouched mixed-diff rule: a hit on any OTHER governed path still forks the whole PR.\n\nFail-closed is the default everywhere: if the recompute cannot run in the caller's environment (no git, no base, generator failure), the path simply stays governed with a stated reason — the fence holds; nothing degrades to a baseline compare.\n\n**Deliberately unchanged:** the post-merge SWEEP still lists a pure-regeneration merge. Under-enumeration is the one direction the sweep must never be wrong in (#9902), and recomputing a generator against historical trees is a different machine — the exception narrows the pre-merge predicate, not the audit trail.\n\n## Verification (all at `7dd5db4`)\n\n- `node scripts/pm/check-governed-merges.mjs --self-test` → `✓ check-governed-merges --self-test: 119 assertions (…)`, exit 0.\n- Ablation (fail-open mutation `=== true` → `!== false`, confirmed on disk by marker grep 1/0 before running): self-test exit 1, failing assertion `absent-provenance-fails-closed-never-open`; restore leg confirmed (diff 0 lines, marker count 0, 119 green again). No build step exists for these scripts; the mutation/restore proof is the on-disk grep.\n- End-to-end on this tree (temp docs page + real `--write`, restored via trap after each leg):\n  - real `+1/-0` regeneration (the measured incident shape) → `--test` exit **0**, `PURE REGENERATION` line;\n  - in-block hand edit (confirmed on disk) → exit **3**, `did NOT lift … differs from the generator output recomputed on this tree`;\n  - out-of-block hand edit → exit **3**;\n  - mixed diff with `.claude/skills/pm-dispatch/SKILL.md` → exit **3** (workflow lifted, PR still governed).\n- Landing class of this PR: `--test scripts/pm/check-governed-merges.mjs` → `0 of 1 path(s) hit the register … ✅ NOT governed`, exit 0.\n- Derived gate families (`dispatch-gates.mjs`, no paths passed — change set from merge base): `check:cross-package-test-inputs` · `check:entry-guard` · `check:parse-guard` · `check:pm-governed-merges` · `check-ci-filter-parity.mjs` all exit 0; plus card-adjacent `check:pm-governed-prose` (28 self-test cases + 2 surfaces OK), `check:nul-bytes` (OK, 6402 files), and the generator's own `check-audit-scope.mjs --self-test` (24 cases) + verify mode (in sync, 189 docs) — all exit 0.\n\nScripts-only tooling change; releases nothing — `skip-changeset` applies.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01MsbKEG4LtERSLaDrbehM3e)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01MsbKEG4LtERSLaDrbehM3e)_"
+}

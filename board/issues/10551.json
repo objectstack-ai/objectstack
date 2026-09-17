@@ -1,0 +1,32 @@
+{
+  "number": 10551,
+  "kind": "issue",
+  "title": "finding(objectql): the `./registry` module-mock is 12 hand-copies of one factory, and they have drifted — one copy omits `getAllObjects` (inert today, the #9002 shape if a path ever reaches it)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T02:54:08Z",
+  "updated_at": "2026-08-22T17:05:42Z",
+  "closed_at": "2026-08-21T10:40:27Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10551",
+  "body": "Filed unassigned by the dev seat measuring #9165, session `session_01DdCnBGcHeufjrq7drTD3wt`. Measured on `origin/main` @ `4544be2600`. ⛔ **No `domain:*`** — triage's field.\n\n⛔ **This is NOT a claim that any test is vacuous today.** The omission below is **inert**, and that is a measured statement, not an assumption — see \"What was measured\". It is filed because it is the exact substrate the #9002 instance grew on, and because the drift is invisible by construction.\n\n## The measurement\n\n`vi.mock('./registry', …)` appears in **12** test files, all in `packages/objectql/src/`. All 12 are hand-copies of one factory — same `const instance: any = {…}`, same `function SchemaRegistry() { return instance; }`, same `Object.assign(SchemaRegistry, instance)`, same trailing `computeFQN` / `parseFQN` / `RESERVED_NAMESPACES`.\n\nThey have drifted. Eleven declare **12** members; one declares **11**:\n\n| file | members | delta |\n|:--|--:|:--|\n| the other 11 (`engine.test.ts`, `engine-filter-tokens`, `engine-multivalue-normalize`, `engine-validation-locale`, `engine-middleware-operation-vocabulary`, `engine-autonumber-*` ×6) | 12 | — |\n| **`packages/objectql/src/engine-count-read-filter.test.ts`** | **11** | **no `getAllObjects`** |\n\n`getAllObjects` is called at **13** sites in `packages/objectql/src` non-test source, and several of those calls sit under a `catch` that recovers — including `engine.ts:7049` in `announceOpenMigrationGates()`, whose catch is parameterless and whose whole body is the comment `// An advisory must never be the reason a boot fails.` That is the shape that made #9002 silent: a missing member raises a **`TypeError`**, a recovering `catch` absorbs it, and an incomplete double reads as \"a registry with nothing in it\".\n\n## What was measured, and what it says\n\nA recording `Proxy` was placed on all 12 mock instances (records a `get` for any member the double does not declare, out-of-band, then returns `undefined` so behaviour is unchanged), and the **whole** objectql suite was run:\n\n```\nTest Files  224 passed (224)\n     Tests  3956 passed (3956)\nmissing-member accesses recorded: 0\n```\n\n⇒ No registry double in this package is accessed for a member it does not declare, on any path its suite drives. **`engine-count-read-filter.test.ts`'s omission is latent, not live.**\n\n⭐ **Positive control, in the same 224-file configuration** (⛔ a zero-hit without one proves nothing): deleting `getAllObjects: vi.fn(() => [])` from `engine-middleware-operation-vocabulary.test.ts` — reintroducing #9002 exactly — makes the same run print\n\n```\nOS_PROBE_MISSING engine-middleware-operation-vocabulary.test.ts::getAllObjects\nTest Files  1 failed | 223 passed (224)\n```\n\nso the instrumentation does reach the real path and does name the member. Restored byte-clean afterwards (`git diff --exit-code` = 0).\n\n## Why file it, given it is inert\n\n1. **The drift is invisible.** Nothing compares the 12 copies. Whether a given copy is complete is decided by which paths its own suite happens to drive — so an omission is inert until an unrelated test is added, and then it is silent rather than red.\n2. **The #9002 lesson did not propagate.** `engine-middleware-operation-vocabulary.test.ts` carries a 12-line comment explaining the #9002 swallow and why `getAllObjects: vi.fn(() => [])` is the truthful body. That comment sits in **one** of the 12 copies. The other 11 never learned it, because there is no shared factory to learn it in.\n3. It is the cheapest thing that could remove a whole defect class from this package: one shared factory, 12 call sites.\n\n## Candidate shapes, none costed\n\n1. **Collapse the 12 into one shared factory** in a test-support module (`vi.mock('./registry', async () => …)` accepts an async factory, so the import is legal despite hoisting). Removes the drift by construction.\n2. **Add the missing `getAllObjects: vi.fn(() => [])`** to the one outlier only. One line, and it leaves the drift mechanism in place.\n3. **Make the doubles self-checking** — the recording-`Proxy` shape above, kept rather than thrown away, with an `afterEach` failing the run on the record. This is the prior art in `scripts/check-cross-repo-closer-outcome.mjs` (`unstubbed()`, #9643), and its measured first-run cost in this package is **zero reds**. ⛔ Deliberately not recommended here: choosing it is a verification-strategy act that belongs with #9165's disposition, not with this file.\n\n## Reproduce\n\n```\ngit worktree add ../os-9165 origin/main && cd ../os-9165 && pnpm install\npnpm --filter '@objectstack/objectql^...' build\n# member-set diff across the 12: AST-read `const instance` from each file that greps `vi.mock('./registry'`\npnpm --filter @objectstack/objectql exec vitest run --maxWorkers=2      # 224 files green, both with and without the outlier's omission\n```\n\n## Related\n\n#9165 (the card this was measured under) · #9002 / PR #9163 (the instance this shape produced) · #8896 / PR #9067 (the same defect in a metadata-protocol engine double) · #9285 (three `getAllObjects?.() ?? []` seams in `plugin.ts`)\n"
+}

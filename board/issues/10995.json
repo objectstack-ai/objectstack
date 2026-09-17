@@ -1,0 +1,34 @@
+{
+  "number": 10995,
+  "kind": "issue",
+  "title": "driver-sql (PG): JSON-field values are bound without JSON.stringify — non-empty arrays and bare strings 500, empty array silently stored as {}",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p0"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-22T03:38:19Z",
+  "updated_at": "2026-08-22T15:42:14Z",
+  "closed_at": "2026-08-22T15:35:08Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10995",
+  "body": "Found live on the cloud control plane (`cloud.objectos.ai`, Postgres/Neon via driver-sql) while auditing browser console errors. Filed here per contract-first: the mechanism is the driver's, every PG-backed deployment inherits it.\n\n## Reproduction matrix — one PATCH, only `value` changes\n\n`sys_user_preference.value` is a JSON-typed field. `PATCH /api/v1/data/sys_user_preference/:id` with:\n\n| body `value` | result |\n|---|---|\n| `{\"a\":1}` (object) | 200 |\n| `42` (number) | 200 |\n| `{\"items\":[1,2]}` (array nested in object) | 200 |\n| **`[{\"type\":\"app\",…}]` (non-empty array)** | **500 `DATABASE_ERROR`** |\n| **`\"x\"` (string)** | **500 `DATABASE_ERROR`** |\n| **`[]` (empty array)** | **200 — but silently stored as `{}`** (see mechanism) |\n\nPOST behaves identically (a create with an array `value` 500s).\n\n## Mechanism (inferred from the signature — verify at the driver)\n\nThe matrix is the classic node-postgres fingerprint for **passing JSON-field values to the driver without `JSON.stringify`**:\n\n- JS **object** → node-pg serialises to JSON text → valid jsonb ✓\n- JS **array** → node-pg converts to a **Postgres array literal** (`{…}`) → invalid JSON text → 500; **except `[]`, whose literal `{}` happens to be valid JSON — so an empty array is accepted and silently stored as an empty *object*.** That last row is data corruption, not an error, and it will outlive any fix that only handles the 500s.\n- JS **string** `x` → passed raw → not valid JSON text (`\"x\"` would be) → 500; a numeric string/number passes because `42` is valid JSON.\n\nExpected: the SQL driver's PG path must `JSON.stringify` every JSON-field binding (insert AND update), exactly as it presumably does for objects via node-pg's default object handling — relying on node-pg's per-type defaults is the bug.\n\n## User-visible impact, today, on every control-plane deployment\n\nThe Console's \"recent items\" preference (`ui.recent`) is naturally a **list**. Every navigation writes it → **every write 500s** → a red `DATABASE_ERROR` in the browser console on every console visit, recents never persist, and the server logs a 5xx per page view. Both prod and staging control planes are PG, so this is not an environment quirk. (Tenant environments on Turso/SQLite take a different driver path, which is presumably why the seed/data suites never caught it.)\n\n## Note for the fix\n\n- The 500 half needs the stringify; **the `[]`→`{}` half needs a regression test of its own** — it is the case that stays wrong silently after the crash is fixed.\n- Scalar JSON values (`\"x\"`, `true`, `null`) are legal JSON documents and should round-trip; a fix that only handles arrays re-fails the string row of the matrix.\n"
+}

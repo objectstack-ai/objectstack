@@ -1,0 +1,35 @@
+{
+  "number": 10373,
+  "kind": "issue",
+  "title": "app-showcase: approval-resume-relation-expand.test.ts tears down driver-before-kernel, so the kernel drains against a disconnected driver",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "tests"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T17:07:26Z",
+  "updated_at": "2026-08-22T17:05:37Z",
+  "closed_at": "2026-08-21T12:01:58Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10373",
+  "body": "Found while fixing #9371. Not fixed there — that PR fixes the product defect that caused the teardown race, and this is a separate (and much smaller) ordering issue in the test's own harness.\n\n## The shape\n\n`examples/app-showcase/test/approval-resume-relation-expand.test.ts:71-78`:\n\n```ts\nafterEach(async () => {\n  while (openDrivers.length) {\n    try { await openDrivers.pop()?.disconnect?.(); } catch { /* noop */ }\n  }\n  while (openKernels.length) {\n    try { await openKernels.pop()?.shutdown?.(); } catch { /* noop */ }\n  }\n});\n```\n\nDrivers are disconnected **first**, then the kernels are shut down. So every kernel runs its whole teardown — hook dispatch, each plugin `destroy()`, each service's drain of in-flight work — against a driver that is already gone. The correct order is the reverse: stop the producers, then remove the resource they depend on.\n\n## Measured consequence\n\nInstrumenting `console.*` across the showcase suite (one run, all 21 files): **348 console calls, 294 of them from this one file**, and 120 of the 348 are `[sql-driver] DATABASE_ERROR — the backend refused a read on …` emitted through `SqlDriver`'s console fallback logger. A large share of those are reads issued during teardown against the disconnected driver.\n\nThat is not a correctness problem for the assertions — every test passes — but under vitest each `console.*` is an RPC round-trip to the main process (`onUserConsoleLog`), so it is pure cost, and the depth of that queue is one of the two things that widened the teardown window in #9371.\n\n## Suggested repair\n\nSwap the two loops. `packages/services/service-messaging/src/plugin-shutdown-stops-dispatchers.test.ts` (added in the #9371 PR) does it in the correct order and says why in a comment.\n\n⚠️ Worth re-measuring the console volume after the swap rather than assuming: the fix in #9371 already removed a large chunk of this traffic (console RPC round-trips over 48 loaded runs of this file fell 6574 → 3456), so the remaining share attributable to ordering is unknown."
+}

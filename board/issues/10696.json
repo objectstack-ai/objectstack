@@ -1,0 +1,34 @@
+{
+  "number": 10696,
+  "kind": "issue",
+  "title": "[finding] the react props gate and the react syntax gate accept different sources — measured both directions (Sucrase vs TypeScript)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T09:03:31Z",
+  "updated_at": "2026-08-21T10:29:59Z",
+  "closed_at": "2026-08-21T10:29:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10696",
+  "body": "Recorded as \"deliberately unmeasured\" on #10653, whose seat declined to file it on reasoning alone — *\"an unmeasured divergence filed as a finding is exactly the borrowed authority this card is about.\"* Measured now, while implementing #10653, so it is filed with numbers instead.\n\n## The claim that was unmeasured\n\n`validate-react-page-props.ts` carried a `catch { continue; }` commented *\"the syntax gate reports unparseable sources\"*. Two things were wrong with it, and #10653 fixes the first (the catch never ran; the live path was the unread `parseDiagnostics`). This issue is the **second**: the gate credited as cover parses with a **different parser**.\n\n- `validate-jsx-pages.ts` does **not** lint `kind:'react'` pages at all.\n- The real cover is `validate-react-pages.ts`, which uses **Sucrase** (`transform`, transpile-only).\n- `validate-react-page-props.ts` uses the **TypeScript** compiler (`createSourceFile`, `ScriptKind.TSX`).\n\nSo \"the syntax gate reports it\" is only true where the two acceptance sets agree, and they do not.\n\n## Measurement (2026-08-21, TypeScript 6.0.3, sucrase 3.35.x, at `55809a09a5`)\n\nEach source below is a `kind:'react'` page source. \"sucrase\" = does `validate-react-pages` report a `react-page-syntax` finding; \"tsc\" = `parseDiagnostics.length` under `ScriptKind.TSX`.\n\n| source | sucrase (syntax gate) | tsc (props gate) |\n|---|---|---|\n| `const n = 0755;` | **accepts** | 1 parse diagnostic |\n| `const s = '\\012';` | **accepts** | 1 parse diagnostic |\n| `const n = 0b2;` | **accepts** | 1 parse diagnostic |\n| `const n = 1__0;` | **accepts** | 1 parse diagnostic |\n| `with (o) { x = 1; }` | **throws** | 0 diagnostics |\n| unterminated comment / template / merge markers / truncated JSX | throws | ≥1 |\n\nBoth directions are real. Four shapes pass the syntax gate and are unreadable to the props gate; one shape is refused by the syntax gate and parses fine for the props gate.\n\n## Why it matters\n\nThe first four rows are the case the deleted comment was most wrong about: the syntax gate is **green**, so nothing tells the author anything, while the props gate is reading a partially recovered tree. Before #10653 that combination was total silence. After #10653 the props gate reports `react-page-source-unparseable` on exactly those rows, which is why the fix does **not** double-report: the two rules fire on overlapping-but-different sets, by construction.\n\nThe last row is the opposite and is harmless today (the syntax gate reports; the props gate reads the source fine).\n\nPinned as a regression test in PR for #10653: `packages/lint/src/validate-react-page-props.test.ts` → `'the syntax gate is a DIFFERENT parser — measured, not assumed'`, which asserts the `0755` row in both directions.\n\n## What is NOT claimed here\n\nThat either parser is wrong. Sucrase is the family that actually transpiles a react page, so its verdict is the one closest to what ships; TypeScript's grammar is stricter about numeric literal legacy forms. What is filed is that **two gates on the same authored surface answer \"does this parse?\" differently**, that the divergence is unmeasured anywhere in the tree, and that a comment in the props gate asserted the opposite.\n\nPossible dispositions, no recommendation made here (it needs a spec-level answer about which parser defines \"a valid react page source\"):\n\n1. Leave it, now that both sides report rather than going silent (what #10653 lands).\n2. Make the syntax gate authoritative and have the props gate defer to its verdict.\n3. Declare one parser the definition of the surface and pin the acceptance set with a shared corpus.\n\nRefs: #10653 · #10606 · PR #10651"
+}

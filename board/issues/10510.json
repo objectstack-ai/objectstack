@@ -1,0 +1,35 @@
+{
+  "number": 10510,
+  "kind": "issue",
+  "title": "Two places document bare `POST /api/v1/ai/chat` as agent-resolved — it resolves no agent at all",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T01:30:25Z",
+  "updated_at": "2026-08-21T13:25:55Z",
+  "closed_at": "2026-08-21T12:58:37Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10510",
+  "body": "Found while verifying cloud#1487 (bare `/ai/chat` offered the full ToolRegistry). Two shipped declarations claim the bare chat endpoint resolves an agent. It does not — the route has no agent identity, which is precisely why `AIService` fell back to the whole tool registry for it.\n\n**Site 1 — `packages/client/src/index.ts:4243`** (`client.ai.agents` JSDoc):\n\n> `/ai/chat` talks to the environment's default agent; these talk to one you name.\n\nThe cloud route (`packages/service-ai/src/routes/ai-routes.ts`, `POST /api/v1/ai/chat`) loads no agent, consults no `AgentRuntime`, and binds no skills. `client.ai.chat()` reaches a raw, agent-less chat plane; `client.ai.agents.chat()` is the only SDK method that reaches an agent.\n\n**Site 2 — `packages/spec/src/ui/app.zod.ts:1502-1504`** (`App.defaultAgent` JSDoc):\n\n> When set, the ambient chat endpoint (`POST /api/v1/ai/chat` with `context.appName`) auto-resolves to this agent without the user having to pick from a list.\n\nThe bare route never reads `context.appName`. The `app.defaultAgent` resolution chain lives in `AgentRuntime.resolveDefaultAgent` (cloud `packages/service-ai/src/agent-runtime.ts:519-540`) and is driven by the assistant routes (`assistant-routes.ts:171-179`, \"explicit > defaultAgent(app) > first active\") — i.e. `POST /api/v1/ai/assistant/chat`, not `POST /api/v1/ai/chat`.\n\n**Why this is worth fixing rather than shrugging at.** Both sites read as a security-relevant guarantee: if the bare endpoint were agent-resolved, its tool offer would be scoped by that agent's skills (ADR-0063 §1/§5, the property cloud#1480/PR #1485 restored). It is not, and the gap between the two claims and the implementation is what made the bare route the third door onto that leak. A reader auditing \"which endpoints are surface-scoped?\" from these declarations gets the wrong answer at both sites.\n\n**Two possible resolutions — this needs a decision, not just an edit:**\n\n- **Correct the docs.** Site 1 names the agent routes as the agent-bearing surface; site 2 names the ambient/assistant endpoint as the one that reads `context.appName`. Cheapest, and truthful today.\n- **Make the implementation match.** Route the bare endpoint through the same default-agent chain the assistant route uses. That is a behaviour change for every bare-chat caller and belongs in the cloud repo; it would also supersede the capability gate cloud#1487 just landed.\n\nCross-refs: cloud#1487 (the fix that closed the tool leak on this route), cloud#1480 / cloud PR #1485 (the agent-scope fix these declarations describe), cloud#1015 (the sibling inert-`permissions` finding).\n\nFiled unassigned by the cloud#1487 dev seat; recorded rather than fixed because it is out of that card's scope and lands in this repo.\n"
+}

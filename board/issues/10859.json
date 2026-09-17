@@ -1,0 +1,35 @@
+{
+  "number": 10859,
+  "kind": "issue",
+  "title": "plugin-auth: `verify-domain` answers a FAILURE code when domain verification is DISABLED, while its sibling route answers `DOMAIN_VERIFICATION_DISABLED`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T14:18:37Z",
+  "updated_at": "2026-08-22T17:04:18Z",
+  "closed_at": "2026-08-22T07:52:46Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10859",
+  "body": "Found while renaming the two lowercase error codes in `register-sso-provider.ts` (#10716 / PR #10858). Not fixed there: that card is a casing rename, and this is a behaviour change to which code a condition answers with. Filed rather than absorbed.\n\n## The inconsistency\n\nThe two SSO domain-verification routes handle the same condition — the feature is off for this environment, so the inner @better-auth/sso endpoint is unmounted and answers `404` with no code — and they answer it with **different codes**.\n\n`packages/plugins/plugin-auth/src/register-sso-provider.ts`, `runRequestDomainVerification`:\n\n```ts\nif (resp.status === 404 && !parsed?.code) {\n  return { status: 400, body: { success: false, error: { code: 'DOMAIN_VERIFICATION_DISABLED', message: 'Domain verification is not enabled for this environment (set OS_SSO_DOMAIN_VERIFICATION).' } } };\n}\n```\n\n`runVerifyDomain`, same condition, a few lines later:\n\n```ts\nlet message = parsed?.message || 'Domain verification failed';\nif (resp.status === 404 && !parsed?.code) {\n  message = 'Domain verification is not enabled for this environment (set OS_SSO_DOMAIN_VERIFICATION).';\n}\n```\n\nThat branch rewrites only the **message**. The code falls through to the route's generic default, so the disabled case answers `404` + the generic domain-verification-failure code while carrying the \"not enabled\" copy. The one machine-readable field says \"verification failed\"; the human-readable one says \"the feature is off\". They are different answers and a client can only act on the first.\n\n## This predates #10716 and is unchanged by it\n\nBefore that PR the default was the bespoke `verify_domain_failed`; after it, the registered `DOMAIN_VERIFICATION_FAILED`. Both spell \"failed\", neither spells \"disabled\" — so the rename neither introduced nor repaired this. It is named here because the rename makes it easy to see: the same file now has `DOMAIN_VERIFICATION_DISABLED` and `DOMAIN_VERIFICATION_FAILED` sitting one function apart, answering one condition two ways.\n\n## Why it is worth fixing rather than tolerating\n\n`DOMAIN_VERIFICATION_DISABLED` is already registered for `@objectstack/plugin-auth` (`packages/spec/src/api/error-code-ledger.zod.ts:340`, \"domain verification is off on this deployment\"), so the correct code exists and costs no ledger change. A caller that wants to say \"turn on `OS_SSO_DOMAIN_VERIFICATION`\" rather than \"retry, DNS may not have propagated\" cannot currently tell those apart on `verify-domain`, only on `request-domain-verification`.\n\nAlso worth deciding as part of it: whether the status should stay `404` (the sibling rewrites it to `400`) — the two routes differ there too, and one answer for one condition is the point.\n\n## What it would take\n\n- `runVerifyDomain`'s `resp.status === 404 && !parsed?.code` branch stamps `DOMAIN_VERIFICATION_DISABLED` alongside the message it already rewrites.\n- Decide the status question above.\n- The dogfood probe note at `packages/qa/dogfood/test/admin-route-nonadmin-refusal.dogfood.test.ts:252` describes this exact response (\"admin passes the gate and lands on 404 … while SSO is off\") and would need updating with whatever is decided. ⚠️ That note is documentation, not an assertion — the bucket loop only asserts the code is not `PERMISSION_DENIED` — so nothing goes red on its own here.\n- It is a wire-visible change to a published endpoint, so contract-review tier.\n\n## Refs\n\n#10716 · PR #10858 (where this surfaced) · #10534 (the SSO mount documentation card) · ADR-0112\n"
+}

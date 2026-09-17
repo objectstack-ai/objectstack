@@ -1,0 +1,35 @@
+{
+  "number": 10533,
+  "kind": "issue",
+  "title": "`check:role-word`'s per-file ratchet makes it impossible to document ANY new route whose body carries better-auth's `role` field — measured while writing #10050",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T02:27:41Z",
+  "updated_at": "2026-08-21T12:12:00Z",
+  "closed_at": "2026-08-21T12:01:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10533",
+  "body": "Hit head-on while writing the `POST /organization/add-member` docs for #10050. Reporting rather than acting: the only mechanical remedy is a baseline expansion, which `check-role-word.mjs` marks ⛔ MAINTAINER-ONLY.\n\n## The mechanism\n\n`scripts/check-role-word.mjs` is a per-file ratchet over `content/docs` and `skills`:\n\n- `WORD = /\\brole(?:s)?\\b/gi`, counted over the **whole file** — fenced code blocks included.\n- a file **not** in `scripts/role-word-baseline.json` containing the word → fail;\n- a baselined file whose count **increases** → fail (`New occurrences are banned (ADR-0090 D3)`), and the remedy message marks `--update` as maintainer-only;\n- a baselined file whose count **decreases** → also fail, but that one is the author's own ratchet-down.\n\nThere is no exemption mechanism — no `SKIP_PATHS`, no per-kind allowlist, no fence skipping.\n\n## The consequence\n\nBecause the ratchet is **per file and exact**, no file anywhere under `content/docs` has spare budget. So the corpus cannot gain a single new occurrence of the word — which means **a route whose wire parameter is literally named `role` cannot have its request shape documented**, in any file, by any author who is not the maintainer.\n\n`POST /api/v1/auth/organization/add-member` is exactly that route. Its handler reads `body.role` (`readRole()` in `packages/plugins/plugin-auth/src/organization-add-member.ts`), and unlike `userId` / `organizationId` / `teamId` it has **no** snake_case alias — the wire name is `role` and nothing else.\n\nThis is not a hypothetical class of one. The same block applies to `/organization/update-member-role` and `/organization/invite-member`'s tier field, and — a second-order bite — the *route path* `/organization/update-member-role` itself matches `\\brole\\b`, so that URL cannot be written into the docs either.\n\n## What #10050's PR did instead\n\nDocumented the field indirectly — \"the body also carries the membership tier, under better-auth's own column name for it\", linking to the existing `#membership-tiers-are-a-closed-list` section whose invitation example already spends one of the baselined occurrences and shows the literal key.\n\nThat keeps `content/docs/permissions/authentication.mdx` at exactly its baselined 4 and the gate green, and it is not *wrong* — but a reference page that describes a **required** parameter without naming it is a real quality cost, and the next author documenting a membership route pays it again.\n\n## Why this is a decision, not a bug\n\nThe gate is behaving as designed; ADR-0090 D3 deliberately makes the word reserved. The question is whether the design has a hole for the case it already names as legitimate. `check-role-word.mjs`'s own header lists the legitimate KINDS, first among them:\n\n> vocabulary owned upstream (better-auth's `sys_member.role`)\n\nThat is precisely this case — and the ratchet has no way to express \"legitimate kind, new occurrence\". It can only express \"frozen count\".\n\n## Options\n\n1. **Expand the baseline** for `content/docs/permissions/authentication.mdx` by 1–3 and document the field literally. Cheapest; weakens the ratchet by exactly the occurrences granted, and sets a precedent each future membership route re-litigates.\n2. **Add an escape for upstream-owned vocabulary** — e.g. count only occurrences outside a `<!-- role-word: upstream -->`-marked span, or exempt fenced blocks whose info string marks them as a vendor wire payload. Keeps the ratchet's teeth for prose (which is what D3 is actually about) while letting a wire contract be written down.\n3. **Leave it.** Accept that better-auth-owned membership routes get tier-field-free prose, and pin the workaround so it is at least consistent.\n\nRecommendation: **2**, narrowly scoped to fenced code blocks. D3's target is ObjectStack *prose* reaching for the word where `permission_set` / `position` / `business_unit` is meant; a JSON body showing a third party's literal key is not that, and the gate's own header already says so. 1 is a reasonable stopgap if 2 is not worth the checker complexity now.\n\n## Refs\n\n#10050 (where this was measured) · ADR-0090 D3 · `scripts/check-role-word.mjs` · `scripts/role-word-baseline.json`\n"
+}

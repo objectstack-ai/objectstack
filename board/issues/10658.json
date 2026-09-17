@@ -1,0 +1,35 @@
+{
+  "number": 10658,
+  "kind": "issue",
+  "title": "check-error-code-casing reports a clean sweep it cannot support: a lowercase `code` in an `||` fallback matches none of its four recognizers, and two live ones ship today",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T07:45:42Z",
+  "updated_at": "2026-08-21T11:12:23Z",
+  "closed_at": "2026-08-21T11:11:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10658",
+  "body": "Found while documenting the SSO domain-verification routes for #10534. Not fixed there — different defect class, so it is filed rather than absorbed.\n\n## The claim, and why it is not supported\n\n`pnpm check:error-code-casing` prints, on `origin/main` at `47aff0938`:\n\n```\n✓ check-error-code-casing self-test: 17 cases pass.\n✓ no lowercase error codes in 4346 scanned file(s) (ADR-0112).\n```\n\nThat second line is unqualified — it reads as \"this tree has none\". It has two, in a file that is inside the scanned set:\n\n| file | line | code |\n| --- | --- | --- |\n| `packages/plugins/plugin-auth/src/register-sso-provider.ts` | 411 | `request_domain_verification_failed` |\n| `packages/plugins/plugin-auth/src/register-sso-provider.ts` | 465 | `verify_domain_failed` |\n\nBoth are emitted as the ObjectStack-authored default of an `||` chain, e.g. line 465:\n\n```ts\nreturn { status: resp.status, body: { success: false, error: { code: parsed?.code || 'verify_domain_failed', message } } };\n```\n\nThese are not vendor codes passing through — `parsed?.code` is that path. The literal is **ours**, and ADR-0112 / Prime Directive #3 make error codes `SCREAMING_SNAKE`.\n\n## Cause: the recognizer requires the quote to sit directly after `code:`\n\nAll four patterns in `scripts/check-error-code-casing.mjs` (`CODE_POSITION_PATTERNS`) anchor the string literal immediately after the position token. The emission one:\n\n```\n{ name: 'emission', re: /\\bcode\\s*:\\s*'([a-z][a-z0-9_]*)'/g }\n```\n\nAn intervening expression (`parsed?.code || `) breaks that adjacency, and the other three do not apply — it is not `.code =`, not `code ===`, not a `'a' | 'b'` union type. So the shape is invisible to the whole set.\n\n**Positive control**, so a zero is a real zero rather than a broken probe — the gate's own emission regex, run on both spellings:\n\n```\ndirect   code: 'oops_bad'                    -> [\"oops_bad\"]\nfallback code: p?.code || 'oops_bad'         -> []\n```\n\nThe recognizer demonstrably fires on one and not the other.\n\n**Extent, measured.** Repo-wide, excluding tests and `node_modules`, the `code: <expr> || '<lower_snake>'` shape occurs **2** times — both rows above. So the correction is small; the reporting defect is the point.\n\n## Why this is a verdict question, not just two renames\n\nThis is the shape PR #10501 just closed for a different scanner: *a partial read is a verdict, not a smaller number*. A scan that cannot see a spelling produces no finding, **silently**, and then prints a total that reads as complete. Two prior cards found the same class in the sibling gate — #9223 (non-literal `code:`) and #9460 (a lowercase thrown code) — so this is the third instance of one pattern across the error-code gates, and the first in this one.\n\nNote the two are not independent: #9460's fix taught `check:dispatcher-error-vocabulary` about a spelling, and this gate was not revisited.\n\n## Suggested direction (not prescriptive)\n\nTwo separable pieces, and the second matters more than the first:\n\n1. Widen the emission recognizer to reach a literal that follows `code:` through an `||` / `??` chain, with `--self-test` cases pinned for both the fallback spelling and the direct one — and pin the population so a widening cannot silently change what \"clean\" counts.\n2. Consider whether the summary line should be able to say *how much it could not read*, the way #10501 made `affected-docs.mjs` print both halves of its fraction. A recognizer will always have a boundary; the defect is a boundary that reports as zero.\n\nThen fix the two codes themselves — but note they are also **wire-visible**, so renaming them is a behaviour change for any client matching on them, and belongs with whoever owns that call. `packages/qa/dogfood/test/admin-route-nonadmin-refusal.dogfood.test.ts:252` currently pins `verify_domain_failed` by name.\n\n## Refs\n\n#10534 (where this was found) · #10501 (the same \"partial read reported as complete\" class, other scanner) · #9223 / #9460 (the same class in `check:dispatcher-error-vocabulary`) · ADR-0112"
+}

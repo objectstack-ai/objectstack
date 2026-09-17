@@ -1,0 +1,34 @@
+{
+  "number": 10767,
+  "kind": "pull_request",
+  "title": "fix(app-showcase): shut down kernels before disconnecting drivers in approval-resume-relation-expand.test.ts",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T10:48:23Z",
+  "updated_at": "2026-08-21T12:01:58Z",
+  "closed_at": "2026-08-21T12:01:57Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-08-21T12:01:57Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10767",
+  "body": "Fixes #10373\n\n## The defect\n\n`examples/app-showcase/test/approval-resume-relation-expand.test.ts`'s `afterEach` disconnected the drivers **before** shutting down the kernels. Every kernel's own teardown — hook dispatch, each plugin's `destroy()`, each service's drain of in-flight work — then ran against a driver that was already gone. The correct order is the reverse: stop the producers, then remove the resource they depend on.\n\n`packages/services/service-messaging/src/plugin-shutdown-stops-dispatchers.test.ts` (added in #9371) already does it in the right order. This file's comment states the same ordering rule, plus what this PR's own measurement found about *this* file specifically (see below — the rule and the measurement are two different kinds of claim, kept separate on purpose):\n\n```ts\n// Kernels first, drivers second: the kernel's own teardown still wants a\n// live driver to drain against -- that is the rule, regardless of what it\n// costs on any given day.\n//\n// Measured here (#10373): this file's own DATABASE_ERROR lines are all\n// \"no such table\" probes against sys_* tables bootShowcaseApprovals()\n// never provisions, not post-disconnect reads -- swapping the order left\n// the count unchanged (36 suite-wide / 31 in this file, before and after).\n```\n\n(An earlier revision of this comment borrowed #9371's parenthetical verbatim — \"reversing these is what makes a suite shout DATABASE_ERROR\" — which is true of `service-messaging`, where it was measured, but not true of this file, where the measurement below shows the opposite. Fixed so the comment doesn't re-plant the same misattribution the card exists to correct.)\n\n## Measured console volume — three numbers, and why the first two disagree by an order of magnitude\n\n| source | scope | DATABASE_ERROR lines |\n|---|---|---|\n| card's historical measurement (pre-#9371) | 21 files, one run | 120 of 294 file-local / 348 total |\n| **my before-baseline** (current `main`, this PR's parent commit) | 24 files, one run | **36** total suite-wide; **31** isolated to this file |\n| **my after-swap measurement** | 24 files, one run | **36** total suite-wide; **31** isolated to this file |\n\n**The 348/294/120 vs. 36/31 gap is the #9371 effect the card itself warned about, not a methodology disagreement between the two readings.** The card's numbers predate #9371 landing (`fix(service-messaging): stop the delivery dispatchers on the kernel's own teardown hook`, merged as #10375) — that PR already removed the dominant source of this traffic across the whole suite. Both readings are correct measurements; they are measurements of two different trees, taken ~30 hours apart with a merge in between. Neither number is wrong.\n\n**On today's `main`, the reordering changes nothing measurable for this file.** Before and after are byte-for-byte identical: full-suite console output is 341 lines / 36 `DATABASE_ERROR` calls in both runs (identical per-table breakdown: 11 `sys_user`, 9 `sys_organization`, 7 `sys_member`, 7 `sys_user_position`, 1 `sys_position`, 1 `sys_user_permission_set`), and this file in isolation is 31 `DATABASE_ERROR` calls in both runs.\n\nWhy: every `DATABASE_ERROR` line this file currently produces is `no such table: sys_*` — a probe against system tables (`sys_organization`, `sys_user`, `sys_member`, `sys_user_position`, `sys_user_permission_set`, `sys_position`) that `bootShowcaseApprovals()` never provisions (it registers `Account/Project/Task/Product/Invoice/InvoiceLine` only), hit mid-test during approval/position resolution — not a post-disconnect teardown read. The teardown-race class this card targets has already been eliminated for this file's traffic by #9371; what's left is an unrelated, pre-existing gap unaffected by driver/kernel ordering either way.\n\n**This is still the correct fix.** Per the card: draining a kernel against an already-disconnected driver is the wrong order even on a day when it's quiet. The reorder is justified on the ordering principle, not on savings realized today — and now the in-code comment says that too, instead of implying a saving that this file never had.\n\n## Ablation\n\nPredicted *before* running it (written down first): reverting the order should restore the file to byte-identical to its pre-PR blob, and — because before/after already measured identically — the DATABASE_ERROR count on revert should also stay ~31 for the isolated run, not \"come back\" from some lower number.\n\nObserved: `git hash-object` on the reverted file = `a9fd1ae5c5fc52ee59ba81e4d7f35157ece1027c`, exactly the pre-PR blob. Isolated DATABASE_ERROR count on the reverted file: **31**, identical per-table breakdown to both the before and after runs. Prediction confirmed.\n\n## Tests\n\n`pnpm --filter @objectstack/example-showcase test -- --maxWorkers=2`, one run, both before and after the swap: **24/24 files, 364/364 tests passing**, exit 0. Not a correctness fix — the assertions passed before this PR too — this is teardown-order hygiene plus an honest re-measurement.\n\n## Gates\n\nLocal gates run per `node scripts/pm/dispatch-gates.mjs` (no path args, off the final commit) — see the PR report comment on #10373 for the full table with quoted verdict lines.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01PnJHU45vPJj5UQrxe946Bx)_\n"
+}

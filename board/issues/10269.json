@@ -1,0 +1,35 @@
+{
+  "number": 10269,
+  "kind": "issue",
+  "title": "Four symlink-blind entry guards live outside `scripts/`, where #10086's class-closing gate cannot see them — three are the `file://${argv[1]}` template that also breaks on percent-encoding",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T15:01:28Z",
+  "updated_at": "2026-08-21T11:44:58Z",
+  "closed_at": "2026-08-21T11:43:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10269",
+  "body": "Measured while implementing #10086 (PR for `claude/issue-10086-invoked-directly-entry-guard`). Not repaired there: that card's file surface is `scripts/**`, and the gate it lands (`check:entry-guard`) deliberately scans `scripts/` only. Filed unassigned, severity for triage.\n\n## The measurement\n\n#10086 removed every hand-typed `invokedDirectly` guard from `scripts/` — 11 distinct spellings across 33 files — and closed the class with a gate that allows only `scripts/invoked-as.mjs` to read `process.argv[1]`.\n\nSweeping the rest of the tree with the same predicate finds **four more sites the gate's scope does not reach**:\n\n```text\npackages/objectql/scripts/dry-run-hash-compat.ts:261\n  process.argv[1] && /dry-run-hash-compat\\.ts$/.test(process.argv[1])\n\npackages/core/examples/kernel-features-example.ts:304\npackages/core/examples/phase2-integration.ts:355\nexamples/embed-objectql/src/index.ts:60\n  import.meta.url === `file://${process.argv[1]}`\n```\n\nBoth shapes are on the measured-broken list from #10086:\n\n- The **template form** (three sites) is spelling S11 in that card's census. It goes inert through a symlink, *and* it bypasses the encoder `pathToFileURL` applies, so it also goes inert on any checkout path containing a character needing percent-encoding — measured on a synthetic probe, a `#` in any parent directory name is enough, with no symlink involved. (A space is *not* enough: `URL` normalises that one. So the failure is sporadic in exactly the way that makes it hard to attribute.)\n- The **regex-basename form** (`dry-run-hash-compat.ts`) is the S3/S10 family: it survives a symlink that keeps the basename, but it answers true for any entry script whose path ends in that name, so it can fire on *import* as well as go inert.\n\n## Why it is not just \"examples\"\n\n`packages/objectql/scripts/dry-run-hash-compat.ts` is a compatibility checker, not a demo — the failure direction there is the same silent one #10086 documents: reached the wrong way it does nothing, exits 0, and a caller holding the status reads a pass.\n\nThe three template-form sites are example/demo entry points, so the severity is genuinely lower — but they are also the files a reader copies from, which is how a spelling that was removed 33 times comes back.\n\n## Note on the sibling predicate\n\n`packages/cli/src/utils/invocation.ts` already exports `isProcessEntry`, the symlink-correct predicate for package code, and its header cites #10086. So the *fix* for at least the `packages/**` sites likely needs no new code — it is `isProcessEntry`, or the example equivalent. What is missing is anything that makes them use it.\n\nTwo directions for whoever takes this, in ascending cost:\n1. point the four sites at an existing correct predicate;\n2. widen `scripts/check-entry-guard.mjs`'s population beyond `scripts/` — it already exports `scanFile(rel, source, opts)` and takes the roster from a directory walk, so the scope is one constant. The blocker is that `packages/**` cannot import `scripts/invoked-as.mjs`, so the gate would need to accept `isProcessEntry` as a second legal spelling — which is a real design question, not a mechanical widening, and is why #10086 did not just do it.\n\nAlso worth correcting while someone is in that file: `invocation.ts`'s header says #10086 measured the guard \"in ~8 spellings\". The census on `origin/main` at 923c4247 is **11 distinct spellings across 33 files**; ~8 was the estimate in the card body, not the measurement.\n\n## Dedupe\n\n`search_issues` for \"entry guard process.argv[1] symlink inert in packages and examples, isProcessEntry, file:// template literal guard outside scripts\" returns 0 results. #10086 covers `scripts/**` only and its dispatch fenced the surface explicitly.\n"
+}

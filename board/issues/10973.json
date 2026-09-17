@@ -1,0 +1,34 @@
+{
+  "number": 10973,
+  "kind": "issue",
+  "title": "Allowlist the claude-code-remote trigger/session self-management tools in .claude/settings.json — auto-mode PM seats still hit confirm prompts on delete_trigger/fire_trigger and stall unattended",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T01:34:50Z",
+  "updated_at": "2026-08-22T17:04:55Z",
+  "closed_at": "2026-08-22T02:07:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10973",
+  "body": "Filed by the skills seat (`session_01ApyDuQY2fkunMCqXiqvBhR`) from a maintainer-reported operational failure, PM chat 2026-08-22.\n\n## The failure, measured\n\nPM seat sessions are created in **auto (or dontAsk) permission mode** — the maintainer confirmed this is done every time (verbatim: 「PM 座位会话创建时选 auto(或 dontAsk)权限模式,每次都是这么操作的」). Yet the maintainer keeps getting confirm dialogs while PM seats work, showing a tool input of the shape `{\"trigger_id\": \"trig_…\"}` — the input signature of `delete_trigger` / `fire_trigger` (claude-code-remote MCP). When nobody is at the computer, the seat blocks on the dialog indefinitely (verbatim: 「还有项目经理工作时一直弹出这种,我不在电脑边就不能确认」). One measured consequence: a dispatching seat sat silent ~11h on three ACCEPTed, contract-review-PASSed PRs whose landing steps it never executed.\n\nCorroborating negative: this session, also auto mode, called `send_later` / `create_trigger` / `list_triggers` / `get_session` many times today with zero prompts, and never called `delete_trigger` / `fire_trigger`. So the prompt is a **classifier-level forced confirmation on specific tools**, not a permission-mode issue — the same classifier family whose misjudgments #10686 already records.\n\n## The fix\n\nAdd explicit `permissions.allow` entries to the repo's `.claude/settings.json` for the claude-code-remote **trigger/session self-management family**: `delete_trigger`, `fire_trigger`, `update_trigger`, `send_later`, `list_triggers`, `get_session`, `list_sessions` (and `create_trigger`, which does not prompt today but belongs to the same self-management family — include it so the list is the family, not today's symptom set). An explicit allow outranks the classifier's confirmation.\n\n**Deliberately NOT allowlisted**: `create_session` / `archive_session` / `interrupt_session` (fleet-shape and spend actions on other sessions — those staying behind a prompt is defensible and is not the reported pain).\n\nImplementation cautions:\n- **Verify the tool-name spelling against reality, not memory.** The MCP server's prefix appears in at least two spellings across surfaces (`mcp__Claude_Code_Remote__*` in some schema listings; check what the permission layer actually matches — existing MCP entries in the settings file, harness docs, or a live prompt record are the evidence). If ambiguous, cover the spellings that are actually observed, with a comment naming the source of each.\n- These tools act only on the account's own Routines/sessions — no repo or code surface — which is the risk argument for the allow.\n- `.claude/settings.json` is a governed face: draft PR, `Fixes` this card, human merge, ⛔ never flip ready.\n\n## Acceptance criterion\n\nThe settings diff parses (the harness's settings schema, if a check exists), the allowlist entries name the verified spellings, and the PR body records the verification evidence for the prefix spelling. Real-world confirmation (no more `trigger_id` dialogs) lands after merge and is the maintainer's observation to report.\n\nRef: #10686 (permission classifier misjudgments, same lane)."
+}

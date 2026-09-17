@@ -1,0 +1,33 @@
+{
+  "number": 11035,
+  "kind": "issue",
+  "title": "2FA re-enrollment kills the confirmed secret before the new one is confirmed — the availability half #10700 could not reach",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-22T12:12:26Z",
+  "updated_at": "2026-08-22T13:50:16Z",
+  "closed_at": "2026-08-22T13:49:29Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11035",
+  "body": "Carved out of **#10700**, whose integrity half landed in PR #10994. This is the half that PR proved **cannot be reached by any change to the `verified` flag**, so it needs its own tracking artifact rather than living as an unclosed bullet on a card whose PR has merged.\n\nFiled **unassigned and ungraded** — `domain:*` and type are triage's to mint.\n\n## The property that is still false\n\n> The old secret goes dead **only** when the new one is live and confirmed.\n\n`POST /api/v1/auth/two-factor/enable` rewrites the account's **single** `sys_two_factor` row unconditionally, and `user_id` is declared unique — so there is nowhere to hold an unconfirmed secret. The previously confirmed secret stops working when the call returns. That was true before #10994 and is true after it.\n\n## What #10994 did and did not change\n\n✅ **Integrity is fully restored.** `verified` now describes the secret stored beside it at every point in the flow; the vendor's existing sign-in gate (`TOTP_NOT_ENABLED` before any lockout bookkeeping) does the rest, with no second owner of the decision.\n\n✅ **The discovery point moved.** A mis-scan is now found immediately, at the confirmation step, with a live session in hand — instead of at the next sign-in with none.\n\n✅ **The floor across the window is pinned.** The backup codes the same `enable` response issues still complete a sign-in.\n\n❌ **The strict property above.** Unreachable by a flag.\n\n## The four routes, and why none was takeable by the dispatched seat\n\nThe seat declined to pick, and its reasoning is why this card exists rather than a silent choice:\n\n> that leaves A as the only option I could take unilaterally, which makes \"A\" a statement about my permissions rather than a measurement\n\n| | option | measured cost |\n|---|---|---|\n| **A** | accept the current position as the end state | strictly better than before on integrity, neutral-to-better on availability. The strict property stays false. This is what shipped |\n| **B** | stage the unconfirmed secret in better-auth's verification table, promote it on verify | **widens what `/two-factor/verify-totp` accepts** — a code derived from a secret that is not on the row — and reimplements vendor crypto / lockout / session-rotation that drifts on every better-auth bump |\n| **C** | add pending-secret columns to `sys_two_factor` | verified by content: that object is `managedBy: 'better-auth'` (`sys-two-factor.object.ts:19`) and `lock: 'full'` (`:24`). Persisted state on a vendor-managed locked table is a design decision on a published auth table, plus the schema-parity surface |\n| **D** | refuse `enable` while already enabled; rotation goes through the published `disable` → `enable` pair | no new state, no new surface — the cheapest route to the strict property. ⚠️ But it **removes a currently-working call from a published endpoint**, and leaves 2FA **fully off** in the gap between the two calls. That gap is its own exposure, not a free win |\n\n**Recommendation, offered as input:** if the strict property is wanted, D is cheapest and least drift-prone — but its disable→enable window should be weighed rather than waved past, because it trades a confirmation gap for an unprotected one. If it is not wanted, this card closes as \"A is the end state\" and the reasoning is on the record either way.\n\n## Not a duplicate of #10681\n\n**#10681** (`sys_user.generate_backup_codes` re-provisioning on an already-enabled account) is the same family but a different mechanism, and #10994's seat measured the difference rather than assuming it:\n\n- the vendor's `/two-factor/generate-backup-codes` does **not** consult `verified` at all — it gates only on `user.twoFactorEnabled` (`backup-codes/index.mjs`: `if (!user.twoFactorEnabled) throw TWO_FACTOR_NOT_ENABLED`). **A `verified`-shaped fix does not transfer to it.** Its lockout shape is the silent replacement of live codes, not a stale flag.\n- `/two-factor/enable` **also** regenerates and rewrites `backupCodes` on the same row in the same statement as the secret, and returns them. So the two surfaces overlap on one row, and a fix to either must not assume it is the only writer.\n\nThat overlap is also why the availability floor pinned in #10994 holds: the codes the `enable` response issues are the stored ones.\n\n## Recorded here so it is not re-derived\n\n`sys_two_factor.verified` declares **`defaultValue: true`** — a security-relevant flag defaulting to the permissive value. Checked rather than assumed: the only writer of that table in this tree is better-auth, which always passes `verified` explicitly (positive control: vendor create/update sites exist; **zero** non-vendor writers under `packages/`), and the declaration mirrors better-auth's own schema default, so changing it would diverge from the vendor and move the parity gate. `lock: 'full'` makes a second writer unlikely.\n\n**Latent, not live — no defect to fix.** It is written down so the next reader of this surface finds it. ⚠️ It is the second time in one session that a declared security property turned out to be defended by an absence or a convention rather than by a declaration — #10702's `sys_file` columns are the other. A third would be a pattern worth its own card.\n\n⛔ Auth/authz disclosure carve-out applies. Mechanism and verdict only; the withheld reproduction lives in QA session #10663.\n\n## Refs\n\n#10700 (parent) · PR #10994 (the integrity half) · #10681 (same family, different mechanism) · QA #10663 · #10702 (the other absence-defended property)\n"
+}

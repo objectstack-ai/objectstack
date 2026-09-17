@@ -1,0 +1,35 @@
+{
+  "number": 10618,
+  "kind": "issue",
+  "title": "[finding] `os:check` doc blocks type-check but never run `os validate` — a docs example can carry an author-time lint error (e.g. missing `sharingModel`) and no gate sees it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T06:23:29Z",
+  "updated_at": "2026-08-22T00:15:43Z",
+  "closed_at": "2026-08-21T23:57:18Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10618",
+  "body": "Split out of #10581 (member of sweep #10616) — the sweep fixes the 22 instances; this card records the CLASS.\n\n## Observation\n\n`packages/spec/scripts/check-skill-examples.ts` compiles `{/* os:check */}` fenced blocks in `content/docs/**`, so nonexistent identifiers and type errors are caught. But author-time lint rules enforced by `os validate` (`packages/lint/**`) never run over those blocks. Measured consequence: 22 `ObjectSchema.create()` examples omitted `sharingModel` — `z.enum([...]).optional()` with no `.default()`, so the omission type-checks clean, while `os validate` rejects it as `severity: 'error'` (`SECURITY_OWD_UNSET`, `packages/lint/src/validate-security-posture.ts:266-281`). A reader copying a canonical docs example gets a failing `os validate` with no hint from the page.\n\n## Shape of a fix (for grading, not a ruling)\n\nRun the relevant `packages/lint` author-time rules (or full `os validate`) over `os:check` blocks that construct authorable metadata (`ObjectSchema.create` at minimum). Producer is the spec-lane docs-gate toolchain (`packages/spec/scripts/**`), hence `domain:spec` (same anchoring as #10457).\n\n## Grading questions for first touch\n\n- Cost/benefit: the instances are being fixed by sweep #10616; the gate prevents recurrence. Does the docs surface churn fast enough to pay for a new gate now (创业阶段聚焦)?\n- If promoted, scope narrowly: lint the constructed object literal, not the whole page pipeline.\n\nBack-links: #10581, #10616, #10563. Dedupe: semantic search zero-hit, channel verified against #10563."
+}

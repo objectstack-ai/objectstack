@@ -1,0 +1,34 @@
+{
+  "number": 10937,
+  "kind": "pull_request",
+  "title": "fix(plugin-approvals): require warn on ApprovalServiceOptions logger sink",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T19:37:24Z",
+  "updated_at": "2026-08-21T19:59:40Z",
+  "closed_at": "2026-08-21T19:59:39Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-08-21T19:59:39Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10937",
+  "body": "Part of #10556\n\n## What\n\nDrops the `?` from `warn` on `ApprovalServiceOptions['logger']` so a sink\ndeclaring an optional `error` always has a guaranteed durability-report\nchannel (#9754). `error` stays optional. This is the last of the card's\nthirteen mechanical repairs — held out of #10691 to serialize against\nPR #10547, which owned `approval-service.ts` while it was open; that fence\ncleared when #10739 merged (2026-08-21T14:40Z).\n\nDeletes the now-stale `logger@ApprovalServiceOptions` row from the\nshrink-only `scripts/optional-error-sink-contract.baseline.json`, identified\nby running `pnpm check:optional-error-sink` after the type fix and using its\nown \"1 stale entry(ies)\" verdict as the deletion criterion (not by line\nnumber). The other two rows — `plugin-security`'s default-sink design call\nand `service-settings`'s no-fallback design call — are untouched; both\nremain escalated to the maintainer per #10556's re-triage\n(issuecomment-5368213444). Baselined count after this PR: **2** (as\nexpected).\n\n⛔ Not `Fixes #10556` — the card still carries two unruled design\ndecisions; a closing keyword would silently close their only tracking\nartifact.\n\n## Construction-site re-check\n\nThe sole non-test construction site (`ApprovalsServicePlugin.start`, same\npackage) passes `ctx.logger` (`PluginContext['logger']`), whose `Logger`\ncontract already requires `warn` — zero widening needed. `pnpm --filter\n'@objectstack/plugin-approvals' typecheck` is clean (echoed `tsc --noEmit`\nthen done — not a zero-match pass). Test-file loggers (`noopLogger`,\n`capturing`, inline `{ warn: ... }` spies) already declare `warn`; none\nneeded a change.\n\n## Ablation (both directions, predicted before mutating)\n\n- **Leg A** (un-repair, ledger row stays deleted): predicted the gate reds\n  with \"no guaranteed fallback channel\". Observed exactly:\n  `✗ 1 sink type(s) declare an optional `error` with no guaranteed fallback\n  channel ... sink: inline type logger@ApprovalServiceOptions { info? warn?\n  error? debug? }`. Restored via `git checkout HEAD --\n  packages/plugins/plugin-approvals/src/approval-service.ts` (fix was\n  already committed) — `git hash-object` confirms byte-identical restore\n  (`20083b9a4ab5ef6e3d3cff46bfcf12701d968df8`).\n- **Leg B** (repair kept, ledger row restored): predicted `stale entry`.\n  Observed exactly: `✗ 1 stale entry(ies) in\n  scripts/optional-error-sink-contract.baseline.json ...\n  packages/plugins/plugin-approvals/src/approval-service.ts::logger@ApprovalServiceOptions`\n  — proves the row deletion is a required part of this fix, not tidying.\n  Restored via `git checkout HEAD -- scripts/optional-error-sink-contract.baseline.json`,\n  byte-identical (`1a933af08d6aa911b7377d63effc352c8116d80a`).\n\n## Tests\n\nAll at final head `1a9baa986`, exit codes captured before any pipe.\n\n- `pnpm check:optional-error-sink`: exit 0 — `✓ optional-error sink\n  contract: every sink declaring an optional `error` guarantees a `warn`\n  channel (**2** baselined, shrink-only).`\n- `pnpm --filter '@objectstack/plugin-approvals^...' build`: exit 0 (dependency\n  closure — upstream direction, `^...`).\n- `pnpm --filter '@objectstack/plugin-approvals' typecheck`: exit 0.\n- `pnpm --filter '@objectstack/plugin-approvals' test -- --maxWorkers=2`: exit\n  0 — 536 tests / 28 files passed.\n- `pnpm check:route-envelope -- --self-test` and `pnpm\n  check:dispatcher-error-vocabulary -- --self-test`: both exit 0. The\n  gate-union derivation (`node scripts/pm/dispatch-gates.mjs`, no path args)\n  did **not** name either — this diff touches no `packages/plugins/plugin-auth/**`\n  path, so class #10309 does not apply to this PR's surface; run anyway per\n  dispatch item 7 and both green.\n- Changeset gates: `check:empty-changeset`, `check:adr-0087-registration`,\n  `check:changeset-no-major` (and the bundled `check:changeset-gate-self-tests`)\n  all exit 0 on the **committed** tree. `check-adr-0087-registration` verdict:\n  `[BREAKING] not-required (runtime-interface-only) -- verified:\n  packages/plugins/plugin-approvals/src/approval-service.ts#ApprovalServiceOptions\n  (interface)`.\n- Full named-gate sweep from `node scripts/pm/dispatch-gates.mjs` (no path\n  args, run after the final commit, clean tree): all 15 path-matched\n  families green, plus the one convention-triggered gate (`pnpm check:i18n`,\n  triggered because this package owns an `i18n-extract.config.ts`) green\n  after building the CLI (`check:i18n`'s own prerequisite — it exits 1 with\n  \"PREREQUISITE NOT MET\" and checks nothing until the CLI is built).\n\n## Bump / ADR-0087 reasoning (read #10691's changeset first, per dispatch)\n\n`minor`, matching #10691's twelve sibling repairs: `major` is banned by\n`check-changeset-no-major.mjs` during the launch window (lockstep\nversioning), and `patch` would be wrong because this can break a consumer's\nbuild (compile-time only, no runtime change). No exemption for a types-only\nbreak was found, matching #10691's own search.\n\n`not-required (runtime-interface-only)`: `ApprovalServiceOptions` is a plain\nTypeScript interface — no Zod projection, no metadata surface, not\nreferenced by one — so `objectstack migrate meta` has nothing to rewrite.\nNothing is removed or renamed (AGENTS.md's FROM→TO prescription requirement\nis scoped to removal/rename) and no stored value moves.\n\n⭐ Instrument note (confirmed again on this PR):\n`check-adr-0087-registration` reads changeset content from **git**, not the\nworking tree — it must be re-run after committing the changeset to carry\nany information.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PnJHU45vPJj5UQrxe946Bx)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 10680,
+  "kind": "issue",
+  "title": "os doctor --scan-deprecations prescribes a codemod command that does not exist",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T08:32:13Z",
+  "updated_at": "2026-08-22T17:05:23Z",
+  "closed_at": "2026-08-21T16:09:30Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10680",
+  "body": "Found by QA run #10663 driving `cli.doctor-deprecation-scan` at framework `79ebb37`. Also recorded in PR #10147 FOLLOW-UPS §7b; this card is its extraction with live confirmation.\n\n## Symptom\nAfter reporting deprecated patterns, `os doctor --scan-deprecations` prints:\n```\nℹ Found N deprecated pattern(s). Run `objectstack codemod v2-to-v3` to auto-fix.\n```\n(`doctor.ts:2149`). But no `codemod` command is registered: `os codemod v2-to-v3` → exit 2 \"command codemod:v2-to-v3 not found\"; `os codemod --help` → exit 2 \"Command codemod not found.\" The docs already admit it: `content/docs/protocol/backward-compatibility.mdx:134` — \"An automated `codemod` command is referenced in the migration guides but is **not yet available**.\" The real, registered metadata codemod is **`os migrate meta`**.\n\n## Suggested fix\nPoint the hint at a command `os` actually registers (`os migrate meta`), scope/remove it, or gate it behind the command's existence.\n\n## Passing clauses\nThe scanner itself works correctly: file:line attribution for all 8 DEPRECATED_PATTERNS (incl. the retired `referenceFilters`→`lookupFilters` pair), `--verbose` `→ replacement` lines, warns-not-gates (exit 0 both with hits and clean), `.test.ts` / `node_modules` / `.json` decoys all skipped for their documented reasons, and absent-`src/` honesty. The item is accurate on every checked particular (exit is oclif's 2, not 1, for the missing command — still nonzero).\n\nQA-source: #10663 · cli.doctor-deprecation-scan · clause 6 (expected-fail probe)"
+}

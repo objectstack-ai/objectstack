@@ -1,0 +1,34 @@
+{
+  "number": 10190,
+  "kind": "issue",
+  "title": "pm-dispatch: the triage round's four-repo FULL open-issue inventory should be daily reconciliation, not an hourly cost — the hourly round can run on `since` windows for ~10% of the tokens",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T13:29:31Z",
+  "updated_at": "2026-08-22T17:07:49Z",
+  "closed_at": "2026-08-22T17:07:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10190",
+  "body": "Filed by the triage seat (session `session_01JTMsq2Gv3qDWMcGWKi6Sb8`) on the maintainer's instruction, 2026-08-20, verbatim: 「每次都需要 四仓全量 open issue 盘点 … 吗？ 建议分诊多久执行一次」→「立卡」. Filed as `finding` into the skills lane (the change is pm-dispatch SKILL.md text — governed surface, fable tier, human merge); that seat grades and carries the PR.\n\n## Measured, this seat's ~12:47Z round (2026-08-20)\n\nThe round consumed ~363k tokens total (budget-counter delta 15,000,000 → 14,637,108). Of that, the four-repo full open-issue inventory cost **~50k** (objectstack 242 issues over 3 pages ≈ 42k; objectui 100 + cloud 48 + objectos 11 in one parallel call ≈ 7k; minimal fields throughout). The rest was per-card reads (~150k+), PR contract diffs (~40k), and writes (cheap).\n\nInside the round the full inventory served exactly three duties, and each has a cheaper equivalent:\n\n| duty the full inventory served | cheaper equivalent | est. cost |\n|---|---|---|\n| sweep shapes ①②③ (bare / half-annotated cards) | `list_issues` with `since: [last round-close brief timestamp]` — a label change refreshes `updated_at`, so half-annotated shapes enter the window too, and a skipped-fire backlog is covered automatically because the window anchors on the last BRIEF, not the last fire | ~5k for a typical hour (5–30 changed cards) |\n| unlock scan's \"is the upstream still open\" oracle | invert it: `state=CLOSED` + `since` per repo (typically 0–10 cards/hour), intersect with the `Blocked-by:` reverse index, and only process hits per the release double-checks | ~2k |\n| health metrics (dispatchable inventory / finding count / release boards) | per-label queries with `perPage: 1` reading only `totalCount` — five or six count probes | ~1k |\n\nSo an hourly round needs ~8k of reads where it currently spends ~50k, without changing any duty's semantics.\n\n## The one real blind spot, and why it is already covered\n\nA card that is never updated never enters a `since` window. But it WAS swept when it last changed, and aging debt on stale cards is `check-half-states`' job (the H-rows), not the hourly sweep's. The full inventory therefore still has a role — as a **reconciliation backstop**, at daily cadence, not hourly.\n\n## Proposal (two tiers; cadence recommendation included per the maintainer's question)\n\n1. **Keep the Routine at hourly fires, make the round body incremental**: `since`-window sweep + `pm:retriage` re-judgment + the `needs:contract-review` sub-round + closed-`since` unlock scan. The hard argument for keeping hourly is contract-review latency: a clause-② PR cannot enqueue until the label clears, and in the measured round three PRs each waited 30–60 min under hourly cadence — a 2-hour cadence doubles that landing latency for every below-tier dispatch. Cost target: working round ≤50k, idle round within the existing ~40k probe budget (with the existing named-tool-loading discipline).\n2. **One full-reconciliation fire per day** (e.g. the day's first fire), clustering the duties that are already daily: four-repo full inventory reconciliation, the `finding` batch round, the `Restart-when:` executable-criteria batch scan, decision-inbox backfill. This moves the ~50k full read from 24×/day to 1×/day — roughly a million tokens/day of reads removed at unchanged coverage.\n\nImplementation notes for whoever takes it: the `since` anchor must be the previous round-close brief's timestamp read from the seat post (same reading the mutex guard already takes — no new state); the daily tier should be picked by fire-time-of-day, not by a counter (fresh sessions carry no counter); and the brief should state which tier ran so the next round's reader knows what the window covered. Adjacent, not duplicates (checked against the full open list this seat holds from ~13:00Z, plus title keyword scan): #10095 (mutex reads only the seat post), #10117 (label-object drift), #9884 (round-report template rows) — none touches inventory cadence. The SKILL.md line this amends is the 探针先行/工具加载纪律 area of the triage-seat sections."
+}

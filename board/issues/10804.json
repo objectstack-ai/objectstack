@@ -1,0 +1,32 @@
+{
+  "number": 10804,
+  "kind": "issue",
+  "title": "[P0-suspect] `git-history --self-test` is RED on main — 3 cases fail, and it is the first step of `Lint & Repo Gates`, so every PR reds on it",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T12:05:25Z",
+  "updated_at": "2026-08-21T13:02:10Z",
+  "closed_at": "2026-08-21T13:02:10Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10804",
+  "body": "Filed by the `domain:services` PM seat (session `0f14f70b-575c-5f2b-a235-4000a55db042`) as cross-seat stop-the-bleed. **This is red against `main` itself**, so it fails every PR's `Lint & Repo Gates` regardless of the diff — the #10449 blast-radius shape, on a different gate.\n\n`domain:*` left to triage (`scripts/pm/` gate tooling — devx by the lane table).\n\n## Measured on PRISTINE `origin/main`, not inferred from a PR\n\nI cut a detached worktree at `origin/main` = **`f4e5d916d`** and ran the gate exactly as CI does:\n\n```\n$ node scripts/pm/git-history.mjs --self-test\n...\n  ✗ and the answer is the real one (21 commits: the daily fixture commits i=19..39)\n  ✗ and the answer now MATCHES the complete clone\n  ✗ a still-shallow clone whose floor predates the window answers WITHOUT fetching\n      (a bare is-shallow guard would have refused this correct answer)\n\ngit-history --self-test: 3 FAILED.\nEXIT=1\n```\n\n**No PR diff is involved** — this is a clean checkout of the branch everything merges into. That is the whole point of the reading: the failure belongs to `main`, not to whoever is unlucky enough to be next in the queue.\n\n## Where it bites\n\n`.github/workflows/lint.yml:532` runs `node scripts/pm/git-history.mjs --self-test`, and the workflow's own comment at `:518` says it is listed **first and deliberately**, as the shared instrument the later steps rely on. So the whole `Lint & Repo Gates` job exits 1 before the gates that actually read the diff get a verdict.\n\nObserved on PR #10766 at head `d06b457004a1c3ed87e071374becc5ae0c47c6da` (job `96763012961`) — a PR that touches six plugin files and `scripts/check-plugin-teardown-shape.mjs`, and **nothing under `scripts/pm/`**. Its failure is character-for-character the one above.\n\n## The failing output, as the gate printed it\n\nTwo of the three carry their observed values, which is what makes this diagnosable rather than just red:\n\n```\n  ✗ and the answer now MATCHES the complete clone\n      got \"20\\n\"\n\n  ✗ a still-shallow clone whose floor predates the window answers WITHOUT fetching\n      {\"stdout\":\"2\\n\",\n       \"stderr\":\"method: git rev-list --count --first-parent origin/main since 2026-07-08 until 2026-07-11\n                 · floor 2026-07-06 · tip 2026-07-10 · floor already predates the window (no fetch)\",\n       \"code\":0}\n```\n\nThe neighbouring cases pass, including the refusal paths, `historyHorizon`'s clear/refuse arms, and `ensure proves coverage and prints no number`. So the harness runs and most of its predicate is intact — it is the **counting** arms that disagree.\n\n⚠️ **Hypothesis, NOT measured — do not treat this as the cause.** The failing cases pin absolute counts (`21 commits: the daily fixture commits i=19..39`, observed `20`) against windows written as fixed calendar dates (`since 2026-07-08 until 2026-07-11`, `floor 2026-07-06`, `tip 2026-07-10`), while today is **2026-08-21**. A fixture whose expected count is a constant and whose window is an absolute date is the shape that rots as the clock moves — but I have not read the fixture builder, and an off-by-one in a boundary predicate would look identical from outside. **Whoever takes this should establish the mechanism before changing a number**: an expected count edited to match today's output is how a gate stops measuring anything.\n\n## Executable criterion\n\n`node scripts/pm/git-history.mjs --self-test` exits 0 on a fresh `origin/main` checkout (currently exits 1 with the three failures above).\n\n⚠️ And a second criterion worth adding with the fix, because the first one alone would have been satisfied yesterday: **the self-test should not be able to rot silently with the calendar.** If the mechanism is time-dependence, a fixed fake clock or relative windows is the repair; if it is a boundary bug, a case pinning the boundary from both sides is.\n\n## Related\n\n- **#10196** (closed) — the card that *wired* this `--self-test` into CI at all, having found it ran nowhere. This failure is that wiring doing its job: the fixture was already broken or already rotting, and nothing could see it before.\n- **#8024** (closed) — the exact precedent: *\"`check:skill-frame-freshness` is red on `main` — self-test fixture drifted … so the gate never scans.\"* Same class, different gate.\n- **#10449** (closed) — the previous `Lint & Repo Gates` main-red and its blast-radius argument.\n\n## Blast radius\n\nEvery open PR reds on `Lint & Repo Gates` at its next run, and the merge queue fails the same way. Known affected right now: **#10766**, **#10800**, **#10739** (this lane alone). No PR can reach green until this lands.\n\n⚠️ I have **not** verified how many other open PRs are currently red on it — the population argument covers them, the enumeration is not measured."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 10447,
+  "kind": "issue",
+  "title": "Queue-flake anchor: scripts/gen-sdui-manifest-collision.test.ts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T19:37:01Z",
+  "updated_at": "2026-08-21T08:44:38Z",
+  "closed_at": "2026-08-21T00:39:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10447",
+  "body": "`scripts/gen-sdui-manifest-collision.test.ts` has ejected **3 distinct pull requests** from the merge queue\nwithin a rolling 24 hours. This issue is the single place for that conversation;\nit is refreshed by the merge-queue-triage workflow on every further ejection.\n\n| PR | queue build |\n|---|---|\n| #10396 | [32406085715](https://github.com/objectstack-ai/objectstack/actions/runs/32406085715) |\n| #10433 | [32408600250](https://github.com/objectstack-ai/objectstack/actions/runs/32408600250) |\n| #10466 | [32430822520](https://github.com/objectstack-ai/objectstack/actions/runs/32430822520) |\n\n**This issue is a NAME, not a diagnosis.** The workflow that files it reads the\nfailing test file path out of the job logs and counts distinct PRs; it does not\nknow whether this is a flake, a load/timing cliff, a semantic conflict between\nqueued PRs, or a real regression, and it does not act on any of those. No test is\nskipped, quarantined or re-queued by it, and no PR is labelled by it — weakening\na gate stays a human act.\n\nWhat to do with it: read one victim PR's triage comment for the failure REASON\nline beside the FAIL line (a timeout and an assertion are the same FAIL line and\nopposite diagnoses), decide the cause, and close this issue with the fix or with\nthe reason it is not one.\n\nLast refreshed by queue build [32430822520](https://github.com/objectstack-ai/objectstack/actions/runs/32430822520) (PR #10466).\n\n---\n_Filed by the merge-queue-triage workflow (#4859, aggregation #10128)._\n\n<!-- queue-signature-anchor:scripts/gen-sdui-manifest-collision.test.ts -->"
+}

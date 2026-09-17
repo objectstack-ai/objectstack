@@ -1,0 +1,35 @@
+{
+  "number": 15362,
+  "kind": "issue",
+  "title": "[finding] content/docs/protocol/kernel/error-handling.mdx documents `DUPLICATE_RECORD` as a 409 HTTP response code, while every route reports the conflict as `UNIQUE_VIOLATION`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T12:49:00Z",
+  "updated_at": "2026-09-17T10:32:39Z",
+  "closed_at": "2026-09-05T04:51:29Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15362",
+  "body": "Observation recorded while implementing #14723 (maintainer ruling A: a unique-constraint refusal has ONE wire spelling on every route, `UNIQUE_VIOLATION`; the engine's thrown `DuplicateRecordError.code` stays `DUPLICATE_RECORD` in-process). Filed unassigned; not addressed by the #14723 PR, whose surface is code, pins and changesets.\n\n## What the page says\n\n`content/docs/protocol/kernel/error-handling.mdx`, section `## Error Codes` / `### Resource Errors`, at line 349 on `origin/main` `2ed6be649`:\n\n- `#### DUPLICATE_RECORD` — \"HTTP Status: 409\", \"Meaning: Resource with unique constraint already exists\", with an example HTTP body whose `error.code` is `\"DUPLICATE_RECORD\"` (and a `details` object carrying `resource` / `constraint` / `field` / `value`).\n- Line 950, in the rate-limiting section: `// Response: \"DUPLICATE_RECORD\" or \"VALIDATION_ERROR\"` for a registration attempt.\n\n## What the platform does\n\n- `content/docs/protocol/kernel/http-protocol.mdx` lines 759 and 775 document the 409 constraint-violation body as `\"code\": \"UNIQUE_VIOLATION\"` — the spelling the ruling on #14723 names as the published one.\n- Every REST route answers a unique-constraint refusal as `UNIQUE_VIOLATION`: the single-record door (#6250 / #7821 / #14389), the whole-request bulk / import / metadata / UI doors (#14541), and after #14723 the per-row reports of `POST /api/v1/data/:object/batch` and the import runner.\n- `DUPLICATE_RECORD` is the engine's in-process identity (a hook or a flow node catching `DuplicateRecordError` sees it — `content/docs/automation/flows.mdx` line 1124 documents that correctly), never an HTTP body's `code`.\n\nSo the error-handling page describes a wire body no route emits, and the example's `details.value` echoes the offending value, which the platform sentence deliberately withholds (the driver's error stays on `cause`).\n\n## Not measured here\n\n- Whether the `{ \"success\": false, \"error\": { ... } }` envelope shape on that page matches today's ADR-0112 body at all — the whole section may predate the current envelope; this card records only the code spelling.\n- Whether `content/docs/api/error-catalog.mdx` line 355 (`### DUPLICATE_RECORD`, \"A record with the same unique key already exists\") needs a note distinguishing the in-process code from the wire spelling; it is a catalog entry, not an HTTP example, so it may be fine as-is.\n\n## Suggested disposition\n\nDocs-only: rewrite the `DUPLICATE_RECORD` entry on `error-handling.mdx` to say the 409 wire body carries `UNIQUE_VIOLATION` (cross-reference `http-protocol.mdx`), keep `DUPLICATE_RECORD` documented as the engine-envelope code an in-process caller branches on, and drop the value echo from the example. Leave for triage to grade."
+}

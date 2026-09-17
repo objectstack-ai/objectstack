@@ -1,0 +1,32 @@
+{
+  "number": 7826,
+  "kind": "issue",
+  "title": "[finding] `sys_session` has no retention policy — nothing sweeps it, here or in better-auth, and #7732 makes revoked rows permanent",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-11T17:11:16Z",
+  "updated_at": "2026-08-21T14:16:20Z",
+  "closed_at": "2026-08-21T14:09:55Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 20,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7826",
+  "body": "Blocked-by: #10165\n\n> ⚠️ **The former `Restart-when:` line has been REMOVED, deliberately.** This card is no longer waiting on a *condition* — as of the maintainer's 2026-08-20 option-A ruling it is waiting on a *card*, #10165, which gives `lifecycle.ttl` the `onlyWhen` row filter this object's policy cannot be written without. Leaving a `Restart-when:` behind would let the daily executable-criteria scan fire on a card that the unlock scan already owns. Its substance is preserved below and nothing else in this body was touched. Ruling and the four-facet analysis: comment `5355771705`.\n\nEscalated by the dev on #7732 (PR #7825) and carded rather than invented inside a bug fix. **Nothing is broken today**; this records a policy nobody owns, with the measurements that make it decidable.\n\n> ⚠️ **Trigger history, kept because it is the useful part.** The original trigger read \"closed #7675\" and **fired without delivering what it stood for** — #7675 closed 2026-08-16 and did land `login`/`logout` as real `sys_audit_log` rows, but **revocation was deliberately excluded**: `logoutEventFor` returns `null` for every path except `/sign-out` (`auth-session-audit.ts:157`), and that module states the reason — *\"the revoke families already have their own trail (ADR-0069 D4 tombstones)\"*. There are still two trails, not one. The remaining promote-trigger was an operational symptom on `sys_session` (table size / read latency / monitoring alarm); it never fired, and the card was promoted on the independent ground that `sys_session` is the odd one out among the objects declaring a lifecycle policy. Every measurement below still stands.\n\n## Measured\n\nbetter-auth `1.7.0-rc.2` has **no scheduled sweeper** of session rows. Its only expiry-driven collection in the whole library is one line inside `GET /get-session`: on a row whose `expiresAt` has passed, it calls `internalAdapter.deleteSession(token)`. That collector fires **only on a row `findSession` returned**, i.e. only when the client presents that cookie again.\n\nTwo consequences follow, and the first predates everything:\n\n1. **An abandoned session is already immortal.** A user who closes the tab and never returns leaves a row nothing will ever collect, because the only collector needs the cookie to come back. `sys_session` has therefore always accumulated dead rows, at a rate strictly higher than interactive revocations occur.\n2. **After #7732, a revoked session is deliberately permanent.** Tombstoned rows are hidden from better-auth's own session reads (that is what stops the collector eating the audit record), so the one collector cannot reach them by construction.\n\nThere is no TTL, no retention window, no sweeper and no setting for `sys_session` in this repo either.\n\n## Why it is worth owning rather than shrugging at\n\nADR-0069 D4's intent, in the issue's own words, is to keep the row *\"long enough to audit\"*. That phrase implies a **window**, and there is none — \"forever\" is the current answer by default rather than by decision. Two different questions hide in it:\n\n- **Operational**: unbounded growth on a table every authenticated request reads. Bounded in practice today by row size and by the fact that the abandoned-session leak is larger, but it has no ceiling and no monitoring.\n- **Compliance**: a revoked-session tombstone is an audit record about a person. Whether it is retained on the same schedule as `sys_audit_log`, longer, or shorter is a retention-policy question, not an engineering one. Note the user-erasure paths already remove tombstones (`/delete-user`, `/delete-user/callback`, `/admin/remove-user`), so the erasure story is coherent; it is the steady-state schedule that is unowned.\n\n## The dispatchable scope, once #10165 lands\n\nDeclare a lifecycle policy for **ordinary expired/inactive** `sys_session` rows, using the `onlyWhen` filter #10165 adds:\n\n```ts\nttl: { field: 'expires_at', expireAfter: '1d', onlyWhen: { revoked_at: { $null: true } } }\n```\n\n⛔ **Hard fence, unchanged and load-bearing:** the revoked-row/tombstone retention *window* is compliance/audit-trail semantics and is NOT in scope. Every option put to the maintainer excluded it explicitly and the ruling did not settle it.\n\n⚠️ **Measured, so it is not re-derivable from the object file:** a tombstone is a strict **superset** of an ordinary row (`session-tombstone.ts:281-283` stamps `expires_at`, `revoked_at`, `revoke_reason` and clears nothing), and that write **backdates `expires_at` to `now - 1000`** — so a `ttl` keyed on `expires_at` without the filter reaps tombstones *first and hardest*, with no test going red. The `1d` figure is derivable without fresh policy from `sys_device_code`, the only other `managedBy: 'better-auth'` transient object.\n\n## Provenance\n\nEscalated in #7732's dev report and accepted at PM review of PR #7825. Filed as a `finding` rather than `needs-user-decision` because nothing was blocked on it; promoted 2026-08-17, re-routed to `domain:engine` 2026-08-20, dispatched and measured the same day, escalated on the measurement, and ruled the same day."
+}

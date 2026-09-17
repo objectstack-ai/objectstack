@@ -1,0 +1,35 @@
+{
+  "number": 10776,
+  "kind": "issue",
+  "title": "finding: the break-glass last-local-credential guard runs BEFORE authentication, so an anonymous caller can learn which user is the environment's break-glass account",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "security"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T11:12:17Z",
+  "updated_at": "2026-08-22T17:03:49Z",
+  "closed_at": "2026-08-22T15:46:40Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10776",
+  "body": "Found while implementing #10349 (the ADR-0112 envelope for the better-auth-native `/admin/` refusals). Filed unassigned; **not** fixed in that PR — it is a different defect class (ordering / disclosure, not envelope shape) and #10349's change deliberately leaves this response untouched.\n\n## Measured\n\nHermetic fixture: `AuthManager` (`plugins: { admin: true }`) over the in-memory engine, better-auth 1.7.1, requests through `AuthManager.handleRequest`. One signed-up user, no session, no `Authorization` header.\n\n```text\nPOST /api/v1/auth/admin/remove-user  {\"userId\":\"<the only local-credential holder>\"}\n  anonymous -> 409 content-type: application/json\n               {\"message\":\"Cannot remove the last local password login. At least one\n                break-glass account with a password must remain so an identity-provider\n                outage can never lock the organization out. …\",\"code\":\"LAST_LOCAL_CREDENTIAL\"}\n```\n\nEvery other vendor-lane `/admin/` route in the same run answered the same anonymous caller `401`. So a **409 `LAST_LOCAL_CREDENTIAL` rather than a 401 is itself the answer to a question the caller was never authenticated to ask.**\n\n## Why it happens\n\n`packages/plugins/plugin-auth/src/auth-manager.ts` registers the break-glass guard as a better-auth **`hooks.before`** keyed on `ctx.path` (`/delete-user`, `/admin/remove-user`, `/admin/ban-user`). A `before` hook runs ahead of the endpoint's own `use: [adminMiddleware]`, and `adminMiddleware` is the only thing that establishes identity on that lane (`getAuthoritativeSessionFromCtx(ctx)` then `APIError.fromStatus(\"UNAUTHORIZED\")`). The hook reads `ctx.body.userId` straight from the unauthenticated request and calls `isLastLocalCredentialHolder(ctx.context.adapter, targetId)` (`last-local-credential.ts`), so the lookup — and the `CONFLICT` throw that follows it — both happen before anyone has asked who the caller is.\n\n## Why this is not #9654\n\n[#9654](https://github.com/objectstack-ai/objectstack/issues/9654) (closed `not_planned`) recorded the same *ordering* shape on ObjectStack's raw `/admin/` mounts and judged it low severity because what leaks is **parameter shape** — field names and which are required, close to free information for a documented API.\n\nWhat leaks here is not schema shape. It is a **per-record state answer about a named user**, and specifically the one record an attacker most wants: the account that must keep a local password so an IdP outage cannot lock the org out. An anonymous caller who can enumerate or guess user ids gets a yes/no oracle identifying the break-glass holder — the highest-value target in the deployment, and the one whose compromise defeats an enforced-SSO posture. That is a different severity argument from #9654's, which is why this is filed rather than folded into it.\n\n## Not yet measured\n\nThe second arm — anonymous `POST /admin/remove-user` naming a userId that is **not** the last local-credential holder, which the source says falls through to the `401` — was read off `auth-manager.ts` rather than fired, because it was outside the card being worked. Anyone picking this up should fire both arms in one run before acting on the oracle framing; if the 401 arm does not hold, the finding is weaker than written here.\n\n## Shape of a fix, not a prescription\n\nThe obvious ordering repair (authenticate, then run the guard) is a behaviour change on the paths that hook covers and touches the `/delete-user` self-service path too, so it wants its own decision rather than a rider. There may also be an argument that the guard must stay early precisely because it is an invariant — in which case the honest fix is to make the pre-auth answer indistinguishable from the ordinary refusal rather than to move the guard."
+}

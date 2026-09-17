@@ -1,0 +1,35 @@
+{
+  "number": 10367,
+  "kind": "issue",
+  "title": "[finding] check:published-readme-exports' namespace-import branch can never fire — `namespaceSymbol` is hardcoded `null` at the only call site",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T16:58:55Z",
+  "updated_at": "2026-08-21T08:44:28Z",
+  "closed_at": "2026-08-21T05:07:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10367",
+  "body": "Observation found while widening the call-site half for #9870 (PR #10365). **Not fixed there** — different defect, and it has no live consequence today.\n\n## The branch\n\n`analyzeDocument` binds a namespace import so the call-site half can check its members against the module's export set:\n\n```js\nif (imp.namespaceLocal) {\n  const ns = target.namespaceSymbol;\n  if (ns) {\n    bound.set(imp.namespaceLocal, { symbol: ns, /* … */ imported: '*' });\n  }\n}\n```\n\n`resolveTarget` in `run()` is the only production caller, and it returns:\n\n```js\nreturn {\n  declared: true,\n  exports,\n  namespaceSymbol: null,   // ← always\n  hasMember: …,\n};\n```\n\nSo `ns` is always falsy and the branch never binds anything. `hasMember` already has the matching `SymbolFlags.Module` arm (`checker.getExportsOfModule(s).some(…)`), so the machinery on the answering side exists — only the symbol is never supplied.\n\n## Why it is a `finding` and not a bug report\n\nThe population is **zero twice over**, measured with the gate's own `publishedDocs()`:\n\n- 5 namespace imports exist across the 60 published documents;\n- all 5 are **relative** specifiers (`import * as objects from './src/objects'`), in `packages/cli/README.md`, `packages/mcp/README.md` and `packages/spec/prompts/create-new-project.md`;\n- `splitSpecifier` returns `null` for a relative specifier, so those imports are skipped before the branch is reached regardless.\n\n⇒ Wiring `namespaceSymbol` today would change no verdict. Nothing is currently mis-measured.\n\n## Why it is still worth recording\n\nThis is a branch that reads as coverage and cannot fire — in a gate whose own header raises \"zero is a broken scan, not a clean repo\" (#4690) to a hard error. The day a published README namespace-imports a workspace package (`import * as spec from '@objectstack/spec'`), the call-site half will silently not read it, and the green line will not say so. The `NOT read:` clause added by PR #10365 would count those call sites, so the blind spot would at least be *visible* — but it would be attributed to \"no type this gate can reach\", which is not the reason.\n\nTwo honest resolutions, both cheap; picking between them is a maintainer call:\n\n1. **Wire it** — supply the module symbol from `surface` (the `exportsOf` cache already holds it) and pin the shape in `--self-test`, so the branch is exercised by a fixture even while the tree's population is 0.\n2. **Delete it** — remove the branch and the `imported: '*'` path, and say in the header that namespace imports are out of scope, the way `CHANGELOG.md` and `bash` fences are.\n\n⛔ What it must not stay is what it is now: present, unreachable, and reading like coverage.\n\nRefs: #9870 / PR #10365 (where it was found) · #9911 (the other no-population shape in this file) · #4690 (empty-population failure)."
+}

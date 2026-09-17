@@ -1,0 +1,33 @@
+{
+  "number": 10721,
+  "kind": "pull_request",
+  "title": "docs(tooling): rewrite service-automation's DEBT note to its measured composition",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T09:45:12Z",
+  "updated_at": "2026-08-21T10:29:05Z",
+  "closed_at": "2026-08-21T10:29:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-21T10:29:03Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10721",
+  "body": "Closes #10174\n\n`DEBT['@objectstack/service-automation']` recorded `errors: 3` while its own note\nnarrated **5** — it opened `'code-tier 5.'`, closed `'Re-measured 5 at 5ab08428.'`,\nand itemised 2 + 3. The two it itemised first were TS2741 in `engine.test.ts`, a\nfile tsc no longer reports anything for. The entry was evidently lowered 5 -> 3\nwithout the note being rewritten alongside it.\n\n**Prose only. `errors: 3` is unchanged** — the count is correct and no count moves.\n\n## Measured, not adopted\n\nRe-derived with the gate's own invocation (`tscErrorCount()`'s), from the repo root\nagainst a built dependency closure, at base `53a48c93f4`:\n\n```\n$ ./node_modules/.bin/tsc --noEmit --pretty false -p packages/services/service-automation/tsconfig.json\npackages/services/service-automation/src/nested-region-parity.test.ts(95,25): error TS2341: Property 'flows' is private and only accessible within class 'AutomationEngine'.\npackages/services/service-automation/src/nested-region-parity.test.ts(151,20): error TS2341: Property 'flows' is private and only accessible within class 'AutomationEngine'.\npackages/services/service-automation/src/nested-region-parity.test.ts(180,20): error TS2341: Property 'flows' is private and only accessible within class 'AutomationEngine'.\n```\n\n**3, all TS2341, all in one file** — matching the field exactly, and matching what\nthe card measured at an earlier tip.\n\nThe measurement is **valid, not a silent zero**: the output carries none of the\ncodes in the gate's own `TSC_SETUP_ERROR` set (TS5058/5083/6053/18003/5012/2688),\nand tsc's exit 2 came with three recognisable diagnostics, so the gate's\n\"refusing to record 0\" guard does not fire.\n\n**The graduation is real, not an exclusion artifact.** `--listFiles` on the same\nproject lists `src/engine.test.ts` in the compiled program, and it reports nothing.\nThat file now builds its pausing fixtures through a single `defineActionDescriptor`\nhelper that declares `resumeAuthority` (its docblock cites #5561), where the note's\nTS2741 had been \"both literals omit both\".\n\n## What the note says now\n\nThe measured composition first — 3 x TS2341 at `nested-region-parity.test.ts`\n95/151/180, dot-reading the private `engine.flows` (the `as any` casts on two of\nthose lines sit on `.config`, not on the engine, so they do not suppress it) —\nthen the 5 -> 3 graduation, then the residue restated as the one decision it\nactually is: whether tests may read private state at all.\n\nThe entry keeps its warrant as the specimen #5278 cites for composition drift, now\nstated honestly: it has drifted **both** ways — 2 -> 5 by acquiring a second file,\nthen 5 -> 3 by graduating the first.\n\n## Deliberately not in this PR\n\nThe file already states the general rule at `:167-173` and cites **this very entry**\nas its worked example, but speaks only about counts going **up**; this entry drifted\nthe other way. Per triage, extending that wording or adding a note-vs-field\nconsistency check is a new finding rather than a rider, so neither is here. The\nconsistency-check proposal is filed separately and named in the dev report.\n\n## Gates\n\nDerived with `node scripts/pm/dispatch-gates.mjs` (no paths — merge base `53a48c93f`),\nthen run at `5757b74a35`:\n\n| Gate | Result |\n| --- | --- |\n| `check:type-check-coverage` | OK — 64/77 packages type-checked, 13 in DEBT; self-test 23+24+25+28+9 cases hold |\n| `check:type-check-debt` (`--re-measure`) | OK — 33 ledger entries re-measured in 271.2s, 1912 raw errors, **none above its recorded number** |\n| `check:cross-package-test-inputs` | OK — 13 packages read outside themselves, all declared; 90 self-test cases passed |\n| `check:nul-bytes` | OK — 6222 text files scanned, no raw ASCII control bytes |\n\nThe re-measure half first **refused correctly** on a partial closure (\"would silently\nmeasure a DIFFERENT WORLD\"); it was re-run after\n`turbo run build --filter='./packages/*' --filter='./packages/*/*'` (70/70 successful).\n\nIts one informational line is `@objectstack/plugin-auth` TEST_DEBT 109 recorded vs 97\nmeasured — pre-existing, unrelated to this card, explicitly not an error, and already\nowned by #6376.\n\nNo changeset: gate-ledger prose publishes nothing, so this carries `skip-changeset`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_"
+}

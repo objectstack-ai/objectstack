@@ -13,7 +13,6 @@
   "labels": [
     "documentation",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,7 +21,7 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-09-11T10:03:02Z",
-  "updated_at": "2026-09-17T08:05:49Z",
+  "updated_at": "2026-09-17T13:48:26Z",
   "closed_at": "2026-09-17T08:05:49Z",
   "closed_by": {
     "login": "os-litant",
@@ -30,7 +29,7 @@
     "type": "User"
   },
   "merged_at": null,
-  "comments": 9,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/17670",
   "body": "## Summary\n\n#17328 established, by browser measurement at all three surface widths, that two sentences are false:\n\n1. an absolute `colSpan` \"only lines up at the one width the author imagined\" — it does not; the renderer clamps the span to the section's column count, so the cell is grid-aligned at every width and rendered overflow is 0px in every configuration, including `colSpan: 4` in a 3-column section;\n2. `span: 'full'` gives the \"whole row at any column count\" — it does not; it compiles to `@2xl:col-span-3`, gated at the top breakpoint only, and at the modal width it renders pixel-identical to authoring nothing at all (285px, one column of two).\n\nThe PR for #17328 withdrew the `absolute-colspan-discouraged` lint rule, which was one carrier of both sentences. **The same two sentences are still on the tree in five more places, and the most authoritative of them is the one that generates the public reference docs.** That PR is fenced to `packages/lint` and deliberately did not touch them.\n\n## The carriers, read on `origin/main` at 5ddd5d3f15\n\n| # | Carrier | The sentence |\n|:--|:--|:--|\n| 1 | `packages/spec/src/ui/view.zod.ts:2489` — the `.describe()` on `FormField.colSpan` | \"Fragile when the column count is derived per surface (mobile 1 / modal 2 / page 3-4): a fixed span only lines up at the width the author imagined. The renderer clamps it to the current column count. Prefer `span`.\" |\n| 2 | `packages/spec/src/ui/view.zod.ts:2494` — the `.describe()` on `FormField.span` | \"'full': whole row at any column count. Prefer this over the absolute `colSpan`.\" |\n| 3 | `content/docs/references/ui/view.mdx:200` and `:365` | AUTO-GENERATED from carrier 1 — two rows, verbatim. Never hand-edited; they move when carrier 1 moves. |\n| 4 | `content/docs/ui/views.mdx:412` and `:428` | \"span: 'full',   // Take the whole row at any column count\", and the table row \"Legacy absolute column span — prefer `span`\". Hand-written. |\n| 5 | `content/docs/protocol/objectui/layout-dsl.mdx:223` | \"`span: auto \\| full` (or the legacy absolute `colSpan`, also `1`-`4`)\". Hand-written. |\n| 6 | `skills/objectstack-ui/rules/navigation.md:136` and `:139` | \"Use the relative **`span: 'full'`** to make a field take the whole row… Do **not** use the absolute `colSpan` — it only lines up at one width and is deprecated.\" Published skill catalog, and a **governed surface**. |\n\nCarrier 1 is the sharp one: it is the single source the generated reference pages project, so the false claim reaches every reader of the public API reference. Carrier 6 is the one most likely to be *acted on*: it is prescriptive, it ships to customer projects, and it prescribes the spelling that measures worse.\n\n## Why this is a separate card and not a rider on #17328\n\n- **Different verification surface.** Carrier 1 is a `.describe()` in `packages/spec`; moving it pulls in `gen:schema` / `gen:docs` and the generated-artifact gate family, which #17328's diff (a `packages/lint` change plus its tests) does not otherwise touch.\n- **Carrier 6 is a governed surface** (`skills/**`), human-merge only.\n- **It is not a mechanical rewrite.** Deleting \"prefer `span`\" is not obviously right either: the measurement says `span: 'full'` is the spelling that misrenders at intermediate widths, so what these sentences *should* say depends on an answer this repo does not hold. #17328's PR body records that evidence. That renderer question is deliberately **not** part of this card and is not filed here.\n\n## Acceptance\n\nEvery carrier above either states something the #17328 measurement supports, or is gone. `content/docs/references/**` is regenerated, never hand-edited. `content/docs/releases/v12.mdx:73-76` and `:82` are release-owned history and are explicitly **out of scope** — they record what v12 shipped and are correct as history.\n\nFiled unassigned and unlabelled by the dev seat on #17328, for triage.\n\nRefs: #17328 (the measurement and the lint-rule half)."

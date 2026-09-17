@@ -1,0 +1,35 @@
+{
+  "number": 10565,
+  "kind": "issue",
+  "title": "[finding] The cross-package detector's own comments still say \"the two seeds\" — the source the three stale copies were copied from",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T03:27:06Z",
+  "updated_at": "2026-08-21T09:20:00Z",
+  "closed_at": "2026-08-21T09:18:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10565",
+  "body": "Observation-class, found while sweeping for #10163. **No gate is red today.** Filed unassigned, no `pm:queue`.\n\n## Measured\n\n#10163 corrects four files *outside* `scripts/check-cross-package-test-inputs.mjs` that told authors the gate recognises \"exactly two seeds\". The phrase is also inside the detector itself, four times, and two of those instances are now inaccurate in the same way — measured on `ceb33a9f12`:\n\n| line | text | verdict |\n|---|---|---|\n| `:660` | `// The two seeds NAME the directory; fileSegs names the FILE inside it.` | **stale** — four directory-naming seeds are resolved below it (`dirname(fileURLToPath(import.meta.url))`, `__dirname`, `import.meta.dirname`, `dirname(import.meta.filename)`) |\n| `:673` | `// ... the two seeds above ...` | accurate in local context (exactly two cases precede it) |\n| `:679` | `// The two seeds above NAME the directory.` | **stale** — four directory seeds precede it |\n| `:695` | `// ... the same base as the two seeds above.` | **stale** by the same reading |\n\nThe gate's published `RECOGNISED_PATH_SPELLINGS` (`:530-542`), which it prints verbatim in its failure text, is correct and lists all of them. Only the surrounding prose lags.\n\n## Why record it rather than shrug\n\nThis is where the copies came from. #8995 and #9763 each widened the resolved set and each updated `RECOGNISED_PATH_SPELLINGS`; neither swept the prose, and the phrase then propagated into three files outside the detector plus a fourth claim in the opposite direction. Leaving the phrase at its source is what makes a fifth copy likely.\n\nThe drift direction is benign — the prose is narrower than the code — which is exactly why nothing caught it.\n\n## Why it is not a rider on the #10163 PR\n\n`scripts/check-cross-package-test-inputs.mjs` is edited by **open PR #10450**, so #10163's PR deliberately does not touch it. Cheapest landing is a wording pass on that PR's file or a small follow-up after it merges: replace the count with \"the directory-naming seeds above\", or point at `RECOGNISED_PATH_SPELLINGS`, the same shape #10163 used in the four external files.\n\n## Refs\n\n#10163 (the external sweep) · #8995 and #9763 (the widenings) · PR #10450 (holds the file)"
+}

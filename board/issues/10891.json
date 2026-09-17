@@ -1,0 +1,34 @@
+{
+  "number": 10891,
+  "kind": "issue",
+  "title": "[finding] check:published-files is `silent` for every package.json card, though it reads all 77 workspace manifests — a population whose only spellings are the ones hintCovers prices as fabrication",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T16:00:38Z",
+  "updated_at": "2026-08-21T17:03:58Z",
+  "closed_at": "2026-08-21T17:03:58Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10891",
+  "body": "Found while discharging the last `ESCAPABLE_LITERAL_LEDGER` row (#10875 / PR #10890). Filed unassigned, out of scope there, and **not** a regression from that PR — see the measurement below.\n\n## The observation\n\n`check:published-files` reads **every workspace member's `package.json`** (the `files` whitelist) and walks each member's file tree. So a card editing `packages/<any>/package.json` genuinely can move it — that is the gate's whole subject.\n\nThe derivation never names it for one. Its live hint set is:\n\n```\n[\"scripts/check-published-files.mjs\", \"@objectstack/spec\", \"src/**/*.zod.ts\"]\n```\n\n- `scripts/check-published-files.mjs` — its own source (reverse containment);\n- `@objectstack/spec` — an npm package name from `EXTRA_ENTRIES`, not a repo path;\n- `src/**/*.zod.ts` — collapses to `src/.zod.ts`, which matches nothing.\n\nVerdict for `packages/spec/package.json`, on the live tree: the gate does not appear in the 19 derived families at all.\n\n## Why this is NOT the ledger row that just closed, and not #10840\n\nWorth separating, because all three look alike from a distance:\n\n- the **#10875 row** was a literal that *misdescribed* the population (`scripts`, a root the gate never opens). Removing it changed **0** of 50259 match pairs — the bare literal was already inert under `hintCovers`' refusal. So this silence is **pre-existing**, not introduced by that PR;\n- **#10840** is the *invisible* half: population literals carrying no separator, which never reach the hint set. This gate's population is not a literal problem at all;\n- this one is a gate whose real population **has** no spelling that the hint language can express cheaply.\n\n## Why it is not obviously fixable, which is why it is a finding rather than a card\n\nThe `ROOT_DIR_WATCH_HINTS` escape would need `packages/**` + `apps/**` + `examples/**`. That is precisely the volume `hintCovers`' docblock refuses (`packages` alone is measured at +139084 fabricated pairs across the family corpus, and one card going 7 → 34 matched families). The narrower true spelling — \"every `package.json` under a workspace member\" — is not expressible: hints are prefix/segment-based with globs collapsed by deletion, so a mid-path `*` like `packages/*/package.json` collapses to `packages//package.json` and matches nothing.\n\nSo the honest options are all judgement calls:\n\n1. leave it — the derivation's contract is \"leads, not verdicts\" and it errs toward missing; a miss costs one card one CI round;\n2. declare the three member roots and accept the volume;\n3. teach `hintCovers` a `**/<basename>` form, which reopens the basename class the docblock closed on provenance grounds (8 of 17 new pairs fabricated when re-measured for `*.md`).\n\nRecommendation: **(1)**, recorded rather than acted on — but the choice should be made once, in the open, rather than rediscovered by the next person who reads the hint set and assumes a bug.\n\nRefs: #10875 / PR #10890 (the ledger row, and the 0-pair measurement) · #10840 (the invisible half) · `scripts/pm/dispatch-gates.mjs` `hintCovers` docblock (the two refusals and their prices)"
+}

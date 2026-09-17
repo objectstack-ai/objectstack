@@ -1,0 +1,35 @@
+{
+  "number": 10677,
+  "kind": "issue",
+  "title": "migrate duplicates: no_sql_seam loud-refusal is dead code for the memory driver (false all-clear)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T08:31:27Z",
+  "updated_at": "2026-08-22T17:05:25Z",
+  "closed_at": "2026-08-21T14:48:37Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10677",
+  "body": "Found by QA run #10663 driving `cli.migrate-duplicates-inventory` at framework `79ebb37`.\n\n## Symptom\n`os migrate duplicates --database-url memory://qa` → **exit 0 with a clean empty report** (`duplicates:[]`, `counters.status:\"read\"`) instead of the intended `{error:\"no_sql_seam\"}` exit 1. This is the exact \"indistinguishable from never looked\" false all-clear that the #8928 ruling exists to prevent — a scan that reports \"no duplicates\" over a driver it cannot actually query.\n\n## Root cause\n`InMemoryDriver.execute()` (`packages/drivers/driver-memory/src/memory-driver.ts:300-302`, confirmed in the loaded `dist`) logs `WARN Raw execution not supported in InMemory driver` and `return null` — it neither throws nor is absent. So `resolveSeedTenancySeam`'s `canRun` (`seed-tenancy-backfill.ts:247`, `typeof d.execute === 'function'`) sees a usable seam, `resolveSeedTenancyExec` returns a non-null exec, and the `if (!exec)` guard at `duplicates.ts:697` never fires. Every probe then calls the no-op `execute` → `null` → `normalizeRows([])` → no throw, no `.skipped` entry. The `no_sql_seam` refusal is effectively dead code for the memory driver — one of the two drivers the clause/knownGap explicitly name. Reproduced across 3 URL variants, deterministic.\n\n## Suggested fix\nEither have `InMemoryDriver.execute()` throw an explicit \"raw SQL not supported\" error (so the seam is honestly absent), or make `resolveSeedTenancyExec`/`duplicates.ts` treat a null-returning execute as no-seam and take the `no_sql_seam` branch.\n\n## Note for the checklist\nThe item's clause-7 knownGap (\"the memory and mongodb drivers expose no raw-SQL seam\") is factually wrong for the memory driver — it exposes a no-op `execute` seam. `@objectstack/driver-mongodb` is not installed in the QA container, so the genuinely seam-less mongodb branch was not reachable this run. The six other clauses pass — the scan itself is correct.\n\nQA-source: #10663 · cli.migrate-duplicates-inventory · clause 7 (seam-less driver refuses loudly, no_sql_seam, exit 1)"
+}

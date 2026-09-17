@@ -1,0 +1,35 @@
+{
+  "number": 10685,
+  "kind": "issue",
+  "title": "Three ref'd-timer pins score a process-global count across an `await` — green only because their windows happen not to cross a timer phase",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T08:42:07Z",
+  "updated_at": "2026-08-21T12:12:01Z",
+  "closed_at": "2026-08-21T12:02:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10685",
+  "body": "Filed from PR #10661 (issue #10604) as an out-of-scope observation. **Nothing is red today** — this is about an unstated invariant, not a live failure. No fix is proposed here; that PR's brief scoped it to its own CI failure and it stayed there.\n\n## The idiom\n\nFour `@objectstack/core` test files count ref'd timers with the same process-wide probe:\n\n```js\nconst refdTimers = () =>\n    process.getActiveResourcesInfo().filter((r) => r === 'Timeout').length;\n```\n\n`getActiveResourcesInfo()` reports the **whole process**, and in CI a `Test Core` shard runs ~37 core test files in one worker. So the absolute count is ambient: it belongs to every co-tenant file, not to the test reading it. Scoring a subject against it with `toBe` is only sound while nothing else can move it between the two samples — which is true exactly when the window contains **no event-loop turn**, because timer callbacks run in the timers phase and a microtask drain never reaches it.\n\n## Who relies on that, and who says so\n\n`packages/core/src/health-monitor.test.ts:194` is the one that states the requirement and holds itself to it:\n\n```\n// Everything from here to the last assertion runs in one uninterrupted\n// synchronous turn, so each difference is attributable.\n```\n\nThree others depend on the same property silently, with an `await` inside the measured window:\n\n| site | window |\n|---|---|\n| `packages/core/src/kernel.test.ts` — `Startup timeout guards do not outlive the race (#4813)` > `leaves no ref'd timer behind after the plugin wins the race` | `await kernel.bootstrap()` |\n| `packages/core/src/kernel.test.ts` — same describe > `reclaims one guard per lifecycle hook, for every plugin` | `await kernel.bootstrap()` |\n| `packages/core/src/hot-reload.test.ts:80` — `expect(refdTimers()).toBe(before)` | `await manager.reloadPlugin(...)` |\n\nThey pass because those awaits resolve on microtasks (the plugin hooks are `async () => {}`, nothing in the path awaits a real timer), so the reading cannot move under them. That is a property of code they do not own, and it is written down nowhere.\n\n## Measured\n\nPR #10661's fourth pin had the same shape **plus** a leg that waits 10 ms of real time, and that leg is the one CI reddened: `expected 2 to be 4` at `timeout-guard.test.ts:156:24` — the count went **down**, two foreign timers expiring mid-test. Reproduced synthetically by arming ambient ref'd timers at 1 ms spacing via a scratch `setupFiles` (same test, same line, `expected 2872 to be 2885`).\n\nRun the three sites above under that same ambient noise and they stay green — 4 runs, `54 passed (54)` each time for `kernel.test.ts` + `health-monitor.test.ts` + `hot-reload.test.ts`. So the exposure is real but currently unrealised.\n\n## Why it is worth recording\n\nThe invariant is invisible at the point where it would be broken. Adding anything that awaits a real timer inside one of those three windows — a retry backoff in `bootstrap()`, a debounce in `reloadPlugin()` — turns a green pin into an intermittent shard-only red whose message points at timers and not at the change that caused it. That is the same class as #10511 / PR #10626: a fixture scored against an ambient value it does not own.\n\nTwo shapes resolve it, both cheap:\n\n- assert **non-increase** (`toBeLessThanOrEqual`) — a leak is a growth, so the direction that matters survives and foreign expiry stops being a signal. This is what PR #10661 landed for its own pin, ablation-checked to still red on a real leak.\n- or keep the window synchronous and say so, as `health-monitor.test.ts` does.\n\nNot urgent, and deliberately not labelled `pm:queue`.\n"
+}

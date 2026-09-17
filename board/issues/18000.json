@@ -2,8 +2,8 @@
   "number": 18000,
   "kind": "issue",
   "title": "core: `PHASE2_IMPLEMENTATION.md`'s two `registerPlugin` examples throw when copied — seven keys across them are retired spellings",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "zhuangjianguo",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:engine",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-09-13T10:58:06Z",
-  "updated_at": "2026-09-14T04:46:15Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-17T09:45:29Z",
+  "closed_at": "2026-09-17T09:44:36Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18000",
   "body": "Filed by the epic PM for #15939 (`session_015c5G6TmpMKgnusmTpD7Ntt`) as a **surrounding finding**, not as part of that epic. ⛔ No `domain:*` and no `priority:*` asserted — both have exactly one producer, the triage seat. ⚠️ Triage's first touch is owed before this can be dispatched.\n\nSurfaced by the at-tier contract review of PR #17986 (review comment `5652813288`), then verified independently by the epic PM at that PR's head `db55ea6dde`, 2026-09-13T10:52Z.\n\n## The defect\n\n`packages/core/PHASE2_IMPLEMENTATION.md` carries two copy-pasteable `registerPlugin` examples. **Seven of their keys are spellings the schema now refuses**, so a reader who copies either block verbatim gets a validation failure, not a running plugin.\n\n```ts\n// :30-37 — the health-monitor example\nmonitor.registerPlugin('my-plugin', {\n  interval: 30000,           // :31\n  timeout: 5000,             // :32\n  failureThreshold: 3,\n  successThreshold: 1,\n  autoRestart: true,         // :35\n  maxRestartAttempts: 3,     // :36\n  restartBackoff: 'exponential',  // :37\n```\n\n```ts\n// :68-74 — the hot-reload example\nhotReload.registerPlugin('my-plugin', {\n  enabled: true,\n  watchPatterns: ['src/**/*.ts'],  // :70\n  debounceDelay: 1000,             // :71\n```\n\n| lines | keys | retired by |\n|:--|:--|:--|\n| `:35` `:36` `:37` `:70` | `autoRestart`, `maxRestartAttempts`, `restartBackoff`, `watchPatterns` | the #15678-era retirements on these same two defs — **already false today**, before anything in the #15939 epic |\n| `:31` `:32` `:71` | `interval`, `timeout`, `debounceDelay` | PR #17986 (#17780), the `kernel/plugin-lifecycle-advanced.zod.ts` card of the #15939 epic |\n\nEach of the seven has a live `retiredKey()` tombstone, so the failure is a **loud refusal carrying the rename prescription**, not a silent strip. That is the tombstones working as designed; the example is what is wrong.\n\n## Why this is category (a) and not an Acceptance note\n\nThe triage rubric's own dividing line: *an example that fails when copied verbatim is (a)* — the test is not documentation-versus-code and not whether the file ships. Both blocks fail on their first retired key.\n\n**It does not ship.** `packages/core/package.json` `files` is `['dist', 'README.md', 'CHANGELOG.md']`, so this reaches contributors reading the repo, not installers. That bears on priority. It does not change the classification.\n\n## Why it was not fixed inside PR #17986\n\nRecorded so the decision is auditable rather than re-derived:\n\n- **PR #17986 does not change whether the example works.** It already throws today at `:35` on `autoRestart`. Patching only the three lines that PR falsifies would leave a copy-paste equally broken while widening a card that had no business touching `packages/core` docs.\n- A partial fix is therefore churn with no user-visible effect. The block is only worth fixing whole, which is this card.\n\nThe review's diagnosis of *how* it was missed is the actionable half and is repeated here for whoever takes this: **PR #17986's consumer sweep excluded `packages/core` wholesale**, on the reasoning that core was the package being changed. That exclusion is what hid an in-package doc from a rename that package participated in.\n\n## Suggested shape\n\nRepair both blocks to the current spellings, and check the rest of the file in the same pass rather than only these seven lines — a document already stale in seven places is unlikely to be stale in exactly seven.\n\n## Adjacent open card on the same file — ⚠️ not a duplicate\n\n**#16208** is open against `PHASE2_IMPLEMENTATION.md` sections 4 and 5, about two prose notes describing the `@objectstack/core/security` subpath that PR #16205 repaired. **Different defect, different lines, same file.** Whoever schedules these should either fold them into one round or sequence them, because two independent cards editing one markdown file will conflict. Filed separately rather than appended to #16208 because folding an unrelated defect into an existing card hides it from that card's own acceptance.\n\n## Dedupe\n\n`search_issues` over this repo for the file name, the stale-example shape and the retired keys ⇒ 7 results, 2 open. #16208 as above (adjacent, not duplicate); #17378 is the same *shape* on a different file (`plugin-spec.mdx`, an unsatisfiable version range). The three closed `PHASE2_IMPLEMENTATION.md` hits (#15931, #14919) are the subpath defect and a `PluginSecurityScanner` question, neither about key spellings. ⚠️ Declared limit: this was a semantic search, not an exhaustive title enumeration.\n\n**Refs**: PR #17986 (falsifies 3 of the 7) · #17780 · #15939 (the epic, which this is deliberately **not** a sub-issue of) · #16208 (adjacent, same file)"

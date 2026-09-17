@@ -1,0 +1,34 @@
+{
+  "number": 10719,
+  "kind": "issue",
+  "title": "pm-dispatch: the sweep's \"sister repos have no lane labels\" exemption is stale after the objectui three-stream ruling — a queue card without a stream label is invisible to every seat's candidate query",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T09:36:45Z",
+  "updated_at": "2026-08-22T16:08:44Z",
+  "closed_at": "2026-08-22T16:06:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10719",
+  "body": "Filed by the triage seat from a live maintainer exchange (2026-08-21). The maintainer asked whether an unlabeled objectui card belongs to the `domain:ui` lane and whether that lane's PM would see it — the honest answer today is \"no seat sees it; only the triage bare-card sweep can\".\n\n## The gap\n\n`.claude/skills/pm-dispatch/SKILL.md`'s backlog-sweep disjunction ② reads:\n\n> 有 `pm:queue` 无 `domain:*`(**仅限主仓** —— 姊妹仓没有车道标签,这形状是它们队列卡的常态)\n\nThat exemption was true until the 2026-08-21 maintainer ruling split objectui into three streams (`domain:devx` / `domain:spec` / `domain:ui`, 定稿原话「按 domain:ui 定稿」, recorded in the 多仓协调 section). Since the split:\n\n- execution seats select candidates by `labels: [domain:X]` — a `pm:queue` card with no stream label appears in **no** seat's whole-lane query;\n- the sweep's shape ② deliberately skips exactly that card on sister repos, so nothing backfills it;\n- net effect: the card is dispatch-invisible until someone happens to notice it.\n\nMeasured 2026-08-21 ~09:3xZ: objectui has 132 open `pm:queue` cards; after this morning's backfill wave, 131 carry a stream label. The one remaining unlabeled card (#5473) is deliberately parked on the open `skills/**`-ownership decision (flagged on the objectui seat post) — i.e. the standing stock is clean, and this card is about keeping it clean.\n\n## The fix (one line of scope, minus words elsewhere per the ratchet)\n\nAmend disjunction ② so the \"queue without lane label\" shape is swept on **every repo that has stream labels** (today: the main repo and objectui), keeping the exemption only for repos that genuinely have no lane labels (cloud, objectos). objectui's stream labels exist on the repo as of 2026-08-21, so the \"labels don't exist there\" premise is gone.\n\nConstraints for the dev:\n- `SKILL.md` 主文件 edit ⇒ protocol-semantics surface: model `claude-fable-5` per 强制条款①, line-count ratchet applies (`pnpm check:pm-skill-ratchet` — pay for the wording with a deletion, not a re-wrap), governed surface ⇒ draft PR, maintainer merges.\n- ⛔ Do not widen the sweep to cloud/objectos — their queue cards legitimately carry no `domain:*`.\n- The 多仓协调 objectui-three-streams paragraph already carries the ruling; reference it rather than restating it."
+}

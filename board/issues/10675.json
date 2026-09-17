@@ -1,0 +1,35 @@
+{
+  "number": 10675,
+  "kind": "issue",
+  "title": "os datasource list-tables/introspect/validate are non-functional — CLI reads pre-#3843 flat envelope",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T08:30:57Z",
+  "updated_at": "2026-08-22T17:05:40Z",
+  "closed_at": "2026-08-21T11:31:37Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10675",
+  "body": "Found by QA run #10663 driving `cli.datasource-introspect-codegen` against a live showcase boot at framework `79ebb37`.\n\n## Symptom\nAll three `os datasource` subcommands are broken on the happy path:\n- `os datasource list-tables showcase_external` → `No remote tables found.` (exit 0), while the server returns two tables.\n- `os datasource introspect showcase_external --table customers` → `Error: Failed to generate draft` (exit 2).\n- `os datasource validate showcase_external` → `No federated objects to validate.` (exit 0) **even against induced drift** the server flags as `missing_column region severity:error` — a silent CI-breaking pass.\n- Unknown datasource → `TypeError: first argument must be a string or instance of Error` (exit 1, a crash rather than the server's error text).\n\n## Root cause\nThe commands read the pre-#3843 **flat** response shape (`body.tables` / `body.draft` / `body.results`, and `body.error` as a string), but the server emits the current wrapped envelope from `packages/types/src/response-envelope.ts`: `sendOk` → `{success:true, data:{…}}`, `sendError` → `{success:false, error:{code,message}}`. So payloads (nested under `data`) read as `undefined`, and passing the error **object** to oclif's `this.error(...)` crashes. Mechanism at `list-tables.ts:42-48`, `introspect.ts:53-63`, `validate.ts:43-53`. This is these commands' first functional coverage — they never worked against the current envelope.\n\n## Reproduction\n1. Boot showcase on a scratch port, mint an admin token.\n2. `os datasource list-tables showcase_external --url <U> --token <T>` → `No remote tables found.` exit 0; oracle `GET /api/v1/datasources/showcase_external/external/tables` = `{success:true,data:{tables:[{\"name\":\"customers\",\"columnCount\":7},{\"name\":\"orders\",\"columnCount\":7}]}}`.\n3. `os datasource introspect showcase_external --table customers …` → `Error: Failed to generate draft` exit 2; oracle `POST …/tables/customers/draft` returns `data.draft.source`.\n4. Induce drift (rename `customers.region` in the fixture DB), `os datasource validate …` → `No federated objects to validate.` exit 0; oracle `POST …/external/validate` = `ok:false … missing_column region`.\n\n## Suggested fix\nUnwrap the envelope in all three commands: read `body.data.tables|draft|results` and `body.error?.message`. Secondary quality gap: even once unwrapped, the generated draft fails `os build` as-is (object name lacks `${namespace}_` prefix; no `sharingModel`).\n\nQA-source: #10663 · integration-system.external-schema-introspection · CLI lane (the introspection feature's CLI door)"
+}

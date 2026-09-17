@@ -1,0 +1,30 @@
+{
+  "number": 10734,
+  "kind": "issue",
+  "title": "【缺陷】审批中心-审批详情抽屉底部无条件展示单据完整原始 JSON(「原始数据(JSON)」面板),建议移除或加开关",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T09:57:17Z",
+  "updated_at": "2026-08-21T10:24:12Z",
+  "closed_at": "2026-08-21T10:24:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10734",
+  "body": "## 环境\n- 平台版本:@objectstack/* 17.1.0(@objectstack/console 17.1.0、@objectstack/plugin-approvals 17.1.0)\n- 端:桌面端 Console\n- 页面:/_console/apps/<任一应用>/system/approvals(审批中心);/_console/apps/com.objectstack.setup/component/approvals/inbox 同样出现\n\n## 现象\n审批中心点开任意审批请求,右侧详情抽屉「审批动态」与「操作」按钮之间固定挂着折叠面板「原始数据(JSON)」(右上角带「复制」按钮),展开后是该业务记录提交时的完整原始行 JSON,含 id / created_by / updated_by / owner_id / organization_id 等内部字段、lookup 裸 id,以及对象元数据上显式声明 hidden: true 的字段。默认折叠,一次点击即展开。对 pending / approved 全部状态的请求均出现。\n\n## 复现步骤\n1. 定义一条含 approval 节点的 record_change 审批流,给审批人挂好\n2. 新建业务单据 → 提交审批,进入 pending\n3. 以审批人身份打开审批中心,点开该审批请求\n4. 展开抽屉底部「原始数据(JSON)」\n\n## 期望\n审批人只看到与审批决策相关的业务信息(单据关键字段、审批链步骤条、审批动态、操作按钮);原始记录 JSON 属实现细节,不应出现在业务审批人动线上。\n\n## 实际\n无条件展示完整原始行 JSON 并带一键复制。两层问题:\n1. 对业务审批人零价值——不需要也看不懂 id / created_by / organization_id;\n2. 绕过应用层字段可见性——JSON 含对象元数据显式 hidden: true 的内部字段与全部内部主键、审计人 id,应用方「这些字段不该给用户看」的声明在此失效。\n\n## 定位(供参考)\n- 渲染方:@objectstack/console@17.1.0,chunk ApprovalsInboxPage-*.js,i18n key `rawData`(中文文案「原始数据(JSON)」);\n- 渲染条件仅 `payload != null`,无角色判断、无 debug/feature flag(已全量搜 showRaw* / rawPayload / hideRawData / showPayload / approvals.* 设置键,零命中);\n- 数据源 sys_approval_request.payload_json,由 @objectstack/plugin-approvals 建请求时无条件写入;ApprovalNodeConfigSchema($strict)无关闭快照或关闭该面板的字段;\n- 应用方无任何正规配置可移除(字段 hidden、视图列、应用导航、权限集、环境变量均不生效),只能改 dist bundle 或注 CSS,属打补丁。\n\n## 建议(任选,按优先级)\n1. 默认不渲染,仅开发模式 / 平台管理员 / 显式调试开关下渲染;\n2. 提供系统或应用级开关(如 approvals.showRawPayload,默认 false);\n3. 若保留,至少按对象元数据裁剪:过滤 hidden 字段与内部审计/主键字段。\n\n(现象截图见来源项目 steedos-labs/os-project-titanwind-ehr#1683,私有仓;如需截图可联系项目方提供)"
+}

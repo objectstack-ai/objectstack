@@ -1,0 +1,32 @@
+{
+  "number": 10870,
+  "kind": "issue",
+  "title": "[finding] 54 package-root tool configs (`vitest.config.ts`, `tsup.config.ts`, …) are TypeScript no tsc program reads — SOURCES_COVERED deliberately does not govern them",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T14:53:16Z",
+  "updated_at": "2026-08-21T15:04:53Z",
+  "closed_at": "2026-08-21T15:04:53Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10870",
+  "body": "Filed by the #10756 census so the scoping decision it forced is recorded and ruled on by\na maintainer, rather than settled by whoever happened to be holding that card.\n\n## The measurement\n\n`SOURCES_COVERED` (`scripts/check-type-check-coverage.mjs`, added in #10756) asks, per\npackage the coverage headline calls **covered**: is there a non-test `.ts` source file\nthat no tsc program accounting for the package reads? On `main` @ `5886ee6d22` the honest\nanswer over all 64 covered packages is **65 files across 42 packages**, and it splits\ncleanly in two:\n\n| group | files | packages |\n| --- | --- | --- |\n| package-root tool configs | **54** | 42 |\n| files in a source **directory** | 11 | 11 |\n\nThe 54 are `vitest.config.ts` x32, `tsup.config.ts` x16, `objectstack.config.ts` x5 and\n`vitest.integration.config.ts` x1.\n\n`SOURCES_COVERED` governs the second group only — its observation half takes files at\n`depth > 0` (i.e. in a subdirectory), and the 11 are seeded into\n`UNCHECKED_SOURCE_DEBT`. This card is about the first group.\n\n## The argument on both sides, as the gate's own header records it\n\n**For leaving them out.** They are one repo-wide convention, not 42 independent\ndecisions: every package's `include` is `src/**/*`, and a tool config sits at the package\nroot because that is where its tool looks for it. It is loaded **by that tool** (vitest,\ntsup), not imported by the package. Ledgering them would seed 42 entries all stating the\nsame sentence, and a ledger whose every line is identical is one nobody reads — the\nfailure mode #4311's own header warns about (\"a ledger that can only accrete rots into a\nlist nobody trusts\").\n\n**Against.** A `vitest.config.ts` is unchecked TypeScript exactly as much as\n`packages/objectql/scripts/dry-run-hash-compat.ts` was, and #4311's founding premise is\nthat a green suite no tsc has read is not evidence of a contract. Worse, the\n`depth > 0` line **can be walked around**: moving a file up into the package root takes\nit out of the invariant's scope. That hole is left open knowingly.\n\n## What deciding it would look like\n\n1. **Leave as-is**, and record the exclusion in the gate's header (it already is).\n2. **Bring them into a program** — one shared `tsconfig.tools.json` pattern named in\n   each `typecheck` script. Closes the class; costs 42 manifests plus whatever errors\n   surface (unmeasured — the census counted files, not errors, for this group).\n3. **Govern them with a separate, deliberately coarse invariant** (e.g. \"every package's\n   root tool configs are read by some program, or the package is listed\") — which is\n   option 2 with a ledger for the stragglers.\n\nNo recommendation attached: this is a convention question across 42 packages and the\nstartup-scope axis cuts against expanding gate surface without a pull. Filed as\n`finding`, not queued.\n\n## Dedupe\n\n`search_issues` for the tool-config paths, `vitest.config.ts` type checking, and the\nSOURCES_COVERED scope returns nothing; #10756 is the parent measurement and names this\nsplit in its own report."
+}

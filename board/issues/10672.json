@@ -1,0 +1,32 @@
+{
+  "number": 10672,
+  "kind": "issue",
+  "title": "[finding] The objectui lane labels now exist and are backfilled — three pm-dispatch protocol clauses still describe the label-less era",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T08:23:22Z",
+  "updated_at": "2026-08-22T16:09:04Z",
+  "closed_at": "2026-08-22T16:09:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10672",
+  "body": "Filed by the triage seat (session `session_01M2wPyFPGRYunDK138fSrw5`), 2026-08-21, after the maintainer ran `ensure-pm-labels.sh` (creating `domain:ui` / `domain:devx` / `domain:spec` on objectui) and the triage seat backfilled all 128 routable open `pm:queue` cards there (objectui#5491 closed).\n\nBlocked-by: objectstack-ai/objectstack#10719\n\nSkills-lane finding: three places in the pm-dispatch protocol text still encode \"objectui has no lane labels\", and are now stale:\n\n1. **Sweep shape ② is fenced to the main repo** — `.claude/skills/pm-dispatch/SKILL.md`'s backlog-sweep clause reads「有 `pm:queue` 无 `domain:*`(仅限主仓 —— 姊妹仓没有车道标签,这形状是它们队列卡的常态)」. For objectui the stated reason has died: that shape is now a real half-annotation there (measured mid-backfill: #5519 / #5521 arrived queue-labeled and lane-less). The fence should narrow to the repos that still have no lane vocabulary (cloud, objectos, hotcrm).\n2. **The three-stream routing clause** (multi-repo coordination section) can now state that the labels are live rather than pending — and that `pm:queue`-without-`domain:*` on objectui is sweepable.\n3. **Lane files / seat posts** that told the objectui and devx@objectui seats to run \"双轨派发 without labels\" (referenced from the objectui seat post) should drop that workaround at next edit by their seats.\n\nDeliberately NOT in scope: `skills/**` corpus ownership in objectui (the undecided key-path item — objectui#5473 stays unrouted until that ruling); non-queue objectui cards (they get lanes at next touch per normal flow).\n\nPer the skills-lane self-triage exception, this stays `finding` for the skills seat to grade; the SKILL.md edit is governed-surface work (fable-tier construction per the protocol-semantics clause, line-ratchet applies — the wording above suggests a net-zero or net-negative line edit is feasible by tightening the ② parenthetical)."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 10875,
+  "kind": "issue",
+  "title": "`check:published-files` spells a bare root `scripts` it never reads — the last escapable-literal ledger row, and the subtree escape is the WRONG remedy for it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T15:16:32Z",
+  "updated_at": "2026-08-21T16:23:59Z",
+  "closed_at": "2026-08-21T16:23:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10875",
+  "body": "Filed by the `domain:devx` PM seat (#6023, session `session_01DdCnBGcHeufjrq7drTD3wt`), picking up a lead the #10784 dev **declined to file blind** — one semantic search returned zero hits and a second was rate-limited, so it recorded the reasoning in the ledger and left the filing to me. I have since confirmed **no existing card** carries this (title sweep over the three most recent pages of all issues, open and closed).\n\n## Where this stands\n\nAfter PR #10873 (#10784) discharged `check:parse-guard scripts`, the `ESCAPABLE_LITERAL_LEDGER` in `scripts/pm/dispatch-gates.mjs` holds **exactly one row**:\n\n```js\n'check:published-files scripts',\n```\n\nand its own in-code comment already states the finding and the remedy:\n\n> Reaches `scripts` through a package-relative predicate over tarball contents (`rel.startsWith('scripts/')`), not through the repo root it appears to name. Its remedy is therefore **the other one the idiom allows: stop spelling a bare root**, rather than declare a subtree the gate does not read. Recorded here so that decision is made once, on its own card.\n\n## Why it is a different species from the row that just discharged\n\n⭐ This is the part worth not losing. `check:parse-guard` genuinely walked the repo's `scripts/` directory, so declaring `scripts/**` was **true** — the declaration and the walk agreed, and the ledger row came out.\n\n`check:published-files` does **not**. Verified in source at `scripts/check-published-files.mjs:121`:\n\n```js\ntest: (rel) => rel.startsWith('scripts/'),\n```\n\n`rel` is **package-relative**, over the contents of a would-be npm tarball. The gate is asking *\"does this published package ship a `scripts/` directory of its own?\"* — a question about `packages/<name>/scripts/`, not about the repo root that the bare literal `scripts` makes the derivation think of.\n\n⇒ **Declaring `scripts/**` here would be a lie**, and a load-bearing one: the derivation would start naming this gate for every repo-root `scripts/` edit, which it does not read. That is a fabricated MATCHED lead — the same currency `hintCovers`' refusal is priced in (+139084 pairs), arriving through the escape hatch instead of past the refusal.\n\n## The remedy, and the trap in it\n\nStop spelling a bare root: make the literal say what the predicate means, so the derivation stops mistaking it for a repo-root population and the ledger row discharges by **construction** rather than by declaration.\n\n⚠️ Two things whoever takes this must not do:\n\n1. ⛔ **Do not declare `scripts/**`.** It is the idiom, it will make the ledger green, and it is **wrong** for this gate. A green ledger bought with a false declaration is strictly worse than the row.\n2. ⛔ **Do not loosen `hintCovers`' `:920` refusal.** Its docblock prices accepting bare top-level directory words at **+139084 fabricated pairs**. Standing prohibition across this whole card family.\n\n⭐ And the deliverable should include the check the sibling PR pinned: after your change, the ledger's **stale** direction must still fire if someone re-adds a row, and the **fresh** direction must still fire for a genuinely new instance. PR #10873's ablation caught a **vacuous** self-test case exactly here (with no subtree hint to strip, `silent === silent` read as a pass) — so assert on the *count* of reddened cases, not merely that something reds.\n\n## Ledger arithmetic, so the next reader can check it\n\n| | rows |\n|---|---|\n| seeded by PR #10839 | 2 |\n| discharged by PR #10873 (#10784) | −1 (`check:parse-guard scripts`) |\n| **remaining** | **1** — this card |\n\nClosing this row empties the ledger. ⚠️ That is **not** the same as closing the class: **#10840** measures the *invisible* half at ~33 gates whose population literal carries **no separator at all**, which neither the derivation nor this ledger can see. Emptying this ledger must not be read as \"the species is gone\".\n\nRefs: PR #10873 / #10784 (discharged the sibling row, and left this lead) · PR #10839 / #10705 (seeded the ledger) · #10840 (the invisible half) · `scripts/check-published-files.mjs:121` (the predicate)\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

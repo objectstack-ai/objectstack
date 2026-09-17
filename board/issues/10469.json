@@ -1,0 +1,35 @@
+{
+  "number": 10469,
+  "kind": "issue",
+  "title": "docs(ui): the react-pages live-data sample reads `result.records`, which is always undefined — and its Callout misstates what a dropped option does",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T00:07:03Z",
+  "updated_at": "2026-08-21T10:52:39Z",
+  "closed_at": "2026-08-21T10:42:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10469",
+  "body": "Found while fixing #10288 (the same two defects in `examples/app-showcase`). Filing\nrather than fixing: `content/docs/**` pulls in a different gate family than that card's\ndiff (`check:doc-anchors`, `check:docs-audit-scope`, `check:docs-redirects`,\n`check:published-readme-links`, `check:role-word`, plus the `{/* os:check */}` verified-\nsample convention), and the Callout's second half needs a wording decision, not a\nmechanical edit.\n\n## 1. The sample renders an empty list\n\n`content/docs/ui/react-pages.mdx`, the \"Live data\" sample (L143-148):\n\n```jsx\nconst result = await adapter.find('showcase_invoice', {\n  $filter: ['status', '!=', 'paid'],\n  $top: 200,\n});\nconst records = Array.isArray(result) ? result : (result && result.records) || [];\n```\n\nThe query options are right. The **result read is not**. `useAdapter()` returns\n`ObjectStackAdapter`, whose `find()` resolves to a normalized `QueryResult` — objectui\n`packages/types/src/data.ts` declares `data` / `total` / `page` / `pageSize` /\n`hasMore` / `cursor`, and `normalizeQueryResult` (objectui\n`packages/data-objectstack/src/index.ts`) returns exactly that shape. There is no\n`records` key. `result.records` is `undefined` on every call, so `records` falls to `[]`\nand the documented sample renders an empty `<ul>` forever, with no error.\n\nThis is not theoretical: the identical read was fixed once already in\n`examples/app-showcase/src/ui/pages/crm-workbench.page.ts`, whose comment records the\nsymptom verbatim — \"Reading .records here always missed, so the KPI cards silently stuck\nat 0 even though the ListView beside them showed the same rows\" — and was still live in\n`renewals-pipeline.page.ts` until #10288. The doc is the third instance, and it is the\none a customer copies from.\n\nFix: `result.data`, with the array arm kept. Every objectui consumer of this contract\nspells it `res?.data ?? res?.records ?? …` (`data-list.tsx`, `record-picker.tsx`,\n`ObjectRefField.tsx`, `record-history.tsx`, …) — canonical first, the legacy spelling as\na fallback, never alone.\n\n## 2. The Callout names the wrong consequence\n\nDirectly below the sample:\n\n> An unprefixed `top:` or a `filters:` key is not a query option — it is silently\n> dropped, and the query comes back unfiltered or **with the default page size**. There\n> is no error.\n\nThe \"unfiltered\" half is right. The page-size half is backwards. **The GET list route has\nno default page size**, so an absent `top` returns the ENTIRE match set — stated in\n`packages/client/src/index.ts` (\"The GET list route has no default page size, so an\nabsent `top` returns the ENTIRE match set\"), pinned in `packages/client/src/client.test.ts`\n(#6485), and measured by `packages/objectql/src/protocol-unknown-query-param.test.ts`'s\n`baseline — no params returns every row` (10 rows seeded, `total: 10` with no params).\n\nSo the real failure mode of a dropped `top` is an **unbounded read**, not a truncated\none — the cap the author wrote never happens, and the page pulls every matching row over\nthe wire. That is a different thing to warn an author about, and the current wording\nsends anyone debugging it looking for pagination that is not there.\n\nSuggested wording: \"…it is silently dropped. The query then runs as if you had not\nwritten it: an unprefixed `filter:` comes back unfiltered, and an unprefixed `top:`\ncomes back with every matching row, because the list route has no default page size.\nThere is no error.\"\n\n## Acceptance\n\n- The sample reads `result.data` (array arm preserved) and, run against a real adapter,\n  renders rows.\n- The Callout states the unbounded-read consequence, sourced from the client/protocol\n  behaviour above rather than from the old wording.\n- The named docs gates stay green.\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 10009,
+  "kind": "issue",
+  "title": "finding: the direct /sso/register endpoint's ADR-0024 before-hook admits org owners/admins — wider than the platform-admin posture #9653 landed on the /admin/sso/* bridges",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T14:18:25Z",
+  "updated_at": "2026-08-21T09:16:19Z",
+  "closed_at": "2026-08-21T09:15:25Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10009",
+  "body": "Observed 2026-08-19 while implementing #9653 (the four `/admin/sso/*` bridges now gate on the shared ADR-0068 platform-admin judge before delegating). Filed unassigned, `finding` — this records a posture divergence between two surfaces that reach the same operation; whether to align them is a policy decision.\n\n## What the two surfaces now answer\n\n`POST /api/v1/auth/sso/register` (better-auth's own endpoint, served by the catch-all) is guarded by the ADR-0024 before-hook in `auth-manager.ts` (`ctx.path === '/sso/register'`), whose admit set is **platform admin OR org owner/admin of the caller's active org** (`isOrgOrPlatformAdmin`). That hook was deliberate when it landed: better-auth's own model treats org-scoped SSO providers as org-admin-manageable.\n\n`POST /api/v1/auth/admin/sso/{register,register-saml}` (the ObjectStack bridges the `sys_sso_provider` actions call) now gate on **platform admin only** (`judgePlatformAdmin`), per #9653's triage adjudication: ADR-0068 D4 — \"platform-operator actions gate on `isPlatformAdmin` (sole operator)\", and registering an identity provider is a platform-operator action.\n\nSo after #9653 an org owner/admin who is not a platform admin is refused `403 PERMISSION_DENIED` at the bridge, while the direct endpoint still admits them for the same underlying registration. The bridge tightening is therefore not a boundary for that caller class — it is honest labelling on the surface the console uses, with the vendor-native surface still carrying the wider ADR-0024 admit set.\n\n## Why it is worth recording rather than fixing in #9653\n\n- #9653's ruling and declared file surface are the four bridges; the before-hook is a different seam (`auth-manager.ts`) with its own history and its own rationale (org-scoped providers are org-admin-manageable *by the vendor's design*; the hook's comment block says why it exists).\n- Aligning the two surfaces means choosing a policy: (a) tighten the hook to platform-admin-only (D4 read: registering an env-wide login-routing IdP is platform-operator, full stop), or (b) keep org-admin registration for org-scoped providers and platform-admin-only for the org-less/global case, or (c) leave the divergence and document it. Each has real consequences for multi-org deployments where org admins legitimately self-serve their own IdP.\n- The hook had no test pins until #9653 added fixture coverage around the bridges; a decision here should land with pins on the direct surface too.\n\nRelated context: #9653 (the bridge gate + the measured vendor posture on the installed `@better-auth/sso` 1.7.1), ADR-0024 (open SSO mechanism), ADR-0068 D4 (platform-operator actions)."
+}

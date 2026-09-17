@@ -1,0 +1,35 @@
+{
+  "number": 11091,
+  "kind": "pull_request",
+  "title": "pm-dispatch: SKILL.md wave-2 family — two-tier triage inventory, decision re-read, subagent tier fuse, git-history guard index",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-22T16:41:16Z",
+  "updated_at": "2026-08-22T17:07:26Z",
+  "closed_at": "2026-08-22T17:07:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-22T17:07:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11091",
+  "body": "Fixes #10190\nFixes #10544\nFixes #10523\nFixes #10508\n\nMaintainer-authorized family fold (recorded on the chain-head claim, live PM chat 2026-08-22): four graded cards, one commit per member, one shared branch. Governed surfaces throughout (`.claude/skills/**`, `AGENTS.md`) — **draft PR, human merge only; never queue/arm/ready**.\n\n## Members (one commit each, in order)\n\n1. **Two-tier triage inventory** (`c2d962af`) — SKILL.md gains the principle in the 分诊座位职责 section: hourly rounds read `since` windows anchored to the previous round-close brief's timestamp from the seat post (the mutex guard's existing reading — no new state; label writes refresh `updated_at`; anchoring on the brief covers a skipped-fire backlog); one daily fire runs the four-repo full reconciliation and clusters the already-daily duties; the tier is picked by fire-time-of-day, never a counter; the brief states which tier ran. The `since`-equivalent readings, cost targets and daily-duty clustering land in `references/dispatch-runbook.md` (new section 分诊两级盘点细则 with the maintainer's 2026-08-20 verbatim quote).\n2. **Decision re-read** (`ad9c80fe`) — the pre-brief protocol (候选与批次) gains the decision re-read, symmetrical to the claim protocol's race re-read: read the card's comments to the last page before writing a brief; quote any maintainer ruling verbatim into the brief's ruling partition as binding, or state none exists. Lead 1 of the card only; leads 2–3 (greppable marker, body-carried ruling) are noted adjacencies, not implemented.\n3. **Subagent tier fuse** (`9857ead3`) — the `needs:contract-review` chain now states: a `mode:subagent` `get_session` reading measures the **dispatching** session (the two fields agreeing is one source quoted twice), so the downgrade fuse is valid only for seat sessions; clause-② subagent dispatches always keep `needs:contract-review`, and the dispatched-at-the-floor review skip is seat-session-only. Composes with the 2026-08-21 self-review relaxation (that path is a seat session reading its own row) — no conflict measured.\n4. **git-history guard index** (`9e58b7d8`) — `AGENTS.md` (Multi-agent working discipline) gains the windowed-history rule using the card's drafted wording (answer or REFUSE; shallow clones answer windowed `git log`/`rev-list` at exit 0 with no warning; `historyHorizon()` is the read-only predicate), and the pm-dispatch 机械守卫索引 gains the `scripts/pm/git-history.mjs` row, ratchet-paid. Both placements landed (the SKILL.md row was affordable).\n\n## Ratchet ledger (all three files at their ceilings before AND after; verified at `9e58b7d8`)\n\n| file | before | after | ceiling |\n|---|---|---|---|\n| `.claude/skills/pm-dispatch/SKILL.md` | 682 | 682 | 682 |\n| `.claude/skills/pm-dispatch/references/dispatch-runbook.md` | 243 | 243 | 243 |\n| `AGENTS.md` | 961 | 961 | 961 |\n\nOne dispatch mechanism assumption was falsified and is reported here: the runbook is **not** unratcheted — it carries its own 243-line ceiling at zero headroom, so member 1's runbook section is paid in-file too. Additions are paid by content deletions, never bare re-wrap: trimmed redundancy/incident-narrative in the runbook (读数成本三则 intro, 落卡细则 measured-narrative per its own 行文纪律, 活性巡查 tail, roster/SendMessage duplication with the main file, 紧急卡 restatement of a rule the main file owns, subagent-checkout incident detail), in SKILL.md (objectos onboarding history, dispatch-gates clause duplicated by the runbook's 清单取数补遗, one stale-premise rationale clause), and in AGENTS.md (merged-language incident narrative, duplicated-branch incident sentence, stash/registry incident detail — case law lives in git history per the ratchet's own header). Per-commit ratchet stays ≤ ceiling at every step (682 → 680 → 681 → 682).\n\n## Gates (final tree `9e58b7d8`, derived by `node scripts/pm/dispatch-gates.mjs` on the actual change set; exits captured before any pipe)\n\n- `check:pm-skill-ratchet` — ✓ all 20 files within ceilings (verdict lines: \"682 lines (ceiling 682; headroom 0)\", \"243 (243; 0)\", \"961 (961; 0)\")\n- `check:pm-skill-id-lint` — ✓ \"17 file(s) clean (pattern /#[0-9]{3,}/g)\"\n- `check:skill-frame-sync` — ✓ \"binding sentence present in all 4; 4 count mention(s) agree\"; `check:skill-frame-freshness` — ✓ \"frame itself is unchanged\"\n- `check:pm-governed-prose` — ✓ \"2 instruction surface(s) name all 5 registered governed surfaces\"\n- `check:pm-governed-merges` — ✓ self-test 119 assertions\n- `check:doc-authoring` — ✓ \"389 files clean\"; `check:docs-audit-scope` — ✓; `check:required-contexts` — ✓\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` — ✓ (after building the lint dependency closure; first run failed only on unbuilt `@objectstack/formula` dist)\n- `check:nul-bytes` — ✓ \"no raw ASCII control bytes\" (6414 files)\n\nInstruction-file-only diff, releases nothing → `skip-changeset` (label applied and read back after PR creation).\n\n_Generated by [Claude Code](https://claude.ai/code/session_01MsbKEG4LtERSLaDrbehM3e)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01MsbKEG4LtERSLaDrbehM3e)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 10268,
+  "kind": "issue",
+  "title": "[finding] `check:release-page-status` guards the release-status blockquote but not section coverage — a published minor with no section on its per-major page fails nothing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T15:01:27Z",
+  "updated_at": "2026-08-21T14:05:39Z",
+  "closed_at": "2026-08-21T13:58:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10268",
+  "body": "Filed unassigned while discharging #10232 (authoring the missing 17.1.0 section). This is item 4 of that card's suggested shape, which #10232's triage explicitly deferred: *\"Item 4 (mechanising 'published version has no section') is out of scope here — if wanted it should be a separate finding after 1–3 land.\"* 1–3 have landed, so here it is.\n\n## The gap, stated precisely\n\n`scripts/check-release-page-status.mjs` (from #8892) already mechanises **half** of the detectable surface, and it works — it caught a stale wording during #10232's own implementation, red on a novel phrasing no phrase list had seen:\n\n```\n• content/docs/releases/v17.mdx: the release-status blockquote never states that a 17.x\n  version is released. @objectstack/spec 17.x is GA, so the page must say so in a form a\n  reader and this gate can both find …\n```\n\nWhat it checks is keyed on the **major**: `releasedAssertionRe(major)` matches `\\b<major>\\.\\d+\\.\\d+ … (?:is|was|has been) (?:released|published|…)`. That predicate is satisfied by **any** `17.x.y` claim on the page. So:\n\n- ✅ caught: a v17 page that still describes the series as a pre-release, or that asserts no release at all.\n- ⛔ **not** caught: a v17 page whose blockquote says `17.0.0 is released` while `latest` has been `17.1.0` for six days, with no `17.1.0` section anywhere on the page.\n\nThat second state is exactly what #10232 measured, and the index-entry arm has the same shape — it flags a parenthetical naming a *prerelease*, but not one naming a superseded *stable* version (`current series: 17.0.0` while `latest` is 17.1.0 passes today).\n\n## This is now the third occurrence of the class\n\n- #8886 / #8882 — v16 and v17 pages stale at the GA cut. Produced `check:release-page-status`.\n- #8917 — *\"the v16 line has two content gaps — **16.1.0 is documented on no page at all**\"*. Same defect as this one, on the previous major, and it produced no gate.\n- #10232 — 17.1.0 published with a 69-package train and no section.\n\n`check:docs-image-tag`'s header states the repo's own threshold:\n\n> Two occurrences of an identical drift is where a mechanical guard beats fixing the third one by hand.\n\n## What is and is not generatable\n\n⚠️ Worth stating explicitly, because it is the reason item 4 was deferred rather than bundled: **curated release prose cannot be generated from changesets** without losing the thing that makes it curated. #10232's section took a full read of 69 `CHANGELOG.md` sections (314 distinct entries) and a lot of judgement about what is user-facing.\n\nBut the **absence** is mechanically detectable without writing a word of prose. Two candidate assertions, both computable from artifacts already in the tree:\n\n1. **Section coverage** — for every `<major>.<minor>.0` with a `## <version>` section in `packages/spec/CHANGELOG.md` (the instrument `check-release-page-status.mjs` already reads and already trusts for its GA predicate), `content/docs/releases/v<major>.mdx` must carry a heading naming that minor. The v16 and v17 pages both use `# What's new in <version>` plus `### <version>` in the upgrade checklist, so the shape is already conventional.\n2. **Index currency** — the `(current series: <version>, …)` parenthetical must name the newest released version of that major, not merely a non-prerelease one.\n\nBoth are shrink-only ratchets in the same style as the existing gate, and both would have gone red on 2026-08-20 without anyone reading the page.\n\n## Not claimed\n\n- I have not written either check, and I have not measured what an older page (v9–v15) would do under assertion 1 — the existing gate deliberately floors at v16 under a maintainer ruling (「只负责 v16 以后的」), and any new assertion should almost certainly inherit that same floor rather than invent its own.\n- Whether assertion 1 should be an error or an advisory is a real question: a minor published minutes ago has legitimately not been documented yet, so the useful form may be a grace window or a `latest`-tag-only trigger rather than a hard fail on every PR. I have no recommendation with evidence behind it.\n- I have not checked whether `docs/releases-maintenance.md` already prescribes a release-notes step that was simply skipped — #10232 flagged that as unexamined and I did not open it either.\n\nCross-links: #10232 (this release's manual fix), #8892 (the existing gate), #8917 (the v16 occurrence), #8882 / #8886 (the GA-cut occurrences)."
+}

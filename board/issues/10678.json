@@ -1,0 +1,35 @@
+{
+  "number": 10678,
+  "kind": "issue",
+  "title": "Hook-body build gates: @capabilities override dead through os build; require() pattern dead; default build silently bundles forbidden patterns",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T08:31:44Z",
+  "updated_at": "2026-08-22T12:32:37Z",
+  "closed_at": "2026-08-22T12:29:32Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10678",
+  "body": "Found by QA run #10663 driving `cli.hook-body-extraction-gates` at framework `79ebb37`. The security net is intact throughout — no forbidden body ever shipped as `body.source`, and every forbidden/free-identifier hook was still refused under `--strict-body`. Three defects in the *reporting/reachability*, not the enforcement:\n\n## 1. `// @capabilities` override is unreachable through `os build` (product/docs gap)\nA handler authored in `objectstack.config.ts` with a first line `// @capabilities api.read api.write` produces artifact capabilities `[]`. The config loader (`config.ts:loadConfig` → `bundle-require` → esbuild `transformSync{loader:'ts'}`) **strips `//` line comments** before `String(fn)` runs, so the override at `extract-hook-body.ts:118-131` — documented as working at `hook-bodies.mdx:320-327` — never receives the comment. The pin `lower-callables.test.ts` masks it by feeding raw JS function literals that keep their comment, never exercising the esbuild load path. Fix: move the directive off a `//` comment (e.g. a real property), or state in docs that it is authorable only in pre-bundled JS; add an `os build`-level test.\n\n## 2. `require()` FORBIDDEN pattern is effectively dead (assertion/coverage gap)\n`require('node:os')` in a TS config is rewritten by esbuild's ESM shim to `__require(\"node:os\")`, so `FORBIDDEN_PATTERNS[/\\brequire\\s*\\(/]` (`extract-hook-body.ts:35`) never matches. The refusal still fires (exit 1) — via the #1876 free-identifier gate naming `__require` — so enforcement holds, but the `require()`-specific worded reason the acceptance promises is never emitted for the real authoring path.\n\n## 3. Default `os build` silently warn-and-bundles forbidden patterns (header contradiction)\nA default (non-`--strict-body`) `os build` of a hook containing a forbidden pattern exits 0 with **no output**: `lower-callables.ts:63-78` catches the extraction error and falls back to the `.mjs` bundle; the warning is recorded into `bodyExtractionWarnings` but `compile.ts` prints it nowhere and `:437` `--json warnings` carries rule advisories only. This contradicts the extractor header `extract-hook-body.ts:14-18` (\"makes the build **fail** … no silent fallback\"). Docs `hook-bodies.mdx:256` agree with the *code*, so the header is the outlier. Fix: surface the warning on the default path (at minimum in `--json`), or correct the header to describe warn-and-bundle.\n\n## Clauses that pass\nCapability inference (`.find`→api.read, `.update`→api.write, `const api=ctx.api` alias caught), `crypto.hash` infers nothing (#4391 regression), free-identifier bundle fallback (#1876), all-body-only skip + `.mjs` cleanup.\n\nQA-source: #10663 · cli.hook-body-extraction-gates · clauses 3, 0, 6"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 10725,
+  "kind": "pull_request",
+  "title": "fix(messaging): classify the delivery dispatchers' updateMany sweeps as global environment sweeps",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T09:49:41Z",
+  "updated_at": "2026-08-21T10:22:11Z",
+  "closed_at": "2026-08-21T10:22:09Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-08-21T10:22:09Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10725",
+  "body": "Fixes #10673\n\nOn a walled deployment (`OS_TENANCY_POSTURE=isolated|group`) the SQL driver's tenant-audit gate reported both delivery objects:\n\n```\n[tenant-audit] updateMany on tenant-scoped object \"sys_http_delivery\" without options.tenantId\n[tenant-audit] updateMany on tenant-scoped object \"sys_notification_delivery\" without options.tenantId\n```\n\nThe card is explicit that silencing the line is not a fix — the audit exists to force a per-call-site classification. This PR does that classification and nothing else.\n\n## Call-site census\n\nSix `multi: true` (⇒ `driver.updateMany`) writes exist on these two objects. All six are on the dispatcher claim path:\n\n| # | Site | Role |\n|---|------|------|\n| 1 | `sql-outbox.ts` `claim()` step 1 | visibility-timeout reap |\n| 2 | `sql-outbox.ts` `claim()` step 3 | atomic claim |\n| 3 | `sql-outbox.ts` `claimDigest()` step 1 | visibility-timeout reap |\n| 4 | `sql-outbox.ts` `claimDigest()` step 3 | atomic claim |\n| 5 | `sql-http-outbox.ts` `claim()` step 1 | visibility-timeout reap |\n| 6 | `sql-http-outbox.ts` `claim()` step 3 | atomic claim |\n\nThe census is not a bare `updateMany` grep: `driver.updateMany` is reached through `engine.update(..., { multi: true })`, so the search term is `multi: true` scoped to the two outbox implementations, cross-checked against every `engine.update` in both files (the remaining three are `multi: false` single-record writes — `ack` in both outboxes and `redeliver` — which the driver audits under the `update` op, not `updateMany`, and which this card does not cover).\n\n## Classification: all six are global dispatcher sweeps\n\nNot a judgement of taste — three structural facts, all checked against the tree:\n\n1. **No request context exists to thread.** The only callers are `NotificationDispatcher.runPartition()` and `HttpDispatcher.runPartition()`, driven by a `setInterval` tick under a cluster lock keyed `notify.dispatcher.partition.N` / `http.dispatcher.partition.N`. No HTTP request, no session, no active organization.\n2. **The outbox contract has no tenant to thread even in principle.** `ClaimOptions` / `HttpClaimOptions` are `{ nodeId, limit, partition, claimTtlMs, now }`. Partitioning is `hash(refId | notificationId | digestKey) mod N` — a load-spreading key, deliberately not an organization key — so a partition holds rows from every organization by construction.\n3. **Scoping them would break delivery, not isolate it.** One outbox and one dispatcher pair are constructed per environment (`messaging-service-plugin.ts`) and drain the whole environment's queue. An `organization_id = ` predicate naming a single org on the claim would strand every other organization's deliveries forever; the same predicate on the reap would leave rows a crashed node abandoned permanently `in_flight` for every other organization.\n\nSo each site now passes `bypassTenantAudit` through one documented helper, `outbox-dispatcher-scope.ts`, which carries that warrant in full, with a one-line pointer at each site. Per its spec the flag is diagnostics-only and \"never changes what the write touches\" — and the tests below pin that it changed nothing.\n\n## Verification\n\nThe card's repro (EE 4.1.0 image + composed boot + `docker compose logs app`) is not runnable in this container. **Declared narrowing:** it was not run and no composed log is claimed. What stands in its place is the instrument's own criterion — `SqlDriver.auditMissingTenant` — exercised end to end in `delivery-claim-tenant-audit.integration.test.ts`: a real `SqlDriver` on better-sqlite3, real `syncSchemas()`, the real live `OS_TENANCY_POSTURE` read, the production outboxes, and the driver's own logger as the assertion surface. Before the change that harness reproduces both card lines verbatim.\n\nEach test pins three directions:\n\n- the classified write emits no `[tenant-audit] updateMany` line for its object;\n- **the rows still move in every organization** — both orgs' rows are claimed/reaped and their `organization_id` survives, so an implementation that touched nothing, or one that scoped per organization, goes red;\n- a **positive control** runs afterwards: a deliberately unscoped `multi: true` write on the same object through the same driver must still produce the audit line. Without it, a silent run would prove nothing about the code under test — it would equally match an object that stopped being tenant-scoped or a posture that stopped resolving. The control runs after the assertion it guards because the gate throttles one warning per object-and-op pair.\n\nAblation (signature predicted before mutating): flipping `bypassTenantAudit` to `false` in `src/`, **with no rebuild**, turns exactly the four audit assertions red with `expected true to be false`, and zero \"positive control failed\" — matching the prediction, and proving the tests read `src/` rather than a built artifact. `git checkout HEAD --` restored the file byte-identically (`git hash-object` = `e8e59054e802ecd60344682d6f46d20cf8bea6c8`, equal to the HEAD blob) and the suite returned to 4 passed.\n\nPackage suite at final commit `72607c0`: `Test Files 24 passed (24)`, `Tests 248 passed (248)`; `tsc --noEmit` clean.\n\nGate union derived with `node scripts/pm/dispatch-gates.mjs` (no path arguments) after the final commit on a clean tree, all green at `72607c0` — including `check:i18n` (\"OK — 9 package(s) — all bundles in sync\"), `check:type-check-debt --re-measure` (\"33 ledger entr(ies) re-measured ... none above its recorded number\"), `check:engine-double-contract`, `check:where-matcher`, `check:test-source-alias` and `check:nul-bytes`. The derivation did not name `check:route-envelope` or `check:dispatcher-error-vocabulary`; both were run explicitly with `--self-test` and both pass. `check:query-options-erasure` is green, and its self-test prints `packages/spec/src/migrations/registry.ts parses at --stack-size=4000 through this gate's own channel` — the reported parser-stack red does not reproduce here.\n\n## Out of scope\n\nThe `crm_contract` half of the upstream report stays on `objectstack-ai/cloud#1512` and is not addressed here; that card remains open.\n"
+}

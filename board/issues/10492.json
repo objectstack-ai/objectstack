@@ -1,0 +1,34 @@
+{
+  "number": 10492,
+  "kind": "issue",
+  "title": "`InlineLocaleMapSchema` 的拒收消息说退役形态「resolves to nothing」,实测两个 resolver 都返回原始 `key`;且 `{ key }` 单独写会被**接受**",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T00:45:14Z",
+  "updated_at": "2026-08-21T08:40:47Z",
+  "closed_at": "2026-08-21T08:14:24Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10492",
+  "body": "越界发现,记录于 objectui#5081(把 objectui 的 i18n 指南按实装 spec 17 重写 label 规则)实施期间 —— 那张卡的 file surface 是 objectui 的两个文件,故只记录、不动手。\n\n⚠️ **立卡前的查重搜索被 API 限流挡下**(`search_issues` / `list_issues` 对本身份返回 `API rate limit already exceeded`,重试两次)。分诊去重关键词:`INLINE_LOCALE_KEY`、`resolves to nothing`、`key-reference`、`I18nLabelSchema`。已有同形卡请直接关掉本卡。\n\n## 位置\n\n`packages/spec/src/ui/i18n.zod.ts:108-124`(读于 `origin/main` @ `b057e53f4`;同一文本也在已发布的 `@objectstack/spec@17.0.0` 的 `dist/ui/index.mjs:1932-1939`)。\n\n```\nconst INLINE_LOCALE_KEY = /^(default|[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*)$/;\n// :123\n+ 'not by `key`/`defaultValue`, which was the retired key-reference form (#5055) and resolves to nothing'\n```\n\n## 事实一 —— 「resolves to nothing」实测为假\n\n对**已安装**的 `@objectstack/spec@17.0.0` dist 实跑:\n\n| 调用 | 返回 |\n|---|---|\n| `resolveI18nLabel({ key: 'common.save', defaultValue: 'Save' }, 'en')` | `'common.save'` |\n| objectui `pickLocalized({ key: 'common.save', defaultValue: 'Save' }, 'en')` | `'common.save'` |\n\n两端都走到最后一条腿(first string value,插入序),返回的是**原始翻译键**。它不是「resolves to nothing」,而是「resolves to the machine key」—— 对用户来说比 nothing 更糟:界面上会画出 `common.save` 这样的字符串,而不是空白或缺失告警。\n\n(objectui 的 `pickLocalized` 与本仓 `resolveI18nLabel` 逐腿对齐,parity 由 objectui 的 `plugin-list/src/__tests__/i18nLabel-resolver-parity.test.ts` 钉住,所以两边一致是设计,不是巧合。)\n\n## 事实二 —— 拒收整对形态,靠的只是 `defaultValue`\n\n按键逐个探(`I18nLabelSchema.safeParse({ [k]: 'v' })`,同一份 dist):\n\n| 键 | 结果 |\n|---|---|\n| `en` / `zh-CN` / `zh-Hans-CN` / `default` / `EN` | ACCEPTED |\n| **`key`** | **ACCEPTED** |\n| `defaultValue` | REJECTED |\n| `notALocale` / `x-private` / `e` | REJECTED |\n\n`key` 是三个字母,正好命中 `[A-Za-z]{2,3}` 那条主语言子标签分支 —— BCP-47 语法上它**就是**一个合法的 primary subtag。于是:\n\n- `{ key: 'common.save', defaultValue: 'Save' }` 被拒,**只因为 `defaultValue`**;\n- `{ key: 'common.save' }` 单独写 **parse 通过**,被当成「语言 `key` 的 inline locale map」,随后 render 出 `common.save`。\n\n作者把退役形态写成单键(或先删掉 `defaultValue` 去凑绿),拿到的是一次静默通过 + 一个画在界面上的机器键。这正是那条消息想拦的东西,而它拦不住。\n\n## 为什么值得记\n\n这是 objectui#4611 那一族的形状:**一句关于 spec 的权威断言,实测为假**。区别在于这次假话就写在 schema 自己的报错文案里 —— 读者(人或 AI)最信的地方。objectui#5081 的指南重写为了不复制这个错误,不得不绕开这句措辞,改成实测的「falls through to the first string value, so the screen shows the raw key」。\n\n## 可选处置(不代裁)\n\n- **只改文案**:把 `and resolves to nothing` 换成实测行为(`and resolves to the raw key`)。最小,不动契约。\n- **文案 + 收紧键**:上面那条,再加一条 refinement 让 `key`/`defaultValue` 这两个拼写在**任何**组合下都被具名拒收(不依赖 `defaultValue` 在场)。代价是给一条纯语法的 BCP-47 规则挂一份拼写黑名单 —— 要不要接受这个代价,是契约取舍,不是清扫。\n- **不动**:如果维护者认为单键 `{ key }` 罕见到不值得,那至少事实一(文案)仍应改,它是无成本的。\n\n未指派。"
+}

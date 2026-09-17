@@ -1,0 +1,35 @@
+{
+  "number": 10646,
+  "kind": "issue",
+  "title": "cli: server-ready banner prints container-internal `http://localhost:<port>` URLs, ignoring resolved `OS_AUTH_URL` / `OS_BASE_URL`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T07:23:55Z",
+  "updated_at": "2026-08-22T17:05:24Z",
+  "closed_at": "2026-08-21T14:50:10Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10646",
+  "body": "**Origin**: moved from objectstack-ai/cloud#1507 (EE 4.1.0 published-image acceptance) — the fix lands in `packages/cli`, so the card lives here (file-at-destination); the source card is closed as moved.\n\n## Symptom (measured, EE 4.1.0 compose stack)\n\nThe boot banner prints the container-internal address:\n\n```\n  ➜  API:       http://localhost:3000/\n  ➜  Console:   http://localhost:3000/_console/\n  ➜  MCP:       http://localhost:3000/api/v1/mcp\n      connect an AI client (Claude Code, Cursor, …) · skill: http://localhost:3000/api/v1/mcp/skill\n```\n\nwhile the published entry point is Caddy on `:80` (the deploy README's step 5 is `open http://localhost`), and `OS_AUTH_URL` is already resolved to `http://localhost` by compose. `:3000` is an `expose`-only container port — **unreachable from the host** (no `ports:` mapping; even less so under `--scale app=N`).\n\nImpact: following the banner's Console link fails outright; after moving to a domain (per the README's HTTPS step) the banner still says `localhost:3000`; the MCP line is the address customers copy into AI clients, and it can never connect.\n\n## PM 建议的路线(可选,实测优先)\n\nResolve the banner's external base through the runtime's existing precedence chain (`OS_AUTH_URL` → `OS_BASE_URL` → `http://localhost:<port>` fallback) — the same chain the compose template documents; when no external base can be determined, prefer printing no absolute URL over a wrong one.\n\nLanding spot: `packages/cli/src/utils/format.ts:583` area (server-ready banner assembly) and its call site in `serve`."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 10941,
+  "kind": "pull_request",
+  "title": "skills(checklist-test): one strict qa-run title shape, and a parser that holds it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T19:45:14Z",
+  "updated_at": "2026-08-22T01:35:27Z",
+  "closed_at": "2026-08-22T01:35:26Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-22T01:35:26Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10941",
+  "body": "Fixes #9617\n\nImplements the maintainer ruling recorded on the card 2026-08-20 — option 2, tighten the\n`qa-run` record title to ONE strict shape, new records only. Provenance quoted verbatim and\nuntranslated: 「其他接受你的建议。」\n\n## Files\n\n- `.claude/skills/checklist-test/SKILL.md` — the binding rule and a pointer (governed surface)\n- `docs/qa/platform-checklist/RUNNER.md` — the field-by-field grammar\n- `scripts/qa/qa-rollup.mjs` — the strict parser and its embedded `--self-test`\n\n## The contract\n\n    QA run · SELECTOR (JUDGED/TOTAL) · FRAMEWORK-SHA8 · DATE · COUNTS\n\nExactly five middle-dot fields. `(JUDGED/TOTAL)` is **mandatory** and bare-digits-only, with\njudged not exceeding total. The sha is exactly 8 lowercase hex. The date is a real calendar\ndate. COUNTS is ` / `-separated `N VERDICT` segments — uppercase, in the report order\nPASS / PARTIAL / FAIL / BLOCKED / NOT-RUN, each bucket at most once. An omitted bucket still\nmeans \"not declared\", never zero, so an author who means zero writes `0 FAIL`.\n\n**Retired, all of them:** `(FULL area)`, `(N items)`, `(N of M items)`, `(N/M items consulted)`,\nomitting the parenthetical entirely, and the trailing `(11 not-run)` spelling of NOT-RUN.\n`(FULL area)` is why the ruling exists — it declares no total, and a record wearing it judged\n13 of its area's 33 items while reading as complete coverage.\n\n## Where the contract is written\n\nThe grammar lives in `docs/qa/platform-checklist/RUNNER.md`, as a new\n\"The record title — one canonical shape\" subsection under its existing \"## Run records\"\nsection: the shape, a field-by-field table, the declared-vs-zero rule, the retired phrasings\nwith the reason each died, and the new-records-only note.\n\n`SKILL.md` keeps the binding rule — one shape, strict parsing, judged/total mandatory — plus a\npointer. That split is the skill line ratchet's own stated remedy (\"principles in SKILL.md,\non-demand detail elsewhere\"): the file was at its ceiling of 232 with zero headroom, so\ndocumenting the contract inside it overflowed by 9 lines. It is back to exactly 232, with no\nceiling exception and nothing maintainer-authored deleted.\n\n## The parser is strict, not tolerant\n\n`scripts/qa/qa-rollup.mjs` (landed by PR #9616) matches that shape and nothing else. The\nmulti-phrasing branches are gone, and so are `judgedCell`'s three inferred denominators — they\nexisted only because the retired phrasings declared no total, and inferring a denominator the\nrecord never claimed is the confident nonsense the contract removes.\n\nEvery rejection names the field that failed, because that reason is what the \"Not parsed\"\nsection prints and that section is the enforcement surface.\n\n## Existing records are not migrated, and the enforcement surface stays legible\n\nThe ruling is new-records-only. Measured against the live corpus on 2026-08-21 (34 records,\nopen and closed) the strict parser gives **3 parsed / 31 predating the contract / 0 deviating**.\nAn undifferentiated \"Not parsed\" list would therefore be 31 rows deep on day one, and the first\ngenuine deviation would be invisible inside it — defeating the surface the ruling relies on.\n\nSo the render partitions the unparsed set by a `CANONICAL_FROM` constant, using the GitHub API's\n`created_at`. This is **not** tolerant multi-shape parsing: nothing is extracted from a legacy\ntitle, no legacy shape is recognised, and every record is equally unparsed. Only the explanation\ndiffers — records predating the contract are labelled expected and not defects; records written\nafter it are the signal. Every record is still printed, never dropped.\n\n## Verification\n\n- `node scripts/qa/qa-rollup.mjs --self-test` — green, 78 assertions over 5 canonical shapes and\n  16 retired ones. Both halves are load-bearing: a parser re-widened to accept a retired phrasing\n  passes every happy-path assertion, so the rejections are the half that actually holds the ruling.\n- **Ablation** — widening the parenthetical regex by one character class (`[^)]*`) to re-accept\n  `(6/14 items consulted)` turns the self-test **red with exactly 1 failure**, naming that fixture\n  as having parsed. Mutation confirmed on disk before the run (injected form present 1, strict form\n  present 0, plus the diff of the line); the restore leg ran under an `EXIT INT TERM` trap and was\n  confirmed absent afterwards, tree clean, self-test green again.\n- Gate families re-derived by `node scripts/pm/dispatch-gates.mjs` (no path args) on a clean tree\n  at `e249bff62` — it read the 3-path change set itself. 10 named, **all 10 green**, plus\n  `check-platform-checklist` run as an adjacent extra, also green. `check:pm-skill-ratchet` now\n  reports: \"✓ check-skill-line-ratchet: .claude/skills/checklist-test/SKILL.md is 232 lines\n  (ceiling 232; headroom 0).\"\n\n## Governed surface\n\n`.claude/skills/**` — draft-only, human merge (Prime Directive #14). Not queued, not armed, never\nflipped ready. `RUNNER.md` is not a governed face; that edit is confined to the grammar section.\nNo changeset: this PR publishes nothing, matching 12 of 12 recent `.claude/skills/**` merges, so it\ncarries `skip-changeset`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ApyDuQY2fkunMCqXiqvBhR)_\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 10679,
+  "kind": "issue",
+  "title": "os doctor prints ✓ Test coverage / ✓ Deprecations about a tree it never examined (in any user app)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T08:32:01Z",
+  "updated_at": "2026-08-22T17:05:30Z",
+  "closed_at": "2026-08-21T12:41:50Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10679",
+  "body": "Found by QA run #10663 driving `cli.doctor-health-report` at framework `79ebb37`. Also recorded in PR #10147 FOLLOW-UPS §7c (D12); this card is its extraction with live confirmation.\n\n## Symptom\nIn any user-app cwd with no `<cwd>/packages/spec/src` (a stock `create-objectstack -t blank` scaffold), `os doctor` prints verbatim:\n```\n  ✓ Test coverage         All *.zod.ts files have matching tests\n  ✓ Deprecations          No @deprecated tags found\n```\nabout a tree it never walked (`ls packages/spec/src` → \"No such file or directory\" in the same cwd). Reproduced ×2.\n\n## Root cause\n`findMissingTests` (`doctor.ts:1141-1143`) and `findDeprecatedUsages` (`:1159-1161`) both early-return `[]` when `<cwd>/packages/spec/src` does not exist; the `else` branches then print `✓ Test coverage` (`:1939`) and `✓ Deprecations` (`:1951`). This violates doctor's own withhold-the-✓ discipline (the `ledgerReadingIsComplete` gate at `:2063-2065` used for the installed-packages ledger) — a ✓ over an unexamined tree should be withheld, scoped to the tree actually examined, or skipped with a named reason.\n\n## Adjacent (same card)\n`⚠ @objectstack/spec  Not built` (`doctor.ts:1837`) probes `<cwd>/packages/spec/dist` and is monorepo-anchored noise in a user app — same class.\n\n## Suggested fix\nGate both ✓ lines on the scanned tree actually existing; when it does not, skip the check (named reason) or scope it. Both checks are monorepo-internal — they should not run, or should announce themselves as skipped, in a user app.\n\n## Passing clauses\nThe seven real health checks pass: env-provenance attribution (#5387), posture-as-error (#5382), ledger independence across postures (#5429), withheld unique-scope on incomplete ledger, config-analysis both ways (orphan view / circular / unused + the three ✓), exit contract (1 iff error, warnings never flip).\n\nQA-source: #10663 · cli.doctor-health-report · clause 7 (expected-fail probe)"
+}

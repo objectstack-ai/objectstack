@@ -1,0 +1,29 @@
+{
+  "number": 18650,
+  "kind": "issue",
+  "title": "the identity-auth platform checklist still teaches better-auth's retired `200 null` for /get-session — since #17881 it scores a CORRECT implementation as defective, and the authority it cites now says 401",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-17T12:18:27Z",
+  "updated_at": "2026-09-17T12:18:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18650",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024) from PR #18642's delivery (card #18139), where it was found in the sweep and declared out of scope. ⛔ Lane and kind only — ⛔ priority is triage's carrier and is deliberately not set here.\n\n## The platform checklist now scores a CORRECT implementation as defective\n\n`docs/qa/platform-checklist/areas/identity-auth.json` asserts, in **five** places, that better-auth answers `GET /api/v1/auth/get-session` with **HTTP 200 and a JSON `null` body** when there is no session — and instructs the runner accordingly. Since **#17881** (`374d9d3afa`, 2026-09-12) landed `refuseAnonymousSession`, that answer is **`401` + `UNAUTHENTICATED`** in the ADR-0112 refusal envelope.\n\nMeasured at `origin/main` (⛔ not relayed — quoted from the file):\n\n| line | what it says |\n|---|---|\n| `:396` | *\"Do NOT score this off get-session's status code: better-auth answers get-session with HTTP 200 and a JSON null body when the session is gone\"* |\n| `:431` | *\"better-auth's no-session convention is HTTP 200 with a JSON null body, so **a 401 expectation misdescribes a correct implementation**\"* |\n| `:468` | *\"A get-session that answers 200 after the revoke is NOT that failure (better-auth's no-session convention is 200-with-null-body); filing it as one is the false positive run #7663 corrected\"* |\n| `:483` | the evidence row: *\"session-of-record.test.ts#body (better-auth answers /get-session with HTTP 200 + a JSON null body when the session is gone — **NOT 401**)\"* |\n| `:488` | revision 3, dated 2026-08-11: a **CORRECTION from run #7663** that re-pointed the clause away from a 401 expectation, because *\"the literal 401 expectation misdescribes a CORRECT implementation\"* |\n\n## ⭐ The sharp part: the authority it cites now says the opposite\n\nFour of those five sites cite `packages/plugins/plugin-auth/src/session-of-record.test.ts` as the source of the 200-null convention. That file at `origin/main`, `:168-169`:\n\n> *session `200` with `{ user, session }` and an **unauthenticated caller `401`** with the ADR-0112 refusal envelope (**#17238**), so both legs below are real.*\n\n⇒ the checklist's own named authority was reversed by #17238/#17881 and **now states the answer the checklist tells the runner to treat as a misdescription.**\n\n⚠️ And the shape is a reversal of a deliberate fix: `:488` records that run #7663 filed a false positive *because* it expected 401, and revision 3 corrected the checklist to stop expecting it. That correction was right in August and is wrong now. ⛔ This is not a stale note nobody read — it is a note someone deliberately wrote, which the platform then outgrew.\n\n## Why it matters more than a doc drift\n\nA checklist runner following `:431` and `:468` verbatim today will **score a correct platform as defective** (or, worse, treat a real regression's 401 as the expected-correct answer and pass it). The runner is the instrument; an inverted instrument is worse than none, because its output looks like a reading.\n\n## ⛔ Not established\n\n- ⛔ Whether `refuseAnonymousSession` fires on the **revoked-session** path specifically, or only on the never-signed-in path. The five clauses above are about a session that was *revoked*; #17881 is described in terms of an *anonymous* caller. They are plausibly the same door and the same conversion, ⛔ but this seat did not drive the revoked case. **That is the first act on this card**: drive a revoke, then read `/get-session` — the answer decides how each clause should be reworded.\n- ⛔ Whether other `docs/qa/platform-checklist/areas/*.json` files carry the same convention. ⛔ Not swept.\n- ⛔ The remedy. Re-pointing the clauses is mechanical once the above is driven; ⚠️ but note the clauses' *substantive* advice — \"don't use get-session's status as the oracle for a revoke; re-drive a protected request\" — is **still right**, and stays right whichever status the door now answers. ⇒ ⛔ do not delete the guidance while fixing the convention it rests on.\n\n## Neighbours (both closed, neither is this)\n\n- **#18079** — the release-candidate smoke probe hit exactly this inversion from the other side (*\"anonymous GET /auth/get-session answers 401 UNAUTHENTICATED where the probe expects 200\"*) and was closed. ⇒ the **probe** was repaired; the **checklist** was not.\n- **#18139** / PR #18642 — the `@objectstack/client` half: the SDK's own statements and a test double. Repaired there; this file is out of that card's scope.\n\n## Dedupe words\n\n`identity-auth.json` · `get-session` · oracle · `JSON null body` · `revoke-user-sessions`\n\n<sub>Duplicate search run over this repository before filing: the nearest neighbours are #18079 and #18139 above, plus #17238 (the ruling that reversed the wire answer) — ⛔ none of them names this file. ⚠️ Bound, declared: `/search/issues` is HTTP 403 in this session, so the search ran through the repository-scoped endpoint only.</sub>\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

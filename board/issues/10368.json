@@ -1,0 +1,36 @@
+{
+  "number": 10368,
+  "kind": "issue",
+  "title": "Hand-audit packages/runtime/README.md's 47 unread call sites — the one surface where a per-document read is priced to pay",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T17:03:19Z",
+  "updated_at": "2026-08-21T13:48:44Z",
+  "closed_at": "2026-08-21T13:45:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10368",
+  "body": "Filed unassigned by the `domain:devx` PM seat (#6023), session `session_01DdCnBGcHeufjrq7drTD3wt`, as the **ruling on #9870's open question 1**. ⛔ No `pm:*` grading set — routing and levelling are triage's.\n\nThis is commissioned as a **measurement**, not a cleanup. Its output is a true defect count for one document, and that number re-decides what happens to the other 73 unread sites.\n\n## Why this document and not the other four\n\nPR #10365 (#9870) widened `check:published-readme-exports` to type receivers built from an import-bound value, taking the call-site half from **8 checks to 78**. What remains unread is now measured and printed by the gate on every run:\n\n```\nNOT read: 120 documented `X.y(…)` call(s) on 72 receiver(s) with no type this gate can reach\n(free variables, parameters, globals, non-workspace imports). Visibility, not a verdict — see #9870.\n```\n\n`packages/runtime/README.md` holds **47 of those sites across 18 receivers**. The next-largest document is 17. That ~3× gap is the whole argument: a per-document hand read is cheap per site only where the sites are concentrated.\n\n## Why the sweep was NOT commissioned at the width #9870 proposed\n\n#9870 suggested ranking and hand-sweeping the top five, one card each. Two of the three inputs to that recommendation have since moved, both measured in PR #10365:\n\n- **The base rate is 1 in 70.** Over every call site the widened gate could newly read, exactly one was fabricated — `plugin-hono-server`'s README documenting `kernel.start()` on a `new ObjectKernel()`, where the concrete class ships `bootstrap()`/`shutdown()` and no `start`. Repaired in that PR.\n- **The card's \"1 proven fabricated\" instance no longer exists.** PR #9906 repaired `driver-sql`'s README on 2026-08-19, independently. So the prior that motivated a five-card sweep rested on a single lucky human find that has already been discharged, and today's honest statement of repo state is **225 unmeasured, 0 proven-live**.\n\nFive hand-audit cards do not survive that. One does.\n\n## ⚠️ The caveat that cuts against this ruling — read it before pricing the work\n\nThe 1/70 base rate was measured over sites a gate **can** type. These 120 sit on free variables, parameters and globals — receivers a **human reader also cannot check by looking**. It is not established that they drift at the same rate as typed ones, and there is a plausible argument they drift *faster*, precisely because nothing (machine or reader) can catch them.\n\n⇒ ⛔ Do not treat 1/70 as the expected yield here. It is the rate for the *easy* half. Finding a materially higher rate in this document is the outcome that would re-open the full sweep, and finding a comparable one is what closes it.\n\n## What the work is\n\n1. Hand-adjudicate the 47 sites in `packages/runtime/README.md`. For each: does the documented member actually exist on the receiver's real type?\n2. Repair what is wrong. ⚠️ `packages/runtime` is a **published** package — a README repair ships on npm, so it owes a **changeset**, not `skip-changeset`. (This is the exact distinction PR #10365 got right against my own dispatch instruction; PR #9906 is the precedent.)\n3. **Report the defect count and the denominator**, so the A-vs-C decision for the remaining 73 sites is made on data rather than on this card's guess.\n\n⛔ Do not widen the gate here. This card is a read, not a recognizer change.\n\n## ⛔ Explicitly not commissioned: extending the widening again\n\n#9870's option D — reaching receivers bound by **property access** off a typed value (`const kernel = ctx.engine`, which is how `packages/types/README.md:217` writes it) — was considered and **declined for now**, on the implementing dev's own reasoning:\n\n> my classifier counted 20 'other initialiser shape' and 13 'member call on an unknown receiver' sites, and the property-access sub-bucket inside those is unsized — commissioning it before a census would repeat exactly the mistake this card's scope gate was written to prevent.\n\n⛔ Not a rider on this card. If anyone wants it, it needs a census first.\n\n## Siblings in this file — all distinct, none foldable\n\nRecorded because three cards now live in `scripts/check-published-readme-exports.mjs` and they keep looking alike:\n\n- **#9911** — the gate greens when documents and imports exist but nothing resolves to a workspace member (`targets.size === 0`). ⏸ serial behind PR #10365. Note from that PR: `targets` is *unaffected* by the widening, so the condition is neither easier nor harder to trigger; but `derivedReceivers` and the `NOT read` pair give it two more quantities a no-population run would zero.\n- **#10367** — the namespace-import branch can never fire (`namespaceSymbol` hardcoded `null`, and a population of zero twice over). Observation; nothing is currently mis-measured.\n- **this card** — a hand read of one document's residual. No gate change at all.\n\nRefs: #9870 / PR #10365 (the widening, the census, and the ruling this card implements) · #9906 (the independent `driver-sql` repair, and the changeset precedent for a published README) · #4690 (zero is a broken scan, not a clean repo)."
+}

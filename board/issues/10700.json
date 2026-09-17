@@ -1,0 +1,36 @@
+{
+  "number": 10700,
+  "kind": "issue",
+  "title": "[security-sensitive] 2FA re-enrollment rotates the TOTP secret in place and keeps verified=1 (integrity/availability)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "security"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T09:06:31Z",
+  "updated_at": "2026-08-22T13:50:20Z",
+  "closed_at": "2026-08-22T13:49:31Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10700",
+  "body": "Surfaced by QA run #10663 (`identity-auth.two-factor-verify-to-activate` / `-enrollment-reveal`) at `79ebb37`. **Existence + mechanism only; full reproduction withheld pending maintainer review per the auth/authz disclosure carve-out — available in the QA session on request.**\n\n## What\nCalling `POST /api/v1/auth/two-factor/enable` while 2FA is **already active** rotates the stored TOTP secret in place on the same `sys_two_factor` row and leaves `verified = 1` carried over from the prior enrollment. The replacement secret — which no code has ever confirmed — becomes immediately live at the sign-in challenge, while the previously verified secret goes dead. Not a privilege escalation (the call requires a live session **and** the account password, and such an actor could call `/two-factor/disable` anyway).\n\n## Impact\n- **Integrity of the flag**: `verified` no longer describes the secret actually stored — any code or audit trusting \"this factor was user-confirmed\" is wrong after a re-enroll.\n- **Availability**: a user who re-enrolls and mis-scans the QR is locked out instantly — the old authenticator is already dead and there is no confirmation step to catch it.\n\n## Mechanism (fix-oriented)\nThe enable path treats an already-enrolled account the same as a fresh one, overwriting the secret without resetting `verified` to false or requiring a re-verification before the new secret is honored at the challenge. Fix direction: on re-enroll, set `verified = false` and gate the new secret on a fresh verify (or reject enable when already enabled and route through a dedicated rotate flow).\n\n## Related\nSame family: `sys_user.generate_backup_codes` silently re-provisions on an already-enabled account too (see the non-sensitive lockout card #10681).\n\nQA-source: #10663 · identity-auth.two-factor-verify-to-activate · clause 2 / negative 1"
+}

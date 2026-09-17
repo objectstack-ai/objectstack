@@ -1,0 +1,36 @@
+{
+  "number": 10701,
+  "kind": "issue",
+  "title": "[security-sensitive] 2FA verify-totp token is not accepted on the bearer seam and overrides a valid cookie (fail-closed lockout)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "security"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T09:06:42Z",
+  "updated_at": "2026-08-22T17:04:57Z",
+  "closed_at": "2026-08-22T01:45:35Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10701",
+  "body": "Surfaced by QA run #10663 (`identity-auth.two-factor-enrollment-reveal`) at `79ebb37`. **Existence + mechanism only; full reproduction withheld pending maintainer review per the auth/authz disclosure carve-out — available in the QA session on request.**\n\n## What\n`POST /api/v1/auth/two-factor/verify-totp` returns 200 with a rotated session cookie **and** a `token` field. The new **cookie alone** authenticates correctly; the new **bearer alone** does not (`get-session` 200 but empty, `get-totp-uri` 401), and cookie + bearer **together** also 401 — the Authorization header wins and drops the request to anonymous. Fail-closed (no privilege gained), but a legitimate user is locked out.\n\n## Impact\nAny client that stores the token from the 2FA-completion response — exactly the console's `auth-session-token` pattern — is unauthenticated after a 2FA sign-in, and its still-valid cookie cannot rescue it (the header takes precedence). A convincing \"2FA sign-in silently breaks my session\" for header/bearer-based clients.\n\n## Mechanism (fix-oriented)\nThe token echoed by `verify-totp` is not a usable bearer credential, and the request resolver prefers the Authorization header over the (valid) cookie, so presenting the dud bearer downgrades an otherwise-authenticated request. Fix direction: either return a bearer that is actually accepted, or have the resolver fall back to the cookie when the bearer is unusable rather than dropping to anonymous.\n\nQA-source: #10663 · identity-auth.two-factor-enrollment-reveal · adjacent finding (verify-totp token seam)"
+}

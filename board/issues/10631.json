@@ -1,0 +1,35 @@
+{
+  "number": 10631,
+  "kind": "issue",
+  "title": "[finding] 39 scripts/ modules export bindings with no entry guard — the class has now been fixed one file at a time twice, and check:entry-guard accepts \"no guard at all\" by design",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T06:50:47Z",
+  "updated_at": "2026-08-21T08:31:52Z",
+  "closed_at": "2026-08-21T08:31:50Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10631",
+  "body": "Filed unassigned from the #10610 dev seat (session `session_01DdCnBGcHeufjrq7drTD3wt`, PR #10628). This is the sweep that #10610's \"Not claimed\" section explicitly left undone — *\"I have not swept the other `scripts/**` gates for the same missing guard. If several are unguarded the shape of the fix changes.\"*\n\nSeveral are. **39.**\n\n## The measurement\n\nOn `origin/main` at `5e50e2e3ba`, files under `scripts/` that **export** at least one binding and have **no** `isEntrypoint(import.meta.url)` guard — comments and string literals masked with `check-entry-guard.mjs`'s own `codeOnly()`, so a prose mention of the idiom is not miscounted as a guard:\n\n```\nscripts/ files scanned                       : 123\nwith a real (code, not comment) entry guard  : 41   (42 after PR #10628)\nexporting bindings AND unguarded             : 40   (39 after PR #10628)\n```\n\nThe 39 that remain:\n\n```\nablation-dist-preflight.mjs        check-release-page-status.mjs\nadr-anchors.mjs                    check-required-contexts.mjs\ncheck-changeset-no-major.mjs       check-route-envelope.mjs\ncheck-dispatcher-error-vocabulary  check-runtime-services-index.mjs\ncheck-driver-memory-census.mjs     check-shard-attestation.mjs\ncheck-empty-changeset.mjs          check-spec-parsed-alias.mjs\ncheck-engine-split-ratio.mjs       check-startup-registry-verdict.mjs\ncheck-error-code-casing.mjs        check-tenant-chokepoint.mjs\ncheck-error-status-conformance.mjs check-test-completeness.mjs\ncheck-examples-live-imports.mjs    check-workflow-status-functions.mjs\ncheck-filter-alias-parity.mjs      checklist-select.mjs\ncheck-nul-bytes.mjs                cli-build-prerequisite.mjs\ncheck-org-identifier.mjs           console-spec-probes.mjs\ncheck-query-options-erasure-ratchet.mjs  docs-audit/check-audit-scope.mjs\ncheck-quick-reference-counts.mjs   eslint-fatal-guard.mjs\ncheck-ratchet-remedy-authority.mjs eslint-stack-headroom.mjs\n                                   i18n-bundle-surface.mjs\n                                   measure-test-shard-timings.mjs\n                                   pm/check-governed-prose.mjs\n                                   pm/check-label-desc-cap.mjs\n                                   pm/check-skill-id-lint.mjs\n                                   pm/check-skill-line-ratchet.mjs\n                                   regen-artifacts.mjs\n```\n\nReproduce:\n\n```js\nimport { readdirSync, readFileSync, statSync } from 'node:fs';\nimport { join } from 'node:path';\nimport { codeOnly } from './scripts/check-entry-guard.mjs';\n// walk scripts/, skipping node_modules and dotfiles, for .mjs/.js/.cjs\nconst guarded = /isEntrypoint\\s*\\(\\s*import\\.meta\\.url\\s*\\)/.test(codeOnly(src));\nconst exports = /^export\\s/m.test(codeOnly(src));\n```\n\n## Why this is a class, not 39 tickets\n\nIt has now been fixed **twice, one file at a time**:\n\n- #9757 — `scripts/pm/dispatch-gates.mjs` dispatched at top level, so `import` ran the tool and `process.exit(2)`'d the importer. Closed.\n- #10610 — the same shape in `check-cross-package-test-inputs.mjs`, where it had already cost something real: `check-examples-live-imports.mjs` hand-copied `globToRegExp` rather than import it, and *recorded the load-time gate as its reason*. PR #10628 adds the guard and collects the duplicate.\n\nBoth were found by someone tripping over one instance. Nothing gates the next one, and there are 39 more sitting there. `check-entry-guard.mjs` exists precisely because a one-time sweep is worth little on its own — its own header says so about the spelling problem — but it currently enforces only that a guard, **if present**, is spelled the one right way. A file with **no** guard at all is accepted; that case is an explicit self-test assertion:\n\n```js\nt('a file with no guard at all is accepted', n(\"console.log('hello');\\n\") === 0);\n```\n\nwhich is correct for a script that exports nothing, and is exactly the hole for one that does.\n\n## Suggested shape (not claimed)\n\nExtend `check-entry-guard.mjs` with a second finding kind: a `scripts/**` file that **both** exports a binding **and** performs top-level side-effectful dispatch must carry the guard. That closes the class the way the spelling half was closed, instead of a 40th ticket later.\n\nThe hard part is deciding \"top-level side-effectful dispatch\" precisely enough to avoid false positives — a module of pure `export function`s with no top-level statements is fine unguarded, and several of the 39 may be exactly that. Worth measuring before choosing between:\n\n- **A. Require the guard whenever the file exports AND has any top-level call expression.** Strongest; needs a real parse, and `check-entry-guard.mjs` is deliberately a masked-source scanner rather than a parser.\n- **B. Require it only when the file exports AND reads `process.argv`.** Cheap, no parser, catches the CLI-dispatch shape all three known instances had — including this one. Misses a module whose top-level side effect is not argv-driven.\n- **C. Behavioural: import each candidate in a child and assert silence + exit 0.** Directly measures the property. `check-entry-guard.mjs`'s header already rejected running scripts wholesale, but *importing* them is a much weaker action than invoking them — though not a safe one for the modules whose top level has real side effects, which is the same objection in a smaller form.\n\nB looks like the best value for the risk; A is the one that actually closes the class. Someone should measure how many of the 39 have top-level statements at all before picking — that number decides whether this is a 5-file fix or a 39-file one.\n\n## Not claimed\n\n- I have not checked which of the 39 are genuinely at risk (exports that anyone would plausibly want, versus exports that exist only for a self-test in the same file). The count above is the shape, not the severity.\n- I have not checked whether any of the 39 is *currently* imported by something. #10610's instance had no live importer either; the cost it had already imposed was a hand-copied helper, which no import-graph search would have found.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

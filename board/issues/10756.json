@@ -1,0 +1,34 @@
+{
+  "number": 10756,
+  "kind": "issue",
+  "title": "[finding] A package can pass `check:type-check-coverage` with a whole source directory outside tsc — `packages/objectql/scripts/**` is invisible to its own `typecheck`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T10:35:31Z",
+  "updated_at": "2026-08-21T15:44:48Z",
+  "closed_at": "2026-08-21T15:43:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10756",
+  "body": "Measured while implementing #10269 (PR #10755). Not repaired there: that card's surface\nis four entry guards, and this is a property of the tsconfig `include` globs.\n\n## The measurement\n\n`@objectstack/objectql` declares a `typecheck` script, passes it, and is counted as\ncovered by `check:type-check-coverage` (`64/77 workspace packages type-checked ... 13 in\nthe DEBT ledger, 1 exempt` — objectql is in neither ledger). But its tsconfig is\n\n```json\n{ \"include\": [\"src/**/*\"], \"exclude\": [\"node_modules\", \"dist\", \"**/*.test.ts\"] }\n```\n\nso `packages/objectql/scripts/**` is outside the program the package's own\n`typecheck` compiles (see the CORRECTION below: that is narrower than \"no tsc program\nat all\", which is what this body first claimed). Ablation on\n`origin/main` + the #10269 branch, at `ca022387f2`:\n\n```\ninject  const OS_ABLATION_TYPE_ERROR: number = \"definitely not a number\";\n        into packages/objectql/scripts/dry-run-hash-compat.ts\nconfirm on disk        grep -c OS_ABLATION_TYPE_ERROR  ->  1\npnpm --filter @objectstack/objectql typecheck  ->  EXIT 0, zero `error TS` lines\npnpm exec tsc --noEmit --listFiles | grep -c scripts/dry-run-hash-compat.ts  ->  0\nrestore, confirm on disk  grep -c OS_ABLATION_TYPE_ERROR  ->  0\n```\n\nThe file appears **zero times** in tsc's own file list, and a `number` initialised with a\nstring sits in it without moving the gate.\n\n### CORRECTION (2026-08-21) — \"in no tsc program at all\" was too broad\n\nThis body originally read \"so `packages/objectql/scripts/**` is in no tsc program at\nall\". That is wrong as written, and PR #10755 going red is what measured it. The\naccurate statement is the one already in the title: that directory is invisible to\nthe package's **own** `tsc -p`, and it is **not** invisible to every tsc program.\n\nThe TEST_DEBT re-measure builds a **different project**. `measureTestDebt` calls\n`remeasureProject` (`scripts/check-type-check-coverage.mjs`), which copies the package\ntsconfig and drops every test glob from `exclude` — so\n`packages/objectql/src/dry-run-hash-compat.test.ts` becomes a root file, and its\nline 5 is:\n\n```ts\nimport { runDryRun, type LegacyMetadataRow } from '../scripts/dry-run-hash-compat';\n```\n\ntsc pulls every transitively imported file into the program regardless of `include`,\nso the script **is** compiled there. It is reached through the test, not through\n`include`.\n\nMeasured: the `import.meta.url` that PR #10755 added to that script (the package\ndeclares no `\"type\"`, so under the repo-wide `module: NodeNext` it compiles as\nCommonJS) produced exactly one `TS1470` in the re-measure and drove\n`@objectstack/objectql` from its frozen `TEST_DEBT` of 355 to 356 — a red\n`Type Check · debt ledger` — while `pnpm --filter @objectstack/objectql typecheck`\nstayed at exit 0 the whole time.\n\nWhy the ablation above could not see it: it ran the **package's** `typecheck` and a\n`--listFiles` over the package's own config, and that is precisely the program the\nfile is missing from. It never built the test-inclusive project.\n\n**The finding stands and this card stays open.** The blind spot is real, and the\naccidental coverage described here argues for the gate rather than against it: it is\nnot a property anyone declared. It holds only for the files some test happens to\nimport, only while that import exists, and it reports through a shrink-only debt\nledger — as a drifted count on a package the ratchet calls covered — rather than\nthrough the package's own `typecheck`.\n\n## Why this is worth a card rather than a shrug\n\n`packages/objectql/scripts/dry-run-hash-compat.ts` is not scratch: it is a\n**compatibility checker** with a documented CLI, and `packages/objectql/src/dry-run-hash-compat.test.ts`\nimports `runDryRun` from it. So a package test depends on a module whose types nothing\nverifies.\n\nThe same shape holds for `packages/core/examples/**` (`include: [\"src/**/*\"]`,\n`rootDir: \"./src\"`), which `docs/qa/platform-checklist/FOLLOW-UPS.md` already notes in\npassing for `phase2-integration.ts` — but `@objectstack/core` has no `typecheck` script at\nall and is a ledgered DEBT entry (#4311), so that half is already tracked. The objectql\nhalf is not: it is a package the ratchet reports as **covered**.\n\n## The gap in the ratchet, stated precisely\n\n`check:type-check-coverage` is **package-granular**: it asks whether a package declares a\n`typecheck` script or carries a ledger entry. It cannot see a package that declares one\nand whose tsconfig `include` omits a real source directory. That is the same class AGENTS.md\nalready warns about for test files —\n\n> **Never `exclude` `*.test.ts` / `*.spec.ts` from a package's `tsconfig.json`** — `tsc\n> --noEmit` reads that config, so the exclusion hides the tests from the very check the\n> `typecheck` script advertises (a green gate over source nothing read).\n\n— one level up: a whole directory rather than a file glob, and reached through `include`\nrather than `exclude`, so the existing prose does not cover it.\n\n## Not proposing the remedy here\n\nSeveral shapes are possible (a sibling `tsconfig.scripts.json` named in the `typecheck`\nscript, the `packages/spec` pattern; widening `include`; or a ratchet limb that compares a\npackage's tracked `.ts` files against `tsc --listFiles`), and which one is right depends on\nhow many packages are in this state — which nobody has counted. Filed so the count gets\nmade rather than guessed.\n\n## Dedupe\n\nGrepped the titles and bodies of all 299 open issues for `packages/objectql/scripts`,\n`packages/core/examples`, `include.{0,20}src/\\*\\*`, `outside (every|any) tsconfig` and\n`--listFiles`. Only #10269 matches, and only because it names the two paths.\n(`search_issues` was unavailable to this seat.)\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

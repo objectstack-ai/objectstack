@@ -1,0 +1,37 @@
+{
+  "number": 10945,
+  "kind": "issue",
+  "title": "SchemaRegistry.resolveObjectKey scans the whole registry per lookup, making kernel boot quadratic in stored metadata",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "pm:dispatched",
+    "priority:p0"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T19:50:19Z",
+  "updated_at": "2026-08-22T17:24:47Z",
+  "closed_at": "2026-08-22T17:24:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10945",
+  "body": "`SchemaRegistry.resolveObjectKey` rescans the ENTIRE object registry on every name lookup, so kernel boot is quadratic in how much metadata an environment has stored.\n\n```ts\n// packages/objectql/src/registry.ts:2366\nprivate resolveObjectKey(name: string): string | undefined {\n    const matches: string[] = [];\n    for (const fqn of this.objectContributors.keys()) {   // ← every registered object\n      const { shortName } = parseFQN(fqn);                 // ← per entry, per lookup\n      if (shortName === name) matches.push(fqn);\n    }\n    …\n}\n```\n\nIt is called from at least seven sites in the same file (1842, 2346, 2453, 2476, 2703, 3133, 3365) — `getObject(name)` among them — so a boot that registers N objects and looks up O(N) names does O(N²) string work with `parseFQN` as the inner loop.\n\n## Measured\n\nInstrumenting a real per-environment kernel build (`ArtifactKernelFactory.create()`, full hosted capability slate, real `TursoDriver` in remote transport over a local libsql file) and sweeping the number of env-wide `sys_metadata` rows the kernel hydrates at boot (`ObjectQLPlugin({ hydrateMetadataFromDb: true })`, which the cloud tenant runtime always sets):\n\n```\nsys_metadata rows   bootstrap step   marginal ms/row   database round trips\n              0            63 ms            —                  242\n            500           232 ms         0.338                 243\n          1,000           422 ms         0.380                 243\n          2,000         1,036 ms         0.614                 243\n          4,000         2,627 ms         0.798                 243\n          8,000         8,533 ms         1.496                 315\n```\n\nRound trips are FLAT — this is not I/O. Log-log fit of (bootstrap − baseline) against row count: **exponent 1.413, R² = 0.994**.\n\nA `--cpu-prof` of the 8,000-row boot names the loop directly. Self time attributed to `parseFQN` + `resolveObjectKey` + `getPackagedObjectOwner`:\n\n```\nsys_metadata rows    registry-scan self time\n          1,000                80 ms\n          2,000               192 ms   (2.4x)\n          4,000               631 ms   (3.3x)\n          8,000             2,325 ms   (3.7x)\n```\n\nEach doubling multiplies the cost by ~3.7 — exponent ≈ 1.89, i.e. quadratic. `parseFQN` is the single largest non-database entry in the profile.\n\n## Why it matters\n\nThis is the mechanism behind objectstack-ai/cloud#1555: a hosted environment whose `bootstrap` step takes 134 s against a 20 s request waiter, so every request answers `kernel_warming` and the environment can never be opened. The build never fails — it is just slower than anything will wait for. Boot cost that is quadratic in stored metadata means an environment gets permanently unservable purely by being used, with no error anywhere.\n\n## Direction\n\n`objectContributors` is keyed by FQN; the short-name→FQN direction wants its own index maintained alongside it (a `Map<shortName, fqn[]>` updated in register/unregister), turning every one of these lookups into O(1). The ambiguity warning the current loop emits is preserved by keeping the array of matches per short name.\n\nTwo properties worth pinning with the fix: a lookup must not depend on registration order, and `unregisterObject` must keep both maps in step — the extraction note at registry.ts:2350 says the read and the name-addressed removal must not disagree about which contributor a bare name addresses, and a second index is exactly where that could drift.\n\n## Reproducing\n\n`objectstack-ai/cloud`: `node scripts/dev-local/bootstrap-curve.mjs --hosted --meta-rows 0,1000,4000,8000`\n\nRefs objectstack-ai/cloud#1555\n"
+}

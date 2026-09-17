@@ -1,0 +1,33 @@
+{
+  "number": 10883,
+  "kind": "pull_request",
+  "title": "docs(qa-checklist): correct two knownGaps that still deny the provisioning.use resolve",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T15:49:48Z",
+  "updated_at": "2026-08-21T16:15:51Z",
+  "closed_at": "2026-08-21T16:15:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-21T16:15:37Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10883",
+  "body": "Fixes #10809\n\nTwo `knownGaps` clauses stated that the validator does **not** resolve `provisioning.use`\nin either direction. The area-scoped resolve landed with the gap-1 work on #10593, so that\nis false today: a same-area `use` **resolves**, and a cross-area one **fails**. The clauses\nalso still cited the old deferral (#7716 / #7720) as if it were live.\n\nThe inversion matters more than a stale footnote. The clause reads as **permission**: an\nauthor following it would spell a cross-area `use` and get a red they were told to expect\nnot to get. A stale permission outranks a stale fact, which is why this is corrected now\nrather than folded into the pending convention work.\n\n## What changed\n\n| file | what | revision |\n|---|---|---|\n| `areas/records-forms.json` | item `records-forms.crud-roundtrip` → its own `fixtures.knownGaps[0]` | 5 → 6 |\n| `areas/search.json` | **area-level recipe** `qa-contributor-bound-member` → `knownGaps[0]` | (recipes carry no revision) |\n| `areas/search.json` | item `search.rls-both-personas` — revision pin only, own fields unchanged | 4 → 5 |\n\nBoth clauses keep their first half (the mechanism is AREA-SCOPED — still true and now\nload-bearing) and state what is enforced today. The cross-area **spelling** is deliberately\n**not** predicted: that convention is the open half of #10593, still undecided, and writing a\nguess into a checklist is how the next stale permission gets created.\n\n## One correction to the card\n\nThe card places the sibling clause on item `search.rls-both-personas`. It is actually on the\n**area-level recipe** `qa-contributor-bound-member`, which carries no `revision`/`history` —\nthe lifecycle check in `scripts/check-platform-checklist.mjs` is item-scoped, and none of the\nfour recipes in this checklist has either field. So the \"both items owe a revision bump\"\nobligation was re-derived rather than applied literally: `search.rls-both-personas` is bumped\nbecause it `use`s that recipe, making its revision the **only** pin a run record can hold the\nrecipe text against. Its own steps, clauses, fixtures and provisioning are unchanged, and the\nhistory entry says so explicitly, so no run verdict is invalidated.\n\n## Verification — this gate is not CI-wired\n\n`check:platform-checklist` is not wired into CI, so a green `Lint & Repo Gates` on this PR\nsays nothing about it. Both halves were run by hand at `af2e9ee9b4`, before and after:\n\n```\n✓ checklist-select self-test: 17 cases pass.\n✓ check-platform-checklist --self-test: 36 assertions — … `fixtures.provisioning.use`\n  resolves against its own area and fires on a dangling one.\ncheck-platform-checklist: OK — 15 areas, 205 items (205 active); … provisioning: 4 area\n  recipes, 6 item references resolved (self-checks: 22 trap-vocabulary + 14\n  provisioning-resolve assertions).\n```\n\nInvariants are identical to the pre-edit baseline (205 items, 4 recipes, 6 references resolved).\n\n**Ablation** — to show the revision bump is enforced rather than assumed. Predicted before\nrunning: exactly one reddened case naming the item. Reverting `crud-roundtrip` to revision 5\nwhile its history's last entry stays 6 (mutation proven on disk: target anchor 1 → 0,\nreplacement +1, and the parsed field read back as `revision=5, last history=6`):\n\n```\n✗ records-forms.json · records-forms.crud-roundtrip: \"revision\" (5) must equal the last\n  history entry's revision (6) — a semantic edit bumps both        (exit 1, 1 case)\n```\n\nThe restore leg was run too: byte-identical to the commit, all three halves green again.\n\nDerived gates (`scripts/pm/dispatch-gates.mjs`, 2 paths) and the hand-run `scripts/**` pair:\n\n```\n✓ doc authoring guard: 389 files clean — no bare metadata literals.\n✓ check:doc-formula-expressions: 22 record-scoped formula example(s) across 416 files /\n  1444 TS blocks judged clean by @objectstack/formula.\n✓ check:entry-guard: 129 scripts/ file(s) — every entry guard goes through invoked-as.mjs.\n✓ check:parse-guard: 128 scripts/ file(s) — every TypeScript parse goes through ts-parse.mjs.\ncheck-nul-bytes: OK (scanned 6295 text file(s); no raw ASCII control bytes).\n```\n\n## No changeset\n\n`skip-changeset`: nothing here is published. `content/docs/` is the docs-site source; these\nfiles live in `docs/qa/`, which no `apps/docs` or `content/` path references and no\n`package.json` ships.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_"
+}

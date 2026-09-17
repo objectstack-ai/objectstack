@@ -1,0 +1,35 @@
+{
+  "number": 10707,
+  "kind": "pull_request",
+  "title": "fix(plugin-security): report a metadata-store outage as an outage, not an absent declaration",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T09:16:46Z",
+  "updated_at": "2026-08-21T09:40:28Z",
+  "closed_at": "2026-08-21T09:40:26Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-08-21T09:40:26Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10707",
+  "body": "Fixes #10424\n\n`SecurityPlugin.getObjectSecurityMeta` resolved an object's posture and set\n`unresolved: !obj`, where `obj` came from `IMetadataService.get`. That read is\nambiguous by construction — its own TSDoc says `undefined` means \"not found\"\n*and* \"every loader that could hold it failed\", and directs callers to\n`getDiagnosed` (#5840) wherever the difference could change a decision. The\nverdict was already being computed and thrown away: `MetadataManager` defines\n`get` as `(await getDiagnosed(…)).data`.\n\nSo a metadata-store outage and a genuinely absent declaration arrived wearing\nthe same sentence, and that sentence said *\"Check that the object is declared\nand published on this runtime.\"* Correct for an absent object; actively wrong\nmid-incident, where the declaration is fine and the store is not.\n\n## Measured before the change, not inferred\n\nThree inputs through one tree in one run — an absent declaration, a store\nreporting `degraded: true`, and a service with no `getDiagnosed` at all —\nproduced **byte-identical** `message` and log line, with `PERMISSION_DENIED` /\n403 in all three. After the change the first and third are unchanged verbatim\nand only the outage diverges.\n\n## What changed\n\n- `UnresolvedPostureCause` gains a third member, `'metadata_unavailable'`, and\n  the four wording surfaces in `unresolved-posture.ts` state it distinctly:\n  the refusal names the **store**, says the declaration may well be fine, and\n  the operator log line carries a grep-able `DEGRADED` / `metadata-store\n  OUTAGE`. A metadata-store outage is an incident and a query against a missing\n  object is routine; they were the same line.\n- A separate best-effort `probeMetadataOutage`, run only on the path that is\n  already refusing.\n\n## What deliberately did NOT change\n\nThe resolving read is untouched byte for byte. The tempting shape — swapping\n`metadata.get` for `getDiagnosed` and taking `.data` — was rejected: `obj` is\nthe input to a fail-closed deny (#3545), so sourcing it from an **optional**\nmember would put an externally observable accept/reject decision at the mercy\nof every third-party `IMetadataService` whose `getDiagnosed` disagrees with its\nown `get` or throws where `get` succeeds. An object that resolves today would\nthen be refused. This is an explanation change and stays one. The same trade\nwas made once before, for the same reason (#6055, written down in #6505): buy a\nsecond read on the miss path rather than presume an equivalence the contract\nnever made.\n\nThe deny is unchanged in every case — same `PermissionDeniedError`, same\n`PERMISSION_DENIED`, same 403, still fail-closed — and the accept/reject set\ndoes not move. Pinned separately from the wording, in both directions.\n\n## The fail-safe direction\n\n`getDiagnosed` is optional, and the contract is explicit that a consumer\nprobing for it must keep reading `get` when it is absent. A service that does\nnot implement it reports `'unknown'` and keeps the previous wording — never\n`'metadata_unavailable'`. Publishing \"I don't know\" as \"the store is down\"\nwould manufacture an incident out of a missing capability and send an operator\nto read healthy dashboards. `'metadata_unavailable'` is asserted on a positive\n`degraded === true` and on nothing else; a probe that throws, returns a\nnon-boolean `degraded`, or resolves to nothing lands on `'unknown'`.\n\nA degraded read also outranks the draft probe: \"a draft exists but no published\none\" has a second half the outage made unknowable, since the store is exactly\nwhat could not answer.\n\n## Tests\n\n21 new cases. The three-way pin (absent → existing wording, outage → new\nwording, no-capability → `'unknown'`) plus the fail-safe variants, the\nprecedence rule, the #3545 refusal envelope in all three cases, and four\naccept-side cases proving the resolving read did not move.\n\nTwo ablations, predicted before running, both matching exactly:\n\n| Ablation | Predicted | Observed |\n|---|---|---|\n| drop the outage leg from the cause resolver | 3 red — outage collapses back onto the absent wording; absent / no-capability / all deny pins stay green | 3 failed, 18 passed — exactly the three predicted |\n| make the missing-capability fallback claim an outage | 1 red — only the third pin | 1 failed, 20 passed — exactly the third pin |\n\nThe second is the one that matters: a suite pinning only absent and outage goes\ngreen on an implementation that reports an outage for everything. Both files\nrestored byte-identically (`git hash-object` equal before and after).\n\n## Gates\n\nUnion derived with `node scripts/pm/dispatch-gates.mjs` (no path arguments)\nafter the final commit on a clean tree, at `f14fd1cde`. All green: the 11\npath-derived families, the six convention-triggered ones (including\n`check:type-check-debt --re-measure` with the workspace closure built, and\n`check:i18n` reporting `plugins/plugin-security in sync (4 bundle(s))`), and\n`check:nul-bytes`.\n\nNote for the reviewer: the derivation named neither `check:route-envelope` nor\n`check:dispatcher-error-vocabulary`; both were run explicitly, with\n`--self-test`, and both pass.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01PnJHU45vPJj5UQrxe946Bx)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PnJHU45vPJj5UQrxe946Bx)_"
+}

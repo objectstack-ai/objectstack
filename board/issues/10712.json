@@ -1,0 +1,35 @@
+{
+  "number": 10712,
+  "kind": "issue",
+  "title": "[finding] External object-draft output fails `os build` as generated — object name lacks the `${namespace}_` prefix and no `sharingModel` is emitted",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T09:20:09Z",
+  "updated_at": "2026-08-22T17:03:54Z",
+  "closed_at": "2026-08-22T14:40:52Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10712",
+  "body": "Extracted from #10675's secondary observation (QA run #10663, `cli.datasource-introspect-codegen` at framework `79ebb37`) so it doesn't ride the CLI envelope fix — the defect is server-side.\n\n## What\n`ExternalDatasourceService.generateObjectDraft` (`packages/services/service-datasource/src/external-datasource-service.ts`) renders a draft whose object definition does not compile: measured at `79ebb37`, the rendered source fails `os build` because (a) the object name lacks the `${namespace}_` prefix the author-time rules require, and (b) no `sharingModel` is set — `security-owd-unset` rejects it (same rule family that #9666 hit for the app template). The review-before-commit flow therefore hands the user a draft the platform's own validator refuses.\n\n## Scope notes\n- Distinct from #10676 (PK dropped at the `isPrimary`/`primaryKey` seam) — same generator, different defect; if one dev covers both, the family-dispatch five gates apply.\n- Distinct from #10675 (CLI reads the pre-#3843 envelope) — that card explicitly excludes this gap from its fix.\n\n## Fix direction\nEmit a draft that passes `os build` out of the box: derive the namespace prefix from the datasource/package context and set an explicit `sharingModel` (or emit the field with a loud TODO the validator accepts — whichever the acceptance rules already prescribe for generated scaffolds; cf. #9666's resolution for the template case).\n\nFiled unassigned as a finding awaiting first-touch grading."
+}

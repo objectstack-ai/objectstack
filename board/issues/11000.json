@@ -1,0 +1,35 @@
+{
+  "number": 11000,
+  "kind": "issue",
+  "title": "External object-draft renders a field key that is not authorable: `fields.&lt;f&gt;.primaryKey` fails `tsc` against `ServiceObject` and `ObjectSchema.safeParse`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-22T03:43:17Z",
+  "updated_at": "2026-08-22T17:03:47Z",
+  "closed_at": "2026-08-22T15:47:55Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11000",
+  "body": "Found while working #10676. This is the reason that card could not be discharged as written, so it is filed as its own defect — it exists today, independently of #10676, and is reachable without any change to the tree.\n\n## What\n\n`ExternalDatasourceService.generateObjectDraft` emits, and `renderObjectSource` renders, a field-level `primaryKey: true`:\n\n```ts\nfields[fieldName] = isPk ? { type: fieldType, primaryKey: true } : { type: fieldType };\n```\n\n```ts\nconst pk = f.primaryKey ? ', primaryKey: true' : '';\nreturn `    ${fieldName}: { type: '${f.type}'${pk} },${comment}`;\n```\n\n`primaryKey` is **not a key of the spec field schema**. The rendered `*.object.ts` is annotated `ServiceObject`, so the generated source does not compile, and the definition does not parse.\n\n## Measured at `368e7a06f`\n\n`tsc --noEmit` over the rendered draft, with a no-`primaryKey` copy of the same file in the **same program** as a positive control:\n\n```\nwith-pk.ts(8,25): error TS2353: Object literal may only specify known properties,\n  and 'primaryKey' does not exist in type '{ type: \"number\" | ... ; externalId?: boolean | undefined; }'.\n```\n\n`without-pk.ts` produced no diagnostic — so the program is live and the clean result is meaningful.\n\n`ObjectSchema.safeParse` on the same two definitions:\n\n| definition | `success` | issue |\n| --- | --- | --- |\n| with `fields.id.primaryKey: true` | `false` | `unrecognized_keys`, `path: [\"fields\",\"id\"]`, keys `[\"primaryKey\"]` |\n| identical, key removed | `true` | — |\n\n## Reachable today\n\nThis is not hypothetical and does not depend on #10676. `generateObjectDraft` already emits the key whenever the caller passes the `primaryKey` option — the path `POST /object-draft { \"primaryKey\": [...] }` and `os datasource introspect --primary-key` take — and the existing suite pins that output (`external-datasource-service.test.ts` asserts both `{ type: 'text', primaryKey: true }` in `definition.fields` and `\"order_id: { type: 'text', primaryKey: true }\"` in `source`). So the generator has a pinned path that produces a draft the platform's own validator and compiler both refuse.\n\nIt is *usually* invisible only because the introspected default never fires — which is precisely the bug #10676 reports.\n\n## The open question\n\nThere is currently **no authorable place** for a federated object's remote primary key:\n\n- not on the field — `primaryKey` is unrecognized, as measured above;\n- not on the binding — `ObjectExternalBindingSchema` is a `strictObject` whose keys are `remoteName`, `remoteSchema`, `writable`, `columnMap`, `introspectedAt`, `ignoreColumns`. No key holds a primary key.\n\n`FieldSchema` does declare `externalId: z.boolean().default(false)` — \"Is external ID for upsert operations\" — which is semantically adjacent (the card #10676 describes the lost value as \"the addressing/upsert key\"). Routing the introspected primary key there would need no spec change. But it is a different concept, it maps badly onto a composite key, and a scan of non-test, non-`dist` TypeScript under `packages/` turned up no site that reads a *field's* `externalId` property at all — the `externalId` hits are SCIM, the batch API, and the seed/mapping `upsertKey` aliases, which take a field **name** at the dataset level, not this boolean. So it may itself be declared-but-unenforced (ADR-0049 territory) and is not obviously a safe destination.\n\nThree candidate repairs, none of which a dev should pick unilaterally:\n\n- **A.** Emit `fields.<f>.primaryKey` anyway — no spec change, but ships codegen output that fails `tsc` and `ObjectSchema` by default. Adds a third reason on top of #10712's two for why the draft does not build.\n- **B.** Emit `fields.<f>.externalId` — no spec change, draft stays compilable, but overloads a key with different stated semantics that may itself have no enforcing consumer.\n- **C.** Add an authorable spelling for a remote key (e.g. `external.primaryKey: string[]` on `ObjectExternalBindingSchema`) — contract-first, handles composite keys naturally, `declared = enforced`; but it is a `packages/spec` change and adds surface, which wants a maintainer ruling on whether anything consumes a federated primary key at runtime today.\n\nRelated: #10712 (the same generated draft also fails `os build` on the missing `${namespace}_` prefix and absent `sharingModel`), #10676 (the seam that keeps the key from ever reaching the draft).\n\nFiled unassigned as a finding awaiting first-touch grading. Discovered from #10676."
+}

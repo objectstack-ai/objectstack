@@ -1,0 +1,35 @@
+{
+  "number": 10716,
+  "kind": "issue",
+  "title": "plugin-auth: `register-sso-provider` emits two lowercase wire-visible error codes (`request_domain_verification_failed`, `verify_domain_failed`) — ADR-0112 violation invisible to the casing gate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T09:23:52Z",
+  "updated_at": "2026-08-22T17:04:59Z",
+  "closed_at": "2026-08-22T01:41:46Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10716",
+  "body": "Split out of #10658 at triage: that card fixes the GATE (the `||`-fallback recognizer blindness in `scripts/check-error-code-casing.mjs`); this card fixes the two CODES it could not see. Different lane (plugin-auth = services), different risk (wire-visible rename), must not ride a tooling PR.\n\n## What\n`packages/plugins/plugin-auth/src/register-sso-provider.ts` emits ObjectStack-authored default error codes in lowercase, as the fallback arm of an `||` chain:\n\n| line | code |\n| --- | --- |\n| 411 | `request_domain_verification_failed` |\n| 465 | `verify_domain_failed` |\n\ne.g. line 465: `code: parsed?.code || 'verify_domain_failed'`. The `parsed?.code` path is the vendor pass-through; the literal is ours. ADR-0112 / Prime Directive #3 require `SCREAMING_SNAKE` for our error codes. Measured at `47aff0938` (see #10658 for the positive control proving the gate misses this spelling).\n\n## Constraints for the fix\n- **Wire-visible rename**: any client matching on the lowercase spellings breaks. `packages/qa/dogfood/test/admin-route-nonadmin-refusal.dogfood.test.ts:252` pins `verify_domain_failed` by name — update it in the same PR.\n- **Clause-② applies**: the emitted error vocabulary of a published endpoint changes (restoring declared ADR-0112 casing, but still a public-surface change) — claim should declare `Clause-②: yes`; contract-review tier at dispatch.\n- Coordinate with #10658's gate PR: whichever lands second removes the other's temporary expected-finding/allowlist entry so the gate ends up green with zero exceptions.\n- Related context: #10534 (SSO mount documentation card, where the codes were found) — this card deliberately does not touch mounts or docs.\n\nFiled by the triage seat; queue-ready (concrete lines, measured, mechanical edit + pin update)."
+}

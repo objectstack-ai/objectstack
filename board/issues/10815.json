@@ -1,0 +1,35 @@
+{
+  "number": 10815,
+  "kind": "issue",
+  "title": "[finding] `check:published-readme-exports` prints its `NOT read` blind spot only as whole-repo scalars — a per-document hand read must re-derive the population outside the gate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T12:21:44Z",
+  "updated_at": "2026-08-21T15:34:02Z",
+  "closed_at": "2026-08-21T15:33:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10815",
+  "body": "Found while executing #10368, which commissioned a hand read of ONE document's share of `check:published-readme-exports`' `NOT read:` population. Filed unassigned, no `pm:queue`.\n\n## The observation\n\nThe gate prints the blind spot as two whole-repo scalars, and nothing else:\n\n```\nNOT read: 120 documented `X.y(…)` call(s) on 72 receiver(s) with no type this gate can reach\n(free variables, parameters, globals, non-workspace imports). Visibility, not a verdict — see #9870.\n```\n\n#9870 added those two numbers so the green line could not read as coverage of documents. They do that. What they cannot do is answer the question the ruling on #9870's open question 1 then asked of them: **which document holds how many, and which sites are they?** That is the input to every per-document hand read, including the one #10368 commissioned.\n\nThere is no flag, no `--json`, no per-document breakdown. `countUnreadCalls(markdown, readableNames)` is exported and returns `{ calls, receivers }` — counts, not the site list — and `readableNames` is the thing a caller cannot get: `analyzeDocument` builds its `readable` map internally (import-bound names, plus #9870's `extractLocalBindings` derivations) and returns only findings.\n\n## What that cost, concretely\n\nTo adjudicate the sites in #10368 I had to **re-implement `analyzeDocument`'s `readable` derivation** outside the gate — the import-binding walk, `splitSpecifier`/`resolveTypesEntry`, then `extractLocalBindings` filtered to sources that are import-bound — and then re-implement `countUnreadCalls`' body to return the pairs instead of their cardinality.\n\nThat is precisely the failure mode this file's own header refuses elsewhere:\n\n> \"Published\" is `private` unset AND a non-empty `files` array AND the file matched by one of its patterns […] That definition is load-bearing for more than one gate now, and two gates deriving it separately would disagree the first time a package's `files` array changed — silently, each still green. So it is computed HERE and imported, never re-derived.\n\nA hand read whose population silently disagrees with the gate's produces a defect count with the wrong denominator, and nothing anywhere goes red. The only evidence available that my re-derivation *was* the gate's population is that summing it over all 60 published documents reproduced the printed pair exactly (`120 / 72`) — a whole-run checksum that catches a systematic drift and would not catch one document's worth.\n\n## The population that motivates it, measured\n\nPer-document, derived as above and checksummed against the printed totals (repo at 112a8c673, before #10368's repairs):\n\n```\n 30 call(s) / 17 receiver(s)  packages/runtime/README.md\n 10 call(s) /  3 receiver(s)  packages/metadata/README.md\n  9 call(s) /  2 receiver(s)  packages/drivers/driver-mongodb/README.md\n  8 call(s) /  7 receiver(s)  packages/client-react/README.md\n  7 call(s) /  4 receiver(s)  packages/plugins/plugin-auth/README.md\n  … 27 more documents, all ≤ 5\n```\n\n⚠️ Note for whoever reads #10368's ruling: it states the runtime README holds **47 sites on 18 receivers**. The gate's own population says **30 on 17**, and no counting convention I could find in the file reproduces 47/18 (import-bound-only, i.e. pre-#10365: 35/20; raw occurrences with no dedup: 44; whole-file rather than fenced: identical). The document has not been edited since #10226, well before the ruling was written. `47` is, however, exactly the `derivedReceivers` figure printed one line above on the same green output (`47 name(s) built from one`) — a whole-repo quantity. A per-document breakdown the gate itself emits is what makes that class of transcription slip impossible.\n\n## Scope\n\nObservation. ⛔ Distinct from the three cards already living in this file, and none of them is this:\n\n- **#9911** — refuse the third no-population state (`targets.size === 0`).\n- **#10367** — the namespace-import branch could never fire.\n- **#10368** — a hand read of one document, no gate change at all.\n\nIf it is taken up, the cheap shape is an opt-in reporting flag (`--unread-report`) that prints what the run already computed per document, changing no verdict and no exit code — the same \"visibility, not a verdict\" register `NOT read:` already occupies. ⛔ It must not become a widening of what the gate *types*: that is #9870's option D, explicitly declined pending a census.\n\nRefs: #9870 / PR #10365 (the widening and the `NOT read` pair) · #10368 (the hand read that needed the breakdown) · #4690 (zero is a broken scan).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

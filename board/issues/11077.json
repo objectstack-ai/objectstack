@@ -1,0 +1,36 @@
+{
+  "number": 11077,
+  "kind": "pull_request",
+  "title": "pm-dispatch: SKILL.md protocol family — symmetric contract-review carrier, sweep lane-label scope, clause-② restatement scope",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-22T15:46:40Z",
+  "updated_at": "2026-08-22T16:07:03Z",
+  "closed_at": "2026-08-22T16:06:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-22T16:06:09Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11077",
+  "body": "Fixes #10972\nFixes #10719\nFixes #10313\n\nFamily dispatch (fold ruled by the PM on the chain-head claim): three adjudicated cards, one file, one commit per member, each independently verifiable.\n\n## Member 1 — symmetric `needs:contract-review` hang and clear (commit 1)\n\nMaintainer ruling 2026-08-22, carried verbatim in the edited bullet: 「简化一点是否可以直接挂 PR 侧」「两边都挂好」. The clause-② gate bullet now parks the label on **both the PR (as soon as it exists) and the card in the same stroke**, and the 复审链 bullet clears **both in the same stroke on PASS**, each side by the standing read-modify-write hard steps (the 标签纪律 four-step rule already names gate-carrying labels for both directions). The label remains the gate carrier — the 2026-08-18 载体不迁移 ruling stands untouched in the same bullet. The commissioned request-review sentence (2026-08-22 ruling recorded on the card) is included: parking also requests review on the PR from the reviewing seat's account (notification only, quoted 「也可以直接要求复审」); the reviewing seat clears the request or leaves a review comment on PASS. A dev report arriving before the PR exists parks issue-side first; the dispatching seat completes the PR side at ACCEPT.\n\nRatchet payment: the triage auto-adjudication confidence-gate item ⑤ no longer restates the downgrade-fuse mechanism (the `get_session` machine reading) that the 复审链 bullet carries in full — it defers to that single source, same semantics.\n\n## Member 2 — sweep disjunction ② scope (commit 2)\n\nThe \"queue label without lane label\" shape is now swept on **every repo that has stream labels** (today: the main repo and objectui); the exemption survives only for repos genuinely without lane labels (cloud, objectos) — deliberately **not** widened to them. The 2026-08-21 objectui three-stream ruling is referenced via the 多仓协调 paragraph that already carries it, not restated.\n\n## Member 3 — a card-level restatement of clause ② is still clause ② (commit 3)\n\nThe clause-② paragraph gains its scope sentence: a seat's on-card restatement of clause ② loses the exceptions that lived beside the original, and the copy is what gets read — so the paragraph now states that the quota-exhaustion exemption and its `needs:contract-review` compensation reach a restatement too, and only a maintainer ruling can set a floor the exemption does not reach. Measured cost of the wrong reading: two cards parked ~11 hours.\n\nRatchet payment: the contract-review eligibility parenthetical tightened in place (same meaning, fewer words).\n\n## Verification (all on final commit `6c31501`, clean tree)\n\nGates derived with `node scripts/pm/dispatch-gates.mjs` (no paths — script took the changed set from merge-base); 7 matched families all green, verdict lines quoted from each gate's own output:\n\n- `check:pm-skill-ratchet` — \"✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/SKILL.md is 682 lines (ceiling 682; headroom 0).\" — the file stays at its ceiling; every addition paid by in-file tightening, no re-wrap used as payment.\n- `check:pm-skill-id-lint` — \"✓ check-skill-id-lint: 17 file(s) clean (pattern /#[0-9]{3,}/g).\"\n- `check:skill-frame-sync` — \"✓ check-skill-frame-sync: 4 copies of the decision frame are structurally isomorphic across 3 files\"\n- `check:pm-governed-prose` — \"✓ check-governed-prose: 2 instruction surface(s) name all 5 registered governed surfaces … and claim no others.\"\n- `check:pm-governed-merges` (self-test) — \"✓ check-governed-merges --self-test: 90 assertions\"\n- `check:doc-authoring` — \"✓ doc authoring guard: 389 files clean — no bare metadata literals.\"\n- `@objectstack/lint check:doc-formula-expressions` — \"✓ check:doc-formula-expressions: 22 record-scoped formula example(s) across 416 files / 1447 TS blocks judged clean\" (required building the lint dependency closure first in the fresh worktree).\n- `scripts/check-nul-bytes.mjs` — \"check-nul-bytes: OK (scanned 6402 text file(s) …)\".\n\n`.claude/**`-only diff — releases nothing; `skip-changeset` applied per the changeset gate's documented exemption (label is the author's explicit opt-out; live-read authority).\n\n**Governed surface** (`.claude/**`): draft PR, human merge only — never ready, never queued, never auto-merged.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01MsbKEG4LtERSLaDrbehM3e)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01MsbKEG4LtERSLaDrbehM3e)_"
+}

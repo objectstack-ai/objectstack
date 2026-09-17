@@ -1,0 +1,34 @@
+{
+  "number": 10936,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): relax contract-review eligibility condition ② per maintainer ruling 2026-08-21",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T19:35:28Z",
+  "updated_at": "2026-08-22T01:35:35Z",
+  "closed_at": "2026-08-22T01:35:26Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-22T01:35:26Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10936",
+  "body": "Fixes #10822\n\n## What\n\nRelaxes reviewer-eligibility condition ② of the `needs:contract-review` review chain in `.claude/skills/pm-dispatch/SKILL.md` (「入队与落地」 section), implementing the maintainer ruling of 2026-08-21, quoted verbatim and untranslated in the clause per the file's dated-ruling convention: 「你自己就是 Fable，自己就可以审核」.\n\n- Condition ① (runs at `CONTRACT_REVIEW_TIER`) stays hard, and the finding is machine-read only — the existing 降档保险丝 `get_session` reading of `external_metadata.last_served_model`; self-description is still not a reading.\n- Condition ② (not the dispatching seat) is relaxed from an eligibility condition to a routing preference: a dispatching seat machine-verified at tier by that same reading MAY perform the contract review and clear the label on cards it itself dispatched. Rationale kept in-clause: the PM writes no code, so it reviews the lower-tier implementer's contract-face increment, not its own work product.\n- The review itself is NOT waived: a verdict still lands on the card before the label clears; the preceding bullet's 「⛔ 禁止自查放行」 is explicitly disambiguated in-clause as forbidding review-free clearing, not this path.\n- The triage sub-round remains the DEFAULT clearing path; at-tier seat self-clear is the fallback; below-tier seats still leave the label in place and wait (per the 2026-08-20 席位档策略).\n- The 降档保险丝 and 载体不迁移 sentences in the same bullet are intact, byte for byte.\n\n## Verification\n\nInitial full pass at the pre-amend HEAD `125d4562b`; a PM patch round then amended one byte inside the quoted ruling (half-width comma → the issue body's faithful full-width comma, no other change — the two trees differ by that single character), and the two pm-skill gates were re-run at the final HEAD `b0ab63c82`:\n\n- At `b0ab63c82`: `pnpm check:pm-skill-ratchet` → \"✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/SKILL.md is 682 lines (ceiling 682; headroom 0)\"; `pnpm check:pm-skill-id-lint` → \"✓ check-skill-id-lint: 17 file(s) clean (pattern /#[0-9]{3,}/g)\".\n- At `125d4562b` (tree identical but for the one quote byte): `node scripts/pm/dispatch-gates.mjs` (no path args; change set derived from git) derived 1 path, 7 matched local gate families — all 7 run, all green:\n  - `pnpm check:skill-frame-sync` → \"✓ check-skill-frame-sync: 4 copies of the decision frame are structurally isomorphic across 3 files\" — four-prism copies untouched.\n  - `pnpm check:pm-governed-prose` → \"✓ check-governed-prose: 2 instruction surface(s) name all 5 registered governed surfaces\"; `pnpm check:pm-governed-merges` self-test → \"✓ check-governed-merges --self-test: 90 assertions\".\n  - `pnpm check:doc-authoring` → \"✓ doc authoring guard: 389 files clean — no bare metadata literals\"; `pnpm --filter @objectstack/lint run check:doc-formula-expressions` → \"✓ check:doc-formula-expressions: 22 record-scoped formula example(s) across 416 files / 1444 TS blocks judged clean\" (its first run failed only on the fresh worktree's unbuilt `@objectstack/formula` dist; green after building the dependency closure).\n  - `pnpm check:nul-bytes` → \"check-nul-bytes: OK (scanned 6312 text file(s) — 6312 tracked, 0 untracked-not-ignored; skipped 5 binary; no raw ASCII control bytes)\".\n  - Plus the two pm-skill gates above, green at both shas.\n\n## Governed surface\n\nThis PR touches `.claude/**` — human merge only (Prime Directive #14). It stays draft; it is never queued, armed, or flipped ready by any seat.\n\n## Provenance\n\nThe interrupted first dispatch run left an unpushed local commit in this container's worktree. This run verified that edit against the issue's binding constraints and against current `origin/main` (`9d101d28`; zero churn on the file since the stale base), then rebased it onto that tip via cherry-pick. An intermediate push of the stale-based commit (a fast-forward; no history lost) was superseded by the rebased head. The PM patch round (comma fidelity, option B) amended in place — same branch, lease-pinned force push.\n\nChangeset: none — `.claude/`-internal protocol text, no published surface; `skip-changeset` label applied per repo convention.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ApyDuQY2fkunMCqXiqvBhR)_"
+}

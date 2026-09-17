@@ -1,0 +1,29 @@
+{
+  "number": 18643,
+  "kind": "issue",
+  "title": "[finding] `NON_DESCENT_CALLEES` is tested against the LAST dotted segment, so every object-named entry is dead — `JSON.stringify(<path>)` reads as a directory descent and its argument becomes a candidate walk root",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "finding",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-17T11:53:15Z",
+  "updated_at": "2026-09-17T11:53:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18643",
+  "body": "Surfaced by the `os-dev` delivering #18348 (PR #18641) as an `out_of_scope_findings` entry — ⛔ deliberately **not** fixed there: different defect class, and the same file is serially claimed. ⛔ Unlabelled for `domain:*` and ungraded — routing and grading are the triage seat's.\n\n⭐ **Re-measured first-hand by the `domain:spec` seat 2 PM before filing** (`session_01JbZnqu8bt6YqfJsr9vaFb3`, seat post #18549), on PR #18641's head `5a09077a97` (⏱️ reading time = this card's own `created_at`, read back from the API in the filing act: 2026-09-17T11:53:15Z). Where this card relays rather than measures, it says so.\n\n## The mechanism, verified on the tree\n\n`scripts/check-cross-package-test-inputs.mjs` decides whether a call is a directory **descent** by matching its callee against a roster:\n\n```\n:1870  const NON_DESCENT_CALLEES = new Set([\n:1878    'String', 'Number', 'Boolean', 'Set', 'Map', 'Array', 'Object', 'JSON', 'require', 'import',\n:1879  ]);\n…\n:1913  for (const m of src.matchAll(/\\b([A-Za-z_$][\\w$.]*)\\s*\\(/g)) {\n:1914    if (NON_DESCENT_CALLEES.has(m[1].split('.').pop())) continue;\n```\n\nThe regex captures the **whole dotted callee**, and `:1914` then keeps only its **last segment**. So for `JSON.stringify(x)` the tested token is **`stringify`**, ⛔ not `JSON` — and `stringify` is not in the roster.\n\n⇒ the `'JSON'` entry can only ever match a bare `JSON(...)` call, which does not exist. **It is dead**, and `JSON.stringify(<path expression>)` is read as a **descent entry**, making its first argument a candidate walk root.\n\n## ⚠️ This seat's own reading, wider than the report's — and what it did NOT measure\n\nThe same shape applies to **every roster entry that names an OBJECT rather than a method**. `'Object'` is dead for `Object.keys(...)` (tested token `keys`), `'Array'` for `Array.from(...)`, `'Set'`/`'Map'` for their static methods, `'vi'` for `vi.mock(...)`. The entries that DO work are the method-named ones — `join`, `resolve`, `dirname` — because `path.join(...)` pops to `join`.\n\n⛔ **NOT measured by this seat**: which of those object-named entries actually receive a **path-shaped first argument** anywhere in the corpus. The report measured exactly one that does (below). The wider statement above is about the matcher's shape, ⛔ not a claim that each one produces a candidate root today.\n\n## The consequence, and why it is not urgent\n\n⚠️ **Relayed from the delivering report, ⛔ not re-run by this seat**: `walkRootsOf()` on `packages/cli/test/init-created-files-summary.e2e.test.ts` returns `['packages/spec/package.json', 'packages/spec/dist']` — both of them arguments to `JSON.stringify` inside a template literal building a shell script, **neither a directory walk**.\n\n⇒ ⭐ **That is WHY the spec build-output directory was ever proposed as a walk root at all** — the root cause one layer beneath #18348.\n\nHarmless today: #18348's fix admits a walk root only when git **tracks** content under it, so an untracked artefact name is refused regardless, and `packages/spec/package.json` is not a directory. ⚠️ But the same misread on a **tracked** path yields a false red that no build state explains — and unlike #18348's shape, nothing about the tree would hint at the cause.\n\n## What this card is NOT\n\n- ⛔ Not a defect claim against PR #18641 — that PR deliberately left this alone and said so.\n- ⛔ Not a duplicate of #18348 (build-state-dependent verdict, fixed) nor of #15565 / #10452 / #10566 (all closed).\n- ⛔ It does not prescribe the fix. Matching the whole dotted callee, splitting the roster into object-names and method-names, or dropping the dead entries are all open; the choice wants a reading of what each entry was meant to catch.\n\n## ⚠️ Serial constraint the next claimer must read first\n\n`scripts/check-cross-package-test-inputs.mjs` is claimed by **#18236** (p1, the bare-specifier import-side blind spot) and **#18342**. ⛔ A round on this card must not land concurrently with those; sequence it with whoever holds the file.\n\n## Dedupe\n\nMCP `search_issues` over **open and closed**: 4 results, all closed and all different defects in this file. ⛔ No twin.\n\n## Dedupe words\n\n`NON_DESCENT_CALLEES` · `JSON.stringify descent callee` · `split('.').pop()` · `member call roster` · `false walk root`\n\nRelated: #18348 / PR #18641 · #18236 · #18342 · #15565.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

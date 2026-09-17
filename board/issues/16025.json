@@ -1,0 +1,36 @@
+{
+  "number": 16025,
+  "kind": "issue",
+  "title": "`createHonoApp`'s default `prefix: '/api'` does not compose with AuthPlugin's default `basePath: '/api/v1/auth'` — the documented embed answers `200 {}` to sign-in",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T20:11:38Z",
+  "updated_at": "2026-09-17T12:27:28Z",
+  "closed_at": "2026-09-08T02:13:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16025",
+  "body": "## Measured, on a real boot through the adapter\n\nFound while measuring #15928; **out of that card's scope** (that card is about *which* 404 the `/auth/*` mount may yield, this is about the mount never reaching better-auth at all). Filed unassigned.\n\nBoot: a real `ObjectKernel` with `AuthPlugin` (`@objectstack/verify`'s `bootStack`), then the **documented** embed shape from `skills/objectstack-platform/SKILL.md` — `createHonoApp({ kernel })`, i.e. `prefix` defaulting to `/api` — with requests injected through the returned app.\n\n```\nPOST /api/auth/sign-in/email   (valid shape, wrong password)  ->  200  {}\nGET  /api/auth/get-session                                    ->  200  {}\nPOST /api/auth/sign-up/email                                  ->  200  {}\n```\n\nA failed sign-in answering `200 {}` is the silent-success shape.\n\n## Why\n\n`packages/adapters/hono/src/index.ts` mounts `app.all(FIELD_PREFIX + '/auth/*')` and forwards the request unchanged to the kernel's `auth` service. `AuthManager` hands it to better-auth, which matches against its **own** configured `basePath`, defaulting to `/api/v1/auth` (`packages/plugins/plugin-auth/src/auth-plugin.ts` line 327, `auth-manager.ts` line 1254). With the adapter's default prefix the wire path is `/api/auth/...`, which is not under that base, so better-auth routes nothing:\n\n```\nauthService.handleRequest(POST /api/auth/delete-user)      ->  404, zero-length body, no content-type\nauthService.handleRequest(POST /api/v1/auth/delete-user)   ->  401 {\"message\":\"Unauthorized\",\"code\":\"UNAUTHORIZED\"}\n```\n\nEvery one of those 404s is then yielded to the adapter's own terminal `FIELD_PREFIX + '/*'` dispatcher catch-all, which answers `200 {}` for paths under `/auth/` (see the sibling finding on that). The same measurement confirms the two do line up when the prefix is set to `/api/v1`: there `ownsRoute('POST', '/api/v1/auth/delete-user')` is `true` and the real auth surface answers.\n\n## What is NOT measured here\n\n- Which of the two defaults is the wrong one. Moving the adapter's default, moving the auth default, or refusing the mismatch loudly at boot are three different decisions with different blast radii — this card records the composition failure, not the remedy.\n- Whether any deployment outside this repo relies on the current default. `@objectstack/hono` has no in-repo consumer (#4117 already recorded that), so nothing here can answer it.\n- Anything about `plugin-hono-server`, which mounts auth itself and is unaffected.\n\n## Note\n\nA loud refusal is worth considering over a silent default change: the failure mode today is not \"auth 404s\", which someone would notice, but \"auth answers `200 {}`\", which reads as success on every call."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 10702,
+  "kind": "issue",
+  "title": "[security-sensitive] sys_file mime_type/size are writable via the data API — may neutralize field accept/maxSize re-check (verify non-admin)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T09:06:57Z",
+  "updated_at": "2026-08-22T15:29:40Z",
+  "closed_at": "2026-08-22T15:28:47Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10702",
+  "body": "Surfaced by QA run #10663 (`attachments-storage.field-accept-maxsize-server-enforced`) at `79ebb37`. **Existence + mechanism only; full reproduction withheld pending maintainer review per the auth/authz disclosure carve-out — available in the QA session on request. This one is a HYPOTHESIS for the non-admin case — only the admin path was proven.**\n\n## What\nThe server-side `accept`/`maxSize` re-check on record write reads `sys_file.mime_type` and `sys_file.size`, and those columns are **writable through the ordinary data API** (`PATCH /api/v1/data/sys_file/<id>`). A caller who can PATCH a `sys_file` row can null those fields; the accept/maxSize check then has nothing to test against and passes (the documented \"missing metadata is not a violation\" boundary), reachable on demand.\n\n## What is proven vs. open\n- **Proven** (as the seeded platform admin): nulling `mime_type`/`size` on a `sys_file` row succeeds and lets a subsequent write bypass the field's accept/maxSize constraint. As admin this is expected privilege, not a hole.\n- **Open / needs a run**: whether a **non-admin file owner** (or any caller who can reference the row) can PATCH those columns. If yes, the field-level accept/maxSize control is bypassable by an unprivileged caller — an authz-adjacent defect. If RLS/FLS blocks the non-admin PATCH, this is a non-issue.\n\n## Mechanism (fix-oriented)\n`sys_file.mime_type`/`size` are not treated as system-managed/immutable after commit, so the metadata the constraint check trusts is caller-mutable. Fix direction (if the non-admin case confirms): make those columns immutable post-commit, or re-derive them server-side rather than trusting the stored value at check time. Note the broader boundary: enforcement is declaration-based, not content-based (no magic-byte sniffing anywhere on the upload path) — tracked separately.\n\n## Next step\nA follow-up run as a non-admin file-owner persona resolves the open half. I can run it if you want the answer before deciding.\n\nQA-source: #10663 · attachments-storage.field-accept-maxsize-server-enforced · knownGap (content-boundary / metadata-mutability)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 10780,
+  "kind": "pull_request",
+  "title": "fix(docs): stop `next dev` writing untracked AGENTS.md / CLAUDE.md into apps/docs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T11:22:28Z",
+  "updated_at": "2026-08-21T11:43:57Z",
+  "closed_at": "2026-08-21T11:43:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-21T11:43:55Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10780",
+  "body": "Fixes #10249\n\n## What\n\nSets `agentRules: false` in `apps/docs/next.config.mjs`.\n\n`next dev` (Next `16.3.1`) calls `ensureAgentRulesForDev` on boot and, whenever\n`@vercel/detect-agent` reports an AI coding agent, scaffolds `apps/docs/AGENTS.md` and\n`apps/docs/CLAUDE.md`. Neither path is tracked or ignored, so both land as `??` and any\n`git add -A` after booting the docs server sweeps them into an unrelated PR.\n\nThose two filenames are load-bearing in this repo: the root `AGENTS.md` is the binding\nplaybook and agents are told to read the `AGENTS.md` governing the files they touch. A\nNext-authored stub pointing at `node_modules/next/dist/docs/` can be read as this repo's\ndiscipline, and the generated text argues for committing itself, which nudges an agent the\nwrong way. The generated `CLAUDE.md` is the single line `@AGENTS.md` — an import directive\nthat pulls the stub in.\n\n## Why disable rather than ignore\n\nTurned off at the source instead of adding a `.gitignore` entry, and this is a deliberate\nchoice rather than a cost comparison. An ignore rule for `apps/docs/AGENTS.md` would\nsilently swallow a future **repo-authored** `AGENTS.md` for the docs app, and that failure\nwould be invisible at exactly the moment someone was trying to add real guidance there. A\nvisible untracked file is a better failure than an invisibly ignored one for this filename\nspecifically. The reasoning is recorded in the config comment so the next reader does not\nre-litigate it.\n\n## Evidence\n\nMeasured in a dedicated worktree off `origin/main` @ `01c50322a1`. The detector was\nconfirmed live in this shell first — `determineAgent()` returns\n`{\"isAgent\":true,\"agent\":{\"name\":\"claude-code_2-1-238_agent\"}}` — so a clean tree after the\nfix cannot be a false negative caused by non-detection.\n\nBaseline, all four checks from the issue, in a checkout that had not run `next dev`:\n\n| check | result |\n| --- | --- |\n| `git ls-files apps/docs \\| grep -iE 'AGENTS\\|CLAUDE'` | exit 1 — nothing tracked |\n| `git check-ignore -v apps/docs/AGENTS.md apps/docs/CLAUDE.md` | exit 1 — not ignored |\n| `grep -n agentRules apps/docs/next.config.mjs` | exit 1 — not set |\n| `ls apps/docs/AGENTS.md apps/docs/CLAUDE.md` | neither file exists |\n\n**Boot 1 — base config, both files absent, port 31249:**\n\n```\n✓ Ready in 530ms\n✓ Generated AGENTS.md and CLAUDE.md for AI agents. Set `agentRules: false` in next.config to disable.\n GET /docs 200 in 48s\n```\n```\n$ git status --porcelain\n?? apps/docs/AGENTS.md\n?? apps/docs/CLAUDE.md\n```\n\n**Boot 2 — with `agentRules: false`, both files deleted first so the run starts from the\nsame state, port 31250:**\n\n```\n✓ Ready in 417ms\n GET /docs 200 in 11.8s (220754 bytes)\n GET / 200 in 628ms\n```\n```\n$ git status --porcelain\n M apps/docs/next.config.mjs\n$ ls apps/docs/AGENTS.md apps/docs/CLAUDE.md\nls: cannot access 'apps/docs/AGENTS.md': No such file or directory\nls: cannot access 'apps/docs/CLAUDE.md': No such file or directory\n```\n\nNo `Generated ...` line, no new files. Deleting the two files before boot 2 is the load-bearing\npart of the control: `ensureAgentRulesForDev` also returns early when the current block is\nalready present, so leaving them in place would have produced a clean tree whether or not the\nflag worked.\n\nThe server still starts and serves after the config change — `Ready in 417ms`, `/docs` and `/`\nboth HTTP 200, and `/docs` returned 220754 bytes, byte-identical in size to the pre-fix boot.\nNext's zod config schema accepts the key (`agentRules: z.boolean().optional()`), and\n`✓ Running next.config.mjs took 282ms` confirms the config parsed with no validation warning.\n\n## Residue\n\n`agentRules: false` stops future generation; it does not delete copies from a checkout that\nalready ran `next dev`. No cleanup script: the affected population is small, self-limiting and\nalready visible as `??`, and once this lands the files are never rewritten, so removing them\nonce is permanent. Handled with a sentence in the config comment naming the one command\n(`rm -f apps/docs/AGENTS.md apps/docs/CLAUDE.md`), which is where someone asking \"why do I have\nthese files\" will be reading. No copies exist anywhere in the container this was built in.\n\n## Gates\n\nDerived with `node scripts/pm/dispatch-gates.mjs` from the real change set (it reads the merge\nbase itself), re-run after the final commit at `d2c46c1c2d`. Exit codes captured before any\npipe; verdict lines are each gate's own output.\n\n| gate | exit | verdict |\n| --- | --- | --- |\n| `pnpm check:test-source-alias` | 0 | `check-test-source-alias OK — 72 packages with tests scanned` |\n| `pnpm check:type-source-resolution` | 0 | `check-type-source-resolution OK — 76 packages with a tsconfig.json scanned` |\n| `pnpm check:nul-bytes` | 0 | `check-nul-bytes: OK (scanned 6237 text file(s) -- 6237 tracked, 0 untracked-not-ignored ...)` |\n\nThe first two are the families `dispatch-gates` matched for `apps/docs/next.config.mjs`\n(both via gate source `apps/*`); `check:nul-bytes` is run because the diff touches a text file.\n\n## No changeset\n\nA dev-server config flag publishes nothing — no package behaviour changes for any consumer.\nLabelled `skip-changeset`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_"
+}

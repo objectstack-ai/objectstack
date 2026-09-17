@@ -1,0 +1,35 @@
+{
+  "number": 10616,
+  "kind": "issue",
+  "title": "sweep: docs-audit wave (#10563) — 13 factual corrections across content/docs/** where the page contradicts the enforced platform",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T06:21:59Z",
+  "updated_at": "2026-08-21T09:48:10Z",
+  "closed_at": "2026-08-21T09:47:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10616",
+  "body": "Anchor card for the sweep-package promotion of the 2026-08-21 docs-audit finding wave (audit dispatch: #10563, closed). Triage seat authored per the batch-promotion rules (five gates below). **This card is the claim/dispatch object; the member cards keep their `finding` label and are NOT dispatch candidates.**\n\n## Family criterion (gate ①)\n\nEvery member is the same defect shape: **a `content/docs/**` page states something the current enforced platform contradicts**, and the fix is a prose/example correction on that page against the cited source of truth. No member changes any contract, schema, or gate.\n\n## Members (13)\n\n| Issue | Page(s) | One-line defect |\n|:--|:--|:--|\n| #10581 | 12 pages (list in card) | 22 `ObjectSchema.create()` examples omit `sharingModel`; `os validate` errors on every one (`SECURITY_OWD_UNSET`) |\n| #10582 | `getting-started/examples.mdx` | \"Quick Run\" omits the required `pnpm build`, contradicts README.md:210-212 |\n| #10583 | `getting-started/index.mdx` | advertises GraphQL via `IGraphQLService` — contract does not exist, `/graphql` removed |\n| #10584 | `data-modeling/field-types.mdx:533`, `validation-rules.mdx:373` | `location` value documented `{latitude,longitude}`; enforced contract is `{lat,lng}` (`field-value.zod.ts:251-256`) |\n| #10585 | `data-modeling/validation.mdx` | retired `partial` index key presented as live |\n| #10586 | `data-modeling/index.mdx` | still sells `joins` + window functions, both retired in protocol 17 |\n| #10587 | `validation-rules.mdx` | promises constraints for \"each field type\", covers 44 of 49 |\n| #10588 | `data-modeling/field-types.mdx` | says unknown field keys are \"stripped\" — `FieldSchema` is a strictObject that rejects with guidance (ADR-0078) |\n| #10589 | `validation-rules.mdx` | says `currency` is stored as `{value,currency}` — it is a bare number |\n| #10590 | `data-modeling/schema-design.mdx` | `apiMethods` sample says \"six primitives\" and lists five — silently denies `bulk` |\n| #10591 | `data-modeling/index.mdx` | \"Four database drivers\" — there are five; `driver-turso` omitted |\n| #10578 | `ui/actions.mdx` | `rowActions`/`bulkActions` shown at `defineView` container top level — strictObject rejects it |\n| #10579 | `ui/` form-section pages | 3 of 5 form-section examples omit `name` |\n\nRead each member card in full before editing — each carries exact line numbers, the source-of-truth citation, and (for #10581) the full 22-site table.\n\n## Gates ②–⑤\n\n- **② PR body MUST carry a per-member checklist: `落点 (file:line) | before | after` — one row per member**, and a `Fixes #<n>` line per member.\n- **③ Zero changes outside the listed member sites.** Docs-only diff; the PR self-evidences (no source, no gates, no `content/docs/references/**`, no `content/docs/releases/**`).\n- **④ Out-of-scope discoveries are filed as separate findings, never folded in.**\n- **⑤ Exclusion list — looks like family, is NOT in this sweep:**\n  - #10592 — `@objectstack/studio` package-header prose: not `content/docs/**`, already queued (`domain:cli`).\n  - #10593 — QA checklist `fixtures` recipe convention: internal QA tooling, not customer docs; graded separately.\n  - #10581's mechanization idea (run `os validate` over `os:check` blocks in `packages/spec/scripts/check-skill-examples.ts`) — gate work in the spec lane, explicitly NOT part of this sweep; tracked as a separate finding.\n  - Any defect in `content/docs/references/**` — generator territory per #10563; file against the generator.\n\n## Dispatch notes (for the devx seat)\n\n- Premise freshness: wave filed 2026-08-21 ~04:0xZ; triage spot-checked #10584 and #10581 against `origin/main` @ `bde0ab9` (2026-08-21 ~06:2xZ) — both hold.\n- Same-file serial check at claim time: queued docs cards #10487 (`ui/index.mdx`), #10469 (`ui/` react-pages sample), #10355 (`ai/agents.mdx`) touch neighbouring docs — different files on today's reading, re-verify at dispatch.\n- Size/model suggestion: M, `mode:subagent`; prose-vs-source verification per item — default judgment tier.\n\nTriage: lands in `content/docs/**` ⇒ `domain:devx`; concrete named landing spots, no open questions ⇒ `pm:queue`."
+}

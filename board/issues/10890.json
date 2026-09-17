@@ -1,0 +1,33 @@
+{
+  "number": 10890,
+  "kind": "pull_request",
+  "title": "fix(devx): stop check:published-files spelling a bare repo root it never opens",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T15:59:34Z",
+  "updated_at": "2026-08-21T16:23:55Z",
+  "closed_at": "2026-08-21T16:23:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-21T16:23:38Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10890",
+  "body": "Fixes #10875\n\n`check:published-files` reached the literal `scripts` through a **package-relative** predicate over would-be tarball contents, not through the repo root it appeared to name. Verified in source:\n\n```js\ntest: (rel) => rel.startsWith('scripts/'),   // rel is PACKAGE-relative\n```\n\nThe dispatch derivation read that literal as a declaration of the repo's own `scripts/` tree, and `hintCovers` refuses a bare top-level word as too generic — so the gate was unnameable for every card while *appearing* to name a root it never opens. It was the **last row** of `ESCAPABLE_LITERAL_LEDGER`.\n\n## The remedy, and the one that was refused\n\nRespell the predicate as an anchored regex — the idiom the file's three other `FORBIDDEN` entries already use. Behaviour is identical; the row discharges **by construction** rather than by declaration, and the ledger empties.\n\n⛔ The `ROOT_DIR_WATCH_HINTS` escape (`['scripts/**']`) is the **wrong** remedy here. It is the idiom, it would have made the ledger green, and it would have been a **false declaration**. Measured on this tree:\n\n| | pairs |\n|---|---|\n| the bare `scripts` literal ever contributed | **0** |\n| `scripts/**` would have added, to this one gate | **+226** |\n\nThe bare literal was already inert for matching, so removing it changes **zero** match results tree-wide (50259 → 50259 pairs over 131 families × 6300 files). It only ever bought the ledger row. The forbidden remedy would have bought 226 fabricated leads — the currency `hintCovers`' refusal is priced in.\n\n`hintCovers` `:920` was **not** loosened.\n\n## The verdict is correct, not merely quiet\n\nBoth directions are pinned against the live tree (`check:pm-dispatch-gates`), because once a ledger row is out the ledger says nothing at all:\n\n- a brand-new repo-root `scripts/` file does **not** name this gate;\n- …and it is not silent everywhere — `scripts/check-published-files.mjs`, a population it really does have, still resolves `matched`.\n\nThe second is what separates a correct verdict from a dead one, and it is what the first case's non-vacuity rests on.\n\n## The ledger's #4690 guard had to be re-anchored\n\n`the live sweep still reaches this species at all` was `ledgerRows.length > 0` — a live-tree count that read the right rule off the wrong quantity. It conflated two separable claims: *\"the recognizer works\"* and *\"the tree still owes a row\"*. While a debt existed they moved together, so the conflation was invisible. **Paying the last row is what pulled them apart**, leaving a SHRINK-ONLY ledger that could not be allowed to reach zero — the one end state it exists to reach.\n\nA probe family spelling a bare root is now spliced into the **live** corpus and must be recognized. That holds at zero rows and at any other count, and unlike the fixture cases it exercises the live prefix set.\n\nTwo further cases were kept from going vacuous as the ledger emptied — the shape #10784's ablation caught one case over, where `silent === silent` read as a pass.\n\n## Ablations — prediction stated before each run\n\n| ablation | predicted | observed |\n|---|---|---|\n| re-add a ledger row (**stale** direction) | 1 | 1 — `and no ledger row is stale`, naming the row |\n| revert the gate spelling (**fresh** direction) | 1 | 1 — `no gate has NEWLY joined the escapable-literal species` |\n| remove the probe splice (is the new guard real?) | 2 | 2 — the probe guard + `every ledger row names a root the tree HAS` |\n| **apply the forbidden `scripts/**`** | 1 | 1 — `…a brand-new repo-root scripts/ file does NOT name it` |\n\nOne prediction **missed** and is reported as a defect in the test, not noise: killing `trackedPrefixes` globally was predicted at 2 and observed **7**. `trackedPrefixes` is a shared helper and 5 reds belonged to the residue/reachability sweep, which I had failed to include in the blast radius. Both target cases did red; the ablation was simply too broad to isolate the new guard, so it was re-run in isolated form (row 3 above).\n\nNote the fourth row: **FRESH stayed green** under the forbidden remedy, because a subtree declaration is not a bare root. That is exactly the failure the ledger alone could never have caught, and why it is pinned separately.\n\n## ⚠️ An empty ledger is not a closed species\n\nThis list only ever saw the half the derivation can see — a literal that reaches the hint set, which needs a separator in the source spelling. **#10840** measures the other half at ~33 gates whose population literal carries no separator at all. Those are invisible to the derivation *and* to this ledger, and emptying this list moves **none** of them. The ledger's own comment now says so, so nobody reads an empty list as \"done\".\n\n## Verification\n\nHead `825d27a872`. Gates derived with `node scripts/pm/dispatch-gates.mjs` (no paths — it reads the merge-base changeset itself), all 7 run plus `check:nul-bytes`, every one exit 0:\n\n```\n✓ dispatch-gates self-test: 506 cases pass.\n✓ check:published-files — 69 publishable package(s) of 77 workspace member(s) …\n✓ check:entry-guard: 129 scripts/ file(s) …\n✓ check:parse-guard: 128 scripts/ file(s) — every TypeScript parse goes through ts-parse.mjs.\ncheck-nul-bytes: OK (scanned 6296 text file(s) … no raw ASCII control bytes).\n```\n\n`check:published-files`' live verdict is unchanged from base (69 publishable packages, same registered-reason count), which is the behaviour-preservation half.\n\n`check:entry-guard` / `check:parse-guard` were run by hand as instructed — though both are now **derived** automatically via #10873's `scripts/**` declaration, so that dispatch note is stale.\n\nRebased onto `origin/main` after four sibling PRs landed mid-task; the diff is exactly two files.\n\n`skip-changeset`: `scripts/`-only internal CI tooling, releases nothing.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_"
+}

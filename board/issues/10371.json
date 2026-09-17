@@ -1,0 +1,34 @@
+{
+  "number": 10371,
+  "kind": "issue",
+  "title": "plugin-reports: the timers started by ReportsPlugin are released from stop(), which the kernel never calls",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T17:07:10Z",
+  "updated_at": "2026-08-22T17:05:29Z",
+  "closed_at": "2026-08-21T13:32:03Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10371",
+  "body": "Found while fixing #9371 in `@objectstack/service-messaging`. **Same defect, different package — filed rather than fixed, to keep that PR to one defect with one proof.**\n\n## The shape\n\n`Plugin` (`packages/core/src/types.ts:170`) declares exactly one teardown hook:\n\n```ts\ndestroy?(): Promise<void> | void;\n```\n\n`ObjectKernel.performShutdown()` and `LiteKernel.destroy()` walk the plugins in reverse and call `plugin.destroy()`. **`stop()` is not on that interface**, so a plugin that spells its teardown `stop()` is never torn down: `await kernel.shutdown()` resolves with the plugin's timers still armed.\n\nThat is exactly what #9371 was — measured there as 48 further delivery reads/writes in the 80 ms after a resolved `shutdown()`.\n\n## This instance\n\n`packages/plugins/plugin-reports/src/reports-plugin.ts` has an `async stop()` and **5** `setInterval`/`setTimeout` sites, and no `destroy()`. Nothing in the tree calls its `stop()`.\n\n## The rest of the class (no timers, so lower stakes — listed for whoever sweeps)\n\nThese also expose an `async stop()` with no `destroy()`, i.e. a teardown the kernel does not reach. None of them own timers today, so the consequence is limited to whatever else `stop()` releases:\n\n- `packages/connectors/connector-openapi/src/connector-openapi-plugin.ts`\n- `packages/connectors/connector-rest/src/connector-rest-plugin.ts`\n- `packages/connectors/connector-slack/src/connector-slack-plugin.ts`\n- `packages/plugins/plugin-approvals/src/approvals-plugin.ts`\n- `packages/services/service-knowledge/src/knowledge-service-plugin.ts`\n\n## Why it stays invisible\n\n`plugin-reports` `unref()`s at least some of its timers (as messaging did), so a long-lived host process still exits and nothing complains. The bill lands in test harnesses, where the process is alive throughout teardown — see #9371 for the full mechanism by which that turns into a **green suite exiting 1**.\n\n## Shape of the repair (as applied in #9371)\n\nMove the body to `destroy()` and keep `stop()` as a delegating alias — it is public API of an exported class, and removing it would break an embedder who learned to call it directly precisely because the kernel never did.\n\nA guard that fails when a `Plugin` implementation declares `stop()` and no `destroy()` would close the whole class; that is a judgement call for triage, not something this finding asserts."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 10379,
+  "kind": "issue",
+  "title": "ci.yml's `crosspkg` filter is a second, hand-kept recognizer of CROSS_PACKAGE_TEST_INPUTS — nothing fails when a declaration lands in a root it does not cover",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T17:29:48Z",
+  "updated_at": "2026-08-21T13:34:29Z",
+  "closed_at": "2026-08-21T13:32:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10379",
+  "body": "Found while implementing #10015 (which makes the ten then-unschedulable declarations schedule). Filed unassigned.\n\n## The residual hole\n\nAfter #9829/#10014 and #10015, ci.yml carries a `crosspkg` paths-filter whose entries mirror the\ntop-level roots that `CROSS_PACKAGE_TEST_INPUTS` declares and `core` does not already match:\n\n```yaml\ncrosspkg:\n  - 'scripts/**'\n  - 'content/**'\n  - 'docs/audits/2026-07-unknown-key-strictness-ledger.md'\n  - 'skills/objectstack-formula/**'\n  - '.github/workflows/scaffold-e2e.yml'\n```\n\n`pnpm check:cross-package-test-inputs` verifies two of the three layers the mechanism has:\n\n- it finds escaping tests **itself**, statically, and fails naming any package that has one and no\n  declaration;\n- `--verify` requires `turbo.json` to carry a matching `$TURBO_ROOT$/…` input, so the **task hash**\n  moves with the declared path (Layer B).\n\nNothing verifies the third: that the **scheduler** can start the job in which Layer A's\n`--union-into` step lives. The five entries above are a second recognizer of the same declarations,\nkept in step by hand. Add a declaration in a root none of them covers — `tools/`, `docker/`,\n`paseo.json`, a second `skills/*` bundle, another `docs/…` file — and the gate stays green, the\nturbo hash still moves, and the test still does not run at PR time. That is exactly the #7802\nshape, one layer up, and it is the failure #10015 was filed for after #9829 fixed one root.\n\n## Measured, on `f3996182b`\n\nInstantiating every `$TURBO_ROOT$` declaration to a real tracked file and running it through\nci.yml's filters with picomatch (the matcher `dorny/paths-filter@v4` uses), under both 2.3.1\n(bundled by the action) and 4.0.5 (this tree) — the two agree on every row:\n\n| | declarations | core=false | of those, covered by `crosspkg` |\n| --- | --- | --- | --- |\n| before #10015 | 64 | 19 | 9 |\n| after #10015 | 64 | 19 | 19 |\n\nThe \"after\" row is green **today**, and no gate holds it there.\n\n## Two routes, both previously considered\n\n1. **Derive the filter entries from `CROSS_PACKAGE_TEST_INPUTS` at CI time** — option 1 of #9829's\n   own list, held there because it collided with #9826's rewrite of\n   `scripts/check-cross-package-test-inputs.mjs`. **#9826 has since merged**, so the collision is\n   gone. `dorny/paths-filter` accepts its `filters` input as a string, and a YAML *flow* sequence\n   (`crosspkg: [\"scripts/**\", …]`) is a single line, so an earlier step could emit it into\n   `$GITHUB_OUTPUT` with no indentation problem. Cost: a new failure mode inside the `filter` job —\n   the one job whose death THE FILTER CONTRACT (#4928) was written about — and the entries stop\n   being readable in the workflow file.\n\n2. **A static parity gate**: assert at lint time that every declared glob is covered by `core` or\n   `crosspkg`. No CI-time coupling, entries stay readable and commented. Cost: it needs a\n   coverage decision. Instantiating to tracked files needs a picomatch-compatible matcher for\n   `core`'s `apps/!(docs)/**` extglob, which the gate's deliberately dependency-free\n   `globToRegExp` does not support — i.e. a *third* recognizer, with its own divergence risk. A\n   pure-string rule avoids that: a declared glob is covered iff some list literally contains it, or\n   contains `<prefix>/**` for a directory prefix of its leading literal segments. Checked by hand\n   against all 55 unique declared globs on `f3996182b`, that rule classifies every one correctly —\n   red on the exact ten #10015 fixes (including `.github/workflows/scaffold-e2e.yml`, the\n   same-root-different-file case a root-level rule would false-green), green on the other 45.\n\nRoute 2's pure-string rule looks like the cheaper and safer of the two, but choosing between them\nis a mechanism decision, which is why this is a card rather than a rider on #10015's PR.\n\nRefs: #10015 (the four roots), #9829 / #10014 (the `scripts/` root), #9826 (the merged rewrite that\nunblocked route 1), #7802 (the defect the mechanism exists for), #4928 (THE FILTER CONTRACT).\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 10871,
+  "kind": "issue",
+  "title": "[finding] `apps/docs` `types:check` is invoked by nothing, so the docs app is only ever type-checked without `next typegen`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T14:53:47Z",
+  "updated_at": "2026-08-21T15:45:52Z",
+  "closed_at": "2026-08-21T15:44:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10871",
+  "body": "## What\n\n`apps/docs/package.json` declares two near-identically named type-checking scripts:\n\n```json\n\"types:check\": \"fumadocs-mdx && next typegen && tsc --noEmit\",\n\"typecheck\":   \"tsc --noEmit\"\n```\n\n`types:check` — the thorough one — is called by **nothing**. Measured on\n`origin/main` @ `5886ee6d22`:\n\n```\ngrep -rn \"types:check\" .github/ scripts/     -> no matches\n```\n\nNo workflow, no script, no turbo task references it. The one that actually runs is\n`typecheck`, reached through the root `turbo run typecheck`.\n\n## Why it may be worth a card\n\n`apps/docs/tsconfig.json` includes the generated route types:\n\n```json\n\"include\": [\"next-env.d.ts\", \"**/*.ts\", \"**/*.tsx\",\n            \".next/types/**/*.ts\", \".next/dev/types/**/*.ts\"]\n```\n\nThose paths are produced by `next typegen` — which only `types:check` runs. So the\nprogram `typecheck` actually checks depends on whether some *earlier, unrelated*\ncommand happened to populate `.next`: a previous `next build` or `next dev` in the\nsame checkout. A clean checkout type-checks a strictly smaller program than a dirty\none, and neither is declared anywhere.\n\nMeasured directly while verifying #10782: with `apps/docs/.next` deleted,\n\n```\npnpm --filter @objectstack/docs typecheck   ->   DOCS_TYPECHECK_EXIT=0\n```\n\nIt passes without the generated route types existing at all. That is the\n\"reads green, verified less\" shape — the failure is not that it goes red, but that\nits coverage is set by incidental build state and nothing says so.\n\nTwo things a triage round might separate:\n\n1. the dead `types:check` script (either wire it up or delete it — ADR-0049's\n   enforce-or-remove instinct applied to a package script); and\n2. whether the docs app's declared type-check should include `next typegen`, so\n   coverage is a property of the script rather than of leftover `.next` state.\n\nI have not verified whether the generated route types would actually catch anything\nin this app today — that is the triage question, not a claim made here.\n\nFound while working on #10782 (Next `middleware` -> `proxy` convention rename);\nout of that card's file surface, so filed rather than fixed. Unassigned."
+}

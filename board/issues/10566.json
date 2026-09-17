@@ -1,0 +1,35 @@
+{
+  "number": 10566,
+  "kind": "issue",
+  "title": "check:cross-package-test-inputs reports a stale declaration per PACKAGE, not per GLOB — a second escaping test lets a declared glob go held by nothing, silently",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T03:27:30Z",
+  "updated_at": "2026-08-21T09:19:59Z",
+  "closed_at": "2026-08-21T09:18:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10566",
+  "body": "Measured while implementing #10163. **No gate is red today**, and the failure is silent by construction. Filed unassigned.\n\n## Measured on `ceb33a9f12`\n\n`verify()` has two staleness limbs and both are **package-scoped**:\n\n- a package with an escaping test and no entry → red (`:950-958`);\n- an entry whose package has **no** escaping test any more → red as stale (`:960-967`).\n\nThere is no limb asking whether each declared **glob** is still held by something. The roster check at `:973-988` runs the other direction: it fails when a test names a path *no* glob covers. A glob that covers nothing any more is never reported.\n\nThat gap was invisible while most declaring packages had exactly one escaping test. `@objectstack/plugin-auth` now has two, so it is reachable there today:\n\n**Ablation.** Reseed `packages/plugins/plugin-auth/src/managed-extension-fields.test.ts` from `process.cwd()` (the walk the detector deliberately does not resolve) and re-run the gate:\n\n```\n$ node scripts/check-cross-package-test-inputs.mjs --list-escapes | grep -A3 plugin-auth\n@objectstack/plugin-auth  (packages/plugins/plugin-auth)\n    packages/plugins/plugin-auth/src/rate-limit-storage-isolation.test.ts     # the object walker is gone\n\n$ node scripts/check-cross-package-test-inputs.mjs ; echo \"EXIT=$?\"\nOK: 12 package(s) read outside themselves, all declared, and turbo.json hashes every declared glob.\nEXIT=0\n```\n\n`packages/**/*.object.ts` stays declared in `CROSS_PACKAGE_TEST_INPUTS` and in `turbo.json`, and nothing holds it. Restored; the tree is unchanged.\n\nPositive control, same ablation on `packages/platform-objects/src/managed-api-method-affordance-sweep.test.ts` — that package's **only** escaping test — exits **1**: *\"@objectstack/platform-objects declares a cross-package input radius, but no test in it reads outside the package any more.\"* So the limb works exactly as far as its package scope reaches, and no further.\n\n## Why this matters more than a dangling glob\n\nAn unheld glob costs nothing directly — it over-invalidates a cache. The cost is that **the declaration stops being checked against the code**, which is the property the gate's own header calls load-bearing: *\"a narrow glob is only safe while the gate can check it against the paths the tests really read\"*. This is #9763's \"prose was holding the radius\" one level up: after the ablation, `packages/**/*.object.ts` is held by a comment in a test file, and a later edit that removed the glob as \"unused\" would go green while putting that sweep back in #7802's blind spot.\n\nThe prose in `managed-extension-fields.test.ts` used to promise the stale-declaration failure as the guard for exactly this. #10163 corrects the promise; it cannot supply the missing limb.\n\n## Direction (not a decision)\n\n- **A** — extend `verify()` with a per-glob holder check: a declared glob that matches nothing in its package's roster fails as unheld. Symmetric with the roster check already there, and it is the same data (`info.literals` / `info.dirEntries`) read the other way. Needs care with globs deliberately declared for a path only *named* in prose (`serve.ts`, `check-nul-bytes.mjs`, `realtime-protocol.mdx` today) — those are held by the flat literal collector, so the check must read the same roster the coverage limb reads, not the fs.\n- **B** — leave it, and rely on the per-glob comments naming their justifying test.\n\nA is the one that keeps a narrow radius honest, which is the reason the glob list is allowed to be narrow at all.\n\n⚠️ **Collision:** the file is edited by open PR #10450, so this wants to land after it, not as a rider.\n\n## Refs\n\n#10163 (where it was measured) · #10161 (gave plugin-auth its second escaping test, which is what made the gap reachable) · #9763 · #7802 · PR #10450 (holds the file)"
+}

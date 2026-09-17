@@ -1,0 +1,35 @@
+{
+  "number": 10457,
+  "kind": "issue",
+  "title": "[finding] publish-smoke-port-collision's THIEF binds a port the picker merely handed it — the same reservation-is-not-a-bind gap #10370 fixed for sdui",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "tests"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T22:03:17Z",
+  "updated_at": "2026-08-21T10:32:09Z",
+  "closed_at": "2026-08-21T09:59:13Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10457",
+  "body": "Filed unassigned from work on #10370 (PR #10456). ⛔ **Not observed failing** — recorded as a latent instance of a class that has now cost three PRs a red check in the sibling file, not as a live incident.\n\nDuplicate search first (`publish-smoke`, `STEAL_HELD`, harness precondition wording): no open card carries this. #10212 is closed and is about `smoke_pick_free_port` itself, not the harness that tests it. #10261 (the two registries) is `pm:on-hold` and a different subject.\n\n## The class\n\n#10370's measured mechanism was: **a reservation is not a bind.** `sdui_pick_free_port` claims a port through an `O_EXCL` registry and probes it, then *returns* — the caller binds afterwards. Anything outside the registry can take the port in that gap, and losing there evaporates the precondition the vacuity guard rests on, which then reads as an accusation of the picker.\n\n`packages/spec/scripts/publish-smoke-port-collision.test.ts:305-321` has the same shape, and deliberately widens the gap:\n\n```bash\nSTEAL=\"$(smoke_pick_free_port 3210)\"\nrm -f \"$SMOKE_PORT_RESERVATION_DIR/$STEAL\"          # claim released ON PURPOSE\nSTUB_PORT=\"$STEAL\" STUB_NAME=THIEF node -e \"$STUB\" >/dev/null 2>&1 & THIEF=$!\nsleep 1\necho \"STEAL_HELD=$(curl -sS \"http://localhost:$STEAL/\" | jq -r .iam)\"\n```\n\nThe `rm -f` is correct for what the case tests (a holder the registry knows nothing about), but it means the port is unclaimed for the whole interval between the `rm` and the stub's `listen` — anything scanning from 3210 in that window can legitimately take it. Then `STEAL_HELD` is not `THIEF` and `expect(r.STEAL_HELD).toBe('THIEF')` reds a PR that has nothing to do with this area.\n\n## Why the exposure is lower than #10370's, and why that is not a reason to leave it\n\nTwo things make it rarer than the sdui case, and both are accidents rather than design:\n\n- **No in-file thief.** #10370's actual culprit was `port_held`, a bind-and-close probe on the very port the occupier was taking, measured winning that bind 39 times in 80. This file's liveness check is `curl` + `jq`, which never binds — so the only racer is a genuine concurrent `smoke_pick_free_port` caller.\n- **Base 3210 is quieter than 5180.** `publish-smoke.sh` is driven by fewer suites than `gen-sdui-manifest.sh`.\n\nNeither is a property anyone maintains on purpose, and the fix is the one already landed next door.\n\n## Shape of a fix — a lead, not a decision\n\nThe shape #10370 settled on transfers directly and is small: let the stub **bind `:0` and report back the port the kernel gave it**, so the port it holds is one it provably owns, and drop the pick-then-`rm` dance entirely. That also makes the \"outside the registry\" property *more* obvious rather than less — a port bound straight from the ephemeral range was never claimed in any registry, so there is no claim to remove. See PR #10456 for the landed version, including the ablation that positively controls the guard.\n\n⚠️ Whoever takes this: `publish-smoke` probes the **wildcard** address, matching `serve.ts`'s own `isPortAvailable`, while `sdui` probes `127.0.0.1`. That asymmetry is load-bearing and is recorded on #10261. ⛔ Do not converge them as part of this.\n\n## Not in this finding\n\nThe harness's second #10370 defect does **not** apply here: this file already does `set +e +o pipefail` immediately after sourcing `publish-smoke.sh` (`:135`), with a comment naming exactly the failure mode — the sdui sibling was the one that had not caught up, not this one."
+}

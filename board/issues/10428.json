@@ -1,0 +1,35 @@
+{
+  "number": 10428,
+  "kind": "issue",
+  "title": "`check:console-injection` silently drops its only tree-sensitive assertion when `packages/spec` is unbuilt — and nothing requires the spec blob",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-20T18:44:01Z",
+  "updated_at": "2026-08-21T08:44:26Z",
+  "closed_at": "2026-08-21T05:07:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10428",
+  "body": "Observation found while measuring #9710 (which is the reason it is filed rather than fixed there — #9710's answer is a ruling, not a diff).\n\n## What I measured\n\n`scripts/check-console-injection.mjs` makes five assertions that are pure functions of the **restored dist + its stamp**, and exactly one that reads **this tree**: the probe-expiry re-check\n\n```js\nif (staleDetector && treeBlob && treeBlob.includes(staleDetector)) { … EXPIRED … }\n```\n\n`treeBlob` comes from `readSpecBlob(specDir)`, which resolves `packages/spec`'s `exports` map — i.e. it needs `packages/spec/dist/**`. When the spec is not built, `readSpecBlob` throws `ProbeError`, the script catches it, and the expiry branch is skipped because `treeBlob` is `null`. The run still exits **0**, printing only:\n\n```\nℹ Probe expiry not re-checked: this tree's spec at `…/packages/spec` has no built JavaScript to compare\n  (build the spec — `pnpm --filter @objectstack/spec build` — to enable it)\n```\n\nDriving the real exported `evaluate()` against a fixed dist + stamp, varying only the tree:\n\n| tree state | verdict |\n|---|---|\n| spec **not built** | `PASS` — *expiry check skipped* |\n| spec built, unchanged | `PASS` |\n| spec built, moved forward | `PASS` |\n| spec built, **caught up to the published text** | `FAIL(1)` — `✗ The stamped staleness probe … has EXPIRED.` |\n\nRow 1 and row 4 are the same tree question; only row 4 can ever be reached, and only with a built spec.\n\n## Why this is worth a card\n\n`--require-stamp` exists precisely so the gate refuses to pass **vacuously** on a missing or unstamped dist. There is no equivalent for the spec side: no `--require-spec-blob`, and `--require-stamp` does not imply one. So the gate has a second vacuity path that its own design philosophy already rejects — the frozen-probe failure #8134 was filed about, one step further out.\n\nIt is **not** live today: `ci.yml`'s Console Pin Gate runs `pnpm exec turbo run build --filter=@objectstack/client...` before the check, and `@objectstack/spec` is in that closure (verified: `turbo … --dry=json` lists 32 packages, spec among them). But nothing *enforces* that ordering — it is step adjacency, not a contract. Reordering the steps, or invoking the script from any job that does not build the closure, turns the expiry check off silently and still reports green.\n\n## Suggested shape (not prescriptive)\n\nEither make `--require-stamp` imply a readable spec blob, or add an explicit flag and pass it in `ci.yml`, so a run that cannot perform the expiry re-check says so as a failure rather than an `ℹ`. A cheaper variant worth pricing: derive the expiry probe from `packages/spec/src/**` source text instead of built JS — `.describe()` arguments are plain string literals present in both — which would make the assertion buildless and remove the dependency entirely.\n\nRefs: #9710 (where this was measured) · #9706 (the gate) · #9667 · #8134"
+}

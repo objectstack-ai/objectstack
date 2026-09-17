@@ -1,0 +1,38 @@
+{
+  "number": 10807,
+  "kind": "issue",
+  "title": "`git-history --self-test` is red on main every day after 12:00 UTC — a bare `--since` date is approxidated to the CURRENT time of day, and it fails Lint & Repo Gates for every PR",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "ci/cd",
+    "domain:devx",
+    "priority:p0",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T12:07:13Z",
+  "updated_at": "2026-08-22T17:05:36Z",
+  "closed_at": "2026-08-21T12:41:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10807",
+  "body": "`scripts/pm/git-history.mjs --self-test` is **red on `main` right now**, and it fails `Lint & Repo Gates` on every PR in the repo. It is not a code regression — the same commits that CI passed this morning fail this afternoon. **The self-test passes before 12:00 UTC each day and fails after it.**\n\n## Measured\n\n| where | result |\n|---|---|\n| `origin/main` `f4e5d916d6`, run at ~12:05Z | `git-history --self-test: 3 FAILED` |\n| `01c50322a1`, run at ~12:06Z | `3 FAILED` — **the same commit CI reported green at 10:47:13Z today** |\n\nCI agrees, and pins the transition to the top of the hour:\n\n| PR | `Lint & Repo Gates` | completed |\n|---|---|---|\n| #10795 | success | 11:55:03Z |\n| #10796 | success | 11:57:14Z |\n| #10801 | **failure** | 12:02:57Z |\n| #10802 | **failure** | 12:02:35Z |\n\nSame code either side of ~12:00Z. Nothing merged in that window touches `scripts/pm/`.\n\n## Root cause: git approxidate resolves a bare date at the CURRENT time of day\n\nThe fixture builds 40 commits, one per day, each stamped **12:00:00Z**:\n\n```js\nconst d = new Date(Date.parse('2026-06-01T12:00:00Z') + i * day).toISOString();\n```\n\nand the assertion asks for an absolute-looking window:\n\n```js\nrunCliAllowFail(['count', '--since=2026-06-20', '--until=2026-07-11'], full)\nt('and the answer is the real one (21 commits: the daily fixture commits i=19..39)', … === '21')\n```\n\nThat window is **not** absolute. `git rev-list --since=2026-06-20` has no time component, and git's approxidate fills it with **the current wall-clock time**, not midnight. So the `--since` boundary sweeps across the fixture's 12:00Z commits once each day:\n\n- before 12:00 UTC → `--since` ≈ `2026-06-20T11:5x` → **c19 included** → 21 ✅\n- after 12:00 UTC → `--since` ≈ `2026-06-20T12:0x` → **c19 excluded** → 20 ❌\n\nReproduced standalone, outside the gate, at ~12:07Z — a fresh 40-commit fixture with the identical stamps and the identical window:\n\n```\n$ git rev-list --count --first-parent --since=2026-06-20 --until=2026-07-11 main\n20\n$ git rev-list --first-parent --since=2026-06-20 --until=2026-07-11 --format='%s %cI' main | tail -2\nc21 2026-06-22T12:00:00+00:00\nc20 2026-06-21T12:00:00+00:00        <- oldest in window\n$ git log --format='%s %cI' main | grep '^c19 '\nc19 2026-06-20T12:00:00+00:00        <- the dropped boundary commit\n```\n\nThe window holds c20..c39. **c19 is the one that falls out**, and it is exactly the `--since` boundary.\n\nAll three failures share this shape — each is off by one in a counted window:\n\n```\n✗ and the answer is the real one (21 commits: the daily fixture commits i=19..39)\n    got \"20\"\n✗ and the answer now MATCHES the complete clone\n    got \"20\"\n✗ a still-shallow clone whose floor predates the window answers WITHOUT fetching\n    {\"stdout\":\"2\n\", \"stderr\":\"… since 2026-07-08 until 2026-07-11 · floor 2026-07-06 · tip 2026-07-10 …\"}\n```\n\n## Why this is worse than an ordinary flake\n\nIt does not look like one. A flake that fires at random gets re-run and forgotten; this one is **deterministic within a day** — red for twelve hours, green for twelve — so the first person to look after noon sees a solid, reproducible failure and goes hunting for the regression that is not there. Every PR opened this afternoon inherits it, and re-queuing cannot clear it.\n\nIt is also **silent about its own cause**: the assertion says \"21 commits\" and gets 20, which reads as an off-by-one in the tool under test rather than in the question the test asked.\n\n## Direction, not a prescription\n\nThe fixture's stamps and the window are both the test's own inputs, so this is fixable without touching the tool:\n\n1. **Give the window a time component** — `--since=2026-06-20T00:00:00Z`. Smallest change; check whether the CLI's `--since` parsing accepts it (`Date.parse` at `:352` does, but the value is also handed to git).\n2. **Move the fixture stamps off 12:00** — e.g. `00:00:01Z` — so no boundary can sweep them. Weaker: it moves the collision rather than removing it, and a stamp at midnight is one timezone away from the same bug.\n3. **Assert a window whose boundaries sit strictly between commit stamps**, so no commit is ever within a day of an edge.\n\n⚠️ Whichever is chosen, the fix must be **proven by running the self-test on both sides of 12:00 UTC**, or by a mechanism that makes the time of day irrelevant. A green run at 11:00 proves nothing about this defect — which is exactly how it shipped.\n\n⚠️ Worth checking while in there: whether any **other** self-test or gate in the repo passes a bare `YYYY-MM-DD` to git. The same approxidate rule applies everywhere, and this one was invisible for ~10 hours after landing.\n\n## Provenance\n\nThe self-test landed in **#10506** (`7f8b36086f`, 2026-08-21T02:10:05Z), which wired `node scripts/pm/git-history.mjs --self-test` into `lint.yml`'s *Shallow-history guard self-tests* step. Filed by the `domain:devx` PM seat; the diagnosis above is measured, the remedy is not chosen.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

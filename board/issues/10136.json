@@ -1,0 +1,32 @@
+{
+  "number": 10136,
+  "kind": "issue",
+  "title": "Console Pin Gate cannot build any objectui pin at/after `6d5368ac8`: the lazy-linter counter-probe is blind to the OBJECTSTACK_SPEC_DIST injection",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T07:58:28Z",
+  "updated_at": "2026-08-21T08:44:44Z",
+  "closed_at": "2026-08-20T09:35:32Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10136",
+  "body": "Measured in a dedicated worktree at `origin/main` + the pin bump from #10129, not recalled.\n\n`scripts/build-console.sh` cannot build objectui at `main` (`0fd11444a89e57114903afa2cc8115a3871f3e16`). The console build dies in `generateBundle`:\n\n```\n[plugin assert-lazy-linter-stays-lazy]\nRolldownError: [assert-lazy-linter-stays-lazy] counter-probe failed: no eagerly loaded chunk\ncontains an `@objectstack/spec` module. The spec is reached synchronously from the app entry,\nso it must be in the eager closure — its absence means this walk is reading the graph wrongly,\nnot that the bundle improved. Fix the walk before trusting the linter assertion below.\n(entry chunks: assets/index-mpVXni3j.js; eager chunks: 59/508)\n```\n\nThis blocks #10129 (bump the pin to current objectui `main`) and it will turn **Console Pin Gate** red on any PR that moves `.objectui-sha` to a commit at or after objectui `6d5368ac8` — the commit that added the probe (objectui#5323, \"keep the lazily-imported @objectstack/lint out of the eager chunk\").\n\n## The two mechanisms, and why they are incompatible\n\n**Ours (#8134, hook added in objectui#4854).** `build-console.sh` exports `OBJECTSTACK_SPEC_DIST` so the console bundles *this tree's* spec instead of the last published one from objectui's lockfile. objectui's `apps/console/vite.config.ts` honours it through `resolveSpecDistInjection`, which rewrites all **18** `@objectstack/spec*` specifiers to absolute paths in the framework tree:\n\n```\n@objectstack/spec/ai  =>  /path/to/objectstack/packages/spec/dist/ai/index.mjs\n@objectstack/spec/api =>  /path/to/objectstack/packages/spec/dist/api/index.mjs\n...  (18 aliases, one per exports-map entry)\n```\n\nThat helper already knows this rewrite moves the spec out of `node_modules`, and it compensates where it must: it returns a **widened** `vendorChunkTest`, so the chunk grouping keeps recognising the injected spec —\n\n```\n/[\\\\/]node_modules[\\\\/](@objectstack)[\\\\/]|\\/path\\/to\\/objectstack\\/packages\\/spec[\\\\/]/\n```\n\n**Theirs (objectui#5323).** `assertLazyLinterStaysLazy()` in the same `vite.config.ts` carries its **own private** module-id regex and is not widened:\n\n```ts\nconst SPEC = /@objectstack[\\\\/+]spec/;\n```\n\nUnder the injection, zero emitted module ids match it — the ids are now framework-tree absolute paths with no `@objectstack` segment at all. So the counter-probe, whose whole job is to refuse a verdict when the walk sees nothing, correctly refuses — and takes the build with it. The counter-probe is not wrong about what it saw; it is reading a module-id shape that our injection deliberately abolished.\n\n## Reproduction — the injection is the only variable\n\nSame objectui build tree, same pin, same command:\n\n| `OBJECTSTACK_SPEC_DIST` | result |\n| --- | --- |\n| set (what `build-console.sh` does) | `Build failed in 11.73s`, counter-probe error above |\n| unset | `EXIT=0`, dist written |\n\n```bash\n# fails\nbash scripts/build-console.sh\n\n# succeeds — identical tree, injection removed\ncd .cache/objectui-0fd11444a89e\nOBJECTSTACK_CLIENT_DIST=/path/to/objectstack/packages/client \\\n  pnpm --filter @object-ui/console exec vite build\n```\n\nCI reproduces it as-is: **Console Pin Gate** runs `bash scripts/build-console.sh`, and the probe is registered unconditionally in the `plugins` array (its own comment says \"Runs on CI/Vercel too\"). The runner's framework path (`/home/runner/work/objectstack/objectstack/packages/spec`) has no `@objectstack` segment either, so the mismatch is not local-path-specific.\n\n## Where the fix belongs\n\n**objectui**, `apps/console/vite.config.ts` — the file already computes the widened test three lines away:\n\n```ts\nconst vendorObjectstackTest = specDistInjection ? specDistInjection.vendorChunkTest : VENDOR_OBJECTSTACK_TEST;\n```\n\n`assertLazyLinterStaysLazy()` should consume the injection-aware location the same way instead of hardcoding `SPEC`, i.e. take the spec test as a parameter. Contract-first: the defect is that one consumer of `resolveSpecDistInjection`'s output does not read that output — widening a tolerance on our side, or dropping the injection, would both be workarounds for a producer that already publishes the right answer.\n\nNote the `LINT` half of the probe needs the same review: `@objectstack/lint` is *not* injected today, so its regex still matches — but #9659 proposes injecting four more `@objectstack/*` packages the same way, and lint is a plausible member of that set.\n\nA companion objectui PR is required; this repo cannot fix it alone. Until it lands, the pin cannot move past objectui `6d5368ac8` with a green Console Pin Gate.\n\n## Not the remedy\n\n- Do **not** unset `OBJECTSTACK_SPEC_DIST` in `build-console.sh`. That injection exists to collapse a three-step publish ordering (#8134) and its absence is a silent skew, not a build error.\n- Do **not** pin below `6d5368ac8` as a fix. That is a workaround that re-opens the freshness gap #10129 exists to close; it is at most a stopgap and needs a maintainer decision.\n\nBack-link: blocks objectstack#10129. Related: #9707 (the finding objectui#5323 answers), #9659 (more packages proposed for the same injection).\n"
+}

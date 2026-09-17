@@ -1,0 +1,34 @@
+{
+  "number": 18634,
+  "kind": "pull_request",
+  "title": "docs(metadata-protocol): re-point the seed-exemption falsification instruction at its proven lever",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-17T10:46:51Z",
+  "updated_at": "2026-09-17T12:01:24Z",
+  "closed_at": "2026-09-17T12:01:22Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-09-17T12:01:22Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/18634",
+  "body": "Fixes #17938\n\nClause-②: no\n\nComment-only repair of a runnable falsification instruction in\n`packages/metadata-protocol/src/seed-loader-state-machine-exempt.test.ts`. One file, +12/-2,\nall of it inside the file's leading block comment. No assertion changed, no behaviour changed.\n\n## The stale instruction\n\nThe comment told a future debugger: \"Revert the `seedReplay` flag in `SEED_OPTIONS` and both\ncases below go red\". `SEED_OPTIONS` is now `{ context: SEED_WRITE_EXECUTION_CONTEXT }`\n(`seed-loader.ts:2112`, imported at `:17` from `@objectstack/spec/kernel`), so there is no\n`seedReplay` inside `SEED_OPTIONS` left to revert. The procedure is not wrong, it moved — and\nthe natural next move, \"this comment is stale, ignore it\", discards a correct falsification\nprocedure that still works at a different address.\n\n## Which lever — measured, not read\n\n`packages/spec/src/kernel/execution-context.zod.ts` holds two plausible candidates, and the card\ndid not disambiguate them. Both were ablated, each leg rebuilding `@objectstack/spec` and proving\non disk that the mutation reached `dist/` before its colour was read — this suite has no vitest\nalias for that dep, so it resolves it through the export map, i.e. through `dist/`.\n\n| leg | edit | dist proof | the two cases |\n|:--|:--|:--|:--|\n| **A — the VALUE** | delete `seedReplay: true` from `SEED_WRITE_EXECUTION_CONTEXT` (`:519`) | marker `seedReplay: true` absent from all 216 built files | **2 failed** (exit 1) |\n| **B — the SCHEMA FIELD** | make `seedReplay: z.boolean().optional()` (`:393`) required | marker `seedReplay: z.boolean().optional()` absent from all 216 built files | **2 passed** (exit 0) |\n\nLeg A failures, both cases, as the comment now promises:\n\n```\nFAIL  ... > inserts every mid-lifecycle row on a fresh DB (no initialStates rejection)\nAssertionError: expected false to be true       (result.success, line 171)\nFAIL  ... > threads seedReplay into every project write (the flag the engine keys off)\nAssertionError: expected undefined to be true   (call[2]?.context?.seedReplay, line 201)\nTest Files  1 failed (1) · Tests  2 failed (2)\n```\n\nLeg B, same rebuild discipline, same two cases:\n\n```\nTest Files  1 passed (1) · Tests  2 passed (2)\n```\n\nSo the schema field is a decoy: it governs what is ACCEPTED, not what the loader SENDS. A\nfalsification instruction naming it would be worse than the stale one it replaces — a debugger\nflips a `.optional()`, nothing happens, and the vacuous pass reads as a completed falsification.\nThe new comment therefore names the VALUE, names the rebuild step, and names the schema field as\nthe decoy it was measured to be.\n\nBoth legs restored from `HEAD` and verified by blob hash plus a whole-tree `git status\n--porcelain`, and `@objectstack/spec` was rebuilt on the restore leg with the marker proven back\nin `dist/`, so nothing of either ablation survives in this tree or in the built artifacts.\n\n## Verification\n\nTaken at `8a4d82c833`, which is this branch's final head.\n\n- **Gate reconciliation** — `dispatch-gates.mjs --repo objectstack-ai/objectstack --ran`:\n  **51 derived, 48 run, 3 NOT-MEASURED, 0 UNRUN**. 47 of the 48 exited 0.\n  - The 3 NOT-MEASURED are `check:dual-build-cjs-loads`, `check:lean-entry-closure` and\n    `check:type-check-debt`, each exit 3 = `PREREQUISITE NOT MET` (they read built output of the\n    whole repo; a full `pnpm build` is CI's run, not this card's).\n  - The 1 non-zero is `check:cross-package-test-inputs` (exit 1). It is the known gate defect\n    #18621 — its verdict follows build state, not this diff: it names\n    `packages/cli/test/init-created-files-summary.e2e.test.ts` descending into\n    `packages/spec/dist/`, and this diff's only path appears nowhere in its output.\n- `pnpm --filter @objectstack/metadata-protocol typecheck` — exit 0. `tsc --listFiles` confirms\n  the edited file is one of the 744 files in that program, so the green covers it.\n- `pnpm --filter @objectstack/metadata-protocol test` — exit 0. 178 files passed / 3 skipped,\n  2548 tests passed / 19 skipped.\n- `pnpm lint` (`eslint . --no-inline-config`) — exit 0, whole repo, 110s. No narrowing was needed,\n  so no narrowing is claimed.\n- The derivation is stale against `origin/main` by 3 commits (`scripts/pm/check-widening-tells.mjs`\n  moved in that range). The count above is the reading at this branch's head, stated as such.\n\n## Changeset\n\nNone — `skip-changeset`, measured rather than assumed. `@objectstack/metadata-protocol`'s\n`files[]` is `[\"dist\", \"README.md\", \"CHANGELOG.md\"]`. After building the package, `enforceInitialStates`\n— a symbol unique to the edited test file — has zero hits across all three, while the positive\ncontrol `SeedLoaderService` is present in 5 built files. Nothing that ships moves.\n\n## Acceptance notes\n\nOut-of-scope findings from this round, none of them class (a)/(b)/(c), so none filed:\n\n- noted, not filed: `seed-loader.ts:866` and `:2223` read `SeedLoaderService.SEED_OPTIONS as any`,\n  erasing the `ExecutionContext` typing the constant carries at its declaration. Nothing is wrong\n  at runtime and no declared contract is violated, so this is an observation, not a defect.\n  Who would meet it: the next PR that touches the loader's write path. Nothing is queued on it\n  today.\n- noted, not filed: the retained tail \"4 of 5 rows rejected\" is not directly witnessed by the leg A\n  output, because case 1 fails on `result.success` before it reaches any row count. It is correct\n  by construction of the fixture (1 of the 5 seed rows is born `planned`, which is the only member\n  of `initialStates`), so it was kept unchanged rather than re-derived. Who would meet it: whoever\n  next runs the procedure. It will hold for them.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01CqmCgU5RGDoJYhHUMVp2af)_"
+}

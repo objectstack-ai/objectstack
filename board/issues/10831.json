@@ -1,0 +1,35 @@
+{
+  "number": 10831,
+  "kind": "issue",
+  "title": "[finding][devx] four docs-site pages say `os migrate meta --from` rewrites your sources — the same site says in bold that it does not",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T12:50:37Z",
+  "updated_at": "2026-08-21T15:06:14Z",
+  "closed_at": "2026-08-21T15:05:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10831",
+  "body": "Found while correcting #10418 (PR #10829), which removed the two `cli.doctor-deprecation-scan` descriptors calling `os migrate meta` a codemod. #10418 asked whether that claim had spread. The word \"codemod\" has **not** — but the idea behind it has, into four live docs-site pages and one docblock inside the command's own source.\n\n## The claim\n\n`os migrate meta`'s authored-source arm (`--from`) **rewrites no file**. It replays the chain in memory and prints the mechanical edits; its only file write is the `--out` JSON snapshot — both `writeFileSync` calls are guarded by `if (flags.out)` (`packages/cli/src/commands/migrate/meta.ts:347`, `:394-396`), and the header at `:155-157` declines the AST rewrite as \"unsafe and lossy\". The in-place codemod is #9591 (v18, `pm:on-hold`), unbuilt.\n\nThe docs site says otherwise in four places, all naming the `--from` arm:\n\n| file:line | text | wrong how |\n|---|---|---|\n| `content/docs/automation/flows.mdx:245` | \"Stored flows are rewritten by `os migrate meta --from 16`\" | twice: `--from` rewrites nothing, and *stored* rows are the `--stored` arm — `from` is declared `exclusive: ['stored']` (`meta.ts:195-198`), so the sentence names a flag pair that cannot be used together |\n| `content/docs/protocol/objectui/widget-contract.mdx:316` | \"Run `os migrate meta --from 16` to rewrite stored metadata automatically.\" | same two errors, plus \"automatically\" — the one word the #9529 reword was written to remove |\n| `content/docs/protocol/objectql/query-syntax.mdx:860` | \"`os migrate meta --from 16` rewrites affected dataset measures.\" | `--from` rewrites nothing |\n| `content/docs/data-modeling/queries.mdx:388` | same sentence, duplicated page | same |\n\n## Why it is a defect and not a nitpick\n\nThe same docs site contradicts all four **in bold**, in the page an upgrader is most likely to read:\n\n> **`os migrate meta` does not rewrite your source files.** It replays the chain over the loaded stack *in memory* and reports the diff; the only file it writes is `--out`, a JSON snapshot. Porting the listed edits into your own `.ts` sources is your work — use `--out` as the oracle you diff against, never as the file you ship.\n> — `content/docs/upgrading.mdx:145-150`\n\nAnd every auto-generated reference table already carries the corrected class-wide sentence #9529 landed on 2026-08-18 — \"Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand\" (e.g. `content/docs/references/ai/agent.mdx:56`, `content/docs/references/shared/mapping.mdx:78`). #9529 reworded the **generated** carriers; these four hand-written callouts are the residue it did not reach.\n\nThe cost is concrete: an author who believes the four runs the command, sees \"Applied N mechanical change(s)\", diffs their tree, finds it byte-identical, and concludes the migration is broken — the exact `absence-inference` inversion `cli.migrate-meta-codemod` revision 3 added its trap for.\n\n## Also — the command contradicts itself in its own file\n\n`packages/cli/src/commands/migrate/meta.ts:81`, in the `pendingDataMigrations` docblock:\n\n> Metadata migration and data migration are different jobs with different subjects: **this command rewrites an author's source**, while these two rewrite (or vouch for) a deployment's rows…\n\nThe contrast it draws (source vs rows) is right; the verb is the same false one, 74 lines above the header that says the opposite. Same one-line class as the four above.\n\n## Scope note — what a fix should NOT touch\n\n`content/docs/releases/v17.mdx:451` carries the same false sentence (\"rewrites all seven in your source\"). Release notes are **not** edited in a code PR (CLAUDE.md), so it is named here as evidence the claim spread, not as a fix target. Note `v17.mdx:2475` — \"`os migrate meta --stored` rewrites `sys_metadata` rows in place\" — is **correct** and must not be caught by a blanket search-and-replace: the `--stored --apply` arm genuinely does rewrite rows. Any fix has to split on the arm, not on the verb.\n\n## Suggested disposition\n\nReword the four hand-written callouts (and, optionally, the `meta.ts:81` docblock) to the sentence #9529 already blessed: the command **lists** the mechanical edits for existing sources, applied by hand. Cheap, one docs PR, no code change. Whether the `meta.ts` docblock rides along or gets its own card is triage's call — it is source, not docs.\n\nRefs: #10418 / PR #10829 (where this surfaced) · #9529 (the class-wide reword these four missed) · #9591 (the unbuilt in-place codemod) · `docs/qa/platform-checklist/areas/cli.json` item `cli.migrate-meta-codemod` revision 3 (the ledger's statement of the real contract).\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

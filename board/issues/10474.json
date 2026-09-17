@@ -1,0 +1,35 @@
+{
+  "number": 10474,
+  "kind": "issue",
+  "title": "the SORT axis reads the blanket SYSTEM_FIELDS union but never asks the #8116 provenance question, while the SEARCH axis on the identical index does",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T00:14:15Z",
+  "updated_at": "2026-08-21T10:52:37Z",
+  "closed_at": "2026-08-21T10:42:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10474",
+  "body": "Found while building the #8999 consumer census (PR on `claude/issue-8999-system-fields-spread-sweep`). ⛔ Filed, not fixed — out of that card's scope, which is the census instrument.\n\n## What the census turned up\n\nThe census enumerates every consumer of the blanket `SYSTEM_FIELDS` union by module graph and records, per consumer, whether it asks the #8116 provenance question (`unprovisionedInjectedColumnsFor` / `indexUnprovisionedAnchors` / `unprovisionedAnchorCause`). Two of the ten rule-file consumers reference none of them:\n\n| consumer | reaches the union by | asks provenance |\n|---|---|---|\n| `validate-sortable-fields.ts` | `direct` | **no** |\n| `validate-translation-references.ts` | `derived` (spread) + `direct` | **no** |\n\nBoth are recorded in the census ledger with a reason rather than silently exempted, so this issue is about confirming or overturning those two rulings — not about a test that is failing.\n\n## 1. `validate-sortable-fields.ts` — the one that looks real\n\nIt landed 2026-08-17 (#9314), **after** the #8996 sweep that wired the other write/read sites, so it was never in any sweep's population.\n\n`packages/lint/src/validate-sortable-fields.ts:310`\n\n```ts\nif (SYSTEM_FIELDS.has(head)) continue;\n```\n\nThe rule's header records skip ② as \"an object that declares no field map at all — external objects and datasource-introspected schemas whose columns resolve at runtime\", which reads as though an ADR-0015 `external` object never reaches the union branch. **It is not what the code keys on.** The index it consults is the shared `indexObjectSearchTargets` (`packages/lint/src/validate-searchable-fields.ts:312`), whose `declaredFieldTarget` returns `null` on exactly one condition:\n\n```ts\nconst fields = obj.fields;\nif (!fields || typeof fields !== 'object') return null;\n…\nif (names.size === 0) return null;\n```\n\nNothing there tests `external`. So an external object that **does** declare a mapped field map (the shape #7859 is about — the author vouches for remote columns through the binding's `columnMap`) is indexed normally, reaches line 310, and a `sort: [{ field: 'created_at' }]` over it is skipped in silence.\n\nThat is the asymmetry: on that same object, the SEARCH axis warns — `validate-searchable-fields` was wired for exactly this by #8404, and it passes `indexUnprovisionedAnchors` into the shared `checkSearchableFieldList` core. The FILTER and page-binding axes warn too (#8340). SORT is the one axis that consults the union and says nothing, and the runtime consequence is the one #8116 describes: an `ORDER BY` over an anchor with no storage, HTTP 200 and a silently wrong ordering rather than an error.\n\n⚠️ Not verified end-to-end: I did not construct a running external-object stack and observe the missing finding. What is verified is the code path — `declaredFieldTarget` does not exclude external objects, and the rule references no provenance helper. Worth a triage read before anyone writes the fix.\n\n## 2. `validate-translation-references.ts` — recorded as deliberately not asking\n\n`packages/lint/src/validate-translation-references.ts:177` spreads the union into its own rule-local `IMPLICIT_FIELDS`, and has done since before #8340. It is a spread consumer that **no sweep ever listed**, which is its own small data point for #8999.\n\nMy ruling in the ledger is that it correctly asks nothing: a translation bundle supplies a **label** for a column and never reads the value, so \"this anchor has no storage behind it\" says nothing about whether the label resolves. The #8116 warning is about predicates and pointers over the value. Recorded here so a second pair of eyes can overturn it rather than inherit it.\n\n## Why this is filed rather than fixed\n\nThe #8999 card's deliverable is the census instrument; wiring a provenance warning into the SORT axis is a rule-shape change with its own message wording, its own tests, and a judgement about the dotted-path posture the rule deliberately shares with the FILTER and PROJECTION axes (#4256 / #7532 / #7589). That is not a rider on a test-only PR.\n\n⚠️ One consequence for triage: #8999 was held on the argument that after #8996 the family had \"no known remaining hole\". That premise no longer holds literally — though neither row above is a proven defect yet, which is what this issue is for.\n\nRelated: #8999 (the census) · #8996 / #8663 (the sweep that wired the others) · #8404 (the SEARCH axis wiring this mirrors) · #8340 · #8116 (the provenance question) · #9314 (where the SORT axis landed) · #7859\n"
+}

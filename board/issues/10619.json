@@ -1,0 +1,35 @@
+{
+  "number": 10619,
+  "kind": "issue",
+  "title": "guard: fail any `Plugin` implementation that declares `stop()` (or `shutdown()`/`close()`) with no `destroy()` — the kernel only ever calls `destroy()`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T06:30:18Z",
+  "updated_at": "2026-08-21T11:31:25Z",
+  "closed_at": "2026-08-21T11:27:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10619",
+  "body": "Class-closing half of #10371, split out by lane (the six repairs are the services-lane card; this guard is devx gate work). The guard was already ruled FOR by the `domain:devx` PM on the #9371 thread — this card is the workpiece, not a re-ask.\n\n## Why a guard and not six fixes\n\n`Plugin` (`packages/core/src/types.ts:170`) declares `init()`, `start?(ctx)`, `destroy?()` — and NOT `stop()`. The trap is the asymmetry: `start?()` IS on the interface and fires, so a `start`/`stop` pair reads symmetric in review while only one half is wired. This survived review in two packages and was only ever found by merge-queue evictions (#9371: two green PRs evicted). Fix six plugins and the seventh arrives spelled `shutdown()` or `close()`; the guard makes the class unreachable.\n\n## Spec of the check\n\n- Population: `Plugin` implementations across `packages/**` (the six known instances are enumerated in #10371).\n- Red condition: class implements a teardown-shaped method (`stop`/`shutdown`/`close` — exact roster is the dev's first design decision, document it in the gate header) and does not implement `destroy()`.\n- Positive control (from the devx seat's note): `MessagingServicePlugin` at main **before** PR #10375 must red — a real fixture, not a synthetic one.\n- Delegating-alias pattern (`stop()` calling `destroy()` or vice versa, the #9371 repair shape) must stay green.\n- Wire into CI + dispatch-gates population literals (avoid the #10516 undetermined-bucket shape).\n\n## Ordering\n\nNo hard dependency on the six repairs landing first, but the guard will red on all six until they do — either land after the services-lane repairs (#10371), or land with the six known instances baselined and the baseline burned down by that card. Dev picks; say which in the PR.\n\nRefs: #10371 (repairs, same class) · #9371 / PR #10375 (root cause + ruling) · #10374 (upstream amplifier).\n\nTriage: `pm:queue`, `domain:devx`, Task — gate addition with a named population and a ruled mandate."
+}

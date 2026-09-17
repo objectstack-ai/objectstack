@@ -1,0 +1,35 @@
+{
+  "number": 10029,
+  "kind": "issue",
+  "title": "[finding] rate-limit-storage-isolation.test.ts reads two other packages through a `findUp` seed, so `check:cross-package-test-inputs` cannot see the radius and turbo does not hash it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-19T16:09:15Z",
+  "updated_at": "2026-08-21T14:35:16Z",
+  "closed_at": "2026-08-21T14:34:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10029",
+  "body": "Observation-class finding, measured while implementing #9694 (PR #10028). **No gate is red today** — this is a read that is real, unhashed, and structurally invisible to the gate whose whole job is to notice it.\n\n## Measured\n\n`check:cross-package-test-inputs` finds escaping tests by scanning source text, and it recognises exactly two directory seeds: `dirname(fileURLToPath(import.meta.url))` and `__dirname`. Its own header says what happens otherwise, in its own words:\n\n> A path written any other way yields no flag — which means no declaration, **silently**.\n\n`packages/plugins/plugin-auth/src/rate-limit-storage-isolation.test.ts` derives its roots with a `findUp` walk from `process.cwd()` (`:53` for `PKG`, `:69` for `REPO`), which is not one of the two. It then reads two other packages by directory, at `:282-292`:\n\n```ts\nconst roots = ['packages/runtime/src', 'packages/services/service-sms/src'];\nfor (const root of roots) {\n  const abs = join(REPO, root);\n  expect(existsSync(abs), `${root} — consumer directory moved; re-point this check`).toBe(true);\n  for (const entry of readdirSync(abs, { recursive: true, withFileTypes: true })) { … }\n}\n```\n\nEnumerating the gate's own detector against `origin/main@e717ba111`:\n\n```\nfindEscapingPackages().get('@objectstack/plugin-auth')\n  tests:    [ 'packages/plugins/plugin-auth/src/managed-extension-fields.test.ts' ]\n  literals: [ 'packages/core/src/security/api-key.ts' ]\n```\n\n`rate-limit-storage-isolation.test.ts` is not in that list, and neither of the two directories it reads is in it either. `@objectstack/plugin-auth`'s declared globs are `packages/**/*.object.ts` and `packages/core/src/security/**`; the matching `turbo.json` `@objectstack/plugin-auth#test` inputs carry the same two. **Neither covers `packages/runtime/src` or `packages/services/service-sms/src`.**\n\nTwo consequences, both of them the #7802 shape this gate exists for:\n\n1. The affected-subset filter does not add plugin-auth to the shard when a diff touches only `runtime` or `service-sms`.\n2. The `test` task's input hash does not move with those directories, so turbo replays a cached green over a scan it never re-ran.\n\nThat is precisely the invariant the test states it is guarding — a consumer switching an import back to the package root, silently reinstating the whole better-auth load for `service-sms` — and the PR that does it is a PR in `runtime` or `service-sms`, i.e. exactly the diff this radius cannot see.\n\nThe gate's \"stale declaration\" check does not catch it either, because a *different* file in the same package (`managed-extension-fields.test.ts`) does escape visibly, so `@objectstack/plugin-auth` is present in the escaping set and the entry reads as live. One file's visible radius is currently vouching for another file's invisible one.\n\n## How it surfaced\n\n#9694 asked for `managed-extension-fields.test.ts`'s `import.meta.url` seed to be converted to this package's `findUp` idiom. Doing exactly that was measured to turn the gate **red**:\n\n```\n  - @objectstack/plugin-auth declares a cross-package input radius, but no test in it reads outside\n    the package any more. Delete the entry (and its turbo.json inputs) — a stale\n    declaration invalidates that package's test cache for nothing.\n```\n\nPR #10028 therefore seeds from `__dirname` instead — TS1470-free *and* recognised — following `packages/platform-objects/src/managed-api-method-affordance-sweep.test.ts:95-113`, which had already reasoned its way to the same answer for the sibling repo-wide object walk. The invisible radius in `rate-limit-storage-isolation.test.ts` is what that investigation walked past, and it is out of scope there.\n\n## Population\n\nThree test files in the repo carry a `findUp` walk, all in `plugin-auth`:\n\n- `rate-limit-storage-isolation.test.ts` — **the case above**: reads two other packages by directory.\n- `member-role-canonical.test.ts` — reads the installed `better-auth` under `node_modules`. The gate deliberately does not flag vendored paths (an installed dependency is not a repo source input), so this one is invisible **and** correctly so. No action.\n- `better-auth-schema-parity.test.ts` — worth re-checking for the same reason; not measured here.\n\n## Directions (not a decision)\n\nThree, and they price very differently:\n\n- **A — reseed `rate-limit-storage-isolation.test.ts` from `__dirname`** and widen plugin-auth's declared globs (plus the `turbo.json#test` inputs) to cover `packages/runtime/src` and `packages/services/service-sms/src`. Smallest diff, and it makes the radius true. It also widens plugin-auth's test-cache invalidation to two large directories — a real cost the gate's own header argues is the point (\"what the list buys over 'just always run those packages' is the radius\").\n- **B — teach the detector the `findUp` shape.** A `findUp` keyed on the package manifest's own `name` resolves statically to the package root, and one keyed on `pnpm-workspace.yaml` resolves to the repo root; both are knowable without executing anything, and the detector already composes seeds with literal walks. Retires the class rather than one instance, and would newly force declarations wherever else the shape appears. Needs a `--self-test` case in the same edit, per the gate's own rule. Larger and repo-wide.\n- **C — leave it, having recorded it.** The invariant is one the suite really does check; only its *scheduling* is wrong. Cheapest, and it keeps a silent hole that reads as covered.\n\nA prior card already extended this detector once for a missed seed (#8698, `new URL(…, import.meta.url)`), and #9763 extended the collector for three more spellings — so B has precedent and a shape to follow.\n\nFiled unassigned, no `pm:queue`.\n\nBacklinks: #9694 / PR #10028 (where it was measured), #7802 (the blind spot), #9763 and #8698 (prior extensions of the same detector), #6040 (the invariant the affected test guards).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PnJHU45vPJj5UQrxe946Bx)_"
+}

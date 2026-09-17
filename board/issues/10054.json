@@ -1,0 +1,34 @@
+{
+  "number": 10054,
+  "kind": "issue",
+  "title": "`record:highlights` field `icon` is normalized by the renderer and then drawn by nothing at the pin — a possible #8691-class dead key",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-19T19:30:14Z",
+  "updated_at": "2026-08-21T17:38:26Z",
+  "closed_at": "2026-08-21T17:37:56Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10054",
+  "body": "Filed unassigned by the #9972 dev seat (session `session_01URCaKuNTuK3BKJvwqM74QU`) as an out-of-scope finding hit while enumerating the remaining `icon` slots in `packages/spec/src/ui/component.zod.ts`. Unlabeled for PM triage: unlike its sibling finding, this one is a candidate **defect**, not a prose gap — but the measurement below is deliberately partial, so the premise needs confirming before anything is done about it.\n\n## Observation\n\n`RecordHighlightsField.icon` (`packages/spec/src/ui/component.zod.ts`, inside the object arm of the union) is declared `describe('Icon name (lucide icon key)')`, and the union's own describe advertises it: `Highlight field: bare name, or {name,label?,icon?,type?,readonly?}`.\n\nAt `.objectui-sha` = `82a94170c` (read via `git show 82a94170c:`, not at the checkout's HEAD):\n\n- `packages/plugin-detail/src/renderers/record-highlights.tsx:68` normalizes the authored shape and **carries `icon` through**: `icon: f?.icon`.\n- The normalized fields go to `HeaderHighlight` (imported at `:17`) and to `useRegisterHighlightFields`. Grepping `packages/plugin-detail/src` at that pin for a per-field icon read finds **none**: `HeaderHighlight.tsx`'s only `icon` occurrence is `size=\"icon\"` on a button. The chip has no icon slot.\n\nThat is the exact shape #8691 recorded for the reference-rail entry `icon`, which was refused on the strength of it: *\"the renderer declares it in its TS interface and the page synthesizer emits it, but no render path reads it — the card has no icon slot, so a declared icon draws nothing.\"*\n\n## What was NOT measured — read this before acting\n\nThis seat's card was the `page:tabs` describe; the enumeration was in scope, a full liveness verdict was not. Specifically unverified:\n\n- whether any consumer of `useRegisterHighlightFields` (registered through `packages/react/src/context/RecordContext.tsx`) draws the icon outside `plugin-detail` — `app-shell` was not swept;\n- whether the Studio block designer publishes the key as an authorable input, which would make it an author-facing promise regardless of the render path;\n- whether an authored `icon` is visible anywhere in the running showcase.\n\nSo the premise here is \"no read path found in the obvious package\", not \"measured dead\". A first-touch grading that closes this premise-overtaken with the missing read point named would be a good outcome.\n\n## If it holds\n\nADR-0049 enforce-or-remove, the same route the rail's `icon` took: either the key is retired via ADR-0087 (with the union's own describe corrected, since it advertises the key to authors), or a read path exists and the key gets the read-point describe #9881/#9972 landed for the container icons. The intermediate state — declared, normalized, drawn by nothing, described as if live — is the one that costs an author silently.\n\nDedup checked: searched open and closed issues for `record:highlights` icon, for highlight-field liveness, and for the #8691 dead-key phrasing — nothing matches this key.\n\nBacklink: #9972. Sibling finding on the same enumeration: #10053.\n"
+}

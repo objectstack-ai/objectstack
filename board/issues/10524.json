@@ -1,0 +1,32 @@
+{
+  "number": 10524,
+  "kind": "issue",
+  "title": "A publish failure's `error` string inlines the same validation prose that `issues[]` already carries, so every console renders each finding twice",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T02:00:45Z",
+  "updated_at": "2026-08-21T16:41:22Z",
+  "closed_at": "2026-08-21T16:40:51Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10524",
+  "body": "Filed from objectstack-ai/objectui#5418 (Studio dogfood, 17.1.0). Filed **here**, not in objectui, because the fix is producer-side: de-duplicating in the consumer is the alias-tolerance shape Prime Directive #12 forbids, so objectui deliberately did not touch it.\n\n## Measured\n\nThe publish-drafts response's `failed[]` entries carry both:\n\n- `error` — a summary string that **already contains the rendered issue text**, and\n- `issues[]` — the same findings, structured (`{ path, message }`).\n\nobjectui's `formatPublishFailures` renders `${type}/${name}: ${error}` and then one `• path — message` line per issue, which is the right thing to do with that contract — it is what turns an opaque banner into a field-anchored list. The result on the card's walk was the same sentence twice:\n\n```\nobject/crmext_visit: [invalid_metadata] object/crmext_visit failed author-time validation:\nobjects[71].sharingModel: [security-owd-unset] custom object \"crmext_visit\" declares no\nsharingModel (OWD). The runtime fails CLOSED to 'private' (ADR-0090 D1), but the baseline\nmust be an authored decision, not an accident — this is the exact shape of the leave_request\nincident (objectstack-ai/objectui#2348). • objects[71].sharingModel — custom object \"crmext_visit\" declares\nno sharingModel (OWD). …\n```\n\nThe original reporter called this out directly: *\"a wall of English ADR prose (the same sentence twice, once as a summary and once as a bullet)\"*.\n\n## Why the consumer must not fix it\n\nEvery plausible client-side fix is a guess about producer text — strip the summary when `issues.length &gt; 0` (loses the summary's own framing for non-validation failures), or substring-match the issue text out of `error` (a parser for prose). Both are exactly the consumer tolerance that hides producer drift.\n\n## Suggested shape\n\n`error` should be the *headline* — what failed and why, one sentence — with the per-path detail left to `issues[]`, which is the structured channel that exists for it. Consumers that render only `error` (logs, CLI) keep a usable message; consumers that render both stop repeating themselves.\n\n## Confidence / what I did NOT measure\n\nThe duplication is read off the reporter's captured console output plus objectui's formatter, which I did read. I did **not** run a live publish against a framework build to confirm which server-side site composes `error` — worth confirming before choosing where the change lands.\n\n## Related\n\n- objectstack-ai/objectui#5418 — the console-side card. Its fix asks for the baseline at creation and mirrors `validateSecurityPosture` in the pre-publish review sheet, so the OWD case is now usually reported before this string is ever produced. That narrows how often the duplication is seen; it does not change the contract."
+}

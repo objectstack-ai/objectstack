@@ -1,0 +1,36 @@
+{
+  "number": 10645,
+  "kind": "issue",
+  "title": "cli: `serve`'s dynamic cluster-driver import cannot resolve app-declared `@objectstack/service-cluster*` — EE multi-node `OS_CLUSTER_DRIVER=redis` dies at boot",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-elon"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T07:23:42Z",
+  "updated_at": "2026-08-22T17:05:41Z",
+  "closed_at": "2026-08-21T11:31:37Z",
+  "closed_by": {
+    "login": "os-elon",
+    "id": 318303764,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10645",
+  "body": "**Origin**: triage split from objectstack-ai/cloud#1502 (EE 4.1.0 published-image acceptance, measured on `ghcr.io/objectstack-ai/objectos-ee@sha256:20fc4ab5…`). Filed by the triage seat; the cloud-side legs (deploy README, CI leg, ADR-0010 direction) stay on the source card.\n\n## Symptom (measured on the published image)\n\nWith `OS_CLUSTER_DRIVER=redis` set (the deploy README's recommended production multi-node path), boot dies:\n\n```\n✗ Cannot find package '@objectstack/service-cluster' imported from\n  /repo/objectstack/packages/cli/dist/commands/serve.js\n```\n\n`migrate` exits 1, and compose's `service_completed_successfully` condition takes the whole stack down with it. Triggered by requesting the redis driver at all — replicas declared or not.\n\n## Root cause\n\nModule-resolution asymmetry measured inside the image:\n\n- `/repo/objectstack/packages/cli/node_modules/@objectstack/` holds 48 packages — **no** `service-cluster` / `service-cluster-redis`;\n- both are installed only under the app (`apps/objectos-ee/package.json` declares them).\n\n`serve.ts` reaches the driver via dynamic imports (`packages/cli/src/commands/serve.ts:1425` `'@objectstack/service-cluster'`, `:1456` `` `@objectstack/service-cluster-${driver}` ``) that resolve **from the CLI's own location** and cannot cross the `link:` boundary. App-side code CAN load the same packages (the `ClusterServicePlugin` multi-node guard runs fine), so only the CLI-side hop is broken. Same class as the earlier AI-Studio-plugin CLI auto-discovery resolution defect.\n\n## PM 建议的路线(可选,实测优先)\n\nEither declare `service-cluster` (+ shipped drivers) as CLI dependencies, or resolve the dynamic import with `createRequire` anchored at the app's config directory — the general fix should cover **any** app-declared optional package the CLI advertises it will load, not just this driver.\n\n## Notes\n\n- Direction-independent of the ADR-0010 question held on cloud#1502 (`needs-user-decision`: whether EE recommends redis at all). Whatever that ruling says, a CLI that names `@objectstack/service-cluster-redis` in its own refusal guidance must be able to load it when the app declares it.\n- Downstream: cloud#1502 (`priority:p0`) is blocked on this card.\n- File surface: `packages/cli/src/commands/serve.ts` (+ possibly `packages/cli/package.json`). Mind `serve-multi-node-cap-advisory.pin.test.ts`, which pins the current dynamic-import shape."
+}

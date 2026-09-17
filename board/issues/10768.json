@@ -1,0 +1,34 @@
+{
+  "number": 10768,
+  "kind": "pull_request",
+  "title": "docs(ai): correct the `agent.knowledge` row to a retirement",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T10:48:52Z",
+  "updated_at": "2026-08-21T11:16:03Z",
+  "closed_at": "2026-08-21T11:16:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-21T11:16:01Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/10768",
+  "body": "Closes #10730\n\n## The defect\n\nThe \"shape of an agent\" field table in `content/docs/ai/agents.mdx` documented\n`knowledge` as **live RAG access**, noting only that a nested alias had been removed —\nand handed the reader a migration command for a key that no longer exists.\n\nBut `packages/spec/src/ai/agent.zod.ts` declares `knowledge: retiredKey(...)`. The whole\nkey is retired: it types as `never` (so writing it fails `tsc`) and any value that reaches\nthe runtime is rejected at parse. The row taught a key that cannot be written.\n\nThis is the more dangerous of the two rows on this table, because the key **read as a\nsecurity control and was not one**: declaring `sources` / `indexes` on an agent never\nscoped retrieval — `search_knowledge` takes `sourceIds` from the LLM's own tool-call\narguments, not from the agent record. An author who believed they had scoped retrieval\nhere scoped nothing.\n\n## The page already contradicted itself, 64 lines apart\n\nThe Sales Assistant example further down the same file already carried the correct rule:\n\n> (There is no agent-level `knowledge` block — it was removed in protocol 17 (#3896\n> close-out): declaring sources never scoped retrieval. Restrict access at the\n> knowledge-service/source level; describe intended grounding in `instructions`.)\n\nSo the prescription did not have to be invented — only moved into the row, in the row's\nown register. The two now agree.\n\n## Before\n\n```\n| `knowledge` | RAG access: `{ sources: string[], indexes: string[] }`. `sources` is the only key; the `topics` alias was removed in protocol 17 (#3855) — `os migrate meta --from 16` rewrites it |\n```\n\n## After\n\n```\n| `knowledge` | **Removed in protocol 17 (#3896)** — typed `never`, so writing it fails `tsc`, and a value that reaches the runtime is rejected at parse. Declaring `sources` / `indexes` here never scoped retrieval: `search_knowledge` takes `sourceIds` from the LLM's own tool-call arguments, not from the agent record, so an author who \"scoped\" access here scoped nothing. This is **not** a rename: there is no key the value moves to — delete the block. Restrict retrieval at the knowledge-service / source level (per-source permissions), and describe intended grounding in `instructions` so the model asks for the right sources |\n```\n\nWritten from the tombstone's own words, following the shape of the sibling `tools` row\n(PR #10732), which rewrote from its tombstone, offered no migration command, and carried\nthe *reason* the key is gone so the row reads as a prescription rather than a neutral\n\"this moved\".\n\n## Two judgment calls, flagged for review\n\n**1. No migration command is offered.** The tombstone does name one, verbatim:\n\n> Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.\n\nThat sentence is the identical boilerplate carried by the `tools` tombstone, and it\ndescribes a **lister**, not a rewriter — there is no key a `knowledge` block moves to. The\nrow it replaces claimed the command \"rewrites it\", which is the false half. I omitted the\ncommand rather than restate it, for two reasons: the sibling `tools` row omits it too, and\nan asymmetry between two adjacent rows whose tombstones carry the same sentence would imply\n`knowledge` has a migration path that `tools` lacks. Happy to add it back framed as a\nlister if the reviewer prefers.\n\n**2. The `topics` / #3855 fact is dropped.** It remains historically true, and the\nprotocol-17 `agent-knowledge-topics-to-sources` conversion does remain in the chain (per\nthe header comment in `agent.zod.ts`, it rewrites historical **sources** and imports\nnothing from the removed schema). But for an author, a nested alias of a key that cannot be\nwritten at all is unreachable information — and leading with the alias is exactly what made\nthe old row imply the parent was live. The conversion-chain fact stays recorded where it\nbelongs, in `agent.zod.ts` and the ADR-0087 registries, not in the authoring field table.\n\nNote the two issue numbers are distinct and both real: **#3855** is the `topics` alias\nremoval, **#3896** is the `knowledge` key's own removal. The old row cited only the first.\n\n## Verification\n\nGate union re-run on the final commit `934022ee4a`; the set was derived with\n`node scripts/pm/dispatch-gates.mjs` (no paths) rather than assumed — it returned **13**\nfamilies for this path, not the 4 predicted. All green:\n\n`check:cross-package-test-inputs` · `check:doc-anchors` · `check:doc-authoring` ·\n`check:doc-formula-expressions` · `check:docs-audit-scope` · `check:docs-redirects` ·\n`check:published-readme-links` · `check:role-word` · `check:empty-state` ·\n`check:liveness` · `check:strictness-ledger` · `check:variant-docs` ·\n`check-cross-package-test-inputs.mjs` · plus `check:nul-bytes`.\n\nThe mutation was confirmed on disk by anchor count in both directions (old row 1 → 0, new\nrow 0 → 1; file line count unchanged at 391), since a markdown table row is exactly where a\nzero-match edit reads as a clean no-op.\n\n`check:skill-examples` was **not** run: the nearest `{/* os:check */}` fence on this page is\nat line 247, below this hunk at line 211 and outside it. Verified for this hunk rather than\ninherited from the sibling PR.\n\n**Docs-only, publishes nothing ⇒ no changeset**; `skip-changeset` label applied.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_"
+}

@@ -2,8 +2,8 @@
   "number": 18453,
   "kind": "issue",
   "title": "fix(pm-dispatch): implement the ruled under-tier clause-② route — reconcile the three contradicting lines and NAME the transcript channel the fuse leaves unnamed",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "hotlong",
@@ -17,11 +17,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-16T11:38:35Z",
-  "updated_at": "2026-09-16T11:38:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-17T10:47:25Z",
+  "closed_at": "2026-09-17T10:47:25Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18453",
   "body": "Filed unassigned by the `domain:spec` @ objectui execution seat, session `session_01VCpmqvacV4BypY48QdoxcE`, 2026-09-16T11:4xZ, on the maintainer's instruction 「如果技能有问题的话,也要立卡修改」. ⛔ Not claiming; grading and `domain:*` are the triage seat's. ⛔ This seat proposes the direction and writes none of the text — `SKILL.md` and `references/**` are governed surface.\n\n**This is the WORK card for a ruling already given.** The finding that produced it is objectstack#18418, which now carries the conflict, the ruling and the verification reading. ⛔ That card is a report; this one is the text change, so the fix has a carrier of its own rather than living inside a finding nobody owns.\n\n## The ruling to implement\n\nMaintainer, answering in session on 2026-09-16, verbatim:\n\n> 起达档复核子代理(推荐)\n\nput against the question 「未达档执行席怎么做条款②复核?两条同级细则冲突,需要你裁一句。」 ⇒ the ruled route is `references/contract-review.md` 〈降档保险丝〉's 「读数不达档 ⇒ 改走转录核验的复核子代理」. Maintainer rulings outrank 细则 (〈优先级〉), and 「豁免够不到的地板只有维护者裁决能设」 makes this the maintainer's to set.\n\n## What is owed — three edits, one deliverable\n\n**① `SKILL.md` 〈派发〉, the line that now contradicts a ruling.** It currently reads:\n\n> 条款②复核只在实测达档的席内做,记录写读数;未达档席 ⛔ 不审、**不起该档子代理**\n\nThe second clause is exactly what the ruling authorises. ⛔ Leaving it standing reproduces objectstack#18418 for the next seat.\n\n**② `references/contract-review.md:26`, the third and now-losing reading.** It says 「未达档默认档自审加门禁、挂标」. With ① rewritten and the fuse route ruled, three normative readings must collapse to one. ⚠️ ⛔ Do not simply delete it without deciding what an under-tier seat does when no at-tier subagent is available — 「豁免仅独立性件与保险丝」 sits on the same line.\n\n**③ ⭐ 〈降档保险丝〉 must NAME the verification channel.** This is the part that actually cost time, and it is not a tidying item.\n\nThe fuse already says 「⛔ 自述档位与传参皆非读数」 and 「`mode:subagent` 里 `get_session` 量的是派发会话,⛔ 不作互证」 — i.e. it rules out the obvious channels but never says which one is left. This seat therefore read the ruled route as **unverifiable** and refused to take it, stranding two already-ruled cards for a shift.\n\n**Measured this session** (full reading and controls on objectstack#18418):\n\n- `get_session` inside a subagent returns the **dispatching** session — all three model fields read the parent's tier. The fuse's clause is correct.\n- The harness system-prompt text naming a model is **自述**; the `Agent` call's `model:` input and the agent `.meta.json` are **传参**. Both excluded by the fuse's own line.\n- ⭐ **The reading that works** is `message.model` on the `type: \"assistant\"` records of the subagent's own transcript, `<project>/subagents/agent-<id>.jsonl` — persisted API **response** objects (server-issued `msg_…` / `req_…` ids and `usage`), ⛔ not a client echo of the request.\n- **Control, from one session's own artefacts:** five subagents dispatched `model: opus` read `claude-opus-5`; the one dispatched `model: fable` reads `claude-fable-5-1`. Same instrument, same directory ⇒ the field **discriminates**, and the value differs from the dispatcher's, so it is ⛔ not a copy.\n\n⭐ **The rule is already named after this channel** — 「**转录核验**的复核子代理」. The transcript IS the 转录. Nothing new is being invented; what is missing is the sentence saying so.\n\n⚠️ Known limits to carry into the text, ⛔ not to hide: no env var exposes a subagent's own `agentId`, so the transcript is identified by content match or mtime; and the response-object claim rests on the server-issued ids and `usage`, ⛔ not on intercepting raw HTTP.\n\n## Why this is worth a card rather than an opportunistic edit\n\nPer 〈席位档策略〉 「skills 车道外的执行席与分诊席默认判断档会话」, **most execution seats are under-tier by design**. ⇒ this is not a degraded corner case; it is the normal configuration, and until ① ② ③ land, every default-tier lane either strands its clause-② cards or re-derives the transcript channel from scratch.\n\nConcrete cost already paid: objectui#7911 and objectui#8800, both ruled `Clause-②: yes` by director batch #137, sat unlandable for a full shift on a prohibition the maintainer has now lifted.\n\n## Dedup words\n\n`under-tier clause-2 route` · `转录核验 复核子代理` · `Served-tier transcript channel` · `SKILL.md 523 未达档席` · `降档保险丝 get_session 派发会话`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
