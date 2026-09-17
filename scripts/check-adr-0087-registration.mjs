@@ -951,6 +951,14 @@ export function breakingDeclaration(parsed) {
 // handed back rather than acted on: ⛔ a detector repair does not get to edit somebody
 // else's changeset on its way past.
 //
+// One boundary is DELIBERATE and measured rather than assumed: `carriesConcreteRewrite`,
+// the corroboration predicate branch 1 consults for a prose-governed placeholder, is NOT
+// taught this vocabulary. Over the same history, 298 blobs carry the `FROM`/`TO`
+// placeholder at all, and of those ZERO are both missed today and carry a retirement line
+// anywhere in the body -- so the widening would buy nothing and would loosen a predicate
+// whose whole licence to be loose is that it only ever grants back an occurrence the
+// positional rule already found. Re-measure before changing that.
+//
 // ## #6967 -- the first NARROWING, and why the direction reversed
 //
 // #6419, #6497 and #6559 all fixed UNDER-matching, and each is written above as a
