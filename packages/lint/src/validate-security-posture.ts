@@ -427,7 +427,7 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
   // the predicate itself, so declaring `manage_users` excuses nothing.
   // No declarations ⇒ `undefined` ⇒ the pre-#17811 verdict verbatim.
   const declaredCapabilities = recordsOf(stack.capabilities).filter(
-    (c) => typeof c.name === 'string' && c.name.length > 0,
+    (cap) => typeof cap.name === 'string' && cap.name.length > 0,
   );
   const anchorContext: AnchorBindingContext | undefined =
     declaredCapabilities.length > 0 ? { declaredCapabilities } : undefined;

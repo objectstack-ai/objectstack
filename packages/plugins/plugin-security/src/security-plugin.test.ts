@@ -4254,3 +4254,167 @@ describe('managed-object write denies wiring (#3325)', () => {
     expect(admin.objects.sys_fake_identity).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// [#18535] ADR-0090 D5 — 「平台系统权限;带 package provenance 的应用声明
+// capability 令牌不计」 at the two runtime doors this plugin owns.
+//
+// PR #17811 landed the predicate half: `describeHighPrivilegeBits(def,
+// context?)` excuses a `systemPermissions` name when the caller says this stack
+// DECLARED it. No consumer passed a context, so an app's own "every employee
+// holds this" set stayed unbindable to `everyone` — declared ≠ enforced, on a
+// contract both the ADR and the spec had already ruled.
+//
+// Each door gets THREE cases, never one: "the declared token binds" alone is
+// equally satisfied by a door that stopped judging `systemPermissions`
+// altogether, so the undeclared-token control and the platform-floor control
+// are what make the accepting case mean anything.
+// ---------------------------------------------------------------------------
+describe('audience-anchor bindings read the stack\'s declared capabilities (#18535)', () => {
+  const APP_DEFAULT = (token: string): PermissionSet => ({
+    name: 'app_member_default',
+    label: 'App Member Default',
+    isDefault: true,
+    systemPermissions: [token],
+    objects: { app_announcement: { allowRead: true } },
+  }) as any;
+
+  /**
+   * Boot the plugin far enough to run `runBootstrap` to completion, with the
+   * declarations served off the METADATA SERVICE — the seeder's own fallback
+   * source, and the one that answers at this moment in the boot: the anchor
+   * binding runs BEFORE `bootstrapDeclaredCapabilities` writes any
+   * `sys_capability` row. (The registry door is pinned on the other consumer,
+   * `suggested-audience-bindings.test.ts`.)
+   */
+  async function boot(token: string, declaredCapabilities: any[]) {
+    const tables: Record<string, any[]> = {
+      sys_position: [{ id: 'pos_everyone', name: 'everyone' }],
+      sys_permission_set: [{ id: 'ps_app', name: 'app_member_default' }],
+      sys_position_permission_set: [],
+    };
+    const inserts: Array<{ object: string; data: any }> = [];
+    const ql: any = {
+      registerMiddleware: () => {},
+      find: async (object: string, opts?: any) => {
+        const where = opts?.where ?? {};
+        return (tables[object] ?? []).filter((r: any) =>
+          Object.entries(where).every(([k, v]) => r[k] === v),
+        );
+      },
+      findOne: async (object: string, query?: EngineFindOneQueryInput) => {
+        assertEngineFindOnePredicate(object, query);
+        return null;
+      },
+      insert: async (object: string, d: any) => {
+        inserts.push({ object, data: d });
+        (tables[object] ??= []).push(d);
+        return { id: d?.id ?? 'x' };
+      },
+      // The PRODUCER's own dispatch predicate, never a hand-mirrored guard.
+      update: async (_o: string, d: any, o?: any) => {
+        assertEngineUpdateDispatch(d, o);
+        return true;
+      },
+      getSchema: () => undefined,
+    };
+    const metadata = {
+      get: async () => null,
+      list: async (type: string) => (type === 'capability' ? declaredCapabilities : []),
+    };
+    const services: Record<string, any> = {
+      manifest: { register: vi.fn() },
+      objectql: ql,
+      metadata,
+    };
+    const hook = vi.fn();
+    const ctx: any = {
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+      registerService: vi.fn(),
+      getService: (name: string) => {
+        if (!(name in services)) throw new Error(`service not registered: ${name}`);
+        return services[name];
+      },
+      hook,
+    };
+    const plugin = new SecurityPlugin({ defaultPermissionSets: [APP_DEFAULT(token)] });
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    for (const [, cb] of hook.mock.calls.filter((c: any[]) => c[0] === 'kernel:ready')) await cb();
+
+    // Positive control: the pass really completed. Without it every assertion
+    // below would be satisfied by a boot that fell over before the binding.
+    expect(
+      ctx.logger.info.mock.calls.filter((c: any[]) => String(c[0]).includes('platform bootstrap complete')),
+    ).toHaveLength(1);
+
+    const refusals = ctx.logger.warn.mock.calls.filter((c: any[]) =>
+      String(c[0]).includes('refusing to bind fallback set to everyone'),
+    );
+    const bindings = inserts.filter((i) => i.object === 'sys_position_permission_set');
+    return { plugin, ql, ctx, bindings, refusals };
+  }
+
+  it('binds the isDefault set when the stack declares its systemPermissions token', async () => {
+    const { bindings, refusals } = await boot('crm.export_pipeline', [
+      { name: 'crm.export_pipeline', label: 'Export Pipeline' },
+    ]);
+    expect(refusals).toHaveLength(0);
+    expect(bindings).toHaveLength(1);
+    expect(bindings[0].data).toMatchObject({ position_id: 'pos_everyone', permission_set_id: 'ps_app' });
+  });
+
+  it('still refuses an UNDECLARED token — the control for the case above', async () => {
+    // Declarations exist and name a DIFFERENT capability: it is MEMBERSHIP that
+    // excuses a token, not the presence of a declaration list.
+    const { bindings, refusals } = await boot('crm.settle_ledger', [
+      { name: 'crm.export_pipeline', label: 'Export Pipeline' },
+    ]);
+    expect(bindings).toHaveLength(0);
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0][1]).toMatchObject({ set: 'app_member_default', offending: 'system permissions' });
+  });
+
+  it('still refuses a PLATFORM capability the stack declares a same-named capability for', async () => {
+    const { bindings, refusals } = await boot('manage_users', [{ name: 'manage_users', label: 'Not Yours' }]);
+    expect(bindings).toHaveLength(0);
+    expect(refusals).toHaveLength(1);
+  });
+
+  // ── The engine-side write gate (`sys_position_permission_set` insert) ──
+  //
+  // Same three cases at the door an ADMIN comes through. It must agree with the
+  // boot binding above and with `confirmAudienceBindingSuggestion`'s early
+  // rendition — all three now read one source, so a set that binds at boot
+  // cannot be refused when an admin re-binds it by hand.
+  const anchorInsert = {
+    object: 'sys_position_permission_set',
+    operation: 'insert',
+    data: { position_id: 'pos_everyone', permission_set_id: 'ps_app' },
+  };
+
+  it('write gate: admits a binding whose token the stack declares', async () => {
+    const { plugin } = await boot('crm.export_pipeline', [{ name: 'crm.export_pipeline', label: 'Export Pipeline' }]);
+    await expect((plugin as any).assertAudienceAnchorBindingGate(anchorInsert)).resolves.toBeUndefined();
+  });
+
+  it('write gate: still refuses an undeclared token, with the ADR-0112 envelope', async () => {
+    const { plugin } = await boot('crm.settle_ledger', [{ name: 'crm.export_pipeline', label: 'Export Pipeline' }]);
+    const err = await (plugin as any)
+      .assertAudienceAnchorBindingGate(anchorInsert)
+      .then(() => null, (e: any) => e);
+    expect(err).toBeTruthy();
+    expect(err.code).toBe('PERMISSION_DENIED');
+    expect(err.statusCode).toBe(403);
+    expect(err.message).toContain('system permissions');
+  });
+
+  it('write gate: still refuses a platform capability of that name', async () => {
+    const { plugin } = await boot('manage_users', [{ name: 'manage_users', label: 'Not Yours' }]);
+    const err = await (plugin as any)
+      .assertAudienceAnchorBindingGate(anchorInsert)
+      .then(() => null, (e: any) => e);
+    expect(err?.code).toBe('PERMISSION_DENIED');
+    expect(err?.statusCode).toBe(403);
+  });
+});
