@@ -33004,6 +33004,13 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY65, 'H65 #18547 control: ⛔ a mid-sentence Chinese mention is PROSE — it keeps today\'s verdict', h65reason(MARKER65 + '\n\n简报写明本轮跑的层:小时层,照旧。'), 'absent');
   b(BATTERY65, 'H65 #18547 control: ⛔ …and a 「·」 elsewhere on that line does not license it', h65reason(MARKER65 + '\n\n锚 · 简报写明本轮跑的层:小时层。'), 'absent');
   b(BATTERY65, 'H65 #18547 control: ⛔ a BLOCKQUOTED Chinese declaration is this artefact quoting another', h65reason(withTier65(MARKER65, '> 层:每日层(当日首 fire)')), 'absent');
+  // ⚠️ The case above is carried by the SLOT rule, not by the blockquote skip:
+  // `> ` is not `[ \t]`, so the line-start branch never reaches the key. The
+  // measured hazard is a quoted HEADLINE, where the 「·」 branch does reach it — a
+  // marker repeating last round's field would otherwise clear this round's duty.
+  // An ablation deleting the skip left the case above GREEN, which is how this
+  // second one came to exist; ⛔ do not merge them.
+  b(BATTERY65, 'H65 #18547 control: ⛔ …and a quoted HEADLINE cannot clear the duty through its 「·」 field', h65reason(withTier65(MARKER65, '> **Round-open marker** · triage seat · **R+258** · **层:小时层(增量)**')), 'absent');
   b(BATTERY65, 'H65 #18547 control: ⛔ the WORD SET is closed — a Chinese dialect is a finding', h65reason(withTier65(MARKER65, '层:全量层')), 'unknown-tier');
   b(BATTERY65, 'H65 #18547 control: …and the row echoes the word it refused', h65row(withTier65(MARKER65, '层:全量层')).includes('`全量层`'), true);
   b(BATTERY65, 'H65 #18547 control: …naming the key it ACTUALLY read', h65row(withTier65(MARKER65, '层:全量层')).includes('carries a `层:` declaration'), true);
