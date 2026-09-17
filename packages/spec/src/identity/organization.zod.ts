@@ -36,9 +36,41 @@ export const OrganizationSchema = lazySchema(() => z.object({
     .describe('Unique URL-friendly slug (lowercase alphanumeric, hyphens, underscores)'),
   
   /**
-   * Organization logo URL
+   * Organization logo URL.
+   *
+   * `null` is accepted alongside a URL string and alongside the key being
+   * absent. `logo` is one of better-auth's own `sys_organization` columns,
+   * declared `Field.url({ required: false })` and reaching SQLite as
+   * `logo varchar(255)` with `notnull=0`; better-auth serialises it
+   * present-and-null for an organization created without one. Measured on a
+   * real `AuthManager` over ObjectQL + driver-sqlite-wasm (#18509): the
+   * `/auth/organization/create`, `/auth/organization/list` and
+   * `/auth/organization/get-full-organization` bodies all carry `"logo": null`.
+   *
+   * Same defect and same remedy as `SessionUserSchema.image` (#17235 / PR
+   * #18501, ruling batch #138 item 1), reached here by measurement rather than
+   * by analogy — #18509 exists precisely because that review refused to infer
+   * this key's verdict from that one.
+   *
+   * `.nullish()`, NOT `.nullable()`: the key's ABSENCE is a legal shape today,
+   * so `.nullable()` would retire a live shape as the price of admitting
+   * `null`. Pure widening only.
+   *
+   * `.url()` is KEPT, and it is not in tension with `null`. `.nullish()` wraps
+   * the whole `z.string().url()`, so `null` and `undefined` are separate
+   * branches the URL check never sees, while a present string is still required
+   * to be a well-formed URL. Measured: of the six inputs
+   * (absent / `null` / `''` / a URL / a non-URL / a number) exactly ONE moves,
+   * and it is the ruled one.
+   *
+   * ⚠️ This widening does NOT make a served organization body parse clean.
+   * The same measurement found two further divergences on this schema —
+   * `metadata` is served present-and-null, and `/auth/organization/create`
+   * omits `updatedAt`, which is declared required. Those are separate defects
+   * with their own reasoning and are filed separately rather than folded in
+   * here; #18509 asked about `logo`.
    */
-  logo: z.string().url().optional().describe('Organization logo URL'),
+  logo: z.string().url().nullish().describe('Organization logo URL'),
   
   /**
    * Custom metadata for the organization
