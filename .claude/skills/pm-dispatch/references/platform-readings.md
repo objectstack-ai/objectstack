@@ -209,7 +209,7 @@
 - 403 走降级梯 MCP 档:单标签读全加本地求交;⛔ 不是翻页手扫,不完整枚举比零结果更险。
 - 会话代理只服务 repo-scoped 路径,`/search/*` 的 403 体解析成净零。
 - 代理回 403 加体 sessions are bound to their configured repositories,而那是合法 JSON。
-- 读 `total_count` 得 None、打印成 total: None,与真空集只差一个字符,而请求根本没跑。
+- 读 `total_count` 得 None、打印成 total: None,与空集只差一字符;缺键即拒绝,判别式是状态码。
 - `/search` 类问题的仪器是 MCP search 工具,repo-scoped 枚举不受影响。
 - 推论:阳性对照先跑 —— 合乎预期的零是永不复检的那个。
 - `search_issues` 不可靠地返回分钟级新卡:同轮发现的查重另按创建时间列近期 issue。
