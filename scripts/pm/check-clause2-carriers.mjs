@@ -782,6 +782,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 16,
   '#18719: a RETRACTED claim leaves the pool — a withdrawn claim never governs': 36,
   '#18683: the card-comment read pages to a cap — past 100 is UNJUDGED, ⛔ never a truncated pool': 27,
+  '#18764: a DECORATED claim ENTERS the pool — ONE reading, and it is the sibling\'s': 24,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -793,8 +794,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // one #17915 adds, by the one #17959 adds, by the one #18042 adds, and by the
 // one #18174 adds, and by the one #18141 adds, and by the one #17919 adds, and
 // by the one #16833 adds, and by the one #18456 adds, and by the one #18719
-// adds, and by the one #18683 adds.
-const SELF_TEST_BATTERY_FLOOR = 30;
+// adds, and by the one #18683 adds, and by the one #18764 adds.
+const SELF_TEST_BATTERY_FLOOR = 31;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -8183,6 +8184,82 @@ export async function selfTest() {
   })());
   t('⛔ CONTROL: the diagnosis KEY is unchanged, so every sentence already keyed to `comments` still finds it', readDiagnosisKey('comments', 770017) === 'comments:770017');
 
+  // -- #18764: a DECORATED claim ENTERS the pool -----------------------------
+  //
+  // The two live records the escalation named, replayed OFFLINE and ⛔ never
+  // re-graded: they are another repository's cards and another seat's work.
+  // Ids, stamps and the load-bearing LINES are the real ones, read from the
+  // REST rows at 2026-09-17T22:02Z — ⚠️ both cards have since left the state
+  // they were read in, which is why the reading carries its time. The bodies
+  // below ADD the `Branch:` / `Clause-②` lines the real comments did not carry:
+  // without them the thread reads `claim-branch-unparsed` on BOTH sides of this
+  // change (measured), and the defect this battery pins is the one that only
+  // shows once a claim is otherwise complete.
+  battery('#18764: a DECORATED claim ENTERS the pool — ONE reading, and it is the sibling\'s');
+  const D64 = (id, at, body, login = 'os-sales') => ({ id, created_at: at, user: { login }, body });
+  const D64_BOLD = D64(5721120402, '2026-09-17T20:57:09Z', [
+    '**Claim:** card objectui#9660, by the `domain:spec` @ objectui execution seat, session `session_01UanLVj6xvbS6puBCewLr8L`.',
+    'Branch: `claude/issue-9660-named-test-invocation`',
+    'Clause-②: no',
+  ].join('\n'));
+  const D64_TICK = D64(5720184809, '2026-09-17T19:41:36Z', [
+    '`Claim:` card objectui#9717, by the `domain:spec` @ objectui execution seat, session `session_01UanLVj6xvbS6puBCewLr8L`.',
+    'Branch: `claude/issue-9717-doc-component-types`',
+    'Clause-②: no',
+  ].join('\n'));
+  // The older BARE claim, declaring the OPPOSITE value — so "the wrong carrier
+  // governs" is a WRONG VALUE here and not merely a missing one.
+  const D64_BARE_OLD = D64(5700000001, '2026-09-17T18:00:00Z', [
+    'Claim: the older BARE claim',
+    'Branch: `claude/issue-9660-older-bare`',
+    'Clause-②: yes',
+  ].join('\n'));
+  const D64_POOL = (rows) => claimCarrierSelection(rows).pool.map((r) => r.id).join(',');
+  const D64_RECORD = (rows) => {
+    const rec = pairInputRecord({ pr: 9999, card: 9660, cardComments: rows, headSha: 'offline' });
+    return { selected: [rec['claim.selected']].flat().join('\n'), rejected: [rec['claim.rejected']].flat().join('\n') };
+  };
+
+  t('⭐ a BOLD claim ENTERS the pool — the state it could not reach at all before', D64_POOL([D64_BOLD]) === String(D64_BOLD.id), D64_POOL([D64_BOLD]));
+  t('…and GOVERNS: the branch resolved is the one IT names', (claimCarrierSelection([D64_BOLD]).governing?.branches ?? []).join() === 'claude/issue-9660-named-test-invocation');
+  t('…and the declaration limb reads the `Clause-②` line OFF IT', cardDeclaration([D64_BOLD]).state === 'declared' && cardDeclaration([D64_BOLD]).value === 'no');
+  t('⛔ CONTROL — the CONSTANT is NOT widened: the raw marker still refuses that same body', CLAIM_COMMENT_MARKER.test(D64_BOLD.body) === false);
+  t('⭐ the BACKTICKED spelling is the same record, by the same reading', D64_POOL([D64_TICK]) === String(D64_TICK.id));
+  t('…with its own `Branch:` line resolved', (claimCarrierSelection([D64_TICK]).governing?.branches ?? []).join() === 'claude/issue-9717-doc-component-types');
+  t('…and its own declaration read', cardDeclaration([D64_TICK]).value === 'no');
+  t('⛔ CONTROL: the raw marker refuses the backticked body too', CLAIM_COMMENT_MARKER.test(D64_TICK.body) === false);
+  t('⭐ a DECORATED NEWER claim SUPERSEDES a BARE older one — the pool is the newest, not the readable one', D64_POOL([D64_BARE_OLD, D64_BOLD]) === String(D64_BOLD.id), D64_POOL([D64_BARE_OLD, D64_BOLD]));
+  t('…and the older record is LISTED, as SUPERSEDED rather than dropped', says(D64_RECORD([D64_BARE_OLD, D64_BOLD]).rejected, 'a SUPERSEDED claim') && says(D64_RECORD([D64_BARE_OLD, D64_BOLD]).rejected, String(D64_BARE_OLD.id)));
+  t('⭐ …and the VALUE the limb reads is the newer one', cardDeclaration([D64_BARE_OLD, D64_BOLD]).value === 'no');
+  t('⛔ CONTROL: the older record declares the OPPOSITE, so selecting the wrong carrier is a WRONG value, ⛔ not a missing one', cardDeclaration([D64_BARE_OLD]).value === 'yes');
+  t('the input record NAMES the decorated row it selected — by id and by date', says(D64_RECORD([D64_BOLD]).selected, String(D64_BOLD.id)) && says(D64_RECORD([D64_BOLD]).selected, '2026-09-17T20:57:09Z'));
+  t('⛔ CONTROL: the same thread read the other way says nobody claimed at all', says(D64_RECORD([D64(1, '2026-09-17T20:57:09Z', 'no claim on this line')]).selected, 'no comment on this thread carries'));
+
+  // The retraction index reads the SAME predicate, so a decorated claim is
+  // retractable by its own author — ⛔ never a record that can be written but
+  // never withdrawn.
+  const D64_RELEASE = D64(5721120999, '2026-09-17T21:30:00Z', 'Release: session `session_01UanLVj6xvbS6puBCewLr8L` — 去向 `pm:queue`');
+  t('⭐ the retraction index SEES a decorated claim — it is retractable by its own author', claimRetractions([D64_BOLD, D64_RELEASE]).has(D64_BOLD));
+  t('…and the pool then says every claim on the thread is RETRACTED, ⛔ not that none was written', says(D64_RECORD([D64_BOLD, D64_RELEASE]).selected, 'RETRACTED'));
+  t('⛔ CONTROL: a DIFFERENT author\'s release retracts nothing, decorated or not', claimRetractions([D64_BOLD, { ...D64_RELEASE, user: { login: 'os-other' } }]).size === 0);
+
+  // The refusals are the SIBLING's and are pinned here as still-refused: this
+  // file admits no spelling of its own, so a form the sibling names as a NEAR
+  // MISS must not become a claim by arriving through this door.
+  t('⛔ a markdown LIST ITEM is still not a claim — the shape the shared reading refuses to undecorate through', D64_POOL([D64(2, '2026-09-17T20:00:00Z', '- Claim: seat.\nBranch: `claude/issue-1-x`')]) === '');
+  t('⛔ a HEADING-style claim is still not one', D64_POOL([D64(3, '2026-09-17T20:00:00Z', '## Claim: seat.\nBranch: `claude/issue-1-x`')]) === '');
+  t('⛔ UNDERSCORE emphasis is still a NAMED near miss, ⛔ not a claim', markerMatches(CLAIM_COMMENT_MARKER, '__Claim:__ seat.') === false);
+  t('⛔ and the `Clause-②-correction:` comment does not enter the pool through the new door either', D64_POOL([FIXED_CORRECTION('no')]) === '' && markerMatches(CLAIM_COMMENT_MARKER, FIXED_CORRECTION('no').body) === false);
+  t('⛔ provably ADDITIVE: a bare claim this file already read reads exactly as before', claimCarrierSelection([CLAIM('Clause-②: no')]).pool.length === 1);
+
+  // ⭐ The file keeps TWO undecoration paths, and that is a measurement rather
+  // than an oversight: `undecorateRetractionLine` strips `_` and then every
+  // leading non-letter/non-digit character, which the shared stripper does not.
+  // 5 of 12 fixtures read differently. Both directions are load-bearing, so the
+  // pair below pins the divergence instead of quietly closing it.
+  t('⭐ the RETRACTION path still reads the sigil-led #18373 line — narrowing it to the shared reading would unland #18719', claimRetractions(RTX_18373).has(RTX_18373.find((r) => r.id === RTX_WITHDRAWN)));
+  t('⭐ …while the SHARED reading does not strip a leading sigil, so the two paths are ⛔ NOT interchangeable', markerMatches(CLAIM_COMMENT_MARKER, '🚨 Claim: PM loop round 1') === false);
+
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -8251,7 +8328,9 @@ export async function selfTest() {
       + 'line that QUOTES the spelling held apart from one that declares a value in BOTH halves '
       + 'of that property, the input record whose field roster is the same on exit 0, on exit 4 '
       + 'and on a refusal — with the selected carrier, its body fingerprint and the rejected '
-      + 'candidates each stated — and the exit register).',
+      + 'candidates each stated, the DECORATED claim that enters the pool and governs through '
+      + 'the sibling\'s one reading — the constant unwidened, and the file\'s two undecoration '
+      + 'paths pinned as the two jobs they are — and the exit register).',
   );
 
   selfTestReachedVerdict = true;
