@@ -384,18 +384,24 @@ function loneTokenBody(raw: unknown): string | undefined {
  *     collection names one of those lists, each element is a record of its
  *     object.
  *
- * Everything else that can bind a name POISONS it instead. `seedRunVariables`
- * keeps ONE flat map per run, so a second binder makes the root ambiguous and
- * an ambiguous root must stay silent — the same conservatism the `record` root
- * has always had, not a new one. Poisoned: declared flow variables, assignment
- * targets, `indexVariable` / `errorVariable`, an `outputVariable` on any other
- * node type, an unresolvable `iteratorVariable`, every node id (the engine
- * writes each node's outputs under `<nodeId>.<key>` and `evaluateCondition`
- * expands that dotted key into an object AT the node id), and any name a
- * trigger field is flattened to.
+ * A SECOND binder POISONS the name instead. `seedRunVariables` keeps ONE flat
+ * map per run, so two writers make the root ambiguous and an ambiguous root
+ * must stay silent — the same conservatism the `record` root has always had,
+ * not a new one. Poisoned: assignment targets, `indexVariable` /
+ * `errorVariable`, an `outputVariable` on any other node type, an unresolvable
+ * `iteratorVariable`, every node id (the engine writes each node's outputs
+ * under `<nodeId>.<key>` and `evaluateCondition` expands that dotted key into
+ * an object AT the node id), and any name a trigger field is flattened to.
+ *
+ * ⛔ A `flow.variables` DECLARATION is deliberately NOT a second binder. It
+ * declares the slot the node then fills — `seedDeclaredVariables` runs first
+ * and the node's write replaces what it seeded — and it is the shape the
+ * platform's own canon teaches: `examples/app-todo`'s two sweep flows declare
+ * `tasksToRemind` / `overdueTasks` beside the `get_record` that fills them.
+ * Treating the declaration as a collision would make this whole resolution
+ * inert on exactly the flows it was written for.
  */
 function resolveVariableRoots(
-  flow: AnyRec,
   walked: readonly WalkedFlowNode[],
   triggerScope: ReadonlySet<string>,
 ): Map<string, string> {
@@ -419,10 +425,6 @@ function resolveVariableRoots(
     }
     into.set(name, objectName);
   };
-
-  // A declared flow variable is seeded before any node runs, so the name
-  // already means whatever the author declared.
-  for (const declared of recordsOf(flow.variables)) poison(declared.name);
 
   const loops: Array<{ collection: unknown; iterator: string }> = [];
 
@@ -570,7 +572,7 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
     const triggerScope: ReadonlySet<string> = triggerRoot
       ? new Set<string>([...triggerRoot.fieldTypes.keys(), ...IMPLICIT_HEADS])
       : NO_NAMES;
-    for (const [name, objectName] of resolveVariableRoots(flow, walked, triggerScope)) {
+    for (const [name, objectName] of resolveVariableRoots(walked, triggerScope)) {
       const obj = objectsByName.get(objectName);
       if (!obj) continue;
       roots.set(name, {

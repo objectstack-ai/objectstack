@@ -877,15 +877,37 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
     ).toEqual([]);
   });
 
-  it('is silent when the name is ALSO a declared flow variable', () => {
-    expect(
-      validateFlowTemplatePaths(
-        scheduleFlow(
-          [FETCH_ONE, { id: 'note', type: 'notify', config: { body: '{caseRecord.subjcet}' } }],
-          { variables: [{ name: 'caseRecord', type: 'object' }] },
-        ),
+  // A `flow.variables` DECLARATION is the slot the binding node fills, not a
+  // second writer — and it is the shape the platform's own canon teaches
+  // (examples/app-todo declares `tasksToRemind` beside the `get_record` that
+  // fills it). Reading it as a collision would make this resolution inert on
+  // exactly the flows it was written for.
+  it('still resolves the root when the flow DECLARES the variable it binds', () => {
+    const findings = validateFlowTemplatePaths(
+      scheduleFlow(
+        [FETCH_ONE, { id: 'note', type: 'notify', config: { body: '{caseRecord.subjcet}' } }],
+        { variables: [{ name: 'caseRecord', type: 'object', isInput: false, isOutput: false }] },
       ),
-    ).toEqual([]);
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(FLOW_TEMPLATE_UNKNOWN_FIELD);
+  });
+
+  it('resolves the declared-variable + loop shape examples/app-todo ships', () => {
+    const findings = validateFlowTemplatePaths(
+      scheduleFlow(
+        [
+          FETCH_MANY,
+          { id: 'loop_cases', type: 'loop', config: { collection: '{staleCases}', iteratorVariable: 'currentCase' } },
+          { id: 'note', type: 'notify', config: { title: '{currentCase.subject}', body: '{currentCase.subjcet}' } },
+        ],
+        { variables: [{ name: 'staleCases', type: 'record_collection', isInput: false, isOutput: false }] },
+      ),
+    );
+    // The loop body lives in the EDGE graph, not a region slot — the root map
+    // is flow-scoped, so a token on a top-level node still resolves.
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('{currentCase.subjcet}');
   });
 
   it('is silent when an assignment node also writes the name', () => {
