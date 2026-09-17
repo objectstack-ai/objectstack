@@ -414,6 +414,50 @@ export function parseCelToAst(source: string): CelAstNode | null {
   return parsed.ok ? parsed.ast : null;
 }
 
+/**
+ * The inverse of {@link parseCelToAst}: print a CEL AST back to surface syntax.
+ *
+ * This is the lossless half of the #15811 migration. Every EVALUATED expression
+ * slot in the spec now composes `EvaluatedExpressionInputSchema`, so an
+ * `{ dialect: 'cel', ast }` envelope carrying no `source` is refused at the
+ * door — and the author of such an envelope needs a `source` back. For CEL the
+ * platform HAS a printer (cel-js `serialize`, which this package already uses
+ * for its own scope rewrites), so that recovery is mechanical rather than a
+ * re-authoring job. `cron` and `template` have no AST at all, so the question
+ * does not arise for them; ADR-0087's structured TODO covers every case this
+ * function answers `null` to.
+ *
+ * ⚠️ Lossless is claimed about MEANING, not bytes. `serialize` re-renders from
+ * the parse tree, so it normalises what the grammar does not distinguish —
+ * measured: single-quoted string literals come back double-quoted
+ * (`record.p == 'x'` → `record.p == "x"`), and redundant parentheses that the
+ * parser dropped do not come back. A caller that needs the author's original
+ * bytes cannot get them from an AST; a caller that needs a `source` the engine
+ * evaluates identically can.
+ *
+ * Returns `null` — never throws — on anything that is not a CEL AST this
+ * platform can round-trip, so a caller can fall back to the hand-migration path
+ * in one line. Three ways to earn that `null`, and the third is the one that
+ * matters: `serialize` refuses the value (it throws `Unknown AST operation` on
+ * a non-AST, which is how an opaque `ast` an author hand-wrote is caught); the
+ * printed text is blank; or the printed text does not parse back through
+ * {@link parseCelToAst} — the platform's own bounded parser, the same one every
+ * other entry point in this package reaches. That last check is what makes
+ * "lossless" a reading rather than a claim: a source this platform cannot parse
+ * is not a source it can evaluate, whatever the printer produced.
+ */
+export function printCelAst(ast: unknown): string | null {
+  if (ast === null || typeof ast !== 'object') return null;
+  let printed: unknown;
+  try {
+    printed = serialize(ast as Parameters<typeof serialize>[0]);
+  } catch {
+    return null;
+  }
+  if (typeof printed !== 'string' || printed.trim().length === 0) return null;
+  return parseCelToAst(printed) === null ? null : printed;
+}
+
 // ---------------------------------------------------------------------------
 // The reason-carrying sister entrance (#6132)
 // ---------------------------------------------------------------------------
