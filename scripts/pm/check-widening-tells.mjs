@@ -1816,17 +1816,19 @@ export function keyedPropertyName(text) {
 }
 
 /**
- * The key a T1 line names and the closed-set members its value declares INLINE,
- * or `null` when either half is not readable on this one line.
+ * The closed-set members one line declares INLINE, or `null` when the list is
+ * not readable on this one line.
  *
  * ⭐ "Not readable" is the common answer and it is the safe one: a value whose
  * list opens on a later line (`strategy: z.enum([`) reads `null`, and a `null`
- * on either side of the comparison below leaves the tell firing.
+ * on either side of either comparison below leaves the tell firing.
+ *
+ * ⛔ ONE reading, for the reason {@link keyedPropertyName} is one: the keyed
+ * spend (#17618) and the binding spend (#18640) both ask "which members does
+ * this line carry", and two spellings of that question would disagree about a
+ * nested bracket or a comma inside a string on the day one of them moved.
  */
-export function keyedClosedSetMembers(text) {
-  const s = String(text ?? '');
-  const key = keyedPropertyName(s);
-  if (key === null) return null;
+function inlineClosedSetMembers(s) {
   const ctor = CLOSED_SET_CONSTRUCTOR.exec(s);
   if (ctor === null) return null;
   const openParen = ctor.index + ctor[0].length - 1;
@@ -1834,14 +1836,26 @@ export function keyedClosedSetMembers(text) {
   if (ctor[1] === 'literal') {
     if (closeParen === -1) return null;
     const members = topLevelMembers(s, openParen, closeParen);
-    return members.length > 0 ? { key, members } : null;
+    return members.length > 0 ? members : null;
   }
   const openBracket = s.indexOf('[', openParen);
   if (openBracket === -1 || (closeParen !== -1 && openBracket > closeParen)) return null;
   const closeBracket = matchingCloser(s, openBracket);
   if (closeBracket === -1) return null;
   const members = topLevelMembers(s, openBracket, closeBracket);
-  return members.length > 0 ? { key, members } : null;
+  return members.length > 0 ? members : null;
+}
+
+/**
+ * The key a T1 line names and the closed-set members its value declares INLINE,
+ * or `null` when either half is not readable on this one line.
+ */
+export function keyedClosedSetMembers(text) {
+  const s = String(text ?? '');
+  const key = keyedPropertyName(s);
+  if (key === null) return null;
+  const members = inlineClosedSetMembers(s);
+  return members === null ? null : { key, members };
 }
 
 /**
@@ -1866,6 +1880,118 @@ export function respellsExistingClosedSetKey(text, removedTexts) {
     const before = keyedClosedSetMembers(r);
     if (before === null || before.key !== added.key) return false;
     return added.members.every((m) => before.members.includes(m));
+  });
+}
+
+/**
+ * The BINDING a closed-set declaration line names — everything left of the
+ * constructor, the way {@link closedSetOpenerBinding} reads it — together with
+ * the members the SAME line carries inline. `null` when the line is not one
+ * (#18640).
+ *
+ * Three things must all hold, and each one is the loud direction when it does
+ * not:
+ *
+ *   ① the line is NOT a keyed property. That population is #17618's three-fact
+ *     spend and this reading must never reach it — see
+ *     {@link respellsExistingClosedSetBinding} for why the two answer different
+ *     questions and why collapsing them would be a real loosening.
+ *   ② the binding is NON-EMPTY. Identity is what makes "the same set was
+ *     re-spelled" a fact rather than a resemblance, and an anonymous inline set
+ *     (`z.union([A, B]),` as one arm of an outer union) declares none — two of
+ *     them in one block are not evidence they are the same set.
+ *   ③ the member list closes ON THIS LINE. A list that opens here and closes
+ *     later is unreadable, exactly as it is for a keyed value.
+ */
+const CLOSED_SET_BINDING_HEAD = /^(.*?)z\.(?:enum|union|discriminatedUnion|literal)\(/;
+
+export function closedSetBindingMembers(text) {
+  const s = String(text ?? '');
+  if (COMMENT_LINE.test(s)) return null;
+  if (keyedPropertyName(s) !== null) return null; // ① a keyed line is #17618's, never this reading's
+  const head = CLOSED_SET_BINDING_HEAD.exec(s);
+  if (head === null) return null;
+  const binding = head[1].trim();
+  if (binding === '') return null; // ② no declaration identity, no evidence
+  const members = inlineClosedSetMembers(s); // ③ readable on this line, or `null`
+  return members === null ? null : { binding, members };
+}
+
+/**
+ * Every member of `added` that `before` did not already carry, counted as a
+ * MULTISET difference — the surplus, and what the removed list freed to pay for
+ * it.
+ *
+ * ⛔ Multiset, not set: a list that repeats a member twice where the removed one
+ * carried it once has gained a member, and a set difference would call that
+ * zero.
+ */
+function netMemberDelta(added, before) {
+  const pool = [...before];
+  let surplus = 0;
+  for (const m of added) {
+    const at = pool.indexOf(m);
+    if (at === -1) surplus += 1;
+    else pool.splice(at, 1);
+  }
+  return { surplus, freed: pool.length };
+}
+
+/**
+ * Does this added line RE-SPELL a closed set the same change block declared at
+ * the SAME BINDING, without the set gaining a value? (instance 3, #18640)
+ *
+ * ⭐ The evidence is the CONTROL SET, not an argument about direction. The
+ * identical edit spelled one member per line already declines, through
+ * #16822's `rewritesExistingOpener` (the opener re-declares the same binding)
+ * and #16943's budget (each removed arm line buys the added one that replaced
+ * it); spelled INLINE it fires, because an inline opener is not an opener-only
+ * line and a `const` declaration is not a key, so no reading in this file
+ * reaches it. One semantic change, two opposite verdicts, decided by nothing
+ * but where the author put the newlines — which is not a scale set too strict,
+ * it is the accidental variable this family removes.
+ *
+ * ⇒ this reading supplies the same positive evidence the other two spellings
+ * already accept, at the one position that had none, and is bounded EXACTLY by
+ * what the multi-line spelling of the same block does: the per-line budget is
+ * replacement-vs-net-addition arithmetic (#16943 — "the ruling this implements
+ * is replacement-vs-net-addition, not spelling"), so this is the same
+ * arithmetic over the members the inline line carries.
+ *
+ * ⛔ It is NOT #17618's subset test, and the difference is deliberate rather
+ * than overlooked. #17618 governs a KEYED value, where the multi-line spelling
+ * FIRES too (a keyed value whose list opens on a later line is unreadable and
+ * still tells) — so there is no control bounding a relaxation there, and
+ * carrying this arithmetic across to it would be a loosening with nothing to
+ * measure it against. The two populations are kept apart by ① in
+ * {@link closedSetBindingMembers}.
+ *
+ * The sensitivity guarantee is the surplus, exactly as #16943's is: a list that
+ * grows reports, with its own file:line. `z.enum(['a', 'b'])` ->
+ * `z.enum(['a', 'b', 'c'])` at one binding still fires; a different binding
+ * pays nothing; a brand-new declaration has no removal to pay for it; and a
+ * genuine new key beside the re-spelling still fires, because this reading
+ * takes nothing out of the #16943 budget.
+ *
+ * ⚠️ The quiet direction this buys, stated rather than left to be discovered: a
+ * one-for-one member SWAP at an existing binding — `z.union([A, B])` ->
+ * `z.union([A, C])` — now declines, and `C` may accept more than `B` did.
+ * ⛔ That is not a new class: #16943 bought exactly this silence for every set
+ * spelled one member per line, and measured it over 82 commits (34 declines,
+ * not one a member rename). What this removes is the accidental exception, not
+ * the rule. What still catches a swap that slips past is what caught it for the
+ * spelled-out form: `check:api-surface` on any exported name it moves,
+ * `check:authorable-surface` on any authorable key it changes, and the ADR-0087
+ * registries.
+ */
+export function respellsExistingClosedSetBinding(text, removedTexts) {
+  const added = closedSetBindingMembers(text);
+  if (added === null || !Array.isArray(removedTexts)) return false;
+  return removedTexts.some((r) => {
+    const before = closedSetBindingMembers(r);
+    if (before === null || before.binding !== added.binding) return false;
+    const { surplus, freed } = netMemberDelta(added.members, before.members);
+    return surplus <= freed;
   });
 }
 
@@ -2439,7 +2565,21 @@ export function tellsInFile(file, { repo = THIS_REPO, licensed = null } = {}) {
     }
     // #16822 — an opener that re-declares a set the same hunk removed adds no
     // member; the members are read below, one line each.
-    const opener = CLOSED_SET_OPENER.test(text) && !rewritesExistingOpener(text, removedByHunk.get(hunk));
+    //
+    // #18640 — … and an opener that carries its members INLINE re-declares one
+    // too, when the same BLOCK removed a line declaring that same binding and
+    // the list did not grow. #16822's reading cannot see this line: an opener
+    // carrying members is not an opener-only line, by its own construction, so
+    // the population it left behind is every closed set DECLARED and re-spelled
+    // on one line — where the #16943 budget cannot reach either, because a
+    // `const` declaration names no key and `memberTellKind` answers `null` for
+    // it. The control set is the same edit spelled one member per line, which
+    // declines today; see `respellsExistingClosedSetBinding` for what bounds it
+    // and for why #17618's keyed subset test is deliberately NOT changed.
+    const opener =
+      CLOSED_SET_OPENER.test(text) &&
+      !rewritesExistingOpener(text, removedByHunk.get(hunk)) &&
+      !respellsExistingClosedSetBinding(text, removedHere);
     if (onContractSource && (opener || kind === 'T2')) {
       rows.push({ tell: 'T2', ...at, why: 'a new member of a closed set (z.enum / union / an `as const` array) — the accept set gains a value' });
       continue;
