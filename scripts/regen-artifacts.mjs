@@ -662,8 +662,10 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
   // actually made for any of these files. Each package's `TEST_DEBT` entry in
   // `scripts/check-type-check-coverage.mjs` graduated in the same change, so
   // each file below is now the ONLY record of its population anywhere in the
-  // tree. ⛔ `@objectstack/http-conformance` is deliberately absent: it did not
-  // graduate, keeps its per-package entry, and defines no generator.
+  // tree. EIGHT rows since 2026-09-17: `@objectstack/http-conformance` was
+  // deliberately absent while it had no sibling config and no generator, and
+  // the director ruling that gave it both (maintainer verbatim: 「同意」) is what
+  // closed the card at 8 of 8. Its row is the last of this block.
   {
     path: 'packages/mcp/test-typecheck-debt.json',
     gen: 'gen:test-typecheck-debt',
@@ -756,6 +758,22 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'that GAINED errors would enter the ledger as merge noise instead of as red. '
       + 'One error, in `src/transports/transports.test.ts` — see the `connector-rest` row directly above '
       + 'for why a one-entry ledger is the most exposed to a mid-merge recompute, not the least.',
+  },
+  {
+    path: 'packages/qa/http-conformance/test-typecheck-debt.json',
+    gen: 'gen:test-typecheck-debt',
+    owner: '@objectstack/http-conformance',
+    why:
+      'a SHRINK-ONLY ratchet — see `packages/plugins/plugin-approvals/test-typecheck-debt.json` '
+      + 'above; same generator, same per-package ledger, same reason a merge must never recompute '
+      + 'it: the half-merged tree is not the tree whose type errors this file records, so a file '
+      + 'that GAINED errors would enter the ledger as merge noise instead of as red. '
+      + 'The eighth and last of the card, and the one whose population is the MOST sensitive to the '
+      + 'tree it is measured on: 25 of its 27 errors exist only because the build config now inherits '
+      + "the root config's declared `lib`, which drops the DOM reading of `Response.json()` in favour "
+      + "of @types/node's undici one. A mid-merge recompute against a half-merged tsconfig would "
+      + 'report those 25 as repaired — a config-tier flip that looks exactly like somebody typing 25 '
+      + 'narrowings — and would rewrite the per-signature keys underneath with it.',
   },
   {
     path: 'packages/sdui-parser/objectui-lockstep.json',
