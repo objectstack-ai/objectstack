@@ -4,7 +4,7 @@
 
 feat(spec)!: a metric-family dashboard widget declares exactly ONE measure — `values` is bounded above on `metric` / `kpi` / `gauge` / `solid-gauge` / `bullet` (#17779; objectui#8894 ruling D, decision batch #119 item 4)
 
-Clause-②: yes (widening) — routing, not direction. The accept set NARROWS (that is this change). What makes the line `yes` is the other axis: the published surface GAINS one exported symbol, `checkDashboardWidgetMetricMeasureArity`, and a new exported symbol is the mechanical floor for in-seat contract review. Breaking-ness is carried by the **BREAKING** banner and the ADR-0087 disposition above, not by this line.
+Clause-②: yes (narrowing) — this diff BOTH narrows and widens, which is the shape this arm exists for. The accept set NARROWS (that is the change). What makes the value `yes` is the other axis: the published surface GAINS one exported symbol, `checkDashboardWidgetMetricMeasureArity`, and a new exported symbol is the mechanical floor for in-seat contract review.
 
 <!-- adr-0087: registered dashboard-widget-metric-family-multi-measure-refused -->
 
