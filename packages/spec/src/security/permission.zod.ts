@@ -75,6 +75,152 @@ const OBJECT_PERMISSION_KEY_ALIASES: Readonly<Record<string, string>> = {
 };
 
 /**
+ * The object-permission bit a permission VERB resolves to. Only the `allow*`
+ * capability bits are reachable from a verb: the super-user axes
+ * (`viewAllRecords` / `modifyAllRecords`) are grants a verb never names, and
+ * the depth axes (`readScope` / `writeScope`) are not booleans at all.
+ */
+export type ObjectPermissionVerbTarget =
+  | 'allowRead'
+  | 'allowCreate'
+  | 'allowEdit'
+  | 'allowDelete'
+  | 'allowExport'
+  | 'allowTransfer';
+
+/**
+ * A `can`-prefixed spelling of a bare verb already in
+ * {@link OBJECT_PERMISSION_KEY_ALIASES} — `canread` beside `read`, both landing
+ * on `allowRead`. Detected structurally (the `can`-stripped remainder is itself
+ * an alias onto the SAME target) rather than by a hand-kept list, so a future
+ * verb that merely begins with those three letters is not swallowed.
+ */
+function isCanPrefixedSpelling(key: string): boolean {
+  if (!key.startsWith('can')) return false;
+  const bare = key.slice(3);
+  return bare.length > 0 && OBJECT_PERMISSION_KEY_ALIASES[bare] === OBJECT_PERMISSION_KEY_ALIASES[key];
+}
+
+/**
+ * The permission VERB vocabulary — the closed set of verbs a predicate may name
+ * when it asks whether the acting subject holds a capability on an object, and
+ * the `allow*` bit each verb resolves to.
+ *
+ * ## Seeded, never transcribed
+ *
+ * The rows are DERIVED from {@link OBJECT_PERMISSION_KEY_ALIASES}' bare verbs —
+ * every alias key that lands on an `allow*` bit and is not a `can`-prefixed
+ * spelling of another one. Deriving rather than copying is the whole point: the
+ * alias table is what an author's mis-spelled permission KEY is corrected
+ * against, so a verb accepted here is a verb that table already recognises, and
+ * a row retired there (`restore` / `purge` left with the #12497 tombstones)
+ * leaves here in the same edit with no second place to forget. The derived set
+ * is pinned exactly in `permission.test.ts`; a change to the alias table that
+ * moves it is a decision to take, not drift to absorb.
+ *
+ * ## The one row that is NOT derived
+ *
+ * `import` → `allowCreate`. `ObjectPermission` has no `allowImport` bit and the
+ * alias table has no `import` row, so nothing to derive it from exists: it is
+ * the MAINTAINER'S OWN CHOICE, recorded in director batch #13 — importing rows
+ * is creating rows, and the create grant is what gates it. ⛔ It is not derived
+ * from ADR-0068, which contains no verb table at all and whose D4 defers
+ * capability-gating; citing that ADR for this row would attribute a decision to
+ * a document that does not carry it.
+ *
+ * ## Closed, and loudly so
+ *
+ * A verb outside this table is REFUSED by its consumer, never mapped to a
+ * nearest neighbour and never answered `false`: a predicate asking about a
+ * capability this platform does not model is an authoring mistake whose silent
+ * answer would be indistinguishable from a real denial.
+ *
+ * ⚠️ Read it through {@link resolveObjectPermissionVerb}, never by indexing it
+ * directly with author-supplied text — a plain record inherits `Object`'s own
+ * properties, so `OBJECT_PERMISSION_VERBS['toString']` answers with a function
+ * and a truthiness test on it says "granted".
+ */
+export const OBJECT_PERMISSION_VERBS: Readonly<Record<string, ObjectPermissionVerbTarget>> =
+  Object.freeze({
+    ...(Object.fromEntries(
+      Object.entries(OBJECT_PERMISSION_KEY_ALIASES).filter(
+        ([key, target]) => target.startsWith('allow') && !isCanPrefixedSpelling(key),
+      ),
+    ) as Record<string, ObjectPermissionVerbTarget>),
+    // Maintainer's own choice, director batch #13 — see the block above.
+    import: 'allowCreate',
+  });
+
+/**
+ * Every verb {@link OBJECT_PERMISSION_VERBS} accepts, sorted — the list a
+ * consumer prints when it refuses one, so the author is told the whole
+ * vocabulary instead of being asked to guess again.
+ */
+export const OBJECT_PERMISSION_VERB_NAMES: readonly string[] = Object.freeze(
+  Object.keys(OBJECT_PERMISSION_VERBS).sort(),
+);
+
+/**
+ * The `allow*` bit `verb` resolves to, or `undefined` when the verb is outside
+ * the vocabulary.
+ *
+ * The ONLY supported read of {@link OBJECT_PERMISSION_VERBS}: the own-property
+ * check is what keeps `toString`, `constructor` and `__proto__` from resolving
+ * to something truthy when the verb arrives from an authored expression.
+ */
+export function resolveObjectPermissionVerb(verb: string): ObjectPermissionVerbTarget | undefined {
+  return Object.hasOwn(OBJECT_PERMISSION_VERBS, verb) ? OBJECT_PERMISSION_VERBS[verb] : undefined;
+}
+
+/**
+ * Whether one effective object-permission entry grants `target`.
+ *
+ * ## Why this is not `permission[target] === true`
+ *
+ * The super-user axes are grants, and a reader that only looks at the named
+ * `allow*` bit answers `false` for a caller the enforcement door lets through —
+ * the `declared ≠ enforced` gap, pointed the dangerous way round: a predicate
+ * hiding an action from the one administrator who holds the power to use it.
+ * The fold below is the SAME fold the runtime's own answer is built from
+ * (`PermissionEvaluator.checkObjectPermission` in `@objectstack/plugin-security`
+ * — the read bypass on `viewAllRecords || modifyAllRecords`, the write bypass on
+ * `modifyAllRecords` alone, `export` as `grant ∧ read`), stated once here so
+ * every reader of an `/auth/me/permissions` entry gives the caller the same
+ * verdict the server's 403 would.
+ *
+ * Three cells are deliberate rather than incidental, and each is load-bearing:
+ *
+ * - **`allowCreate` has NO super-user bypass.** "Modify All Data" widens edit,
+ *   delete and transfer; it does not manufacture a create grant, and the
+ *   evaluator's bypass key set (edit/delete + the mapped destructive ops) is
+ *   what says so.
+ * - **`allowExport` is a CONJUNCTION, not a bit.** Export is `read ∧ grant`
+ *   (`export ⊆ list`), so a set granting export on an object the caller cannot
+ *   read grants nothing — and the super-user bits, which do not imply export,
+ *   still satisfy the read half.
+ * - **An ABSENT entry is `false`, never an error.** An object no permission set
+ *   mentions is an object with no grant; an effective map is allowed to omit it
+ *   exactly as it is allowed to carry an all-`false` entry, and the two must
+ *   read the same.
+ */
+export function objectPermissionGrants(
+  permission: EffectiveObjectPermission | undefined,
+  target: ObjectPermissionVerbTarget,
+): boolean {
+  if (!permission) return false;
+  const modifyAll = permission.modifyAllRecords === true;
+  const read = permission.allowRead === true || permission.viewAllRecords === true || modifyAll;
+  switch (target) {
+    case 'allowRead': return read;
+    case 'allowCreate': return permission.allowCreate === true;
+    case 'allowEdit': return permission.allowEdit === true || modifyAll;
+    case 'allowDelete': return permission.allowDelete === true || modifyAll;
+    case 'allowTransfer': return permission.allowTransfer === true || modifyAll;
+    case 'allowExport': return permission.allowExport === true && read;
+  }
+}
+
+/**
  * [#12840] The inert residue the #12497 retirement left in BUILT artifacts:
  * every `@objectstack/spec` 17.x the released toolchain shipped still carried
  * `z.boolean().default(false)` for both keys, so every artifact it built has

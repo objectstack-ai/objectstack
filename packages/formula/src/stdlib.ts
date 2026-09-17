@@ -2,19 +2,33 @@
  * ObjectStack standard CEL function library.
  *
  * Registered into the per-evaluation `Environment` by the CEL engine. All
- * functions are pure given a pinned `now` — that determinism is what makes
- * `objectstack build` artifacts byte-stable across runs.
+ * functions are pure given a pinned `now` and the pinned data this module is
+ * handed — that determinism is what makes `objectstack build` artifacts
+ * byte-stable across runs. ⛔ Nothing registered here may be handed a resolver,
+ * a lazy getter or any other callback into the host: a function that reaches
+ * outside its arguments and the data pinned at registration makes the same
+ * source evaluate to different values on two runs of the same build.
  *
  * Function naming intentionally avoids the `os.` prefix because cel-js binds
  * dotted names to receiver types. Instead, the `os` namespace in CEL holds
  * *data* (`os.user`, `os.org`, `os.env`) supplied by the caller's
- * {@link EvalContext}.
+ * {@link EvalContext}. The one RECEIVER-form function this library registers —
+ * `current_user.can(object, verb)` — uses that same binding rather than
+ * fighting it: see {@link registerPermissionPredicate}.
  */
 
 import type { Environment } from '@marcbachmann/cel-js';
 
-import type { EvalContext } from './types';
+import type { EvalContext, EvalPermissions } from './types';
 import { createEvalUser, type EvalUser } from '@objectstack/spec';
+// The verb vocabulary lives on the SECURITY subpath, where the permission
+// contract it is seeded from lives — not on the root barrel, which exports a
+// curated authoring surface and no domain tables.
+import {
+  objectPermissionGrants,
+  resolveObjectPermissionVerb,
+  OBJECT_PERMISSION_VERB_NAMES,
+} from '@objectstack/spec/security';
 
 /**
  * Calendar-day parts (y/m/d) of an instant *as seen in a timezone*
@@ -91,18 +105,138 @@ function addMonthsUtc(d: Date, n: number): Date {
 }
 
 /**
+ * What `current_user.can(object, verb)` is answered from: the acting subject
+ * this evaluation bound, and that subject's effective object permissions.
+ *
+ * Both halves are DATA, pinned when the environment is built. `subject` is the
+ * very object {@link buildScope} mounted under `current_user` (and its `user` /
+ * `ctx.user` / `os.user` aliases), carried here so the binding can tell a call
+ * ON the acting subject from a call on something else that happens to sit to
+ * the left of a dot.
+ */
+export interface PermissionBinding {
+  /**
+   * The canonical `EvalUser` this evaluation bound, or `undefined` when the
+   * evaluation carries no user at all (a parse-time environment, a system
+   * write). Compared by IDENTITY, never by shape.
+   */
+  readonly subject: unknown;
+  /** The subject's effective object permissions, or `undefined` when none were passed. */
+  readonly permissions: EvalPermissions | undefined;
+}
+
+/**
+ * Register `can` — the permission predicate — as a RECEIVER method, so the one
+ * authored spelling is `current_user.can(object, verb)`.
+ *
+ * ## Receiver-only, deliberately
+ *
+ * cel-js binds dotted names to receiver types, and a bare `can(object, verb)`
+ * is NOT registered: it keeps faulting (`found no matching overload for
+ * 'can(dyn, dyn)'`), which is the right answer — a bare call names no subject,
+ * and a permission question with no subject has no meaning. The name exists in
+ * the environment either way, so the publish gate's function-existence verdict
+ * (`firstUnknownFunctionCall`) reads a bare call as a call-FORM fault rather
+ * than an existence one, exactly as it already does for `split`.
+ *
+ * ## Every refusal is LOUD — there is no quiet answer
+ *
+ * The binding throws, and the engine reports the throw as
+ * `{ ok: false, error: { kind: 'runtime' } }`, for each of:
+ *
+ *  - **no permission data in the context.** ⛔ Never `true` (fail-open: an
+ *    action shown to someone who cannot use it, and worse, a section of data
+ *    revealed), ⛔ never a silent `false` (fail-shut: every gated element
+ *    disappears for everyone, indistinguishable from a correct denial, and the
+ *    author is told nothing). A context that was never given the data cannot
+ *    tell "denied" from "nobody passed it", so it says so.
+ *  - **a receiver that is not the acting subject.** `record.can(…)` reads as a
+ *    question about the record and would silently be answered about the user.
+ *  - **a verb outside the vocabulary.** `current_user.can('crm_lead', 'approve')`
+ *    is an author asking about a capability this platform does not model; the
+ *    refusal names the whole accepted vocabulary.
+ *  - **a non-string object or verb.**
+ *
+ * The ONE quiet answer is a real one: an object the effective map does not
+ * mention is an object with no grant, and answers `false` — the same answer an
+ * all-`false` entry gives, because they mean the same thing.
+ */
+export function registerPermissionPredicate(
+  env: Environment,
+  binding: PermissionBinding | undefined,
+): Environment {
+  return env.registerFunction(
+    'dyn.can(dyn, dyn): bool',
+    (receiver: unknown, object: unknown, verb: unknown): boolean => {
+      if (typeof object !== 'string' || object.length === 0) {
+        throw new Error(
+          'can(object, verb): `object` must be an object NAME (a non-empty string), e.g. ' +
+          "current_user.can('crm_lead', 'edit').",
+        );
+      }
+      if (typeof verb !== 'string' || verb.length === 0) {
+        throw new Error(
+          'can(object, verb): `verb` must be one of ' +
+          `${OBJECT_PERMISSION_VERB_NAMES.join(', ')} (a non-empty string).`,
+        );
+      }
+      const target = resolveObjectPermissionVerb(verb);
+      if (!target) {
+        throw new Error(
+          `can(object, verb): \`${verb}\` is not a permission verb. The accepted verbs are ` +
+          `${OBJECT_PERMISSION_VERB_NAMES.join(', ')}. A capability outside that list is not ` +
+          'modelled as an object permission, so no answer about it would mean anything.',
+        );
+      }
+      if (binding?.subject === undefined || receiver !== binding.subject) {
+        throw new Error(
+          'can(object, verb) answers about the ACTING SUBJECT and must be called on it: write ' +
+          "current_user.can('<object>', '<verb>') (the `user` / `ctx.user` / `os.user` aliases " +
+          'are the same object and work too). Calling it on anything else would answer a ' +
+          'question about the current user while reading as a question about the receiver.',
+        );
+      }
+      if (binding.permissions === undefined) {
+        throw new Error(
+          `can('${object}', '${verb}') cannot be answered: this evaluation context carries no ` +
+          'permission data. Pass `permissions` on the EvalContext — the `objects` map of the ' +
+          'published /auth/me/permissions response, object name -> EffectiveObjectPermission. ' +
+          'Refusing loudly is deliberate: answering `true` would show what the subject may not ' +
+          'have, and answering `false` would hide it from everyone with no way to tell that ' +
+          'apart from a real denial.',
+        );
+      }
+      const entry = Object.hasOwn(binding.permissions, object)
+        ? binding.permissions[object]
+        : undefined;
+      return objectPermissionGrants(entry, target);
+    },
+  );
+}
+
+/**
  * Register the ObjectStack standard library into a CEL environment.
  *
  * The `now` resolver is closed over so each call uses the pinned
- * `EvalContext.now` (or wall-clock fallback). Implementations are kept tiny
- * and dependency-free — they're the contract surface for AI authors and must
- * stay legible.
+ * `EvalContext.now` (or wall-clock fallback); `permissionBinding` is pinned the
+ * same way and for the same reason — see {@link PermissionBinding}.
+ * Implementations are kept tiny and dependency-free — they're the contract
+ * surface for AI authors and must stay legible.
+ *
+ * `can` is registered UNCONDITIONALLY, binding or not: whether a name exists in
+ * this environment is a fact about the platform, not about one call site's
+ * data. A conditional registration would make the publish gate's answer depend
+ * on which context happened to build the environment, so an authored predicate
+ * could pass the gate and be unknown at runtime — the very split this binding
+ * exists to close.
  */
 export function registerStdLib(
   env: Environment,
   now: () => Date,
   timezone = 'UTC',
+  permissionBinding?: PermissionBinding,
 ): Environment {
+  registerPermissionPredicate(env, permissionBinding);
   // `today()` / `daysFromNow()` / `daysAgo()` are calendar-day functions: they
   // resolve to the reference-tz calendar day expressed as a UTC-midnight Date
   // (ADR-0053 Phase 2 D1), never an instant carrying wall-clock time. For a
