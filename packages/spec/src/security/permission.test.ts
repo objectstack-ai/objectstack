@@ -8,6 +8,10 @@ import {
   type PermissionSet,
   type ObjectPermission,
   type FieldPermission,
+  OBJECT_PERMISSION_VERBS,
+  OBJECT_PERMISSION_VERB_NAMES,
+  objectPermissionGrants,
+  resolveObjectPermissionVerb,
 } from './permission.zod';
 import { ObjectStackDefinitionSchema } from '../stack.zod';
 
@@ -1081,5 +1085,125 @@ describe('[#6698] modifyAllRecords declares its bypass AND the limit of that byp
   it('discloses the platform write floor that survives on an owner-less object', () => {
     expect(description, `no surviving-floor disclosure found in: ${description}`)
       .toMatch(SURVIVING_FLOOR);
+  });
+});
+
+/**
+ * The permission VERB vocabulary (objectui#4421, maintainer ruling batch #147
+ * item 5, letter A).
+ *
+ * Two properties, and the second is why this block exists at all:
+ *
+ * 1. the table is DERIVED from `OBJECT_PERMISSION_KEY_ALIASES`' bare verbs, so
+ *    the two can never disagree about which verbs this platform recognises;
+ * 2. the derived result is PINNED exactly. A derivation with no pin absorbs an
+ *    alias-table edit silently — retire an alias and a verb leaves the closed
+ *    vocabulary with nothing red, which is a capability quietly disappearing
+ *    from every authored predicate that named it.
+ */
+describe('OBJECT_PERMISSION_VERBS — the closed verb vocabulary', () => {
+  it('is exactly the derived set, row for row', () => {
+    expect({ ...OBJECT_PERMISSION_VERBS }).toEqual({
+      // Derived — the bare verbs of OBJECT_PERMISSION_KEY_ALIASES.
+      read: 'allowRead',
+      create: 'allowCreate',
+      edit: 'allowEdit',
+      update: 'allowEdit',
+      write: 'allowEdit',
+      delete: 'allowDelete',
+      remove: 'allowDelete',
+      export: 'allowExport',
+      transfer: 'allowTransfer',
+      // NOT derived — the maintainer's own choice, director batch #13. Nothing
+      // to derive it from exists: there is no `allowImport` bit and no `import`
+      // alias row. ⛔ Not ADR-0068, which contains no verb table.
+      import: 'allowCreate',
+    });
+  });
+
+  it('withholds the `can`-prefixed spellings and the super-user aliases', () => {
+    // `canread` etc. are alias spellings of a verb already in the table; taking
+    // them too would put two names for one capability into an authored surface.
+    // `viewall` / `modifyall` name super-user AXES, which a verb never names.
+    for (const notAVerb of ['canread', 'cancreate', 'canedit', 'candelete',
+      'viewall', 'viewalldata', 'modifyall', 'modifyalldata']) {
+      expect(resolveObjectPermissionVerb(notAVerb), notAVerb).toBeUndefined();
+    }
+  });
+
+  it('withholds the retired lifecycle verbs — a verb may only name a bit the shape accepts', () => {
+    // `restore` / `purge` left the alias table with the #12497 tombstones. A
+    // vocabulary that still carried them would answer questions about bits that
+    // cannot be authored, and `false` would read as "you lack the grant".
+    expect(resolveObjectPermissionVerb('restore')).toBeUndefined();
+    expect(resolveObjectPermissionVerb('purge')).toBeUndefined();
+  });
+
+  it('resolves nothing for an inherited property', () => {
+    // A plain record inherits Object.prototype, so a direct index on
+    // author-supplied text answers `toString` with a function — truthy, and read
+    // by a caller as a grant. The own-property check in the resolver is the fix,
+    // and this is the pin that keeps a "simplification" back to `VERBS[verb]`
+    // from landing.
+    for (const inherited of ['toString', 'constructor', '__proto__', 'hasOwnProperty', 'valueOf']) {
+      expect(resolveObjectPermissionVerb(inherited), inherited).toBeUndefined();
+    }
+  });
+
+  it('publishes the whole vocabulary, sorted, for a refusal message to name', () => {
+    expect([...OBJECT_PERMISSION_VERB_NAMES]).toEqual(
+      ['create', 'delete', 'edit', 'export', 'import', 'read', 'remove', 'transfer', 'update', 'write'],
+    );
+  });
+});
+
+/**
+ * `objectPermissionGrants` — reading one effective entry the way the
+ * enforcement door reads it.
+ */
+describe('objectPermissionGrants — the fold, not the bare bit', () => {
+  it('answers the plain bits', () => {
+    expect(objectPermissionGrants({ allowRead: true }, 'allowRead')).toBe(true);
+    expect(objectPermissionGrants({ allowRead: true }, 'allowEdit')).toBe(false);
+    expect(objectPermissionGrants({ allowCreate: true }, 'allowCreate')).toBe(true);
+  });
+
+  it('folds the READ bypass across BOTH super-user bits', () => {
+    // `PermissionEvaluator.checkObjectPermission`: `permKey === 'allowRead' &&
+    // (viewAllRecords || modifyAllRecords)`. A reader that missed this hides a
+    // section from the one caller the server would have served.
+    expect(objectPermissionGrants({ viewAllRecords: true }, 'allowRead')).toBe(true);
+    expect(objectPermissionGrants({ modifyAllRecords: true }, 'allowRead')).toBe(true);
+  });
+
+  it('folds the WRITE bypass across modifyAllRecords ONLY', () => {
+    // "View All Data" is a read power and must never widen a write — the whole
+    // point of shipping the two bits separately.
+    expect(objectPermissionGrants({ modifyAllRecords: true }, 'allowEdit')).toBe(true);
+    expect(objectPermissionGrants({ modifyAllRecords: true }, 'allowDelete')).toBe(true);
+    expect(objectPermissionGrants({ modifyAllRecords: true }, 'allowTransfer')).toBe(true);
+    expect(objectPermissionGrants({ viewAllRecords: true }, 'allowEdit')).toBe(false);
+    expect(objectPermissionGrants({ viewAllRecords: true }, 'allowDelete')).toBe(false);
+  });
+
+  it('does NOT manufacture a create grant from a super-user bit', () => {
+    // The evaluator's bypass key set is edit/delete plus the mapped destructive
+    // ops; `allowCreate` is deliberately not in it.
+    expect(objectPermissionGrants({ modifyAllRecords: true }, 'allowCreate')).toBe(false);
+    expect(objectPermissionGrants({ viewAllRecords: true }, 'allowCreate')).toBe(false);
+  });
+
+  it('treats export as `grant ∧ read`', () => {
+    expect(objectPermissionGrants({ allowExport: true }, 'allowExport')).toBe(false);
+    expect(objectPermissionGrants({ allowExport: true, allowRead: true }, 'allowExport')).toBe(true);
+    // The super-user bits satisfy the read half but never the grant half.
+    expect(objectPermissionGrants({ allowExport: true, viewAllRecords: true }, 'allowExport')).toBe(true);
+    expect(objectPermissionGrants({ modifyAllRecords: true }, 'allowExport')).toBe(false);
+  });
+
+  it('reads an ABSENT entry and an all-false entry the same way', () => {
+    // An object no permission set mentions is an object with no grant.
+    expect(objectPermissionGrants(undefined, 'allowRead')).toBe(false);
+    expect(objectPermissionGrants({}, 'allowRead')).toBe(false);
   });
 });

@@ -661,6 +661,7 @@ import {
   EXIT_PREREQUISITE_NOT_MET,
   H51_SHA_MIN_HEX,
   PROXY_FLAG,
+  RELEASE_COMMENT_MARKER,
   SWEEP_REPO_SHAPE,
   branchNameTarget,
   closingKeywordTargets,
@@ -770,6 +771,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#16833: an UNJUDGED refusal names the CHANNEL that answered, what it answered, and which carrier': 30,
   '#18456: the `--pair` input record — the same block on every exit, so two runs that disagree can be diffed': 38,
   '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 16,
+  '#18719: a RETRACTED claim leaves the pool — a withdrawn claim never governs': 36,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -780,8 +782,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // effect, and once more by the one #17149 adds, by the one #17098 adds, by the
 // one #17915 adds, by the one #17959 adds, by the one #18042 adds, and by the
 // one #18174 adds, and by the one #18141 adds, and by the one #17919 adds, and
-// by the one #16833 adds, and by the one #18456 adds.
-const SELF_TEST_BATTERY_FLOOR = 28;
+// by the one #16833 adds, and by the one #18456 adds, and by the one #18719
+// adds.
+const SELF_TEST_BATTERY_FLOOR = 29;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1502,6 +1505,272 @@ function applicableCorrection(commentRows, pool) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// #18719 — a RETRACTED claim leaves the pool.
+//
+// The pool was every comment matching `CLAIM_COMMENT_MARKER`, ranked by
+// recency. A RETRACTION carries no `Claim:` line of its own, so it was never IN
+// the pool and could not remove the claim it retracts. Measured on #18373:
+// `os-bill`'s claim 5717315121 (15:53:24Z) was withdrawn by the same seat 84
+// seconds later (5717333576, 15:54:48Z, assignee cleared in the same stroke),
+// and the selector went on naming the withdrawn record GOVERNING — pointing at
+// `claude/issue-18373-include-bare-directory-provenance`, a branch origin does
+// not have — while the seat actually working the card (`os-litant`,
+// 5717143021, the card's only assignee) read SUPERSEDED. An arbiter that names
+// the WRONG owner is worse than one that names none, because it looks like it
+// answered.
+//
+// ⛔ The repair is NOT a re-sort: every ordering of a pool that still contains
+// the withdrawn record picks a withdrawn record, and the next retraction is
+// exactly as invisible. What changes is MEMBERSHIP — the selector READS the
+// retraction.
+//
+// ## One predicate, two channels — the shape H4's blocker reader already has
+//
+// A claim leaves the pool when a LATER comment BY THE SAME AUTHOR retracts it.
+// That one sentence is read through the two channels the protocol itself
+// writes, exactly as the sibling reads a block through a DIRECTIVE
+// (`Blocked-by:`) and through PROSE anchors (`PROSE_BLOCKER_ANCHORS`):
+//
+//   directive — the `Release:` line AGENTS.md and SKILL.md already name as the
+//               act that takes a card out of a seat's hands 「释放是显式动作:
+//               让卡离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一
+//               任重新认领。」 It needs no id, because it is a statement about
+//               its own author: it retracts that author's OLDER claims.
+//   prose     — a line carrying a retraction anchor AND NAMING the claim by its
+//               comment id. The id is what makes the prose channel safe: it
+//               says WHICH record is withdrawn instead of inferring one from a
+//               verb.
+//
+// ⛔ No new protocol text is declared here. `Release:` is already the act, and
+// `RELEASE_COMMENT_MARKER` is IMPORTED rather than restated for
+// `CLAIM_COMMENT_MARKER`'s reason — two readers of one thread must not drift.
+// Whether the protocol should REQUIRE the `Release:` spelling of a retraction,
+// so the prose channel could be retired, is a GOVERNED-text question: it is
+// raised on the card and ⛔ not answered from here.
+//
+// ## Why SAME AUTHOR is load-bearing, not tidiness
+//
+// Only the seat that wrote a claim can withdraw it; anyone else's line is
+// DISCUSSION of a retraction, which is not one. That is not hypothetical on
+// this very thread: `os-litant` — the OTHER seat — wrote 「那条已撤回的
+// `5717315121`」 (5717775707) and 「now names a retracted claim … selects
+// comment 5717315121」 (5717738051). Both lines carry a retraction anchor AND
+// the claim's id. Without the author test each of them retracts another seat's
+// claim, and the reader becomes a way for any participant to void any owner's
+// record by describing it.
+//
+// An UNREADABLE author on either side retracts NOTHING. Fail-closed is the
+// direction that leaves the existing record standing, and it is the only
+// direction that cannot manufacture a retraction out of a missing field.
+//
+// ⚠️ Under one shared GitHub identity the author test is VACUOUS — every seat
+// writes as the same login. That is the fleet's accepted blind spot (AGENTS.md
+// 「per-seat identities are not introduced」), stated here rather than repaired
+// here: this reader cannot invent an identity the API does not carry.
+// ---------------------------------------------------------------------------
+
+/**
+ * The prose spellings that RETRACT a claim, matched case-insensitively against
+ * a line whose markdown decoration has been removed — the same judgement
+ * `PROSE_BLOCKER_ANCHORS` makes one file over, for the same reason: authors
+ * format these lines, and a decorated one means what the bare one means.
+ *
+ * All three Chinese spellings are MEASURED, not guessed: 「撤回」 opens the
+ * #18373 retraction and 「作废」 carries its second sentence
+ * (「**评论 `5717315121` 作废**」). The two English stems cover the inflections
+ * (`retracts`/`retracted`/`retraction`, `withdraws`/`withdrawn`).
+ *
+ * ⛔ Bare `release` is deliberately ABSENT, exactly as bare `blocking` is from
+ * the blocker anchors: in THIS repository a "release" is overwhelmingly a
+ * VERSION release (Prime Directive #15), so admitting the word would read a
+ * seat discussing the release train as a seat giving up a card. The `Release:`
+ * DIRECTIVE is read by the other channel, where the colon is the discriminator.
+ *
+ * ⛔ `supersede` is absent too, and for the opposite reason: supersession is
+ * what the recency rule ALREADY does, and a claim that supersedes another is a
+ * claim, not a retraction. Reading the word here would collapse two states the
+ * record keeps apart.
+ *
+ * ## ⛔ The anchor OPENS the line — it is not searched for inside it (MEASURED)
+ *
+ * `PROSE_BLOCKER_ANCHORS` asks `includes`, and correctly: that reader NOMINATES
+ * candidates which it then resolves with a real read, so a sentence merely
+ * discussing a block costs one request and no verdict. This reader DECIDES
+ * ownership with nothing downstream to catch it, so it anchors.
+ *
+ * ⚠️ The cost of the loose form was measured on the very thread this rule comes
+ * from, and it inverts the rule's purpose. `os-litant` — the seat whose claim
+ * this reading has to PROTECT — wrote, in its own dev report (5717738051), the
+ * line that REPORTED this defect:
+ *
+ *   「"question": "The governing-claim instrument now names a retracted claim.
+ *     … marks my dispatch's 5717143021 as SUPERSEDED …"」
+ *
+ * Same author, later than the claim, an anchor and the claim's own id on one
+ * line. Under `includes` that line RETRACTS the claim it is defending, and the
+ * comment that filed the card silently voids the ownership the card exists to
+ * restore. ⇒ the anchor must be what the line is ABOUT, which is what opening
+ * it means. `os-litant`'s 5717775707 「⚠️ 但它暴露了一个工具缺陷…那条已撤回的
+ * `5717315121`…」 is the same shape from the other direction and is excluded
+ * twice over — by the author test and by this one.
+ *
+ * ⚠️ The accepted direction is UNDER-reading: a retraction written mid-sentence
+ * leaves the claim standing, which is exactly today's behaviour, and the remedy
+ * is the one line the protocol already names. Reading it would mean guessing
+ * which of two seats a sentence is about — the call `claimedBranches` makes for
+ * an unrecognised branch spelling, for its reason.
+ */
+export const RETRACTION_PROSE_ANCHORS = Object.freeze([
+  'retract',
+  'withdraw',
+  '撤回',
+  '撤销',
+  '作废',
+]);
+
+/**
+ * How a comment id is spelled inside a line — a run of digits long enough to be
+ * one, with no digit on either side.
+ *
+ * ⛔ Not a dynamically built regex per claim: the ids are COMPARED as strings
+ * after the scan, so nothing here interpolates a value into a pattern and the
+ * `g` flag lives on one frozen literal that only `matchAll` reads.
+ */
+const COMMENT_ID_SCAN = /(?<!\d)\d{6,}(?!\d)/gu;
+
+/**
+ * What a line SAYS, with the decoration an author puts in front of it removed:
+ * markdown emphasis anywhere, then every leading character that is neither a
+ * letter nor a digit — the blockquote and list markers the sibling anchors
+ * already tolerate, plus the sigils this fleet writes (「🚨 」, 「- ⚠️ 」, 「⇒ 」).
+ *
+ * ⛔ The strip is LEADING-only and stops at the first letter or digit, so it can
+ * never reach inside a sentence to promote a word into the opening position: a
+ * line beginning `"question": "The governing-claim…` still begins with
+ * `question`, and a timeline row beginning `15:40:44Z` still begins with `15`.
+ */
+function undecorateRetractionLine(line) {
+  return String(line ?? '').replace(/[`*_]/gu, '').replace(/^[^\p{L}\p{N}]+/u, '');
+}
+
+/**
+ * The login that wrote one row, or `null` when the row carries none.
+ *
+ * `null` is a REFUSAL, never a wildcard: every comparison below fails closed on
+ * it, so a row shape that drops `user` can only ever leave claims standing.
+ */
+function rowAuthor(row) {
+  const login = row?.user?.login;
+  return typeof login === 'string' && login.trim() !== '' ? login : null;
+}
+
+/**
+ * Is `candidate` LATER than `claim` on this thread?
+ *
+ * The file's one recency rule, in its strict form: `created_at` decides when
+ * both stamps read and differ, and a tie or an unreadable stamp falls back to
+ * THREAD ORDER. ⛔ Never `>=` here — a comment is not later than itself, and a
+ * retraction posted BEFORE the claim it names retracts nothing.
+ */
+function laterOnThread(candidate, claim) {
+  return candidate.stamp !== null && claim.stamp !== null && candidate.stamp !== claim.stamp
+    ? candidate.stamp > claim.stamp
+    : candidate.index > claim.index;
+}
+
+/**
+ * WHICH channel, if either, makes this comment a retraction of the claim whose
+ * id is `claimId` — or `null` when it is not one.
+ *
+ * @param {{ body?: string }} row
+ * @param {string|null} claimId — the claim comment's id as a string; `null`
+ *   when the row carries no readable id, which closes the PROSE channel (a
+ *   retraction that cannot name its target is not read as one) and leaves the
+ *   directive channel open (it names its target by authorship, not by id).
+ * @returns {string|null} the channel, as the sentence the record prints.
+ */
+function retractionChannel(row, claimId) {
+  const body = String(row?.body ?? '');
+  if (RELEASE_COMMENT_MARKER.test(body)) {
+    return 'the protocol `Release:` line — the act that takes a card out of a seat\'s hands';
+  }
+  if (claimId === null) return null;
+  for (const raw of body.split(/\r?\n/)) {
+    const line = undecorateRetractionLine(raw);
+    const lower = line.toLowerCase();
+    // ⛔ OPENS the line — see `RETRACTION_PROSE_ANCHORS` for the measured line
+    // that `includes` would have read as a retraction of the claim it defends.
+    if (!RETRACTION_PROSE_ANCHORS.some((anchor) => lower.startsWith(anchor))) continue;
+    for (const hit of line.matchAll(COMMENT_ID_SCAN)) {
+      if (hit[0] === claimId) return `a retraction line OPENING with the act and naming the claim by comment id (${claimId})`;
+    }
+  }
+  return null;
+}
+
+/** The rule the pool's MEMBERSHIP is judged by, written out once and PRINTED. */
+export const CLAIM_RETRACTION_RULE =
+  'A claim LEAVES the pool when a LATER comment BY THE SAME AUTHOR retracts it, read through two '
+  + 'channels: the protocol `Release:` directive (no id needed — it retracts its own author\'s older '
+  + 'claims) and a prose line that OPENS with the retraction act AND names the claim by comment id. ⛔ Never a DIFFERENT '
+  + 'author\'s line, ⛔ never a line older than the claim it names, and ⛔ never an unreadable author '
+  + 'on either side. A retracted claim is listed RETRACTED with the retracting comment id — ⛔ never '
+  + 'SUPERSEDED, ⛔ never dropped from the listing.';
+
+/**
+ * Every claim comment on this thread that a LATER comment RETRACTED, keyed by
+ * the claim ROW itself.
+ *
+ * ⭐ ONE derivation, for `claimCarrierSelection`'s reason: the membership test
+ * and the sentence that explains a rejection read the same map, so the pool and
+ * the record cannot describe two different retractions.
+ *
+ * The retractor reported is the FIRST one in thread order: a claim withdrawn
+ * twice was withdrawn when it was withdrawn, and naming the later mention would
+ * date the act wrongly.
+ *
+ * @param {{ id?: number|string, body?: string, created_at?: string,
+ *   user?: { login?: string } }[]|null} commentRows
+ * @returns {Map<object, { id: string, author: string, at: string, channel: string }>}
+ */
+export function claimRetractions(commentRows) {
+  const rows = Array.isArray(commentRows) ? commentRows : [];
+  const indexed = rows.map((row, index) => {
+    const parsed = Date.parse(row?.created_at ?? '');
+    return {
+      row,
+      index,
+      stamp: Number.isFinite(parsed) ? parsed : null,
+      author: rowAuthor(row),
+    };
+  });
+  const out = new Map();
+  for (const claim of indexed) {
+    if (!CLAIM_COMMENT_MARKER.test(String(claim.row?.body ?? ''))) continue;
+    // Fail closed, twice: an unattributable claim cannot be matched against an
+    // author, and an unattributable candidate cannot be the seat that wrote it.
+    if (claim.author === null) continue;
+    const rawId = claim.row?.id;
+    const claimId = rawId === null || rawId === undefined || String(rawId) === '' ? null : String(rawId);
+    for (const candidate of indexed) {
+      if (candidate.row === claim.row) continue;
+      if (candidate.author === null || candidate.author !== claim.author) continue;
+      if (!laterOnThread(candidate, claim)) continue;
+      const channel = retractionChannel(candidate.row, claimId);
+      if (channel === null) continue;
+      out.set(claim.row, {
+        id: String(candidate.row?.id ?? '(no id)'),
+        author: candidate.author,
+        at: candidate.row?.created_at ?? '(no readable date)',
+        channel,
+      });
+      break;
+    }
+  }
+  return out;
+}
+
 /** The key as prose, for the sentences above — declared once, beside the regex that reads it. */
 /**
  * The rule that picks the declaration limb's CARRIER, written out once.
@@ -1516,7 +1785,8 @@ export const CLAIM_SELECTION_RULE =
   + 'AND whose `Branch:` line parses at least one protocol-shaped branch (newest by `created_at`; an '
   + 'unreadable stamp or a tie falls back to thread order, later row wins). The pool is every claim '
   + 'comment sharing that `created_at`; when NO claim names a branch at all, every claim comment is '
-  + 'the pool. ⛔ Not earliest, ⛔ not a session match, ⛔ not the one whose body mentions the key.';
+  + 'the pool. ⛔ Not earliest, ⛔ not a session match, ⛔ not the one whose body mentions the key. '
+  + `MEMBERSHIP comes first: ${CLAIM_RETRACTION_RULE}`;
 
 /**
  * WHICH claim comment this reading is built from, and which it is not — the
@@ -1543,23 +1813,45 @@ export const CLAIM_SELECTION_RULE =
 export function claimCarrierSelection(commentRows) {
   const rule = CLAIM_SELECTION_RULE;
   if (!Array.isArray(commentRows)) {
-    return { readable: false, rule, claims: [], pool: [], governing: null, malformed: null, rejected: [] };
+    return {
+      readable: false, rule, claims: [], live: [], retracted: new Map(),
+      pool: [], governing: null, malformed: null, rejected: [],
+    };
   }
-  const governance = claimGovernance(commentRows);
+  // ⛔ MEMBERSHIP before recency (#18719). A withdrawn claim is not a stale
+  // candidate to be out-ranked — it is not a candidate. Governance is resolved
+  // over the thread with the retracted claims REMOVED, so the newest-branch
+  // rule can never land on a record its own author has taken back, and so the
+  // `malformed` reading below is about a LIVE claim rather than a dead one.
+  const retracted = claimRetractions(commentRows);
+  const governance = claimGovernance(commentRows.filter((row) => !retracted.has(row)));
+  // ⭐ The full claim listing KEEPS the retracted rows: the record names them
+  // RETRACTED below. A pool that silently shrank would replace one invisible
+  // fact with another.
   const claims = commentRows.filter((row) => CLAIM_COMMENT_MARKER.test(String(row?.body ?? '')));
+  const live = claims.filter((row) => !retracted.has(row));
   const governing = governance.governing;
-  const matched = governing ? claims.filter((row) => (row?.created_at ?? null) === governing.createdAt) : [];
-  const pool = governing && matched.length > 0 ? matched : claims;
+  const matched = governing ? live.filter((row) => (row?.created_at ?? null) === governing.createdAt) : [];
+  const pool = governing && matched.length > 0 ? matched : live;
   const rejected = claims
     .filter((row) => !pool.includes(row))
-    .map((row) => ({
-      row,
-      reason:
-        `a SUPERSEDED claim — it is not the newest claim that parses a branch, so it is not the `
-        + `governing claim (this one is stamped ${row?.created_at ?? 'with no readable date'}; the `
-        + `governing claim is stamped ${governing?.createdAt ?? 'unreadably'})`,
-    }));
-  return { readable: true, rule, claims, pool, governing, malformed: governance.malformed, rejected };
+    .map((row) => {
+      const gone = retracted.get(row);
+      return {
+        row,
+        reason: gone
+          ? `RETRACTED — comment ${gone.id} at ${gone.at}, by the same author (\`${gone.author}\`), `
+            + `takes it back via ${gone.channel}. ⛔ NOT superseded: a withdrawn claim is not a `
+            + `candidate for governance at all, whatever its date`
+          : `a SUPERSEDED claim — it is not the newest LIVE claim that parses a branch, so it is not `
+            + `the governing claim (this one is stamped ${row?.created_at ?? 'with no readable date'}; `
+            + `the governing claim is stamped ${governing?.createdAt ?? 'unreadably'})`,
+      };
+    });
+  return {
+    readable: true, rule, claims, live, retracted,
+    pool, governing, malformed: governance.malformed, rejected,
+  };
 }
 
 const CLAUSE2_CORRECTION_KEY_TEXT = 'Clause-②-correction';
@@ -1644,7 +1936,12 @@ export function cardDeclaration(commentRows, { card = null } = {}) {
   // names a branch, every claim-marked comment is still a claim carrier and is
   // read, so a claim written without a branch cannot make the declaration
   // invisible. Both sets come from the selection above.
-  const claimRows = selection.claims;
+  // ⛔ The LIVE claims, never the full listing (#18719): a retracted claim is
+  // not a carrier, so a thread whose every claim was withdrawn owes the claim
+  // comment (`absent`) rather than a line on a record nobody stands behind
+  // (`missing`). The not-read state this file already has, ⛔ not a fabricated
+  // carrier.
+  const claimRows = selection.live;
   const pool = selection.pool;
   // WHICH comment id a remedy printed below may name, resolved from the SAME
   // pool the readings are built from and from nowhere else (#17919). It rides
@@ -5030,10 +5327,22 @@ export function newestRow(rows) {
   return best?.row ?? null;
 }
 
-/** `<id> at <created_at>` — one row named the way every field here names one. */
+/**
+ * `<id> at <created_at> by <login>` — one row named the way every field here
+ * names one.
+ *
+ * ⭐ The LOGIN is part of the name (#18719). The card's assignee is the LABEL
+ * face of ownership and the governing claim is the SELECTOR face; on #18373
+ * they disagreed for hours and nothing printed the two side by side, so the
+ * contradiction had to be reconstructed by hand. ⚠️ The assignee itself is ⛔
+ * not read on this path — this block states the selector face and says whose
+ * comment it is, which is the half this record can buy without a new request.
+ */
 function namedRow(row) {
   if (!row) return 'none';
-  return `${String(row?.id ?? '(no id)')} at ${row?.created_at ?? '(no readable date)'}`;
+  const login = row?.user?.login;
+  const by = typeof login === 'string' && login.trim() !== '' ? `\`${login}\`` : '(no readable author)';
+  return `${String(row?.id ?? '(no id)')} at ${row?.created_at ?? '(no readable date)'} by ${by}`;
 }
 
 /** What `readClause2Line` read out of one body, stated as an INPUT. */
@@ -5103,7 +5412,14 @@ export function pairInputRecord(pair) {
       + `${selection.malformed.createdAt ?? '(no readable date)'}) parses ZERO branches, so governance `
       + 'is unresolvable and no declaration is read from any comment (state `claim-branch-unparsed`)';
   } else if (pool.length === 0) {
-    out['claim.selected'] = 'none — no comment on this thread carries a line beginning `Claim:`';
+    // Two different facts, and ⛔ never one sentence: a thread nobody claimed
+    // owes a claim comment; a thread whose every claim was WITHDRAWN owes a
+    // fresh one from whoever picks the card up. Saying the first about the
+    // second would report the record the seats wrote as a record they did not.
+    out['claim.selected'] = (selection.claims ?? []).length === 0
+      ? 'none — no comment on this thread carries a line beginning `Claim:`'
+      : `none — all ${selection.claims.length} claim comment(s) on this thread are RETRACTED (listed `
+        + 'below), so there is no carrier and ⛔ none is fabricated from a withdrawn record';
   } else {
     out['claim.selected'] = [
       `${pool.length} comment(s) in the pool`,
@@ -7414,6 +7730,149 @@ export async function selfTest() {
   t('…while a STRONGER grade still decides, so a stray `Part of` beside a keyword is not a tie', deliveredCardNumber(PIN_PULL(`Fixes #${PIN_CARD}\n\npart of #4444 already landed`)).card === PIN_CARD);
   t('⛔ CONTROL: the ranking belongs to `deliveryEvidence` -- every grade it answers is ranked here, none invented', DELIVERY_EVIDENCE_PRECEDENCE.every((kind) => deliveryEvidenceNote(kind) !== 'evidence unread') && new Set(DELIVERY_EVIDENCE_PRECEDENCE).size === DELIVERY_EVIDENCE_PRECEDENCE.length);
   t('…and it is ranked in the order that function applies, measured pair by pair', DELIVERY_EVIDENCE_PRECEDENCE.indexOf(deliveryEvidence(PIN_PULL(`Fixes #1\nPart of #2`), '1')) < DELIVERY_EVIDENCE_PRECEDENCE.indexOf(deliveryEvidence(PIN_PULL(`Fixes #1\nPart of #2`), '2')) && DELIVERY_EVIDENCE_PRECEDENCE.indexOf('part-of') < DELIVERY_EVIDENCE_PRECEDENCE.indexOf('branch-name'));
+
+  // -- #18719: a RETRACTED claim leaves the pool -----------------------------
+  //
+  // The pool used to be closed under addition: a `Claim:` comment entered it
+  // and nothing ever took one out, so the withdrawal that the protocol calls an
+  // explicit act was the one act the arbiter could not see. These cases pin the
+  // MEMBERSHIP rule and its three shapes, each against the control that makes
+  // the shape a reading rather than a coincidence.
+  battery('#18719: a RETRACTED claim leaves the pool — a withdrawn claim never governs');
+
+  // The #18373 thread, replayed OFFLINE and ⛔ never re-graded: that card is
+  // `needs-user-decision` and another seat's. Ids, stamps and logins are the
+  // REAL ones; each body carries the load-bearing LINES of the real comment,
+  // extracted from the REST rows rather than retyped — so a case here fails
+  // when the reader changes, ⛔ never when a transcription slipped.
+  const RTX_18373 = [
+  {
+    // the triage comment — no `Claim:` line, so never a pool candidate
+    id: 5716318188,
+    created_at: '2026-09-17T14:45:28Z',
+    user: { login: 'os-sam' },
+    body: '**Triage:`pm:queue` · `priority:p1` · `domain:spec` · 类型 Bug · 摘 `finding`** · 2026-09-17T14:45Z · 分诊席 #6015 · R+275',
+  },
+  {
+    // `os-litant` — the claim the card is actually being worked on, and the card's only assignee
+    id: 5717143021,
+    created_at: '2026-09-17T15:40:44Z',
+    user: { login: 'os-litant' },
+    body: [
+      'Claim: PM loop round 2026-09-17 R1',
+      'Session: `session_01LvwGppdonww4zGLWZo5rho`',
+      'Branch: `claude/issue-18373-type-source-resolution-bare-dir-include`',
+      'Clause-②: no',
+    ].join('\n'),
+  },
+  {
+    // `os-bill` — claimed 13 minutes later, and withdrawn 84 seconds after that
+    id: 5717315121,
+    created_at: '2026-09-17T15:53:24Z',
+    user: { login: 'os-bill' },
+    body: [
+      'Claim: PM loop round 8',
+      'Session: `session_01JbZnqu8bt6YqfJsr9vaFb3`',
+      'Branch: `claude/issue-18373-include-bare-directory-provenance`',
+      'Clause-②: no',
+    ].join('\n'),
+  },
+  {
+    // THE RETRACTION — no `Claim:` line of its own, which is why the pool could not see it
+    id: 5717333576,
+    created_at: '2026-09-17T15:54:48Z',
+    user: { login: 'os-bill' },
+    body: '🚨 **撤回上一条认领(`5717315121`)—— 本卡已由 `os-litant` 在先认领,本席晚了 13 分钟。** `domain:spec` seat 2(`session_01JbZnqu8bt6YqfJsr9vaFb3`,座位贴 #18549)。⏱️ 本条读数取自同一动作:2026-09-17T15:54Z。',
+  },
+  {
+    // `os-litant`'s report line: an anchor and its OWN claim id, mid-line — the `includes` trap
+    id: 5717738051,
+    created_at: '2026-09-17T16:22:40Z',
+    user: { login: 'os-litant' },
+    body: '      "question": "The governing-claim instrument now names a retracted claim. check-clause2-carriers --pair 18708 (exit 0) selects comment 5717315121 as governing and marks my dispatch\'s 5717143021 as SUPERSEDED, because the retraction 5717333576 carries no `Claim:` line and so is not in the pool. Is that worth a rule change?",',
+  },
+  {
+    // `os-litant` describing the retraction: an anchor, another seat's claim id — shape (3)
+    id: 5717775707,
+    created_at: '2026-09-17T16:25:37Z',
+    user: { login: 'os-litant' },
+    body: '- ⚠️ 但它暴露了一个**工具缺陷**:`check-clause2-carriers --pair 18708` 仍机械地把**那条已撤回的** `5717315121` 选为 governing claim —— 因为撤回评论不带 `Claim:` 行,不在候选池里。**本席另行立卡**,⛔ 不在本卡处理。',
+  },
+  ];
+  const RTX_LIVE_CLAIM = 5717143021;
+  const RTX_WITHDRAWN = 5717315121;
+  const RTX_RETRACTION = 5717333576;
+  const RTX_LIVE_BRANCH = 'claude/issue-18373-type-source-resolution-bare-dir-include';
+  const RTX_GHOST_BRANCH = 'claude/issue-18373-include-bare-directory-provenance';
+  const RTX_AFTER = claimCarrierSelection(RTX_18373);
+  // ⛔ The BEFORE leg is the reading `main` takes, produced by REMOVING the
+  // retraction rather than by describing it: the same rows, minus the one
+  // comment the old pool could not see.
+  const RTX_BEFORE = claimCarrierSelection(RTX_18373.filter((r) => r.id !== RTX_RETRACTION));
+  const RTX_REASON = (sel, id) => sel.rejected.find((r) => r.row.id === id)?.reason ?? '';
+  const RTX_RECORD = (rows) => {
+    const rec = pairInputRecord({ pr: 18708, card: 18373, cardComments: rows, headSha: 'offline' });
+    const flat = (v) => (Array.isArray(v) ? v.join('\n') : String(v ?? ''));
+    return { selected: flat(rec['claim.selected']), rejected: flat(rec['claim.rejected']), rule: flat(rec['claim.rule']) };
+  };
+
+  t('⭐ the #18373 counterfactual, AFTER: the pool is the LIVE claimant\'s claim alone', RTX_AFTER.pool.length === 1 && RTX_AFTER.pool[0].id === RTX_LIVE_CLAIM, JSON.stringify(RTX_AFTER.pool.map((r) => r.id)));
+  t('…and the branch it names is the ONE ref origin actually has', (RTX_AFTER.governing?.branches ?? []).join() === RTX_LIVE_BRANCH);
+  t('…while the branch the withdrawn claim named — absent from origin — governs nothing', !(RTX_AFTER.governing?.branches ?? []).includes(RTX_GHOST_BRANCH));
+  t('the withdrawn claim is listed RETRACTED, naming the comment that took it back', RTX_REASON(RTX_AFTER, RTX_WITHDRAWN).startsWith('RETRACTED') && RTX_REASON(RTX_AFTER, RTX_WITHDRAWN).includes(String(RTX_RETRACTION)));
+  t('⛔ …never as SUPERSEDED: a withdrawn record and an out-ranked one are two different facts', !/a SUPERSEDED claim/.test(RTX_REASON(RTX_AFTER, RTX_WITHDRAWN)));
+  t('⛔ …and never DROPPED: the full claim listing still carries both records', RTX_AFTER.claims.length === 2 && RTX_AFTER.claims.some((r) => r.id === RTX_WITHDRAWN));
+  t('…and the LIVE claim is no longer rejected at all', RTX_REASON(RTX_AFTER, RTX_LIVE_CLAIM) === '');
+  t('⛔ CONTROL — the #18373 counterfactual, BEFORE: drop the retraction and the withdrawn claim governs again', RTX_BEFORE.pool.length === 1 && RTX_BEFORE.pool[0].id === RTX_WITHDRAWN && (RTX_BEFORE.governing?.branches ?? []).join() === RTX_GHOST_BRANCH);
+  t('⛔ …and in that reading the real claimant is the one marked SUPERSEDED — the defect, replayed', /a SUPERSEDED claim/.test(RTX_REASON(RTX_BEFORE, RTX_LIVE_CLAIM)));
+  t('⭐ the two faces side by side: the record NAMES the author the pool selected', RTX_RECORD(RTX_18373).selected.includes('os-litant') && !RTX_RECORD(RTX_18373).selected.includes('os-bill'));
+  t('⛔ CONTROL: the BEFORE record named the other seat, which is how the contradiction went unread', RTX_RECORD(RTX_18373.filter((r) => r.id !== RTX_RETRACTION)).selected.includes('os-bill'));
+  t('the printed RULE carries the membership half, so two runs are comparable on it', RTX_RECORD(RTX_18373).rule.includes(CLAIM_RETRACTION_RULE) && CLAIM_SELECTION_RULE.includes(CLAIM_RETRACTION_RULE));
+
+  // ⚠️ The measured trap, and the reason the anchor OPENS a line instead of
+  // being searched for inside one. Both lines below are real bytes off this
+  // thread; the first is the report that FILED this defect.
+  const RTX_OWN_REPORT = RTX_18373.find((r) => r.id === 5717738051);
+  const RTX_DESCRIPTION = RTX_18373.find((r) => r.id === 5717775707);
+  t('⛔ a seat REPORTING the defect does not commit it — an anchor and its own claim id, mid-line', !claimRetractions(RTX_18373).has(RTX_18373.find((r) => r.id === RTX_LIVE_CLAIM)));
+  t('⛔ …and the author test alone would NOT have saved it: that line is the claim\'s OWN author', RTX_OWN_REPORT.user.login === RTX_18373.find((r) => r.id === RTX_LIVE_CLAIM).user.login && /retract/i.test(RTX_OWN_REPORT.body) && RTX_OWN_REPORT.body.includes(String(RTX_LIVE_CLAIM)));
+  t('⛔ …and a THIRD seat describing the retraction retracts nothing either — anchor, id, wrong author', RTX_DESCRIPTION.body.includes('撤回') && RTX_DESCRIPTION.body.includes(String(RTX_WITHDRAWN)) && RTX_DESCRIPTION.user.login !== RTX_18373.find((r) => r.id === RTX_WITHDRAWN).user.login);
+
+  // The three shapes, synthetic so each one varies exactly one thing.
+  const RTX_ROW = (id, at, login, lines) => ({ id, created_at: at, user: { login }, body: [].concat(lines).join('\n') });
+  const RTX_CLAIM = (id, at, login, value = 'no') => RTX_ROW(id, at, login, ['Claim: round 1', 'Branch: `claude/issue-4242-x`', `Clause-②: ${value}`]);
+  const RTX_A = RTX_CLAIM(6000000011, '2026-09-17T10:00:00Z', 'seat-a');
+  const RTX_B = RTX_CLAIM(6000000012, '2026-09-17T11:00:00Z', 'seat-b');
+  const RTX_POOL_IDS = (rows) => claimCarrierSelection(rows).pool.map((r) => r.id).join();
+
+  t('shape (1) — a retraction NAMING the claim by comment id takes it out of the pool', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回本席的认领 `6000000012` —— 先到者是 seat-a')]) === '6000000011');
+  t('⛔ shape (1) CONTROL: the SAME words from a DIFFERENT author retract nothing', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-a', '撤回本席的认领 `6000000012` —— 先到者是 seat-a')]) === '6000000012');
+  t('shape (2) — a `Release:` line from the claim\'s own author, no id at all, takes it out', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', 'Release: session X, cause: 先到者是 seat-a, 去向: back to the queue')]) === '6000000011');
+  t('⛔ shape (2) CONTROL: the same `Release:` posted BEFORE the claim retracts nothing', RTX_POOL_IDS([RTX_A, RTX_ROW(6000000013, '2026-09-17T10:30:00Z', 'seat-b', 'Release: session X, cause: y, 去向: queue'), RTX_B]) === '6000000012');
+  t('shape (3) — a `Release:` from a DIFFERENT author retracts nobody else\'s claim', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-c', 'Release: session Z, cause: y, 去向: queue')]) === '6000000012');
+  t('⛔ shape (3) CONTROL: the live claimant\'s claim still GOVERNS, it is not merely un-rejected', (() => { const sel = claimCarrierSelection([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-c', 'Release: session Z')]); return sel.governing?.createdAt === RTX_B.created_at && sel.rejected.every((r) => !r.reason.startsWith('RETRACTED')); })());
+  t('⛔ the anchor OPENS the line: the same act and id buried mid-sentence retract nothing', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '本席读到工具把 `6000000012` 当作已撤回的认领,记一笔')]) === '6000000012');
+  t('…while decoration in FRONT of the act is not a difference — 「- ⚠️ **撤回** …」 reads', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '- ⚠️ **撤回**了 `6000000012`,本席让行')]) === '6000000011');
+  t('⛔ a retraction naming SOME OTHER comment id retracts nothing here', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000009999` —— 另一张卡上的认领')]) === '6000000012');
+  t('⛔ an unreadable author on the RETRACTOR retracts nothing — fail closed, never a wildcard', RTX_POOL_IDS([RTX_A, RTX_B, { id: 6000000013, created_at: '2026-09-17T12:00:00Z', body: '撤回 `6000000012`' }]) === '6000000012');
+  t('⛔ an unreadable author on the CLAIM is not retractable either', RTX_POOL_IDS([RTX_A, { id: 6000000012, created_at: '2026-09-17T11:00:00Z', body: ['Claim: r', 'Branch: `claude/issue-4242-x`'].join('\n') }, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]) === '6000000012');
+  t('⛔ a RETRACTED claim\'s declaration is not the one read — the LIVE carrier\'s line is', cardDeclaration([RTX_CLAIM(6000000011, '2026-09-17T10:00:00Z', 'seat-a', 'no'), RTX_CLAIM(6000000012, '2026-09-17T11:00:00Z', 'seat-b', 'yes'), RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]).value === 'no');
+  // ⭐ Every claim retracted ⇒ a state this file ALREADY has, ⛔ never a
+  // fabricated carrier and ⛔ never the withdrawn record's own value. WHICH
+  // existing state depends on what is left on the thread, and both are pinned
+  // because collapsing them would describe neither: a withdrawn claim that
+  // carried a declaration leaves that line ON the thread with no carrier under
+  // it (`misplaced`, a C2 row, the value ⛔ not accepted), and one that carried
+  // none leaves nothing to read at all (`absent`).
+  t('⭐ every claim retracted, declaration left on the thread ⇒ `misplaced` — a finding, ⛔ not a reading', (() => { const rows = [RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]; const d = cardDeclaration(rows); return claimCarrierSelection(rows).pool.length === 0 && d.state === 'misplaced'; })());
+  t('⛔ …and the withdrawn record\'s OWN value is never handed back as the card\'s declaration', (() => { const rows = [RTX_CLAIM(6000000012, '2026-09-17T11:00:00Z', 'seat-b', 'yes'), RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]; return cardDeclaration(rows).state !== 'declared'; })());
+  t('⭐ …and with nothing left to read the state is `absent` — the carrier is owed, ⛔ not invented', (() => { const rows = [RTX_ROW(6000000012, '2026-09-17T11:00:00Z', 'seat-b', ['Claim: r', 'Branch: `claude/issue-4242-x`']), RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]; return cardDeclaration(rows).state === 'absent'; })());
+  t('⛔ CONTROL: without the retraction that same thread reads `missing` — the claim IS the carrier', cardDeclaration([RTX_ROW(6000000012, '2026-09-17T11:00:00Z', 'seat-b', ['Claim: r', 'Branch: `claude/issue-4242-x`'])]).state === 'missing');
+  t('…and the record SAYS that, instead of reporting a thread nobody claimed', RTX_RECORD([RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]).selected.includes('RETRACTED'));
+  t('⛔ CONTROL: a thread with no claim at all still reads as the OTHER sentence', RTX_RECORD([RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', 'no claim here')]).selected.includes('no comment on this thread carries'));
+  t('ONE derivation: the map the selection rejects from is the map `claimRetractions` returns', (() => { const rows = [RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]; const sel = claimCarrierSelection(rows); return sel.retracted.size === 1 && sel.retracted.get(RTX_B)?.id === '6000000013' && claimRetractions(rows).get(RTX_B)?.id === '6000000013'; })());
+  t('⛔ an unreadable thread retracts nothing and carries the empty halves', claimRetractions(null).size === 0 && claimCarrierSelection(null).live.length === 0 && claimCarrierSelection(null).retracted.size === 0);
+  t('the anchor roster is CLOSED, and bare `release` is not on it — a version release is not a retraction', RETRACTION_PROSE_ANCHORS.length === 5 && !RETRACTION_PROSE_ANCHORS.includes('release') && RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', 'release 阻塞在 `6000000012` 上,等维护者')]) === '6000000012');
 
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //

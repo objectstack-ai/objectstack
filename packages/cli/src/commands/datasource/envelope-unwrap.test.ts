@@ -27,15 +27,57 @@
  * construction. Typing this file's payloads out by hand would repeat the exact
  * mistake under repair: a copy of a server shape that stays self-consistent
  * while the server moves.
+ *
+ * ## Why the oclif `Config` is loaded at MODULE SCOPE (#18748)
+ *
+ * `Config.load({ root: CLI_ROOT })` used to sit in a `beforeAll`, where it was
+ * judged by vitest's DEFAULT `hookTimeout` of 10000ms -- a budget nobody in
+ * this package chose (`packages/cli/vitest.config.ts` sets no timeout key at
+ * all, by the declared design in its own header). Measured on the 4-vCPU
+ * container this change was made on, n=5 per row, the call itself:
+ *
+ *     idle                       3934 / 3962 / 4272 / 4451 / 4469 ms
+ *     4 spinners on 4 vCPU       7843 / 7981 / 8585 / 8782 / 9011 ms
+ *
+ * So an ordinary idle run already spends 39-45% of that budget, and a box that
+ * cannot even reach the load a merge-queue shard applies leaves as little as
+ * **989 ms** of margin. A budget a real cost approaches to within a second is
+ * not a budget -- it is a LOAD SENSOR, and what it senses is how busy the
+ * runner is, reported as "this file failed".
+ *
+ * ⛔ The answer is NOT a bigger number. Widening the window around the cost
+ * relocates the cliff to the next heavier shard; the merge queue runs the FULL
+ * suite where PR-side CI runs only the affected subset, so the queue shard is
+ * heavier than anything a PR check measures, and it is where this class has
+ * already ejected green PRs belonging to other people.
+ *
+ * The answer is to take the cost OUT of every clocked window, which is the
+ * repo's own stated convention -- "clocked windows measure behaviour, never
+ * loading" (AGENTS.md, Build & Test), the same move `check:test-source-alias`
+ * prescribes for a cold dependency load and the same one
+ * `plugins/plugin-dev/src/dev-plugin-security-enforcement-warning.test.ts`
+ * records paying twice. A module-scope `await` is paid during COLLECTION, and
+ * collection is clocked against NOTHING. Verified against the runner this tree
+ * installs rather than recalled: in `@vitest/runner@4.1.11`, `withTimeout(...)`
+ * wraps exactly the hooks and the test bodies, while `collectTests()` awaits
+ * `runner.importFile(filepath, 'collect')` bare; and `vitest --help` on 4.1.11
+ * offers exactly three timeout knobs (`testTimeout`, `hookTimeout`,
+ * `teardownTimeout`), none of which covers module loading.
+ *
+ * ⛔ Do not move this back into a hook, and do not answer a recurrence by
+ * raising a timeout. The last section of this file pins the placement so that
+ * "do not" is an assertion rather than a sentence nobody reads.
  */
 
-import { beforeAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Config } from '@oclif/core';
 import type { Command } from '@oclif/core';
 import { sendError, sendOk } from '@objectstack/types';
 import type { RemoteTable, SchemaValidationResult } from '@objectstack/spec/contracts';
+import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { maskCommentsAndLiterals } from '../../../../../scripts/js-comment-mask.mjs';
 import { serverBody } from '../../utils/__tests__/server-body.js';
 import DatasourceIntrospect from './introspect.js';
 import DatasourceListTables from './list-tables.js';
@@ -75,11 +117,12 @@ const CLEAN_RESULT: SchemaValidationResult = {
 /** The silent pass this card exists to make impossible. */
 const SILENT_PASS = 'No federated objects to validate.';
 
-let config: Config;
-
-beforeAll(async () => {
-  config = await Config.load({ root: CLI_ROOT });
-});
+/**
+ * Paid HERE, at module scope, and not in a hook -- see "Why the oclif `Config`
+ * is loaded at MODULE SCOPE" in this file's header for the measured legs and
+ * for the runner reading that says collection is the one unclocked phase.
+ */
+const config = await Config.load({ root: CLI_ROOT });
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -290,5 +333,41 @@ describe('os datasource introspect', () => {
 
     expect(run.failure?.message).toBe("Remote table 'ghost' not found.");
     expect(run.failure?.message).not.toContain('first argument must be a string');
+  });
+});
+
+/**
+ * The placement above, pinned (#18748).
+ *
+ * ⚠️ This is a SOURCE assertion on purpose, and it is the only shape available
+ * here. The behavioural instrument the sibling prior art used --
+ * `vitest run --hookTimeout=1`, green iff no hook time is left to clock -- is
+ * INERT in this package, measured rather than assumed: a probe `beforeAll`
+ * sleeping 500ms passes under `--hookTimeout=1` in `packages/cli` (with and
+ * without `--project`), while the identical probe under `@objectstack/plugin-
+ * dev` -- which declares no `test.projects` -- fails with `Hook timed out in
+ * 1ms`. A CLI timeout override does not reach a project-level config on
+ * vitest 4.1.11, so in this package that flag cannot witness anything.
+ *
+ * What is left to assert is the structural fact the measurement stands on: the
+ * cold load has no clocked window around it. A regression puts `Config.load`
+ * back inside a hook or a test body, and both halves of that show up here.
+ */
+describe('#18748 the oclif cold load stays outside every clocked window', () => {
+  it('pays `Config.load` at module scope, leaving no hook to clock it', () => {
+    // Comment AND literal spans blanked: this file's prose discusses the very
+    // spellings being searched for, and so do the regex bodies just below, so
+    // a bare-text scan would match itself and pass on its own commentary.
+    const code = maskCommentsAndLiterals(readFileSync(fileURLToPath(import.meta.url), 'utf8'));
+
+    // Exactly one call site, and it opens its own line -- i.e. it is nested in
+    // no function body, which is what "paid during collection" reduces to.
+    expect(code.match(/Config\.load\s*\(/g) ?? []).toHaveLength(1);
+    expect(code).toMatch(/^const\s+config\s*=\s*await\s+Config\.load\s*\(/m);
+
+    // ⛔ No hook may come back to carry it. The `afterEach` this file does keep
+    // is a synchronous `vi.unstubAllGlobals()` and loads nothing.
+    expect(code).not.toMatch(/\bbeforeAll\s*\(/);
+    expect(code).not.toMatch(/\bbeforeEach\s*\(/);
   });
 });

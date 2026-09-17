@@ -249,10 +249,9 @@ await client.packages.list();
 // a transposed `namesapce`) is refused by name rather than dropped.
 await client.packages.install({
   id: 'com.vendor.plugin',
+  type: 'plugin',
   name: 'Vendor Plugin',
-  namespace: 'vendor',
   version: '1.0.0',
-  type: 'app',
 });
 // Re-installing an id that already exists answers 409 by default; opt in:
 await client.packages.install(manifest, { overwrite: true });

@@ -2760,18 +2760,109 @@ export function declaredNoCheckFamiliesReason(workflowText) {
 const POPULATION_MARKER_KEYS = Object.freeze(['no-path-population', 'whole-tree-population', 'wide-population']);
 
 /**
- * The HEAD of every `dispatch-gates:` declaration line, in ONE spelling — the
- * indent, the comment form, and the key that follows it.
+ * The COMMENT FORMS a `dispatch-gates:` declaration may be written in, in ONE
+ * roster — and the HEAD every marker pattern below is built out of it: the
+ * indent, the form, and the key that follows it.
  *
- * Both builders below append their own tail to this. The comment-form
- * alternation is the half a reader has to be able to change in ONE place: a
- * declaration written in a form this alternation does not list parses as
- * nothing at all, silently, and widening it in one builder while the other kept
- * its own copy would fix half the markers and leave the other half reading
- * exactly as they did. Group 1 is the form, for the continuation reading that
- * has to know a `#` line is not continuing a `//` one.
+ * ## The defect the roster was widened for (#18661)
+ *
+ * The alternation listed `//` and `#` and nothing else, so a declaration
+ * written in the file's own BLOCK-comment idiom parsed as NOTHING: not
+ * refused, not printed, not counted. Measured on `origin/main` 95b21b33be,
+ * `declaredNoPathPopulation` read `null` over both of this tree's block-form
+ * declarations — `scripts/symbol-anchors.mjs` (a slash-star opener) and
+ * `scripts/release-verify-npm.mjs` (a star-prefixed line inside a docblock) —
+ * and both families sat in the residue's `undetermined` bucket with `hints=0`,
+ * the exact bucket the marker exists to split them out of. A dropped
+ * declaration printed IDENTICALLY to one nobody ever wrote, which is the one
+ * shape neither side will go and check: its author believes they explained the
+ * emptiness, its reader believes nobody ever did.
+ *
+ * ## Two KINDS of form, because they answer the wholeness question differently
+ *
+ * `line` — `//` and `#`. Each line is its OWN comment. The line under a
+ *   declaration is a SEPARATE comment, and nothing in the text says whether it
+ *   belongs to the reason or is an unrelated remark. So the declaration owns
+ *   its line, and a comment line under it is refused as a CUT (#18422) —
+ *   unchanged here, byte for byte, and `populationReasonCutRefusal`'s text
+ *   still states it.
+ *
+ * `block` — a slash-star opener (one star or two) and the star-prefixed
+ *   CONTINUATION lines inside it. The whole comment is ONE comment and its
+ *   internal newlines are FORMATTING, not comment boundaries, so a reason that
+ *   wraps is decidable rather than a guess: inside a block, the next
+ *   star-prefixed line is a continuation BY CONSTRUCTION. What the block form
+ *   therefore cannot do is cross any of the three places a block-comment author
+ *   signals a new thought — each one pinned in the self-test:
+ *
+ *     the CLOSING delimiter       the comment is over
+ *     a blank star-only line      the author ended the paragraph
+ *     the next star-@tag line     the docblock's tag section begins
+ *
+ *   plus the two the line forms already carry: another `dispatch-gates:` key,
+ *   and EOF. A line INSIDE the block carrying text with no star prefix is none
+ *   of the five — it is reason text this walk cannot read — so it is recorded
+ *   as a CUT and refused, the same direction and for the same reason the line
+ *   forms are refused in.
+ *
+ * ⚠️ The residual asymmetry, named here rather than left to be found: a second
+ * sentence written on the very next star line, with no blank line between it
+ * and the declaration, IS swallowed into the reason. That is OVER-inclusion,
+ * and it reaches the seat as a reason that says too much — visible on the row.
+ * The truncation #18422 refused is UNDER-inclusion, and reaches the seat as a
+ * sentence that merely ends oddly — invisible. The block idiom's own paragraph
+ * break is the text that separates the two, and it is what a block-comment
+ * author already writes; the line forms have no such text, which is why they
+ * refuse instead.
+ *
+ * ## One alternation, one roster
+ *
+ * The form alternation is the half a reader has to be able to change in ONE
+ * place: a form this roster does not list parses as nothing at all, silently,
+ * and widening it in one builder while the other kept its own copy would fix
+ * half the markers and leave the other half reading exactly as they did. Both
+ * builders below and the continuation reading come out of this roster. Group 1
+ * of every pattern is the form, because the reading has to know a `#` line is
+ * not continuing a `//` one — and now also which KIND of form it is reading.
+ *
+ * ⚠️ Order is load-bearing: the two-star opener is listed BEFORE the one-star
+ * opener, so a `/**` docblock opener captures whole instead of matching `/*`
+ * and stranding its second star in front of the key.
+ *
+ * ⛔ Every example in the docblocks below is written with the docblock's OWN
+ * star prefix AND the example's own form — two openers on one line. That is
+ * not decoration: exactly ONE opener is what this grammar and the
+ * unparsed-form probe both accept, so a two-opener line is documentation to
+ * both of them and can never be read as a live declaration about this file.
  */
-const MARKER_LINE_HEAD = '^[ \\t]*(\\/\\/|#)[ \\t]*dispatch-gates:[ \\t]*';
+const MARKER_COMMENT_FORMS = Object.freeze([
+  Object.freeze({ label: '//', kind: 'line', open: '\\/\\/' }),
+  Object.freeze({ label: '#', kind: 'line', open: '#' }),
+  Object.freeze({ label: '/**', kind: 'block', open: '\\/\\*\\*' }),
+  Object.freeze({ label: '/*', kind: 'block', open: '\\/\\*' }),
+  Object.freeze({ label: '*', kind: 'block', open: '\\*' }),
+]);
+
+const MARKER_LINE_HEAD =
+  `^[ \\t]*(${MARKER_COMMENT_FORMS.map((f) => f.open).join('|')})[ \\t]*dispatch-gates:[ \\t]*`;
+
+/**
+ * Which KIND a captured comment form is — `line` or `block`. Read off the
+ * roster above rather than off the characters, so a form added there is
+ * classified there too and no reading can disagree with the alternation that
+ * matched it. Throws on anything else: the capture group can only ever hold a
+ * label from that roster, so an unknown one means the two have drifted apart.
+ */
+function markerFormKind(form) {
+  const known = MARKER_COMMENT_FORMS.find((f) => f.label === form);
+  if (!known) {
+    throw new Error(
+      `dispatch-gates: unrecognised comment form '${form}' — group 1 can only ever hold one of: ` +
+        `${MARKER_COMMENT_FORMS.map((f) => f.label).join(', ')}. A form is added to MARKER_COMMENT_FORMS, never here.`,
+    );
+  }
+  return known.kind;
+}
 
 function populationMarkerPattern(key) {
   if (!POPULATION_MARKER_KEYS.includes(key)) {
@@ -2809,45 +2900,151 @@ function pathListMarkerPattern(key) {
 }
 
 /**
- * The line that CONTINUES a population declaration's reason, or null when the
- * reason ends where the capture ends (#18422). Pure over the source text, so
- * the refusal below and any future caller cannot disagree about what a cut
- * reason is.
+ * A population declaration read WHOLE — its form, its reason, and the line that
+ * CUTS the reason short — off ONE match (#18422, widened to the block forms by
+ * #18661). Pure over the source text, so the refusals below, the three
+ * `declared*` readers and any future caller cannot disagree about what a cut
+ * reason is or about where a whole one ends.
  *
- * Returns `{ file, line, text }` — the 1-based line number of the CONTINUATION
- * (not of the declaration), and its comment text, because a refusal a reader
- * cannot navigate to is a refusal they cannot act on. `file` is whatever the
- * caller knew the source by; the discovery passes the repo-relative path it
- * read, so reason and continuation can never describe two different files.
+ * Returns `{ form, kind, line, reason, cut }`, or null when this source carries
+ * no usable declaration of that key — no match, or a match whose reason is
+ * empty, which is a declaration written and dropped rather than one made.
+ * `line` is the 1-based line the declaration is written on; `cut` is
+ * `{ line, text, kind }` — the 1-based line that truncates the reason and its
+ * text, because a refusal a reader cannot navigate to is a refusal they cannot
+ * act on — or null when the reason is whole.
  *
- * Reads the FIRST marker of that key, exactly as the capture does — a second
- * declaration of one key in one file is a different defect, and this reading
- * must grade the declaration the capture actually returned.
+ * Reads the FIRST marker of that key, exactly as the capture does: a second
+ * declaration of one key in one file is a different defect, and every reading
+ * taken off this function must grade the declaration the capture returned.
+ *
+ * The two KINDS part company on ONE question and no other — where the reason
+ * ENDS. `MARKER_COMMENT_FORMS`' docblock is the authority on why; the two
+ * functions under this one are where that answer is executed.
  */
-export function populationReasonContinuation(scriptSource, markerKey, file = null) {
-  const marker = populationMarkerPattern(markerKey);
+function readPopulationMarker(scriptSource, markerKey) {
   const text = String(scriptSource);
-  const m = marker.exec(text);
+  const m = populationMarkerPattern(markerKey).exec(text);
   if (!m) return null;
   // Counted off the SAME text the capture read, and off `m.index` rather than
   // by re-matching: the pattern is anchored at the line start, so the newlines
   // before the match ARE the declaration's line number.
   const declarationLine = text.slice(0, m.index).split('\n').length;
-  const next = text.split('\n')[declarationLine];
-  if (next === undefined) return null;
-  // The SAME comment form, and the form is the whole point: `#` is not a
-  // comment in a file whose declaration is spelled `//`, so such a line cannot
-  // be continuing it.
-  const form = m[1] === '#' ? '#' : '\\/\\/';
-  const continuation = new RegExp(`^[ \\t]*${form}[ \\t]*(\\S.*)$`).exec(next);
-  if (!continuation) return null;
+  const lines = text.split('\n');
+  const kind = markerFormKind(m[1]);
+  const read = kind === 'block'
+    ? blockFormReason(lines, declarationLine, m[2])
+    : lineFormReason(lines, declarationLine, m[1], m[2]);
+  if (!read.reason) return null;
+  return { form: m[1], kind, line: declarationLine, reason: read.reason, cut: read.cut };
+}
+
+/**
+ * The LINE forms' reading, unchanged from #18422 in both halves: the
+ * declaration owns the line it is written on, and a comment line under it IN
+ * THE SAME FORM, carrying text that is not a new `dispatch-gates:` key, is the
+ * cut. The form is the whole point — `#` is not a comment in a file whose
+ * declaration is spelled `//`, so such a line cannot be continuing it, and the
+ * opener comes off the same roster the alternation was built from so the two
+ * can never disagree about what that form's comment looks like.
+ */
+function lineFormReason(lines, declarationLine, form, tail) {
+  const reason = tail.trim();
+  const next = lines[declarationLine];
+  if (next === undefined) return { reason, cut: null };
+  const opener = MARKER_COMMENT_FORMS.find((f) => f.label === form).open;
+  const continuation = new RegExp(`^[ \\t]*${opener}[ \\t]*(\\S.*)$`).exec(next);
+  if (!continuation) return { reason, cut: null };
   const continued = continuation[1].trim();
   // A NEW key below a declaration is a second declaration, never a continuation
   // of the first. The pair refusals are what grade that shape, and they are
   // deliberately left to do it: a reason that reads "dispatch-gates: …" is not
   // a reason anyone wrapped.
-  if (/^dispatch-gates:/.test(continued)) return null;
-  return { file: file ?? null, line: declarationLine + 1, text: continued };
+  if (/^dispatch-gates:/.test(continued)) return { reason, cut: null };
+  return { reason, cut: { line: declarationLine + 1, text: continued, kind: 'line' } };
+}
+
+/**
+ * The BLOCK forms' reading: the star-prefixed lines under the declaration are
+ * the SAME comment, so they are joined into the reason until one of the five
+ * terminators the form roster pins — the closing delimiter, a blank star-only
+ * line, the next star-@tag line, another `dispatch-gates:` key, or EOF. A line
+ * carrying TEXT with no star prefix is none of the five: it is reason text this
+ * walk cannot read, which is the silent direction, so it is recorded as the CUT
+ * and refused exactly as a line form's continuation is.
+ *
+ * The closing delimiter is found by SCANNING for it rather than by anchoring a
+ * pattern, because it sits at the end of a content line as readily as on one of
+ * its own — and a reason can never contain it, since the two characters would
+ * have ended the comment.
+ */
+function blockFormReason(lines, declarationLine, tail) {
+  const head = blockChunk(tail);
+  const parts = head.text ? [head.text] : [];
+  let cut = null;
+  if (!head.closed) {
+    for (let i = declarationLine; i < lines.length; i += 1) {
+      const raw = lines[i];
+      const cont = blockContinuationChunk(raw);
+      if (!cont) {
+        // A blank line ends the paragraph whichever side of the closing
+        // delimiter it falls on. A line with TEXT and no star prefix is the one
+        // shape that is refused rather than read as an ending.
+        if (raw.trim() !== '') cut = { line: i + 1, text: raw.trim(), kind: 'block' };
+        break;
+      }
+      if (cont.text === '') break;
+      if (cont.text.startsWith('@')) break;
+      if (/^dispatch-gates:/.test(cont.text)) break;
+      parts.push(cont.text);
+      if (cont.closed) break;
+    }
+  }
+  return { reason: parts.join(' '), cut };
+}
+
+/**
+ * The comment TEXT on one line of a block, up to the closing delimiter, and
+ * whether that delimiter was on it.
+ */
+function blockChunk(rest) {
+  const end = rest.indexOf('*/');
+  return end === -1
+    ? { text: rest.trim(), closed: false }
+    : { text: rest.slice(0, end).trim(), closed: true };
+}
+
+/**
+ * One CONTINUATION line of a block comment, or null when the line is not one.
+ * A star-only line and a bare closing delimiter both read as empty text — the
+ * two terminators that are not the end of the reason's own sentence.
+ */
+function blockContinuationChunk(raw) {
+  const m = /^[ \t]*\*(.*)$/.exec(raw);
+  if (!m) return null;
+  const rest = m[1];
+  if (rest.startsWith('/')) return { text: '', closed: true };
+  return blockChunk(rest);
+}
+
+/**
+ * The line that CUTS a population declaration's reason short, or null when the
+ * reason is whole (#18422). A thin reading of `readPopulationMarker` above, kept
+ * exported and kept to its own signature because the refusal and the discovery
+ * both name it, and because a caller asking only this question should not have
+ * to know the shape of the whole reading.
+ *
+ * Returns `{ file, line, text, kind }` — the 1-based line number of the CUT
+ * (not of the declaration), its text, and which KIND of form was cut, because
+ * the two kinds are cut by different shapes and the refusal has to say which.
+ * `file` is whatever the caller knew the source by; the discovery passes the
+ * repo-relative path it read, so reason and cut can never describe two
+ * different files.
+ */
+export function populationReasonContinuation(scriptSource, markerKey, file = null) {
+  const read = readPopulationMarker(scriptSource, markerKey);
+  if (!read?.cut) return null;
+  return { file: file ?? null, line: read.cut.line, text: read.cut.text, kind: read.cut.kind };
 }
 
 /**
@@ -2856,6 +3053,10 @@ export function populationReasonContinuation(scriptSource, markerKey, file = nul
  *
  *   // dispatch-gates: no-path-population -- <reason>
  *   #  dispatch-gates: no-path-population -- <reason>      (shell gates)
+ *   /* dispatch-gates: no-path-population -- <reason>      (block comment; the
+ *    * reason may wrap onto the star lines under it, and ends at the
+ *    * closing delimiter, a blank star line or the next star-@tag)
+ *    * dispatch-gates: no-path-population -- <reason>      (inside a docblock)
  *
  * ## What it is for (#10542)
  *
@@ -2900,11 +3101,8 @@ export function populationReasonContinuation(scriptSource, markerKey, file = nul
  * line by asserting the live tree's markers are only ever on families this
  * derivation leaves unplaced.
  */
-const NO_PATH_POPULATION_MARKER = populationMarkerPattern('no-path-population');
-
 export function declaredNoPathPopulation(scriptSource) {
-  const m = NO_PATH_POPULATION_MARKER.exec(String(scriptSource));
-  return m ? m[2].trim() : null;
+  return readPopulationMarker(scriptSource, 'no-path-population')?.reason ?? null;
 }
 
 /**
@@ -2913,6 +3111,10 @@ export function declaredNoPathPopulation(scriptSource) {
  *
  *   // dispatch-gates: whole-tree-population -- <reason>
  *   #  dispatch-gates: whole-tree-population -- <reason>      (shell gates)
+ *   /* dispatch-gates: whole-tree-population -- <reason>      (block comment; the
+ *    * reason may wrap onto the star lines under it, and ends at the
+ *    * closing delimiter, a blank star line or the next star-@tag)
+ *    * dispatch-gates: whole-tree-population -- <reason>      (inside a docblock)
  *
  * Read it as the exact INVERSE of `no-path-population` above — which is why
  * the two are spelled to read as opposites, tolerate the same two comment
@@ -2977,11 +3179,8 @@ export function declaredNoPathPopulation(scriptSource) {
  * will revisit, and is the one shape a reviewer cannot tell from a gate whose
  * population was never examined.
  */
-const WHOLE_TREE_POPULATION_MARKER = populationMarkerPattern('whole-tree-population');
-
 export function declaredWholeTreePopulation(scriptSource) {
-  const m = WHOLE_TREE_POPULATION_MARKER.exec(String(scriptSource));
-  return m ? m[2].trim() : null;
+  return readPopulationMarker(scriptSource, 'whole-tree-population')?.reason ?? null;
 }
 
 /**
@@ -2990,6 +3189,10 @@ export function declaredWholeTreePopulation(scriptSource) {
  *
  *   // dispatch-gates: wide-population -- <reason>
  *   #  dispatch-gates: wide-population -- <reason>      (shell gates)
+ *   /* dispatch-gates: wide-population -- <reason>      (block comment; the
+ *    * reason may wrap onto the star lines under it, and ends at the
+ *    * closing delimiter, a blank star line or the next star-@tag)
+ *    * dispatch-gates: wide-population -- <reason>      (inside a docblock)
  *
  * The THIRD derivation channel, and the one that is neither of the two above.
  * `no-path-population` says "this gate reads NO file". `whole-tree-population`
@@ -3061,11 +3264,112 @@ export function declaredWholeTreePopulation(scriptSource) {
  * gate has nothing else, and an opt-out with no reason reads exactly like a
  * placeholder nobody will revisit.
  */
-const WIDE_POPULATION_MARKER = populationMarkerPattern('wide-population');
-
 export function declaredWidePopulation(scriptSource) {
-  const m = WIDE_POPULATION_MARKER.exec(String(scriptSource));
-  return m ? m[2].trim() : null;
+  return readPopulationMarker(scriptSource, 'wide-population')?.reason ?? null;
+}
+
+const POPULATION_MARKER_LOOKALIKE = new RegExp(
+  `^[ \\t]*([^\\s\\w'"\`]{1,4})?[ \\t]*dispatch-gates:[ \\t]*(${POPULATION_MARKER_KEYS.join('|')})\\b(.*)$`,
+);
+
+/**
+ * A line that READS as a population declaration and did not PARSE as one — the
+ * SOUND a dropped declaration makes (#18661), and the half of that card that
+ * outlives the form set it was filed over.
+ *
+ * ## Why widening the forms is not the whole repair
+ *
+ * #18661 was found because two gates wrote their declaration in a comment form
+ * the alternation did not list. The forms are widened above; the DEFECT is not
+ * the two files, it is that the tool answered a declaration it could not read
+ * with exactly the output it gives a file that declares nothing — no reason, no
+ * refusal, no row, no count. The author reads the residue and sees their gate
+ * in the unexamined pile; the seat reads the same row and concludes nobody has
+ * looked. Neither of them has any reason to go and check, because there is
+ * nothing to check against. The next comment form nobody thought of replays it
+ * exactly, and so does a declaration whose reason someone forgot to write.
+ *
+ * ## What counts as READING like a declaration
+ *
+ * The indent, then AT MOST ONE opener made of comment punctuation, then
+ * `dispatch-gates: <population key>`. Two deliberate boundaries:
+ *
+ *   ONE opener, never two. A line carrying the docblock's own star AND a
+ *   second opener is an EXAMPLE of a declaration written inside a comment
+ *   about declarations — which is how every example in this file is written,
+ *   and it is why they are. The grammar above reads one opener too, so the
+ *   probe and the grammar agree about what documentation looks like.
+ *
+ *   The key text starts the comment. Every live prose mention of these keys in
+ *   this tree writes them mid-sentence or inside backticks (`symbol-anchors`,
+ *   `workspace-enumerator`, `check-widening-tells`, `check-declared-population-live`,
+ *   `bare-root-worklist` — measured, five of them), and a mention that is not
+ *   the first thing in its comment was never trying to be a declaration.
+ *
+ *   A QUOTE is not a comment opener. Gate sources carry declarations inside
+ *   string literals — every self-test in this family builds its fixtures out
+ *   of them, this file's own included — and they open with a quote or a
+ *   backtick, never with comment punctuation. The grammar above already
+ *   ignores them for that exact reason (it anchors on a comment form, and a
+ *   line beginning with a quote has none), so excluding the three quote
+ *   characters here keeps the probe agreeing with the grammar instead of
+ *   reporting every fixture in the tree as a dropped declaration.
+ *
+ * A WORD-character opener (`rem`, `REM`) is not covered — no gate in this tree
+ * is written in a language that uses one, and admitting word characters here
+ * would make every sentence that opens with the key a finding.
+ *
+ * ## Both ways a line can read like one and not parse
+ *
+ * An unrecognised comment FORM, and a recognised form with no `-- <reason>`
+ * tail (or an empty one). They are one finding on purpose: the author's
+ * experience is identical — they wrote a declaration and the tool behaved as
+ * though they had not — and splitting them would let one of the two go quiet.
+ *
+ * Pure over the source text, and returns EVERY such line rather than the first:
+ * a file with two of them has two authors' declarations dropped.
+ */
+export function unparsedPopulationMarkers(scriptSource, file = null) {
+  const found = [];
+  const lines = String(scriptSource).split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    const m = POPULATION_MARKER_LOOKALIKE.exec(lines[i]);
+    if (!m) continue;
+    const key = m[2];
+    // Asked of the LINE, because that is the whole question: does this text,
+    // as written, reach the grammar? A block declaration whose reason wraps
+    // still answers yes here — its own line carries the head of the reason.
+    if (readPopulationMarker(lines[i], key)) continue;
+    found.push({ file: file ?? null, line: i + 1, key, form: m[1] ?? '(no comment opener)', text: lines[i].trim() });
+  }
+  return found;
+}
+
+
+/**
+ * Why a dropped population declaration must be refused, or null when a source
+ * carries none (#18661) — the same shape the three refusals above take, so the
+ * self-test's live half and any future caller cannot disagree about what a
+ * dropped declaration is.
+ *
+ * It names the FILE, the LINE and the FORM it was written in, because those
+ * three are exactly what the old output withheld: a reader of the residue could
+ * not have found this line from anything the tool printed.
+ */
+export function unparsedPopulationMarkerRefusal(unparsed) {
+  if (!unparsed?.length) return null;
+  const rows = unparsed.map(
+    (u) => `${u.file ?? 'the declaring file'}:${u.line} declares ${u.key} in form ${u.form} — "${u.text}"`,
+  );
+  return `${unparsed.length} line(s) READ as a population declaration and did not PARSE as one: ${rows.join(' · ')}. `
+    + 'A declaration the grammar cannot read produces the SAME output as a gate that declares nothing at all — no '
+    + 'reason, no refusal, no row — so its author believes the emptiness was explained and its reader believes '
+    + 'nobody ever looked, and neither has anything to check. Either the comment form is not one of '
+    + `${MARKER_COMMENT_FORMS.map((f) => f.label).join(', ')}, or the line carries no "-- <reason>" tail. Rewrite the `
+    + 'declaration in one of those forms with a reason, or — if the form is a real comment idiom this tree uses — add '
+    + 'it to MARKER_COMMENT_FORMS in scripts/pm/dispatch-gates.mjs with a self-test case beside it, answering where a '
+    + 'reason written in it ENDS. ⛔ Never delete the line to clear this refusal: a declaration nobody can read and a '
+    + 'declaration nobody wrote are the two states this refusal exists to keep apart.';
 }
 
 /**
@@ -3148,6 +3452,23 @@ export function populationReasonCutRefusal(entry, markerKey) {
   const cut = entry?.[fields.cut] ?? null;
   if (!cut) return null;
   const where = `${cut.file ?? 'the declaring file'}:${cut.line}`;
+  // A BLOCK form is cut by a different shape and takes a different repair
+  // (#18661), so it gets its own text rather than the line forms' advice. In a
+  // block the star lines under a declaration ARE the reason — the walk joins
+  // them — so the only way to lose half of one is to write a line the walk
+  // cannot see as part of the comment. Telling that author to "put the whole
+  // reason on the marker line" would send them to the wrong half of their
+  // declaration, which is precisely what this family of refusals exists not to
+  // do. The line forms' text below is unchanged, byte for byte.
+  if (cut.kind === 'block') {
+    return `declares ${markerKey} inside a block comment and its reason is CUT at ${where} by a line the block walk `
+      + `cannot read as part of the comment: "${cut.text}". Inside a block the star-prefixed lines under a `
+      + 'declaration are the same comment and are joined into the reason; a line with text and no star prefix is '
+      + 'neither a continuation nor one of the endings (the closing delimiter, a blank star line, the next star-@tag, '
+      + 'another dispatch-gates: key), so everything from it on is dropped and the seat is handed the declaration cut '
+      + 'off mid-sentence. Give that line the block\'s star prefix, or end the reason before it with a blank star '
+      + 'line. Rewrite the declaration — never route around this refusal.';
+  }
   return `declares ${markerKey} and its reason does not END on the marker line: ${where} continues it with `
     + `"${cut.text}". The capture stops at the FIRST NEWLINE, so the seat is handed the declaration cut off `
     + 'mid-sentence — and the reason is the one thing a seat reads off this row when deciding whether the family '
@@ -3491,14 +3812,19 @@ export const ROOT_WALK_RESIDUE_LEDGER = [
   // the #15753 placement this row was written about: that one came from a
   // noise-floor constant and said the opposite of what the constant declares,
   // while these two literals are exactly what the self-test reads.
-  [
-    'scripts/symbol-anchors.mjs --self-test',
-    'a shared grammar-and-extractor LIBRARY, invoked by CI only as its own self-test; its `git ls-files` runs over a '
-      + 'corpus its caller passes in. The corpus walk it lends is exercised by its registrations — '
-      + 'check-adr-symbol-anchors.mjs, which declares ROOT_DIR_WATCH_HINTS = [docs/adr/**], '
-      + 'check-scripts-symbol-anchors.mjs, which declares [scripts/**], and '
-      + 'check-spec-docblock-symbol-anchors.mjs, which declares [packages/spec/src/**] — and each is placed by its own.',
-  ],
+  // ⚖️ `scripts/symbol-anchors.mjs --self-test` LEFT this population under
+  // #18661 and its row is gone with it — a listed family that stops being a
+  // member reds here, and a stale exclusion is an exclusion nobody measures.
+  // It left through the OUTCOME this table exists to push toward: it DECLARES.
+  // The declaration was there the whole time — a `no-path-population` marker
+  // written in that file's own block-comment idiom, in a form the marker
+  // grammar did not list, so it read back `null` and the family arrived here
+  // looking like a gate whose emptiness nobody had examined. This row was the
+  // price of that silence: a hand-written exclusion, carrying by hand the
+  // reading the gate's own source already carried, for a family that was never
+  // a member of this population at all. Widening the form set (see
+  // `MARKER_COMMENT_FORMS`) is what let the declaration be read; deleting the
+  // row is the other half of the same landing.
 ];
 
 /** The ledger as a Map, keyed by the family key this derivation places. */
@@ -20517,6 +20843,168 @@ function selfTest() {
     Object.keys(POPULATION_DECLARATION_FIELDS).sort().join(' ') === [...POPULATION_MARKER_KEYS].sort().join(' '),
   );
 
+  // ── The BLOCK comment forms, and where a reason written in one ENDS (#18661) ──
+  //
+  // The alternation listed `//` and `#` only, so a declaration written in the
+  // file's own block-comment idiom parsed as NOTHING — the two live specimens
+  // are pinned in the live half below. The cases here are the form roster's
+  // contract, one per clause: the three block spellings, each of the five
+  // places a block reason ends, and the one shape inside a block that is
+  // refused instead. The control that the widening did not buy its answers by
+  // swallowing whatever sits under a declaration is the group above, which is
+  // unchanged, plus the terminator cases here.
+  const blockOpener = [
+    '/* dispatch-gates: no-path-population -- this module is the shared resolution',
+    ' * core and reads NO population of its own: each corpus gate declares its',
+    ' * own roots. */',
+    'export const X = 1;',
+  ].join('\n');
+  t(
+    'a slash-star opener declares, and the star lines under it are JOINED into the reason — the scripts/symbol-anchors.mjs shape, which used to parse as nothing',
+    declaredNoPathPopulation(blockOpener)
+      === 'this module is the shared resolution core and reads NO population of its own: each corpus gate declares its own roots.',
+  );
+  t(
+    'and a joined block reason is NOT a cut one — the wholeness reading has nothing to refuse, because nothing was dropped',
+    populationReasonContinuation(blockOpener, 'no-path-population') === null,
+  );
+  t(
+    'a star-prefixed line INSIDE a docblock declares too — the scripts/release-verify-npm.mjs shape — and the closing delimiter ends the reason',
+    declaredNoPathPopulation(
+      '/**\n * Probes run SEQUENTIALLY.\n *\n * dispatch-gates: no-path-population -- the self-test drives synthetic package maps\n */\n',
+    ) === 'the self-test drives synthetic package maps',
+  );
+  t(
+    'the TWO-star opener captures whole rather than matching the one-star form and stranding a star in front of the key — the roster order is load-bearing',
+    declaredWidePopulation('/** dispatch-gates: wide-population -- walks packages/ entire */\n')
+      === 'walks packages/ entire',
+  );
+  t(
+    'a blank star line ENDS the reason: the paragraph the author separated is not swallowed into it',
+    declaredWholeTreePopulation(
+      '/**\n * dispatch-gates: whole-tree-population -- it sweeps git ls-files\n *\n * An unrelated paragraph about something else entirely.\n */\n',
+    ) === 'it sweeps git ls-files',
+  );
+  t(
+    'the next star-@tag line ENDS it as well — a docblock tag section is never part of a seat-facing reason',
+    declaredWholeTreePopulation(
+      '/**\n * dispatch-gates: whole-tree-population -- it sweeps git ls-files\n * @param {string} p the path\n */\n',
+    ) === 'it sweeps git ls-files',
+  );
+  t(
+    'and a SECOND dispatch-gates key ENDS it, in a block exactly as in a line comment — two declarations, never one wrapped reason',
+    declaredWholeTreePopulation(
+      '/**\n * dispatch-gates: whole-tree-population -- it sweeps git ls-files\n * dispatch-gates: no-path-population -- CI runs the self-test only\n */\n',
+    ) === 'it sweeps git ls-files',
+  );
+  t(
+    'a one-line block declaration ends at its own closing delimiter, and the code under it continues nothing',
+    declaredNoPathPopulation('/* dispatch-gates: no-path-population -- CI runs the self-test only */\nconst X = 1;\n')
+      === 'CI runs the self-test only'
+      && populationReasonContinuation('/* dispatch-gates: no-path-population -- CI runs the self-test only */\nconst X = 1;\n', 'no-path-population')
+        === null,
+  );
+  t(
+    'a line INSIDE the block with text and NO star prefix is the block form\'s CUT — the one shape a block walk cannot read, refused rather than silently dropped',
+    (() => {
+      const hangingIndent = [
+        '/* dispatch-gates: no-path-population -- this module reads no population',
+        '   of its own, and this line has no star prefix */',
+      ].join('\n');
+      const cut = populationReasonContinuation(hangingIndent, 'no-path-population', 'scripts/x.mjs');
+      return cut?.line === 2 && cut?.kind === 'block'
+        && cut?.text === 'of its own, and this line has no star prefix */';
+    })(),
+  );
+  t(
+    'and its refusal names the BLOCK repair, not the line forms\' one — the two kinds are cut by different shapes and send an author to different halves of their declaration',
+    (() => {
+      const why = populationReasonCutRefusal(
+        {
+          noPopulationReason: 'this module reads no population',
+          noPopulationReasonCut: { file: 'scripts/x.mjs', line: 2, text: 'of its own', kind: 'block' },
+        },
+        'no-path-population',
+      ) ?? '';
+      return why.includes('scripts/x.mjs:2') && why.includes("block's star prefix")
+        && !why.includes('Put the WHOLE reason on the marker line');
+    })(),
+  );
+  t(
+    'while the LINE forms\' refusal text is untouched by the widening — #18422\'s refusal is not loosened, it is left exactly where it was',
+    (populationReasonCutRefusal(
+      {
+        noPopulationReason: 'CI runs the self-test only',
+        noPopulationReasonCut: { file: 'scripts/x.mjs', line: 2, text: 'and the rest', kind: 'line' },
+      },
+      'no-path-population',
+    ) ?? '').includes('Put the WHOLE reason on the marker line'),
+  );
+  t(
+    'a line carrying TWO comment openers is documentation, not a declaration — which is the only reason this file can print examples of its own markers',
+    declaredNoPathPopulation(' *   // dispatch-gates: no-path-population -- <reason>\n') === null
+      && declaredNoPathPopulation(' *    * dispatch-gates: no-path-population -- <reason>\n') === null,
+  );
+
+  // ── A declaration the grammar could not read makes a SOUND (#18661) ────────
+  //
+  // The form widening above repairs the two forms this tree happens to use.
+  // This is the half that outlives it: a line that READS as a declaration and
+  // does not PARSE as one produced exactly the output of a file that declares
+  // nothing — no reason, no refusal, no row, no count — so a dropped
+  // declaration and one nobody ever wrote were indistinguishable in every
+  // channel the tool has. The live half below is where this goes RED.
+  t(
+    'an unrecognised comment form is FOUND, with the file, the line and the form it was written in',
+    (() => {
+      const [only, ...rest] = unparsedPopulationMarkers(
+        'const X = 1;\n<!-- dispatch-gates: no-path-population -- CI runs the self-test only -->\n',
+        'scripts/x.mjs',
+      );
+      return rest.length === 0 && only?.file === 'scripts/x.mjs' && only?.line === 2
+        && only?.key === 'no-path-population' && only?.form === '<!--';
+    })(),
+  );
+  t(
+    'a RECOGNISED form with no "-- <reason>" tail is found by the same reading — the author wrote a declaration and the tool behaved as though they had not, which is one defect and not two',
+    unparsedPopulationMarkers('// dispatch-gates: wide-population\n', 'scripts/x.mjs').length === 1
+      && unparsedPopulationMarkers('/* dispatch-gates: wide-population -- */\n', 'scripts/x.mjs').length === 1,
+  );
+  t(
+    'every form the roster DOES list is silent here — a declaration that parses is not a finding, in any of the five spellings',
+    MARKER_COMMENT_FORMS.every(
+      (f) => unparsedPopulationMarkers(`${f.label} dispatch-gates: no-path-population -- CI runs the self-test only\n`).length === 0,
+    ),
+  );
+  t(
+    'and so is PROSE about these keys — the five live mention shapes in this tree, none of which was ever trying to declare anything',
+    unparsedPopulationMarkers([
+      ' * discipline the `dispatch-gates: no-path-population` note further down states',
+      ' * `dispatch-gates: no-path-population` discipline the grammar block above',
+      '// ⛔ NO `dispatch-gates: no-path-population` MARKER HERE — deliberately',
+      "    '          `dispatch-gates: no-path-population -- <reason>` marker, and stop spelling the',",
+      "      + 'the gate declares `dispatch-gates: '",
+      "  '// dispatch-gates: no-path-population -- a fixture inside a self-test',",
+    ].join('\n')).length === 0,
+  );
+  t(
+    'the refusal names every dropped line rather than the first — a file with two of them has TWO authors\' declarations dropped',
+    (() => {
+      const why = unparsedPopulationMarkerRefusal(
+        unparsedPopulationMarkers(
+          '; dispatch-gates: no-path-population -- one\n% dispatch-gates: wide-population -- two\n',
+          'scripts/x.mjs',
+        ),
+      ) ?? '';
+      return why.includes('scripts/x.mjs:1') && why.includes('scripts/x.mjs:2')
+        && why.includes('form ;') && why.includes('form %');
+    })(),
+  );
+  t(
+    'and it refuses NOTHING when nothing was dropped — the shape every refusal in this family takes',
+    unparsedPopulationMarkerRefusal([]) === null && unparsedPopulationMarkerRefusal(null) === null,
+  );
+
   // The refusal, once per channel. One capture shape means one defect: a
   // repair on one marker and not its siblings leaves this card alive twice.
   const cutAt = (file, line, text) => ({ file, line, text });
@@ -20941,6 +21429,52 @@ function selfTest() {
         'no-path-population',
       ) ?? '';
       return why.includes('scripts/probe.mjs:9');
+    })(),
+  );
+
+  // The live half of the FORM roster and of the sound (#18661), over the same
+  // corpus and for the same reason: a form set is a claim about the idioms this
+  // tree's gates actually write in, so it is held against the tree rather than
+  // against fixtures alone. Two directions, and they fail differently — the
+  // first goes red when a form the tree uses stops being read, the second the
+  // moment anyone writes a declaration this grammar drops.
+  const liveSources = [...new Set([...liveDiscovery.byCheck].flatMap(([, e]) => e.files ?? []))].sort();
+  const liveSourceText = new Map(
+    liveSources
+      .filter((f) => existsSync(nodePath.join(ROOT, f)))
+      .map((f) => [f, readFileSync(nodePath.join(ROOT, f), 'utf8')]),
+  );
+  const liveBlockDeclared = [...liveSourceText]
+    .filter(([, src]) => POPULATION_MARKER_KEYS.some((k) => readPopulationMarker(src, k)?.kind === 'block'))
+    .map(([f]) => f);
+  t(
+    `the live tree's BLOCK-form declarations are READ and not dropped (found ${liveBlockDeclared.length}: ${liveBlockDeclared.join(', ') || 'none'})`,
+    liveBlockDeclared.length > 0,
+  );
+  // The sound itself, and the one place it is RED at author time: every gate
+  // source the discovery reads, swept for a line that reads like a declaration
+  // and did not parse as one. The boundary is that corpus, deliberately — a
+  // marker in a file no family reads declares nothing to begin with — and it is
+  // the same corpus every reading above is held over.
+  const liveUnparsed = [...liveSourceText].flatMap(([f, src]) => unparsedPopulationMarkers(src, f));
+  t(
+    `no live gate source carries a population declaration this grammar drops (${liveSourceText.size} source(s) swept)`,
+    liveUnparsed.length === 0,
+    unparsedPopulationMarkerRefusal(liveUnparsed),
+  );
+  t(
+    'and that sweep is not vacuous over this tree: take one LIVE declaration, re-spell its opener in a form the roster does not list, and exactly that line is found',
+    (() => {
+      const hit = [...liveSourceText]
+        .map(([f, s]) => [f, s, readPopulationMarker(s, 'no-path-population')])
+        .find(([, , read]) => read !== null);
+      if (!hit) return false;
+      const [file, src, read] = hit;
+      const openers = new RegExp(`^[ \\t]*(${MARKER_COMMENT_FORMS.map((f) => f.open).join('|')})`);
+      const lines = src.split('\n');
+      lines[read.line - 1] = lines[read.line - 1].replace(openers, ';;');
+      return unparsedPopulationMarkers(lines.join('\n'), file)
+        .some((u) => u.line === read.line && u.form === ';;' && u.key === 'no-path-population');
     })(),
   );
 
