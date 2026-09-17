@@ -118,7 +118,7 @@
  * credit belongs to the schema's closed enum.
  */
 
-import { describeAnchorForbiddenBits } from '@objectstack/spec/security';
+import { describeAnchorForbiddenBits, type AnchorBindingContext } from '@objectstack/spec/security';
 import { indexObjectGraph, recordsOf, type ObjectGraph } from './object-graph.js';
 
 export const SECURITY_OWD_UNSET = 'security-owd-unset';
@@ -417,6 +417,20 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
 
   const objects = recordsOf(stack.objects);
   const permissionSets = recordsOf(stack.permissions);
+  // [#18535, ADR-0090 D5 / ADR-0066 D1] The stack's own capability
+  // declarations, handed to the anchor predicate as
+  // `AnchorBindingContext.declaredCapabilities` — the authoring-time half of
+  // the source the runtime reads at boot. A `systemPermissions` token this
+  // stack DECLARES is the app's own gate and does not make an `isDefault` set
+  // unbindable (the runtime agrees, so the lint and the gate stay one rule);
+  // an UNDECLARED token still offends, and the platform floor is applied by
+  // the predicate itself, so declaring `manage_users` excuses nothing.
+  // No declarations ⇒ `undefined` ⇒ the pre-#17811 verdict verbatim.
+  const declaredCapabilities = recordsOf(stack.capabilities).filter(
+    (c) => typeof c.name === 'string' && c.name.length > 0,
+  );
+  const anchorContext: AnchorBindingContext | undefined =
+    declaredCapabilities.length > 0 ? { declaredCapabilities } : undefined;
 
   // ── D1/D4/D11: per-object OWD posture ────────────────────────────────
   for (let i = 0; i < objects.length; i++) {
@@ -768,7 +782,7 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
     // this rule to key off, so that binding is outside what a package-time
     // linter can see and is judged by the bind-time gate alone (#16110).
     if (ps.isDefault === true) {
-      const offending = describeAnchorForbiddenBits(ps, 'everyone');
+      const offending = describeAnchorForbiddenBits(ps, 'everyone', anchorContext);
       if (offending) {
         findings.push({
           severity: 'error',
