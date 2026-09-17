@@ -823,6 +823,17 @@
  *   `belongsInConfig(`             8 key lines,  8 file-local — NOT A SCHEMA
  *                                 (a template string)
  *
+ * ⚠️ …and the sibling board, where the SAME census answers the heuristic
+ * question outright. At objectui 15f01223d, file-local to
+ * `packages/types/src/zod/complex.zod.ts`: `chatbotRequestBodyArm(` (2 key
+ * lines) returns `z.record(…)` ⇒ WRITABLE, `chatbotEnableMarkdownArm(` (2) and
+ * `chatbotEnableFileUploadArm(` (2) return `z.boolean()` ⇒ WRITABLE, while
+ * `chatbotOnClearArm(` (2) returns `handlerKeyRefusal(…)` ⇒ REFUSING and
+ * `retiredDeclarativeKanbanKey(` (1) returns `retirementTombstone(…)` ⇒
+ * REFUSING. ⭐ FOUR `*Arm(` factories in ONE file, in OPPOSITE registers, and
+ * nothing in the name says which — that is the measurement that retires the
+ * name-shaped heuristic rather than merely declining it on principle.
+ *
  * ⚠️ AND THE CARD'S OWN PROBE IS AN IMPORTED ONE — measured on the tip, not
  * argued from the filing. `placeholderFree` is declared in
  * `packages/spec/src/data/driver/common.zod.ts` and IMPORTED at all 23 of its
@@ -1115,7 +1126,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#17217 — the CLI can be told which board it judges': 22,
   '#18560 — the declaring vocabulary is a NAMED list, every form pinned by a counterfactual fixture': 30,
   '#18640 — an inline closed set RE-SPELLED at the same binding is not a set that gained a value': 20,
-  '#18702 — a declaring factory PRIVATE to one file, resolved through its own DEFINITION': 50,
+  '#18702 — a declaring factory PRIVATE to one file, resolved through its own DEFINITION': 53,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -5130,6 +5141,23 @@ export function selfTest() {
   t('⛔ a line that fires WITHOUT the resolver still fires with it — the `no` criterion is untouched', localRun(BLUEPRINT, '+  cursor: z.string().optional(),', FACTORY_FIXTURES.strictIdent.definition).rows[0]?.tell === 'T1');
   t('⭐ ⛔ the resolver is read on the ADDED side ONLY: a REMOVED local-factory key buys nothing, so a `z.` key added beside it STILL fires', tellsInFile({ filename: BLUEPRINT, status: 'modified', patch: "@@ -30,1 +30,1 @@\n-  gone: strictIdent('x'),\n+  cursor: z.string().optional()," }, { readSource: () => FACTORY_FIXTURES.strictIdent.definition }).length === 1);
   t('⚠️ …and the PRICE of that asymmetry, pinned rather than discovered: a block REPLACING one local-factory key with another fires on the added one', tellsInFile({ filename: BLUEPRINT, status: 'modified', patch: "@@ -30,1 +30,1 @@\n-  gone: strictIdent('x'),\n+  fresh: strictIdent('y')," }, { readSource: () => FACTORY_FIXTURES.strictIdent.definition }).length === 1);
+
+
+  // -- ⭐ the measurement that RETIRES the name-shaped heuristic outright ----
+  //
+  // #18560's header refused `*Refusal(` / `*Arm(` on principle. This is the
+  // measurement, on the sibling board: TWO factories with the same `*Arm(`
+  // shape, file-local to ONE objectui file, land in OPPOSITE registers. A
+  // name-shaped reading is wrong about one of them whichever way it guesses —
+  // and which one is decided by nothing a name carries.
+  const UI_ARMS =
+    'const chatbotRequestBodyArm = () =>\n'
+    + "  z.record(z.string(), z.unknown()).optional().describe('Additional body parameters');\n"
+    + 'const chatbotOnClearArm = () =>\n'
+    + "  handlerKeyRefusal('onClear', 'runtime-slot', 'Called after the conversation is cleared');\n";
+  t('⭐ `chatbotRequestBodyArm(` returns `z.record(…)` ⇒ a WRITABLE key (objectui 15f01223d, 2 key lines, file-local)', resolveDeclaringFactory(UI_ARMS, 'chatbotRequestBodyArm').verdict === 'writable');
+  t('⭐ …while `chatbotOnClearArm(` returns `handlerKeyRefusal(…)` ⇒ REFUSING — two `*Arm(` factories in ONE file, opposite registers', resolveDeclaringFactory(UI_ARMS, 'chatbotOnClearArm').verdict === 'refusing');
+  t('…so a factory returning ANOTHER declared form inherits THAT form\'s register, never the one its own name suggests', resolveDeclaringFactory("const retiredDeclarativeKanbanKey = (key: string) =>\n  retirementTombstone('this key is RETIRED');\n", 'retiredDeclarativeKanbanKey').verdict === 'refusing');
 
   // -- the readings this round must NOT disturb ------------------------------
   t('⛔ #17618 — a typed PARAMETER is still not a key, and the resolver never sees one: its value opens no CALL', keyValueFactoryName('  ctx: z.RefinementCtx,') === null && tellsInFile({ filename: BLUEPRINT, status: 'modified', patch: '@@ -30,0 +30,3 @@\n+export const refine = (\n+  ctx: z.RefinementCtx,\n+) => ctx;' }).length === 0);
