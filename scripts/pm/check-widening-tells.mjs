@@ -1115,6 +1115,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#17217 — the CLI can be told which board it judges': 22,
   '#18560 — the declaring vocabulary is a NAMED list, every form pinned by a counterfactual fixture': 30,
   '#18640 — an inline closed set RE-SPELLED at the same binding is not a set that gained a value': 20,
+  '#18702 — a declaring factory PRIVATE to one file, resolved through its own DEFINITION': 50,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -4895,6 +4896,246 @@ export function selfTest() {
   t('⛔ a removal in a DIFFERENT change block buys nothing — the block is the unit, as it is for #16943 and #17618', respellsExistingClosedSetBinding("const C = z.enum(['a']);", []) === false);
   t('⛔ CONTROL — the identical specimen with `Clause-②: yes` is not refused either way: this file never blocks the honest declaration', wideningRefusal({ declaration: 'yes', files: [ARM_ADDED_BESIDE_OPTIONS] }).state !== 'refused');
 
+
+  // -- #18702 ----------------------------------------------------------------
+  //
+  // The counterfactual pin, in #18560's shape and for the same reason: the unit
+  // is the FACTORY, and a frozen fixture roster is asserted EQUAL to the set of
+  // factories the filing card names, so a factory dropped from the roster reds
+  // here rather than going quiet.
+  //
+  // ⭐ Each fixture carries that factory's REAL definition from the tip —
+  // signature verbatim, return expression verbatim at its opener, prose
+  // truncated — and its `returns` field is asserted to be text the definition
+  // actually contains, so a fixture cannot drift into describing a definition
+  // it does not carry. ⛔ The fixtures are NOT read off the tree: a generated
+  // fixture makes every future factory pass by construction, which is the shape
+  // this card exists because of.
+  battery('#18702 — a declaring factory PRIVATE to one file, resolved through its own DEFINITION');
+  const DRIVER_COMMON = 'packages/spec/src/data/driver/common.zod.ts';
+  const BLUEPRINT = 'packages/spec/src/ai/solution-blueprint.zod.ts';
+  const COMPONENT = 'packages/spec/src/ui/component.zod.ts';
+  const DATASOURCE = 'packages/spec/src/data/datasource.zod.ts';
+  const FILTER_RULE_ARRAY = 'packages/spec/src/ui/filter-rule-array.ts';
+  const MEMORY_DRIVER = 'packages/spec/src/data/driver/memory.zod.ts';
+  // The eight the card names, and nothing else — the roster this battery is
+  // held equal to.
+  const CARD_FACTORIES = Object.freeze([
+    'placeholderFree', 'strictIdent', 'strictIdentOrNull', 'emptyProps',
+    'objectBlockHistory', 'belongsInConfig', 'INLINE_CREDENTIAL_REFUSED', 'ruleArrayFilterError',
+  ]);
+  const FACTORY_FIXTURES = Object.freeze({
+    placeholderFree: {
+      where: DRIVER_COMMON,
+      measured: '23 key lines at objectstack 30bac2880, 0 of them file-local',
+      arm: 'writable',
+      returns: 'return schema.superRefine((value, ctx) => {',
+      definition:
+        'export function placeholderFree<S extends z.ZodString>(schema: S, key: string) {\n'
+        + '  return schema.superRefine((value, ctx) => {\n'
+        + "    if (typeof value !== 'string') return;\n"
+        + '  });\n}\n',
+      line: "+    snapshotPath: placeholderFree(z.string(), 'persistence.snapshotPath').optional(),",
+    },
+    strictIdent: {
+      where: BLUEPRINT,
+      measured: '12 key lines at objectstack 30bac2880, all 12 file-local',
+      arm: 'writable',
+      returns: 'z.string().regex(SNAKE_CASE).describe(description)',
+      definition: 'const strictIdent = (description: string) => z.string().regex(SNAKE_CASE).describe(description);\n',
+      line: "+  snapshotObject: strictIdent('Object whose snapshot is taken (snake_case)'),",
+    },
+    strictIdentOrNull: {
+      where: BLUEPRINT,
+      measured: '8 key lines at objectstack 30bac2880, all 8 file-local',
+      arm: 'writable',
+      returns: 'z.string().regex(SNAKE_CASE).nullable().describe(description)',
+      definition:
+        'const strictIdentOrNull = (description: string) =>\n'
+        + '  z.string().regex(SNAKE_CASE).nullable().describe(description);\n',
+      line: "+  snapshotField: strictIdentOrNull('Numeric field to snapshot, or null'),",
+    },
+    emptyProps: {
+      where: COMPONENT,
+      measured: '9 key lines at objectstack 30bac2880, all 9 file-local',
+      arm: 'writable',
+      returns: 'strictObject(',
+      definition:
+        'const emptyProps = (type: string) =>\n'
+        + '  strictObject(\n'
+        + '    {\n'
+        + '      guidanceSets: COMPONENT_LEVEL_GUIDANCE,\n'
+        + '    },\n'
+        + '    {},\n'
+        + '  );\n',
+      line: "+  'nav:launcher': emptyProps('nav:launcher'),",
+    },
+    objectBlockHistory: {
+      where: COMPONENT,
+      measured: '9 key lines at objectstack 30bac2880, all 9 file-local',
+      arm: null,
+      returns: '`Until this type was added to ComponentPropsMap',
+      definition:
+        'const objectBlockHistory = (type: string) =>\n'
+        + '  `Until this type was added to ComponentPropsMap, it had no entry there at all, so `\n'
+        + "  + 'the authoring gate skipped it.';\n",
+      line: "+  history: objectBlockHistory('object-grid'),",
+    },
+    belongsInConfig: {
+      where: DATASOURCE,
+      measured: '8 key lines at objectstack 30bac2880, all 8 file-local',
+      arm: null,
+      returns: '`is a driver connection detail',
+      definition:
+        'const belongsInConfig = (key: string, canonical: string = key) =>\n'
+        + '  `is a driver connection detail — it belongs inside config, not at the top level.`;\n',
+      line: "+      host: belongsInConfig('host'),",
+    },
+    INLINE_CREDENTIAL_REFUSED: {
+      where: DRIVER_COMMON,
+      measured: '10 key lines at objectstack 30bac2880, 0 of them file-local',
+      arm: null,
+      returns: '`is a credential and is not accepted inline',
+      definition:
+        'export const INLINE_CREDENTIAL_REFUSED = (key: string): string =>\n'
+        + '  `is a credential and is not accepted inline in driver config: the `\n'
+        + "  + 'datasource is persisted whole into sys_metadata.';\n",
+      line: "+      passwd: INLINE_CREDENTIAL_REFUSED('passwd'),",
+    },
+    ruleArrayFilterError: {
+      where: FILTER_RULE_ARRAY,
+      measured: '11 key lines at objectstack 30bac2880, 0 of them file-local',
+      arm: null,
+      returns: 'return (issue) => {',
+      definition:
+        'export function ruleArrayFilterError(options: RuleArrayFilterErrorOptions): z.core.$ZodErrorMap {\n'
+        + '  const { surface, migration } = options;\n\n'
+        + '  return (issue) => {\n'
+        + "    if (issue.code !== 'invalid_type') return undefined;\n"
+        + '  };\n}\n',
+      line: '+    error: ruleArrayFilterError({',
+    },
+  });
+  const rosterMissing = CARD_FACTORIES.filter((n) => FACTORY_FIXTURES[n] === undefined);
+  const rosterOrphan = Object.keys(FACTORY_FIXTURES).filter((n) => !CARD_FACTORIES.includes(n));
+  t(
+    `⭐ every factory the card names has a fixture — a new one with no fixture reds HERE${rosterMissing.length ? ` (missing: ${rosterMissing.join(', ')})` : ''}`,
+    rosterMissing.length === 0,
+  );
+  t(
+    `⭐ …and every fixture names a factory still on that roster — one silently dropped reds HERE${rosterOrphan.length ? ` (orphaned: ${rosterOrphan.join(', ')})` : ''}`,
+    rosterOrphan.length === 0,
+  );
+  t(
+    '⛔ …and every fixture QUOTES a return its own definition really carries — a fixture describing a definition it does not hold pins nothing',
+    Object.values(FACTORY_FIXTURES).every((fx) => fx.definition.includes(fx.returns.replace(/^return /, ''))),
+  );
+  t('…each carrying its measurement WITH the tree it was taken against — a count with no tree is not a reading', Object.values(FACTORY_FIXTURES).every((fx) => /\bobjectstack [0-9a-f]{7,}/.test(fx.measured)));
+
+  const localRun = (where, line, source, opts = {}) => {
+    const unresolved = [];
+    const file = { filename: where, status: 'modified', patch: patchOf(30, line) };
+    const rows = tellsInFile(file, {
+      repo: opts.repo ?? THIS_REPO,
+      readSource: opts.blind === true ? () => null : () => source,
+      unresolved,
+    });
+    return { rows, unresolved, file };
+  };
+
+  // RESOLUTION is the first half, asserted for every fixture against its own
+  // arm — a writable factory, and one whose body mints prose or an error map
+  // rather than a schema. ⛔ `null` is a THIRD state and never rounded to
+  // either: it is what a name-shaped heuristic would have guessed at.
+  for (const name of CARD_FACTORIES) {
+    const fx = FACTORY_FIXTURES[name];
+    const read = resolveDeclaringFactory(fx.definition, name);
+    t(
+      fx.arm === 'writable'
+        ? `⭐ \`${name}(\` returns \`${fx.returns}\` ⇒ a WRITABLE key`
+        : `⭐ \`${name}(\` returns \`${fx.returns}\` ⇒ NOT a schema this reader classifies — a named silence, never a guess`,
+      read.verdict === fx.arm,
+      `verdict ${JSON.stringify(read.verdict)} — ${read.reason}`,
+    );
+  }
+  // The VERDICT is the second half, each fixture against its own arm.
+  for (const name of CARD_FACTORIES) {
+    const fx = FACTORY_FIXTURES[name];
+    const { rows, unresolved } = localRun(fx.where, fx.line, fx.definition);
+    if (fx.arm === 'writable') {
+      t(
+        `⭐ \`${name}(\` declares a WRITABLE key, so a \`Clause-②: no\` diff carrying it FIRES — with its own file:line`,
+        rows.length === 1 && rows[0]?.tell === 'T1' && rows[0]?.line === 30 && unresolved.length === 0,
+      );
+    } else {
+      t(
+        `⭐ \`${name}(\` is unclassifiable, so nothing fires — and the line is REPORTED by name rather than swallowed`,
+        rows.length === 0 && unresolved.length === 1 && unresolved[0]?.name === name && unresolved[0]?.line === 30,
+      );
+    }
+  }
+
+  // -- the REFUSING arm, read off a definition rather than off a name --------
+  const REFUSAL_DEFINITION =
+    'export function refusedInlineCredentialKey(key: string, formTitle: string) {\n'
+    + '  return z.never({ error: () => INLINE_CREDENTIAL_REFUSED(key) }).optional()\n'
+    + "    .describe('Set through the connection form secret field');\n}\n";
+  const REFUSAL_LINE = "+  password: refusedInlineCredentialKey('password', 'Password'),";
+  t('⭐ a file-local factory whose body returns `z.never(…)` declares the key UNWRITABLE — the same primitive `retiredKey(` carries, read off the DEFINITION', resolveDeclaringFactory(REFUSAL_DEFINITION, 'refusedInlineCredentialKey').verdict === 'refusing');
+  t('…so it is RECOGNISED and DECLINES — a stated silence, and NOT an unresolved line either', localRun(DRIVER_COMMON, REFUSAL_LINE, REFUSAL_DEFINITION).rows.length === 0 && localRun(DRIVER_COMMON, REFUSAL_LINE, REFUSAL_DEFINITION).unresolved.length === 0);
+  t('⛔ …and a live arm CHAINED onto it leaves the key writable, so it FIRES — the decline is bound to the line\'s own evidence, never to the factory', localRun(DRIVER_COMMON, `${REFUSAL_LINE.replace(/,$/, '')}.or(z.string()),`, REFUSAL_DEFINITION).rows[0]?.tell === 'T1');
+
+  // -- THE COUNTERFACTUAL ----------------------------------------------------
+  //
+  // ⭐ The card's own probe LINE, on the file where its factory is DECLARED. It
+  // is silent before and fires after, and the "before" is taken by disabling the
+  // resolver — ⛔ never by editing the fixture, which would prove nothing about
+  // the reading.
+  const PROBE = FACTORY_FIXTURES.placeholderFree;
+  t('⭐ THE FINDING: a new key added through a file-local declaring factory FIRES — the row that was silent at 6dfa3ea77', localRun(PROBE.where, PROBE.line, PROBE.definition).rows[0]?.tell === 'T1');
+  t('…at the line the author can open', localRun(PROBE.where, PROBE.line, PROBE.definition).rows[0]?.line === 30);
+  t('⭐ CONTROL — the SAME fixture with the resolver blind is silent, which is the state this card measured', localRun(PROBE.where, PROBE.line, PROBE.definition, { blind: true }).rows.length === 0);
+  t('…and the whole verdict is a REFUSAL, not a clean reading', wideningRefusal({ declaration: 'no', files: [localRun(PROBE.where, PROBE.line, PROBE.definition).file], readSource: () => PROBE.definition }).state === 'refused');
+  t('⛔ CONTROL — the identical diff with `Clause-②: yes` is not refused: this file never blocks the honest declaration', wideningRefusal({ declaration: 'yes', files: [localRun(PROBE.where, PROBE.line, PROBE.definition).file], readSource: () => PROBE.definition }).state !== 'refused');
+  t('⛔ CONTROL — the same widening judged on the objectui board is not judged at all, so the board resolution still decides it', wideningRefusal({ declaration: 'no', files: [localRun(PROBE.where, PROBE.line, PROBE.definition).file], repo: UI_BOARD, readSource: () => PROBE.definition }).state !== 'refused');
+
+  // -- BOUNDARY ONE: an IMPORTED factory ------------------------------------
+  //
+  // ⚠️ The card's LITERAL probe is one of these, measured rather than argued:
+  // `placeholderFree` is declared in `common.zod.ts` and imported at all 23 of
+  // its key positions, `memory.zod.ts` included. It exits 0 still — but the
+  // line is now NAMED.
+  const importedRun = localRun(MEMORY_DRIVER, PROBE.line, "import { placeholderFree } from './common.zod';\n");
+  t('⛔ BOUNDARY ONE — a factory defined in ANOTHER file stays unrecognised: imports are not chased', importedRun.rows.length === 0);
+  t('⭐ …but the silence is STATED — the line is reported with its file:line, the factory and the reason', importedRun.unresolved.length === 1 && importedRun.unresolved[0]?.name === 'placeholderFree' && importedRun.unresolved[0]?.reason.includes('IMPORTED'));
+  t('…and the reader PRINTS it, so exit 0 is no longer evidence about that line', unresolvedLines(importedRun.unresolved).some((l) => l.includes(`${MEMORY_DRIVER}:30`)));
+  t('⛔ …while an empty list prints NOTHING — a heading with no rows would read as a finding', unresolvedLines([]).length === 0 && unresolvedLines(null).length === 0);
+
+  // -- BOUNDARY TWO: a body this reader cannot read -------------------------
+  t('⛔ BOUNDARY TWO — two definitions of one name in a file are AMBIGUOUS, never "the first one"', resolveDeclaringFactory('const dup = (a: string) => z.string();\nconst dup = (a: string) => z.never();\n', 'dup').verdict === null);
+  t('⛔ …a body with no `return` this reader can find stays unresolved', resolveDeclaringFactory('function opaque(a) {\n  doSomething(a);\n}\n', 'opaque').verdict === null);
+  t('⭐ …and a `return` belonging to a NESTED callback is not read as the factory\'s own — the quiet direction, refused by brace depth', resolveDeclaringFactory('function live(schema) {\n  const g = () => {\n    return z.never();\n  };\n  return schema;\n}\n', 'live').verdict === 'writable');
+  t('⛔ …a factory named in a COMMENT is no definition — the declaration must follow the line\'s indentation and nothing else', resolveDeclaringFactory('// const ghost = (a: string) => z.string();\n * const ghost = (a: string) => z.string();\n', 'ghost').verdict === null);
+
+  // -- the head BLOB, which is what makes this reading legal after #17300 ----
+  t('the API row carries the head blob as `sha`', headBlobId({ filename: 'x.ts', sha: 'a'.repeat(40) }) === 'a'.repeat(40));
+  t('…and the local path carries the same fact in its `index <old>..<new>` line', headBlobId({ filename: 'x.ts', patch: 'index eb82214af9..34232a3ac5 100644\n@@ -1,0 +1,1 @@\n+x' }) === '34232a3ac5');
+  t('⛔ …an all-zero id is no blob — a deleted side names nothing to read', headBlobId({ filename: 'x.ts', patch: 'index eb82214af9..0000000 100644\n@@ -1,1 +1,0 @@\n-x' }) === null);
+  t('⭐ ⛔ …and a patch that names NEITHER answers null, which is why every other fixture in this file never touches an object store', headBlobId({ filename: 'x.ts', patch: patchOf(30, '+  a: z.string(),') }) === null);
+  t('⛔ …a path that climbs out of the tree is never read, whatever id it carries', headBlobSource({ filename: '../elsewhere/x.ts', sha: 'a'.repeat(40) }) === null);
+
+  // -- the direction: the resolver only ever ADDS ----------------------------
+  t('⭐ the shared vocabulary is the FAST PATH — a line `SCHEMA_PROPERTY` already reads is never re-judged here', keyValueFactoryName('  window: strictObject({ from: z.string() }),') === null && keyValueFactoryName("  legacy: retiredKey('gone'),") === null);
+  t('…and a line it does not read hands over its identifier', keyValueFactoryName("  snapshotObject: strictIdent('x'),") === 'strictIdent');
+  t('⛔ a line that fires WITHOUT the resolver still fires with it — the `no` criterion is untouched', localRun(BLUEPRINT, '+  cursor: z.string().optional(),', FACTORY_FIXTURES.strictIdent.definition).rows[0]?.tell === 'T1');
+  t('⭐ ⛔ the resolver is read on the ADDED side ONLY: a REMOVED local-factory key buys nothing, so a `z.` key added beside it STILL fires', tellsInFile({ filename: BLUEPRINT, status: 'modified', patch: "@@ -30,1 +30,1 @@\n-  gone: strictIdent('x'),\n+  cursor: z.string().optional()," }, { readSource: () => FACTORY_FIXTURES.strictIdent.definition }).length === 1);
+  t('⚠️ …and the PRICE of that asymmetry, pinned rather than discovered: a block REPLACING one local-factory key with another fires on the added one', tellsInFile({ filename: BLUEPRINT, status: 'modified', patch: "@@ -30,1 +30,1 @@\n-  gone: strictIdent('x'),\n+  fresh: strictIdent('y')," }, { readSource: () => FACTORY_FIXTURES.strictIdent.definition }).length === 1);
+
+  // -- the readings this round must NOT disturb ------------------------------
+  t('⛔ #17618 — a typed PARAMETER is still not a key, and the resolver never sees one: its value opens no CALL', keyValueFactoryName('  ctx: z.RefinementCtx,') === null && tellsInFile({ filename: BLUEPRINT, status: 'modified', patch: '@@ -30,0 +30,3 @@\n+export const refine = (\n+  ctx: z.RefinementCtx,\n+) => ctx;' }).length === 0);
+  t('⛔ …a COMMENT carrying a local-factory key line is still not a key line', localRun(BLUEPRINT, "+  // snapshotObject: strictIdent('x'),", FACTORY_FIXTURES.strictIdent.definition).rows.length === 0);
+  t('⛔ …and a file OFF the contract source surface reads no blob at all, whatever its lines say', localRun('README.md', FACTORY_FIXTURES.strictIdent.line, FACTORY_FIXTURES.strictIdent.definition).unresolved.length === 0);
+
   // -- the floor -------------------------------------------------------------
   const floorFailures = [];
   const floorFailure = (text) => {
@@ -4949,6 +5190,7 @@ export function selfTest() {
       "#17848's re-declared key with a zod `error` param — declined by #16943's budget, bracketed by the dark control that fires when nothing paid and the surplus control that fires on a real new key beside it, " +
       "#18234's key narrowed out of a universal acceptor — certified by the REMOVED value's own semantics rather than by the added value's spelling, with the dark, different-key, never-universal, narrowing-step and surplus controls that still fire, " +
       "#18640's inline closed set re-spelled at the same binding — bounded by the control set that IS the finding, the same edit spelled one member per line and at a keyed property, with the added-arm, different-binding, brand-new, widened-enum and new-key controls that still fire, " +
+      "#18702's FILE-LOCAL declaring factory, resolved through its own definition at the head BLOB and classified by what its body returns — every factory the filing card names pinned against its own arm, the refusal arm read off a `z.never` definition rather than a name with its chained-arm control, the counterfactual bracketed by the same fixture with the resolver blind, and both boundaries (an imported factory, an unclassifiable body) pinned as a STATED silence the reader prints, " +
       "#16448's four positive controls each with its file:line, its negative controls — " +
       'the same diffs with `yes`, and a removal-only diff with `no` — the local path composed end ' +
       'to end so a binary change to a tell surface cannot read as clean, #17112\'s split count with ' +
