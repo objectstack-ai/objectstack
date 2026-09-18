@@ -28,7 +28,21 @@ The query TRANSPORT dialect is declared — keys AND values — and the `findDat
 - a `$count` that is neither the boolean nor `'true'` / `'false'`;
 - two spellings of one slot carrying different values — reported at the canonical path, quoting the spelling the caller actually wrote (`$orderby`, not `orderBy`).
 
-These refusals narrow no DECLARED surface: none of these value shapes was ever declared, and each one the door could serve is still served. They narrow how far an unservable body travels before it is refused — from the engine, or from a wrong answer under a `200`, to the ingress that can name the parameter to fix. The GET querystring path is unchanged: it does not parse through this schema.
+These refusals narrow no DECLARED surface: none of these value shapes was ever declared — `FindDataRequestSchema.query` was `QuerySchema`, which STRIPPED every one of these keys rather than declaring it.
+
+**Five of them were nonetheless SERVED, and now answer `400 VALIDATION_FAILED` at the ingress.** The route forwards the ORIGINAL body, not the parse output, so a key the old schema stripped still reached the door, which read it and answered `200`. A `POST /data/:object/query` body written one of these five ways stops working; each has a declared spelling that means the same thing:
+
+| body that now answers `400` | what the door served it as | write instead |
+|---|---|---|
+| `{ $orderby: 'name desc' }` | `orderBy: [{ field: 'name', order: 'desc' }]` | `{ $orderby: { name: 'desc' } }` — or `{ orderBy: [{ field: 'name', order: 'desc' }] }` |
+| `{ sort: '-created_at' }` | `orderBy: [{ field: 'created_at', order: 'desc' }]` | `{ sort: { created_at: 'desc' } }` — or `{ sort: [{ field: 'created_at', order: 'desc' }] }` |
+| `{ $orderby: ['name'] }` | `orderBy: [{ field: 'name', order: 'asc' }]` | `{ $orderby: { name: 'asc' } }` — or the `SortNode[]` form |
+| `{ $filter: '{"status":"open"}' }` | `where: { status: 'open' }` | `{ $filter: { status: 'open' } }` |
+| that same JSON string on `filters` or `filter` | `where: { status: 'open' }` | the object form on whichever of the two keys you write |
+
+**`GET /data/:object` still serves every one of those shapes.** The querystring path does not parse through this schema at all — `FindDataRequestSchema` is parsed at exactly one call site, the POST handler — so `?$orderby=name desc`, `?sort=-created_at` and `?$filter={"status":"open"}` answer exactly as before. What narrowed is the POST body alone — the platform has not stopped accepting these spellings everywhere.
+
+The remaining refusals in the list narrow nothing that was served correctly; they move an unservable body's refusal earlier — from the engine, or from a wrong answer under a `200`, to the ingress that can name the parameter to fix.
 
 **`@objectstack/metadata-protocol` folds by the spec export** instead of its own table, and both resolved tables — plus the `$`-parameter list its `UNSUPPORTED_QUERY_PARAM` refusal quotes — are pinned byte-equal to their pre-change values. An undeclared `$` spelling is still refused loudly with the same `400 UNSUPPORTED_QUERY_PARAM`; the sentence now quotes `QUERY_TRANSPORT_DOLLAR_PARAMS` rather than a hand-copied list, so a spelling added to the table cannot leave the refusal naming a set the door no longer has.
 
