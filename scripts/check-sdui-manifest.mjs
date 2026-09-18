@@ -40,11 +40,12 @@
  *      the version `packages/core/package.json` DECLARES at the pinned commit.
  *      Checks 1-3 reach both fields and relate neither: the version was read
  *      as a presence check only, so the record could name pin C and version V
- *      with nothing asking whether V is C's version at all (#18611). The live
- *      way to write that record is the generator's own default —
- *      `--objectui-version` unset makes it REUSE the version already in the
- *      record, so a regeneration after a pin bump keeps the OLD version string
- *      while re-recording the NEW pin, and checks 1-3 stay green throughout.
+ *      with nothing asking whether V is C's version at all (#18611). The
+ *      generator's own default does not write such a record — `--objectui-version`
+ *      unset reads the version off the PIN and REFUSES when the pin cannot be
+ *      read — but an explicit wrong version, a hand edit, or a record written
+ *      before that default was fixed still produce one, and checks 1-3 stay
+ *      green throughout.
  *      This is the only check here that needs an input from outside this tree,
  *      so it is the only one that can report NOT CHECKED — see below.
  *
@@ -315,8 +316,9 @@ export function checkTree(root, { objectuiRoot, requireObjectui = false, onVersi
       `the record's two objectui fields describe different commits: objectuiPackagesVersion is ${JSON.stringify(record.objectuiPackagesVersion)},\n` +
         `  but objectui ${pin.slice(0, 12)}… — the pin the record itself names — declares ${JSON.stringify(versionLeg.version)} in ${OBJECTUI_VERSION_FILE}\n` +
         `  (read from ${versionLeg.where}). The manifest was generated from the published ${record.objectuiPackagesVersion} packages, so it\n` +
-        '  describes a registry this pin does not name. The generator REUSES the version already recorded when\n' +
-        '  --objectui-version is not passed, which is how a regeneration re-records a new pin under an old version.\n' +
+        '  describes a registry this pin does not name. The generator reads this version from the PIN, never\n' +
+        '  from this record, so a disagreement came from outside that default: a version named explicitly on\n' +
+        '  some other run, a hand edit, or a record written before the default was fixed to read the pin.\n' +
         `  Regenerate against the pin: node scripts/gen-sdui-manifest-node.mjs --objectui-version ${versionLeg.version}`,
     );
   } else if (versionLeg.status === 'unsupported') {
