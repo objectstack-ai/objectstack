@@ -215,9 +215,12 @@ about).
   the ruling as *「action `visibleWhen` / `visible` / `ActionConditionInputSchema`;
   app `visible`; settings visibility; … `ui/bulk-action` visibility」*. **Cite that
   census rather than re-enumerating it** — a hand list rots, and this record's
-  did: it omitted `system/settings-manifest.zod.ts:424` and `:686`, both
+  did: it omitted the settings `visible` pair, on
+  `packages/spec/src/system/settings-manifest.zod.ts#SpecifierSchema` and
+  `packages/spec/src/system/settings-manifest.zod.ts#SettingsManifestSchema`. Both are
   `visible: SettingsVisibilityInputSchema`, which is
-  `ExpressionInputSchema.superRefine(…)` — the refinement returns early on a
+  `packages/spec/src/system/settings-manifest.zod.ts#SettingsVisibilityInputSchema`, an
+  `ExpressionInputSchema.superRefine(…)` — and the refinement returns early on a
   `source` that is absent or blank (`if (!source) return;`), so it narrows
   neither the `ast`-only nor the blank-`source` arm and those two slots sit on
   the persistence contract exactly like the rest.
