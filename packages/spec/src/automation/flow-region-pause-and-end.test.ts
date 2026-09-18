@@ -4,24 +4,35 @@
  * What a structured region body may NOT contain — #15646, absorbing #18112.
  *
  * Director seat ruling 5714239196 (maintainer 「同意,其他也同意」) and its scope
- * addition 5714981966 (maintainer 「146 同意」), quoted in the PR: an ADR-0031
- * region body (`loop` / `try_catch` / `parallel`) refuses a node that can
- * durably pause, and refuses an `end` node — one rule family, one PR.
+ * addition 5714981966 (maintainer 「146 同意」) put the rule here; ruling
+ * 5724940095, decision batch #153 item 1 letter **D** (maintainer 「其他同意」),
+ * fixed its POPULATION and is quoted verbatim in the PR:
+ *
+ * 「inside `loop` / `parallel` branch / `try_catch` (try and catch) bodies at
+ * any depth, the node types `screen`, `wait`, `approval`, `approval_revise`
+ * and `end` are refused by `FlowSchema.superRefine`, the message naming the
+ * node and the region. `map` and `subflow` are ⛔ not refused by type.」
  *
  * Both halves are authoring-time enforcement of the limit #3267 ruled 禁: a
  * region body runs synchronously inside the enclosing run, so it can neither
  * park that run nor terminate it. The engine already refuses both AT RUN TIME
  * (`durable pause inside a structured region … is not supported`, and the
  * #15788 refusing-`end` conversion) — this moves the refusal to where the
- * author is standing.
+ * author is standing, for the half a parse can actually judge.
  *
- * Every case here fails without the rule: the shapes below all parsed green
- * before it.
+ * ⭐ The `map` / `subflow` exclusion is load-bearing and has its own pins in
+ * "the declared boundaries" below: those two pause exactly when the child flow
+ * they name pauses, so a type-keyed refusal would also refuse
+ * `loop { map(synchronous child) }` — a shape that runs correctly today. The
+ * run-time half of ruling D is what meets them.
+ *
+ * Every refusal case here fails without the rule: the shapes below all parsed
+ * green before it.
  */
 import { describe, it, expect } from 'vitest';
 import {
   FlowSchema,
-  FLOW_PAUSE_CAPABLE_NODE_TYPES,
+  FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES,
   defineFlow,
   type Flow,
   type FlowNode,
@@ -73,25 +84,37 @@ const issuesOf = (flow: Flow): Array<[string, string]> => {
   return result.error.issues.map((i) => [i.path.join('.'), i.message]);
 };
 
-describe('FLOW_PAUSE_CAPABLE_NODE_TYPES — the declared set, and how it was derived', () => {
-  it('names the six built-in types whose shipped executor declares `supportsPause: true`', () => {
-    // Read off the descriptors, not recalled: `screen` / `wait` / `subflow` /
-    // `map` in `service-automation`'s builtins, `approval` / `approval_revise`
-    // in `plugin-approvals` — the same six the ADR-0044 `resumeAuthority`
-    // default-flip migration entry names in its own prose.
-    expect([...FLOW_PAUSE_CAPABLE_NODE_TYPES]).toEqual([
-      'screen', 'wait', 'subflow', 'map', 'approval', 'approval_revise',
+describe('FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES — the declared set, and how it was derived', () => {
+  it('names the four built-in types that park a run on EVERY execution', () => {
+    // Read off the descriptors, not recalled. SIX shipped executors declare
+    // `supportsPause: true` — `screen` / `wait` / `subflow` / `map` in
+    // `service-automation`'s builtins, `approval` / `approval_revise` in
+    // `plugin-approvals`, the same six the ADR-0044 `resumeAuthority`
+    // default-flip migration entry names. Four of them pause from this flow's
+    // own text; those four are the region rule's population.
+    expect([...FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES]).toEqual([
+      'screen', 'wait', 'approval', 'approval_revise',
     ]);
   });
 
+  it('⛔ excludes `subflow` and `map`, which are pause-capable but not unconditionally so', () => {
+    // Ruling D, verbatim: 「`map` and `subflow` are ⛔ not refused by type.」
+    // They pause exactly when the child flow `config.flowName` names pauses —
+    // a different metadata record, unreadable from here. Pinned as a DECISION
+    // so re-adding either is an edit somebody makes on purpose, against the
+    // ruling, rather than a tidy-up that looks like completing a list.
+    expect(FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES).not.toContain('subflow');
+    expect(FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES).not.toContain('map');
+  });
+
   it('carries the approval node types by their declared constants, so a rename cannot desynchronise the two', () => {
-    expect(FLOW_PAUSE_CAPABLE_NODE_TYPES).toContain(APPROVAL_NODE_TYPE);
-    expect(FLOW_PAUSE_CAPABLE_NODE_TYPES).toContain(APPROVAL_REVISE_NODE_TYPE);
+    expect(FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES).toContain(APPROVAL_NODE_TYPE);
+    expect(FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES).toContain(APPROVAL_REVISE_NODE_TYPE);
   });
 });
 
 describe('a region body refuses a pause-capable node (#15646)', () => {
-  it.each(FLOW_PAUSE_CAPABLE_NODE_TYPES)('refuses a `%s` node in a loop body, anchored on its `type`', (type) => {
+  it.each(FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES)('refuses a `%s` node in a loop body, anchored on its `type`', (type) => {
     expect(issuesOf(flowWith([loopOver([pausingNode(type)])]))).toEqual([[
       'nodes.1.config.body.nodes.0.type',
       expect.stringContaining(
@@ -102,9 +125,9 @@ describe('a region body refuses a pause-capable node (#15646)', () => {
   });
 
   it('refuses it in a try_catch TRY region', () => {
-    expect(issuesOf(flowWith([tryCatchOver([pausingNode('map')], [step('recover')])]))).toEqual([[
+    expect(issuesOf(flowWith([tryCatchOver([pausingNode('wait')], [step('recover')])]))).toEqual([[
       'nodes.1.config.try.nodes.0.type',
-      expect.stringContaining("`try_catch 'guard' try` is a region body and the `map` node `pauser` is inside it") as unknown as string,
+      expect.stringContaining("`try_catch 'guard' try` is a region body and the `wait` node `pauser` is inside it") as unknown as string,
     ]]);
   });
 
@@ -122,20 +145,29 @@ describe('a region body refuses a pause-capable node (#15646)', () => {
     ]]);
   });
 
-  it("refuses this card's own reproduction — `loop { try_catch { map } }` — with the chained region path", () => {
-    const issues = issuesOf(flowWith([loopOver([tryCatchOver([pausingNode('map')], [step('recover')])])]));
+  it('names the CHAINED region path when the regions nest — `loop { try_catch { approval } }`', () => {
+    // The nesting shape of this card's own reproduction, with a node type the
+    // parse can judge. The reproduction's own `map` is pinned as still
+    // declarable in "the declared boundaries" below — that is ruling D, not a
+    // hole in this assertion.
+    const issues = issuesOf(flowWith([loopOver([tryCatchOver([pausingNode('approval')], [step('recover')])])]));
     expect(issues.map(([path]) => path)).toEqual([
       'nodes.1.config.body.nodes.0.config.try.nodes.0.type',
     ]);
     expect(issues[0][1]).toContain("`loop 'sweep' body → try_catch 'guard' try` is a region body");
   });
 
-  it('says WHY on the node type rather than on the child flow — the sentence an author acts on', () => {
-    const [[, message]] = issuesOf(flowWith([loopOver([pausingNode('map')])]));
+  it('says WHY, and names the node and the region — the sentence an author acts on', () => {
+    const [[, message]] = issuesOf(flowWith([loopOver([pausingNode('wait')])]));
     expect(message).toContain('A region body runs synchronously and cannot durably pause');
+    expect(message).toContain('parks the run on EVERY execution');
     expect(message).toContain('reads back as progress');
-    expect(message).toContain("Move the `map` node onto the top-level graph and route the region's exit to it");
-    expect(message).toContain('`map` / `subflow` pause exactly when the child flow they name pauses');
+    expect(message).toContain("Move the `wait` node onto the top-level graph and route the region's exit to it");
+    // ⛔ The message must not advertise a population the rule does not refuse:
+    // naming `map` / `subflow` here would send an author hunting for a refusal
+    // that never fires.
+    expect(message).not.toContain('subflow');
+    expect(message).not.toContain('`map`');
   });
 
   it('renders through formatZodError pointing INTO the region', () => {
@@ -150,7 +182,7 @@ describe('a region body refuses a pause-capable node (#15646)', () => {
   it('defineFlow refuses it with the same anchored issue', () => {
     let caught: unknown;
     try {
-      defineFlow(flowWith([loopOver([pausingNode('subflow')])]));
+      defineFlow(flowWith([loopOver([pausingNode('screen')])]));
     } catch (error) {
       caught = error;
     }
@@ -192,7 +224,7 @@ describe('a region body refuses an `end` node (#18112, absorbed into #15646)', (
 
 describe('the rule does NOT over-reach', () => {
   it('accepts every pause-capable type on the TOP-LEVEL graph — a refusal that over-reaches is worse than the silence it replaces', () => {
-    for (const type of FLOW_PAUSE_CAPABLE_NODE_TYPES) {
+    for (const type of [...FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES, 'subflow', 'map']) {
       const flow = flowWith([pausingNode(type)], [{ id: 'e1', source: 'start', target: 'pauser' }]);
       expect(FlowSchema.safeParse(flow).success, type).toBe(true);
     }
@@ -223,18 +255,38 @@ describe('the rule does NOT over-reach', () => {
   });
 });
 
-describe('the two declared boundaries — measured, so they move deliberately', () => {
+describe('the declared boundaries — measured, so they move deliberately', () => {
+  it.each(['map', 'subflow'])('⛔ does NOT refuse a `%s` in a region body — ruling D, letter for letter', (type) => {
+    // 「`map` and `subflow` are ⛔ not refused by type.」 Their pause lives in
+    // the child flow `config.flowName` names — a metadata record this parse
+    // does not hold — so a type-keyed refusal would also refuse
+    // `loop { map(synchronous child) }`, which runs correctly today and is
+    // covered by #15616's regression suite in `packages/services`.
+    expect(FlowSchema.safeParse(flowWith([loopOver([pausingNode(type)])])).success, type).toBe(true);
+  });
+
+  it("⛔ leaves this card's own reproduction declarable — `loop { try_catch { map } }` — and that is the ruling, not a hole", () => {
+    // The exact shape #15646 was filed on. It parses, deliberately: what makes
+    // it wrong is that the child flow pauses, which only the RUN knows. Ruling
+    // D's second half is a `domain:services` card that fails such a run with a
+    // named error instead of reporting `success` with `summary.failed = 0`.
+    // ⛔ Do not "fix" this pin by widening the parse — that is route A/C, both
+    // explicitly refused.
+    const flow = flowWith([loopOver([tryCatchOver([pausingNode('map')], [step('recover')])])]);
+    expect(FlowSchema.safeParse(flow).success).toBe(true);
+  });
+
   it('a PLUGIN-contributed pausing type is not refused: a parse has no registry (ADR-0018 open namespace)', () => {
     // ⚠️ Not an oversight and not a gap to quietly close: `FlowNodeSchema.type`
     // is a validated `string`, and a plugin registers pause-capable types at run
     // time. The engine's own run-time refusal is what meets this one. Extending
-    // `FLOW_PAUSE_CAPABLE_NODE_TYPES` is how a first-party type joins the rule —
-    // and this pin is what makes that an edit somebody makes on purpose.
+    // `FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES` is how a first-party type joins the
+    // rule — and this pin is what makes that an edit somebody makes on purpose.
     const flow = flowWith([loopOver([{ id: 'vendor', type: 'vendor_signature_pause', label: 'Sign' }])]);
     expect(FlowSchema.safeParse(flow).success).toBe(true);
   });
 
-  it('the seam at MAX_REGION_DEPTH: a pause-capable node at nesting 32 is refused; at nesting 33 the parse does not judge it', () => {
+  it('the seam at MAX_REGION_DEPTH: an unconditionally pausing node at nesting 32 is refused; at nesting 33 the parse does not judge it', () => {
     // The walk this rule rides (`collectFlowGraphs`) stops at 32, the ceiling
     // `parseFlowNodeRegions` shares — the same measured boundary #16134's
     // one-id-space rule hands off at. Past it there is no second spec refusal
@@ -242,7 +294,7 @@ describe('the two declared boundaries — measured, so they move deliberately', 
     // so the engine's run-time refusal is the only one left. Stated in the
     // docblock and in the changeset rather than discovered by an author.
     const nestedTo = (nesting: number): Flow => {
-      let body: { nodes: FlowNode[]; edges: FlowEdge[] } = { nodes: [pausingNode('map')], edges: [] };
+      let body: { nodes: FlowNode[]; edges: FlowEdge[] } = { nodes: [pausingNode('wait')], edges: [] };
       for (let k = nesting - 1; k >= 1; k--) {
         body = { nodes: [{ id: `l${k}`, type: 'loop', label: `L${k}`, config: { collection: '{items}', body } }], edges: [] };
       }
@@ -255,7 +307,7 @@ describe('the two declared boundaries — measured, so they move deliberately', 
     expect(atCeiling.success).toBe(false);
     if (atCeiling.success) return;
     expect(atCeiling.error.issues).toHaveLength(1);
-    expect(atCeiling.error.issues[0].message).toContain('A `map` node may not sit inside a structured region');
+    expect(atCeiling.error.issues[0].message).toContain('A `wait` node may not sit inside a structured region');
     expect(atCeiling.error.issues[0].path.slice(-2)).toEqual([0, 'type']);
 
     expect(FlowSchema.safeParse(nestedTo(33)).success).toBe(true);
