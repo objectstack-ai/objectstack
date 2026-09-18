@@ -65,5 +65,5 @@ for both corollaries.
 | `realtime_subscription` | 0 | 0 | 0 | 6 | 0 | 6 |
 | `sharing_rule` | 16 | 0 | 0 | 0 | 1 | 17 |
 | `connector` | 20 | 0 | 0 | 53 | 1 | 74 |
-| `analytics_cube` | 17 | 0 | 0 | 12 | 0 | 29 |
-| **total** | **915** | **5** | **1** | **161** | **12** | **1094** |
+| `analytics_cube` | 17 | 0 | 0 | 10 | 0 | 27 |
+| **total** | **915** | **5** | **1** | **159** | **12** | **1092** |

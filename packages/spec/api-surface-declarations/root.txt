@@ -22346,12 +22346,6 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
         }, z.core.$strict>>;
         joins: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
             name: z.ZodString;
-            relationship: z.ZodDefault<z.ZodEnum<{
-                one_to_one: "one_to_one";
-                one_to_many: "one_to_many";
-                many_to_one: "many_to_one";
-            }>>;
-            sql: z.ZodString;
         }, z.core.$strict>>>;
         refreshKey: z.ZodOptional<z.ZodObject<{
             every: z.ZodOptional<z.ZodString>;
@@ -44199,12 +44193,6 @@ declare const ObjectStackSchema: z.ZodObject<{
         }, z.core.$strict>>;
         joins: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
             name: z.ZodString;
-            relationship: z.ZodDefault<z.ZodEnum<{
-                one_to_one: "one_to_one";
-                one_to_many: "one_to_many";
-                many_to_one: "many_to_one";
-            }>>;
-            sql: z.ZodString;
         }, z.core.$strict>>>;
         refreshKey: z.ZodOptional<z.ZodObject<{
             every: z.ZodOptional<z.ZodString>;
