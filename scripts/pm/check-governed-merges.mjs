@@ -22,6 +22,8 @@
  *   node scripts/pm/check-governed-merges.mjs --pr 16997       # same predicate, list DERIVED from the API
  *   node scripts/pm/check-governed-merges.mjs --pr objectstack-ai/objectui#42   # any governed repo
  *   node scripts/pm/check-governed-merges.mjs --branch claude/issue-17003-x     # DERIVED offline, merge-base
+ *   node scripts/pm/check-governed-merges.mjs --pr 18971       # --pr and --branch read the SIZE too (additions + deletions)
+ *   node scripts/pm/check-governed-merges.mjs --test src/x.ts --additions 238310 --deletions 119   # the size, passed in
  *   node scripts/pm/check-governed-merges.mjs --self-test      # offline, no network
  *
  * ## Exit codes — the refusal to read as clean, in one table
@@ -46,6 +48,13 @@
  *      2: a governed verdict must be impossible to confuse with the sweep's
  *      "could not sweep" / "incomplete", so `if cmd; then` and `$?` readings
  *      cannot silently turn a governed answer into an environment complaint.
+ *      ALSO the answer when the diff's SIZE crosses `HUMAN_MERGE_LINE_THRESHOLD`
+ *      (the "SIZE predicate" section below) — deliberately the SAME code, so
+ *      every caller that already routes GOVERNED to the human terminal routes
+ *      an oversized PR there without learning a new code. Which limb fired is
+ *      in the words and in `--json`: `governed` is the PATH limb, `humanMerge`
+ *      is either limb. Half a `--additions`/`--deletions` pair is bad args
+ *      (1, below): the size is their SUM, and half a pair is no reading.
  *   1  bad args — no paths given. ⛔ Silence never reads as "not governed":
  *      `--test` with an empty path list is a failure, never a green light.
  *   The register rows in `GENERATED_SURFACE_EXCEPTIONS` carry a provenance-
@@ -60,7 +69,10 @@
  * already means "could not answer":
  *   1  could not DERIVE the list — an unresolvable ref, a merge-base that
  *      cannot be computed, an unreachable API, a page walk that came back
- *      short. ⛔ A derivation that cannot be made is a REFUSAL, never a
+ *      short, a PR object missing its `additions`/`deletions` pair, a
+ *      `--numstat` that did not read (the size leg, below), or `--additions`/
+ *      `--deletions` handed to a mode that reads the number itself (two
+ *      readings of one number). ⛔ A derivation that cannot be made is a REFUSAL, never a
  *      quieter answer: see the section below for why the fallback everyone
  *      reaches for is the defect itself.
  *
@@ -134,6 +146,55 @@
  * is wrong on any exact multiple of 100, so the walk follows `Link` and then
  * proves itself against the PR's own `changed_files` count. A walk that cannot
  * prove it collected the whole list refuses instead of answering on part of it.
+ *
+ * ## The SIZE predicate (maintainer ruling, 2026-09-18)
+ *
+ * The maintainer, verbatim, in the same exchange as ruling C on PR #18971:
+ *
+ *   「还有应该完善skills，修改代码量超过某个行数（比如5000）就应该人工审核。」
+ *
+ * Read as: a pull request whose changed line count exceeds 5,000 lands only by
+ * a human merge — the same terminal as a governed diff (ACCEPT on the card,
+ * `needs-user-decision` on the PR, a final 维护者速读, review requested from
+ * `GOVERNED_APPROVERS`), whatever paths it touches. 「比如」 makes 5,000 the
+ * ruled DEFAULT, declared once as `HUMAN_MERGE_LINE_THRESHOLD` so it moves by
+ * one word from the maintainer and by one edit here.
+ *
+ * The count is GitHub's `additions + deletions` on the PR — the number the API
+ * and the size labeller report — and generated files are INCLUDED. The case
+ * that prompted the ruling was PR #18971: +238,310 / −119, of which 237,706
+ * lines were regenerated artefacts, landed through the queue on an AI review
+ * alone. An exemption for generated files would exempt exactly that PR, so
+ * there is none: no regen family, no docs build and no revert is carved out.
+ * `GENERATED_SURFACE_EXCEPTIONS` lifts a PATH off the governed predicate on
+ * proven provenance; it lifts nothing from the size predicate, and the
+ * self-test pins that a certified regeneration over the threshold still lands
+ * by a human merge. A label (`size/xl`) is not a gate — the gate reads the
+ * numbers.
+ *
+ * Where the number comes from, per mode:
+ *   `--pr <n>`        `additions` / `deletions` off the same `GET /pulls/{n}`
+ *                     read that gives the `changed_files` count — one read, one
+ *                     channel. A PR object without both numbers is a REFUSAL on
+ *                     the derivation code (exit 1): never a "not governed"
+ *                     answer and never a size of zero.
+ *   `--branch <ref>`  `git diff --numstat --no-renames <merge-base> <ref>` —
+ *                     the range the path list is taken from; a binary file
+ *                     counts 0 lines here as it does on GitHub.
+ *   `--test <paths>`  `--additions <n> --deletions <n>`, both or neither. With
+ *                     neither the size is NOT MEASURED and the verdict says so
+ *                     on STDOUT — the path answer is complete and exits on its
+ *                     own codes, but the words say a seat has not read the
+ *                     size and which mode reads it. Handing the flags to a mode
+ *                     that reads the number itself is two readings of one
+ *                     number and is refused, the way two mode flags are.
+ *
+ * What did NOT change: `testVerdict(paths)` with no size answers the PATH
+ * question exactly as before (the queue guard imports it for that question);
+ * the governed answer, its words and the exception register are untouched.
+ * The one addition to every rendering is the size line — measured, or NOT
+ * MEASURED with the remedy — because a verifier that silently skips a leg it
+ * could not run reports success it did not measure.
  *
  * ## The regime this audit belongs to (maintainer ruling, 2026-08-18)
  *
@@ -778,11 +839,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ #15406: the sweep row names the register it does not recompute': 10,
   '⭐ #17003: the list is DERIVED three-dot, or refused': 43,
   '⭐ #18055: the INCOMPLETE banner is BUILT, never thrown away': 11,
+  '⭐ the SIZE predicate: over the human-merge line threshold, whatever the paths': 30,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 25;
+const SELF_TEST_BATTERY_FLOOR = 27;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -856,6 +918,17 @@ export const EXIT_CANNOT_SWEEP = 1;
 export const EXIT_INCOMPLETE = 2;
 export const EXIT_TEST_GOVERNED = 3;
 export const EXIT_TEST_NOT_GOVERNED = 0;
+
+/**
+ * The human-merge line threshold — the maintainer's 2026-09-18 ruling, its
+ * 「比如5000」 taken as the ruled default (header: "The SIZE predicate"). ONE
+ * declaration: the predicate, the words it prints, `dispatch-gates.mjs`'s
+ * dispatch-time reading and the self-test's pins on both sides all read it
+ * from here, so moving it is one word from the maintainer and one edit.
+ * `additions + deletions` STRICTLY greater: 5,000 changed lines is under the
+ * threshold, 5,001 is over; the self-test pins the pair.
+ */
+export const HUMAN_MERGE_LINE_THRESHOLD = 5000;
 
 /**
  * The governed surfaces, in report order — the 2026-08-18 unified definition
@@ -1046,6 +1119,9 @@ export function applyGeneratedExceptions(verdict, provenanceByPath = new Map()) 
     matched,
     hitPaths: verdict.hitPaths.filter((p) => !lifted.has(p)),
     governed: matched.length > 0,
+    // A lift moves a PATH off the register and moves the SIZE not at all
+    // (the 2026-09-18 ruling has no exemption for generated files).
+    humanMerge: matched.length > 0 || verdict.size?.exceeds === true,
     exceptions,
   };
 }
@@ -1207,10 +1283,11 @@ export function classifyCommit({ sha, date, subject }, changedPaths, repo = null
  * same in all five governed repos, so a seat can run this from anywhere with
  * the file list of any PR in any of them.
  */
-export function testVerdict(paths) {
+export function testVerdict(paths, { size = null } = {}) {
   const list = (Array.isArray(paths) ? paths : []).filter((p) => typeof p === 'string' && p !== '');
   const matched = governedPathsIn(list);
   const hit = new Set(matched.flatMap((s) => s.files));
+  const sized = sizeVerdict(size);
   return {
     governed: matched.length > 0,
     checked: list.length,
@@ -1218,7 +1295,40 @@ export function testVerdict(paths) {
     matched,
     hitPaths: [...hit],
     clearPaths: list.filter((p) => !hit.has(p)),
+    size: sized,
+    humanMerge: matched.length > 0 || sized.exceeds,
   };
+}
+
+/**
+ * The SIZE limb (maintainer ruling 2026-09-18, header section "The SIZE
+ * predicate"), as data. Pure. `size` is `{ additions, deletions, source? }` or
+ * null; anything that is not a pair of non-negative integers is NOT MEASURED —
+ * never a size of zero, which would read as under the threshold.
+ */
+export function sizeVerdict(size = null) {
+  const additions = size?.additions;
+  const deletions = size?.deletions;
+  const measured =
+    Number.isInteger(additions) && additions >= 0 && Number.isInteger(deletions) && deletions >= 0;
+  if (!measured) {
+    return { measured: false, additions: null, deletions: null, changedLines: null, threshold: HUMAN_MERGE_LINE_THRESHOLD, exceeds: false, source: null };
+  }
+  const changedLines = additions + deletions;
+  return {
+    measured: true,
+    additions,
+    deletions,
+    changedLines,
+    threshold: HUMAN_MERGE_LINE_THRESHOLD,
+    exceeds: changedLines > HUMAN_MERGE_LINE_THRESHOLD,
+    source: typeof size?.source === 'string' && size.source !== '' ? size.source : null,
+  };
+}
+
+/** Either limb: the PATH register or the SIZE threshold. The exit code reads this, never `governed` alone. */
+export function landsByHumanMerge(verdict) {
+  return verdict?.governed === true || verdict?.size?.exceeds === true;
 }
 
 /**
@@ -1260,12 +1370,24 @@ export function renderTestVerdict(verdict) {
     `governed-surface predicate: ${verdict.hitPaths.length} of ${verdict.checked} path(s) hit the register` +
     (liftedCount > 0 ? ` after ${liftedCount} generated-artifact lift(s)` : '') +
     ` (${verdict.surfacesChecked} surfaces, repo-agnostic).`;
+  const size = verdict.size ?? sizeVerdict(null);
   if (!verdict.governed) {
+    if (size.exceeds) {
+      // The PATH limb is clear and the SIZE limb is not: the "ordinary queue
+      // landing applies" sentence would be false here, so it is not printed.
+      return (
+        `${head}\n` +
+        `  paths: none on the register — the SIZE decides this PR:\n` +
+        `${renderSizeLines(size)}` +
+        renderExceptionLines(verdict)
+      );
+    }
     return (
       `${head}\n` +
       `  ✅  NOT governed — ordinary queue landing applies to a PR with exactly this file list.\n` +
       `      Derived from GOVERNED_SURFACES, not recalled. Re-run on the FINAL file list: the register\n` +
-      `      has grown several times in two days, and a reading taken earlier in the session is recall.` +
+      `      has grown several times in two days, and a reading taken earlier in the session is recall.\n` +
+      `${renderSizeLines(size)}` +
       renderExceptionLines(verdict)
     );
   }
@@ -1279,12 +1401,47 @@ export function renderTestVerdict(verdict) {
     `  ⛔  GOVERNED — a human merge is the review record for this PR (#9495 regime).\n` +
     `      No seat flips it ready, enqueues it, or arms auto-merge (AGENTS.md Prime Directive #14).\n` +
     `      One hit governs the whole PR — 「混合 diff 一条命中即整 PR 分叉」; proportion is not a question.\n` +
-    `${lines.join('\n')}${clear}` +
+    `${lines.join('\n')}${clear}\n` +
+    `${renderSizeLines(size)}` +
     renderExceptionLines(verdict)
   );
 }
 
+/**
+ * The SIZE limb's words (maintainer ruling 2026-09-18). Pure, so `--self-test`
+ * pins all three readings: over, under, and NOT MEASURED. Printed under every
+ * verdict — a reading that is silent about a leg it did not run reports a
+ * clearance it never measured.
+ */
+export function renderSizeLines(size) {
+  const s = size ?? sizeVerdict(null);
+  const t = s.threshold;
+  if (!s.measured) {
+    return (
+      `  ⚠️  size: NOT MEASURED — this verdict answers the PATH question only. A PR whose changed lines\n` +
+      `      (additions + deletions, generated files INCLUDED) exceed ${t} lands only by a human merge; read\n` +
+      `      the number with \`--pr <n>\` or \`--branch <ref>\`, or hand it to --test as \`--additions <n> --deletions <n>\`.`
+    );
+  }
+  // The provenance of the number is NOT in these words — it is on the
+  // derivation line (`--pr`, `--branch`) or the stderr note (`--test`), so the
+  // verdict stays byte-identical across modes on the same list and numbers.
+  const reading = `${s.changedLines} changed line(s) (+${s.additions} / -${s.deletions})`;
+  if (!s.exceeds) return `  size: ${reading} ≤ ${t} — under the human-merge threshold (generated files included in the count).`;
+  return (
+    `  ⛔  HUMAN MERGE — ${reading} > ${t}: this PR lands only by a human merge (maintainer ruling 2026-09-18;\n` +
+    `      generated files INCLUDED — no exemption for regen artefacts, docs builds or reverts). The same terminal\n` +
+    `      as a governed diff: no seat flips it ready, enqueues it, or arms auto-merge. ACCEPT on the card,\n` +
+    `      \`needs-user-decision\` on the PR, the final 维护者速读, review requested from GOVERNED_APPROVERS.`
+  );
+}
+
 // ── deriving the path list (#17003): three-dot, or a refusal ────────────────
+
+/** The size flags' counterpart of the note below — same stream, same reason. */
+export const CALLER_SIZED_NOTE =
+  'ℹ️  the size above came from the CALLER (--additions/--deletions) — this predicate cannot see how it was\n' +
+  '    counted. `--pr <n>` reads the pair off the PR object and `--branch <ref>` counts the merge-base range itself.';
 
 /**
  * What `--test` says about its own INPUT. Printed on STDERR, deliberately: this
@@ -1458,9 +1615,21 @@ export function deriveBranchPaths({ ref, base = 'origin/main', run }) {
     return refuse(`\`git diff\` failed against the merge base ${mergeBase.out.slice(0, 10)} (${diff.error}).`, null);
   }
   const paths = diff.out.split('\n').map((l) => l.trim()).filter((l) => l !== '');
+  // The SIZE limb (2026-09-18 ruling) is read off the SAME range the list is:
+  // `--numstat` per file, summed, a binary row counting 0 as it does on GitHub.
+  const numstat = run(['diff', '--numstat', '--no-renames', mergeBase.out, refRead.out]);
+  if (!numstat.ok) {
+    return refuse(
+      `\`git diff --numstat\` failed against the merge base ${mergeBase.out.slice(0, 10)} (${numstat.error}) — ` +
+        `the size leg cannot be answered, and an unanswered size is never a size of zero.`,
+      null,
+    );
+  }
+  const size = { ...parseNumstat(numstat.out), source: 'git diff --numstat on the same merge-base range' };
   return {
     ok: true,
     paths,
+    size,
     derivation: {
       kind: 'branch',
       base,
@@ -1470,8 +1639,33 @@ export function deriveBranchPaths({ ref, base = 'origin/main', run }) {
       mergeBase: mergeBase.out,
       command: `git diff --name-only --no-renames ${mergeBase.out.slice(0, 10)} ${refRead.out.slice(0, 10)}`,
       count: paths.length,
+      size,
     },
   };
+}
+
+/**
+ * `git diff --numstat` → the pair the size predicate reads. Pure. A binary row
+ * (`-\t-\tpath`) is counted as a file and as 0 changed lines — GitHub reports
+ * 0/0 for a binary file too, so the local number matches the PR's.
+ */
+export function parseNumstat(text) {
+  let additions = 0;
+  let deletions = 0;
+  let files = 0;
+  let binaryFiles = 0;
+  for (const line of String(text ?? '').split('\n')) {
+    const m = /^(\d+|-)\t(\d+|-)\t/.exec(line);
+    if (!m) continue;
+    files += 1;
+    if (m[1] === '-' || m[2] === '-') {
+      binaryFiles += 1;
+      continue;
+    }
+    additions += Number(m[1]);
+    deletions += Number(m[2]);
+  }
+  return { additions, deletions, files, binaryFiles };
 }
 
 /** The self-describing line every derived reading prints above its verdict. Pure. */
@@ -1480,17 +1674,25 @@ export function renderDerivation(derivation) {
     const renameLines = (derivation.renames ?? []).map(
       (r) => `    renamed — BOTH paths read, the old one included: ${r.from} → ${r.to}`,
     );
+    const sizeLine = derivation.size
+      ? [`    size: +${derivation.size.additions} / -${derivation.size.deletions} — additions and deletions as GitHub reports them on the PR object.`]
+      : [];
     return [
       `derived from GET ${derivation.endpoint} (three-dot by construction): ${derivation.count} path(s) ` +
         `from ${derivation.entries} changed file(s), over ${derivation.pages} page(s).`,
       ...renameLines,
+      ...sizeLine,
     ].join('\n');
   }
   if (derivation?.kind === 'branch') {
+    const sizeLine = derivation.size
+      ? `\n    size: +${derivation.size.additions} / -${derivation.size.deletions} over ${derivation.size.files} file(s)` +
+        ` (${derivation.size.binaryFiles} binary, counted 0) — \`git diff --numstat --no-renames\` on the same range.`
+      : '';
     return (
       `derived from \`${derivation.command}\` (three-dot): ${derivation.count} path(s).\n` +
       `    ${derivation.base} = ${derivation.baseSha.slice(0, 10)}, ${derivation.ref} = ${derivation.refSha.slice(0, 10)}, ` +
-      `merge-base = ${derivation.mergeBase.slice(0, 10)}.`
+      `merge-base = ${derivation.mergeBase.slice(0, 10)}.${sizeLine}`
     );
   }
   return 'derived from an unnamed source — ⛔ do not act on this reading.';
@@ -2365,6 +2567,21 @@ export async function fetchPullFiles({ apiUrl, slug, pull, channels, fetchImpl =
     };
   }
   const changedFiles = typeof head?.changed_files === 'number' ? head.changed_files : null;
+  // The SIZE limb (2026-09-18 ruling) rides the same read as the count. A PR
+  // object without the pair is a refusal here, before a page is spent: an
+  // unanswered size is never a size of zero and never a "not governed" answer.
+  const pair = pullSizeFrom(head);
+  if (pair === null) {
+    return {
+      ok: false,
+      reason:
+        `${slug}#${pull} reports no \`additions\` / \`deletions\` pair (got ${JSON.stringify(head?.additions ?? null)} / ` +
+        `${JSON.stringify(head?.deletions ?? null)}), so the size predicate cannot be answered — and an unanswered size ` +
+        `is a REFUSAL, never a size of zero and never a "not governed" answer.`,
+      remedy: 'Re-run; if the API keeps omitting the pair, read the branch locally: `--branch <ref>` counts the same range with `git diff --numstat`.',
+    };
+  }
+  const size = { ...pair, source: `GET /repos/${slug}/pulls/${pull}` };
 
   const files = [];
   let pages = 0;
@@ -2403,6 +2620,7 @@ export async function fetchPullFiles({ apiUrl, slug, pull, channels, fetchImpl =
   return {
     ok: true,
     paths,
+    size,
     derivation: {
       kind: 'pull',
       slug,
@@ -2413,8 +2631,21 @@ export async function fetchPullFiles({ apiUrl, slug, pull, channels, fetchImpl =
       entries,
       count: paths.length,
       renames,
+      size,
     },
   };
+}
+
+/**
+ * The `additions` / `deletions` pair off a PR object, or null when the object
+ * does not carry both as non-negative integers. Pure; null is the caller's
+ * refusal, never a zero.
+ */
+export function pullSizeFrom(head) {
+  const additions = head?.additions;
+  const deletions = head?.deletions;
+  if (!Number.isInteger(additions) || additions < 0 || !Number.isInteger(deletions) || deletions < 0) return null;
+  return { additions, deletions };
 }
 
 /**
@@ -2707,8 +2938,8 @@ function rootFromArgs(args) {
  * leave two readings of the same register in circulation, which is the shape
  * the card is about. `--self-test` pins the identity end to end.
  */
-async function emitVerdict(paths, args, derivation = null) {
-  let verdict = testVerdict(paths);
+async function emitVerdict(paths, args, derivation = null, size = null) {
+  let verdict = testVerdict(paths, { size });
   // The provenance-aware exceptions (#9866 + #11705): recompute only when a
   // registered path is actually among the hits, so every other run stays the
   // zero-git, zero-cost read it always was. The driver applies each row's
@@ -2723,7 +2954,53 @@ async function emitVerdict(paths, args, derivation = null) {
   }
   if (args.includes('--json')) console.log(JSON.stringify(derivation ? { ...verdict, derivation } : verdict, null, 2));
   else console.log(renderTestVerdict(verdict));
-  return verdict.governed ? EXIT_TEST_GOVERNED : EXIT_TEST_NOT_GOVERNED;
+  // Either limb exits on the GOVERNED code (header: the SIZE predicate) — one
+  // code, so every caller that routes 3 to the human terminal routes both.
+  return landsByHumanMerge(verdict) ? EXIT_TEST_GOVERNED : EXIT_TEST_NOT_GOVERNED;
+}
+
+/** The two flags the SIZE limb takes from a caller, and the words for a half pair. */
+export const SIZE_FLAGS = Object.freeze(['--additions', '--deletions']);
+
+/**
+ * `--additions <n> --deletions <n>` off argv: both (the pair), neither (no
+ * size — NOT MEASURED downstream), or a refusal. Pure. Half a pair is refused
+ * rather than read as a zero on the missing side: the count is their SUM, and
+ * a zero nobody typed would read as under the threshold.
+ */
+export function readSizeFlags(args) {
+  const read = (flag) => {
+    const i = args.indexOf(flag);
+    if (i === -1) return { present: false, raw: null, n: null };
+    const raw = args[i + 1];
+    const n = typeof raw === 'string' && /^\d+$/.test(raw) ? Number(raw) : null;
+    return { present: true, raw: raw ?? null, n };
+  };
+  const a = read('--additions');
+  const d = read('--deletions');
+  if (!a.present && !d.present) return { ok: true, size: null };
+  if (!a.present || !d.present) {
+    return {
+      ok: false,
+      error:
+        `--additions and --deletions travel together (the count is their SUM; half a pair is no reading) — ` +
+        `got only ${a.present ? '--additions' : '--deletions'}.`,
+    };
+  }
+  if (a.n === null || d.n === null) {
+    return { ok: false, error: `--additions / --deletions want non-negative integers; got '${a.raw}' / '${d.raw}'.` };
+  }
+  return { ok: true, size: { additions: a.n, deletions: d.n, source: '--additions/--deletions, from the CALLER' } };
+}
+
+/** A derived mode handed the size flags is two readings of one number — refused, like two mode flags. */
+function refuseSizeFlagsIn(args, mode, reads) {
+  if (!SIZE_FLAGS.some((f) => args.includes(f))) return null;
+  console.error(
+    `❌  ${mode} reads the size itself (${reads}); --additions/--deletions beside it would be two readings of one ` +
+      `number, and this predicate answers on one. Drop the flags, or ask --test with them.`,
+  );
+  return EXIT_CANNOT_SWEEP;
 }
 
 async function runTestMode(args) {
@@ -2731,9 +3008,15 @@ async function runTestMode(args) {
   const paths = [];
   const tail = args.slice(i + 1);
   for (let j = 0; j < tail.length; j++) {
-    if (tail[j] === '--root') { j++; continue; } // `--root <path>`'s value is a flag argument, not a PR path
+    // `--root <path>`'s and the size flags' values are flag arguments, not PR paths.
+    if (tail[j] === '--root' || SIZE_FLAGS.includes(tail[j])) { j++; continue; }
     if (tail[j].startsWith('--')) continue;
     paths.push(tail[j]);
+  }
+  const flags = readSizeFlags(args);
+  if (!flags.ok) {
+    console.error(`❌  ${flags.error}`);
+    return EXIT_CANNOT_SWEEP;
   }
   if (paths.length === 0) {
     console.error(
@@ -2751,7 +3034,8 @@ async function runTestMode(args) {
   // machine-read surface). A predicate that changes what it hands its callers in
   // order to warn its humans has broken something in order to say something.
   console.error(CALLER_DERIVED_NOTE);
-  return await emitVerdict(paths, args);
+  if (flags.size) console.error(CALLER_SIZED_NOTE);
+  return await emitVerdict(paths, args, null, flags.size);
 }
 
 /** `--branch <ref>` (#17003): the three-dot list from a local checkout, or a refusal. */
@@ -2761,6 +3045,8 @@ async function runBranchMode(args) {
     console.error('❌  --branch wants a git ref (`--branch claude/issue-17003-x`); it got none.');
     return EXIT_CANNOT_SWEEP;
   }
+  const refusedFlags = refuseSizeFlagsIn(args, `--branch ${ref}`, '`git diff --numstat` on the merge-base range');
+  if (refusedFlags !== null) return refusedFlags;
   const root = rootFromArgs(args);
   const derived = deriveBranchPaths({ ref, run: (argv) => tryGit(root, argv) });
   if (!derived.ok) {
@@ -2775,12 +3061,14 @@ async function runBranchMode(args) {
     return EXIT_CANNOT_SWEEP;
   }
   if (!args.includes('--json')) console.log(renderDerivation(derived.derivation));
-  return await emitVerdict(derived.paths, args, derived.derivation);
+  return await emitVerdict(derived.paths, args, derived.derivation, derived.size);
 }
 
 /** `--pr <n>` (#17003): the API's changed-files list — three-dot by construction — or a refusal. */
 async function runPullMode(args) {
   const raw = args[args.indexOf('--pr') + 1];
+  const refusedFlags = refuseSizeFlagsIn(args, `--pr ${raw}`, 'the `additions` / `deletions` pair on the PR object');
+  if (refusedFlags !== null) return refusedFlags;
   const root = rootFromArgs(args);
   const origin = tryGit(root, ['config', '--get', 'remote.origin.url']);
   const selfSlug = origin.ok ? slugFromRemote(origin.out) : null;
@@ -2809,7 +3097,7 @@ async function runPullMode(args) {
     return EXIT_CANNOT_SWEEP;
   }
   if (!args.includes('--json')) console.log(renderDerivation(derived.derivation));
-  return await emitVerdict(derived.paths, args, derived.derivation);
+  return await emitVerdict(derived.paths, args, derived.derivation, derived.size);
 }
 
 /**
@@ -4692,9 +4980,21 @@ async function selfTest() {
     ['rev-parse --verify --quiet feature', ok40(B)],
     ['merge-base', ok40(M)],
     ['diff --name-only --no-renames', { ok: true, out: 'src/a.ts\nsrc/b.ts\n', error: '' }],
+    ['diff --numstat --no-renames', { ok: true, out: '3\t1\tsrc/a.ts\n10\t0\tsrc/b.ts\n', error: '' }],
   ]) });
   assert('a-derivable-branch-answers-the-three-dot-list-from-the-merge-base',
     derived.ok === true && derived.paths.join() === 'src/a.ts,src/b.ts' && derived.derivation.mergeBase === M, JSON.stringify(derived));
+  assert('and-the-size-off-the-same-range-rides-with-it',
+    derived.size.additions === 13 && derived.size.deletions === 1 && derived.derivation.size.files === 2, JSON.stringify(derived.size));
+  const noNumstat = deriveBranchPaths({ ref: 'feature', run: gitScript([
+    ['rev-parse --verify --quiet origin/main', ok40(A)],
+    ['rev-parse --verify --quiet feature', ok40(B)],
+    ['merge-base', ok40(M)],
+    ['diff --name-only --no-renames', { ok: true, out: 'src/a.ts\n', error: '' }],
+    ['diff --numstat --no-renames', { ok: false, out: '', error: 'fatal: numstat unavailable' }],
+  ]) });
+  assert('a---numstat-that-does-not-read-REFUSES-the-whole-derivation-never-a-size-of-zero',
+    noNumstat.ok === false && /numstat/.test(noNumstat.reason) && /never a size of zero/.test(noNumstat.reason) && noNumstat.paths === undefined, JSON.stringify(noNumstat));
   assert('⛔ the-diff-is-taken-with---no-renames-so-a-rename-out-of-a-governed-path-still-hits',
     derived.derivation.command.includes('--no-renames'), derived.derivation.command);
   const branchLine = renderDerivation(derived.derivation);
@@ -4728,7 +5028,7 @@ async function selfTest() {
     const one = [{ id: 'fixture', name: 'fixture channel', headers: {} }];
     const walk = await fetchPullFiles({
       apiUrl: 'https://api', slug: 'o/r', pull: 1, channels: one,
-      fetchImpl: async (url) => (/\/files/.test(url) ? pageFor(url) : respond({ changed_files: 260 }, null)),
+      fetchImpl: async (url) => (/\/files/.test(url) ? pageFor(url) : respond({ changed_files: 260, additions: 260, deletions: 0 }, null)),
     });
     assert('⭐ the-walk-follows-Link-to-the-end-and-collects-every-page',
       walk.ok === true && walk.paths.length === 260 && walk.derivation.pages === 3 && walk.derivation.entries === 260,
@@ -4739,7 +5039,7 @@ async function selfTest() {
         renderDerivation(walk.derivation).includes('3 page(s)'), renderDerivation(walk.derivation));
     const short = await fetchPullFiles({
       apiUrl: 'https://api', slug: 'o/r', pull: 1, channels: one,
-      fetchImpl: async (url) => (/\/files/.test(url) ? respond(rows(0, 100), null) : respond({ changed_files: 260 }, null)),
+      fetchImpl: async (url) => (/\/files/.test(url) ? respond(rows(0, 100), null) : respond({ changed_files: 260, additions: 260, deletions: 0 }, null)),
     });
     assert('⭐ a-walk-the-PRs-own-count-contradicts-REFUSES-rather-than-answering-on-a-subset',
       short.ok === false && /but the PR reports 260/.test(short.reason) && short.paths === undefined, JSON.stringify(short));
@@ -4750,7 +5050,7 @@ async function selfTest() {
     const pickSecond = await fetchPullFiles({
       apiUrl: 'https://api', slug: 'o/r', pull: 1, channels: two,
       fetchImpl: async (url, init) => {
-        if (!/\/files/.test(url)) { seen += 1; return seen === 1 ? denied : respond({ changed_files: 1 }, null); }
+        if (!/\/files/.test(url)) { seen += 1; return seen === 1 ? denied : respond({ changed_files: 1, additions: 1, deletions: 0 }, null); }
         return respond([{ filename: 'a.ts' }], null);
       },
     });
@@ -4759,7 +5059,7 @@ async function selfTest() {
     const dropMidWalk = await fetchPullFiles({
       apiUrl: 'https://api', slug: 'o/r', pull: 1, channels: two,
       fetchImpl: async (url) => {
-        if (!/\/files/.test(url)) return respond({ changed_files: 200 }, null);
+        if (!/\/files/.test(url)) return respond({ changed_files: 200, additions: 200, deletions: 0 }, null);
         if (/page=2/.test(url)) return denied; // the SECOND page, on the channel that served the first
         return respond(rows(0, 100), `${filesUrl(2)}; rel="next"`);
       },
@@ -4768,7 +5068,7 @@ async function selfTest() {
       dropMidWalk.ok === false && /did not read/.test(dropMidWalk.reason), JSON.stringify(dropMidWalk));
     const renamedPr = await fetchPullFiles({
       apiUrl: 'https://api', slug: 'o/r', pull: 1, channels: one,
-      fetchImpl: async (url) => (/\/files/.test(url) ? respond(renamedOut, null) : respond({ changed_files: 1 }, null)),
+      fetchImpl: async (url) => (/\/files/.test(url) ? respond(renamedOut, null) : respond({ changed_files: 1, additions: 1, deletions: 0 }, null)),
     });
     assert('and-a-renamed-governed-file-reaches-the-predicate-as-BOTH-of-its-paths',
       renamedPr.ok === true && testVerdict(renamedPr.paths).governed === true &&
@@ -4839,7 +5139,9 @@ async function selfTest() {
     assert('while-the-two-dot-list-through---test-still-answers-GOVERNED-the-defect-is-the-INPUT',
       twoDotRun.status === EXIT_TEST_GOVERNED, `status=${twoDotRun.status} out=${twoDotRun.out.slice(0, 300)}`);
     // Zone (e)'s identity: one register, one answer, however the list was got.
-    const sameListRun = run('--test', ...threeDot.paths);
+    // The size `--branch` read off the range is handed to `--test` as the pair,
+    // so the two readings are of the same list AND the same number.
+    const sameListRun = run('--test', ...threeDot.paths, '--additions', String(threeDot.size.additions), '--deletions', String(threeDot.size.deletions));
     assert('⭐ the-verdict-is-BYTE-IDENTICAL-through---branch-and-through---test-on-the-same-list',
       branchRun.out.endsWith(sameListRun.out) && sameListRun.out !== '', JSON.stringify({ b: branchRun.out.slice(-120), t: sameListRun.out.slice(-120) }));
     assert('and---test-keeps-its-stdout-to-itself-the-three-dot-note-travels-on-stderr',
@@ -4874,6 +5176,183 @@ async function selfTest() {
       noRefRun.status === EXIT_CANNOT_SWEEP && noRefRun.err.includes('--branch wants a git ref'), noRefRun.err.slice(0, 200));
   } finally {
     rmSync(derFx, { recursive: true, force: true });
+  }
+
+  // ── ⭐ the SIZE predicate (maintainer ruling 2026-09-18) ──────────────────
+  //
+  // Header section "The SIZE predicate". Pinned on both sides of the threshold,
+  // on the number that prompted the ruling, on every mode's reading of the
+  // number, and on the one thing an exemption would have exempted: a
+  // generated-artifact lift moves a PATH off the register and moves the size
+  // not at all.
+  battery('⭐ the SIZE predicate: over the human-merge line threshold, whatever the paths');
+  assert('the-threshold-is-the-ruled-default-5000-declared-once', HUMAN_MERGE_LINE_THRESHOLD === 5000, String(HUMAN_MERGE_LINE_THRESHOLD));
+  const atThreshold = sizeVerdict({ additions: HUMAN_MERGE_LINE_THRESHOLD, deletions: 0 });
+  const overByOne = sizeVerdict({ additions: HUMAN_MERGE_LINE_THRESHOLD, deletions: 1 });
+  assert('⭐ exactly-5000-changed-lines-is-UNDER-the-threshold',
+    atThreshold.measured === true && atThreshold.changedLines === 5000 && atThreshold.exceeds === false, JSON.stringify(atThreshold));
+  assert('⭐ 5001-changed-lines-is-OVER-it-the-count-is-additions-PLUS-deletions',
+    overByOne.measured === true && overByOne.changedLines === 5001 && overByOne.exceeds === true, JSON.stringify(overByOne));
+  const prompting = sizeVerdict({ additions: 238310, deletions: 119 });
+  assert('the-PR-that-prompted-the-ruling-reads-238429-changed-lines-and-is-over',
+    prompting.changedLines === 238429 && prompting.exceeds === true, JSON.stringify(prompting));
+  assert('no-size-is-NOT-MEASURED-never-a-size-of-zero',
+    sizeVerdict(null).measured === false && sizeVerdict(null).exceeds === false && sizeVerdict(null).changedLines === null && sizeVerdict({}).measured === false);
+  assert('a-negative-or-non-integer-count-is-NOT-MEASURED-too',
+    sizeVerdict({ additions: -1, deletions: 0 }).measured === false && sizeVerdict({ additions: 1.5, deletions: 0 }).measured === false &&
+      sizeVerdict({ additions: '5001', deletions: 0 }).measured === false);
+  // Through the verdict: the exit code is the GOVERNED one, the words say SIZE.
+  const bigClean = testVerdict(['packages/spec/src/index.ts'], { size: { additions: 6000, deletions: 0, source: 'a fixture' } });
+  assert('⭐ an-oversized-PR-with-no-governed-path-is-NOT-governed-by-path-and-lands-by-HUMAN-MERGE',
+    bigClean.governed === false && bigClean.size.exceeds === true && bigClean.humanMerge === true, JSON.stringify(bigClean));
+  assert('and-it-exits-on-the-GOVERNED-code-so-every-existing-caller-routes-it-to-the-same-terminal',
+    runTestModeExitFor(['packages/spec/src/index.ts'], bigClean.size) === EXIT_TEST_GOVERNED);
+  const bigWords = renderTestVerdict(bigClean);
+  assert('the-words-say-HUMAN-MERGE-the-number-the-threshold-and-that-generated-files-are-INCLUDED',
+    bigWords.includes('HUMAN MERGE') && bigWords.includes('6000 changed line(s)') && bigWords.includes(`> ${HUMAN_MERGE_LINE_THRESHOLD}`) &&
+      bigWords.includes('generated files INCLUDED') && bigWords.includes('arms auto-merge') && !bigWords.includes('a fixture'), bigWords);
+  assert('and-the-provenance-of-the-number-stays-OFF-the-verdict-it-lives-on-the-derivation-line-or-the-stderr-note',
+    bigClean.size.source === 'a fixture' && !renderSizeLines(bigClean.size).includes('fixture') && CALLER_SIZED_NOTE.includes('--additions'), renderSizeLines(bigClean.size));
+  assert('and-they-never-say-ordinary-queue-landing-applies', !bigWords.includes('ordinary queue landing applies'), bigWords);
+  const smallClean = testVerdict(['packages/spec/src/index.ts'], { size: { additions: 10, deletions: 2 } });
+  assert('an-ordinary-sized-ordinary-diff-still-answers-NOT-governed-and-says-the-size-is-under',
+    smallClean.humanMerge === false && runTestModeExitFor(['packages/spec/src/index.ts'], smallClean.size) === EXIT_TEST_NOT_GOVERNED &&
+      renderTestVerdict(smallClean).includes('under the human-merge threshold') && renderTestVerdict(smallClean).includes('12 changed line(s)'),
+    renderTestVerdict(smallClean));
+  const unmeasured = testVerdict(['packages/spec/src/index.ts']);
+  assert('⭐ with-no-size-handed-in-the-verdict-says-NOT-MEASURED-on-stdout-and-names-the-modes-that-read-it',
+    unmeasured.size.measured === false && unmeasured.humanMerge === false && renderTestVerdict(unmeasured).includes('NOT MEASURED') &&
+      renderTestVerdict(unmeasured).includes('--pr') && renderTestVerdict(unmeasured).includes('--additions'), renderTestVerdict(unmeasured));
+  assert('and-testVerdict-with-no-size-keeps-its-PATH-answer-byte-for-byte-the-queue-guard-imports-it',
+    unmeasured.governed === false && JSON.stringify(unmeasured.hitPaths) === '[]' &&
+      JSON.stringify(unmeasured.clearPaths) === '["packages/spec/src/index.ts"]' && testVerdict(['AGENTS.md']).governed === true);
+  const bigGoverned = testVerdict(['AGENTS.md'], { size: { additions: 6000, deletions: 0 } });
+  assert('a-governed-path-AND-an-oversized-diff-renders-both-limbs-and-stays-on-the-governed-code',
+    bigGoverned.governed === true && bigGoverned.humanMerge === true && renderTestVerdict(bigGoverned).includes('GOVERNED') &&
+      renderTestVerdict(bigGoverned).includes('HUMAN MERGE'), renderTestVerdict(bigGoverned));
+  // ⛔ No exemption for generated files: the register lifts a PATH, never a line count.
+  const regenPath = REGISTER_SAMPLES['spec-skill-refs'];
+  const liftedBig = applyGeneratedExceptions(
+    testVerdict([regenPath], { size: { additions: 237706, deletions: 0 } }),
+    new Map([[regenPath, { pureRegeneration: true, reason: 'byte-equal to the generator (fixture)' }]]),
+  );
+  assert('⭐ a-certified-pure-regeneration-lifts-the-PATH-and-lifts-NOTHING-from-the-size',
+    liftedBig.governed === false && liftedBig.exceptions.some((e) => e.pureRegeneration) && liftedBig.humanMerge === true && liftedBig.size.exceeds === true,
+    JSON.stringify({ governed: liftedBig.governed, humanMerge: liftedBig.humanMerge }));
+  assert('and-the-rendering-carries-both-the-lift-and-the-HUMAN-MERGE',
+    renderTestVerdict(liftedBig).includes('PURE REGENERATION') && renderTestVerdict(liftedBig).includes('HUMAN MERGE'), renderTestVerdict(liftedBig));
+  // The number's sources. `--numstat`, parsed: text rows sum, a binary row counts 0 as on GitHub.
+  const numstat = parseNumstat('3\t1\tsrc/a.ts\n-\t-\timg/logo.png\n10\t0\tsrc/b.ts\n\n');
+  assert('numstat-sums-text-rows-and-counts-a-binary-row-as-zero-lines',
+    numstat.additions === 13 && numstat.deletions === 1 && numstat.files === 3 && numstat.binaryFiles === 1, JSON.stringify(numstat));
+  assert('and-an-empty-numstat-is-zero-of-everything-not-a-crash',
+    JSON.stringify(parseNumstat('')) === JSON.stringify({ additions: 0, deletions: 0, files: 0, binaryFiles: 0 }) && parseNumstat(null).files === 0);
+  // The PR object: the pair, or null for the caller to refuse on.
+  assert('a-PR-object-with-the-pair-yields-the-pair',
+    JSON.stringify(pullSizeFrom({ additions: 238310, deletions: 119 })) === JSON.stringify({ additions: 238310, deletions: 119 }));
+  assert('a-PR-object-without-the-pair-yields-null-never-zero',
+    pullSizeFrom({ changed_files: 3 }) === null && pullSizeFrom({ additions: 3 }) === null && pullSizeFrom({ additions: '3', deletions: 0 }) === null && pullSizeFrom(null) === null);
+  // The caller's flags: both, neither, or a refusal.
+  assert('no-size-flags-is-no-size', JSON.stringify(readSizeFlags(['--test', 'a.ts'])) === JSON.stringify({ ok: true, size: null }));
+  const bothFlags = readSizeFlags(['--test', 'a.ts', '--additions', '5000', '--deletions', '1']);
+  assert('both-flags-read-as-the-pair-and-name-the-caller-as-the-source',
+    bothFlags.ok === true && bothFlags.size.additions === 5000 && bothFlags.size.deletions === 1 && /CALLER/.test(bothFlags.size.source), JSON.stringify(bothFlags));
+  assert('one-flag-without-the-other-is-refused-the-count-is-their-SUM',
+    readSizeFlags(['--additions', '5']).ok === false && /travel together/.test(readSizeFlags(['--additions', '5']).error) && readSizeFlags(['--deletions', '5']).ok === false);
+  assert('a-non-integer-or-negative-value-is-refused',
+    readSizeFlags(['--additions', 'x', '--deletions', '1']).ok === false && readSizeFlags(['--additions', '-1', '--deletions', '1']).ok === false &&
+      readSizeFlags(['--additions', '--deletions', '1']).ok === false);
+  // `--pr`'s read, on the injected fetch: the pair rides the same GET as the count; its absence REFUSES.
+  {
+    const respond = (body, link) => ({ ok: true, status: 200, headers: { get: (k) => (String(k).toLowerCase() === 'link' ? link : null) }, json: async () => body });
+    const one = [{ id: 'fixture', name: 'fixture channel', headers: {} }];
+    const sized = await fetchPullFiles({
+      apiUrl: 'https://api', slug: 'o/r', pull: 18971, channels: one,
+      fetchImpl: async (url) => (/\/files/.test(url)
+        ? respond([{ filename: 'packages/spec/api-surface/x.json' }], null)
+        : respond({ changed_files: 1, additions: 238310, deletions: 119 }, null)),
+    });
+    assert('⭐ --pr-reads-additions-and-deletions-off-the-same-GET-that-gives-the-changed_files-count',
+      sized.ok === true && sized.size.additions === 238310 && sized.size.deletions === 119 && /GET \/repos\/o\/r\/pulls\/18971/.test(sized.size.source) &&
+        sized.derivation.size.additions === 238310, JSON.stringify(sized.size ?? sized));
+    assert('and-the-derivation-line-prints-the-pair',
+      renderDerivation(sized.derivation).includes('+238310 / -119'), renderDerivation(sized.derivation));
+    const unsized = await fetchPullFiles({
+      apiUrl: 'https://api', slug: 'o/r', pull: 2, channels: one,
+      fetchImpl: async (url) => (/\/files/.test(url) ? respond([{ filename: 'a.ts' }], null) : respond({ changed_files: 1, merged: false }, null)),
+    });
+    assert('⭐ a-PR-object-missing-the-pair-REFUSES-never-a-not-governed-answer-and-never-a-size-of-zero',
+      unsized.ok === false && /additions/.test(unsized.reason) && /never a size of zero/.test(unsized.reason) && unsized.paths === undefined, JSON.stringify(unsized));
+  }
+  // End to end, on a real repository: `--branch` counts the same range it lists,
+  // the flags reach `--test`, and the verdict is still ONE emitter.
+  const sizeFx = mkdtempSync(join(tmpdir(), 'governed-merges-size-'));
+  try {
+    const g3 = (cwd, ...rest) =>
+      execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...rest],
+        { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const repo = join(sizeFx, 'repo');
+    g3(sizeFx, 'init', '-q', repo);
+    const put = (rel, data) => {
+      mkdirSync(dirname(join(repo, rel)), { recursive: true });
+      writeFileSync(join(repo, rel), data);
+    };
+    put('README.md', 'a\nb\nc\n');
+    g3(repo, 'add', '-A');
+    g3(repo, 'commit', '-qm', 'chore: seed');
+    g3(repo, 'update-ref', 'refs/remotes/origin/main', g3(repo, 'rev-parse', 'main').trim());
+    g3(repo, 'checkout', '-q', '-b', 'feature');
+    put('README.md', 'a\nc\n'); // -1
+    put('src/a.ts', 'l1\nl2\nl3\nl4\nl5\nl6\n'); // +6
+    put('img/blob.bin', Buffer.from([0, 1, 2, 3, 0])); // binary: 0 lines, as on GitHub
+    g3(repo, 'add', '-A');
+    g3(repo, 'commit', '-qm', 'feat: sized');
+    g3(repo, 'checkout', '-q', 'main');
+    const run = (...argv) => {
+      const r = spawnSync(process.execPath, [scriptPath, ...argv], { encoding: 'utf8', env: { ...process.env, [PROXY_REARM_GUARD]: '1' } });
+      return { status: r.status, out: r.stdout ?? '', err: r.stderr ?? '' };
+    };
+    const local = deriveBranchPaths({ ref: 'feature', run: (argv) => tryGit(repo, argv) });
+    assert('⭐ --branch-counts-the-range-it-lists-with---numstat-binary-files-at-zero',
+      local.ok === true && local.size.additions === 6 && local.size.deletions === 1 && local.size.binaryFiles === 1 && local.size.files === 3, JSON.stringify(local.size ?? local));
+    const branchRun = run('--branch', 'feature', '--root', repo);
+    assert('and-the-CLI-prints-the-reading-under-the-threshold-and-exits-NOT-governed',
+      branchRun.status === EXIT_TEST_NOT_GOVERNED && branchRun.out.includes('7 changed line(s)') && branchRun.out.includes('under the human-merge threshold'),
+      `status=${branchRun.status} out=${branchRun.out.slice(0, 500)}`);
+    const sameNumbers = run('--test', ...local.paths, '--additions', '6', '--deletions', '1');
+    assert('⭐ the-verdict-is-BYTE-IDENTICAL-through---branch-and-through---test-once-the-same-numbers-are-handed-in',
+      branchRun.out.endsWith(sameNumbers.out) && sameNumbers.out !== '', JSON.stringify({ b: branchRun.out.slice(-160), t: sameNumbers.out.slice(-160) }));
+    const overRun = run('--test', 'src/a.ts', '--additions', String(HUMAN_MERGE_LINE_THRESHOLD), '--deletions', '1');
+    assert('⭐ --test-with-5001-changed-lines-on-an-ordinary-path-exits-3-and-says-HUMAN-MERGE',
+      overRun.status === EXIT_TEST_GOVERNED && overRun.out.includes('HUMAN MERGE') && !overRun.out.includes('ordinary queue landing'),
+      `status=${overRun.status} out=${overRun.out.slice(0, 400)}`);
+    assert('and-the-flag-values-never-leak-into-the-path-list',
+      overRun.out.includes('0 of 1 path(s) hit the register'), overRun.out.slice(0, 200));
+    const atRun = run('--test', 'src/a.ts', '--additions', String(HUMAN_MERGE_LINE_THRESHOLD), '--deletions', '0');
+    assert('and-exactly-5000-exits-0-the-threshold-is-strictly-greater',
+      atRun.status === EXIT_TEST_NOT_GOVERNED && atRun.out.includes('under the human-merge threshold'), `status=${atRun.status} out=${atRun.out.slice(0, 300)}`);
+    const jsonRun = run('--test', 'src/a.ts', '--additions', '5001', '--deletions', '0', '--json');
+    let jsonBody = null;
+    try { jsonBody = JSON.parse(jsonRun.out); } catch { /* asserted below */ }
+    assert('--json-carries-governed-false-humanMerge-true-and-the-size-block',
+      jsonRun.status === EXIT_TEST_GOVERNED && jsonBody?.governed === false && jsonBody?.humanMerge === true && jsonBody?.size?.exceeds === true &&
+        jsonBody?.size?.changedLines === 5001, jsonRun.out.slice(0, 300));
+    const noneRun = run('--test', 'src/a.ts');
+    assert('--test-with-no-size-flags-still-answers-the-path-question-and-prints-NOT-MEASURED-on-stdout',
+      noneRun.status === EXIT_TEST_NOT_GOVERNED && noneRun.out.includes('NOT MEASURED'), `status=${noneRun.status} out=${noneRun.out.slice(0, 300)}`);
+    assert('and-the-caller-sized-note-travels-on-stderr-only-when-the-flags-were-given',
+      sameNumbers.err.includes('came from the CALLER (--additions') && !noneRun.err.includes('came from the CALLER (--additions') && !sameNumbers.out.includes('CALLER'),
+      sameNumbers.err.slice(0, 300));
+    const halfRun = run('--test', 'src/a.ts', '--additions', '5001');
+    assert('one-size-flag-is-bad-args-exit-1-and-no-verdict',
+      halfRun.status === EXIT_CANNOT_SWEEP && halfRun.err.includes('travel together') && !halfRun.out.includes('governed-surface predicate'),
+      `status=${halfRun.status} err=${halfRun.err.slice(0, 200)}`);
+    const twoReadings = run('--branch', 'feature', '--root', repo, '--additions', '1', '--deletions', '1');
+    assert('--branch-with-the-flags-is-two-readings-of-one-number-and-is-refused',
+      twoReadings.status === EXIT_CANNOT_SWEEP && twoReadings.err.includes('two readings') && !twoReadings.out.includes('governed-surface predicate'),
+      `status=${twoReadings.status} err=${twoReadings.err.slice(0, 200)}`);
+  } finally {
+    rmSync(sizeFx, { recursive: true, force: true });
   }
 
   // ── ⭐ #18055: the INCOMPLETE banner is BUILT, never thrown away ──────────
@@ -5012,15 +5491,15 @@ async function selfTest() {
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register — and the #17003 derivation set: the Link walk that ends on rel=next rather than on a short page, a rename reaching the predicate as BOTH of its paths, a walk the PR's own count contradicts refusing rather than answering on a subset, a channel chosen once and never spliced mid-walk, every --branch leg on an injected git incl. the uncomputable merge base that REFUSES instead of falling back to two-dot, and the card's own reproduction run end to end on a real repo — a branch behind a main that has since touched a governed path answers GOVERNED two-dot and NOT governed three-dot, a rename out of a governed path is a hit only because the diff is taken --no-renames, the merge-base refusal prints no verdict at all, and the verdict is byte-identical through --branch and through --test on the same list. — and the #18055 banner set: the INCOMPLETE banner is BUILT on the attribution-failure path instead of throwing while it is built, it still returns EXIT_INCOMPLETE, the proxy hint renders from the plan the sweep now binds and stays empty both when the plan says no hint and when the incompleteness is not about attribution, and a real sweep whose every attribution channel fails prints the banner on STDERR and exits 2.\n  ${liveNote}`);
+  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register — and the #17003 derivation set: the Link walk that ends on rel=next rather than on a short page, a rename reaching the predicate as BOTH of its paths, a walk the PR's own count contradicts refusing rather than answering on a subset, a channel chosen once and never spliced mid-walk, every --branch leg on an injected git incl. the uncomputable merge base that REFUSES instead of falling back to two-dot, and the card's own reproduction run end to end on a real repo — a branch behind a main that has since touched a governed path answers GOVERNED two-dot and NOT governed three-dot, a rename out of a governed path is a hit only because the diff is taken --no-renames, the merge-base refusal prints no verdict at all, and the verdict is byte-identical through --branch and through --test on the same list. — and the #18055 banner set: the INCOMPLETE banner is BUILT on the attribution-failure path instead of throwing while it is built, it still returns EXIT_INCOMPLETE, the proxy hint renders from the plan the sweep now binds and stays empty both when the plan says no hint and when the incompleteness is not about attribution, and a real sweep whose every attribution channel fails prints the banner on STDERR and exits 2. — and the 2026-09-18 SIZE predicate: the ruled 5,000 declared once and pinned on both sides and on the PR that prompted it; the number read off --pr's own GET (its absence a refusal), off --branch's --numstat on the range it lists (binary files at zero, a failed read a refusal), or off --additions/--deletions handed to --test (half a pair refused, the pair refused where the mode reads it itself); NOT MEASURED said on stdout when nothing read it; a certified regeneration lifting the path and not the size; and the verdict still ONE emitter — the governed code for either limb, byte-identical across --branch and --test on the same list and numbers.\n  ${liveNote}`);
 
   return SELF_TEST_VERDICT;
 }
 
 /** The exit code `--test` would return for a path list — pinned without spawning. */
-function runTestModeExitFor(paths) {
+function runTestModeExitFor(paths, size = null) {
   if (paths.length === 0) return EXIT_CANNOT_SWEEP;
-  return testVerdict(paths).governed ? EXIT_TEST_GOVERNED : EXIT_TEST_NOT_GOVERNED;
+  return landsByHumanMerge(testVerdict(paths, { size })) ? EXIT_TEST_GOVERNED : EXIT_TEST_NOT_GOVERNED;
 }
 
 // `invokedDirectly` for the same reason the main-invocation guard above
