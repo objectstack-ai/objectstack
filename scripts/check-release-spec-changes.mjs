@@ -55,6 +55,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { isEntrypoint } from './invoked-as.mjs';
+
 const API_SURFACE_DIR = 'api-surface';
 const API_SURFACE_MONOLITH = 'api-surface.json';
 const MANIFEST = 'spec-changes.json';
@@ -665,4 +667,10 @@ function main() {
   console.log(`✓ ${verdict.summary}`);
 }
 
-main();
+// `verifyRelease` is exported so the self-test drives the same function the
+// release lane calls. An exported module whose top level also DISPATCHES ends
+// its importer's import instead — so the dispatch is behind the guard
+// (`pnpm check:entry-guard`).
+if (isEntrypoint(import.meta.url)) {
+  main();
+}
