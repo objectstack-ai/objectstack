@@ -2639,10 +2639,19 @@ export default class Serve extends Command {
       // them and an artifact boot serves them. Mirror compile's collection so
       // docs render under /docs/<name> in dev exactly as from a built artifact.
       // Collection only (no lint-fail): docs are additive; never block boot.
+      //
+      // [#18431] The same mirroring, one level down: a `src/<pkg>/docs/`
+      // directory naming one of this config's `packages[]` entries is collected
+      // onto THAT package's body (ADR-0130 D4 option B), exactly where
+      // `os build` puts it. `AppPlugin` reads a package-owned collection back
+      // up through `resolveArtifactCollections`, so dev serves them as an
+      // artifact boot does. Leaving this half out would re-open the asymmetry
+      // the paragraph above exists to close — `os build` producing docs that
+      // `os dev` cannot show.
       if (!useArtifactFallback) {
         try {
-          const { collectDocsFromSrc } = await import('../utils/collect-docs.js');
-          const collected = collectDocsFromSrc(absolutePath);
+          const { collectDocsFromSrc, attachPackageDocs } = await import('../utils/collect-docs.js');
+          const collected = collectDocsFromSrc(absolutePath, (config as any)?.packages);
           if (collected.docs.length > 0) {
             const byName = new Map<string, any>();
             for (const d of (Array.isArray((config as any).docs) ? (config as any).docs : [])) {
@@ -2650,6 +2659,10 @@ export default class Serve extends Command {
             }
             for (const d of collected.docs) byName.set(d.name, d);
             config = { ...config, docs: Array.from(byName.values()) };
+          }
+          if (collected.packageDocs.length > 0) {
+            const packages = attachPackageDocs((config as any).packages, collected.packageDocs);
+            if (packages !== (config as any).packages) config = { ...config, packages };
           }
         } catch {
           /* docs are additive — never block boot on collection */

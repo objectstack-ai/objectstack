@@ -34,6 +34,8 @@
 import fs from 'fs';
 import path from 'path';
 
+import { artifactPackages } from './artifact-packages.js';
+
 export interface DocTranslationItem {
   label?: string;
   description?: string;
@@ -261,63 +263,194 @@ function markdownFilesIn(dir: string): string[] {
  * build (`compile.ts` exits 1 on any doc error), which would refuse a tree that
  * builds green today on a directory this collector can only GUESS was meant as
  * ADR-0046 docs — a `src/<pkg>/docs/` directory is not declared anywhere the
- * build can read. Reading those files instead (the card's other option) widens
- * the accepted set and needs a ruling this does not make: an ADR-0130 D4
- * artifact registers per package, so per-package docs would have to say which
- * package body they belong to. ⛔ Neither is decided here; the loss is made
- * audible, which is the card's stated minimum.
+ * build can read.
+ *
+ * ## What #18431 changed, and what it deliberately did NOT
+ *
+ * The maintainer's ruling (batch #147 item 4) answered the two contract
+ * questions this docblock used to record as open: per-package docs attach to
+ * the OWNING PACKAGE'S BODY (`packages[]`, ADR-0130 D4 option B), and the doc
+ * lint reads that package's OWN `namespace`. So a `src/<dir>/docs/` directory
+ * whose `<dir>` names one of the artifact's `packages[]` entries is now
+ * COLLECTED, by {@link sweepPackageDocsDirectories} below.
+ *
+ * ⛔ The warning is not removed and not weakened — the ruling keeps it for docs
+ * in a place NEITHER convention reads, which is now a smaller but sharper set:
+ * a stack that declares no `packages[]` at all (every single-package app —
+ * where the message below is unchanged, because for that stack it is still
+ * exactly true), and a directory whose name matches no package or matches more
+ * than one (where the message NAMES the candidates, because "I read this
+ * convention and could not attribute the result" is a different fact from "I do
+ * not read this convention").
  */
-function uncollectedDocsDirectories(srcDir: string): DocIssue[] {
+function uncollectedDocsMessage(rel: string, files: readonly string[]): string {
+  return `${rel}/ holds ${files.length} Markdown file(s) that were NOT collected: package docs are read from src/docs/ only (ADR-0046 §3.2), so these are absent from the artifact's \`docs[]\` and from every book that includes them. Move them into src/docs/ (doc names carry the package namespace prefix, so packages do not collide there), declare them inline as \`defineStack({ docs })\`, or delete them if they are not package docs. Found: ${files.join(', ')}`;
+}
+
+/**
+ * One artifact `packages[]` entry, as the docs collector needs to see it: the
+ * position to attach collected docs to, the namespace its docs are linted
+ * against (the ruling's clause 2), and the `src/` directory names that name it.
+ *
+ * ⛔ The id is NOT computed here. `artifactPackages` owns that rule
+ * (`manifest.id`, falling back to `name`, then to the positional spelling) and
+ * its own header forbids a second copy: two readers computing "which package is
+ * this" slightly differently is how one seam comes to judge a different set of
+ * packages than another while both look right.
+ */
+export interface DocsPackageRef {
+  /** Position in the artifact's `packages[]`. */
+  readonly index: number;
+  /** The id the runtime registers this package under, from `artifactPackages`. */
+  readonly id: string;
+  /** The package's own `namespace` — the prefix rule for the docs it owns. */
+  readonly namespace?: string;
+  /** The `src/<dir>` names this package answers to — see {@link docsPackageRefs}. */
+  readonly directoryNames: readonly string[];
+}
+
+/** Docs read out of ONE package's own `src/<dir>/docs/` directory (ADR-0130 D4). */
+export interface PackageDocSet {
+  /** Position in the artifact's `packages[]` — where {@link attachPackageDocs} writes. */
+  readonly index: number;
+  readonly id: string;
+  readonly namespace?: string;
+  /** Where they were read from, relative to the config file. */
+  readonly dir: string;
+  readonly docs: DocItem[];
+}
+
+/**
+ * The artifact's `packages[]`, reduced to what a `src/<dir>/docs/` directory can
+ * be matched against.
+ *
+ * Three spellings, and no more: the package's full `id`, the LAST dot-separated
+ * segment of that id, and its `name`. The middle one is the load-bearing case —
+ * `examples/app-multi-package` declares `id: 'com.example.multi.core'` with
+ * `name: 'Multi-Package Core'`, so a `src/core/` directory can only be resolved
+ * through the id's tail. ⛔ `namespace` is deliberately NOT a spelling: ADR-0130
+ * D1 exists so that N packages of one artifact can SHARE one namespace, so
+ * matching on it would be ambiguous exactly where multi-package layouts are
+ * most common.
+ *
+ * A directory that matches none, or more than one, is not attributed — it is
+ * reported, by {@link sweepPackageDocsDirectories}.
+ */
+export function docsPackageRefs(packages: unknown): DocsPackageRef[] {
+  if (!Array.isArray(packages)) return [];
+  return artifactPackages({ packages }).map(({ index, id, body }) => {
+    const directoryNames = new Set<string>();
+    if (typeof body.id === 'string' && body.id !== '') {
+      directoryNames.add(body.id);
+      const tail = body.id.split('.').pop();
+      if (tail) directoryNames.add(tail);
+    }
+    if (typeof body.name === 'string' && body.name !== '') directoryNames.add(body.name);
+    return {
+      index,
+      id,
+      ...(typeof body.namespace === 'string' && body.namespace !== '' ? { namespace: body.namespace } : {}),
+      directoryNames: [...directoryNames],
+    };
+  });
+}
+
+/**
+ * Walk `src/*/docs/` once and split it two ways: collected into the package
+ * that owns it, or reported as unread (#18170's warning, kept by the #18431
+ * ruling's clause 4).
+ *
+ * ⭐ ONE traversal, and it is the traversal that was already here. The warning
+ * this function grew out of already read every `src/<dir>/docs/` and already
+ * listed its Markdown files by name; collecting them costs the file reads and
+ * nothing else. That is the measurement the ruling asked for — see the PR that
+ * landed this — and it is why the directory convention is the one implemented
+ * first.
+ */
+function sweepPackageDocsDirectories(
+  srcDir: string,
+  refs: readonly DocsPackageRef[],
+): { packageDocs: PackageDocSet[]; issues: DocIssue[] } {
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(srcDir, { withFileTypes: true });
   } catch {
-    return [];
+    return { packageDocs: [], issues: [] };
   }
   const issues: DocIssue[] = [];
+  const packageDocs: PackageDocSet[] = [];
   const packageDirs = entries.filter((e) => e.isDirectory() && e.name !== COLLECTED_DOCS_DIR);
   packageDirs.sort((a, b) => a.name.localeCompare(b.name));
   for (const entry of packageDirs) {
-    const files = markdownFilesIn(path.join(srcDir, entry.name, COLLECTED_DOCS_DIR));
+    const dir = path.join(srcDir, entry.name, COLLECTED_DOCS_DIR);
+    const files = markdownFilesIn(dir);
     if (files.length === 0) continue;
     const rel = `src/${entry.name}/docs`;
+
+    const owners = refs.filter((ref) => ref.directoryNames.includes(entry.name));
+    if (owners.length === 1) {
+      const compiled = compileDocsDirectory(dir, rel);
+      issues.push(...compiled.issues);
+      packageDocs.push({
+        index: owners[0].index,
+        id: owners[0].id,
+        ...(owners[0].namespace !== undefined ? { namespace: owners[0].namespace } : {}),
+        dir: rel,
+        docs: compiled.docs,
+      });
+      continue;
+    }
+
+    if (refs.length === 0) {
+      // No `packages[]` at all — the single-package shape, where "read from
+      // src/docs/ only" is still the whole truth. ⛔ Message unchanged.
+      issues.push({
+        severity: 'warning',
+        rule: 'docs/uncollected-directory',
+        message: uncollectedDocsMessage(rel, files),
+        path: rel,
+      });
+      continue;
+    }
+
+    const declared = refs.map((ref) => ref.id).join(', ');
     issues.push({
       severity: 'warning',
       rule: 'docs/uncollected-directory',
-      message: `${rel}/ holds ${files.length} Markdown file(s) that were NOT collected: package docs are read from src/docs/ only (ADR-0046 §3.2), so these are absent from the artifact's \`docs[]\` and from every book that includes them. Move them into src/docs/ (doc names carry the package namespace prefix, so packages do not collide there), declare them inline as \`defineStack({ docs })\`, or delete them if they are not package docs. Found: ${files.join(', ')}`,
+      message: owners.length === 0
+        ? `${rel}/ holds ${files.length} Markdown file(s) that were NOT collected: "${entry.name}" names none of this artifact's packages, so there is no package body to attach them to (ADR-0130 D4). A per-package docs directory is matched against a package's \`id\`, the last dot-separated segment of that \`id\`, or its \`name\` — rename the directory to one of those, declare the docs inline as \`defineStack({ docs })\` on the package that owns them, or move them into src/docs/. Declared packages: ${declared}. Found: ${files.join(', ')}`
+        : `${rel}/ holds ${files.length} Markdown file(s) that were NOT collected: "${entry.name}" names ${owners.length} of this artifact's packages (${owners.map((o) => o.id).join(', ')}), so which package body owns these docs is ambiguous and ⛔ this collector will not guess (ADR-0130 D4). Give those packages distinct \`id\`/\`name\` spellings, or declare the docs inline as \`defineStack({ docs })\` on the one that owns them. Found: ${files.join(', ')}`,
       path: rel,
     });
   }
-  return issues;
+  return { packageDocs, issues };
 }
 
 /**
- * Read `src/docs/*.md` (flat) next to the given config file and compile
- * each file into a `DocItem`. Structural problems (subdirectories, bad
- * filename stems) are reported as error issues; offending files are
- * skipped rather than partially collected.
+ * Read one flat docs directory and compile each `.md` file into a `DocItem`.
+ * Structural problems (subdirectories, bad filename stems) are reported as
+ * error issues; offending files are skipped rather than partially collected.
  *
- * Markdown docs sitting one level down, in `src/<pkg>/docs/`, are never
- * collected — they are REPORTED instead (see {@link uncollectedDocsDirectories}),
- * whether or not `src/docs/` itself exists, because either way the build keeps
- * none of them.
+ * `relBase` is how the directory is NAMED in every issue this raises, relative
+ * to the config file — `src/docs` for the stack's own flat directory, and
+ * `src/<pkg>/docs` for a package's. It is a parameter rather than a constant
+ * because #18431 gave this reader a second caller; for the flat directory the
+ * text it produces is byte-identical to what it produced before.
  */
-export function collectDocsFromSrc(configPath: string): { docs: DocItem[]; issues: DocIssue[] } {
-  const srcDir = path.join(path.dirname(configPath), 'src');
-  const docsDir = path.join(srcDir, COLLECTED_DOCS_DIR);
-  const issues: DocIssue[] = uncollectedDocsDirectories(srcDir);
+function compileDocsDirectory(docsDir: string, relBase: string): { docs: DocItem[]; issues: DocIssue[] } {
+  const issues: DocIssue[] = [];
   if (!fs.existsSync(docsDir)) return { docs: [], issues };
 
   const baseByName = new Map<string, DocItem>();
   const variants: Array<{ base: string; locale: string; item: DocTranslationItem; rel: string }> = [];
 
   for (const entry of fs.readdirSync(docsDir, { withFileTypes: true })) {
-    const rel = `src/docs/${entry.name}`;
+    const rel = `${relBase}/${entry.name}`;
     if (entry.isDirectory()) {
       issues.push({
         severity: 'error',
         rule: 'docs/flat-directory',
-        message: `Subdirectory "${entry.name}" under src/docs/ is not allowed (ADR-0046 §3.2). Flatten all .md files directly into src/docs/.`,
+        message: `Subdirectory "${entry.name}" under ${relBase}/ is not allowed (ADR-0046 §3.2). Flatten all .md files directly into ${relBase}/.`,
         path: rel,
       });
       continue;
@@ -412,6 +545,33 @@ export function collectDocsFromSrc(configPath: string): { docs: DocItem[]; issue
   }
 
   return { docs: [...baseByName.values()], issues };
+}
+
+/**
+ * Read `src/docs/*.md` (flat) next to the given config file, and — when the
+ * caller hands over the artifact's `packages[]` — every `src/<pkg>/docs/` whose
+ * directory name resolves to one of those packages (#18431, ADR-0130 D4).
+ *
+ * The two results stay SEPARATE and that separation is the ruling: the flat
+ * directory's docs are the stack's own and keep attaching where they always
+ * did (`docs` below, which `compile.ts` writes to the artifact's top level),
+ * while a package's docs go to `packageDocs` and from there into that package's
+ * own body — ⛔ never to the top level.
+ *
+ * ⚠️ Called with ONE argument, this function behaves exactly as it always has:
+ * `packageDocs` is empty, every `src/<pkg>/docs/` is reported by the #18170
+ * warning, and `docs`/`issues` are byte-for-byte what they were. That is what
+ * makes "nothing existing moves" checkable rather than promised — a
+ * single-package stack declares no `packages[]`, so it takes the same branch.
+ */
+export function collectDocsFromSrc(
+  configPath: string,
+  packages?: unknown,
+): { docs: DocItem[]; issues: DocIssue[]; packageDocs: PackageDocSet[] } {
+  const srcDir = path.join(path.dirname(configPath), 'src');
+  const sweep = sweepPackageDocsDirectories(srcDir, docsPackageRefs(packages));
+  const flat = compileDocsDirectory(path.join(srcDir, COLLECTED_DOCS_DIR), `src/${COLLECTED_DOCS_DIR}`);
+  return { docs: flat.docs, issues: [...sweep.issues, ...flat.issues], packageDocs: sweep.packageDocs };
 }
 
 /**
@@ -686,19 +846,191 @@ export function lintMetadataEmbeds(docs: DocItem[], stack: Record<string, unknow
 }
 
 /**
- * One-call entry for `os build`: collect `src/docs/*.md`, merge with the
- * stack's inline `docs`, and lint the combined set. Returns the merged
- * doc array (inline items first — they were already schema-validated) and
+ * A doc's identity for the "does some package already own this one?" question.
+ *
+ * Reference first, structural second — the shape `resolveArtifactCollections`
+ * uses on the other side of the same artifact (`packages/runtime/src/
+ * artifact-collections.ts`). `composeStacks(…, { manifest: 'preserve' })` puts
+ * the SAME item object in a package body and in the flattened top level, so the
+ * reference answers for every artifact this repo produces; the structural leg
+ * is what keeps a hand-written artifact — where the two copies are equal but
+ * not identical — from being read as a name collision with itself.
+ */
+function docIdentity(doc: unknown): string {
+  return JSON.stringify(doc, (_key, value) =>
+    value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? Object.fromEntries(
+        Object.keys(value as Record<string, unknown>).sort().map((k) => [k, (value as Record<string, unknown>)[k]]),
+      )
+      : value) ?? 'undefined';
+}
+
+/** A membership test over {@link docIdentity}, reference-first. */
+function claimedDocs(items: readonly DocItem[]): { has: (doc: DocItem) => boolean } {
+  const refs = new WeakSet<object>();
+  const keys = new Set<string>();
+  for (const item of items) {
+    if (item !== null && typeof item === 'object') refs.add(item as object);
+    keys.add(docIdentity(item));
+  }
+  return {
+    has: (doc) => (doc !== null && typeof doc === 'object' && refs.has(doc as object)) || keys.has(docIdentity(doc)),
+  };
+}
+
+/** The `docs` a `packages[]` entry already carries in its own assembled body. */
+function bodyDocsOf(packages: unknown, index: number): DocItem[] {
+  if (!Array.isArray(packages)) return [];
+  const body = (packages[index] as { manifest?: Record<string, unknown> } | null | undefined)?.manifest;
+  const docs = body?.docs;
+  return Array.isArray(docs) ? (docs as DocItem[]) : [];
+}
+
+/**
+ * The ONE rule the per-package split cannot enforce inside a single package:
+ * a doc name declared by two different owners.
+ *
+ * Doc uniqueness is logical — the metadata registry key carries no package
+ * coordinate — so two owners declaring one name means one silently overwrites
+ * the other at registration. `lintDocs` catches the collision WITHIN a set; the
+ * moment the lint runs per package (the ruling's clause 2) nothing else is
+ * looking across them, and ADR-0130 D1 makes the cross-set case reachable on
+ * purpose: N packages of one artifact may share one namespace, so their
+ * prefixes do not keep them apart.
+ */
+function lintDocNamesAcrossOwners(
+  sets: ReadonlyArray<{ label: string; docs: readonly DocItem[] }>,
+): DocIssue[] {
+  const owners = new Map<string, string[]>();
+  for (const set of sets) {
+    const seen = new Set<string>();
+    for (const doc of set.docs) {
+      if (typeof doc?.name !== 'string' || seen.has(doc.name)) continue; // within-set dupes are `lintDocs`' job
+      seen.add(doc.name);
+      const labels = owners.get(doc.name) ?? [];
+      labels.push(set.label);
+      owners.set(doc.name, labels);
+    }
+  }
+  const issues: DocIssue[] = [];
+  for (const [name, labels] of owners) {
+    if (labels.length < 2) continue;
+    issues.push({
+      severity: 'error',
+      rule: 'docs/duplicate-name',
+      message: `Doc name "${name}" is declared by ${labels.join(' and ')}. Doc names are one flat namespace across the whole artifact (the metadata registry key carries no package coordinate), so one of these silently overwrites the other at registration — rename one.`,
+      path: `docs/${name}`,
+    });
+  }
+  return issues;
+}
+
+/** Re-locate a per-package issue so its `path` says which package it came from. */
+function underPackage(issues: readonly DocIssue[], index: number): DocIssue[] {
+  return issues.map((issue) => ({ ...issue, path: `packages[${index}].${issue.path}` }));
+}
+
+/**
+ * One-call entry for `os build` / `os validate` / `os lint`: collect
+ * `src/docs/*.md` and every resolvable `src/<pkg>/docs/`, merge the flat set
+ * with the stack's inline `docs`, and lint each set against the namespace of
+ * the package that owns it.
+ *
+ * Returns the stack-level doc array (inline items first — they were already
+ * schema-validated), which is what the artifact's TOP LEVEL carries, plus the
+ * per-package sets {@link attachPackageDocs} writes into `packages[]`, plus
  * every issue found.
+ *
+ * ## The lint partition (#18431, the ruling's clause 2)
+ *
+ * A doc is linted ONCE, against the namespace of whoever owns it:
+ *
+ *   - a doc a `packages[]` body carries (composition folded a package's inline
+ *     `defineStack({ docs })` there), or one read out of that package's
+ *     `src/<pkg>/docs/`, is linted against THAT package's `namespace`;
+ *   - everything else — the stack's own flat `src/docs/` and any top-level
+ *     inline doc no package claims — keeps `stack.manifest.namespace`.
+ *
+ * ⛔ There is no single global prefix any more, and no fallback between the two
+ * rules: a package doc that fails its own package's prefix is refused, never
+ * re-tried against the artifact's. `lintDocNamesAcrossOwners` is what replaces
+ * the one thing the single global set used to give for free.
+ *
+ * ⚠️ A stack with no `packages[]` — every single-package app — takes exactly
+ * the old path: nothing is claimed, so the stack-level set IS the whole set and
+ * the issue list is unchanged, item for item.
  */
 export function collectAndLintDocs(
   configPath: string,
   stack: Record<string, unknown>,
-): { docs: DocItem[]; issues: DocIssue[] } {
+): { docs: DocItem[]; issues: DocIssue[]; packageDocs: PackageDocSet[] } {
   const inline = Array.isArray(stack.docs) ? (stack.docs as DocItem[]) : [];
-  const collected = collectDocsFromSrc(configPath);
+  const collected = collectDocsFromSrc(configPath, stack.packages);
   const namespace = (stack.manifest as { namespace?: string } | undefined)?.namespace;
   const docs = [...inline, ...collected.docs];
-  const issues = [...collected.issues, ...lintDocs(docs, namespace), ...lintMetadataEmbeds(docs, stack)];
-  return { docs, issues };
+
+  const collectedByIndex = new Map(collected.packageDocs.map((set) => [set.index, set]));
+  const owned = docsPackageRefs(stack.packages).map((ref) => {
+    const body = bodyDocsOf(stack.packages, ref.index);
+    const fromDisk = collectedByIndex.get(ref.index)?.docs ?? [];
+    return { ref, body, fromDisk, all: [...body, ...fromDisk] };
+  }).filter((entry) => entry.all.length > 0);
+
+  // The top level keeps every doc it carried — the artifact shape does not
+  // move. What the ownership split changes is only which namespace each doc is
+  // JUDGED against, so the stack-level lint drops the ones a package claims.
+  const claimed = claimedDocs(owned.flatMap((entry) => entry.body));
+  const stackScoped = docs.filter((doc) => !claimed.has(doc));
+
+  const issues: DocIssue[] = [
+    ...collected.issues,
+    ...lintDocs(stackScoped, namespace),
+    ...lintMetadataEmbeds(docs, stack),
+  ];
+  for (const entry of owned) {
+    issues.push(...underPackage(lintDocs(entry.all, entry.ref.namespace), entry.ref.index));
+    // Only the docs read off disk need an embed pass here: a doc already on the
+    // body is also in `docs` above, where `lintMetadataEmbeds` has judged it.
+    issues.push(...underPackage(lintMetadataEmbeds(entry.fromDisk, stack), entry.ref.index));
+  }
+  issues.push(...lintDocNamesAcrossOwners([
+    { label: 'the stack itself', docs: stackScoped },
+    ...owned.map((entry) => ({ label: `package "${entry.ref.id}"`, docs: entry.all })),
+  ]));
+
+  return { docs, issues, packageDocs: collected.packageDocs };
+}
+
+/**
+ * Write each collected {@link PackageDocSet} onto the body of the package that
+ * owns it — `packages[i].manifest.docs`, the structural position ADR-0130 D4
+ * reserves for a package body (#18431, the ruling's clause 1).
+ *
+ * ⛔ Not the artifact top level. The runtime reads a package-owned collection
+ * back UP through `resolveArtifactCollections`
+ * (`packages/runtime/src/artifact-collections.ts`), so a doc written here is
+ * served exactly as a top-level one is — while `packages[]` keeps the OWNERSHIP
+ * that ADR-0130 D1 is about and a flattened copy would destroy.
+ *
+ * Returns the ARGUMENT ITSELF when nothing is added, so an artifact with no
+ * per-package docs is not merely equal to the one built before this landed —
+ * it is the same object, serialized from the same references.
+ */
+export function attachPackageDocs(packages: unknown, sets: readonly PackageDocSet[]): unknown {
+  if (!Array.isArray(packages) || sets.length === 0) return packages;
+  const byIndex = new Map(sets.map((set) => [set.index, set]));
+  let changed = false;
+  const out = packages.map((entry, index) => {
+    const set = byIndex.get(index);
+    if (!set || set.docs.length === 0) return entry;
+    const body = (entry as { manifest?: Record<string, unknown> } | null | undefined)?.manifest;
+    if (body === null || typeof body !== 'object') return entry;
+    const existing = Array.isArray(body.docs) ? (body.docs as DocItem[]) : [];
+    const claimed = claimedDocs(existing);
+    const added = set.docs.filter((doc) => !claimed.has(doc));
+    if (added.length === 0) return entry;
+    changed = true;
+    return { ...(entry as Record<string, unknown>), manifest: { ...body, docs: [...existing, ...added] } };
+  });
+  return changed ? out : packages;
 }
