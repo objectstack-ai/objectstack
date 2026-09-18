@@ -775,6 +775,7 @@ Map view configuration
 | **descriptionField** | `string` | optional | Field displayed as the marker description |
 | **zoom** | `number` | optional | Initial zoom level (1-20). Omit to let the renderer fit the camera to the queried records |
 | **center** | `[number, number]` | optional | Initial camera center as [latitude, longitude]. Omit to let the renderer fit the camera to the queried records |
+| **style** | `string` | optional | Map style URL — the MapLibre style document the renderer loads in place of the public demo tiles. The component-level `mapStyle` is read FIRST and wins when both are present; this is NOT the inline CSS `style` record a component node carries |
 
 
 ---
@@ -1023,6 +1024,7 @@ View filter rule
 | **descriptionField** | `string` | optional | Field displayed as the marker description |
 | **zoom** | `number` | optional | Initial zoom level (1-20). Omit to let the renderer fit the camera to the queried records |
 | **center** | `[number, number]` | optional | Initial camera center as [latitude, longitude]. Omit to let the renderer fit the camera to the queried records |
+| **style** | `string` | optional | Map style URL — the MapLibre style document the renderer loads in place of the public demo tiles. The component-level `mapStyle` is read FIRST and wins when both are present; this is NOT the inline CSS `style` record a component node carries |
 
 ### Nested Shape: `ListView.tree`
 
@@ -1421,6 +1423,7 @@ View filter rule
 | **descriptionField** | `string` | optional | Field displayed as the marker description |
 | **zoom** | `number` | optional | Initial zoom level (1-20). Omit to let the renderer fit the camera to the queried records |
 | **center** | `[number, number]` | optional | Initial camera center as [latitude, longitude]. Omit to let the renderer fit the camera to the queried records |
+| **style** | `string` | optional | Map style URL — the MapLibre style document the renderer loads in place of the public demo tiles. The component-level `mapStyle` is read FIRST and wins when both are present; this is NOT the inline CSS `style` record a component node carries |
 
 ### Nested Shape: `ObjectListView.tree`
 

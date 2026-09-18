@@ -269,17 +269,36 @@ export function findSurvivingMark(node: unknown, at = '#'): string | null {
  */
 export function projectByPruningUnionBranches(
   value: z.ZodType,
-  options: { readonly target: 'draft-2020-12' },
+  options: {
+    readonly target: 'draft-2020-12';
+    /**
+     * An extra `override` to run after this module's own marker pass — the
+     * generator's refinement projection (#18670 item 2). This function owns the
+     * single `override` slot `toJSONSchema` provides, so a caller that also
+     * needs one hands it here rather than losing one of the two silently: an
+     * export that reaches its published file through THIS path would otherwise
+     * be the one artifact missing a narrowing the ledger already recorded as
+     * closed (`data/Hook` is the live case).
+     */
+    readonly override?: (ctx: { zodSchema: unknown; jsonSchema: unknown; path: (string | number)[] }) => void;
+  },
 ): BranchProjection | null {
   const candidates: BranchProjection[] = [];
 
   for (const io of ['output', 'input'] as const) {
     let schema: JsonObject;
     try {
+      const mark = markUnprojectableNodes(io);
+      const extra = options.override;
       schema = z.toJSONSchema(value, {
         target: options.target,
         unrepresentable: 'any',
-        override: markUnprojectableNodes(io),
+        override: extra
+          ? (ctx): void => {
+              mark(ctx);
+              extra(ctx);
+            }
+          : mark,
         ...(io === 'input' ? { io } : {}),
       }) as JsonObject;
     } catch {

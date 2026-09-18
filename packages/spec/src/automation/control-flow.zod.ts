@@ -500,9 +500,10 @@ export function findRegionEntry(region: { nodes: FlowNodeParsed[]; edges?: FlowE
 
 /**
  * A dict — region-shaped enough to reach its `nodes` / `edges`, and the same
- * test a member of a node list must pass to be a node at all. One spelling for
- * both, so what {@link collectFlowGraphs} walks cannot drift from what it hands
- * out.
+ * test a member of a node list or an EDGE list must pass to be a node or an
+ * edge at all. One spelling for all three, so what {@link collectFlowGraphs}
+ * walks cannot drift from what it hands out, and the two lists it hands out
+ * cannot drift from each other.
  */
 function isRegionDict(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -722,11 +723,25 @@ export interface FlowGraph {
    * item deserialises to `null` — and a region its own schema refused is left
    * RAW for {@link validateControlFlow} to name. The walk therefore drops a
    * non-record member rather than hand out an array that does not match this
-   * declared type (#16752). Only this array is narrowed: the schema refusal
-   * that owns the malformed region still fires, and {@link path} still indexes
-   * the RAW list, so a finding stays anchored where the author wrote it.
+   * declared type (#16752). Only the two handed-out arrays are narrowed: the
+   * schema refusal that owns the malformed region still fires, and
+   * {@link path} still indexes the RAW list, so a finding stays anchored where
+   * the author wrote it.
    */
   readonly nodes: readonly FlowNodeParsed[];
+  /**
+   * Every member is a record, for the reason {@link FlowGraph.nodes} states and
+   * by the same drop in the same walk. A nested region's edge list is admitted
+   * on `Array.isArray` alone, and `Array.isArray` proves the LIST, never its
+   * MEMBERS: an empty YAML `edges:` item deserialises to `null`, and a region
+   * its own schema refused is left RAW for {@link validateControlFlow} to name.
+   * So this array was forwarded with the producer's word about its members
+   * rather than a check, while its declared element type said it could not hold
+   * one. The walk drops a non-record member here too. Only the handed-out array
+   * is narrowed: the schema refusal that owns the malformed region still fires,
+   * and no consumer indexes this list positionally — a dropped member changes
+   * the index, never whether an edge was judged.
+   */
   readonly edges: readonly FlowEdgeParsed[];
 }
 
@@ -759,11 +774,14 @@ export function collectFlowGraphs(
     // author typed — `null` included. What is HANDED OUT and what is WALKED both
     // drop it, through the one predicate above.
     //
-    // Handed out (#16752): `FlowGraph.nodes` is declared `readonly
-    // FlowNodeParsed[]`, and an array whose members every caller must re-check
-    // is not that array. This list is one the walk picked up out of an open
-    // `z.record` config ITSELF — no caller ever held it, so no coercion at a
-    // call site can reach it. Identity is preserved when nothing is dropped.
+    // Handed out (#16752 for `nodes`, #18102 for `edges`): both are declared
+    // arrays of parsed records, and an array whose members every caller must
+    // re-check is not that array. BOTH lists are ones the walk picked up out of
+    // an open `z.record` config ITSELF — no caller ever held them, so no
+    // coercion at a call site can reach them. The node side was repaired first
+    // and the edge side was forwarded untouched for one list's worth of time;
+    // one filter per list, side by side, is what keeps that from recurring.
+    // Identity is preserved per list when nothing is dropped.
     //
     // Walked (#16134): skip a non-record rather than read `.config` off it —
     // this walk runs inside `FlowSchema`'s parse, where a thrown TypeError would
@@ -771,12 +789,21 @@ export function collectFlowGraphs(
     // refusal that owns the malformed region still fires, reached now where the
     // throw used to pre-empt it.
     const kept = nodes.filter((node) => isRegionDict(node));
-    graphs.push({ scope, path, nodes: kept.length === nodes.length ? nodes : kept, edges });
+    const keptEdges = edges.filter((edge) => isRegionDict(edge));
+    graphs.push({
+      scope,
+      path,
+      nodes: kept.length === nodes.length ? nodes : kept,
+      edges: keptEdges.length === edges.length ? edges : keptEdges,
+    });
     if (depth >= MAX_REGION_DEPTH) return;
     // Indexed over the RAW list, never `kept`: `path` anchors a Zod issue where
     // the author wrote the node, so dropping a member must not renumber the
     // siblings that outlive it. `Array.isArray` on the inner list below proves
     // the LIST, never its MEMBERS — the sentence removed from four lint readers.
+    // It stays a list test on purpose: the member test for both lists is the
+    // pair of filters above, run by the next depth's own `visit` on the way
+    // out, so neither list can be handed out on an `Array.isArray` alone.
     nodes.forEach((node, index) => {
       if (!isRegionDict(node)) return;
       for (const slot of regionSlotsOf(node)) {

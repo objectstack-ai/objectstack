@@ -49,7 +49,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { PackageInstallRequestSchema } from '@objectstack/spec/api';
+import { PackageInstallBodySchema, PackageInstallRequestSchema } from '@objectstack/spec/api';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
@@ -147,4 +147,68 @@ describe('published README — packages.install examples parse as manifests', ()
       expect(refusals, `${example.source}\n→ ${refusals.join('; ')}`).toEqual([]);
     },
   );
+});
+
+/**
+ * [#18058] The same corpus, judged against the BODY the SDK actually PUTS ON
+ * THE WIRE — and with a control that keeps the judgement from going vacuous.
+ *
+ * Two things the block above deliberately does not do, and this one does:
+ *
+ * 1. It parses `{ manifest }` alone. `packages.install` sends
+ *    `{ manifest, settings, enableOnInstall, …overwrite }`, and the contract
+ *    bound to the door is {@link PackageInstallBodySchema} — a union that also
+ *    accepts a BARE manifest, which is how `POST /api/v1/packages` reads a body
+ *    (`body.manifest || body`). Both shapes are asserted here, so a README
+ *    example that parses only when wrapped cannot pass unnoticed.
+ * 2. Its anti-vacuity floor is a COUNT — it proves the corpus is non-empty, not
+ *    that the schema still refuses anything. The at-tier review of #18752
+ *    measured exactly that gap the other way round: reverting this README left
+ *    the hand-transcribed spec-side pin 56/56 green. The refusal control below
+ *    is the other half: if the manifest contract is ever relaxed back to the
+ *    pre-#18058 shape, this reds even while every README example still parses.
+ */
+describe('#18058 — the README examples parse as the BODY the SDK sends, and the pin can still fail', () => {
+  /** `index.ts`'s `packages.install` body, spelled out. */
+  const asTheSdkSends = (
+    manifest: unknown,
+    options?: { settings?: Record<string, unknown>; enableOnInstall?: boolean; overwrite?: boolean },
+  ) => ({
+    manifest,
+    settings: options?.settings,
+    enableOnInstall: options?.enableOnInstall,
+    ...(options?.overwrite !== undefined ? { overwrite: options.overwrite } : {}),
+  });
+
+  it.each(EXAMPLES.map((e) => [e.line, e] as const))(
+    'README line %i parses as the wrapped body the SDK sends',
+    (_line, example) => {
+      const verdict = PackageInstallBodySchema.safeParse(asTheSdkSends(example.manifest));
+      expect(verdict.error?.issues ?? [], example.source).toEqual([]);
+      expect(verdict.success).toBe(true);
+    },
+  );
+
+  it.each(EXAMPLES.map((e) => [e.line, e] as const))(
+    'README line %i parses BARE too — `body.manifest || body` is how the door reads it',
+    (_line, example) => {
+      expect(PackageInstallBodySchema.safeParse(example.manifest).success, example.source).toBe(true);
+    },
+  );
+
+  it('the overwrite opt-in the README names beside the example parses', () => {
+    const [first] = EXAMPLES;
+    expect(first).toBeDefined();
+    expect(PackageInstallBodySchema.safeParse(asTheSdkSends(first?.manifest, { overwrite: true })).success).toBe(true);
+  });
+
+  it('\u26d4 the pre-#18058 literal is still REFUSED — a schema relaxation cannot make this block vacuous', () => {
+    // Exactly the text this README shipped: no `id`, no `type`, and `label`,
+    // which `ManifestSchema`'s strict close refuses by name. If this turns
+    // green the contract was relaxed, not the example fixed.
+    const asShipped = { name: 'vendor_plugin', label: 'Vendor Plugin', version: '1.0.0' };
+    expect(PackageInstallBodySchema.safeParse(asTheSdkSends(asShipped)).success).toBe(false);
+    expect(PackageInstallBodySchema.safeParse(asShipped).success).toBe(false);
+    expect(PackageInstallRequestSchema.safeParse({ manifest: asShipped }).success).toBe(false);
+  });
 });

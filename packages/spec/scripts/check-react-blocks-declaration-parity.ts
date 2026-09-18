@@ -84,8 +84,11 @@
 //            gate on the result — so what it reads is the pinned SOURCE.
 //   node     `scripts/gen-sdui-manifest-node.mjs` writes the TRACKED repo-root
 //            artefact under plain Node — no browser, no objectui build. It
-//            enumerates the PUBLISHED `@object-ui/*` packages at the version named
-//            in `scripts/sdui-manifest.record.json`.
+//            enumerates the PUBLISHED `@object-ui/*` packages at the version
+//            `--objectui-version` names, else the one the PINNED commit's
+//            `packages/core/package.json` declares — and REFUSES when neither
+//            answers. `scripts/sdui-manifest.record.json` is what that run
+//            WRITES, never where it reads the version from.
 //
 // ⚠️ "The registry is a browser app so nothing enumerates it from Node" was true
 // when this header was written and is now FALSE — measured 2026-08-29,

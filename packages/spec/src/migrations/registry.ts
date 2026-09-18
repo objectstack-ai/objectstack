@@ -12140,8 +12140,12 @@ export const MIGRATION_MAJORS: readonly number[] = Object.keys(MIGRATIONS_BY_MAJ
  * gate stays red:
  *
  * - **Check (b)**, the retirement gate: a key that flips live → retired must
- *   appear here, by exact set membership, or the build fails. (Check (b2) is its
- *   inverse: an entry naming a key this build still emits as LIVE is rejected.)
+ *   appear here, by exact set membership, or the build fails. Two companions
+ *   read the table in the other direction: check (b2) refuses an entry naming a
+ *   key this build still emits as LIVE, and check (b3) — nested rows only —
+ *   refuses a dotted entry whose def this build emits but whose path it does
+ *   not (#17969). See "Lifecycle" below for what each of them means for a row
+ *   already in the table.
  * - **Check (c)**, the baseline-deletion gate (#4650): the major recorded here
  *   is what starts a tombstone's ~two-major aging clock, so it is also what
  *   eventually lets its `authorable-surface/` line be deleted. Since #5898 —
@@ -12206,14 +12210,39 @@ export const MIGRATION_MAJORS: readonly number[] = Object.keys(MIGRATIONS_BY_MAJ
  *
  * ## Lifecycle
  *
- * Entries are permanent. A declared tombstone ages out after ~two majors and its
- * line may then leave `authorable-surface.json` (check (c)); its entry here
- * stays, and then names a key the build no longer emits — the expected steady
- * state, not an error. The one state the gate rejects is an entry naming a key
- * that is still LIVE: a registration nothing consumed, pre-approving a
- * retirement that has not happened.
+ * A TRUE entry is permanent. A declared TOP-LEVEL tombstone ages out after ~two
+ * majors and its line may then leave `authorable-surface.json` (check (c)); its
+ * entry here stays, and then names a key the build no longer emits — the
+ * expected steady state, not an error. A NESTED row never reaches that file at
+ * all (0 dotted entries on the shipped surface), so it has no aging clock and
+ * "the build no longer emits it" is never that steady state for one.
  *
- * @see scripts/build-schemas.ts — checks (b)/(b2)/(c), the only consumers
+ * Two states are rejected. A row is read as a PATH only when its `name` half
+ * carries a dot AND this build emits no top-level property of that exact name,
+ * so a live dotted TOP-LEVEL key (`@odata.context`, a SCIM extension URN) stays
+ * on the map check (b2) has always judged it on:
+ *
+ * - **Still LIVE** (check (b2)): the entry names a key this build still emits as
+ *   writable — a registration nothing consumed, pre-approving a retirement that
+ *   has not happened. Remedy: tombstone the key, or delete the entry.
+ * - **Nested and unresolvable** (check (b3), #17969): the entry's def IS emitted
+ *   and the dotted path is not in it. Because checks (a0)/(a)/(b)/(c) are
+ *   structurally blind to a nested key, no gated route can produce this state —
+ *   the row is wrong (a typo'd def, a typo'd path, a stale key name). Remedy:
+ *   fix the spelling against the emitted schema, or delete the entry. A row
+ *   whose DEF this build does not emit is NOT this state: that is the whole-def
+ *   removal steady state, registered in {@link RETIRED_DEFS_BY_MAJOR}.
+ *
+ * ⛔ "Delete the entry" and "entries are permanent" do not conflict, and reading
+ * one as licence to drop the other is the way to lose a retirement. A row that
+ * was ever TRUE of some build is history and is never deleted; a row check (b2)
+ * or (b3) refuses was never true of any build, so deleting it removes a false
+ * claim rather than a record. Check (b3) can also not yet tell a wrong row apart
+ * from every truthful one — its refusal text enumerates the shapes it knows it
+ * cannot see — and for those the remedy is to teach the check the shape, ⛔ never
+ * to delete a row that is telling the truth.
+ *
+ * @see scripts/build-schemas.ts — checks (b)/(b2)/(b3)/(c), the only consumers
  */
 export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> = {
   // The first entries since #4659 built this table (#5552). ONE tombstone

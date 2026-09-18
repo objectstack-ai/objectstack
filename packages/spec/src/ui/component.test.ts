@@ -3504,9 +3504,14 @@ describe('the three #18305 object blocks — key sets derived from the renderers
       expect(Array.isArray(set!.keys), name).toBe(true);
       return [...(set!.keys as readonly string[])].sort();
     };
-    // map: `ListMapConfigSchema`'s own shape, key for key.
+    // map: `ListMapConfigSchema`'s own shape MINUS `style`, the one member that
+    // has no flat spelling — flattened to the top level it collides with
+    // `BaseSchema.style`, the node's inline CSS record, so objectui's own
+    // `FLAT_MAP_CONFIG_KEYS` subtracts it and this set follows. Derived by
+    // SUBTRACTION rather than hand-listed, so a newly declared config key still
+    // lands in this assertion.
     expect(setFor('object-map', 'OBJECT_MAP_FLAT_CONFIG_KEYS'))
-      .toEqual(Object.keys(ListMapConfigSchema.shape).sort());
+      .toEqual(Object.keys(ListMapConfigSchema.shape).filter((k) => k !== 'style').sort());
     // gantt: `GanttConfigSchema`'s shape PLUS the legacy singular alias the
     // renderer's flat branch still reads beside `dependenciesField`.
     expect(setFor('object-gantt', 'OBJECT_GANTT_FLAT_CONFIG_KEYS'))
@@ -3531,13 +3536,25 @@ describe('the three #18305 object blocks — key sets derived from the renderers
     // tree: `TreeConfigSchema`, closed at #15469 on this very measurement.
     expect(door('object-tree').safeParse({ tree: { parentField: 'parent_id' } }).success).toBe(true);
     expect(door('object-tree').safeParse({ tree: { labelFeild: 'name' } }).success).toBe(false);
-    // map: `z.unknown()` — the spec's `ListMapConfigSchema` is strict and
-    // declares no `style`, the key `getMapConfig` reads at `ObjectMap.tsx:365`
-    // (`schema.map?.style`), so pointing this door at it would refuse a value
-    // the renderer honours. The gap is on the list-view face; this pin records
-    // WHY the value stays open here so the later ratchet has its reason.
-    expect(ListMapConfigSchema.safeParse({ style: 'https://tiles.example/style.json' }).success).toBe(false);
+    // map: `ListMapConfigSchema` — the ratchet the previous posture deferred,
+    // taken now that `style` is declared on that block (the key `getMapConfig`
+    // reads at `ObjectMap.tsx:365`, `schema.mapStyle || schema.map?.style`). The
+    // two assertions that used to record the divergence are INVERTED here: the
+    // list-view face accepts the style URL, and the door accepts it through the
+    // spec's own schema rather than through an open value.
+    expect(ListMapConfigSchema.safeParse({ style: 'https://tiles.example/style.json' }).success).toBe(true);
     expect(door('object-map').safeParse({ map: { latitudeField: 'lat', style: 'https://tiles.example/style.json' } }).success).toBe(true);
+    // …and the acceptance is the SCHEMA's, not an open value's: a misspelling
+    // inside the block is refused AT `map`, by name. Without this half the pin
+    // above passes just as well against the `z.unknown()` it replaced.
+    const mapTypo = door('object-map').safeParse({ map: { latitudeField: 'lat', styl: 'https://tiles.example/style.json' } });
+    expect(mapTypo.success).toBe(false);
+    const mapUnknown = mapTypo.error.issues.find(
+      (i: { code: string; path: PropertyKey[] }) => i.code === 'unrecognized_keys'
+        && JSON.stringify(i.path) === JSON.stringify(['map']),
+    );
+    expect(mapUnknown, 'the refusal must land at `map`, not at the node root').toBeDefined();
+    expect(mapUnknown.keys).toContain('styl');
   });
 
   it('every one of the three still refuses an undeclared key BY NAME — the control', () => {
