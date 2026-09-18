@@ -129,3 +129,7 @@ examples/app-crm/storage/
 .claude/worktrees/
 # an agent worktree is git plumbing, never repo content: a `.git` FILE reading `gitdir:` plus a whole second checkout
 .worktrees/
+
+# The release lane's scratch space: the previously published tarball it unpacks
+# and the artifact it packs to verify the ADR-0087 D4 per-release section.
+.release-spec-changes/

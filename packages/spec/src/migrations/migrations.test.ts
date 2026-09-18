@@ -14,7 +14,12 @@ import {
   MIGRATION_MAJORS,
   MIGRATION_SUPPORT_FLOOR,
 } from './registry.js';
-import { composeSpecChanges, SpecChangesSchema } from './spec-changes.js';
+import {
+  composeReleaseChanges,
+  composeSpecChanges,
+  SpecChangesSchema,
+  SpecReleaseChangesSchema,
+} from './spec-changes.js';
 
 const CONVERSION_IDS = new Set(ALL_CONVERSIONS.map((c) => c.id));
 
@@ -481,5 +486,73 @@ describe('spec-changes.json manifest (ADR-0087 D4)', () => {
     expect(changes.converted).toHaveLength(0);
     expect(changes.migrated).toHaveLength(0);
     expect(SpecChangesSchema.safeParse(changes).success).toBe(true);
+  });
+});
+
+describe('per-release section (ADR-0087 D4, package-version resolution)', () => {
+  const aggregate = composeSpecChanges(MIGRATION_SUPPORT_FLOOR, PROTOCOL_MAJOR);
+  const allConversionIds = aggregate.converted.map((c) => c.conversionId);
+  const allMigrationIds = aggregate.migrated.map((m) => m.migrationId);
+
+  it('reports only the registry entries this release added', () => {
+    // The previous release carried everything but the first conversion, so that
+    // one — and nothing else — is new in this release.
+    const [firstNew, ...alreadyPublished] = allConversionIds;
+    const release = composeReleaseChanges(
+      '17.3.0',
+      '17.4.0',
+      aggregate,
+      { conversionIds: alreadyPublished, migrationIds: allMigrationIds },
+      { added: [], removed: [] },
+    );
+    expect(release.converted.map((c) => c.conversionId)).toEqual([firstNew]);
+    expect(release.migrated).toHaveLength(0);
+    expect(SpecReleaseChangesSchema.safeParse(release).success).toBe(true);
+  });
+
+  it('carries the export delta the two artifacts show, sorted', () => {
+    const release = composeReleaseChanges(
+      '17.3.0',
+      '17.4.0',
+      aggregate,
+      { conversionIds: allConversionIds, migrationIds: allMigrationIds },
+      { added: ['./ui: Zed (const)', './ai: Alpha (const)'], removed: ['./integration: Gone (type)'] },
+    );
+    expect(release.added.map((a) => a.surface)).toEqual(['./ai: Alpha (const)', './ui: Zed (const)']);
+    expect(release.removed.map((r) => r.surface)).toEqual(['./integration: Gone (type)']);
+    expect(release.fromVersion).toBe('17.3.0');
+    expect(release.toVersion).toBe('17.4.0');
+  });
+
+  it('a release that moved nothing is four empty arrays, not a missing section', () => {
+    // The section is OMITTED when the delta cannot be computed; when it CAN be
+    // and is empty, the emptiness is the answer and must survive the schema.
+    const release = composeReleaseChanges(
+      '17.4.0',
+      '17.4.1',
+      aggregate,
+      { conversionIds: allConversionIds, migrationIds: allMigrationIds },
+      { added: [], removed: [] },
+    );
+    expect(release.added).toHaveLength(0);
+    expect(release.removed).toHaveLength(0);
+    expect(release.converted).toHaveLength(0);
+    expect(release.migrated).toHaveLength(0);
+    expect(SpecReleaseChangesSchema.safeParse(release).success).toBe(true);
+  });
+
+  it('⛔ never re-attributes a release entry to a protocol MAJOR', () => {
+    // The section's own from/to is the exact attribution; a `since: 17` beside
+    // it would offer a coarser number in the one place a finer one is known —
+    // the defect the section exists to close. The schema refuses the old shape.
+    const release = composeReleaseChanges(
+      '17.3.0',
+      '17.4.0',
+      aggregate,
+      { conversionIds: allConversionIds, migrationIds: allMigrationIds },
+      { added: ['./ai: Alpha (const)'], removed: [] },
+    );
+    expect(release.added[0]).toEqual({ surface: './ai: Alpha (const)' });
+    expect(Object.keys(release.added[0])).not.toContain('since');
   });
 });
