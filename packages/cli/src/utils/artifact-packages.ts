@@ -242,11 +242,21 @@ export function packageBodyAsStack(
  * set the union could not see" — ⛔ do not restate it as that sentence. Two
  * entries rendering the same `where` still collapse (see `findingKey`), and a
  * rule that reports the same `rule`/`where`/`message` for genuinely different
- * items distinguished ONLY by their top-level index would collapse too. That
- * combination is not reachable through any rule in the registry today — every
- * rule names its entity in `where`, which `packages/lint/src/
- * data-model-rule-where-slot.test.ts` holds for the whole registry — so the
- * bound is structural, ⛔ not a measured count of survivors on some corpus.
+ * items distinguished ONLY by their top-level index would collapse with them.
+ *
+ * ⛔ And do not size that residue by quoting the pin next door — that move is
+ * exactly what this card exists to correct. `packages/lint/src/
+ * data-model-rule-where-slot.test.ts` holds something NARROWER than "every
+ * rule names its entity in `where`": it runs the whole registry and fails any
+ * rule that puts a BARE CONFIG PATH in `where`. That forbids the one spelling
+ * which would make the collapse systematic; it does ⛔ not promise that two
+ * entries always render different `where` strings. So the residue is MEASURED
+ * instead — over every example stack in this repo that parses today
+ * (`app-multi-package`'s built artifact, `app-crm`, `app-showcase`,
+ * `app-todo`), 45 registry rules produced 103 findings and 103 distinct
+ * neutralised keys: ZERO groups held two different raw paths. ⛔ Re-measure
+ * rather than re-quote that number — a corpus reading is a count plus the tree
+ * it was taken against, and this one was taken on a43b9d0654.
  */
 export function runPerPackageAuthoringRules(run: {
   /** Which door is asking — the same string its union run passed. */
