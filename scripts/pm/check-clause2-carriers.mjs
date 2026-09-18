@@ -14,14 +14,34 @@
  *   node scripts/pm/check-clause2-carriers.mjs --template   # the record, copyable; no network
  *   node scripts/pm/check-clause2-carriers.mjs --help       # usage; no network
  *
+ * ## Every run STATES what it judged from (#18456)
+ *
+ * Every run past the board resolution closes with a fenced `clause2 input
+ * record` block on stderr: the board and which of the three sources answered,
+ * the read path and every request it issued, the pair and the evidence it was
+ * derived from, the comments read, the claim comment SELECTED as the carrier
+ * with the rule that selected it and every candidate it rejected, each pooled
+ * claim's body fingerprint, and this file's own blob hash and path.
+ *
+ * ⭐ Two runs that DISAGREE about one pair are settled by DIFFING their two
+ * blocks — ⛔ never by re-running until one side wins. The block has the same
+ * field roster on every exit (0, 4, a refusal, a transport failure) precisely
+ * so the diff is line for line, and the blob line says whether the two runs
+ * were even the same instrument. The full reasoning is at INPUT_RECORD_VERSION.
+ *
  * ## Which board this answers about, and how a reader can tell (#16623)
  *
  * The board is a PARAMETER, resolved once per run by `resolveSweepRepo`
  * (imported): `PM_SWEEP_REPO`, else `GITHUB_REPOSITORY`, else the default. It
- * is not a property of this checkout -- this file reads no file in the tree at
- * all, so an environment variable really does retarget it, and a sibling repo's
+ * is not a property of this checkout -- this file reads no BOARD DATA out of a
+ * tree, so an environment variable really does retarget it, and a sibling repo's
  * seat runs `PM_SWEEP_REPO=<its repo> node scripts/pm/check-clause2-carriers.mjs
  * --pair N` to get an answer about its own board.
+ *
+ * ⚠️ Since #18456 it reads exactly ONE file out of the checkout: its OWN source,
+ * for the blob hash the input record prints. That is provenance and nothing
+ * else -- no state, row, count or exit consults it -- so the sentence above
+ * holds where it matters and is amended rather than quietly left false.
  *
  * ⚠️ That was TRUE before this file said so, and saying so is the fix (#16623).
  * The filing seat grepped THIS file for a repo flag, found nothing, and
@@ -389,6 +409,12 @@
  *      re-dispatch the card. It is also excluded from the MISPLACED scan: a
  *      recognised correction is this limb's designated second carrier, not a
  *      declaration written in a place the predicate does not look.
+ *      ⭐ The prohibition this exit exists for — 「the claim protocol forbids a
+ *      second `Claim:`」, three lines up — had no enforcing reader until
+ *      #18828: a seat that wrote the second line anyway was RANKED, not
+ *      refused, and the record called it a SUPERSESSION at exit 0.
+ *      `claimRepeats` / `c8SecondClaimSameSeat` downstairs are that reader, and
+ *      the correction above is the first of the two acts its remedy names.
  *   3. **It is not the checker filling anything in.** The value is the seat's
  *      own, written by the seat, in the fixed spelling. This file reads it and
  *      still writes nothing.
@@ -519,7 +545,14 @@
  * ## The request budget, per run
  *
  * `--pair N`: one open-PR listing page (100 PRs per page) plus 2 reads per card
- * the PR delivers (the card, its comment thread). A C3 candidate adds its two
+ * the PR delivers (the card, its comment thread). ⚠️ The thread is a LADDER
+ * rather than a request (#18683): one page per 100 comments up to
+ * `COMMENT_PAGE_CAP`, so a thread of 99 comments or fewer is the one read this
+ * paragraph has always described, a thread of exactly 100 costs two (a full
+ * page is indistinguishable from a finished one), and the longest thread on
+ * this board on 2026-09-17 — 895 comments — would cost nine. No card in the
+ * clause-② population reached 15 that day, so the totals below are measured
+ * ones rather than upper bounds. A C3 candidate adds its two
  * carriers' event streams (one page each on this board) and — only once both
  * read cleared — one commit: ≤5 reads for a candidate pair, 2 for every other.
  * A pair whose card declares `Clause-②: no` adds ONE more — its changed-file
@@ -529,7 +562,8 @@
  * and on the `--pair` path by EVERY pair, because C7 judges the record wherever
  * one exists (#18174). The sweep pays the listing once and the same
  * per-pair cost for every pair it derives. ⇒ a `--pair` run costs 4–9 requests,
- * while a 29-PR sweep costs about 60 — which is exactly GitHub's documented
+ * while a 29-PR sweep costs about 60 — measured at 64 on 2026-09-17, 28 pairs,
+ * with and without the comment ladder alike — which is about GitHub's documented
  * anonymous hourly budget, one more reason the run prints the remaining count
  * instead of assuming it.
  *
@@ -629,6 +663,7 @@
 
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
@@ -640,16 +675,21 @@ import {
   EXIT_PREREQUISITE_NOT_MET,
   H51_SHA_MIN_HEX,
   PROXY_FLAG,
+  RELEASE_COMMENT_MARKER,
   SWEEP_REPO_SHAPE,
+  branchNameTarget,
+  closingKeywordTargets,
   contractReviewHeadMatch,
   deliveryEvidence,
   deliveryEvidenceNote,
+  partOfTargets,
   claimGovernance,
   claimedBranches,
   governingClaim,
   isGateSemanticLabel,
   labelNames,
   latestMarkedComment,
+  markerMatches,
   prDeliversCard,
   proxyRearmPlan,
   resolveSweepRepo,
@@ -676,8 +716,10 @@ import { CONTRACT_REVIEW_TIER } from './dispatch-gates.mjs';
 // that this gate "reads no file in the tree at all; its whole input is the
 // GitHub API (PRs, their labels, and the claim comments on their cards), so no
 // card's file surface can predict it" (#13519). The INPUT half of that is still
-// exactly true -- nothing here opens a tracked file, and the three read paths
-// above are the whole of what this gate consumes.
+// exactly true -- no BOARD DATA is read out of a tree, and the three read paths
+// above are the whole of what this gate consumes. (#18456 opens one tracked
+// file, this one, to hash it for the input record; it feeds no reading, so the
+// prediction argument is untouched.)
 //
 // ⭐ The OTHER half stopped being true, and a declaration that stopped being
 // true is the shape C7 itself exists against. C7 compares against
@@ -742,6 +784,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18141: the head sha sits in a span of ITS OWN — the key-in-span spelling, refused and NAMED': 19,
   '#17919: the correction remedy names THIS card\'s claim comment, never another card\'s': 24,
   '#16833: an UNJUDGED refusal names the CHANNEL that answered, what it answered, and which carrier': 30,
+  '#18456: the `--pair` input record — the same block on every exit, so two runs that disagree can be diffed': 38,
+  '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 16,
+  '#18719: a RETRACTED claim leaves the pool — a withdrawn claim never governs': 36,
+  '#18683: the card-comment read pages to a cap — past 100 is UNJUDGED, ⛔ never a truncated pool': 27,
+  '#18764: a DECORATED claim ENTERS the pool — ONE reading, and it is the sibling\'s': 24,
+  '#18828: a SECOND `Claim:` by ONE seat — the writer-side prohibition, finally READ': 52,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -752,8 +800,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // effect, and once more by the one #17149 adds, by the one #17098 adds, by the
 // one #17915 adds, by the one #17959 adds, by the one #18042 adds, and by the
 // one #18174 adds, and by the one #18141 adds, and by the one #17919 adds, and
-// by the one #16833 adds.
-const SELF_TEST_BATTERY_FLOOR = 26;
+// by the one #16833 adds, and by the one #18456 adds, and by the one #18719
+// adds, and by the one #18683 adds, and by the one #18764 adds, and by the one
+// #18828 adds.
+const SELF_TEST_BATTERY_FLOOR = 32;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1474,7 +1524,581 @@ function applicableCorrection(commentRows, pool) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// #18719 — a RETRACTED claim leaves the pool.
+//
+// The pool was every comment matching `CLAIM_COMMENT_MARKER`, ranked by
+// recency. A RETRACTION carries no `Claim:` line of its own, so it was never IN
+// the pool and could not remove the claim it retracts. Measured on #18373:
+// `os-bill`'s claim 5717315121 (15:53:24Z) was withdrawn by the same seat 84
+// seconds later (5717333576, 15:54:48Z, assignee cleared in the same stroke),
+// and the selector went on naming the withdrawn record GOVERNING — pointing at
+// `claude/issue-18373-include-bare-directory-provenance`, a branch origin does
+// not have — while the seat actually working the card (`os-litant`,
+// 5717143021, the card's only assignee) read SUPERSEDED. An arbiter that names
+// the WRONG owner is worse than one that names none, because it looks like it
+// answered.
+//
+// ⛔ The repair is NOT a re-sort: every ordering of a pool that still contains
+// the withdrawn record picks a withdrawn record, and the next retraction is
+// exactly as invisible. What changes is MEMBERSHIP — the selector READS the
+// retraction.
+//
+// ## One predicate, two channels — the shape H4's blocker reader already has
+//
+// A claim leaves the pool when a LATER comment BY THE SAME AUTHOR retracts it.
+// That one sentence is read through the two channels the protocol itself
+// writes, exactly as the sibling reads a block through a DIRECTIVE
+// (`Blocked-by:`) and through PROSE anchors (`PROSE_BLOCKER_ANCHORS`):
+//
+//   directive — the `Release:` line AGENTS.md and SKILL.md already name as the
+//               act that takes a card out of a seat's hands 「释放是显式动作:
+//               让卡离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一
+//               任重新认领。」 It needs no id, because it is a statement about
+//               its own author: it retracts that author's OLDER claims.
+//   prose     — a line carrying a retraction anchor AND NAMING the claim by its
+//               comment id. The id is what makes the prose channel safe: it
+//               says WHICH record is withdrawn instead of inferring one from a
+//               verb.
+//
+// ⛔ No new protocol text is declared here. `Release:` is already the act, and
+// `RELEASE_COMMENT_MARKER` is IMPORTED rather than restated for
+// `CLAIM_COMMENT_MARKER`'s reason — two readers of one thread must not drift.
+// Whether the protocol should REQUIRE the `Release:` spelling of a retraction,
+// so the prose channel could be retired, is a GOVERNED-text question: it is
+// raised on the card and ⛔ not answered from here.
+//
+// ## Why SAME AUTHOR is load-bearing, not tidiness
+//
+// Only the seat that wrote a claim can withdraw it; anyone else's line is
+// DISCUSSION of a retraction, which is not one. That is not hypothetical on
+// this very thread: `os-litant` — the OTHER seat — wrote 「那条已撤回的
+// `5717315121`」 (5717775707) and 「now names a retracted claim … selects
+// comment 5717315121」 (5717738051). Both lines carry a retraction anchor AND
+// the claim's id. Without the author test each of them retracts another seat's
+// claim, and the reader becomes a way for any participant to void any owner's
+// record by describing it.
+//
+// An UNREADABLE author on either side retracts NOTHING. Fail-closed is the
+// direction that leaves the existing record standing, and it is the only
+// direction that cannot manufacture a retraction out of a missing field.
+//
+// ⚠️ Under one shared GitHub identity the author test is VACUOUS — every seat
+// writes as the same login. That is the fleet's accepted blind spot (AGENTS.md
+// 「per-seat identities are not introduced」), stated here rather than repaired
+// here: this reader cannot invent an identity the API does not carry.
+// ---------------------------------------------------------------------------
+
+/**
+ * The prose spellings that RETRACT a claim, matched case-insensitively against
+ * a line whose markdown decoration has been removed — the same judgement
+ * `PROSE_BLOCKER_ANCHORS` makes one file over, for the same reason: authors
+ * format these lines, and a decorated one means what the bare one means.
+ *
+ * All three Chinese spellings are MEASURED, not guessed: 「撤回」 opens the
+ * #18373 retraction and 「作废」 carries its second sentence
+ * (「**评论 `5717315121` 作废**」). The two English stems cover the inflections
+ * (`retracts`/`retracted`/`retraction`, `withdraws`/`withdrawn`).
+ *
+ * ⛔ Bare `release` is deliberately ABSENT, exactly as bare `blocking` is from
+ * the blocker anchors: in THIS repository a "release" is overwhelmingly a
+ * VERSION release (Prime Directive #15), so admitting the word would read a
+ * seat discussing the release train as a seat giving up a card. The `Release:`
+ * DIRECTIVE is read by the other channel, where the colon is the discriminator.
+ *
+ * ⛔ `supersede` is absent too, and for the opposite reason: supersession is
+ * what the recency rule ALREADY does, and a claim that supersedes another is a
+ * claim, not a retraction. Reading the word here would collapse two states the
+ * record keeps apart.
+ *
+ * ## ⛔ The anchor OPENS the line — it is not searched for inside it (MEASURED)
+ *
+ * `PROSE_BLOCKER_ANCHORS` asks `includes`, and correctly: that reader NOMINATES
+ * candidates which it then resolves with a real read, so a sentence merely
+ * discussing a block costs one request and no verdict. This reader DECIDES
+ * ownership with nothing downstream to catch it, so it anchors.
+ *
+ * ⚠️ The cost of the loose form was measured on the very thread this rule comes
+ * from, and it inverts the rule's purpose. `os-litant` — the seat whose claim
+ * this reading has to PROTECT — wrote, in its own dev report (5717738051), the
+ * line that REPORTED this defect:
+ *
+ *   「"question": "The governing-claim instrument now names a retracted claim.
+ *     … marks my dispatch's 5717143021 as SUPERSEDED …"」
+ *
+ * Same author, later than the claim, an anchor and the claim's own id on one
+ * line. Under `includes` that line RETRACTS the claim it is defending, and the
+ * comment that filed the card silently voids the ownership the card exists to
+ * restore. ⇒ the anchor must be what the line is ABOUT, which is what opening
+ * it means. `os-litant`'s 5717775707 「⚠️ 但它暴露了一个工具缺陷…那条已撤回的
+ * `5717315121`…」 is the same shape from the other direction and is excluded
+ * twice over — by the author test and by this one.
+ *
+ * ⚠️ The accepted direction is UNDER-reading: a retraction written mid-sentence
+ * leaves the claim standing, which is exactly today's behaviour, and the remedy
+ * is the one line the protocol already names. Reading it would mean guessing
+ * which of two seats a sentence is about — the call `claimedBranches` makes for
+ * an unrecognised branch spelling, for its reason.
+ */
+export const RETRACTION_PROSE_ANCHORS = Object.freeze([
+  'retract',
+  'withdraw',
+  '撤回',
+  '撤销',
+  '作废',
+]);
+
+/**
+ * How a comment id is spelled inside a line — a run of digits long enough to be
+ * one, with no digit on either side.
+ *
+ * ⛔ Not a dynamically built regex per claim: the ids are COMPARED as strings
+ * after the scan, so nothing here interpolates a value into a pattern and the
+ * `g` flag lives on one frozen literal that only `matchAll` reads.
+ */
+const COMMENT_ID_SCAN = /(?<!\d)\d{6,}(?!\d)/gu;
+
+/**
+ * What a line SAYS, with the decoration an author puts in front of it removed:
+ * markdown emphasis anywhere, then every leading character that is neither a
+ * letter nor a digit — the blockquote and list markers the sibling anchors
+ * already tolerate, plus the sigils this fleet writes (「🚨 」, 「- ⚠️ 」, 「⇒ 」).
+ *
+ * ⛔ The strip is LEADING-only and stops at the first letter or digit, so it can
+ * never reach inside a sentence to promote a word into the opening position: a
+ * line beginning `"question": "The governing-claim…` still begins with
+ * `question`, and a timeline row beginning `15:40:44Z` still begins with `15`.
+ */
+function undecorateRetractionLine(line) {
+  return String(line ?? '').replace(/[`*_]/gu, '').replace(/^[^\p{L}\p{N}]+/u, '');
+}
+
+/**
+ * The login that wrote one row, or `null` when the row carries none.
+ *
+ * `null` is a REFUSAL, never a wildcard: every comparison below fails closed on
+ * it, so a row shape that drops `user` can only ever leave claims standing.
+ */
+function rowAuthor(row) {
+  const login = row?.user?.login;
+  return typeof login === 'string' && login.trim() !== '' ? login : null;
+}
+
+/**
+ * Is `candidate` LATER than `claim` on this thread?
+ *
+ * The file's one recency rule, in its strict form: `created_at` decides when
+ * both stamps read and differ, and a tie or an unreadable stamp falls back to
+ * THREAD ORDER. ⛔ Never `>=` here — a comment is not later than itself, and a
+ * retraction posted BEFORE the claim it names retracts nothing.
+ */
+function laterOnThread(candidate, claim) {
+  return candidate.stamp !== null && claim.stamp !== null && candidate.stamp !== claim.stamp
+    ? candidate.stamp > claim.stamp
+    : candidate.index > claim.index;
+}
+
+/**
+ * WHICH channel, if either, makes this comment a retraction of the claim whose
+ * id is `claimId` — or `null` when it is not one.
+ *
+ * @param {{ body?: string }} row
+ * @param {string|null} claimId — the claim comment's id as a string; `null`
+ *   when the row carries no readable id, which closes the PROSE channel (a
+ *   retraction that cannot name its target is not read as one) and leaves the
+ *   directive channel open (it names its target by authorship, not by id).
+ * @returns {string|null} the channel, as the sentence the record prints.
+ */
+function retractionChannel(row, claimId) {
+  const body = String(row?.body ?? '');
+  if (RELEASE_COMMENT_MARKER.test(body)) {
+    return 'the protocol `Release:` line — the act that takes a card out of a seat\'s hands';
+  }
+  if (claimId === null) return null;
+  for (const raw of body.split(/\r?\n/)) {
+    const line = undecorateRetractionLine(raw);
+    const lower = line.toLowerCase();
+    // ⛔ OPENS the line — see `RETRACTION_PROSE_ANCHORS` for the measured line
+    // that `includes` would have read as a retraction of the claim it defends.
+    if (!RETRACTION_PROSE_ANCHORS.some((anchor) => lower.startsWith(anchor))) continue;
+    for (const hit of line.matchAll(COMMENT_ID_SCAN)) {
+      if (hit[0] === claimId) return `a retraction line OPENING with the act and naming the claim by comment id (${claimId})`;
+    }
+  }
+  return null;
+}
+
+/** The rule the pool's MEMBERSHIP is judged by, written out once and PRINTED. */
+export const CLAIM_RETRACTION_RULE =
+  'A claim LEAVES the pool when a LATER comment BY THE SAME AUTHOR retracts it, read through two '
+  + 'channels: the protocol `Release:` directive (no id needed — it retracts its own author\'s older '
+  + 'claims) and a prose line that OPENS with the retraction act AND names the claim by comment id. ⛔ Never a DIFFERENT '
+  + 'author\'s line, ⛔ never a line older than the claim it names, and ⛔ never an unreadable author '
+  + 'on either side. A retracted claim is listed RETRACTED with the retracting comment id — ⛔ never '
+  + 'SUPERSEDED, ⛔ never dropped from the listing.';
+
+/**
+ * Every claim comment on this thread that a LATER comment RETRACTED, keyed by
+ * the claim ROW itself.
+ *
+ * ⭐ ONE derivation, for `claimCarrierSelection`'s reason: the membership test
+ * and the sentence that explains a rejection read the same map, so the pool and
+ * the record cannot describe two different retractions.
+ *
+ * The retractor reported is the FIRST one in thread order: a claim withdrawn
+ * twice was withdrawn when it was withdrawn, and naming the later mention would
+ * date the act wrongly.
+ *
+ * @param {{ id?: number|string, body?: string, created_at?: string,
+ *   user?: { login?: string } }[]|null} commentRows
+ * @returns {Map<object, { id: string, author: string, at: string, channel: string }>}
+ */
+export function claimRetractions(commentRows) {
+  const rows = Array.isArray(commentRows) ? commentRows : [];
+  const indexed = rows.map((row, index) => {
+    const parsed = Date.parse(row?.created_at ?? '');
+    return {
+      row,
+      index,
+      stamp: Number.isFinite(parsed) ? parsed : null,
+      author: rowAuthor(row),
+    };
+  });
+  const out = new Map();
+  for (const claim of indexed) {
+    if (!markerMatches(CLAIM_COMMENT_MARKER, String(claim.row?.body ?? ''))) continue;
+    // Fail closed, twice: an unattributable claim cannot be matched against an
+    // author, and an unattributable candidate cannot be the seat that wrote it.
+    if (claim.author === null) continue;
+    const rawId = claim.row?.id;
+    const claimId = rawId === null || rawId === undefined || String(rawId) === '' ? null : String(rawId);
+    for (const candidate of indexed) {
+      if (candidate.row === claim.row) continue;
+      if (candidate.author === null || candidate.author !== claim.author) continue;
+      if (!laterOnThread(candidate, claim)) continue;
+      const channel = retractionChannel(candidate.row, claimId);
+      if (channel === null) continue;
+      out.set(claim.row, {
+        id: String(candidate.row?.id ?? '(no id)'),
+        author: candidate.author,
+        at: candidate.row?.created_at ?? '(no readable date)',
+        channel,
+      });
+      break;
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// #18828 — a SECOND `Claim:` by ONE seat. The prohibition is on the WRITING,
+// and until this row nothing READ it.
+//
+// The rule is this file's own, in the #17366 block upstairs: 「the claim
+// protocol forbids a second `Claim:`」. It is the reason the correction key
+// exists at all and the reason that key is a DIFFERENT key — a correction never
+// enters the pool, never governs, and cannot re-dispatch the card. What the
+// reader did with a thread that carried a second claim anyway was RANK it: the
+// governing-claim selector takes the newest LIVE claim that parses a branch and
+// prints the loser as 「a SUPERSEDED claim」 — clean, green, exit 0. ⇒ a
+// writer-side prohibition with no enforcing reader, and the word the record
+// reached for («SUPERSEDED») is the word for a transition the protocol
+// DESIGNED, said about a line the protocol says must not be written.
+//
+// ⚠️ Measured before this row was written, over both boards this gate reads,
+// at 2026-09-18T00:05Z: 533 open cards in `objectstack-ai/objectstack`, 416 in
+// `objectstack-ai/objectui` (949, of which 167 carry at least one claim
+// comment). The five the filing card named — #18540 · #18677 · #18748 ·
+// #18651 · #18778 — each carry TWO live `Claim:` comments by `os-support-ai`
+// and zero corrections, and #18559 is the control: one claim plus the
+// sanctioned `Clause-②-correction: 5721425131`. ⛔ The repair of those five is
+// their author's; this file only names them.
+//
+// ## MEMBERSHIP first, and that is what makes the state REPAIRABLE
+//
+// The state is read over the LIVE claims — `claimRetractions` is the authority
+// on 「retracted」, exactly as it is for governance (#18719) — and ⛔ never over
+// the raw claim listing. Two consequences, both deliberate:
+//
+//   · a re-claim AFTER a `Release:` (or the id-naming retraction) of the first
+//     is the protocol working: the first no longer stands, one live claim is
+//     left, and the thread reads exactly as it did before this row existed;
+//   · a seat that ALREADY wrote a second claim has an act that clears the row —
+//     a `Release:` of what it holds, then one fresh claim. ⭐ That is the whole
+//     lesson of #17366 one screen up: a state whose only repair is an act no
+//     seat can perform is a green PR waiting on somebody outside the
+//     repository. A rule written over the WRITING moment instead ("there was no
+//     retraction strictly BETWEEN the two lines") would have been unrepairable
+//     by construction — nothing un-writes a comment, and the MCP tool set has
+//     no edit-a-comment call — so this row would have been a permanent red with
+//     a remedy sentence nobody could execute. ⛔ Not that.
+//
+// ## ⛔ What this row is NOT
+//
+//   1. **Not a second selector.** `CLAIM_SELECTION_RULE` and the governing
+//      claim are untouched for every shape; the pool is what it was. This is an
+//      ADDITIONAL reading of the same thread, and `claimCarrierSelection` stays
+//      a pure function of the rows it is handed with the same return shape.
+//   2. **Not a widened marker.** `CLAIM_COMMENT_MARKER` is read through
+//      `markerMatches` — the sibling's ONE reading (#18764) — so a decorated
+//      `**Claim:**` is counted here exactly as a bare one is counted there, and
+//      ⛔ this file does not grow a second reader of the marker.
+//   3. **Not a cross-seat ownership rule.** Two live claims by DIFFERENT
+//      authors are a real and separate question — the triage's p1 escalation
+//      condition — and this row is deliberately silent on it: refusing an
+//      ownership transfer between sessions is not this card's to do, and a row
+//      that answered both would make one sentence out of two states. The probe
+//      is reported in the PR body, with its population and its time.
+//   4. **Not a NOTE.** The `--pair` path answers `EXIT_PAIR_ADVERSE`. An
+//      adverse fact rendered as 0-with-a-message is the silence this file
+//      exists against, and it is what the old SUPERSEDED reading already was.
+// ---------------------------------------------------------------------------
+
+/** The rule this row is judged by, written out once and PRINTED beside it. */
+export const CLAIM_REPEAT_RULE =
+  'The claim protocol forbids a SECOND `Claim:`: a card is claimed once, and the seat that must '
+  + 'correct its own declaration writes `Clause-②-correction: <claim comment id>` — a DIFFERENT key, '
+  + 'which `CLAIM_COMMENT_MARKER` does not match, so a correction never enters the pool, never governs '
+  + 'and cannot re-dispatch the card. TWO OR MORE LIVE claim comments BY ONE AUTHOR on one thread is '
+  + 'therefore a state the protocol says cannot be written, and it is NAMED here — every comment id, '
+  + 'the author, and the repair — ⛔ never printed as a SUPERSESSION, which is the word for a '
+  + 'transition the protocol designed. MEMBERSHIP comes first: a RETRACTED claim does not stand, so a '
+  + 'fresh claim after a `Release:` of the first is the protocol working and reads exactly as it did '
+  + 'before. ⛔ Two live claims by DIFFERENT authors are not this state — that is a separate reading '
+  + 'and this row does not make it. ⛔ An unattributable row is never counted, the way `claimRetractions` '
+  + 'fails closed on one.';
+
+/** The repair, in the seat's own acts — printed with every instance of the row. */
+export const CLAIM_REPEAT_REMEDY =
+  'Repair, by the seat that holds them and ⛔ by nobody else: post `Clause-②-correction: <claim comment '
+  + 'id>` when what needs fixing is the declaration the claim carries (the #17366 exit — it corrects the '
+  + 'line without touching the claim, and nothing has to be edited), or post `Release:` and then ONE '
+  + 'fresh `Claim:` when the card really is being re-taken (the release retracts what this seat holds, so '
+  + 'the fresh claim is the only one standing). ⛔ Never a second `Claim:` under a live one, and ⛔ never '
+  + 'a `Release:` or a correction posted on another seat\'s behalf.';
+
+/**
+ * Every author holding MORE THAN ONE LIVE claim comment on this thread.
+ *
+ * A sibling pure reader beside `claimRetractions` and built on it: the same map
+ * decides membership here and for governance, so the pool and this row cannot
+ * describe two different retractions. ⛔ It resolves no state, no row and no
+ * exit code — `c8SecondClaimSameSeat` renders the verdict and `pairInputRecord`
+ * renders the reading, both from this one derivation.
+ *
+ * Ordering is the file's one recency rule (`laterOnThread`), used to ORDER the
+ * record rather than to pick a winner: `first` is the claim that stood, and
+ * every row in `repeats` is a line written under it.
+ *
+ * @param {{ id?: number|string, body?: string, created_at?: string,
+ *   user?: { login?: string } }[]|null} commentRows
+ * @returns {{ author: string, claims: object[], ids: string[], first: object,
+ *   repeats: object[] }[]} one entry per author, in thread order.
+ */
+export function claimRepeats(commentRows) {
+  const rows = Array.isArray(commentRows) ? commentRows : [];
+  const retracted = claimRetractions(rows);
+  const indexed = rows.map((row, index) => {
+    const parsed = Date.parse(row?.created_at ?? '');
+    return { row, index, stamp: Number.isFinite(parsed) ? parsed : null, author: rowAuthor(row) };
+  });
+  const byAuthor = new Map();
+  for (const claim of indexed) {
+    // The sibling's ONE reading of the marker (#18764) — ⛔ never a second one.
+    if (!markerMatches(CLAIM_COMMENT_MARKER, String(claim.row?.body ?? ''))) continue;
+    // A withdrawn claim does not stand, so it neither carries this prohibition
+    // nor receives it: ⭐ the same MEMBERSHIP-first order governance takes.
+    if (retracted.has(claim.row)) continue;
+    // Fail closed, exactly as `claimRetractions` does: a row this file cannot
+    // attribute is never counted as some seat's second anything.
+    if (claim.author === null) continue;
+    if (!byAuthor.has(claim.author)) byAuthor.set(claim.author, []);
+    byAuthor.get(claim.author).push(claim);
+  }
+  const out = [];
+  for (const [author, claims] of byAuthor) {
+    if (claims.length < 2) continue;
+    const ordered = [...claims].sort((a, b) => (laterOnThread(a, b) ? 1 : laterOnThread(b, a) ? -1 : 0));
+    out.push({
+      author,
+      claims: ordered.map((c) => c.row),
+      ids: ordered.map((c) => String(c.row?.id ?? '(no id)')),
+      first: ordered[0].row,
+      repeats: ordered.slice(1).map((c) => c.row),
+    });
+  }
+  return out;
+}
+
+/**
+ * The repeat state as ONE sentence per author — shared by the row that refuses
+ * and the input record that reports what was read, so the two cannot disagree
+ * about how many claims are involved or which ones.
+ */
+function claimRepeatSentences(groups) {
+  const when = (row) => `${String(row?.id ?? '(no id)')} at ${row?.created_at ?? '(no readable date)'}`;
+  return groups.map(
+    (g) =>
+      `\`${g.author}\` holds ${g.claims.length} LIVE claim comment(s) here — ${g.claims.map(when).join(', ')} `
+      + `— of which ${String(g.first?.id ?? '(no id)')} is the claim that stood and the other `
+      + `${g.repeats.length} (${g.repeats.map((r) => String(r?.id ?? '(no id)')).join(', ')}) `
+      + 'was written under it, un-retracted',
+  );
+}
+
 /** The key as prose, for the sentences above — declared once, beside the regex that reads it. */
+/**
+ * The rule that picks the declaration limb's CARRIER, written out once.
+ *
+ * It is a sentence and not a comment because the record below PRINTS it: a
+ * reader diffing two runs has to be able to tell "the two runs selected
+ * different comments" from "the two runs applied different rules", and a rule
+ * that lives only in a docblock cannot be compared against a run.
+ */
+export const CLAIM_SELECTION_RULE =
+  'the GOVERNING claim — the NEWEST comment whose body carries a line beginning `Claim:`/`Claimed:` '
+  + '(read through the sibling reader\'s ONE reading, `markerMatches`: the bare marker first, then the '
+  + 'shared stripper per line, with a markdown LIST ITEM refused — so a decorated `**Claim:**` is the '
+  + 'same record as a bare one and ⛔ the two readers of this thread cannot answer differently) '
+  + 'AND whose `Branch:` line parses at least one protocol-shaped branch (newest by `created_at`; an '
+  + 'unreadable stamp or a tie falls back to thread order, later row wins). The pool is every claim '
+  + 'comment sharing that `created_at`; when NO claim names a branch at all, every claim comment is '
+  + 'the pool. ⛔ Not earliest, ⛔ not a session match, ⛔ not the one whose body mentions the key. '
+  + `MEMBERSHIP comes first: ${CLAIM_RETRACTION_RULE}`;
+
+// ---------------------------------------------------------------------------
+// #18764 — a DECORATED claim ENTERS the pool. ONE reading, and it is the
+// sibling's.
+//
+// The pool and the retraction indexer each tested `CLAIM_COMMENT_MARKER`
+// against the RAW body. The constant anchors the bare word at line start and
+// tolerates leading whitespace and one `>` — nothing else — so a claim a seat
+// wrote as `**Claim:** …` or `` `Claim:` … `` was not SUPERSEDED here, it was
+// never a candidate: not listed, not rejected, not named anywhere in the
+// record. Meanwhile `claimGovernance`, imported from the same sibling, had
+// already been reading both markers through `markerMatches` since #18680, so
+// ONE FUNCTION held both answers at once — governance saw the bolded claim and
+// the pool beside it did not.
+//
+// Measured on the two live records the #18764 escalation named (read
+// 2026-09-17T22:02Z; ⚠️ both cards have since left that state and the reading
+// is stated with its time for that reason), replayed through `--pair-json`:
+//
+//   a bolded/backticked claim carrying its own `Branch:` and `Clause-②: no`
+//     → `claim.selected: none — no comment on this thread carries a line
+//       beginning `Claim:``, the limb read MISPLACED and `--pair` exited 4,
+//       prescribing a `Clause-②-correction:` for a line the seat had already
+//       written in the right place.
+//   a BARE older claim declaring `yes` beneath a DECORATED newer one declaring
+//     `no` → the OLD claim governed the declaration, the reading answered
+//     `DECLARED yes`, and the newer record was not even listed as rejected.
+//     ⭐ That is the expensive direction: not a missing reading but a WRONG
+//     value, reported with every appearance of having been read.
+//
+// ⛔ The repair is NOT a `\*\*` added to `CLAIM_COMMENT_MARKER`. Decoration is
+// an OPEN set (#18680 settled that), so admitting one spelling buys exactly
+// that spelling and replays this card on the next one — and the constant is
+// the PROTOCOL's spelling, which is why every reader imports it rather than
+// restating it. ⛔ Nor is it a second undecorator written here: this file
+// would then own a definition of "decorated" that the sibling could drift
+// from, which is the very failure the card names. What both raw tests do
+// instead is READ THROUGH `markerMatches` — the sibling's one reading, bare
+// test first (so the change is provably additive: no body that matched
+// yesterday stops matching) and the shared stripper after it, with the list
+// item refused there and the near-miss vocabulary
+// (`OWNERSHIP_MARKER_NEAR_MISS_FORMS`) kept where it lives. ⛔ That vocabulary
+// is the sibling's and is not re-declared here.
+//
+// ## The OTHER undecorator in this file stays where it is, and that is MEASURED
+//
+// `undecorateRetractionLine` looks like the same job one section up, and the
+// card asked whether the file should end up with one undecoration path. It
+// should not, and the two paths were run over one fixture set to find out:
+// 5 of 12 fixtures read DIFFERENTLY. `undecorateRetractionLine` strips `_` and
+// then every leading non-letter/non-digit character, so it reads
+// `__Claim:__`, `- Claim:`, `* Claim:`, `## Claim:` and `🚨 Claim:` as the
+// directive; `markerMatches` reads none of those, deliberately — the list item
+// and the heading are NAMED refusals with pins behind them, and the underscore
+// form is a named near miss.
+//
+// ⭐ The divergence is load-bearing in BOTH directions, which is why unifying
+// by hand would be a regression whichever way it went. The #18373 retraction
+// this file's own battery replays opens `🚨 **撤回上一条认领…`, and the leading
+// sigil is exactly what the prose channel must strip before the anchor can
+// OPEN the line — narrowing the retraction stripper to the shared one would
+// stop reading the measured specimen #18719 landed for. Widening the shared
+// one the other way would make `- Claim:` a claim, which H20 pins as not one.
+// ⇒ two strippers, two jobs, and the difference is stated here rather than
+// discovered again. ⛔ Not unified from here: it is filed, with the fixture
+// table, for the seat to route.
+// ---------------------------------------------------------------------------
+
+/**
+ * WHICH claim comment this reading is built from, and which it is not — the
+ * input half of the declaration limb (#18456).
+ *
+ * ⭐ ONE derivation, and that is the whole point. `cardDeclaration` used to
+ * compute the governance and the pool inline, so nothing outside it could
+ * state which comment had been selected without RE-deriving it — and a second
+ * derivation of a selection rule is exactly how a record ends up describing a
+ * reading the verdict did not take. This function is that derivation;
+ * `cardDeclaration` calls it and the record renders it, so the two cannot
+ * disagree about the carrier by construction.
+ *
+ * ⛔ It resolves no state, no row and no exit code: it reports WHICH comments
+ * the reading is built from and WHY each other claim is not one of them. The
+ * declaration itself is still read by `readClause2Line` from the pool, exactly
+ * as before, and this function is a pure function of the rows it is handed.
+ *
+ * @param {{ id?: number|string, body?: string, created_at?: string }[]|null} commentRows
+ * @returns {{ readable: boolean, rule: string, claims: object[], pool: object[],
+ *   governing: { branches: string[], createdAt: string|null }|null,
+ *   malformed: object|null, rejected: { row: object, reason: string }[] }}
+ */
+export function claimCarrierSelection(commentRows) {
+  const rule = CLAIM_SELECTION_RULE;
+  if (!Array.isArray(commentRows)) {
+    return {
+      readable: false, rule, claims: [], live: [], retracted: new Map(),
+      pool: [], governing: null, malformed: null, rejected: [],
+    };
+  }
+  // ⛔ MEMBERSHIP before recency (#18719). A withdrawn claim is not a stale
+  // candidate to be out-ranked — it is not a candidate. Governance is resolved
+  // over the thread with the retracted claims REMOVED, so the newest-branch
+  // rule can never land on a record its own author has taken back, and so the
+  // `malformed` reading below is about a LIVE claim rather than a dead one.
+  const retracted = claimRetractions(commentRows);
+  const governance = claimGovernance(commentRows.filter((row) => !retracted.has(row)));
+  // ⭐ The full claim listing KEEPS the retracted rows: the record names them
+  // RETRACTED below. A pool that silently shrank would replace one invisible
+  // fact with another.
+  const claims = commentRows.filter((row) => markerMatches(CLAIM_COMMENT_MARKER, String(row?.body ?? '')));
+  const live = claims.filter((row) => !retracted.has(row));
+  const governing = governance.governing;
+  const matched = governing ? live.filter((row) => (row?.created_at ?? null) === governing.createdAt) : [];
+  const pool = governing && matched.length > 0 ? matched : live;
+  const rejected = claims
+    .filter((row) => !pool.includes(row))
+    .map((row) => {
+      const gone = retracted.get(row);
+      return {
+        row,
+        reason: gone
+          ? `RETRACTED — comment ${gone.id} at ${gone.at}, by the same author (\`${gone.author}\`), `
+            + `takes it back via ${gone.channel}. ⛔ NOT superseded: a withdrawn claim is not a `
+            + `candidate for governance at all, whatever its date`
+          : `a SUPERSEDED claim — it is not the newest LIVE claim that parses a branch, so it is not `
+            + `the governing claim (this one is stamped ${row?.created_at ?? 'with no readable date'}; `
+            + `the governing claim is stamped ${governing?.createdAt ?? 'unreadably'})`,
+      };
+    });
+  return {
+    readable: true, rule, claims, live, retracted,
+    pool, governing, malformed: governance.malformed, rejected,
+  };
+}
+
 const CLAUSE2_CORRECTION_KEY_TEXT = 'Clause-②-correction';
 
 /**
@@ -1510,13 +2134,17 @@ const CLAUSE2_CORRECTION_KEY_TEXT = 'Clause-②-correction';
  * because the older claim happened to agree.
  *
  * The predicate that separates them is `CLAIM_COMMENT_MARKER`, imported rather
- * than restated: a claim comment is one whose body carries a LINE BEGINNING
- * `Claim:` (or `Claimed:`, optionally blockquoted), and that one spelling is
- * the whole set — so a heading-style claim (`## Claim — …`) is not a claim
- * comment here, however complete the reasoning under it, and its thread reads
- * `absent`. ⛔ Widening the predicate is not this file's to do: it is the
- * sibling's constant precisely so the two readers cannot drift, and the remedy
- * for a thread that reads `absent` is a comment in the fixed spelling.
+ * than restated, and OFFERED through `markerMatches` — the sibling's one
+ * reading (#18764), imported for the same reason the constant is. A claim
+ * comment is one whose body carries a LINE BEGINNING `Claim:` (or `Claimed:`,
+ * optionally blockquoted), read bare first and then with the shared
+ * decoration stripped, so `**Claim:**` and `` `Claim:` `` are that same line
+ * and ⛔ not a second spelling this file admits on its own. A heading-style
+ * claim (`## Claim — …`) is still not a claim comment here, however complete
+ * the reasoning under it, and its thread reads `absent`. ⛔ Widening the
+ * predicate is not this file's to do: the constant AND the reading are the
+ * sibling's precisely so the two readers cannot drift, and the remedy for a
+ * thread that reads `absent` is a comment in the fixed spelling.
  *
  * @param {{ body?: string, created_at?: string }[]|null} commentRows — the REST
  *   comment rows, or `null` when the thread could NOT be read.
@@ -1532,7 +2160,12 @@ const CLAUSE2_CORRECTION_KEY_TEXT = 'Clause-②-correction';
  */
 export function cardDeclaration(commentRows, { card = null } = {}) {
   if (!Array.isArray(commentRows)) return { state: 'unreadable' };
-  const governance = claimGovernance(commentRows);
+  // ⭐ ONE derivation of the carrier, shared with the input record (#18456):
+  // the governance, the claim rows and the pool below are this function's
+  // return, so the block that STATES which comment was selected and the
+  // reading that was taken FROM it cannot describe two different comments.
+  const selection = claimCarrierSelection(commentRows);
+  const governance = { governing: selection.governing, malformed: selection.malformed };
   // ⛔ FIRST, and ahead of the correction read (#17366) as well as of every
   // line read below. When the newest claim comment parses to zero branches,
   // `governing` is an OLDER claim or nothing at all — so the pool the reads
@@ -1548,16 +2181,17 @@ export function cardDeclaration(commentRows, { card = null } = {}) {
       governingClaim: governance.governing,
     };
   }
-  const claim = governance.governing;
-  const claimRows = commentRows.filter((row) => CLAIM_COMMENT_MARKER.test(String(row?.body ?? '')));
   // The governing claim is the one the board is waiting on; when no comment
   // names a branch, every claim-marked comment is still a claim carrier and is
   // read, so a claim written without a branch cannot make the declaration
-  // invisible.
-  const governing = claim
-    ? claimRows.filter((row) => (row?.created_at ?? null) === claim.createdAt)
-    : claimRows;
-  const pool = governing.length > 0 ? governing : claimRows;
+  // invisible. Both sets come from the selection above.
+  // ⛔ The LIVE claims, never the full listing (#18719): a retracted claim is
+  // not a carrier, so a thread whose every claim was withdrawn owes the claim
+  // comment (`absent`) rather than a line on a record nobody stands behind
+  // (`missing`). The not-read state this file already has, ⛔ not a fabricated
+  // carrier.
+  const claimRows = selection.live;
+  const pool = selection.pool;
   // WHICH comment id a remedy printed below may name, resolved from the SAME
   // pool the readings are built from and from nowhere else (#17919). It rides
   // alongside exactly as `correctionNote` does: the rows below print it, and
@@ -3059,6 +3693,126 @@ export const RECORD_TEMPLATE_FENCE_START = '----- copy from here; replace the th
 export const RECORD_TEMPLATE_FENCE_END = '----- to here -----';
 
 /**
+ * ⭐ WHERE A REVIEW OF RECORD LIVES — the ONE set every reader in this regime
+ * searches and every printed instruction names.
+ *
+ * The governed text decides this and the constant does not; what the constant
+ * stops is TWO TOOLS ANSWERING IT DIFFERENTLY. The rule is quoted rather than
+ * paraphrased because it IS the operative criterion, and untranslated because
+ * rewriting a quoted ruling rewrites the ruling:
+ *
+ *   > 复核记录 = 一条评论落 PR 或卡，达档与默认档同形
+ *
+ * — `references/contract-review.md` 〈复核归属与资格〉, with SKILL.md
+ * 〈入队与落地〉 saying the same in the same words
+ * (「记录 = 同形评论落 PR 或卡」) and the landing check's own ① repeating it
+ * (「即 PR 或卡上同形的复核记录」). Two carriers, one record.
+ *
+ * ⚖️ THE MEASURED COST of spelling that set twice, on one pull request in one
+ * day: the skills seat posted its `## Contract review` on carrier card #18426
+ * (comment 5716694216) — a location `--template` offers in those exact words —
+ * and this file's `--pair` read it as a record on the card thread. The merge
+ * queue's own guard read the PR thread ALONE, answered
+ * 「0 comment(s) read on the PR thread」 and dequeued PR #18689 `CI_FAILURE`. A
+ * SECOND COPY of the same comment, on the PR thread, is what cured it. The two
+ * tools already shared every recogniser; what they did not share was the set of
+ * threads to run them over.
+ *
+ * ⛔ So nothing here spells a thread set of its own. `locateReviewOfRecord`
+ * builds the rows it searches from this list, `contractReviewTemplateLines`
+ * builds the sentence it prints from it, and `check-governed-queue-guard.mjs`
+ * fetches one thread per entry in it — which is what the cross-tool pin in this
+ * file's self-test measures, by DRIVING that guard rather than by restating the
+ * two sets beside each other.
+ *
+ *   `where`   the tag a located record carries, so a row can name its thread
+ *   `rows`    the key a pair carries that thread's comment rows under
+ *   `number`  the key a pair carries that thread's issue number under
+ *   `words`   how that location is NAMED to a human, in reading order
+ */
+export const REVIEW_OF_RECORD_THREADS = Object.freeze([
+  Object.freeze({ where: 'PR', rows: 'prComments', number: 'pr', words: 'the PR' }),
+  Object.freeze({ where: 'card', rows: 'cardComments', number: 'card', words: 'its card' }),
+]);
+
+/**
+ * The location in the words every instruction prints — DERIVED from the set
+ * above, so an instruction can never offer a thread no reader searches.
+ */
+export const REVIEW_OF_RECORD_LOCATION = REVIEW_OF_RECORD_THREADS.map((thread) => thread.words).join(' or ');
+
+/**
+ * The grades `deliveryEvidence` answers with, STRONGEST FIRST — the ranking that
+ * function already applies internally, written down here because a caller
+ * choosing AMONG several delivered cards needs it as data and
+ * `check-half-states.mjs` exports the relation rather than its ordering.
+ *
+ * ⛔ A MIRROR, so the self-test MEASURES it rather than trusting it: every
+ * neighbouring pair is driven through `deliveryEvidence` on a body that could
+ * grade either way, and the set is held equal to the kinds `deliveryEvidenceNote`
+ * recognises. A grade added or reordered upstream reds here instead of silently
+ * re-ranking a governance reading.
+ */
+export const DELIVERY_EVIDENCE_PRECEDENCE = Object.freeze(['closing-keyword', 'part-of', 'part-of-inline', 'branch-name']);
+
+/**
+ * The card a pull request DELIVERS, as a number — the other half of the pair a
+ * record read needs, for a caller that holds the pull request and no board.
+ *
+ * ⭐ DERIVED THROUGH `deliveryEvidence`, never beside it: this function only
+ * enumerates the numbers a body or a branch name could be naming, and then asks
+ * the ONE relation `derivePairs`, H8 and H31 already ask whether each is
+ * delivered. So it can never accept a card that relation rejects, and the
+ * precedence between a closing keyword, a `Part of` declaration and the branch
+ * name stays where it is written down rather than being graded twice.
+ *
+ * ⛔ AMBIGUITY IS NOT RESOLVED, it is REPORTED. A body naming two cards at the
+ * same strength delivers both, and picking one of them would decide which
+ * thread a governance reading searches by an accident of number order. The
+ * caller gets `card: null` and a reason it can print; on the queue guard that
+ * is the REFUSING direction (no card thread is searched, so no record can be
+ * found on one), which is the direction a governance reading is wrong in
+ * safely.
+ *
+ * @param {object} pr — a REST pull row: `body`, and `head.ref` for the fallback
+ * @returns {{ card: number, evidence: string } | { card: null, reason: string }}
+ */
+export function deliveredCardNumber(pr) {
+  const body = String(pr?.body ?? '');
+  const candidates = new Set([
+    ...closingKeywordTargets(body).keys(),
+    ...partOfTargets(body).keys(),
+    ...[branchNameTarget(pr?.head?.ref)].filter((n) => n !== null && n !== undefined),
+  ]);
+  const delivered = [];
+  for (const n of candidates) {
+    const evidence = deliveryEvidence(pr, n);
+    if (evidence === null) continue;
+    delivered.push({ card: Number(n), evidence, rank: DELIVERY_EVIDENCE_PRECEDENCE.indexOf(evidence) });
+  }
+  if (delivered.length === 0) {
+    return {
+      card: null,
+      reason:
+        'its body names no card (no closing keyword and no `Part of` declaration) and its branch is not '
+        + 'the protocol dev-branch shape, so no card thread could be located for it',
+    };
+  }
+  const best = Math.min(...delivered.map((row) => row.rank));
+  const strongest = delivered.filter((row) => row.rank === best);
+  if (strongest.length > 1) {
+    return {
+      card: null,
+      reason:
+        `it delivers ${strongest.length} cards at the same strength (${strongest.map((row) => `#${row.card}`).join(', ')}, `
+        + `${deliveryEvidenceNote(strongest[0].evidence)}), so WHICH card thread carries its record is not derivable `
+        + 'from the pull request alone',
+    };
+  }
+  return { card: strongest[0].card, evidence: strongest[0].evidence };
+}
+
+/**
  * What `--template` prints: the record, fenced, with the calibration around it.
  *
  * ⭐ The notes live OUTSIDE the fence and carry no key-initial line, so nothing
@@ -3072,7 +3826,7 @@ export const RECORD_TEMPLATE_FENCE_END = '----- to here -----';
 export function contractReviewTemplateLines(values = {}) {
   return [
     'check-clause2-carriers --template — the contract-review record of record, copyable. It is',
-    'ONE comment on the PR or its card; the NEWEST one naming this head governs.',
+    `ONE comment on ${REVIEW_OF_RECORD_LOCATION}; the NEWEST one naming this head governs.`,
     '',
     '⛔ The value is the FIRST thing after the colon. A leading word — "branch ", "the dev on " —',
     '   IS the value as far as the reader is concerned, the pair is refused HALF WRITTEN, and a',
@@ -3154,25 +3908,34 @@ export function contractReviewTemplateLines(values = {}) {
  */
 export function locateReviewOfRecord(pair) {
   const gaps = [];
-  if (!Array.isArray(pair?.prComments)) gaps.push(`PR #${pair?.pr}'s comment thread`);
-  if (!Array.isArray(pair?.cardComments)) gaps.push(`card #${pair?.card}'s comment thread`);
+  // \u2b50 THE THREAD SET IS READ FROM `REVIEW_OF_RECORD_THREADS`, never spelled
+  // here: this loop, the template's printed sentence and the queue guard's
+  // fetches are the three consumers of that one list, and the whole point of it
+  // is that no two of them can name different threads (#18701).
+  for (const thread of REVIEW_OF_RECORD_THREADS) {
+    if (!Array.isArray(pair?.[thread.rows])) gaps.push(`${thread.where} #${pair?.[thread.number]}'s comment thread`);
+  }
   const head = String(pair?.headSha ?? '');
   // A head too short to be matched by H51's span test can never find its
   // record, so it is a read that could not be made -- never an absent record.
   if (head.length < H51_SHA_MIN_HEX) gaps.push(`PR #${pair?.pr}'s head sha`);
   if (gaps.length > 0) return { state: 'unreadable', gaps };
 
-  const tagged = [
-    ...pair.prComments.map((row) => ({ row, where: 'PR' })),
-    ...pair.cardComments.map((row) => ({ row, where: 'card' })),
-  ];
+  const tagged = REVIEW_OF_RECORD_THREADS.flatMap((thread) =>
+    pair[thread.rows].map((row) => ({ row, where: thread.where })),
+  );
   const onHead = tagged.filter(
     ({ row }) =>
       CONTRACT_REVIEW_HEADING_MARKER.test(String(row?.body ?? '')) &&
       contractReviewHeadMatch(row?.body, head) !== null,
   );
   const newest = latestMarkedComment(onHead.map(({ row }) => row), CONTRACT_REVIEW_HEADING_MARKER);
-  if (!newest) return { state: 'absent', read: { pr: pair.prComments.length, card: pair.cardComments.length } };
+  if (!newest) {
+    return {
+      state: 'absent',
+      read: Object.fromEntries(REVIEW_OF_RECORD_THREADS.map((thread) => [thread.number, pair[thread.rows].length])),
+    };
+  }
   const { row, where } = onHead[newest.index];
   const found = {
     where,
@@ -3593,6 +4356,37 @@ export function locatedRecordUnjudged(pair) {
 }
 
 /**
+ * C8 — a SECOND `Claim:` by the SAME seat, named (#18828).
+ *
+ * ⭐ A VERDICT, and the file's own table decides that exactly as it decided C4's:
+ * the row is a fact about THIS pair — a line the claim protocol says must not be
+ * written, standing on the thread the declaration limb is judged over — and an
+ * adverse fact rendered as 0-with-a-message is the silence this file exists
+ * against. It is also, precisely, what the old reading WAS: `rejected: 1 … a
+ * SUPERSEDED claim`, exit 0, in the register reserved for a transition the
+ * protocol designed.
+ *
+ * ⛔ It re-blocks no legal workflow. A card claimed once reads as it always did;
+ * a re-claim after a `Release:` reads as it always did; a `Clause-②-correction:`
+ * is not a claim and never was. What it refuses is the one shape the protocol
+ * already forbade in writing, and the sentence carries the two acts that clear
+ * it — both performable by the seat that wrote the line, with the one tool every
+ * seat certainly has.
+ *
+ * ⛔ Never prescribes WHICH repair: the declaration is the seat's judgement and
+ * a checker that chose between a correction and a release would be choosing
+ * whether the card is being re-taken. It names both and writes nothing.
+ */
+export function c8SecondClaimSameSeat(pair) {
+  const groups = claimRepeats(pair?.cardComments ?? null);
+  if (groups.length === 0) return null;
+  return (
+    `card #${pair?.card} (delivering open PR #${pair?.pr}) — ${claimRepeatSentences(groups).join(' · ')}. `
+    + `${CLAIM_REPEAT_RULE} ${CLAIM_REPEAT_REMEDY} ${NEVER_WRITES}`
+  );
+}
+
+/**
  * Every FINDING row for one pair, in reporting order.
  *
  * `pairs` — the derived set this pair came from — is optional and defaults to
@@ -3625,6 +4419,15 @@ export function pairRows(pair, pairs = null) {
   // absent or unsigned record earns exactly one row, C6's, where C6 is owed.
   const servedTier = c7ServedTierBelow(pair);
   if (servedTier) rows.push({ code: 'C7', text: servedTier });
+  // ⭐ Last, and ORTHOGONAL to every row above it: C1–C7 read the gate's
+  // carriers, its declaration and the round that served the verdict, and this
+  // one reads the THREAD those readings are taken over — a line the claim
+  // protocol says must not be written, which the selector above ranks as a
+  // designed supersession at exit 0. A pair can earn it beside any other row,
+  // and it is a row rather than a note for the reason `c8SecondClaimSameSeat`
+  // states (#18828).
+  const repeatClaim = c8SecondClaimSameSeat(pair);
+  if (repeatClaim) rows.push({ code: 'C8', text: repeatClaim });
   return rows;
 }
 
@@ -3886,7 +4689,31 @@ const readPathState = {
   rate: null,
   /** the path id that last served a read, for the cap/short-read diagnosis. */
   lastServed: null,
+  /**
+   * EVERY read this run issued, in order — the run's own statement of what it
+   * judged from (#18456). Written by the readers, read only by the record.
+   * ⛔ Never consulted by a predicate: a request ledger is provenance.
+   */
+  requests: [],
 };
+
+/**
+ * File one request — the channel, the exact path, what came back, and how many
+ * rows it carried.
+ *
+ * ⭐ The row COUNT is the field that earns its place: a page requested with
+ * `per_page=100` that answers with exactly 100 rows is indistinguishable, in
+ * every other line this file prints, from a thread that simply ends there.
+ */
+function noteRequest(channel, path, answer, rows = null) {
+  readPathState.requests.push({
+    n: readPathState.requests.length + 1,
+    channel,
+    path,
+    answer,
+    rows: typeof rows === 'number' ? rows : null,
+  });
+}
 
 function noteServed(pathId) {
   readPathState.served.set(pathId, (readPathState.served.get(pathId) ?? 0) + 1);
@@ -4097,16 +4924,20 @@ async function restOnce(path, token) {
     // exactly the reading a seat behind a refusing proxy needs, and it is the
     // one a status-only diagnosis would render as silence.
     noteAttempt(channel, `no HTTP response (${err?.message ?? 'transport error'})`);
+    noteRequest(channel, path, `no HTTP response (${err?.message ?? 'transport error'})`);
     throw err;
   }
   noteRateLimit(res);
   if (!res.ok) {
     noteAttempt(channel, `HTTP ${res.status}`);
+    noteRequest(channel, path, `HTTP ${res.status}`);
     const err = new Error(`GET ${path} -> HTTP ${res.status}`);
     err.status = res.status;
     throw err;
   }
-  return res.json();
+  const json = await res.json();
+  noteRequest(channel, path, `HTTP ${res.status}`, Array.isArray(json) ? json.length : null);
+  return json;
 }
 
 /**
@@ -4219,6 +5050,121 @@ async function listOpenPulls(repo) {
 }
 
 /**
+ * The sentence a CAPPED read files, written ONCE for every ladder in this file.
+ *
+ * ⭐ What was measured (#18683) was not a missing sentence: it was two reads in
+ * ONE file giving OPPOSITE defaults on "I did not read everything" — the two
+ * that page answered `null` (UNJUDGED, fail-CLOSED), and the un-paged one
+ * judged the claim pool from whatever the first page happened to contain
+ * (fail-OPEN, on the read that arbitrates OWNERSHIP). A shared sentence is the
+ * half of that a reader can check by sight; the shared LADDER below is the half
+ * that cannot drift at all.
+ */
+export function pageCapNote(cap, noun) {
+  return `${cap} page(s) of 100 ${noun} each, all of them full — the tail is past this file's `
+    + 'page cap and therefore unread';
+}
+
+/**
+ * What ONE paged read DID — the pages it issued, the cap it was allowed, and
+ * whether it hit it. Keyed by the same `readDiagnosisKey` the diagnosis is,
+ * written by `pagedListRead`, drained by `gather` for the input record.
+ *
+ * ⛔ Never consulted by a predicate: a ladder record is provenance, exactly as
+ * the request ledger is.
+ */
+const readLadders = new Map();
+
+/** The ladder one resource's read took, or `null` when no ladder ran for it. */
+export function readLadderRecord(key) {
+  return readLadders.get(key) ?? null;
+}
+
+/**
+ * File the ladder a DOCUMENT-backed read did not take: one read, no cap, and
+ * the field says so rather than rendering as a page count the document never
+ * paid for.
+ */
+function noteDocumentRead(key) {
+  readLadders.set(key, { pages: 1, cap: null, capped: false, complete: true });
+}
+
+/**
+ * ONE list endpoint, paged to exhaustion — or `null`.
+ *
+ * ⛔ Never a partial array, and that is the whole property: a caller cannot
+ * tell a short read from a quiet carrier, so a read that did not finish answers
+ * UNJUDGED rather than handing back the part that arrived. All three of this
+ * file's list reads go through here, so ⛔ no two of them can disagree again
+ * about what an unfinished read defaults to (#18683).
+ *
+ * `readPage` answers one page's rows or `null`. The ladder stops on the FIRST
+ * short page — ⛔ no wasted request — and refuses on the cap.
+ */
+async function pagedListRead({ key, cap, noun, readPage }) {
+  const out = [];
+  for (let page = 1; page <= cap; page++) {
+    const batch = await readPage(page);
+    if (!Array.isArray(batch)) {
+      readLadders.set(key, { pages: page, cap, capped: false, complete: false });
+      return null;
+    }
+    out.push(...batch);
+    if (batch.length < 100) {
+      readLadders.set(key, { pages: page, cap, capped: false, complete: true });
+      return out;
+    }
+  }
+  // ⛔ Not a refusal: every page ANSWERED and the resource is still unread, so
+  // the diagnosis names the channel that served and says what went short rather
+  // than reporting a channel nobody tried (#16833).
+  noteAttempt(readPathState.lastServed ?? READ_PATH_PUBLIC, pageCapNote(cap, noun));
+  readLadders.set(key, { pages: cap, cap, capped: true, complete: false });
+  return null; // cap hit: the tail is unread, so the resource is unread.
+}
+
+/**
+ * The page cap on ONE card's — or one PR's — COMMENT thread.
+ *
+ * ⭐ This is the read that arbitrates OWNERSHIP: the governing claim, the pool
+ * its membership is resolved over, and the `Clause-②` line the declaration limb
+ * reads all come out of these rows. Read short, it does not merely lose detail
+ * — it loses a NEWER claim, so a superseded carrier governs and its declaration
+ * is read as though it were the live one. Measured on the 101-row fixture
+ * (#18683): the un-paged read answered `absent` on a thread whose 101st comment
+ * was the only claim, and `DECLARED \`yes\`` on a thread whose 101st comment
+ * withdrew that value.
+ *
+ * Ten pages is 1,000 comments. Sized on this board, 2026-09-17: the longest
+ * open thread of any kind is seat post #6015 at 895 comments (nine pages), the
+ * next four are #12708 at 365, #6023 at 241, #6017 at 206 and #6024 at 187, the
+ * longest thread carrying a queue label is #13799 at 117, and the longest card
+ * in the clause-② population — the 28 pairs the sweep derived that day — is
+ * #17534 at 14. So the cap clears the whole board today with a page to spare,
+ * and it is the SAME ten `EVENT_PAGE_CAP` uses, because a reader comparing two
+ * caps in one file should have to remember one number. A thread that exceeds it
+ * is answered `null` → UNJUDGED, never clean (#4690).
+ */
+export const COMMENT_PAGE_CAP = 10;
+
+/**
+ * One carrier's comment thread, paged to exhaustion — or `null`.
+ *
+ * ⛔ Never the first page alone: that is what this function exists to stop
+ * being. A truncated pool is a pool, and nothing downstream can tell it from a
+ * complete one.
+ */
+async function readCardComments(repo, number) {
+  const key = readDiagnosisKey('comments', number);
+  return diagnosedRead(key, () => pagedListRead({
+    key,
+    cap: COMMENT_PAGE_CAP,
+    noun: 'comments',
+    readPage: (page) => restOrNull(`/repos/${repo}/issues/${number}/comments?per_page=100&page=${page}`),
+  }));
+}
+
+/**
  * The page cap on ONE carrier's label event stream.
  *
  * Events arrive OLDEST FIRST, so the reading needs the LAST page, not the
@@ -4237,24 +5183,13 @@ export const EVENT_PAGE_CAP = 10;
  * "hang I did not read".
  */
 async function readCarrierEvents(repo, number) {
-  return diagnosedRead(readDiagnosisKey('events', number), async () => {
-    const out = [];
-    for (let page = 1; page <= EVENT_PAGE_CAP; page++) {
-      const batch = await restOrNull(`/repos/${repo}/issues/${number}/events?per_page=100&page=${page}`);
-      if (!Array.isArray(batch)) return null;
-      out.push(...batch);
-      if (batch.length < 100) return out;
-    }
-    // ⛔ Not a refusal: every page ANSWERED and the stream is still unread, so
-    // the diagnosis names the channel that served and says what went short
-    // rather than reporting a channel nobody tried (#16833).
-    noteAttempt(
-      readPathState.lastServed ?? READ_PATH_PUBLIC,
-      `${EVENT_PAGE_CAP} page(s) of 100 events each, all of them full — the tail is past this ` +
-        'file\'s page cap and therefore unread',
-    );
-    return null; // cap hit: the tail is unread, so the history is unread.
-  });
+  const key = readDiagnosisKey('events', number);
+  return diagnosedRead(key, () => pagedListRead({
+    key,
+    cap: EVENT_PAGE_CAP,
+    noun: 'events',
+    readPage: (page) => restOrNull(`/repos/${repo}/issues/${number}/events?per_page=100&page=${page}`),
+  }));
 }
 
 /**
@@ -4300,21 +5235,13 @@ export const FILE_PAGE_CAP = 3;
  * function over: a caller cannot tell a short read from a narrow diff.
  */
 async function readPullFiles(repo, number) {
-  return diagnosedRead(readDiagnosisKey('files', number), async () => {
-    const out = [];
-    for (let page = 1; page <= FILE_PAGE_CAP; page++) {
-      const batch = await restOrNull(`/repos/${repo}/pulls/${number}/files?per_page=100&page=${page}`);
-      if (!Array.isArray(batch)) return null;
-      out.push(...batch);
-      if (batch.length < 100) return out;
-    }
-    noteAttempt(
-      readPathState.lastServed ?? READ_PATH_PUBLIC,
-      `${FILE_PAGE_CAP} page(s) of 100 files each, all of them full — the tail is past this file's ` +
-        'page cap and therefore unread',
-    );
-    return null; // cap hit: the tail is unread, so the diff is unread.
-  });
+  const key = readDiagnosisKey('files', number);
+  return diagnosedRead(key, () => pagedListRead({
+    key,
+    cap: FILE_PAGE_CAP,
+    noun: 'files',
+    readPage: (page) => restOrNull(`/repos/${repo}/pulls/${number}/files?per_page=100&page=${page}`),
+  }));
 }
 
 /**
@@ -4341,8 +5268,7 @@ const NETWORK_READER = Object.freeze({
   repo: null,
   listOpenPulls: (repo) => listOpenPulls(repo),
   readCard: (repo, n) => diagnosedRead(readDiagnosisKey('card', n), () => restOrNull(`/repos/${repo}/issues/${n}`)),
-  readCardComments: (repo, n) =>
-    diagnosedRead(readDiagnosisKey('comments', n), () => restOrNull(`/repos/${repo}/issues/${n}/comments?per_page=100`)),
+  readCardComments: (repo, n) => readCardComments(repo, n),
   readCarrierEvents: (repo, n) => readCarrierEvents(repo, n),
   readHeadCommitDate: (repo, sha) => readHeadCommitDate(repo, sha),
   readPullFiles: (repo, n) => readPullFiles(repo, n),
@@ -4377,8 +5303,17 @@ export function pairJsonReader(doc, { source = 'the --pair-json document' } = {}
         'PR row is the minimum a pair can be formed from (number, draft, body, head.ref, head.sha, labels).',
     );
   }
-  const serve = (value) => {
+  const serve = (value, what) => {
     noteServed(READ_PATH_PAIR_JSON);
+    // The document is a read path like any other, so it files the same request
+    // ledger entry the network paths do (#18456) — a record whose `requests`
+    // block went empty on this path would read as a run that read nothing.
+    noteRequest(
+      READ_PATH_PAIR_JSON,
+      `${source} -> ${what}`,
+      value === null || value === undefined ? 'absent from the document' : 'present',
+      Array.isArray(value) ? value.length : null,
+    );
     return value;
   };
   // ⭐ The document's own refusal, in the same register the network channels
@@ -4394,15 +5329,18 @@ export function pairJsonReader(doc, { source = 'the --pair-json document' } = {}
         },
       ]);
     }
-    return serve(value);
+    return serve(value, `${bag}[${id}]`);
   };
   return Object.freeze({
     id: READ_PATH_PAIR_JSON,
     repo: typeof doc.repo === 'string' && doc.repo.trim() ? doc.repo.trim() : null,
-    listOpenPulls: () => serve(pulls),
+    listOpenPulls: () => serve(pulls, 'pulls'),
     readCard: (_repo, n) => served(readDiagnosisKey('card', n), 'cards', n, fromDocument(doc.cards, n)),
     readCardComments: (_repo, n) => {
       const rows = fromDocument(doc.comments, n);
+      // The document serves the thread whole, so the ladder field states THAT
+      // rather than rendering unset beside a reading that really was complete.
+      if (Array.isArray(rows)) noteDocumentRead(readDiagnosisKey('comments', n));
       return served(readDiagnosisKey('comments', n), 'comments', n, Array.isArray(rows) ? rows : null);
     },
     readCarrierEvents: (_repo, n) => {
@@ -4467,9 +5405,20 @@ async function gather(repo, prFilter = null, reader = NETWORK_READER, { landingR
         draft: Boolean(pr.draft),
         card: Number(n),
         headSha: pr?.head?.sha ?? null,
+        // ⭐ The pairing's own inputs, carried for the input record (#18456)
+        // and read by nothing else: the evidence kind is the SAME call
+        // `prDeliversCard` just made, so the block states the derivation that
+        // actually formed this pair rather than a second opinion about it.
+        evidence: deliveryEvidence(pr, n),
+        prBody: body,
+        headRef: pr?.head?.ref ?? null,
         prLabels: Array.isArray(pr.labels) ? labelNames(pr) : null,
         cardLabels: card && Array.isArray(card.labels) ? labelNames(card) : null,
         cardComments: Array.isArray(comments) ? comments : null,
+        // ⭐ The LADDER the thread was read down (#18683), carried for the
+        // input record and read by nothing else: two runs that disagree about
+        // a pool can now be diffed on how much of the thread each one saw.
+        cardCommentRead: readLadderRecord(readDiagnosisKey('comments', n)),
       };
       // ⭐ The channel diagnosis rides on the pair (#16833), attached under the
       // SAME words the gap that reports it uses, and only where the read came
@@ -4551,6 +5500,7 @@ async function gather(repo, prFilter = null, reader = NETWORK_READER, { landingR
     if (!prThreads.has(pair.pr)) prThreads.set(pair.pr, await reader.readCardComments(repo, pair.pr));
     const rows = prThreads.get(pair.pr);
     pair.prComments = Array.isArray(rows) ? rows : null;
+    pair.prCommentRead = readLadderRecord(readDiagnosisKey('comments', pair.pr));
     if (pair.prComments === null) {
       attachReadDiagnosis(pair, readDiagnosisKey('comments', pair.pr), `PR #${pair.pr}'s comment thread`);
     }
@@ -4558,7 +5508,524 @@ async function gather(repo, prFilter = null, reader = NETWORK_READER, { landingR
   return { pulls, pairs };
 }
 
-function renderSweep({ repo, pulls, pairs }, { json = false } = {}) {
+// ---------------------------------------------------------------------------
+// The INPUT RECORD — what this run judged FROM, stated (#18456)
+// ---------------------------------------------------------------------------
+
+/**
+ * ## The defect: `--pair` was not reproducible, and nothing it printed could
+ * settle which of two disagreeing runs had read what
+ *
+ * Measured on ONE pair — PR #17917 / card #17425 — on 2026-09-13, three
+ * first-hand runs of the same command with an identical script blob: **0 at
+ * 02:57Z, 4 (MISPLACED) at 03:04:09Z, 0 at 03:58:33Z**. Two explanations were
+ * ruled out with controls: no comment on that thread was ever edited (all 16
+ * rows carry `created_at == updated_at`), and this file resolves its board from
+ * the environment alone, so the working directory cannot retarget it. ⇒ The
+ * cause is still UNKNOWN, and the two runs could not be compared because
+ * neither had SAID what it read.
+ *
+ * ⭐ That is the gap this block closes, and it is deliberately not a fix for
+ * the non-determinism: it makes the INPUT of a run a printed artefact, so two
+ * runs that disagree are settled by DIFFING their two blocks — ⛔ never by
+ * re-running until one side wins, which is what the board did three times and
+ * learned nothing from. A verdict a second reader cannot reproduce is not a
+ * clearance, and the landing pre-check ② is exactly where that costs something.
+ *
+ * ## What it states, and why each field is in it
+ *
+ *   · the BOARD and which of the three sources answered — a report about the
+ *     wrong repo reads exactly like a report about this one;
+ *   · the READ PATH and the API surface behind it, plus EVERY request the run
+ *     issued, in order, with its channel, its answer and its ROW COUNT — a page
+ *     asked for with `per_page=100` that answers with exactly 100 rows is the
+ *     one shape a truncated read and a complete one share;
+ *   · the PAIRING: which PR, which card, and the evidence `prDeliversCard`
+ *     derived it from, quoted off the body line that carried it;
+ *   · the COMMENTS read, by count, id list and newest id — the set the
+ *     declaration limb is judged over;
+ *   · the CLAIM COMMENT selected as the carrier, the RULE that selected it,
+ *     and every other claim it rejected WITH the reason — so "the two runs
+ *     selected different comments" is distinguishable from "the two runs
+ *     applied different rules";
+ *   · the REPEAT reading (#18828): which author, if any, holds more than one
+ *     LIVE claim comment on this thread, with every id — a fact about the rows
+ *     that were read, stated where the SUPERSEDED sentence used to be the only
+ *     trace of it. ⚠️ The verdict it earns is row C8's; ⛔ no field here
+ *     resolves one;
+ *   · a BODY FINGERPRINT (bytes + `sha256:`) on each claim in the pool. ⭐ This
+ *     is the field the measured 0/4/0 actually needs: the 4 was `misplaced`,
+ *     which on that thread requires the governing claim to have carried NO
+ *     readable declaration while the superseded one did — and the governing
+ *     claim's line 3 is `Clause-②: no` in the fixed spelling. Same ids and a
+ *     different verdict is only possible if the BYTES differed, and nothing
+ *     printed the bytes;
+ *   · the PR-BODY line, read by the same reader — ⚠️ stated as an input and
+ *     ⛔ not as a limb: no row here judges the PR body, and this field changes
+ *     that by not one character;
+ *   · this file's own blob hash and the path it ran from, plus a UTC stamp —
+ *     "the blob was identical on both sides" was a CLAIM in the measured
+ *     incident, and this makes it a printed fact a seat can check with
+ *     `git hash-object` against the path the block names.
+ *
+ * ## Where it goes, and its shape
+ *
+ * STDERR, in every mode, beside the board provenance line and the read-path
+ * report and for the same reason those are there: stdout is contractually the
+ * ANSWER, and provenance on stdout travels into a round report that pastes it
+ * as though it were part of the finding. The `--json` sweep carries the same
+ * record under `inputs` — ⭐ the same record, never a second format.
+ *
+ * The block is fence-delimited and line-oriented: `key: value`, one declared
+ * key per line, in roster order, on EVERY exit — 0, 4, a refusal, a transport
+ * failure. A field this run could not fill renders an explicit token; ⛔ a
+ * field is never dropped, because a block whose shape moves with the verdict
+ * cannot be diffed against the other one. A value too long for one line
+ * continues on indented lines below its key.
+ *
+ * ⛔ Nothing here resolves a state, a row, a count or an exit code, and the
+ * record reads no verdict. It is what the run READ, never what it concluded.
+ */
+export const INPUT_RECORD_VERSION = 1;
+export const INPUT_RECORD_OPEN = `----- clause2 input record v${INPUT_RECORD_VERSION} -----`;
+export const INPUT_RECORD_CLOSE = '----- end clause2 input record -----';
+
+/** What a declared field renders as when this run never filled it. */
+export const INPUT_RECORD_UNSET = '(not set by this run — ⛔ a declared field is never dropped)';
+
+/**
+ * The RUN half of the roster: the fields every block carries, in order.
+ *
+ * ⭐ Pinned as NAMES, the same call `SELF_TEST_BATTERIES` and `KNOWN_FLAGS`
+ * make one family over: a renderer that walks a declared roster cannot lose a
+ * field by dropping the code that filled it — the field renders unset and
+ * SAYS so — and a field added to the builder without an entry here is named by
+ * this file's own self-test instead of appearing in half the blocks.
+ */
+export const INPUT_RECORD_RUN_FIELDS = Object.freeze([
+  'record.version',
+  'run.utc',
+  'run.mode',
+  'run.script.path',
+  'run.script.blob',
+  'run.script.bytes',
+  'run.node',
+  'board.repo',
+  'board.source',
+  'read.plan',
+  'read.api',
+  'read.token',
+  'read.served',
+  'read.pair-json',
+  'run.requests',
+  'pairs.derived',
+]);
+
+/** The PAIR half of the roster — repeated per derived pair, in order. */
+export const INPUT_RECORD_PAIR_FIELDS = Object.freeze([
+  'pr',
+  'card',
+  'derivation',
+  'head-sha',
+  'card-comments',
+  'card-comment-pages',
+  'card-comment-ids',
+  'card-comment-newest',
+  'pr-comments',
+  'pr-comment-pages',
+  'pr-comment-ids',
+  'pr-comment-newest',
+  'claim.rule',
+  'claim.selected',
+  'claim.rejected',
+  'claim.repeat',
+  'claim.clause2-line',
+  'pr-body.clause2-line',
+]);
+
+/**
+ * The git blob sha1 of some bytes — the hash `git hash-object` prints.
+ *
+ * Git's, and not a plain digest, precisely so a reader can CHECK it:
+ * `git hash-object scripts/pm/check-clause2-carriers.mjs` against the path the
+ * block names is a one-command verification of "same blob on both sides",
+ * which was asserted rather than shown in the incident this record exists for.
+ *
+ * ⚠️ The NUL separator git's format requires is written as a byte rather than
+ * as a literal in this source: `check:nul-bytes` refuses a raw control byte in
+ * a tracked file, and an escape that renders to one is the same byte.
+ */
+export function gitBlobSha1(bytes) {
+  const body = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes ?? ''), 'utf8');
+  return createHash('sha1')
+    .update(Buffer.from(`blob ${body.length}`, 'utf8'))
+    .update(Buffer.from([0]))
+    .update(body)
+    .digest('hex');
+}
+
+/** Bytes + a short content digest — the "same ids, different bytes" field. */
+export function bodyFingerprint(body) {
+  const buf = Buffer.from(String(body ?? ''), 'utf8');
+  return { bytes: buf.length, sha256: createHash('sha256').update(buf).digest('hex').slice(0, 12) };
+}
+
+let selfProvenanceCache = null;
+
+/**
+ * This file, as it is ON DISK in the tree this run was invoked from.
+ *
+ * ⚠️ The ONE file this gate reads out of a checkout, and the header's sentence
+ * upstairs is amended rather than quietly falsified: it reads its own source
+ * for PROVENANCE and reads no board data from any tree. Nothing about the
+ * verdict moves — no state, row, count or exit consults this — so an
+ * environment variable still retargets the board exactly as before, and an
+ * unreadable file yields a stated absence rather than a refusal.
+ */
+export function selfProvenance() {
+  if (selfProvenanceCache === null) {
+    try {
+      const bytes = readFileSync(SELF_PATH);
+      selfProvenanceCache = { path: SELF_PATH, blob: gitBlobSha1(bytes), bytes: bytes.length };
+    } catch (err) {
+      selfProvenanceCache = {
+        path: SELF_PATH,
+        blob: null,
+        bytes: null,
+        reason: err?.message ?? 'unreadable',
+      };
+    }
+  }
+  return selfProvenanceCache;
+}
+
+/** An id list, whole while it is short and first/last/count once it is not. */
+export function renderIdList(rows, cap = 12) {
+  const ids = (Array.isArray(rows) ? rows : []).map((r) => String(r?.id ?? '(no id)'));
+  if (ids.length === 0) return 'none';
+  if (ids.length <= cap) return ids.join(',');
+  return `${ids[0]} … ${ids[ids.length - 1]} (${ids.length} ids; the middle ${ids.length - 2} are elided)`;
+}
+
+/**
+ * The NEWEST row of a thread, by the SAME recency rule the carrier selection
+ * uses — `created_at`, ties and unreadable stamps by thread order, later wins.
+ * ⛔ Not "the last row the API returned": that is what a re-ordered page would
+ * change, and telling the two apart is half of what this record is for.
+ */
+export function newestRow(rows) {
+  let best = null;
+  (Array.isArray(rows) ? rows : []).forEach((row, index) => {
+    const parsed = Date.parse(row?.created_at ?? '');
+    const stamp = Number.isFinite(parsed) ? parsed : null;
+    const candidate = { row, stamp, index };
+    if (best === null) best = candidate;
+    else if (candidate.stamp === null || best.stamp === null) {
+      if (candidate.index > best.index) best = candidate;
+    } else if (candidate.stamp >= best.stamp) best = candidate;
+  });
+  return best?.row ?? null;
+}
+
+/**
+ * `<id> at <created_at> by <login>` — one row named the way every field here
+ * names one.
+ *
+ * ⭐ The LOGIN is part of the name (#18719). The card's assignee is the LABEL
+ * face of ownership and the governing claim is the SELECTOR face; on #18373
+ * they disagreed for hours and nothing printed the two side by side, so the
+ * contradiction had to be reconstructed by hand. ⚠️ The assignee itself is ⛔
+ * not read on this path — this block states the selector face and says whose
+ * comment it is, which is the half this record can buy without a new request.
+ */
+function namedRow(row) {
+  if (!row) return 'none';
+  const login = row?.user?.login;
+  const by = typeof login === 'string' && login.trim() !== '' ? `\`${login}\`` : '(no readable author)';
+  return `${String(row?.id ?? '(no id)')} at ${row?.created_at ?? '(no readable date)'} by ${by}`;
+}
+
+/**
+ * ONE paged read, stated as an INPUT: the pages it issued, the cap it was
+ * allowed, and which of the four ways it ended.
+ *
+ * ⭐ The field the asymmetry closed with (#18683). A thread of exactly 100 rows
+ * and a thread whose tail was dropped are the same `100 row(s)` in every other
+ * line this block prints; they differ HERE, because the complete one stopped on
+ * a short page and the truncated one did not stop at all.
+ */
+export function ladderReading(ladder, noun) {
+  if (!ladder) return '(no paged read of this thread was taken on this path)';
+  if (ladder.cap === null) {
+    return '1 read, served whole from the pre-fetched document — ⛔ no page ladder applies to it';
+  }
+  if (ladder.capped) {
+    return `CAPPED — ${ladder.pages} of ${ladder.cap} page(s) of 100 ${noun} each were requested and `
+      + 'EVERY ONE came back full, so the tail is past the cap and the thread is UNREAD (UNJUDGED) '
+      + '— ⛔ never a truncated pool, ⛔ never a clean reading';
+  }
+  if (!ladder.complete) {
+    return `${ladder.pages} of ${ladder.cap} page(s) requested; page ${ladder.pages} came back UNREAD, `
+      + 'so the thread is unread — the cap was ⛔ not what stopped it';
+  }
+  return `${ladder.pages} of ${ladder.cap} page(s) requested — the ladder stopped on a SHORT page, so `
+    + 'the thread is COMPLETE';
+}
+
+/** What `readClause2Line` read out of one body, stated as an INPUT. */
+function clause2Reading(body) {
+  const read = readClause2Line(body);
+  if (read === null) return 'no line in this body reaches the reader — neither a declaration nor a near miss';
+  if (read.kind === 'declared') {
+    return `DECLARED \`${read.value}\`${read.arm ? ` (arm: ${read.arm})` : ''} — ${quoteLine(read.line)}`;
+  }
+  return `${read.kind.toUpperCase()}${read.reason ? `/${read.reason}` : ''} — ${quoteLine(read.line)}`;
+}
+
+/** The PR body line that carried the pairing, quoted — or what stood in for it. */
+function derivationLine(pair) {
+  const kind = pair?.evidence ?? null;
+  const note = deliveryEvidenceNote(kind);
+  if (kind === 'branch-name') {
+    return `\`branch-name\` (${note}) — head.ref: ${pair?.headRef ?? '(unread)'}`;
+  }
+  const body = String(pair?.prBody ?? '');
+  const marker = `#${pair?.card}`;
+  const line = body.split('\n').find((l) => l.includes(marker)) ?? null;
+  return `\`${kind ?? 'unread'}\` (${note})${line === null ? ' — no body line naming this card was found' : ` — body line: ${quoteLine(line)}`}`;
+}
+
+/**
+ * ONE pair's input half, as a flat map of declared keys.
+ *
+ * Every key in `INPUT_RECORD_PAIR_FIELDS` is filled, including the ones a
+ * given path does not buy: `--pair` reads the PR's own thread and a sweep does
+ * not, and "this path does not read it" is a different fact from "it came back
+ * unread" — the two render as two sentences and ⛔ never as one silence.
+ */
+export function pairInputRecord(pair) {
+  const selection = claimCarrierSelection(pair?.cardComments ?? null);
+  const pool = selection.pool ?? [];
+  const out = {
+    pr: String(pair?.pr ?? '(none)'),
+    card: String(pair?.card ?? '(none)'),
+    derivation: derivationLine(pair),
+    'head-sha': pair?.headSha ?? '(unread)',
+    'card-comments': Array.isArray(pair?.cardComments)
+      ? `${pair.cardComments.length} row(s)`
+      : 'UNREAD — the thread could not be read, so this pair is UNJUDGED',
+    'card-comment-pages': ladderReading(pair?.cardCommentRead ?? null, 'comments'),
+    'card-comment-ids': Array.isArray(pair?.cardComments) ? renderIdList(pair.cardComments) : '(unread)',
+    'card-comment-newest': Array.isArray(pair?.cardComments) ? namedRow(newestRow(pair.cardComments)) : '(unread)',
+    'pr-comments':
+      pair?.prComments === undefined
+        ? '(not read on this path — the sweep buys the PR thread only for a pair that owes a record)'
+        : Array.isArray(pair.prComments)
+          ? `${pair.prComments.length} row(s)`
+          : 'UNREAD — the PR thread could not be read',
+    'pr-comment-pages': pair?.prComments === undefined
+      ? '(not read on this path — the sweep buys the PR thread only for a pair that owes a record)'
+      : ladderReading(pair?.prCommentRead ?? null, 'comments'),
+    'pr-comment-ids': Array.isArray(pair?.prComments)
+      ? renderIdList(pair.prComments)
+      : pair?.prComments === undefined ? '(not read on this path)' : '(unread)',
+    'pr-comment-newest': Array.isArray(pair?.prComments)
+      ? namedRow(newestRow(pair.prComments))
+      : pair?.prComments === undefined ? '(not read on this path)' : '(unread)',
+    'claim.rule': selection.rule,
+  };
+
+  if (!selection.readable) {
+    out['claim.selected'] = 'none — the card thread is UNREAD, so no carrier could be selected';
+  } else if (selection.malformed) {
+    out['claim.selected'] =
+      `NONE — the newest claim comment (${selection.malformed.id ?? '(no readable id)'} at `
+      + `${selection.malformed.createdAt ?? '(no readable date)'}) parses ZERO branches, so governance `
+      + 'is unresolvable and no declaration is read from any comment (state `claim-branch-unparsed`)';
+  } else if (pool.length === 0) {
+    // Two different facts, and ⛔ never one sentence: a thread nobody claimed
+    // owes a claim comment; a thread whose every claim was WITHDRAWN owes a
+    // fresh one from whoever picks the card up. Saying the first about the
+    // second would report the record the seats wrote as a record they did not.
+    out['claim.selected'] = (selection.claims ?? []).length === 0
+      ? 'none — no comment on this thread carries a line beginning `Claim:`'
+      : `none — all ${selection.claims.length} claim comment(s) on this thread are RETRACTED (listed `
+        + 'below), so there is no carrier and ⛔ none is fabricated from a withdrawn record';
+  } else {
+    out['claim.selected'] = [
+      `${pool.length} comment(s) in the pool`,
+      ...pool.map((row) => {
+        const fp = bodyFingerprint(row?.body);
+        return `${namedRow(row)} — ${fp.bytes} bytes, sha256:${fp.sha256}`;
+      }),
+    ];
+  }
+
+  const rejected = selection.rejected ?? [];
+  out['claim.rejected'] = rejected.length === 0
+    ? 'none — every claim comment on this thread is in the pool'
+    : [
+      `${rejected.length} claim comment(s) rejected`,
+      ...rejected.map((r) => `${namedRow(r.row)} — ${r.reason}`),
+    ];
+
+  // ⭐ The same derivation the C8 row renders, so the record and the verdict
+  // cannot disagree about how many claims one seat holds or which they are
+  // (#18828). ⚠️ A READING of the rows — ⛔ not the verdict, which is the row.
+  const repeats = claimRepeats(pair?.cardComments ?? null);
+  out['claim.repeat'] = !Array.isArray(pair?.cardComments)
+    ? 'UNREAD — the thread could not be read, so no repeat reading was taken'
+    : repeats.length === 0
+      ? 'none — no author holds more than one LIVE claim comment on this thread'
+      : [
+        `${repeats.length} author(s) holding more than one LIVE claim comment — the protocol forbids a `
+        + 'second `Claim:` (row C8 is the verdict; this line is what was read)',
+        ...claimRepeatSentences(repeats),
+      ];
+
+  out['claim.clause2-line'] = pool.length === 0
+    ? '(no carrier, so no line was read from one)'
+    : pool.length === 1
+      ? clause2Reading(pool[0]?.body)
+      : [
+        `${pool.length} carriers; the FIRST that declares wins`,
+        ...pool.map((row) => `${String(row?.id ?? '(no id)')}: ${clause2Reading(row?.body)}`),
+      ];
+
+  out['pr-body.clause2-line'] = `${clause2Reading(pair?.prBody)} `
+    + '⚠️ stated as an INPUT only — ⛔ no row here judges the PR body; the declaration limb is '
+    + 'judged from the card, and `check-changeset-no-major.mjs` is what reads this line.';
+
+  return out;
+}
+
+/**
+ * The whole record — the run half plus one map per derived pair.
+ *
+ * Pure in its arguments, so the self-test drives every shape of it offline and
+ * a block can never claim a path, a request or a pair that did not happen.
+ */
+export function buildInputRecord({
+  repoRes = null,
+  mode = null,
+  state = null,
+  pairs = null,
+  self = null,
+  now = null,
+  node = process.version,
+} = {}) {
+  const served = state?.served instanceof Map ? state.served : new Map();
+  const count = (id) => served.get(id) ?? 0;
+  const requests = Array.isArray(state?.requests) ? state.requests : [];
+  const plan = readPathPlan({
+    token: state?.tokenPresent ? 'present' : '',
+    pairJson: Boolean(state?.pairJsonSource),
+  });
+  const run = {
+    'record.version': String(INPUT_RECORD_VERSION),
+    'run.utc': (now instanceof Date ? now : new Date()).toISOString(),
+    'run.mode': mode ?? '(unstated)',
+    'run.script.path': self?.path ?? '(unstated)',
+    'run.script.blob': self?.blob
+      ? `${self.blob} (git blob sha1 — check it with \`git hash-object\` on the path above)`
+      : `UNREAD — ${self?.reason ?? 'this run could not read its own source'}`,
+    'run.script.bytes': self?.bytes === null || self?.bytes === undefined ? '(unread)' : String(self.bytes),
+    'run.node': String(node),
+    'board.repo': repoRes?.repo ?? '(the board was never resolved on this run)',
+    'board.source': repoRes
+      ? repoRes.source === 'default'
+        ? 'default — NEITHER PM_SWEEP_REPO NOR GITHUB_REPOSITORY answered'
+        : `${repoRes.source} — this run was deliberately targeted`
+      : '(the board was never resolved on this run)',
+    'read.plan': plan.map((id) => READ_PATH_LABELS[id] ?? String(id)).join(' then '),
+    'read.api': state?.pairJsonSource
+      ? `no network: every read is served from ${state.pairJsonSource}`
+      : `${API} (REST, accept application/vnd.github+json)`,
+    'read.token': !state?.tokenPresent
+      ? 'absent from this environment (GITHUB_TOKEN / GH_TOKEN)'
+      : state.tokenRetired
+        ? `present but REFUSED (HTTP ${state.tokenRetired.status}) — retired for the rest of this run`
+        : 'present',
+    'read.served': `${READ_PATH_TOKEN}=${count(READ_PATH_TOKEN)}, ${READ_PATH_PUBLIC}=`
+      + `${count(READ_PATH_PUBLIC)}, ${READ_PATH_PAIR_JSON}=${count(READ_PATH_PAIR_JSON)}`,
+    'read.pair-json': state?.pairJsonSource ?? '(not named — this run read the network)',
+    'run.requests': requests.length === 0
+      ? '0 — this run issued no read at all'
+      : [
+        `${requests.length} read(s), in the order they were issued`,
+        ...requests.map((r) => {
+          const label = READ_PATH_LABELS[r.channel] ?? `(?) ${String(r.channel)}`;
+          const rows = r.rows === null ? '' : ` (${r.rows} row(s))`;
+          return `#${r.n} ${label} ${r.path} -> ${r.answer}${rows}`;
+        }),
+      ],
+    'pairs.derived': pairs === null
+      ? 'NONE — no pair was formed on this run, so nothing below was judged'
+      : `${pairs.length} pair(s)`,
+  };
+  return { run, pairs: (pairs ?? []).map((pair) => pairInputRecord(pair)) };
+}
+
+/**
+ * Keys the builder produced that the roster does not declare — ⛔ empty, or
+ * the block has a field nothing pins. Read by the self-test, and printed in
+ * the block itself so a live run cannot hide one either.
+ */
+export function undeclaredRecordFields(record) {
+  const out = [];
+  for (const key of Object.keys(record?.run ?? {})) {
+    if (!INPUT_RECORD_RUN_FIELDS.includes(key)) out.push(key);
+  }
+  for (const pair of record?.pairs ?? []) {
+    for (const key of Object.keys(pair ?? {})) {
+      if (!INPUT_RECORD_PAIR_FIELDS.includes(key) && !out.includes(`pair.${key}`)) out.push(`pair.${key}`);
+    }
+  }
+  return out;
+}
+
+/** One declared field, plus its indented continuation lines when it has any. */
+function recordFieldLines(key, value) {
+  if (value === undefined) return [`${key}: ${INPUT_RECORD_UNSET}`];
+  if (Array.isArray(value)) {
+    return [`${key}: ${value[0] ?? INPUT_RECORD_UNSET}`, ...value.slice(1).map((line) => `  ${line}`)];
+  }
+  return [`${key}: ${value}`];
+}
+
+/**
+ * The block, rendered from the roster and from nowhere else.
+ *
+ * ⭐ It walks the DECLARED keys rather than the record's own: that is what
+ * makes the shape the same on exit 0, exit 4 and every refusal, which is the
+ * property the whole card turns on — two blocks are diffable line for line,
+ * and a field that stopped being filled shows up as an unset field rather than
+ * as a line that is simply not there.
+ */
+export function renderInputRecord(record) {
+  const lines = [INPUT_RECORD_OPEN];
+  for (const key of INPUT_RECORD_RUN_FIELDS) lines.push(...recordFieldLines(key, record?.run?.[key]));
+  const pairs = Array.isArray(record?.pairs) ? record.pairs : [];
+  pairs.forEach((pair, i) => {
+    for (const key of INPUT_RECORD_PAIR_FIELDS) lines.push(...recordFieldLines(`pair.${i + 1}.${key}`, pair?.[key]));
+  });
+  const undeclared = undeclaredRecordFields(record);
+  if (undeclared.length > 0) {
+    lines.push(
+      `record.undeclared: ${undeclared.join(', ')} — field(s) this run filled that the roster does `
+        + 'not declare, so nothing pins them. Add them to the roster.',
+    );
+  }
+  lines.push(
+    'record.how-to-read: two runs that DISAGREE about one pair are settled by diffing their two '
+      + 'blocks — ⛔ never by re-running until one side wins. The blob line says whether the two '
+      + 'runs were even the same instrument.',
+    INPUT_RECORD_CLOSE,
+  );
+  return lines;
+}
+
+function renderSweep({ repo, pulls, pairs, inputs = null }, { json = false } = {}) {
   const rows = [];
   const notes = [];
   const unjudged = [];
@@ -4570,7 +6037,10 @@ function renderSweep({ repo, pulls, pairs }, { json = false } = {}) {
   }
   const declarationLimb = declarationLimbTally(pairs);
   if (json) {
-    console.log(JSON.stringify({ repo, openPrs: pulls.length, pairs: pairs.length, declarationLimb, rows, notes, unjudged }, null, 2));
+    // ⭐ The SAME record the block on stderr renders, in the SAME shape, under
+    // one key — ⛔ never a second format (#18456). A round report that pastes
+    // this JSON carries what the run read beside what it found.
+    console.log(JSON.stringify({ repo, openPrs: pulls.length, pairs: pairs.length, declarationLimb, rows, notes, unjudged, inputs }, null, 2));
   } else {
     console.log(
       `check-clause2-carriers: ${pairs.length} card/PR pair(s) derived from ${pulls.length} open ` +
@@ -4691,7 +6161,7 @@ const CLAIM = (extra) => ({
 // handshake is a flag rather than a returned sentinel.
 let selfTestReachedVerdict = false;
 
-export function selfTest() {
+export async function selfTest() {
   // The battery ledger this self-test's floor is evaluated against (#13489).
   // `battery()` opens a battery; every assertion below is attributed to the one
   // most recently opened, so a section that stops running stops registering and
@@ -6515,6 +7985,656 @@ export function selfTest() {
   t('…and the reading is the same with and without the card number — the guard reads no verdict', cardDeclaration([CLAIM('Clause-②: no')]).value === cardDeclaration([CLAIM('Clause-②: no')], { card: 13476 }).value);
   t('⛔ …an ABSENT thread\'s row is untouched: it names no claim comment to correct in the first place', C19_ROW([{ body: 'a triage note, and nothing that begins a line with the claim key', created_at: '2026-08-31T10:00:00Z' }]) === noClaim);
 
+  // -- #18456: the `--pair` input record ------------------------------------
+  //
+  // The pins are about the BLOCK's shape rather than about any verdict: what
+  // the card measured was two runs that disagreed and could not be compared,
+  // so what must not rot is (a) every declared field is present on every exit,
+  // (b) the exit-0 and exit-4 blocks carry the SAME keys, and (c) the fields a
+  // diff actually turns on — the selected carrier, its body fingerprint and the
+  // line read from it — say what they read.
+  battery('#18456: the `--pair` input record — the same block on every exit, so two runs that disagree can be diffed');
+  const R56_REPO = { valid: true, repo: 'objectstack-ai/objectstack', source: 'default' };
+  const R56_TARGETED = { valid: true, repo: 'objectstack-ai/objectui', source: 'PM_SWEEP_REPO' };
+  const R56_SELF = { path: '/w/scripts/pm/check-clause2-carriers.mjs', blob: 'a'.repeat(40), bytes: 1234 };
+  const R56_NOW = new Date('2026-09-17T12:00:00Z');
+  const R56_REQ = [
+    { n: 1, channel: READ_PATH_TOKEN, path: '/pulls?state=open&per_page=100&page=1', answer: 'HTTP 200', rows: 100 },
+    { n: 2, channel: READ_PATH_PUBLIC, path: '/issues/17425/comments?per_page=100', answer: 'HTTP 403', rows: null },
+  ];
+  const R56_STATE = (extra = {}) => ({
+    tokenPresent: true,
+    tokenRetired: null,
+    served: new Map([[READ_PATH_TOKEN, 5], [READ_PATH_PUBLIC, 1]]),
+    pairJsonSource: null,
+    rate: null,
+    lastServed: READ_PATH_TOKEN,
+    requests: R56_REQ,
+    ...extra,
+  });
+  const R56_CLAIM = (id, createdAt, extra) => ({
+    id,
+    created_at: createdAt,
+    body: `Claim: PM loop round R1\nBranch: \`claude/issue-17425-x\`\n${extra ?? ''}`,
+  });
+  const R56_GOVERNING = R56_CLAIM(5650083758, '2026-09-13T01:57:23Z', 'Clause-②: no');
+  const R56_SUPERSEDED = R56_CLAIM(5622080790, '2026-09-10T16:34:31Z', 'Clause-②: yes');
+  const R56_PAIR = (extra = {}) => ({
+    pr: 17917,
+    card: 17425,
+    headSha: 'd7d22bf4bebc4f0065b932556b07a9330d7822b2',
+    evidence: 'closing-keyword',
+    prBody: 'Fixes #17425\n\nClause-②: no',
+    headRef: 'claude/issue-17425-x',
+    cardComments: [R56_SUPERSEDED, R56_GOVERNING],
+    prComments: [],
+    ...extra,
+  });
+  const R56_BUILD = (pairs, extra = {}) =>
+    buildInputRecord({
+      repoRes: R56_REPO, mode: '--pair 17917', state: R56_STATE(), pairs, self: R56_SELF, now: R56_NOW,
+      node: 'v22.0.0', ...extra,
+    });
+  // Exit 0 shape (a declaring governing claim), exit 4 shape (the same thread
+  // with the governing claim's line unreadable — the MISPLACED state), and a
+  // refusal that formed no pair at all.
+  const R56_OK = R56_BUILD([R56_PAIR()]);
+  const R56_MISPLACED = R56_BUILD([R56_PAIR({
+    cardComments: [R56_SUPERSEDED, R56_CLAIM(5650083758, '2026-09-13T01:57:23Z', 'Domain: `domain:spec`')],
+  })]);
+  const R56_REFUSAL = R56_BUILD(null);
+  const R56_LINES = (rec) => renderInputRecord(rec);
+  const R56_KEYS = (rec) => R56_LINES(rec).filter((l) => /^[a-z]/.test(l)).map((l) => l.slice(0, l.indexOf(':')));
+  const R56_FIELD = (rec, key) => {
+    const lines = R56_LINES(rec);
+    const at = lines.findIndex((l) => l.startsWith(`${key}: `));
+    if (at === -1) return null;
+    const out = [lines[at].slice(key.length + 2)];
+    for (let i = at + 1; i < lines.length && lines[i].startsWith('  '); i++) out.push(lines[i].trim());
+    return out.join('\n');
+  };
+
+  t('the block is fenced, so a seat can cut exactly it out of a log', R56_LINES(R56_OK)[0] === INPUT_RECORD_OPEN && R56_LINES(R56_OK).at(-1) === INPUT_RECORD_CLOSE);
+  t('every declared RUN field is present, in roster order, on exit 0', INPUT_RECORD_RUN_FIELDS.every((f, i) => R56_KEYS(R56_OK)[i] === f));
+  t('…and on a refusal that formed NO pair — the same run half, ⛔ never a shorter block', INPUT_RECORD_RUN_FIELDS.every((f, i) => R56_KEYS(R56_REFUSAL)[i] === f));
+  t('every declared PAIR field is present once per derived pair, prefixed by its index', INPUT_RECORD_PAIR_FIELDS.every((f) => R56_KEYS(R56_OK).includes(`pair.1.${f}`)));
+  t('⭐ the exit-0 block and the exit-4 (MISPLACED) block carry an IDENTICAL key list — the diffability property this card exists for', R56_KEYS(R56_OK).join('|') === R56_KEYS(R56_MISPLACED).join('|'));
+  t('…and the refusal block\'s run half is that same key list, so all three diff against each other', R56_KEYS(R56_REFUSAL).slice(0, INPUT_RECORD_RUN_FIELDS.length).join('|') === R56_KEYS(R56_OK).slice(0, INPUT_RECORD_RUN_FIELDS.length).join('|'));
+  t('⛔ a declared field this run never filled RENDERS, with a token saying so — it is never dropped', says(renderInputRecord({ run: {}, pairs: [] }).join('\n'), INPUT_RECORD_UNSET));
+  t('…and a block with nothing in it still carries every declared key', INPUT_RECORD_RUN_FIELDS.every((f) => renderInputRecord({ run: {}, pairs: [] }).some((l) => l.startsWith(`${f}: `))));
+  t('the roster declares EVERY key the builder fills — a field outside it is a field nothing pins', undeclaredRecordFields(R56_OK).length === 0);
+  t('…and one that is outside it is NAMED in the block rather than printed in silence', says(renderInputRecord({ run: { 'run.invented': 'x' }, pairs: [] }).join('\n'), 'record.undeclared: run.invented'));
+  t('the board is stated with WHICH source answered — a fallback and a deliberate target are two sentences', says(R56_FIELD(R56_OK, 'board.source'), 'NEITHER PM_SWEEP_REPO') && says(R56_FIELD(R56_BUILD([R56_PAIR()], { repoRes: R56_TARGETED }), 'board.source'), 'PM_SWEEP_REPO — this run was deliberately targeted'));
+  t('…and the board VALUE is printed beside it', R56_FIELD(R56_BUILD([R56_PAIR()], { repoRes: R56_TARGETED }), 'board.repo') === 'objectstack-ai/objectui');
+  t('the read path is named from the SAME labels every refusal uses', says(R56_FIELD(R56_OK, 'read.plan'), READ_PATH_LABELS[READ_PATH_TOKEN]));
+  t('a `--pair-json` run names that path AND the document it was served from', (() => { const r = R56_BUILD([R56_PAIR()], { state: R56_STATE({ pairJsonSource: 'pair.json', served: new Map([[READ_PATH_PAIR_JSON, 6]]) }) }); return says(R56_FIELD(r, 'read.plan'), READ_PATH_LABELS[READ_PATH_PAIR_JSON]) && R56_FIELD(r, 'read.pair-json') === 'pair.json'; })());
+  t('…and says the network was not read at all on that path', says(R56_BUILD([R56_PAIR()], { state: R56_STATE({ pairJsonSource: 'pair.json' }) }).run['read.api'], 'no network'));
+  t('every request is numbered and carries its channel, its path and the answer', says(R56_FIELD(R56_OK, 'run.requests'), '#1') && says(R56_FIELD(R56_OK, 'run.requests'), '/pulls?state=open&per_page=100&page=1') && says(R56_FIELD(R56_OK, 'run.requests'), 'HTTP 200'));
+  t('⭐ a page that came back FULL states its row count — a truncated read and a complete one differ nowhere else', says(R56_FIELD(R56_OK, 'run.requests'), '(100 row(s))'));
+  t('a refused request states the status it was refused with', says(R56_FIELD(R56_OK, 'run.requests'), 'HTTP 403'));
+  t('⛔ a run that issued NO read says so, rather than rendering an empty field', says(R56_BUILD(null, { state: R56_STATE({ requests: [] }) }).run['run.requests'], 'issued no read at all'));
+  t('the SELECTION RULE is printed, not merely applied — two runs must be comparable on the rule too', says(R56_FIELD(R56_OK, 'pair.1.claim.rule'), 'NEWEST') && says(R56_FIELD(R56_OK, 'pair.1.claim.rule'), '`Branch:`'));
+  t('…and it is the one constant, so the printed rule cannot drift from the applied one', R56_OK.pairs[0]?.['claim.rule'] === CLAIM_SELECTION_RULE && claimCarrierSelection([]).rule === CLAIM_SELECTION_RULE);
+  t('the SELECTED carrier is named by id and by date', says(R56_FIELD(R56_OK, 'pair.1.claim.selected'), '5650083758') && says(R56_FIELD(R56_OK, 'pair.1.claim.selected'), '2026-09-13T01:57:23Z'));
+  t('⭐ …with a BODY FINGERPRINT: the one field that tells "same ids, different bytes" apart', says(R56_FIELD(R56_OK, 'pair.1.claim.selected'), 'sha256:') && says(R56_FIELD(R56_OK, 'pair.1.claim.selected'), ' bytes,'));
+  t('⭐ …and it MOVES when only the bytes move: same ids, same count, same newest, different verdict', R56_FIELD(R56_OK, 'pair.1.card-comment-ids') === R56_FIELD(R56_MISPLACED, 'pair.1.card-comment-ids') && R56_FIELD(R56_OK, 'pair.1.claim.selected') !== R56_FIELD(R56_MISPLACED, 'pair.1.claim.selected'));
+  t('every REJECTED candidate is named, with the reason it is not the carrier', says(R56_FIELD(R56_OK, 'pair.1.claim.rejected'), '5622080790') && says(R56_FIELD(R56_OK, 'pair.1.claim.rejected'), 'SUPERSEDED'));
+  t('…and a thread whose claims are all in the pool says THAT, rather than going quiet', says(R56_BUILD([R56_PAIR({ cardComments: [R56_GOVERNING] })]).pairs[0]?.['claim.rejected'], 'none — every claim comment'));
+  t('a claim that parses ZERO branches leaves NO carrier, and the block names that claim', (() => { const r = R56_BUILD([R56_PAIR({ cardComments: [{ id: 7, created_at: '2026-09-13T05:00:00Z', body: 'Claim: round R2\nClause-②: no' }] })]); return says(r.pairs[0]?.['claim.selected'], 'parses ZERO branches') && says(r.pairs[0]?.['claim.selected'], '7'); })());
+  t('an UNREAD thread reads UNREAD, ⛔ never 0 rows', says(R56_BUILD([R56_PAIR({ cardComments: null })]).pairs[0]?.['card-comments'], 'UNREAD'));
+  t('the line READ from the carrier is stated — declared, near miss or nothing', says(R56_FIELD(R56_OK, 'pair.1.claim.clause2-line'), 'DECLARED `no`') && says(R56_MISPLACED.pairs[0]?.['claim.clause2-line'], 'no line in this body reaches the reader'));
+  t('a short id list is printed whole; a long one keeps its FIRST, its LAST and the true count', renderIdList([{ id: 1 }, { id: 2 }]) === '1,2' && says(renderIdList(Array.from({ length: 40 }, (_, i) => ({ id: i + 1 }))), '1 … 40 (40 ids'));
+  t('the NEWEST row is the newest by `created_at`, ⛔ not the last row the API returned', newestRow([{ id: 2, created_at: '2026-09-13T09:00:00Z' }, { id: 1, created_at: '2026-09-13T01:00:00Z' }])?.id === 2);
+  t('…and an unreadable stamp falls back to thread order, the recency rule the carrier selection uses', newestRow([{ id: 1, created_at: 'nonsense' }, { id: 2, created_at: 'nonsense' }])?.id === 2);
+  t('the PAIRING quotes the body line it was derived from', says(R56_FIELD(R56_OK, 'pair.1.derivation'), 'closing-keyword') && says(R56_FIELD(R56_OK, 'pair.1.derivation'), 'Fixes #17425'));
+  t('…and the branch-name fallback names the head ref instead of quoting a line that does not exist', says(R56_BUILD([R56_PAIR({ evidence: 'branch-name', prBody: 'no declaration at all' })]).pairs[0]?.derivation, 'head.ref: claude/issue-17425-x'));
+  t('the PR-BODY line is read and stated — ⛔ and stated as an INPUT, never as a limb', says(R56_FIELD(R56_OK, 'pair.1.pr-body.clause2-line'), 'DECLARED `no`') && says(R56_FIELD(R56_OK, 'pair.1.pr-body.clause2-line'), '⛔ no row here judges the PR body'));
+  t('the blob hash is git\'s, so `git hash-object` on the path the block names verifies it', gitBlobSha1('') === 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391' && gitBlobSha1('hello') === 'b6fc4c620b67d95f953a5c1c1230aaab5db5a1b0');
+  t('…and this run states the file it ran FROM, which is what "the same blob on both sides" needs', says(R56_FIELD(R56_OK, 'run.script.path'), 'check-clause2-carriers.mjs') && says(R56_FIELD(R56_OK, 'run.script.blob'), 'git hash-object'));
+  t('a source this run could not read says so, rather than printing a hash of nothing', says(buildInputRecord({ self: { path: '/x', blob: null, bytes: null, reason: 'ENOENT' } }).run['run.script.blob'], 'UNREAD'));
+  // ⛔ CONTROLS — the record reads no verdict and derives no second selection.
+  t('⛔ CONTROL: the selection the block prints IS the pool `cardDeclaration` judged — ONE derivation', (() => { const rows = [R56_SUPERSEDED, R56_GOVERNING]; const sel = claimCarrierSelection(rows); return sel.pool.length === 1 && sel.pool[0] === R56_GOVERNING && cardDeclaration(rows).value === 'no'; })());
+  t('⛔ CONTROL: building the record changes no reading — the same rows read the same way after it', (() => { const rows = [R56_SUPERSEDED, R56_GOVERNING]; const before = cardDeclaration(rows).state; buildInputRecord({ pairs: [R56_PAIR()] }); return cardDeclaration(rows).state === before; })());
+  t('⛔ CONTROL: the record carries no verdict, no exit code and no finding row', !says(R56_LINES(R56_OK).join('\n'), 'exit ') && !says(R56_LINES(R56_OK).join('\n'), 'PASS'));
+
+  // -- #18701: ONE thread set -- what the template STATES, the guard READS -----
+  //
+  // ⭐ THE PIN THE CARD ASKS FOR, and it is a MEASUREMENT rather than two lists
+  // written side by side. The stated set is read out of the text `--template`
+  // actually prints; the read set is obtained by DRIVING
+  // `check-governed-queue-guard.mjs` once per thread, with a record copied from
+  // this file's own template sitting on that thread ALONE. Edit either side by
+  // itself -- drop a location from the sentence, or stop the guard fetching a
+  // carrier -- and the two sets stop matching here.
+  //
+  // ⛔ The guard is imported LAZILY, from a function body. This file reaches
+  // that module at module scope already (through `check-half-states.mjs`'s
+  // top-level await), so the import below is a cache hit; what it must never
+  // become is a top-level `await` in the dispatch, which that guard's own
+  // docblock records as an exit-13 deadlock for BOTH modules.
+  battery('#18701: ONE thread set -- what the template STATES is what the queue guard READS');
+  const GUARD = await import('./check-governed-queue-guard.mjs');
+  const TEMPLATE_TEXT = contractReviewTemplateLines().join('\n');
+  const THREAD_SET = REVIEW_OF_RECORD_THREADS.map((thread) => thread.where).join();
+
+  // STATED -- read off the printed instruction, never restated here.
+  const stated = REVIEW_OF_RECORD_THREADS.filter((thread) => TEMPLATE_TEXT.includes(thread.words)).map((thread) => thread.where).join();
+
+  // READ -- measured by driving the guard's references tier, one run per thread.
+  const PIN_HEAD = 'dead1234beef5678'.padEnd(40, '0');
+  const PIN_PR = 4101;
+  const PIN_CARD = 4102;
+  // ⭐ The fixture record IS what `--template` tells a seat to paste, so this
+  // pin also answers "is the thing we tell them to copy accepted where we tell
+  // them to put it" -- in both places, on the same run.
+  const PIN_RECORD = {
+    id: 7701,
+    created_at: '2026-09-16T10:00:00Z',
+    body: contractReviewRecordLines({ headSha: PIN_HEAD, reviewedBy: 'session_01PINSEAT' }).join('\n'),
+  };
+  const pinRun = async (where) => {
+    const threadsRead = [];
+    const verdict = await GUARD.runGuard({
+      event: GUARD.EVENT_MERGE_GROUP,
+      rows: [{ sha: 'e'.repeat(40), subject: `x (#${PIN_PR})`, pr: PIN_PR, paths: [`${GUARD.REFERENCES_TIER_PREFIX}contract-review.md`] }],
+      fetchReviews: async () => [],
+      fetchPull: async () => ({ sha: PIN_HEAD, body: `Fixes #${PIN_CARD}`, headRef: `claude/issue-${PIN_CARD}-x` }),
+      fetchComments: async (n) => {
+        threadsRead.push(n);
+        return (n === PIN_PR ? 'PR' : 'card') === where ? [PIN_RECORD] : [];
+      },
+      loadRecognisers: GUARD.loadRecordRecognisers,
+    });
+    return { verdict, threadsRead, record: verdict.entries[0]?.record ?? null };
+  };
+  const pinRuns = [];
+  for (const thread of REVIEW_OF_RECORD_THREADS) pinRuns.push([thread.where, await pinRun(thread.where)]);
+  const readSet = pinRuns.filter(([, r]) => r.verdict.exitCode === GUARD.EXIT_CLEAR && r.record?.state === 'stands').map(([where]) => where).join();
+
+  t(`⭐ the set the TEMPLATE states IS the set the GUARD reads (${THREAD_SET})`, stated === THREAD_SET && readSet === THREAD_SET, `stated=[${stated}] read=[${readSet}]`);
+  t('⛔ CONTROL: the pin is not vacuous -- the set has two locations, not one', REVIEW_OF_RECORD_THREADS.length === 2 && stated.includes('PR') && stated.includes('card'));
+  t('…and each run located the record on the thread it was posted to, not on the other one', pinRuns.every(([where, r]) => r.record?.where === where), JSON.stringify(pinRuns.map(([w, r]) => [w, r.record?.where])));
+  t('…and the guard fetched exactly ONE thread per entry in the set, no more and no fewer', pinRuns.every(([, r]) => r.threadsRead.join() === `${PIN_PR},${PIN_CARD}`), JSON.stringify(pinRuns.map(([, r]) => r.threadsRead)));
+  t('⛔ CONTROL: with the record on NEITHER thread the same run is refused -- the pin can fail', await (async () => { const none = await pinRun('nowhere'); return none.verdict.exitCode !== GUARD.EXIT_CLEAR && none.record?.state === 'absent'; })());
+  t('the guard prints the location in the WORDS this file owns, so a seat is told one thing', GUARD.REVIEW_OF_RECORD_LOCATION === REVIEW_OF_RECORD_LOCATION && TEMPLATE_TEXT.includes(`ONE comment on ${REVIEW_OF_RECORD_LOCATION}`));
+
+  // The reader itself is built FROM the set, so a thread added to it is a thread
+  // searched -- the property the two consumers above rest on.
+  const PIN_PAIR = { pr: PIN_PR, card: PIN_CARD, headSha: PIN_HEAD, prComments: [], cardComments: [] };
+  t('`locateReviewOfRecord` accounts for EVERY thread in the set, by the keys the set itself declares', (() => { const r = locateReviewOfRecord(PIN_PAIR); return r.state === 'absent' && REVIEW_OF_RECORD_THREADS.every((thread) => Object.hasOwn(r.read, thread.number)); })());
+  t('…and a thread the pair does not carry is a GAP named in the words the set itself declares', (() => { const r = locateReviewOfRecord({ ...PIN_PAIR, cardComments: null }); return r.state === 'unreadable' && r.gaps.some((g) => g.includes(`card #${PIN_CARD}`)); })());
+
+  // `deliveredCardNumber` -- the other half the guard needs, and it asks the ONE
+  // relation rather than grading evidence a second time.
+  const PIN_PULL = (body, ref = 'feat/none') => ({ number: PIN_PR, body, head: { ref } });
+  t('a closing keyword names the card', deliveredCardNumber(PIN_PULL(`Fixes #${PIN_CARD}`)).card === PIN_CARD && deliveredCardNumber(PIN_PULL(`Fixes #${PIN_CARD}`)).evidence === 'closing-keyword');
+  t('a `Part of` declaration names it too, at its own grade', deliveredCardNumber(PIN_PULL(`Part of #${PIN_CARD}`)).evidence === 'part-of');
+  t('the branch name is the fallback, and ONLY when the body declares nothing', deliveredCardNumber(PIN_PULL('no declaration', `claude/issue-${PIN_CARD}-x`)).evidence === 'branch-name' && deliveredCardNumber(PIN_PULL('Fixes #4444', `claude/issue-${PIN_CARD}-x`)).card === 4444);
+  t('⛔ a body naming NO card yields no card and a reason, never a guess', (() => { const r = deliveredCardNumber(PIN_PULL('nothing here')); return r.card === null && r.reason.includes('names no card'); })());
+  t('⛔ two cards at the SAME strength yield NEITHER, and the reason names both', (() => { const r = deliveredCardNumber(PIN_PULL('Fixes #4444\nFixes #5555')); return r.card === null && r.reason.includes('#4444') && r.reason.includes('#5555'); })());
+  t('…while a STRONGER grade still decides, so a stray `Part of` beside a keyword is not a tie', deliveredCardNumber(PIN_PULL(`Fixes #${PIN_CARD}\n\npart of #4444 already landed`)).card === PIN_CARD);
+  t('⛔ CONTROL: the ranking belongs to `deliveryEvidence` -- every grade it answers is ranked here, none invented', DELIVERY_EVIDENCE_PRECEDENCE.every((kind) => deliveryEvidenceNote(kind) !== 'evidence unread') && new Set(DELIVERY_EVIDENCE_PRECEDENCE).size === DELIVERY_EVIDENCE_PRECEDENCE.length);
+  t('…and it is ranked in the order that function applies, measured pair by pair', DELIVERY_EVIDENCE_PRECEDENCE.indexOf(deliveryEvidence(PIN_PULL(`Fixes #1\nPart of #2`), '1')) < DELIVERY_EVIDENCE_PRECEDENCE.indexOf(deliveryEvidence(PIN_PULL(`Fixes #1\nPart of #2`), '2')) && DELIVERY_EVIDENCE_PRECEDENCE.indexOf('part-of') < DELIVERY_EVIDENCE_PRECEDENCE.indexOf('branch-name'));
+
+  // -- #18719: a RETRACTED claim leaves the pool -----------------------------
+  //
+  // The pool used to be closed under addition: a `Claim:` comment entered it
+  // and nothing ever took one out, so the withdrawal that the protocol calls an
+  // explicit act was the one act the arbiter could not see. These cases pin the
+  // MEMBERSHIP rule and its three shapes, each against the control that makes
+  // the shape a reading rather than a coincidence.
+  battery('#18719: a RETRACTED claim leaves the pool — a withdrawn claim never governs');
+
+  // The #18373 thread, replayed OFFLINE and ⛔ never re-graded: that card is
+  // `needs-user-decision` and another seat's. Ids, stamps and logins are the
+  // REAL ones; each body carries the load-bearing LINES of the real comment,
+  // extracted from the REST rows rather than retyped — so a case here fails
+  // when the reader changes, ⛔ never when a transcription slipped.
+  const RTX_18373 = [
+  {
+    // the triage comment — no `Claim:` line, so never a pool candidate
+    id: 5716318188,
+    created_at: '2026-09-17T14:45:28Z',
+    user: { login: 'os-sam' },
+    body: '**Triage:`pm:queue` · `priority:p1` · `domain:spec` · 类型 Bug · 摘 `finding`** · 2026-09-17T14:45Z · 分诊席 #6015 · R+275',
+  },
+  {
+    // `os-litant` — the claim the card is actually being worked on, and the card's only assignee
+    id: 5717143021,
+    created_at: '2026-09-17T15:40:44Z',
+    user: { login: 'os-litant' },
+    body: [
+      'Claim: PM loop round 2026-09-17 R1',
+      'Session: `session_01LvwGppdonww4zGLWZo5rho`',
+      'Branch: `claude/issue-18373-type-source-resolution-bare-dir-include`',
+      'Clause-②: no',
+    ].join('\n'),
+  },
+  {
+    // `os-bill` — claimed 13 minutes later, and withdrawn 84 seconds after that
+    id: 5717315121,
+    created_at: '2026-09-17T15:53:24Z',
+    user: { login: 'os-bill' },
+    body: [
+      'Claim: PM loop round 8',
+      'Session: `session_01JbZnqu8bt6YqfJsr9vaFb3`',
+      'Branch: `claude/issue-18373-include-bare-directory-provenance`',
+      'Clause-②: no',
+    ].join('\n'),
+  },
+  {
+    // THE RETRACTION — no `Claim:` line of its own, which is why the pool could not see it
+    id: 5717333576,
+    created_at: '2026-09-17T15:54:48Z',
+    user: { login: 'os-bill' },
+    body: '🚨 **撤回上一条认领(`5717315121`)—— 本卡已由 `os-litant` 在先认领,本席晚了 13 分钟。** `domain:spec` seat 2(`session_01JbZnqu8bt6YqfJsr9vaFb3`,座位贴 #18549)。⏱️ 本条读数取自同一动作:2026-09-17T15:54Z。',
+  },
+  {
+    // `os-litant`'s report line: an anchor and its OWN claim id, mid-line — the `includes` trap
+    id: 5717738051,
+    created_at: '2026-09-17T16:22:40Z',
+    user: { login: 'os-litant' },
+    body: '      "question": "The governing-claim instrument now names a retracted claim. check-clause2-carriers --pair 18708 (exit 0) selects comment 5717315121 as governing and marks my dispatch\'s 5717143021 as SUPERSEDED, because the retraction 5717333576 carries no `Claim:` line and so is not in the pool. Is that worth a rule change?",',
+  },
+  {
+    // `os-litant` describing the retraction: an anchor, another seat's claim id — shape (3)
+    id: 5717775707,
+    created_at: '2026-09-17T16:25:37Z',
+    user: { login: 'os-litant' },
+    body: '- ⚠️ 但它暴露了一个**工具缺陷**:`check-clause2-carriers --pair 18708` 仍机械地把**那条已撤回的** `5717315121` 选为 governing claim —— 因为撤回评论不带 `Claim:` 行,不在候选池里。**本席另行立卡**,⛔ 不在本卡处理。',
+  },
+  ];
+  const RTX_LIVE_CLAIM = 5717143021;
+  const RTX_WITHDRAWN = 5717315121;
+  const RTX_RETRACTION = 5717333576;
+  const RTX_LIVE_BRANCH = 'claude/issue-18373-type-source-resolution-bare-dir-include';
+  const RTX_GHOST_BRANCH = 'claude/issue-18373-include-bare-directory-provenance';
+  const RTX_AFTER = claimCarrierSelection(RTX_18373);
+  // ⛔ The BEFORE leg is the reading `main` takes, produced by REMOVING the
+  // retraction rather than by describing it: the same rows, minus the one
+  // comment the old pool could not see.
+  const RTX_BEFORE = claimCarrierSelection(RTX_18373.filter((r) => r.id !== RTX_RETRACTION));
+  const RTX_REASON = (sel, id) => sel.rejected.find((r) => r.row.id === id)?.reason ?? '';
+  const RTX_RECORD = (rows) => {
+    const rec = pairInputRecord({ pr: 18708, card: 18373, cardComments: rows, headSha: 'offline' });
+    const flat = (v) => (Array.isArray(v) ? v.join('\n') : String(v ?? ''));
+    return { selected: flat(rec['claim.selected']), rejected: flat(rec['claim.rejected']), rule: flat(rec['claim.rule']) };
+  };
+
+  t('⭐ the #18373 counterfactual, AFTER: the pool is the LIVE claimant\'s claim alone', RTX_AFTER.pool.length === 1 && RTX_AFTER.pool[0].id === RTX_LIVE_CLAIM, JSON.stringify(RTX_AFTER.pool.map((r) => r.id)));
+  t('…and the branch it names is the ONE ref origin actually has', (RTX_AFTER.governing?.branches ?? []).join() === RTX_LIVE_BRANCH);
+  t('…while the branch the withdrawn claim named — absent from origin — governs nothing', !(RTX_AFTER.governing?.branches ?? []).includes(RTX_GHOST_BRANCH));
+  t('the withdrawn claim is listed RETRACTED, naming the comment that took it back', RTX_REASON(RTX_AFTER, RTX_WITHDRAWN).startsWith('RETRACTED') && RTX_REASON(RTX_AFTER, RTX_WITHDRAWN).includes(String(RTX_RETRACTION)));
+  t('⛔ …never as SUPERSEDED: a withdrawn record and an out-ranked one are two different facts', !/a SUPERSEDED claim/.test(RTX_REASON(RTX_AFTER, RTX_WITHDRAWN)));
+  t('⛔ …and never DROPPED: the full claim listing still carries both records', RTX_AFTER.claims.length === 2 && RTX_AFTER.claims.some((r) => r.id === RTX_WITHDRAWN));
+  t('…and the LIVE claim is no longer rejected at all', RTX_REASON(RTX_AFTER, RTX_LIVE_CLAIM) === '');
+  t('⛔ CONTROL — the #18373 counterfactual, BEFORE: drop the retraction and the withdrawn claim governs again', RTX_BEFORE.pool.length === 1 && RTX_BEFORE.pool[0].id === RTX_WITHDRAWN && (RTX_BEFORE.governing?.branches ?? []).join() === RTX_GHOST_BRANCH);
+  t('⛔ …and in that reading the real claimant is the one marked SUPERSEDED — the defect, replayed', /a SUPERSEDED claim/.test(RTX_REASON(RTX_BEFORE, RTX_LIVE_CLAIM)));
+  t('⭐ the two faces side by side: the record NAMES the author the pool selected', RTX_RECORD(RTX_18373).selected.includes('os-litant') && !RTX_RECORD(RTX_18373).selected.includes('os-bill'));
+  t('⛔ CONTROL: the BEFORE record named the other seat, which is how the contradiction went unread', RTX_RECORD(RTX_18373.filter((r) => r.id !== RTX_RETRACTION)).selected.includes('os-bill'));
+  t('the printed RULE carries the membership half, so two runs are comparable on it', RTX_RECORD(RTX_18373).rule.includes(CLAIM_RETRACTION_RULE) && CLAIM_SELECTION_RULE.includes(CLAIM_RETRACTION_RULE));
+
+  // ⚠️ The measured trap, and the reason the anchor OPENS a line instead of
+  // being searched for inside one. Both lines below are real bytes off this
+  // thread; the first is the report that FILED this defect.
+  const RTX_OWN_REPORT = RTX_18373.find((r) => r.id === 5717738051);
+  const RTX_DESCRIPTION = RTX_18373.find((r) => r.id === 5717775707);
+  t('⛔ a seat REPORTING the defect does not commit it — an anchor and its own claim id, mid-line', !claimRetractions(RTX_18373).has(RTX_18373.find((r) => r.id === RTX_LIVE_CLAIM)));
+  t('⛔ …and the author test alone would NOT have saved it: that line is the claim\'s OWN author', RTX_OWN_REPORT.user.login === RTX_18373.find((r) => r.id === RTX_LIVE_CLAIM).user.login && /retract/i.test(RTX_OWN_REPORT.body) && RTX_OWN_REPORT.body.includes(String(RTX_LIVE_CLAIM)));
+  t('⛔ …and a THIRD seat describing the retraction retracts nothing either — anchor, id, wrong author', RTX_DESCRIPTION.body.includes('撤回') && RTX_DESCRIPTION.body.includes(String(RTX_WITHDRAWN)) && RTX_DESCRIPTION.user.login !== RTX_18373.find((r) => r.id === RTX_WITHDRAWN).user.login);
+
+  // The three shapes, synthetic so each one varies exactly one thing.
+  const RTX_ROW = (id, at, login, lines) => ({ id, created_at: at, user: { login }, body: [].concat(lines).join('\n') });
+  const RTX_CLAIM = (id, at, login, value = 'no') => RTX_ROW(id, at, login, ['Claim: round 1', 'Branch: `claude/issue-4242-x`', `Clause-②: ${value}`]);
+  const RTX_A = RTX_CLAIM(6000000011, '2026-09-17T10:00:00Z', 'seat-a');
+  const RTX_B = RTX_CLAIM(6000000012, '2026-09-17T11:00:00Z', 'seat-b');
+  const RTX_POOL_IDS = (rows) => claimCarrierSelection(rows).pool.map((r) => r.id).join();
+
+  t('shape (1) — a retraction NAMING the claim by comment id takes it out of the pool', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回本席的认领 `6000000012` —— 先到者是 seat-a')]) === '6000000011');
+  t('⛔ shape (1) CONTROL: the SAME words from a DIFFERENT author retract nothing', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-a', '撤回本席的认领 `6000000012` —— 先到者是 seat-a')]) === '6000000012');
+  t('shape (2) — a `Release:` line from the claim\'s own author, no id at all, takes it out', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', 'Release: session X, cause: 先到者是 seat-a, 去向: back to the queue')]) === '6000000011');
+  t('⛔ shape (2) CONTROL: the same `Release:` posted BEFORE the claim retracts nothing', RTX_POOL_IDS([RTX_A, RTX_ROW(6000000013, '2026-09-17T10:30:00Z', 'seat-b', 'Release: session X, cause: y, 去向: queue'), RTX_B]) === '6000000012');
+  t('shape (3) — a `Release:` from a DIFFERENT author retracts nobody else\'s claim', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-c', 'Release: session Z, cause: y, 去向: queue')]) === '6000000012');
+  t('⛔ shape (3) CONTROL: the live claimant\'s claim still GOVERNS, it is not merely un-rejected', (() => { const sel = claimCarrierSelection([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-c', 'Release: session Z')]); return sel.governing?.createdAt === RTX_B.created_at && sel.rejected.every((r) => !r.reason.startsWith('RETRACTED')); })());
+  t('⛔ the anchor OPENS the line: the same act and id buried mid-sentence retract nothing', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '本席读到工具把 `6000000012` 当作已撤回的认领,记一笔')]) === '6000000012');
+  t('…while decoration in FRONT of the act is not a difference — 「- ⚠️ **撤回** …」 reads', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '- ⚠️ **撤回**了 `6000000012`,本席让行')]) === '6000000011');
+  t('⛔ a retraction naming SOME OTHER comment id retracts nothing here', RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000009999` —— 另一张卡上的认领')]) === '6000000012');
+  t('⛔ an unreadable author on the RETRACTOR retracts nothing — fail closed, never a wildcard', RTX_POOL_IDS([RTX_A, RTX_B, { id: 6000000013, created_at: '2026-09-17T12:00:00Z', body: '撤回 `6000000012`' }]) === '6000000012');
+  t('⛔ an unreadable author on the CLAIM is not retractable either', RTX_POOL_IDS([RTX_A, { id: 6000000012, created_at: '2026-09-17T11:00:00Z', body: ['Claim: r', 'Branch: `claude/issue-4242-x`'].join('\n') }, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]) === '6000000012');
+  t('⛔ a RETRACTED claim\'s declaration is not the one read — the LIVE carrier\'s line is', cardDeclaration([RTX_CLAIM(6000000011, '2026-09-17T10:00:00Z', 'seat-a', 'no'), RTX_CLAIM(6000000012, '2026-09-17T11:00:00Z', 'seat-b', 'yes'), RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]).value === 'no');
+  // ⭐ Every claim retracted ⇒ a state this file ALREADY has, ⛔ never a
+  // fabricated carrier and ⛔ never the withdrawn record's own value. WHICH
+  // existing state depends on what is left on the thread, and both are pinned
+  // because collapsing them would describe neither: a withdrawn claim that
+  // carried a declaration leaves that line ON the thread with no carrier under
+  // it (`misplaced`, a C2 row, the value ⛔ not accepted), and one that carried
+  // none leaves nothing to read at all (`absent`).
+  t('⭐ every claim retracted, declaration left on the thread ⇒ `misplaced` — a finding, ⛔ not a reading', (() => { const rows = [RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]; const d = cardDeclaration(rows); return claimCarrierSelection(rows).pool.length === 0 && d.state === 'misplaced'; })());
+  t('⛔ …and the withdrawn record\'s OWN value is never handed back as the card\'s declaration', (() => { const rows = [RTX_CLAIM(6000000012, '2026-09-17T11:00:00Z', 'seat-b', 'yes'), RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]; return cardDeclaration(rows).state !== 'declared'; })());
+  t('⭐ …and with nothing left to read the state is `absent` — the carrier is owed, ⛔ not invented', (() => { const rows = [RTX_ROW(6000000012, '2026-09-17T11:00:00Z', 'seat-b', ['Claim: r', 'Branch: `claude/issue-4242-x`']), RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]; return cardDeclaration(rows).state === 'absent'; })());
+  t('⛔ CONTROL: without the retraction that same thread reads `missing` — the claim IS the carrier', cardDeclaration([RTX_ROW(6000000012, '2026-09-17T11:00:00Z', 'seat-b', ['Claim: r', 'Branch: `claude/issue-4242-x`'])]).state === 'missing');
+  t('…and the record SAYS that, instead of reporting a thread nobody claimed', RTX_RECORD([RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]).selected.includes('RETRACTED'));
+  t('⛔ CONTROL: a thread with no claim at all still reads as the OTHER sentence', RTX_RECORD([RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', 'no claim here')]).selected.includes('no comment on this thread carries'));
+  t('ONE derivation: the map the selection rejects from is the map `claimRetractions` returns', (() => { const rows = [RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', '撤回 `6000000012`')]; const sel = claimCarrierSelection(rows); return sel.retracted.size === 1 && sel.retracted.get(RTX_B)?.id === '6000000013' && claimRetractions(rows).get(RTX_B)?.id === '6000000013'; })());
+  t('⛔ an unreadable thread retracts nothing and carries the empty halves', claimRetractions(null).size === 0 && claimCarrierSelection(null).live.length === 0 && claimCarrierSelection(null).retracted.size === 0);
+  t('the anchor roster is CLOSED, and bare `release` is not on it — a version release is not a retraction', RETRACTION_PROSE_ANCHORS.length === 5 && !RETRACTION_PROSE_ANCHORS.includes('release') && RTX_POOL_IDS([RTX_A, RTX_B, RTX_ROW(6000000013, '2026-09-17T12:00:00Z', 'seat-b', 'release 阻塞在 `6000000012` 上,等维护者')]) === '6000000012');
+
+  // -- #18683: the card-comment read pages like its two siblings -------------
+  //
+  // What the card measured was an ASYMMETRY inside ONE file, not a missing
+  // feature: two list reads paged to a cap and answered `null` on it
+  // (fail-CLOSED), and the third — the one the governing-claim POOL is built
+  // from — issued one `per_page=100` request and judged from whatever came back
+  // (fail-OPEN, on the read that arbitrates ownership). The pins below are
+  // about that DEFAULT rather than about any one verdict: a thread read short
+  // is UNJUDGED, a thread read whole carries its newest claim, and the input
+  // record says which of the two happened.
+  battery('#18683: the card-comment read pages to a cap — past 100 is UNJUDGED, ⛔ never a truncated pool');
+  const L83_FILLER = (i) => ({
+    id: 6000000000 + i,
+    created_at: `2026-09-01T00:00:${String(i % 60).padStart(2, '0')}Z`,
+    user: { login: 'os-filler' },
+    body: `ordinary comment ${i} — nothing on this line begins with the claim key`,
+  });
+  const L83_CLAIM = (id, at, value) => ({
+    id,
+    created_at: at,
+    user: { login: 'os-justin' },
+    body: `Claim: PM loop round\nBranch: \`claude/issue-77001-x\`\nClause-②: ${value}`,
+  });
+  // The 101st row, past the first page in both fixtures below.
+  const L83_NEW = L83_CLAIM(6000000101, '2026-09-17T23:59:59Z', 'no');
+  // The 1st row of the second fixture: an OLDER claim, inside the first page,
+  // declaring the OPPOSITE value.
+  const L83_OLD = L83_CLAIM(6000000001, '2026-09-01T00:00:00Z', 'yes');
+  const L83_PAD = (n, from = 1) => Array.from({ length: n }, (_, i) => L83_FILLER(i + from));
+  const L83_THREAD = [...L83_PAD(100), L83_NEW];
+  const L83_SUPERSEDING = [L83_OLD, ...L83_PAD(99, 2), L83_NEW];
+  // A page server with GitHub's own semantics AND a request counter: what the
+  // ladder COSTS is a pin here, not an implementation detail — a ladder that
+  // kept asking after a short page would be a correct reading bought at ten
+  // times the budget the header paragraph promises.
+  const L83_READ = async (rows, key, { cap = COMMENT_PAGE_CAP, refuseFrom = null } = {}) => {
+    const calls = [];
+    const out = await pagedListRead({
+      key,
+      cap,
+      noun: 'comments',
+      readPage: (page) => {
+        calls.push(page);
+        if (refuseFrom !== null && page >= refuseFrom) return null;
+        return rows.slice((page - 1) * 100, page * 100);
+      },
+    });
+    return { out, calls: calls.join(','), ladder: readLadderRecord(key) };
+  };
+
+  t('the comment read has a DECLARED cap, exactly as the two reads that always paged do', Number.isInteger(COMMENT_PAGE_CAP) && COMMENT_PAGE_CAP > 0);
+  const L83_FULL = await L83_READ(L83_THREAD, readDiagnosisKey('comments', 770011));
+  t('⭐ the 101st comment REACHES the reader — the thread is read whole, ⛔ not to the end of page one', L83_FULL.out?.length === 101 && L83_FULL.out.at(-1) === L83_NEW);
+  t('⭐ …so a claim past row 100 ENTERS the pool, and GOVERNS it', (() => { const sel = claimCarrierSelection(L83_FULL.out); return sel.pool.length === 1 && sel.pool[0] === L83_NEW; })());
+  t('⭐ …and the declaration limb reads ITS line', cardDeclaration(L83_FULL.out).state === 'declared' && cardDeclaration(L83_FULL.out).value === 'no');
+  t('⛔ CONTROL: the same thread cut at row 100 reads `absent` — the reading the un-paged read produced', cardDeclaration(L83_THREAD.slice(0, 100)).state === 'absent' && claimCarrierSelection(L83_THREAD.slice(0, 100)).pool.length === 0);
+  const L83_SUP = await L83_READ(L83_SUPERSEDING, readDiagnosisKey('comments', 770012));
+  t('⭐ a NEWER claim past the page boundary supersedes the one inside it, and the older one is LISTED', (() => { const sel = claimCarrierSelection(L83_SUP.out); return sel.pool.length === 1 && sel.pool[0] === L83_NEW && sel.rejected.some((r) => r.row === L83_OLD); })());
+  t('⛔ CONTROL: cut at row 100 the SUPERSEDED carrier governs and its `yes` is what the limb reads — the fail-OPEN direction', (() => { const cut = L83_SUPERSEDING.slice(0, 100); const sel = claimCarrierSelection(cut); return sel.pool[0] === L83_OLD && cardDeclaration(cut).value === 'yes'; })());
+  t('⭐ …so the two readings of ONE thread DISAGREE on the declaration — the defect stated as one comparison', cardDeclaration(L83_SUP.out).value === 'no' && cardDeclaration(L83_SUPERSEDING.slice(0, 100)).value === 'yes');
+  const L83_CAPPED = await L83_READ(L83_PAD(COMMENT_PAGE_CAP * 100 + 1), readDiagnosisKey('comments', 770013));
+  t('⭐ a thread past the cap answers `null` — UNJUDGED, ⛔ never the pages that did arrive', L83_CAPPED.out === null);
+  t('⭐ …and `null` is neither `missing` nor `absent` nor a carrier: it is `unreadable`', cardDeclaration(L83_CAPPED.out).state === 'unreadable' && claimCarrierSelection(L83_CAPPED.out).readable === false);
+  t('…and the ladder records that the CAP is what stopped it', L83_CAPPED.ladder?.capped === true && L83_CAPPED.ladder.pages === COMMENT_PAGE_CAP);
+  t('⭐ the ladder stops on the first SHORT page — two requests for a 101-row thread, ⛔ not ten', L83_FULL.calls === '1,2');
+  t('…and a thread that fits inside one page costs ONE request', (await L83_READ(L83_PAD(1), readDiagnosisKey('comments', 770014))).calls === '1');
+  t('⭐ …while a thread of EXACTLY 100 rows costs two, because a full page is indistinguishable from a finished one', (await L83_READ(L83_PAD(100), readDiagnosisKey('comments', 770015))).calls === '1,2');
+  const L83_REFUSED = await L83_READ(L83_PAD(101), readDiagnosisKey('comments', 770016), { refuseFrom: 2 });
+  t('a page that came back UNREAD ends the ladder, and the thread is `null` rather than its first page', L83_REFUSED.out === null && L83_REFUSED.calls === '1,2');
+  t('…and the record says the CAP was ⛔ not what stopped it — two different facts, never one sentence', L83_REFUSED.ladder?.capped === false && L83_REFUSED.ladder.complete === false && says(ladderReading(L83_REFUSED.ladder, 'comments'), 'the cap was ⛔ not what stopped it'));
+  t('the input record DECLARES the ladder field for BOTH threads this file reads', INPUT_RECORD_PAIR_FIELDS.includes('card-comment-pages') && INPUT_RECORD_PAIR_FIELDS.includes('pr-comment-pages'));
+  t('⭐ …and it states the pages issued AND the cap, so two runs can be diffed on how much of the thread each read', says(ladderReading(L83_FULL.ladder, 'comments'), `2 of ${COMMENT_PAGE_CAP} page(s)`) && says(ladderReading(L83_FULL.ladder, 'comments'), 'COMPLETE'));
+  t('⭐ …and a CAPPED read says UNJUDGED in the field itself, ⛔ never a row count', says(ladderReading(L83_CAPPED.ladder, 'comments'), 'CAPPED') && says(ladderReading(L83_CAPPED.ladder, 'comments'), 'UNJUDGED') && !says(ladderReading(L83_CAPPED.ladder, 'comments'), 'COMPLETE'));
+  t('a path that took no ladder SAYS so, rather than rendering a page count it never paid for', says(ladderReading(null, 'comments'), 'no paged read'));
+  t('…and the `--pair-json` document says it was served whole in ONE read', (() => { const r = pairJsonReader({ pulls: [], comments: { 13476: [] } }); r.readCardComments('owner/name', 13476); return says(ladderReading(readLadderRecord(readDiagnosisKey('comments', 13476)), 'comments'), 'served whole from the pre-fetched document'); })());
+  t('⭐ the rendered block carries the ladder line beside the row count, on both threads', (() => { const lines = renderInputRecord(buildInputRecord({ pairs: [{ pr: 1, card: 2, cardComments: L83_FULL.out, cardCommentRead: L83_FULL.ladder, prComments: [], prCommentRead: L83_FULL.ladder }] })).join('\n'); return says(lines, 'pair.1.card-comment-pages:') && says(lines, 'pair.1.pr-comment-pages:') && says(lines, '101 row(s)'); })());
+  t('⛔ CONTROL: the ladder fields are DECLARED, so the block does not name them as keys nothing pins', undeclaredRecordFields(buildInputRecord({ pairs: [{ pr: 1, card: 2, cardComments: [], cardCommentRead: L83_FULL.ladder, prComments: [] }] })).length === 0);
+  t('⛔ CONTROL: the SIBLING caps are untouched by this card — ten event pages, three file pages', EVENT_PAGE_CAP === 10 && FILE_PAGE_CAP === 3);
+  t('⭐ all three list reads render ONE cap sentence, so this file can no longer hold two defaults', pageCapNote(EVENT_PAGE_CAP, 'events') === `${EVENT_PAGE_CAP} page(s) of 100 events each, all of them full — the tail is past this file's page cap and therefore unread` && pageCapNote(COMMENT_PAGE_CAP, 'comments') === `${COMMENT_PAGE_CAP} page(s) of 100 comments each, all of them full — the tail is past this file's page cap and therefore unread`);
+  t('⭐ …and a capped comment read FILES that sentence under its own diagnosis key, the way its siblings do', await (async () => {
+    const key = readDiagnosisKey('comments', 770017);
+    const rows = L83_PAD(100);
+    const value = await diagnosedRead(key, () => pagedListRead({ key, cap: 2, noun: 'comments', readPage: () => rows }));
+    const hung = {};
+    attachReadDiagnosis(hung, key, 'card #770017\'s comment thread');
+    return value === null && says(JSON.stringify(hung.reads ?? []), 'page cap and therefore unread');
+  })());
+  t('⛔ CONTROL: the diagnosis KEY is unchanged, so every sentence already keyed to `comments` still finds it', readDiagnosisKey('comments', 770017) === 'comments:770017');
+
+  // -- #18764: a DECORATED claim ENTERS the pool -----------------------------
+  //
+  // The two live records the escalation named, replayed OFFLINE and ⛔ never
+  // re-graded: they are another repository's cards and another seat's work.
+  // Ids, stamps and the load-bearing LINES are the real ones, read from the
+  // REST rows at 2026-09-17T22:02Z — ⚠️ both cards have since left the state
+  // they were read in, which is why the reading carries its time. The bodies
+  // below ADD the `Branch:` / `Clause-②` lines the real comments did not carry:
+  // without them the thread reads `claim-branch-unparsed` on BOTH sides of this
+  // change (measured), and the defect this battery pins is the one that only
+  // shows once a claim is otherwise complete.
+  battery('#18764: a DECORATED claim ENTERS the pool — ONE reading, and it is the sibling\'s');
+  const D64 = (id, at, body, login = 'os-sales') => ({ id, created_at: at, user: { login }, body });
+  const D64_BOLD = D64(5721120402, '2026-09-17T20:57:09Z', [
+    '**Claim:** card objectui#9660, by the `domain:spec` @ objectui execution seat, session `session_01UanLVj6xvbS6puBCewLr8L`.',
+    'Branch: `claude/issue-9660-named-test-invocation`',
+    'Clause-②: no',
+  ].join('\n'));
+  const D64_TICK = D64(5720184809, '2026-09-17T19:41:36Z', [
+    '`Claim:` card objectui#9717, by the `domain:spec` @ objectui execution seat, session `session_01UanLVj6xvbS6puBCewLr8L`.',
+    'Branch: `claude/issue-9717-doc-component-types`',
+    'Clause-②: no',
+  ].join('\n'));
+  // The older BARE claim, declaring the OPPOSITE value — so "the wrong carrier
+  // governs" is a WRONG VALUE here and not merely a missing one.
+  const D64_BARE_OLD = D64(5700000001, '2026-09-17T18:00:00Z', [
+    'Claim: the older BARE claim',
+    'Branch: `claude/issue-9660-older-bare`',
+    'Clause-②: yes',
+  ].join('\n'));
+  const D64_POOL = (rows) => claimCarrierSelection(rows).pool.map((r) => r.id).join(',');
+  const D64_RECORD = (rows) => {
+    const rec = pairInputRecord({ pr: 9999, card: 9660, cardComments: rows, headSha: 'offline' });
+    return { selected: [rec['claim.selected']].flat().join('\n'), rejected: [rec['claim.rejected']].flat().join('\n') };
+  };
+
+  t('⭐ a BOLD claim ENTERS the pool — the state it could not reach at all before', D64_POOL([D64_BOLD]) === String(D64_BOLD.id), D64_POOL([D64_BOLD]));
+  t('…and GOVERNS: the branch resolved is the one IT names', (claimCarrierSelection([D64_BOLD]).governing?.branches ?? []).join() === 'claude/issue-9660-named-test-invocation');
+  t('…and the declaration limb reads the `Clause-②` line OFF IT', cardDeclaration([D64_BOLD]).state === 'declared' && cardDeclaration([D64_BOLD]).value === 'no');
+  t('⛔ CONTROL — the CONSTANT is NOT widened: the raw marker still refuses that same body', CLAIM_COMMENT_MARKER.test(D64_BOLD.body) === false);
+  t('⭐ the BACKTICKED spelling is the same record, by the same reading', D64_POOL([D64_TICK]) === String(D64_TICK.id));
+  t('…with its own `Branch:` line resolved', (claimCarrierSelection([D64_TICK]).governing?.branches ?? []).join() === 'claude/issue-9717-doc-component-types');
+  t('…and its own declaration read', cardDeclaration([D64_TICK]).value === 'no');
+  t('⛔ CONTROL: the raw marker refuses the backticked body too', CLAIM_COMMENT_MARKER.test(D64_TICK.body) === false);
+  t('⭐ a DECORATED NEWER claim SUPERSEDES a BARE older one — the pool is the newest, not the readable one', D64_POOL([D64_BARE_OLD, D64_BOLD]) === String(D64_BOLD.id), D64_POOL([D64_BARE_OLD, D64_BOLD]));
+  t('…and the older record is LISTED, as SUPERSEDED rather than dropped', says(D64_RECORD([D64_BARE_OLD, D64_BOLD]).rejected, 'a SUPERSEDED claim') && says(D64_RECORD([D64_BARE_OLD, D64_BOLD]).rejected, String(D64_BARE_OLD.id)));
+  t('⭐ …and the VALUE the limb reads is the newer one', cardDeclaration([D64_BARE_OLD, D64_BOLD]).value === 'no');
+  t('⛔ CONTROL: the older record declares the OPPOSITE, so selecting the wrong carrier is a WRONG value, ⛔ not a missing one', cardDeclaration([D64_BARE_OLD]).value === 'yes');
+  t('the input record NAMES the decorated row it selected — by id and by date', says(D64_RECORD([D64_BOLD]).selected, String(D64_BOLD.id)) && says(D64_RECORD([D64_BOLD]).selected, '2026-09-17T20:57:09Z'));
+  t('⛔ CONTROL: the same thread read the other way says nobody claimed at all', says(D64_RECORD([D64(1, '2026-09-17T20:57:09Z', 'no claim on this line')]).selected, 'no comment on this thread carries'));
+
+  // The retraction index reads the SAME predicate, so a decorated claim is
+  // retractable by its own author — ⛔ never a record that can be written but
+  // never withdrawn.
+  const D64_RELEASE = D64(5721120999, '2026-09-17T21:30:00Z', 'Release: session `session_01UanLVj6xvbS6puBCewLr8L` — 去向 `pm:queue`');
+  t('⭐ the retraction index SEES a decorated claim — it is retractable by its own author', claimRetractions([D64_BOLD, D64_RELEASE]).has(D64_BOLD));
+  t('…and the pool then says every claim on the thread is RETRACTED, ⛔ not that none was written', says(D64_RECORD([D64_BOLD, D64_RELEASE]).selected, 'RETRACTED'));
+  t('⛔ CONTROL: a DIFFERENT author\'s release retracts nothing, decorated or not', claimRetractions([D64_BOLD, { ...D64_RELEASE, user: { login: 'os-other' } }]).size === 0);
+
+  // The refusals are the SIBLING's and are pinned here as still-refused: this
+  // file admits no spelling of its own, so a form the sibling names as a NEAR
+  // MISS must not become a claim by arriving through this door.
+  t('⛔ a markdown LIST ITEM is still not a claim — the shape the shared reading refuses to undecorate through', D64_POOL([D64(2, '2026-09-17T20:00:00Z', '- Claim: seat.\nBranch: `claude/issue-1-x`')]) === '');
+  t('⛔ a HEADING-style claim is still not one', D64_POOL([D64(3, '2026-09-17T20:00:00Z', '## Claim: seat.\nBranch: `claude/issue-1-x`')]) === '');
+  t('⛔ UNDERSCORE emphasis is still a NAMED near miss, ⛔ not a claim', markerMatches(CLAIM_COMMENT_MARKER, '__Claim:__ seat.') === false);
+  t('⛔ and the `Clause-②-correction:` comment does not enter the pool through the new door either', D64_POOL([FIXED_CORRECTION('no')]) === '' && markerMatches(CLAIM_COMMENT_MARKER, FIXED_CORRECTION('no').body) === false);
+  t('⛔ provably ADDITIVE: a bare claim this file already read reads exactly as before', claimCarrierSelection([CLAIM('Clause-②: no')]).pool.length === 1);
+
+  // ⭐ The file keeps TWO undecoration paths, and that is a measurement rather
+  // than an oversight: `undecorateRetractionLine` strips `_` and then every
+  // leading non-letter/non-digit character, which the shared stripper does not.
+  // 5 of 12 fixtures read differently. Both directions are load-bearing, so the
+  // pair below pins the divergence instead of quietly closing it.
+  t('⭐ the RETRACTION path still reads the sigil-led #18373 line — narrowing it to the shared reading would unland #18719', claimRetractions(RTX_18373).has(RTX_18373.find((r) => r.id === RTX_WITHDRAWN)));
+  t('⭐ …while the SHARED reading does not strip a leading sigil, so the two paths are ⛔ NOT interchangeable', markerMatches(CLAIM_COMMENT_MARKER, '🚨 Claim: PM loop round 1') === false);
+
+  // -- #18828: a SECOND `Claim:` by ONE seat, NAMED -------------------------
+  //
+  // The rule is this file's own (#17366 block, upstairs): the claim protocol
+  // forbids a second `Claim:`. What the reader did with one was RANK it —
+  // `rejected: 1 … a SUPERSEDED claim`, exit 0 — so a writer-side prohibition
+  // had no enforcing reader, and the record used the word for a transition the
+  // protocol DESIGNED about a line it says must not be written.
+  //
+  // ⭐ The pins below are per DIRECTION, and each one carries its own
+  // non-vacuity control: an assertion that some thread is silent proves nothing
+  // unless the SAME thread, with one thing changed, is named.
+  battery('#18828: a SECOND `Claim:` by ONE seat — the writer-side prohibition, finally READ');
+  const R28 = (id, at, login, lines) => ({ id, created_at: at, user: { login }, body: [].concat(lines).join('\n') });
+  const R28_SEAT = 'os-support-ai';
+  const R28_CLAIM = (id, at, login, o = {}) =>
+    R28(id, at, login, [
+      `${o.marker ?? 'Claim:'} PM loop round ${o.round ?? 1}`,
+      `Session: \`session_01DvvamiacK328idtBYJBxV3\``,
+      o.branch === null ? 'Branch: named in the PR body' : `Branch: \`${o.branch ?? 'claude/issue-4242-first'}\``,
+      'Clause-②: no',
+    ]);
+  const R28_A = R28_CLAIM(7100000001, '2026-09-18T01:00:00Z', R28_SEAT);
+  const R28_B = R28_CLAIM(7100000002, '2026-09-18T02:00:00Z', R28_SEAT, { round: 2, branch: 'claude/issue-4242-second' });
+  const R28_PAIR = (rows) => ({ pr: 18999, card: 18828, draft: true, prLabels: [], cardLabels: [], cardComments: rows });
+  const R28_CODES = (rows) => pairRows(R28_PAIR(rows)).map((r) => r.code);
+  const R28_ROW = (rows) => pairRows(R28_PAIR(rows)).find((r) => r.code === 'C8')?.text ?? '';
+  const R28_FIELD = (rows, key) => [pairInputRecord(R28_PAIR(rows))[key]].flat().join('\n');
+  const R28_IDS = (rows) => claimRepeats(rows).map((g) => g.ids.join('+')).join(' | ');
+
+  // (a) the shape the card measured five times over.
+  t('⭐ (a) two LIVE claims by ONE seat, no retraction between them — ONE named group carrying BOTH ids', R28_IDS([R28_A, R28_B]) === '7100000001+7100000002', R28_IDS([R28_A, R28_B]));
+  t('…and `--pair` earns a C8 FINDING, which is its exit 4', R28_CODES([R28_A, R28_B]).includes('C8'), R28_CODES([R28_A, R28_B]).join());
+  t('⛔ …a VERDICT and never a NOTE: the code lives in `pairRows`, and `pairNotes` does not carry it', pairNotes(R28_PAIR([R28_A, R28_B])).every((n) => n.code !== 'C8') && EXIT_PAIR_ADVERSE === 4 && EXIT_PAIR_ADVERSE !== EXIT_OK);
+  t('…the ROW names the author and BOTH comment ids', says(R28_ROW([R28_A, R28_B]), R28_SEAT) && says(R28_ROW([R28_A, R28_B]), '7100000001') && says(R28_ROW([R28_A, R28_B]), '7100000002'));
+  t('…and it names BOTH sanctioned repairs — the correction key and the `Release:`', says(R28_ROW([R28_A, R28_B]), 'Clause-②-correction') && says(R28_ROW([R28_A, R28_B]), '`Release:`'));
+  t('…and the input record READS the same two ids, beside the carrier it selected', says(R28_FIELD([R28_A, R28_B], 'claim.repeat'), '7100000001') && says(R28_FIELD([R28_A, R28_B], 'claim.repeat'), '7100000002'));
+  t('⛔ CONTROL: ONE claim by that same seat is silent — no group, no row, and the record says so', R28_IDS([R28_A]) === '' && !R28_CODES([R28_A]).includes('C8') && says(R28_FIELD([R28_A], 'claim.repeat'), 'none — no author holds'));
+  t('⛔ CONTROL: the SELECTOR did not move — the newest still governs and the older is still listed SUPERSEDED', claimCarrierSelection([R28_A, R28_B]).pool.map((r) => r.id).join() === '7100000002' && says(R28_FIELD([R28_A, R28_B], 'claim.rejected'), 'a SUPERSEDED claim'));
+  t('⛔ …and the refusal is an ADDITIONAL reading, ⛔ not a new selector: same pool, same rejected count as before', claimCarrierSelection([R28_A, R28_B]).rejected.length === 1 && claimCarrierSelection([R28_A, R28_B]).claims.length === 2 && CLAIM_SELECTION_RULE.includes('the GOVERNING claim'));
+
+  // (b) the p1 shape — REPORTED in the filing round, ⛔ not refused here.
+  const R28_OTHER = R28_CLAIM(7100000003, '2026-09-18T02:00:00Z', 'os-litant', { round: 2, branch: 'claude/issue-4242-second' });
+  t('⭐ (b) two live claims by DIFFERENT authors ⇒ ⛔ NOT this state — an ownership transfer is a separate reading', R28_IDS([R28_A, R28_OTHER]) === '' && !R28_CODES([R28_A, R28_OTHER]).includes('C8'));
+  t('…and that thread still reads exactly as it did: the newer governs, the older is SUPERSEDED, exit 0', claimCarrierSelection([R28_A, R28_OTHER]).pool.map((r) => r.id).join() === '7100000003' && says(R28_FIELD([R28_A, R28_OTHER], 'claim.rejected'), 'a SUPERSEDED claim'));
+  t('⛔ CONTROL: make those two authors ONE and the same thread is named — the author test is what decides', R28_IDS([R28_A, { ...R28_OTHER, user: { login: R28_SEAT } }]) === '7100000001+7100000003');
+  t('…and the rule PRINTED with the row says so in as many words, so a reader is not left to infer it', CLAIM_REPEAT_RULE.includes('DIFFERENT authors are not this state'));
+
+  // (c) MEMBERSHIP first — a re-claim after a release is the protocol working.
+  const R28_RELEASE = R28(7100000010, '2026-09-18T01:30:00Z', R28_SEAT, 'Release: session `session_01DvvamiacK328idtBYJBxV3`, cause: 本卡改派, 去向: `pm:queue`');
+  const R28_NAMED_RETRACTION = R28(7100000011, '2026-09-18T01:30:00Z', R28_SEAT, '撤回本席的认领 `7100000001` —— 本卡改派');
+  t('⭐ (c) a fresh claim AFTER a `Release:` of the first ⇒ silent — a retracted claim does not stand', R28_IDS([R28_A, R28_RELEASE, R28_B]) === '' && !R28_CODES([R28_A, R28_RELEASE, R28_B]).includes('C8'));
+  t('…and the first is still listed RETRACTED, with the 「⛔ NOT superseded」 wording byte-unchanged', says(R28_FIELD([R28_A, R28_RELEASE, R28_B], 'claim.rejected'), 'RETRACTED') && says(R28_FIELD([R28_A, R28_RELEASE, R28_B], 'claim.rejected'), '⛔ NOT superseded: a withdrawn claim is not a candidate for governance at all, whatever its date'));
+  t('…and the id-naming retraction channel reads the same way — ⛔ not a `Release:`-only rule', R28_IDS([R28_A, R28_NAMED_RETRACTION, R28_B]) === '');
+  t('⛔ CONTROL: drop the retraction and those same two claims are named — the release is what clears it', R28_IDS([R28_A, R28_B]) === '7100000001+7100000002');
+  t('⭐ the repair is PERFORMABLE after the fact: `Release:` then ONE fresh claim leaves exactly one standing', R28_IDS([R28_A, R28_B, R28(7100000012, '2026-09-18T03:00:00Z', R28_SEAT, 'Release: session `x`, cause: 修复本席的双认领, 去向: `pm:queue`'), R28_CLAIM(7100000013, '2026-09-18T04:00:00Z', R28_SEAT, { round: 3 })]) === '');
+
+  // (d) the sanctioned exit stays the sanctioned exit.
+  const R28_CORRECTION = R28(7100000020, '2026-09-18T02:00:00Z', R28_SEAT, [
+    'Clause-②-correction: 7100000001',
+    'Clause-②: no',
+    'Session: `session_01DvvamiacK328idtBYJBxV3`',
+  ]);
+  t('⭐ (d) a `Clause-②-correction:` as the LATER row is not a claim — silent, and the pool never saw it', R28_IDS([R28_A, R28_CORRECTION]) === '' && !R28_CODES([R28_A, R28_CORRECTION]).includes('C8') && markerMatches(CLAIM_COMMENT_MARKER, R28_CORRECTION.body) === false);
+  t('…and the #17366 exit still WORKS: the declaration is read off the correction, untouched by this row', cardDeclaration([R28_A, R28_CORRECTION]).state === 'declared' && cardDeclaration([R28_A, R28_CORRECTION]).correctionNote !== undefined);
+  t('⛔ CONTROL: write that same correction as a SECOND `Claim:` instead and it is named — which is the whole card', R28_IDS([R28_A, R28_B]) !== '' && says(R28_ROW([R28_A, R28_B]), 'never enters the pool'));
+
+  // (e) ONE reading of the marker, and it is the sibling's (#18764).
+  const R28_BOLD = R28_CLAIM(7100000030, '2026-09-18T02:00:00Z', R28_SEAT, { marker: '**Claim:**', round: 2 });
+  const R28_TICK = R28_CLAIM(7100000031, '2026-09-18T02:00:00Z', R28_SEAT, { marker: '`Claim:`', round: 2 });
+  t('⭐ (e) a DECORATED second claim (`**Claim:**`) is counted exactly as a bare one', R28_IDS([R28_A, R28_BOLD]) === '7100000001+7100000030');
+  t('…and the backticked spelling with it', R28_IDS([R28_A, R28_TICK]) === '7100000001+7100000031');
+  t('⛔ CONTROL: the raw constant REFUSES both bodies — the counting is the sibling\'s ONE reading, ⛔ not a second reader here', CLAIM_COMMENT_MARKER.test(R28_BOLD.body) === false && CLAIM_COMMENT_MARKER.test(R28_TICK.body) === false && markerMatches(CLAIM_COMMENT_MARKER, R28_BOLD.body) === true);
+  t('⛔ CONTROL: a markdown LIST ITEM is not a claim, so it is not a SECOND one either — the refusals are the sibling\'s', R28_IDS([R28_A, R28(7100000032, '2026-09-18T02:00:00Z', R28_SEAT, '- Claim: PM loop round 2\nBranch: `claude/issue-4242-second`')]) === '');
+
+  // (f) the prohibition is on the WRITING, ⛔ not on the parse.
+  const R28_UNPARSED = R28_CLAIM(7100000040, '2026-09-18T02:00:00Z', R28_SEAT, { round: 2, branch: null });
+  t('⭐ (f) a second claim whose `Branch:` parses to ZERO branches is still a second claim', R28_IDS([R28_A, R28_UNPARSED]) === '7100000001+7100000040');
+  t('…and it is named even though governance itself is unresolvable on that thread', cardDeclaration([R28_A, R28_UNPARSED]).state === 'claim-branch-unparsed' && R28_CODES([R28_A, R28_UNPARSED]).includes('C8'));
+  t('⛔ CONTROL: give that same row a parseable branch and the two are named just the same — the parse fires nothing', R28_IDS([R28_A, { ...R28_UNPARSED, body: R28_B.body }]) === '7100000001+7100000040');
+
+  // (g) one refusal per seat, ⛔ never one per pair.
+  const R28_C = R28_CLAIM(7100000050, '2026-09-18T03:00:00Z', R28_SEAT, { round: 3, branch: 'claude/issue-4242-third' });
+  t('⭐ (g) THREE claims by one seat ⇒ ONE refusal naming all three', claimRepeats([R28_A, R28_B, R28_C]).length === 1 && R28_IDS([R28_A, R28_B, R28_C]) === '7100000001+7100000002+7100000050');
+  t('…and exactly ONE C8 row on the pair — ⛔ not one per ordered pair, which would have been three', R28_CODES([R28_A, R28_B, R28_C]).filter((c) => c === 'C8').length === 1);
+  t('…with all three ids in the sentence a reader is handed', says(R28_ROW([R28_A, R28_B, R28_C]), '7100000001') && says(R28_ROW([R28_A, R28_B, R28_C]), '7100000002') && says(R28_ROW([R28_A, R28_B, R28_C]), '7100000050'));
+  t('⛔ CONTROL: retract two of the three and one standing claim is left — silent', R28_IDS([R28_A, R28_B, R28(7100000051, '2026-09-18T02:30:00Z', R28_SEAT, 'Release: session `x`, cause: y, 去向: `pm:queue`'), R28_C]) === '');
+
+  // (h) fail closed on an unattributable row — the way `claimRetractions` does.
+  const R28_NO_USER = { id: 7100000060, created_at: '2026-09-18T02:00:00Z', body: R28_B.body };
+  t('⭐ (h) an unattributable LATER row is never counted — ⛔ `null` is a refusal, never a wildcard', R28_IDS([R28_A, R28_NO_USER]) === '' && !R28_CODES([R28_A, R28_NO_USER]).includes('C8'));
+  t('…and an unattributable FIRST row is not counted either — both sides fail closed', R28_IDS([{ id: 7100000061, created_at: '2026-09-18T01:00:00Z', body: R28_A.body }, R28_B]) === '');
+  t('…and TWO unattributable rows are not ONE seat either — ⛔ `null` never groups with `null`', R28_IDS([{ id: 7100000062, created_at: '2026-09-18T01:00:00Z', body: R28_A.body }, { id: 7100000063, created_at: '2026-09-18T02:00:00Z', body: R28_B.body }]) === '');
+  t('…and the direction is STATED in the rule the row prints, so silence here is readable rather than inferred', CLAIM_REPEAT_RULE.includes('unattributable row is never counted'));
+  t('⛔ CONTROL: give that same row a login and it is named — the attribution is what was missing', R28_IDS([R28_A, { ...R28_NO_USER, user: { login: R28_SEAT } }]) === '7100000001+7100000060');
+
+  // (i) the seat's own shape: a later comment that QUOTES or DISCUSSES the word.
+  const R28_QUOTE = R28(7100000070, '2026-09-18T02:00:00Z', R28_SEAT, [
+    '⚠️ 本席上一条 `Claim:` 的申报行写错了,已另发 `Clause-②-correction:` 更正,⛔ 未再发一条认领。',
+    '      "question": "the governing-claim instrument reads a second Claim: as a SUPERSESSION",',
+  ]);
+  const R28_ROUND_REPORT = R28(7100000071, '2026-09-18T03:00:00Z', R28_SEAT, [
+    '## 轮次报告 — `domain:cli` 执行 PM 席',
+    '- 本轮认领 3 张卡;每张 Claim: 行均由本席发出。',
+  ]);
+  t('⭐ (i) a later same-author comment that QUOTES the word is not a claim — the marker is read at LINE START', R28_IDS([R28_A, R28_QUOTE]) === '' && !R28_CODES([R28_A, R28_QUOTE]).includes('C8'));
+  t('…and a round report mentioning the word mid-line is not one either', R28_IDS([R28_A, R28_ROUND_REPORT]) === '');
+  t('…both of them together with the claim still leave exactly one standing claim on the thread', claimCarrierSelection([R28_A, R28_QUOTE, R28_ROUND_REPORT]).live.length === 1);
+  t('⛔ CONTROL: move that same word to the OPENING of a line and it IS a second claim', R28_IDS([R28_A, R28(7100000072, '2026-09-18T02:00:00Z', R28_SEAT, 'Claim: 本席重新认领\nBranch: `claude/issue-4242-second`')]) === '7100000001+7100000072');
+
+  // The unread and empty halves — ⛔ never a clean reading.
+  t('⛔ an UNREAD thread names nobody and reads nothing', claimRepeats(null).length === 0 && c8SecondClaimSameSeat({ pr: 1, card: 2, cardComments: null }) === null);
+  t('…and the record SAYS unread rather than reporting a clean thread', says(R28_FIELD(null, 'claim.repeat'), 'UNREAD'));
+  t('⛔ an EMPTY thread is silent, and says the other sentence', claimRepeats([]).length === 0 && says(R28_FIELD([], 'claim.repeat'), 'none — no author holds'));
+
+  // ⭐ The LIVE census, replayed from the real rows the filing card named.
+  // Population: both boards this gate reads, at 2026-09-18T00:05Z — 533 open
+  // cards in `objectstack-ai/objectstack`, 416 in `objectstack-ai/objectui`,
+  // 167 of them carrying at least one claim comment. The five below are the
+  // measured instances on the objectstack board, all by one seat; #18559 is the
+  // same seat on the same shift doing it the sanctioned way.
+  const R28_LIVE = (id, at, head) => R28(id, at, R28_SEAT, [
+    head,
+    '',
+    'Claim: session `session_01DvvamiacK328idtBYJBxV3`',
+    'Branch: `claude/issue-18540-actions-native-error-leak`',
+    'Clause-②: no',
+  ]);
+  const R28_LIVE_CARDS = [
+    [18540, R28_LIVE(5719079496, '2026-09-17T18:09:58Z', '## 认领 — `domain:cli` 执行 PM 席'), R28_LIVE(5720020876, '2026-09-17T19:28:06Z', '## 认领(补正,取代 `5719079496` 的申报行)— `domain:cli` 执行 PM 席')],
+    [18677, R28_LIVE(5720104138, '2026-09-17T19:34:43Z', '## 认领'), R28_LIVE(5720190458, '2026-09-17T19:42:03Z', '## 认领(补正)')],
+    [18748, R28_LIVE(5720212595, '2026-09-17T19:43:49Z', '## 认领'), R28_LIVE(5720888122, '2026-09-17T20:36:49Z', '## 认领(补正)')],
+    [18651, R28_LIVE(5721424769, '2026-09-17T21:23:22Z', '## 认领'), R28_LIVE(5721997887, '2026-09-17T22:20:07Z', '## 认领(补正)')],
+    [18778, R28_LIVE(5721425530, '2026-09-17T21:23:25Z', '## 认领'), R28_LIVE(5722028692, '2026-09-17T22:23:32Z', '## 认领(补正)')],
+  ];
+  t('⭐ the five measured instances (2026-09-18T00:05Z) are ALL named — ⛔ five green readings before this row', R28_LIVE_CARDS.every(([, a, b]) => claimRepeats([a, b]).length === 1));
+  t('…each naming its own two comment ids and the one seat that wrote them', R28_LIVE_CARDS.every(([, a, b]) => R28_IDS([a, b]) === `${a.id}+${b.id}` && claimRepeats([a, b])[0]?.author === R28_SEAT), R28_LIVE_CARDS.map(([n, a, b]) => `${n}:${R28_IDS([a, b])}`).join(' '));
+  t('⛔ …and every one of them read GREEN before, as a SUPERSESSION — the measurement this row answers', R28_LIVE_CARDS.every(([, a, b]) => says(R28_FIELD([a, b], 'claim.rejected'), 'a SUPERSEDED claim')));
+  t('⛔ CONTROL #18559 — the same seat, same shift, the SANCTIONED shape: one claim plus a correction ⇒ silent', (() => {
+    const claim = R28_LIVE(5721425131, '2026-09-17T21:23:24Z', '## 认领 — `domain:cli` 执行 PM 席 #6024');
+    const correction = R28(5721779100, '2026-09-17T21:57:34Z', R28_SEAT, ['Clause-②-correction: 5721425131', 'Clause-②: no', 'Session: `session_01DvvamiacK328idtBYJBxV3`']);
+    return claimRepeats([claim, correction]).length === 0 && !R28_CODES([claim, correction]).includes('C8');
+  })());
+  t('⭐ …and that control IS the repair this row prints, which is why the row prints it', says(R28_ROW([R28_A, R28_B]), 'Clause-②-correction: <claim comment id>'));
+
+  // ONE derivation — the record and the verdict cannot disagree. ⛔ Every
+  // assertion below reads the group defensively: under an ablation the pin
+  // must FAIL, and a pin that THROWS aborts the run and names nothing.
+  t('the repeat field is DECLARED in the pair roster, so it renders on every block, filled or not', INPUT_RECORD_PAIR_FIELDS.includes('claim.repeat'));
+  t('⭐ ONE derivation: the ids the ROW names are the ids the RECORD names', (claimRepeats([R28_A, R28_B])[0]?.ids ?? []).length === 2 && (claimRepeats([R28_A, R28_B])[0]?.ids ?? []).every((id) => says(R28_ROW([R28_A, R28_B]), id) && says(R28_FIELD([R28_A, R28_B], 'claim.repeat'), id)));
+  t('⛔ the row is not in the sweep\'s NOTE family and the record carries no verdict word for it', !says(R28_FIELD([R28_A, R28_B], 'claim.repeat'), 'exit 4') && says(R28_FIELD([R28_A, R28_B], 'claim.repeat'), 'row C8 is the verdict'));
+
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -6581,7 +8701,13 @@ export function selfTest() {
       + 'refusal, the board provenance line, the claim whose `Branch:` line parses to ZERO '
       + 'branches — reported as an unresolvable carrier rather than discarded, the key-INITIAL '
       + 'line that QUOTES the spelling held apart from one that declares a value in BOTH halves '
-      + 'of that property — and the exit register).',
+      + 'of that property, the input record whose field roster is the same on exit 0, on exit 4 '
+      + 'and on a refusal — with the selected carrier, its body fingerprint and the rejected '
+      + 'candidates each stated, the DECORATED claim that enters the pool and governs through '
+      + 'the sibling\'s one reading — the constant unwidened, and the file\'s two undecoration '
+      + 'paths pinned as the two jobs they are, the SECOND `Claim:` by one seat named as the state '
+      + 'the protocol forbids writing rather than ranked as a supersession — per direction, with a '
+      + 'non-vacuity control each and the five measured instances replayed — and the exit register).',
   );
 
   selfTestReachedVerdict = true;
@@ -6783,7 +8909,7 @@ export function boardProvenanceLine({ repo, source }) {
 
 async function main(argv) {
   if (flagIndex(argv, '--self-test') !== -1) {
-    const selfTestCode = selfTest();
+    const selfTestCode = await selfTest();
     if (!selfTestReachedVerdict) {
       console.error(
         '\n✗ check-clause2-carriers self-test: selfTest() returned without reaching its verdict,\n'
@@ -6836,6 +8962,40 @@ async function main(argv) {
   // said which board it was about -- the state the filing seat was in.
   console.error(boardProvenanceLine(repoRes));
 
+  // ⭐ Everything from here on runs inside ONE try/finally, so the input record
+  // (#18456) and the read-path report reach a reader on EVERY exit past the
+  // board -- a usage refusal on `--pair-json` included. A block that printed
+  // only beside a verdict would be missing from exactly the refusals two seats
+  // most need to compare.
+  let record = null;
+  const pairFlagIdx = flagIndex(argv, '--pair');
+  const mode = pairFlagIdx === -1
+    ? (flagIndex(argv, '--json') === -1 ? 'sweep' : 'sweep --json')
+    : `--pair ${argv[pairFlagIdx + 1] ?? '(no value)'}`;
+  try {
+    return await runBoard(argv, repo, repoRes, (built) => { record = built; });
+  } finally {
+    console.error(renderReadPathReport(readPathState));
+    for (const line of renderInputRecord(
+      record ?? buildInputRecord({
+        repoRes, mode, state: readPathState, pairs: null, self: selfProvenance(), now: new Date(),
+      }),
+    )) {
+      console.error(line);
+    }
+  }
+}
+
+/**
+ * The board half of `main` -- everything that needs a resolved repo.
+ *
+ * Split out for one reason: the input record and the read-path report are owed
+ * on every exit below, and a `finally` around the whole of it is the only shape
+ * that cannot be lost by a `return` added later (#18456). `keepRecord` hands
+ * the built record back so the caller's `finally` prints the SAME one `--json`
+ * emitted rather than a second reading of the same run.
+ */
+async function runBoard(argv, repo, repoRes, keepRecord) {
   const pairFlag = flagIndex(argv, '--pair');
   let only = null;
   if (pairFlag !== -1) {
@@ -6889,9 +9049,18 @@ async function main(argv) {
   }
 
   let swept = 0;
+  const mode = only === null
+    ? (flagIndex(argv, '--json') === -1 ? 'sweep' : 'sweep --json')
+    : `--pair ${only}`;
   try {
     const { pulls, pairs } = await gather(repo, only, reader, { landingReads: only !== null });
     swept = pairs.length;
+    // Built ONCE, after every read this run makes and before anything is
+    // printed: `--json` emits it and the caller's `finally` renders it.
+    const built = buildInputRecord({
+      repoRes, mode, state: readPathState, pairs, self: selfProvenance(), now: new Date(),
+    });
+    keepRecord(built);
     if (only !== null) {
       if (pairs.length === 0) {
         console.error(
@@ -6913,30 +9082,30 @@ async function main(argv) {
       }
       return worst;
     }
-    return renderSweep({ repo, pulls, pairs }, { json: flagIndex(argv, '--json') !== -1 });
+    return renderSweep({ repo, pulls, pairs, inputs: built }, { json: flagIndex(argv, '--json') !== -1 });
   } catch (err) {
     return reportTransportFailure(err, { swept });
-  } finally {
-    // On stderr in every mode, including `--json`: the budget is a fact about
-    // the RUN, and folding it into the machine channel would change a shape
-    // round reports already read. A verdict that does not say which path
-    // answered is a verdict a seat cannot reproduce.
-    console.error(renderReadPathReport(readPathState));
   }
 }
 
 if (isEntrypoint(import.meta.url)) {
   if (flagIndex(process.argv.slice(2), '--self-test') !== -1) {
-    const selfTestCode = selfTest();
-    if (!selfTestReachedVerdict) {
-      console.error(
-        '\n✗ check-clause2-carriers self-test: selfTest() returned without reaching its verdict,\n'
-          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
-          + 'that never finished as a self-test that passed.\n',
-      );
-      process.exit(1);
-    }
-    process.exit(selfTestCode);
+    // ⭐ `.then`, ⛔ never a top-level `await`. `selfTest` became async to take a
+    // LAZY import of `check-governed-queue-guard.mjs` for the cross-tool pin
+    // (#18701), and that guard's own docblock records what a top-level await in
+    // an entrypoint dispatch costs on this cycle: node exits 13 with "Detected
+    // unsettled top-level await" and BOTH modules stop loading.
+    selfTest().then((selfTestCode) => {
+      if (!selfTestReachedVerdict) {
+        console.error(
+          '\n✗ check-clause2-carriers self-test: selfTest() returned without reaching its verdict,\n'
+            + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+            + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+      }
+      process.exit(selfTestCode);
+    });
   } else {
     // ⭐ Answered HERE, above the proxy re-exec, so neither usage nor a refused
     // argument spawns a child process or opens a socket. `main` judges both

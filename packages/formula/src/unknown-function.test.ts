@@ -71,10 +71,36 @@ describe('firstUnknownFunctionCall — what it REFUSES (#13594)', () => {
     expect(found?.detail).toContain("found no matching overload for 'dyn.nosuchmethod(string)'");
   });
 
-  it('the objectui#4421 predicate — the authored shape this ruling came from', () => {
-    // `current_user` is a declared SCOPE_ROOT, so the unbound-root check cannot
-    // structurally see this one: existence is the only check that can.
-    expect(firstUnknownFunctionCall('current_user.can(object, verb)')?.name).toBe('can');
+  it('the objectui#4421 SHAPE still lands here — with an invented method, now that `can` is real', () => {
+    // RE-POINTED, not deleted (batch #147 item 5, letter A). The case pins a
+    // STRUCTURAL property and the property is unchanged: `current_user` is a
+    // declared SCOPE_ROOT, so the unbound-root check cannot see a method call
+    // hung off it, and existence is the only check that can. What changed is the
+    // EXAMPLE — `can` is registered now (receiver-only) — so the shape is
+    // carried by a method that really is invented. Deleting the case would have
+    // thrown the coverage away with the example.
+    expect(firstUnknownFunctionCall('current_user.canApprove(object, verb)')?.name)
+      .toBe('canApprove');
+  });
+
+  it('`can` itself is REGISTERED now — receiver form resolves, bare form is a call-FORM fault', () => {
+    // The other half of the same re-pointing, and the reason the case above had
+    // to move rather than go: this is what `can` answers today.
+    //
+    // Receiver form: registered, so there is no existence verdict at all.
+    expect(firstUnknownFunctionCall('current_user.can(object, verb)')).toBeNull();
+    // Bare form: still faults (registered receiver-only), but the NAME exists,
+    // so this oracle reports nothing — exactly as it already does for `split`,
+    // pinned in the silence table below. Existence is not call position (ruling
+    // refinement 3).
+    expect(firstUnknownFunctionCall('can(object, verb)')).toBeNull();
+    // …and the control that the bare form really does still fault, so the line
+    // above is silence about a live fault rather than about nothing.
+    const bare = celEngine.compile('can(object, verb)');
+    expect(bare.ok).toBe(false);
+    expect(bare.ok === false && bare.error.kind).toBe('type');
+    expect(bare.ok === false && bare.error.message)
+      .toContain("found no matching overload for 'can(");
   });
 
   it('a typo one edit away from a real function is still just unknown — no suggestion field', () => {

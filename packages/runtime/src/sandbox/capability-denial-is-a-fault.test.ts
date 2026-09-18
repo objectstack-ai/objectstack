@@ -67,12 +67,16 @@ describe('[#4431] an in-VM capability denial reaches the classifier as a FAULT',
     // invisible to gateway error rates, APM and alerting.
     expect(err.innerMessage).toBeUndefined();
 
-    // The debug prefix must not reach the client. The runner's own doc says
-    // only the business message should — and a sandbox fault has none, so what
-    // the client sees is this text, minus the prefix.
+    // The debug prefix must not reach the OPERATOR'S LOG line either. Every
+    // assertion in this block is about the THROWN error — what the runner hands
+    // the classifier and what `domains/actions.ts` prints — never about the wire.
+    // [#18540] Since the door's unexpected-fault terminal answers
+    // `INTERNAL_ERROR_MESSAGE`, what the CLIENT sees for this denial is
+    // `Internal server error`, the same sentence `/data` answers; this text is
+    // the diagnostic half of that split, and it has to stay readable.
     expect(err.message).not.toContain('SandboxError:');
-    // …while the actionable content survives: which capability, whose, and the
-    // call that tripped the gate.
+    // …while the actionable content survives for the log: which capability,
+    // whose, and the call that tripped the gate.
     expect(err.message).toContain("capability 'api.read' not granted");
     expect(err.message).toContain("action 'rc1_crash_probe'");
     expect(err.message).toContain("ctx.api.object('showcase_task').count");

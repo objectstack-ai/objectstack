@@ -333,8 +333,31 @@ export function printSuccess(msg: string) {
   console.log(chalk.green(`  ✓ ${msg}`));
 }
 
+/** The `  ⚠ <msg>` line both warning printers render — one glyph, one source. */
+function warningLine(msg: string): string {
+  return chalk.yellow(`  ⚠ ${msg}`);
+}
+
 export function printWarning(msg: string) {
-  console.log(chalk.yellow(`  ⚠ ${msg}`));
+  console.log(warningLine(msg));
+}
+
+/**
+ * {@link printWarning}'s line, on **stderr** — the advisory counterpart of
+ * {@link printErrorToStderr}, for the same reason and the same callers.
+ *
+ * A shared helper that drops authored input has to say so, and it has no flag
+ * to branch on: `loadConfig()` is handed no `--json` (its own header says so),
+ * so the choice is stdout — which `--json` reserves for the machine — or
+ * stderr. A non-fatal finding cannot take {@link printErrorToStderr}'s `✗`
+ * without reading as a failed run, so the warning severity gets its own door
+ * rather than borrowing the error one.
+ *
+ * ⚠️ Not a general replacement for {@link printWarning}: a command that has
+ * already decided it is rendering the text face keeps writing to stdout.
+ */
+export function printWarningToStderr(msg: string) {
+  console.error(warningLine(msg));
 }
 
 /** The `  ✗ <msg>` line both error printers render — one glyph, one source. */

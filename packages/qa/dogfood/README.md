@@ -46,7 +46,11 @@ the generic verifier cannot auto-derive.
    green-on-the-bug test is not a gate — and an ablation run against a stale `dist/`
    is exactly that, silently: it certifies an assertion that may never be able to
    fail, and no later CI run can expose it (CI builds correctly, so it stays green
-   there forever). Prove the mutation actually reached the built artifact before
+   there forever). Make the revert itself through
+   `node scripts/ablation-replace.mjs --file <path> --anchor <text> --replacement <text> -- <cmd>`
+   rather than `sed -i` / `perl -i`: the anchor must hit, the write and the restore are
+   verified against the disk, and a mutation that did not land exits non-zero instead of
+   handing you a green run. Prove the mutation actually reached the built artifact before
    trusting the colour: `node scripts/ablation-dist-preflight.mjs <pkg> '<marker>'`
    (`--absent` when the revert deletes a guard rather than adding something
    identifiable) exits non-zero unless it does.

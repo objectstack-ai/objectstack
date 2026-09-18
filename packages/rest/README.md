@@ -23,10 +23,12 @@ import { createRestApiPlugin } from '@objectstack/rest';
 
 const kernel = new ObjectKernel();
 
-kernel.use(createRestApiPlugin({
+await kernel.use(createRestApiPlugin({
   api: {
-    version: 'v1',
-    basePath: '/api',
+    api: {
+      version: 'v1',
+      basePath: '/api',
+    },
   },
 }));
 
@@ -38,8 +40,10 @@ await kernel.bootstrap();
 ```typescript
 import { RestServer } from '@objectstack/rest';
 
-const server = new RestServer(protocol, config);
-server.registerRoutes(dispatcher);
+const server = new RestServer(httpServer, protocol, {
+  api: { version: 'v1', basePath: '/api' },
+});
+server.registerRoutes();
 ```
 
 ### Custom routes via `RouteManager`
@@ -47,8 +51,14 @@ server.registerRoutes(dispatcher);
 ```typescript
 import { RouteManager } from '@objectstack/rest';
 
-const routes = new RouteManager();
-routes.register({ method: 'GET', path: '/custom', handler });
+const routes = new RouteManager(httpServer);
+routes.register({
+  method: 'GET',
+  path: '/custom',
+  handler: async (req, res) => {
+    res.json({ ok: true });
+  },
+});
 ```
 
 ## Generated endpoints

@@ -1,6 +1,10 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+// The closed list of refinements that reach the published JSON Schema (#18670
+// item 2). Both rules below are DECLARED through it, so `json-schema/**` states
+// them instead of being silently wider than this file.
+import { NON_BLANK_STRING, requiredOneOf } from './refinement-projection';
 
 /**
  * # Expression Protocol
@@ -98,7 +102,7 @@ export const ExpressionSchema = z.object({
   ast: z.unknown().optional(),
   /** Optional authorship metadata. */
   meta: ExpressionMetaSchema.optional(),
-}).refine(e => e.source !== undefined || e.ast !== undefined, {
+}).refine(requiredOneOf(['source', 'ast']), {
   message: 'Expression requires at least one of `source` or `ast`',
 });
 export type Expression = z.input<typeof ExpressionSchema>;
@@ -165,7 +169,7 @@ export const EvaluatedExpressionSchema = ExpressionSchema.safeExtend({
    * the engine evaluates, and `ast` alone cannot be run.
    */
   source: z.string({ error: () => EVALUATED_EXPRESSION_SOURCE_REQUIRED })
-    .refine((source) => source.trim().length > 0, { message: EVALUATED_EXPRESSION_SOURCE_REQUIRED }),
+    .refine(NON_BLANK_STRING, { message: EVALUATED_EXPRESSION_SOURCE_REQUIRED }),
 });
 export type EvaluatedExpression = z.input<typeof EvaluatedExpressionSchema>;
 export type EvaluatedExpressionParsed = z.infer<typeof EvaluatedExpressionSchema>;
@@ -258,7 +262,7 @@ function evaluatedExpressionInputRefusal(input: unknown): string | undefined {
  */
 export const EvaluatedExpressionInputSchema = z.union([
   z.string()
-    .refine((source) => source.trim().length > 0, { message: EVALUATED_EXPRESSION_SOURCE_REQUIRED })
+    .refine(NON_BLANK_STRING, { message: EVALUATED_EXPRESSION_SOURCE_REQUIRED })
     .transform((source): EvaluatedExpression => ({ dialect: 'cel', source })),
   EvaluatedExpressionSchema,
 ], { error: (issue) => evaluatedExpressionInputRefusal(issue.input) });
@@ -333,7 +337,7 @@ export const TYPED_EXPRESSION_DIALECT_ONLY: Readonly<Record<TypedExpressionDiale
  */
 function typedExpressionStringArm<D extends TypedExpressionDialect>(dialect: D) {
   return z.string()
-    .refine((source) => source.trim().length > 0, { message: TYPED_EXPRESSION_SOURCE_REQUIRED[dialect] })
+    .refine(NON_BLANK_STRING, { message: TYPED_EXPRESSION_SOURCE_REQUIRED[dialect] })
     .transform((source) => ({ dialect, source }));
 }
 

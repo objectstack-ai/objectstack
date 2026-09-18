@@ -2336,9 +2336,42 @@ describe('record-lock hook — predicate (multi) updates (#4778)', () => {
     await expect(predicateUpdate(undefined, { amount: 999 })).rejects.toThrow(/RECORD_LOCKED/);
   });
 
-  it('names the locked record and its object in the refusal', async () => {
-    await expect(predicateUpdate({ stage: 'new' }, { amount: 999 }))
-      .rejects.toThrow(/record 'opp1' of 'opportunity' is locked/);
+  /**
+   * [#18153] This used to assert `record 'opp1' of 'opportunity' is locked` —
+   * the defect itself: the sentence the console copies into a toast carried the
+   * internal record id and the object's API name. It now names the record the
+   * way its object declares it, and the two identifiers move to the console.
+   *
+   * The whole input to that sentence is the pair set up here: ONE registry read
+   * (`getSchema`, in-memory) and the pre-image the real engine already binds on
+   * `ctx.previous`. No read was added on the deny path.
+   */
+  it('names the locked record by its LABEL and demotes the id to the console (#18153)', async () => {
+    (engine as any).getSchema = (object: string) => (object === 'opportunity'
+      ? {
+          name: 'opportunity', label: 'Opportunity', nameField: 'name',
+          fields: { id: { type: 'text' }, name: { type: 'text' } },
+        }
+      : undefined);
+    unbindAllHooks(engine as any);
+    const info: string[] = [];
+    bindApprovalLockHook(engine as any, { warn: () => {}, info: (m: any) => info.push(String(m)) });
+    const previous = { id: 'opp1', name: 'Acme renewal' };
+
+    let body = '';
+    try {
+      await predicateUpdate({ stage: 'new' }, { amount: 999 }, { previous });
+    } catch (e: any) { body = String(e?.message); }
+
+    expect(body).toBe(
+      "RECORD_LOCKED: Opportunity 'Acme renewal' is locked while an approval is in progress, " +
+      'and cannot be edited until that approval is complete',
+    );
+    // Stated as an absence as well, because that is what the card asked for.
+    expect(body).not.toContain('opp1');
+    expect(body).not.toContain('opportunity');
+    // Not deleted — MOVED. A support path still reads both off the console.
+    expect(info.some(l => l.includes('opp1') && l.includes('opportunity'))).toBe(true);
   });
 
   // ── and it must not over-block: a lock is a PER-ROW verdict ────────
@@ -2462,9 +2495,20 @@ describe('record-lock hook — predicate (multi) updates (#4778)', () => {
       flow_run_id: 'run_2',
       node_config_json: JSON.stringify({ lockRecord: false }),
     });
+    unbindAllHooks(engine as any);
+    const info: string[] = [];
+    bindApprovalLockHook(engine as any, { warn: () => {}, info: (m: any) => info.push(String(m)) });
+
     await expect(predicateUpdate({ id: { $in: ['opp2'] } }, { amount: 999 })).resolves.toBeUndefined();
     await expect(predicateUpdate({ id: { $in: ['opp1', 'opp2'] } }, { amount: 999 }))
-      .rejects.toThrow(/record 'opp1'/);
+      .rejects.toThrow(/RECORD_LOCKED/);
+    // [#18153] WHICH of the two requests refused is no longer decidable from the
+    // user-facing sentence — the id left it on purpose — so the discriminator
+    // moves to the console line the refusal writes. Without it this test would
+    // pass on a refusal raised by `opp2`'s opted-OUT request, which is the exact
+    // confusion it exists to rule out.
+    expect(info.filter(l => l.includes("record 'opp1'"))).toHaveLength(1);
+    expect(info.some(l => l.includes("record 'opp2'"))).toBe(false);
   });
 
   it('ignores a request that is no longer pending', async () => {

@@ -482,3 +482,30 @@ export function runFilterPreflight(options: {
   process.on('exit', () => write(notice));
   return notice;
 }
+
+/**
+ * The SECOND preflight this package owns, re-exported here so every consumer
+ * keeps exactly one relative import line (`config-wiring-sweep.test.ts` asserts
+ * that spelling, and its header carries the measurement behind it).
+ *
+ * Different defect, same shape and same seam: `runFilterPreflight` catches a
+ * positional filter that a `projects` narrowing silently discarded, and
+ * `runProjectCliOverridePreflight` catches a CLI TIMEOUT OVERRIDE that the same
+ * narrowing silently discards (#18788). Both fail in the one direction AGENTS.md
+ * ranks below having no verifier at all — green, having measured nothing — and
+ * both are available in exactly the packages that declare `projects`, which is
+ * why the two transcriptions of vitest's project resolution live in one package
+ * rather than in eight configs.
+ */
+export {
+  TIMEOUT_OVERRIDE_OPTIONS,
+  PROJECT_CLI_OVERRIDES,
+  inertTimeoutOverrides,
+  renderInertOverrideNotice,
+  runProjectCliOverridePreflight,
+} from './project-cli-override-preflight.js';
+export type {
+  TimeoutCliOptions,
+  TimeoutCliParse,
+  TimeoutOverrideOption,
+} from './project-cli-override-preflight.js';

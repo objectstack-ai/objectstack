@@ -81,6 +81,7 @@ import { MetricSchema } from '../src/data/analytics.zod';
 import { SchemaLevelIsolationStrategySchema } from '../src/system/tenant.zod';
 import { RateLimitConfigSchema } from '../src/shared/http.zod';
 import { ServerRateLimitConfigSchema } from '../src/system/stack-server.zod';
+import { ViewItemSchema } from '../src/ui/view.zod';
 import {
   AUTHORABLE_SURFACE_DIR_NAME,
   SCHEMA_MANIFEST_DIR_NAME,
@@ -100,6 +101,7 @@ import {
   type UnemittedBaseline,
   type UnemittedEntry,
 } from './lib/unemitted-schemas';
+import { DROPPED_REFINEMENTS_BASELINE_FILE } from './lib/dropped-refinements';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG = path.resolve(HERE, '..');
@@ -385,18 +387,34 @@ function mountSandbox(dir: string): void {
 }
 
 /**
- * Copy the committed never-published ledger (#16431) into a fixture tree.
+ * The committed, package-root ledgers `build-schemas.ts` READS — every one of
+ * them, mounted into a fixture tree as a set.
  *
- * `build-schemas.ts` resolves it from its own `__dirname/..`, so any tree that
- * copies `scripts/` without it fails the #16431 gate on a MISSING ledger,
- * before reaching whatever that fixture is about — which is how all four
- * sandbox builders in this file came to need one line each. Copied rather than
- * symlinked so a fixture may mutate it without writing to the real file; `src/`
- * is the fixture's own, so the population a run observes is the repo's and the
- * copied ledger is green without any seeding.
+ * A list rather than one constant because this is a population that grows: the
+ * generator resolves each of these from its own `__dirname/..`, so a tree that
+ * copies `scripts/` without one of them fails that ledger's gate on a MISSING
+ * artifact, before reaching whatever the fixture is about. That is not a
+ * hypothetical — it is how the never-published ledger (#16431) came to need one
+ * line in each of the five sandbox builders below, and how the
+ * dropped-refinement ledger (#18670) reddened 36 of them at once: every fixture
+ * that expects `status` 0 got a 1 that had nothing to do with its subject.
+ *
+ * ⇒ A new package-root ledger is ONE entry here, not a fifth mount call
+ * somebody has to remember at each builder.
  */
-function mountUnemittedLedger(dir: string): void {
-  fs.cpSync(path.join(PKG, UNEMITTED_BASELINE_FILE), path.join(dir, UNEMITTED_BASELINE_FILE));
+const COMMITTED_LEDGERS = [UNEMITTED_BASELINE_FILE, DROPPED_REFINEMENTS_BASELINE_FILE] as const;
+
+/**
+ * Copy every committed ledger into a fixture tree.
+ *
+ * Copied rather than symlinked so a fixture may mutate one without writing to
+ * the real file; `src/` is the fixture's own, so the population a run observes
+ * is the repo's and the copied ledgers are green without any seeding.
+ */
+function mountCommittedLedgers(dir: string): void {
+  for (const ledger of COMMITTED_LEDGERS) {
+    fs.cpSync(path.join(PKG, ledger), path.join(dir, ledger));
+  }
 }
 
 /**
@@ -458,7 +476,7 @@ function createSandbox(prefix: string): string {
   for (const entry of ['src', 'node_modules', 'package.json']) {
     fs.symlinkSync(path.join(PKG, entry), path.join(dir, entry));
   }
-  mountUnemittedLedger(dir);
+  mountCommittedLedgers(dir);
   mountSandbox(dir);
   // The authorable-surface ratchet runs after the manifest one; give it the
   // committed snapshot so a check that gets that far judges the same contract.
@@ -1071,28 +1089,54 @@ const WITHHELD_TOMBSTONE = 'integration/DataSyncConfig:schedule';
 const PRESCRIPTION_BULLET = '\n  • ';
 /** #18301's DOOR pin — and the reason the first cut of proof 4 was wrong.
  *
- *  `ServerRateLimitConfigSchema` is declared `strictObject({… guidance: { keyBy,
- *  store } }, RateLimitConfigSchema.shape)` — it is built FROM the open schema's
- *  own shape object. So ONE declaration is matched, by shape identity, by TWO
- *  emitted defs: the closed one it built, and `shared/RateLimitConfig`, a plain
- *  `z.object` that drops an unknown key in silence. Both emit
+ *  `ServerRateLimitConfigSchema` USED to be declared `strictObject({… guidance:
+ *  { keyBy, store } }, RateLimitConfigSchema.shape)` — built FROM the open
+ *  schema's own shape object. So ONE declaration was matched, by shape identity,
+ *  by TWO emitted defs: the closed one it built, and `shared/RateLimitConfig`, a
+ *  plain `z.object` that dropped an unknown key in silence. Both emitted
  *  `additionalProperties: false` (in `io: 'output'` zod says `false` for a
- *  non-closing shape too), and both satisfy the declaration match — so NEITHER of
- *  the two facts the first cut read can tell them apart, and it waived the open
- *  one. Measured on the head this fixture landed against: 2 such keys, on this
- *  def, reachable from the roots.
+ *  non-closing shape too), and both satisfied the declaration match — so NEITHER
+ *  of the two facts the first cut read could tell them apart, and it waived the
+ *  open one.
  *
- *  This is the review's "strip-mode clone shares a strict shape" case in the
- *  spelling the tree actually holds — sharing in the other direction, which is
- *  why a sweep for `.strip()` and `z.object(X.shape)` found nothing. */
-const OPEN_TWIN_DEF = 'shared/RateLimitConfig';
-const CLOSED_TWIN_DEF = 'system/ServerRateLimitConfig';
-/** A key BOTH twins' one declaration prescribes for, and only one of them delivers. */
+ *  ⚠️ **#18578 closed that open twin, so this pair no longer models opposite
+ *  doors — and re-picking it was the fixture's own instruction.** The strictness
+ *  and the tables moved onto the shared schema, which is where both defs inherit
+ *  them; the pair still shares ONE declaration and now keeps its promise on BOTH
+ *  sides. That is what makes it the right DARK leg here: if anyone re-opens the
+ *  shared shape, the two rows below stop being admitted and this test says so.
+ *
+ *  The census that found the original case (the gate's own instrument, driven
+ *  over every emitted def) reports no remaining def that ACCEPTS a promised key
+ *  and drops it. What it does report is the other way proof 4's second half can
+ *  come up empty, which is the LIT leg below. */
+const SHARED_TWIN_DEF = 'shared/RateLimitConfig';
+const SERVER_TWIN_DEF = 'system/ServerRateLimitConfig';
+/** A key the twins' one declaration prescribes for, and both now deliver. */
 const TWIN_LEAF = 'keyBy';
-const DELETED_OPEN_TWIN = `${OPEN_TWIN_DEF}:${TWIN_LEAF}`;
-const DELETED_CLOSED_TWIN = `${CLOSED_TWIN_DEF}:${TWIN_LEAF}`;
+const DELETED_SHARED_TWIN = `${SHARED_TWIN_DEF}:${TWIN_LEAF}`;
+const DELETED_SERVER_TWIN = `${SERVER_TWIN_DEF}:${TWIN_LEAF}`;
 /** A budget every twin accepts, so the door is the only thing the probe below reads. */
 const TWIN_VALID = { enabled: true, windowMs: 60_000, maxRequests: 100 };
+/** #18578's LIT leg: a def whose declaration NAMES the key and which this gate
+ *  cannot watch deliver it.
+ *
+ *  `ui/ViewItem` is a discriminated union of two `strictObject` arms that share
+ *  one `VIEW_ITEM_SURFACE` table, and `confg` is the one-letter typo that table
+ *  exists for. The probe writes `{ [key]: null }` and nothing else, so the
+ *  DISCRIMINATOR is missing and the union answers `invalid_union` on `viewKind`
+ *  before any arm's door is reached — measured, not assumed, and the same
+ *  document written whole DOES raise the prescription
+ *  (`ui/view-authoring-wire-split.test.ts`). So the key is promised, the author
+ *  really is answered, and this gate has still watched no delivery.
+ *
+ *  ⛔ That is exactly the state proof 4 must read as NO EVIDENCE rather than as
+ *  proof: "the door is open" would be a guess here, and a wrong guess waives a
+ *  deletion in the one direction this gate must not err in. Its verdict says only
+ *  THAT the prescription did not arrive, never why. */
+const UNREACHED_DOOR_DEF = 'ui/ViewItem';
+const UNREACHED_DOOR_LEAF = 'confg';
+const DELETED_UNREACHED_DOOR = `${UNREACHED_DOOR_DEF}:${UNREACHED_DOOR_LEAF}`;
 
 describe('build-schemas.ts — deleted baseline lines must prove themselves (#4650)', () => {
   beforeAll(() => {
@@ -1109,8 +1153,9 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       DELETED_BY_RENAME,
       DELETED_GUIDANCE_ROUTE,
       DELETED_GUIDANCE_UNNAMED,
-      DELETED_OPEN_TWIN,
-      DELETED_CLOSED_TWIN,
+      DELETED_SHARED_TWIN,
+      DELETED_SERVER_TWIN,
+      DELETED_UNREACHED_DOOR,
       WITHHELD_TOMBSTONE,
     ]) {
       expect(
@@ -1193,46 +1238,65 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
         'stopped discriminating, so it no longer reads the guidance table',
     ).not.toContain(PRESCRIPTION_BULLET);
     // #18301's DOOR fixture is only a pin while the tree still holds ONE
-    // declaration answering for TWO defs with OPPOSITE doors. Each half rots on
-    // its own, and each rots the pin into a green that asserts nothing about the
-    // one direction this gate must not err in.
+    // declaration answering for TWO defs. Each half rots on its own, and each
+    // rots the pin into a green that asserts nothing about the one direction
+    // this gate must not err in.
     expect(
       Object.keys(RateLimitConfigSchema.shape),
-      `${OPEN_TWIN_DEF} and ${CLOSED_TWIN_DEF} no longer declare the same key SET — the ` +
+      `${SHARED_TWIN_DEF} and ${SERVER_TWIN_DEF} no longer declare the same key SET — the ` +
         `registry match is keyed off the sorted key set, so this fixture no longer reaches it`,
     ).toEqual(Object.keys(ServerRateLimitConfigSchema.shape));
     expect(
       Object.entries(RateLimitConfigSchema.shape).every(
         ([name, prop]) => (ServerRateLimitConfigSchema.shape as Record<string, unknown>)[name] === prop,
       ),
-      `${CLOSED_TWIN_DEF} no longer shares ${OPEN_TWIN_DEF}'s shape ENTRIES — the declaration ` +
-        `match is by instance identity, so the open twin would stop matching and this fixture ` +
-        `would pass while modelling nothing`,
+      `${SERVER_TWIN_DEF} no longer shares ${SHARED_TWIN_DEF}'s shape ENTRIES — the declaration ` +
+        `match is by instance identity, so the two defs would stop answering to one declaration ` +
+        `and this fixture would pass while modelling nothing`,
     ).toBe(true);
-    // The two doors, read as a lit/dark pair. The open one is the whole point:
-    // it ACCEPTS the key and drops it, which is the silent strip proof 4 must
-    // never waive a deletion on.
-    const openTwin = RateLimitConfigSchema.safeParse({ ...TWIN_VALID, [TWIN_LEAF]: 'ip' });
-    const closedTwin = ServerRateLimitConfigSchema.safeParse({ ...TWIN_VALID, [TWIN_LEAF]: 'ip' });
+    // Both doors, read as a pair. #18578 is the reason they agree: the shared
+    // schema carries the strictness and the tables, so the def mounted bare on
+    // `apis[].rateLimit` refuses the key with the same prescription the server
+    // key always got. Before that it ACCEPTED the key and dropped it, and proof 4
+    // waiving THAT is what this whole block exists to prevent.
+    const sharedTwin = RateLimitConfigSchema.safeParse({ ...TWIN_VALID, [TWIN_LEAF]: 'ip' });
+    const serverTwin = ServerRateLimitConfigSchema.safeParse({ ...TWIN_VALID, [TWIN_LEAF]: 'ip' });
+    for (const [def, result] of [[SHARED_TWIN_DEF, sharedTwin], [SERVER_TWIN_DEF, serverTwin]] as const) {
+      expect(
+        result.success,
+        `${def} now ACCEPTS '${TWIN_LEAF}' — its door re-opened, so the DARK leg below would be ` +
+          `asserting that proof 4 admits a def which drops an authored key in silence`,
+      ).toBe(false);
+      expect(
+        result.success ? '' : result.error.issues.map((i) => i.message).join('\n'),
+        `${def} rejects '${TWIN_LEAF}' with no prescription — the \`guidance\` entry that is this ` +
+          `pair's evidence has gone`,
+      ).toContain(PRESCRIPTION_BULLET);
+    }
+    // #18578's LIT fixture is only a pin while the probe still cannot watch
+    // `ui/ViewItem` deliver. Both halves are loud: the bare document must fail
+    // BEFORE any arm's door (no `unrecognized_keys` at all), and the whole
+    // document must succeed in raising the prescription — otherwise the key is
+    // either delivered (and the fixture models nothing) or not prescribed for
+    // (and it models the wrong verdict).
+    const bareDoor = ViewItemSchema.safeParse({ [UNREACHED_DOOR_LEAF]: null });
     expect(
-      openTwin.success,
-      `${OPEN_TWIN_DEF} now REFUSES '${TWIN_LEAF}' — its door closed, so this fixture no longer ` +
-        `models an open def sharing a closed declaration's shape; re-pick the pair`,
-    ).toBe(true);
-    expect(
-      openTwin.success && TWIN_LEAF in (openTwin.data as Record<string, unknown>),
-      `${OPEN_TWIN_DEF} now CARRIES '${TWIN_LEAF}' through the parse — it is neither refusing ` +
-        `nor stripping, so the fixture no longer models a silent strip`,
+      bareDoor.success,
+      `${UNREACHED_DOOR_DEF} now ACCEPTS a bare '${UNREACHED_DOOR_LEAF}' — re-pick the fixture`,
     ).toBe(false);
     expect(
-      closedTwin.success,
-      `${CLOSED_TWIN_DEF} now ACCEPTS '${TWIN_LEAF}' — the closed twin opened, so the pair no ` +
-        `longer discriminates`,
-    ).toBe(false);
+      bareDoor.success ? [] : bareDoor.error.issues.map((i) => i.code),
+      `${UNREACHED_DOOR_DEF} now answers the PROBE's own document with an unrecognized-key ` +
+        `issue — the probe reaches a door after all, so this def no longer models the boundary`,
+    ).not.toContain('unrecognized_keys');
+    const wholeDoor = ViewItemSchema.safeParse({
+      name: 'a.b', object: 'a', viewKind: 'list', [UNREACHED_DOOR_LEAF]: { columns: [] },
+    });
     expect(
-      closedTwin.success ? '' : closedTwin.error.issues.map((i) => i.message).join('\n'),
-      `${CLOSED_TWIN_DEF} rejects '${TWIN_LEAF}' with no prescription — the \`guidance\` entry ` +
-        `that is the lit half of this pair has gone`,
+      wholeDoor.success ? '' : wholeDoor.error.issues.map((i) => i.message).join('\n'),
+      `'${UNREACHED_DOOR_LEAF}' no longer raises its prescription on a WHOLE ${UNREACHED_DOOR_DEF} ` +
+        `document — the declaration this fixture is about has gone, so the gate's verdict would ` +
+        `be 'nothing prescribes' rather than 'prescribed and not delivered'`,
     ).toContain(PRESCRIPTION_BULLET);
     // The manifest ratchet runs first; keep it current so every run reaches (c).
     seedManifest((s) => s);
@@ -1526,16 +1590,19 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
   );
 
   it(
-    '#18301 — proof 4 reads the DOOR, not the registry: one declaration, two defs, opposite verdicts',
+    '#18301 — proof 4 reads the DOOR, not the registry: a promise the gate cannot watch kept is no proof',
     { timeout: SPAWN_TIMEOUT_MS },
     () => {
       // The case the contract review found, pinned in the spelling the tree
-      // really holds. `ServerRateLimitConfigSchema` is
-      // `strictObject({… guidance: { keyBy, store } }, RateLimitConfigSchema.shape)`,
-      // so ONE declaration answers for TWO emitted defs by shape identity — and
-      // only one of them ever closed its door.
+      // really holds — and #18578 moved that spelling, so read both halves.
       //
-      // Everything the first cut of proof 4 read says the two are the same:
+      // ## What this used to pin, and why it could not stay
+      //
+      // `ServerRateLimitConfigSchema` was
+      // `strictObject({… guidance: { keyBy, store } }, RateLimitConfigSchema.shape)`,
+      // so ONE declaration answered for TWO emitted defs by shape identity — and
+      // only one of them had ever closed its door. Everything the first cut of
+      // proof 4 read said the two were the same:
       //
       //   - both emit `additionalProperties: false` (measured: in `io: 'output'`
       //     zod says `false` for a non-closing shape too — the ledger reading at
@@ -1545,12 +1612,21 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       //     one's shape object;
       //   - both are reachable, so proof 2 answers for neither.
       //
-      // So a proof 4 that reads either of those facts waives the OPEN twin's
-      // deletion while an author who keeps writing `keyBy` has it dropped in
-      // silence — the one direction this gate must not err in, and the direction
-      // the whole #4001 campaign exists to kill. Only writing the key at the def
-      // and reading the answer separates them.
-      seedBase((s) => [...s, DELETED_OPEN_TWIN, DELETED_CLOSED_TWIN].sort());
+      // #18578 closed the open twin rather than leaving a live silent strip in
+      // the tree for this test to point at, which is what the fixture guard's own
+      // "re-pick the pair" instruction prescribes. The pair is now the DARK leg.
+      //
+      // ## What it pins now
+      //
+      // The invariant is unchanged and is the only one that matters here: proof 4
+      // admits a deletion ONLY where it has watched the def answer, and reads
+      // every other state as no evidence. So the LIT leg is a def whose
+      // declaration NAMES the key and whose delivery this gate cannot observe —
+      // `ui/ViewItem`, a discriminated union the probe's one-key document cannot
+      // drive past `viewKind` to any arm's door. Its author IS answered; this
+      // gate has still seen nothing, and guessing "the door is open" or "the door
+      // is closed" are both wrong here. It refuses.
+      seedBase((s) => [...s, DELETED_SHARED_TWIN, DELETED_SERVER_TWIN, DELETED_UNREACHED_DOOR].sort());
       const canonical = seedSurface((s) => s);
 
       const rx = (key: string, tail: string): RegExp =>
@@ -1558,26 +1634,33 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
 
       const eager = run(['--check'], EAGER_SCHEMAS_ENV);
 
-      // The CLOSED twin: admitted by proof 4, on the door's own evidence.
+      // DARK — BOTH twins are admitted by proof 4, on the door's own evidence.
+      // One declaration, two defs, and since #18578 one door: the def mounted
+      // bare on `apis[].rateLimit` answers exactly as the server key does. The
+      // `shared/` row is the regression guard for that card — re-open the shared
+      // shape and it stops being admitted here.
       expect(eager.output).toContain('carry their own proof (#4650)');
       expect(eager.output).toMatch(
-        rx(DELETED_CLOSED_TWIN, `def .*; writing '${TWIN_LEAF}' on it is REFUSED as an unrecognized key`),
+        rx(DELETED_SERVER_TWIN, `def .*; writing '${TWIN_LEAF}' on it is REFUSED as an unrecognized key`),
+      );
+      expect(eager.output).toMatch(
+        rx(DELETED_SHARED_TWIN, `def .*; writing '${TWIN_LEAF}' on it is REFUSED as an unrecognized key`),
       );
 
-      // The OPEN twin: refused — and refused in words that name what is actually
-      // missing. Its `guidance` entry exists; what does not exist is a door for
-      // it to be delivered through, so the plain "was LIVE (never tombstoned)"
-      // verdict would send its reader to write an entry that is already there.
+      // LIT — refused, and refused in words that name what is actually missing.
+      // The `guidance` entry exists; what this gate could not obtain is a reading
+      // of it being delivered, so the plain "was LIVE (never tombstoned)" verdict
+      // would send its reader to write an entry that is already there.
       expect(eager.status).toBe(1);
       expect(eager.output).toContain('authorable baseline line(s) were deleted without proof (#4650)');
       expect(eager.output).toMatch(
-        rx(DELETED_OPEN_TWIN, `def .*; a \`strictObject\` declaration NAMES '${TWIN_LEAF}', but writing it`),
+        rx(DELETED_UNREACHED_DOOR, `def .*; a \`strictObject\` declaration NAMES '${UNREACHED_DOOR_LEAF}', but writing it`),
       );
-      expect(eager.output).not.toMatch(rx(DELETED_OPEN_TWIN, 'def .*is REFUSED as an unrecognized key'));
+      expect(eager.output).not.toMatch(rx(DELETED_UNREACHED_DOOR, 'def .*is REFUSED as an unrecognized key'));
       // …and it is not being waived by some OTHER proof either. The def is
       // root-reachable, so proof 2 must not answer for it — without this leg the
       // case would pass on a gate that had simply stopped emitting proof 4 at all.
-      expect(eager.output).not.toMatch(rx(DELETED_OPEN_TWIN, 'def not reachable from the'));
+      expect(eager.output).not.toMatch(rx(DELETED_UNREACHED_DOOR, 'def not reachable from the'));
 
       expect(readSurface()).toBe(canonical);
     },
@@ -3356,7 +3439,7 @@ describe('build-schemas.ts — check (b) matches the exact retired key, not its 
     for (const entry of ['node_modules', 'package.json']) {
       fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
     }
-    mountUnemittedLedger(box);
+    mountCommittedLedgers(box);
     writeManifestShards(path.join(box, SCHEMA_MANIFEST_DIR_NAME), pristine);
     boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
     writeSurfaceShards(boxSurfaceDir, pristineSurface);
@@ -3655,7 +3738,7 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
     for (const entry of ['node_modules', 'package.json']) {
       fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
     }
-    mountUnemittedLedger(box);
+    mountCommittedLedgers(box);
     boxScript = path.join(box, 'scripts', 'build-schemas.ts');
     boxManifestDir = path.join(box, SCHEMA_MANIFEST_DIR_NAME);
     boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
@@ -4021,7 +4104,7 @@ describe('build-schemas.ts — check (c) dates a tombstone by its exact key (#58
     for (const entry of ['node_modules', 'package.json']) {
       fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
     }
-    mountUnemittedLedger(box);
+    mountCommittedLedgers(box);
     writeManifestShards(path.join(box, SCHEMA_MANIFEST_DIR_NAME), pristine);
     boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
     writeSurfaceShards(boxSurfaceDir, pristineSurface);
@@ -4285,7 +4368,7 @@ describe('build-schemas.ts — a nested retirement row is judged, not ignored (#
     for (const entry of ['node_modules', 'package.json']) {
       fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
     }
-    mountUnemittedLedger(box);
+    mountCommittedLedgers(box);
     writeManifestShards(path.join(box, SCHEMA_MANIFEST_DIR_NAME), pristine);
     writeSurfaceShards(path.join(box, AUTHORABLE_SURFACE_DIR_NAME), pristineSurface);
     // The #4666 default ratchet runs on every invocation, so every box needs its

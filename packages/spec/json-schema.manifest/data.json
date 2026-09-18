@@ -138,6 +138,8 @@
     "data/PostgresConfig",
     "data/Query",
     "data/QueryFilter",
+    "data/QueryTransportParams",
+    "data/QueryWithTransport",
     "data/RangeOperator",
     "data/ReferenceIdValue",
     "data/ReferenceResolution",

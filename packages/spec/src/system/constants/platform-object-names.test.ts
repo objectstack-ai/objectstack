@@ -184,4 +184,32 @@ describe('platform-object predicates', () => {
       expect(CLOUD_PROVIDED_OBJECT_NAMES, name).toContain(name);
     }
   });
+
+  it('resolves the tenant credential store the cloud runtime registers', () => {
+    // The cloud-side registration is a READING TAKEN IN THE CLOUD REPOSITORY,
+    // at `cb8ee7ff60`, and carried here on its filer's name — like every other
+    // member of this list, it is not re-checkable from this repo, which is what
+    // the list's own header means by "they cannot be conformance-tested from
+    // this repo". As read there, `@objectstack/service-tenant` registers the
+    // name on the same path as the `sys_package*` family above: declared in
+    // `objects/sys-environment-credential.object.ts`, exported through
+    // `objects/index.ts`, listed in `tenantObjects` in `manifest.ts`, and spread
+    // into `manifestService.register({ objects })` by `tenant-plugin.ts`.
+    //
+    // Unlike `sys_license` and `sys_package_version`, no `*.object.ts` in THIS
+    // repository references it today, so nothing here was being mis-diagnosed
+    // while it was absent. What was wrong is the registry's own claim: this
+    // repo's governed records already treat the object as real — ADR-0007's
+    // inventory table lists it as `✅ exists`, and ADR-0131 §1.1 cites a
+    // measured cross-tenant read of its rows — while the list that decides
+    // whether a reference to it resolves said no package registers that name.
+    // So the first author to write the reference would have been told it looked
+    // like a typo. Pinned by name, beside `sys_license` and the package family,
+    // for the same reason: dropping it fails one readable assertion instead of
+    // nothing. What this test asserts is the objectstack half alone — that the
+    // list carries the name and the predicate resolves it. The cloud half is
+    // owned by the cloud repository and is not asserted here.
+    expect(isPlatformProvidedObjectName('sys_environment_credential')).toBe(true);
+    expect(CLOUD_PROVIDED_OBJECT_NAMES).toContain('sys_environment_credential');
+  });
 });

@@ -23,6 +23,23 @@ type FindArgs = Parameters<ImportProtocolLike['findData']>[0];
 type CreateArgs = Parameters<ImportProtocolLike['createData']>[0];
 import type { ExportFieldMeta } from './export-format.js';
 
+/**
+ * The CANONICAL object `where` out of the slot's declared input union.
+ *
+ * `FindDataRequest['query'].where` admits the input-only `FilterArray` sugar as
+ * well, because the transport door serves it on every spelling of that slot.
+ * `runImport` builds only the object form, so this narrows by REFUSING the
+ * other arm rather than by casting past it: a runner that started emitting the
+ * array sugar fails here loudly instead of type-checking into silence.
+ */
+function canonicalWhere(args: FindArgs): Record<string, any> {
+  const where = args.query?.where;
+  if (where == null || Array.isArray(where)) {
+    throw new Error(`runImport must send a canonical object \`where\`; got ${JSON.stringify(where)}`);
+  }
+  return where;
+}
+
 const metaMap = new Map<string, ExportFieldMeta>([
   ['name', { name: 'name', type: 'text' }],
 ]);
@@ -162,7 +179,7 @@ describe('runImport — bulk create batching (framework#2678)', () => {
     // Row 1 ('existing') matches an existing record → update; the rest are creates.
     // [#16638] Reads the CANONICAL `where` the runner sends, not `$filter`.
     const findData = vi.fn(async (args: FindArgs) =>
-      (args.query!.where!.name === 'existing' ? [{ id: 'existing_id', name: 'existing' }] : []));
+      (canonicalWhere(args).name === 'existing' ? [{ id: 'existing_id', name: 'existing' }] : []));
     const p: ImportProtocolLike = { findData, createData: vi.fn(), updateData, createManyData };
 
     const summary = await runImport({

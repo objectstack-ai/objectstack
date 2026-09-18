@@ -63,7 +63,15 @@ export type {
 } from './cel-engine';
 export { cronEngine } from './cron-engine';
 export { templateEngine, TEMPLATE_FORMATTERS, formatValue } from './template-engine';
-export { registerStdLib, buildScope } from './stdlib';
+export { registerStdLib, buildScope, registerPermissionPredicate } from './stdlib';
+export type { PermissionBinding } from './stdlib';
+// objectui#4421 / batch #147 — the permission predicate's data door. `can` reads
+// `EvalContext.permissions` and nothing else, and this is how that map is built
+// from the published `/auth/me/permissions` response. Exported rather than left
+// to each caller because the conversion looks trivial enough to hand-roll, and a
+// hand-rolled permission map has no shape of its own to be wrong against: it
+// parses, `can` answers from it, and the answer is a confident silent denial.
+export { toEvalPermissions } from './eval-permissions';
 export { resolveSeed, resolveSeedRecord } from './seed-eval';
 export { normalizeExpression, normalizeExpressionTree } from './normalize';
 // ADR-0058 — canonical CEL → FilterCondition pushdown compiler (one AST,
@@ -103,4 +111,4 @@ export type { UnknownFunctionCall } from './unknown-function';
 export { validateExpression, introspectScope, expectedDialect, inferExpressionType, nearestName, CEL_STDLIB_FUNCTIONS } from './validate';
 export type { FieldRole, ExprInput, ExprSchemaHint, ExprValidationError, ExprValidationResult, InferredValueType } from './validate';
 export type { SeedValue, SeedPrimitive } from './seed-eval';
-export type { DialectEngine, EvalContext, EvalResult, EvalError } from './types';
+export type { DialectEngine, EvalContext, EvalResult, EvalError, EvalPermissions } from './types';

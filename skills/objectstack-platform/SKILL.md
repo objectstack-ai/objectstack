@@ -449,8 +449,8 @@ token through the `CAPABILITY_PROVIDERS` registry in
 | `mcp` | `@objectstack/mcp` |
 | `triggers` | `@objectstack/trigger-record-change`, plus `trigger-schedule` and `trigger-api`. **Pair it with `job`** — schedule and time-relative triggers run on the job service |
 
-The other eight tokens in the vocabulary are **not** in that map and do not
-resolve through it:
+The tokens in `PLATFORM_CAPABILITY_TOKENS` not in that map do not resolve
+through it:
 
 - **Tier-gated** — `ai`, `ai-studio`, `i18n`, `ui`, `auth` have no provider
   entry; dedicated blocks in `serve.ts` `run()` open their tier instead
@@ -460,7 +460,7 @@ resolve through it:
   ships in `@objectstack/security-enterprise`, loaded through `plugins[]`;
   `ai-seat` and `governance` are resolved only by cloud's objectos-runtime.
 
-The authoritative list of all 28 is `PLATFORM_CAPABILITY_TOKENS`
+The authoritative list is `PLATFORM_CAPABILITY_TOKENS`
 (`@objectstack/spec`, `kernel/platform-capabilities.ts`) — an unknown token is
 **rejected by `defineStack` at authoring time**, not at boot.
 

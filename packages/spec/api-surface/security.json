@@ -40,6 +40,8 @@
     "FieldPermission (type)",
     "FieldPermissionParsed (type)",
     "FieldPermissionSchema (const)",
+    "OBJECT_PERMISSION_VERBS (const)",
+    "OBJECT_PERMISSION_VERB_NAMES (const)",
     "OWDModel (const)",
     "OWDModel (type)",
     "ObjectAccessScope (type)",
@@ -47,6 +49,7 @@
     "ObjectPermission (type)",
     "ObjectPermissionParsed (type)",
     "ObjectPermissionSchema (const)",
+    "ObjectPermissionVerbTarget (type)",
     "OrgScopingEntitlement (interface)",
     "OrgScopingEntitlementSchema (const)",
     "PLATFORM_CAPABILITIES (const)",
@@ -88,9 +91,11 @@
     "describeAnchorForbiddenBits (function)",
     "describeHighPrivilegeBits (function)",
     "normalizeTenancyPosture (function)",
+    "objectPermissionGrants (function)",
     "permissionForm (const)",
     "postureEnforcesWall (function)",
     "postureStampsOrganization (function)",
-    "postureUsesUnionScope (function)"
+    "postureUsesUnionScope (function)",
+    "resolveObjectPermissionVerb (function)"
   ]
 }

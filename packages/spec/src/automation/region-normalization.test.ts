@@ -388,4 +388,135 @@ describe('#4347 — collectFlowGraphs', () => {
       expect(collectFlowGraphs({ nodes: nodes as never, edges: [] })[0]!.nodes).toBe(nodes);
     });
   });
+
+  /**
+   * #18102 — the SAME guarantee for the other list the walk hands out.
+   *
+   * `FlowGraph.edges` is declared `readonly FlowEdgeParsed[]` and was pushed
+   * through untouched, four lines from the node-side filter #16752 added. A
+   * nested region's edge list is admitted on `Array.isArray` alone, and
+   * `Array.isArray` proves the LIST and never its MEMBERS — so a
+   * `body: { edges: [null] }`, which is what a YAML `edges:` item left empty
+   * deserialises to, became a graph whose `edges` held a `null` its own
+   * declared element type excludes.
+   *
+   * ## Why this is a describe of its own and not a shape of the one above
+   *
+   * The two lists are read by the same walk out of the same open `z.record`
+   * config, so nothing about the node-side pin could say the edge side was
+   * unguarded: it addresses `nodes`. That is the whole lesson of this pair —
+   * the repair landed on one of the two lists and the sibling beside it kept
+   * the producer's word about its members for one list's worth of time. A
+   * separate describe is what makes the second list ADDRESSABLE, the same
+   * argument `non-record-object-entry.test.ts` makes for writing its sweep over
+   * a table.
+   *
+   * ⛔ Latent, not live — and the pin does not claim otherwise. On the tree this
+   * landed against, the two `graph.edges` readers in `packages/lint` coerce
+   * through `recordsOf` (#16910) and `packages/services/service-automation`'s
+   * registration pass reaches its unguarded `graph.edges` loop only AFTER
+   * `validateControlFlow` has refused the malformed region. Belt, not braces:
+   * what is pinned here is that the declared element type is now TRUE, so the
+   * next consumer to read this list needs neither coercion nor a call-order
+   * argument. ⛔ The repair is a drop, never a looser signature, and never a new
+   * refusal — the accept set of every authoring door is unchanged.
+   */
+  describe('#18102 — a non-record edge member never reaches a returned graph', () => {
+    /** The same five shapes the node-side pin sweeps; `null` is the authored one. */
+    const NON_EDGES: readonly (readonly [string, unknown])[] = [
+      ['null', null],
+      ['undefined', undefined],
+      ['a string', 'x'],
+      ['a number', 42],
+      ['an array', []],
+    ];
+
+    const isRecord = (v: unknown): boolean => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+    /**
+     * `depth` nested loop bodies, the innermost holding `junk` in its EDGE list
+     * beside one real edge and the two real nodes that edge connects. Depth 0 is
+     * the flow's own list: a caller could coerce that one, but `FlowGraph.edges`
+     * draws no depth distinction, so neither does the filter or this pin.
+     */
+    const nestedJunkEdge = (depth: number, junk: unknown) => {
+      let region: Record<string, unknown> = {
+        nodes: [{ ...gate, id: 'gate_in' }, { ...write, id: 'write_in' }],
+        edges: [junk, { id: 'b_in', source: 'gate_in', target: 'write_in', type: 'default' }],
+      };
+      for (let i = depth; i > 0; i--) {
+        region = { nodes: [loopWith(region, `lp${i}`)], edges: [] };
+      }
+      return { nodes: region.nodes as never, edges: region.edges as never };
+    };
+
+    describe.each(NON_EDGES)('with %s in the innermost edge list', (_label, junk) => {
+      // 0 is the flow's own list, 1 the shape the card reproduced, and 32 the
+      // depth ceiling — where `visit` pushes a graph and returns without ever
+      // walking its members, so the junk was handed out with nothing having
+      // looked at it.
+      it.each([0, 1, 32])('hands out only records at nesting %i', (depth) => {
+        const graphs = collectFlowGraphs(nestedJunkEdge(depth, junk));
+        expect(graphs.flatMap(g => g.edges).filter(e => !isRecord(e))).toEqual([]);
+      });
+
+      it('lets an unguarded consumer dereference every edge it was handed', () => {
+        // The defect stated as the consumer's own operation: `analyzeRegion` and
+        // the engine's registration pass both read `.id` / `.source` / `.target`
+        // straight off a member, which is what a declared element type is FOR.
+        // This arm is what `null` and `undefined` fail before the filter; the
+        // shape assertion above is what the other three fail.
+        const graphs = collectFlowGraphs(nestedJunkEdge(1, junk));
+        expect(() => graphs.flatMap(g => g.edges).map(e => `${e.id}:${e.source}→${e.target}`)).not.toThrow();
+      });
+
+      it('still hands out the real edge, and the node list, standing beside it', () => {
+        // Anti-vacuity, twice: the drop takes what cannot be read, not the list
+        // — and it is per list, so a guard that emptied `edges` or reached into
+        // `nodes` would pass the assertions above.
+        const innermost = collectFlowGraphs(nestedJunkEdge(1, junk)).at(-1)!;
+        expect(innermost.edges.map(e => e.id)).toEqual(['b_in']);
+        expect(innermost.nodes.map(n => n.id)).toEqual(['gate_in', 'write_in']);
+      });
+
+      it('lets `FlowSchema.safeParse` return an envelope rather than throw (#16134)', () => {
+        // This walk runs inside the parse, so the repair has to stay a drop; a
+        // throw here escapes `safeParse` instead of becoming an issue.
+        const result = FlowSchema.safeParse({
+          name: 'repro', label: 'Repro', type: 'schedule',
+          nodes: [
+            { id: 'start', type: 'start', label: 'Start' },
+            loopWith({ nodes: [{ ...gate, id: 'gate_in' }, { ...write, id: 'write_in' }], edges: [junk] }),
+          ],
+          edges: [],
+        });
+        expect(typeof result.success).toBe('boolean');
+      });
+    });
+
+    it('hands out no non-record edge for the shape the card reproduced', () => {
+      // Verbatim from the filing, which is also the minimal repro: an empty
+      // `nodes` list still descends (`Array.isArray([])` holds), so the region
+      // graph exists and its `edges` is the array under test.
+      const graphs = collectFlowGraphs({
+        nodes: [
+          { id: 'start', type: 'start', config: {} },
+          { id: 'lp', type: LOOP_NODE_TYPE, config: { collection: 'x', body: { nodes: [], edges: [null] } } },
+        ] as never,
+        edges: [],
+      });
+      expect(graphs.map(g => g.path)).toEqual([[], ['nodes', 1, 'config', 'body']]);
+      expect(graphs[1]!.edges).toEqual([]);
+    });
+
+    it('hands back the very same arrays when there is nothing to drop', () => {
+      // Copy-on-write per list, as the node side already was: a well-formed flow
+      // pays nothing for either guard.
+      const nodes = [{ ...gate }, { ...write }];
+      const edges = [{ id: 'b1', source: 'gate', target: 'write', type: 'default' }];
+      const graph = collectFlowGraphs({ nodes: nodes as never, edges: edges as never })[0]!;
+      expect(graph.edges).toBe(edges);
+      expect(graph.nodes).toBe(nodes);
+    });
+  });
 });

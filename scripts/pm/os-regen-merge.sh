@@ -29,6 +29,54 @@
 # This script performs steps 1–3 and prints step 4 (the regen chain varies by
 # what the branch touches; running it blind would hide a red).
 #
+# ## ⛔ The base is `origin/main`, ALWAYS — stacked branches are out of scope
+#
+# There is no `--base`, and `origin/main` is hardcoded at every step that has a
+# side: the fetch, the merge base, step 1's `git merge`, step 2's
+# `git restore --source=`, step 3's commit message and step 4's grep target. On a
+# branch whose real base is ANOTHER FEATURE BRANCH this does not refuse, because
+# `git merge-base HEAD origin/main` still answers — with the TRUNK's fork point. It
+# runs, merges `origin/main` instead of the parent branch, and step 2 takes main's
+# side of generated artifacts the parent branch owns. A silently wrong answer, not
+# an error, in exactly the situation this script exists to make safe.
+#
+# ⛔ The remedy is NOT a `--base` flag. AGENTS.md Multi-agent discipline §2 rules a
+# stacked series out as a supported form outright — "⛔ No gate or merge-policy
+# change is made for it" — and prescribes a TRUNK branch for a multi-card change.
+# Teaching this helper a second base would be tooling for the form that ruling
+# refuses. So: land the trunk onto `main`, and run this script on the trunk.
+#
+# ## What "SILENTLY" above means, measured — and why no post-merge check sees it
+#
+# The opening claim is the premise of the whole ordering, so it is a reading, not
+# a recollection. Reproduced 2026-09-17 in a scratch repo with this clone's real
+# driver registered, on the routed path `packages/spec/spec-changes.json`, both
+# sides editing it, plus one ordinary hand-written file edited on the INCOMING
+# side as a firing control:
+#
+#   git merge, driver ON                        exit 0
+#   incoming side's token in the merged file    0 occurrences   <- THE LOSS
+#   our side's token in the merged file         1
+#   control: incoming prose in the plain file   1               <- the merge worked
+#
+# and then, read against the merge commit it produced:
+#
+#   git show --stat / git log -1 --stat         names the routed path 0 times
+#   git diff / git diff HEAD                    0 lines
+#   git status --porcelain                      0 lines
+#   control: first-parent diffstat              names the control file 1 time
+#   git diff --stat HEAD^2 HEAD                 names the routed path 1 time
+#
+# The merged result IS our side, so it differs from the first parent in nothing —
+# which is why a merge commit's combined diffstat omits it and `git diff` reads
+# clean. ⛔ So there is no ordinary post-merge check to catch this, and "the tree
+# is clean" is the symptom, not the all-clear. The drop is visible in exactly four
+# places, every one of which has to be looked at ON PURPOSE: the driver's own
+# record `$GIT_DIR/os-regen-pending`, the `pre-commit` refusal that marker drives,
+# the STAGED diff after regenerating (step 4.4), and a diff against the SECOND
+# parent — the side that was dropped. That is the whole reason step 2 prints a
+# per-path notice and step 4 is not optional.
+#
 # ## Step 2 chooses a side PER FILE — an unconditional one reverts committed work
 #
 # Step 2 used to run `git checkout origin/main -- <path>` for every os-regen
@@ -140,21 +188,30 @@
 #   git --git-dir=PROBE.git merge-tree --write-tree --name-only <base> <head>
 #   rm -rf PROBE.git                       # exit 1 + the paths = really conflicted
 #
-# ⛔ NOT `git -c merge.os-regen.driver= merge-tree --write-tree <base> <head>`. The
-# empty string does not DISABLE the driver — git still tries to RUN it, fails, and
-# marks the path conflicted, so that spelling reports a conflict for EVERY routed
-# path including ones whose text merges perfectly. MEASURED (git 2.43.0, two pairs
+# ⛔ NOT `git -c merge.os-regen.driver= merge-tree --write-tree <base> <head>`, and
+# ⛔ NOT `git -c merge.os-regen.driver=false merge-tree …` either. NEITHER spelling
+# DISABLES the driver — git still tries to RUN the configured program (nothing, or
+# `false`), it fails, and the path is marked conflicted, so BOTH report a conflict
+# for EVERY routed path including ones whose text merges perfectly. Both are spelled
+# out here because readers grep the LITERAL: `=false` is the spelling actually in
+# circulation, and "same family as the empty string" is a thing no grep finds.
+# MEASURED (git 2.43.0, two pairs
 # over packages/spec/spec-changes.json, ground truth = `git merge-file` on the
 # three blobs, which is what a driver-less server-side merge runs):
 #
-#   pair                     truth   driver ON   `-c …driver=`   bare shared clone
-#   same line, both sides    exit 1  exit 0 ✗    exit 1 ✓        exit 1 ✓
-#   1996 lines apart         exit 0  exit 0 ✓    exit 1 ✗        exit 0 ✓
+#   pair                     truth   driver ON   `=` and `=false`   bare shared clone
+#   same line, both sides    exit 1  exit 0 ✗    exit 1 ✓           exit 1 ✓
+#   1996 lines apart         exit 0  exit 0 ✓    exit 1 ✗           exit 0 ✓
 #
 # The middle column is the trap this section is about; the third is a false
 # POSITIVE instrument that agrees with the truth only by coincidence, printing
-# `error: cannot run : No such file or directory` while it does. Only the last
-# column tracks the truth in both rows.
+# `error: cannot run : No such file or directory` while it does (the `=false` half
+# prints nothing at all, which is worse). Only the last column tracks the truth in
+# both rows. The `=false` half of column three is its own reading, taken 2026-09-17
+# on the same instrument over two pairs of its own — a 200-line routed blob, one
+# pair editing the SAME line and one editing ~190 lines apart — and it answered
+# exit 1 / exit 1, cell for cell what the empty string answers, false POSITIVE and
+# all, while the bare shared clone answered exit 1 / exit 0.
 #
 # ⚠️ Which way the driver errs is input-dependent, so the trap is intermittent: on
 # a MIXED row it defers (exit 0) only when the incoming side carries nothing but
@@ -276,6 +333,12 @@ usage:
   os-regen-merge.sh --help       this text
 
 Run INSIDE the feature branch's worktree, on a clean tree.
+
+⛔ The base is ALWAYS `origin/main`; there is no `--base` and none is planned. A
+branch stacked on another feature branch is OUT OF SCOPE: this script would merge
+`origin/main` into it and take main's side of the parent branch's generated
+artifacts. AGENTS.md Multi-agent discipline §2 rules that form out and prescribes a
+TRUNK branch instead — land the trunk onto `main` and run this script there.
 EOF
 }
 
@@ -414,6 +477,9 @@ mode_run() {
     exit 1
   fi
 
+  echo "→ base: origin/main — always; there is no --base (see --help). A branch stacked"
+  echo "        on another feature branch is OUT OF SCOPE here: this would merge origin/main"
+  echo "        into it and take main's side of the parent branch's generated artifacts."
   echo "→ fetching origin/main"
   git fetch origin main
 
@@ -690,6 +756,8 @@ mode_run() {
           # main's side is the point of this step — but say so per path, loudly.
           echo "   ⚠ TAKING main's side of $edited (both sides changed it)"
           echo "     — the os-regen driver merged it with exit 0 and silently kept one side."
+          echo "       MEASURED: nothing downstream reports that drop — it is absent from the"
+          echo "       merge commit's diffstat and \`git diff\`/\`git status\` read clean over it."
           echo "       Step 4's regeneration re-derives the generated content on top. If this"
           echo "       branch HAND-edited this file (a released-baseline deletion no generator"
           echo "       reproduces), restore the branch bytes before regenerating."

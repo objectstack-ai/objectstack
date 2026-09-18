@@ -10,12 +10,14 @@ Phase 2 implements the core runtime features for advanced plugin lifecycle manag
 
 ### 1. Health Monitor (`health-monitor.ts`)
 
-The Health Monitor provides real-time health checking and auto-recovery for plugins.
+The Health Monitor provides real-time health checking for plugins. It REPORTS what it
+finds; acting on a report — restarting, replacing or quarantining a plugin — belongs to
+the host that owns the plugin's lifetime.
 
 **Features:**
 - Configurable health check intervals
 - Automatic failure detection with thresholds
-- Auto-restart with backoff strategies (fixed, linear, exponential)
+- Status and report polling (`getHealthStatus` / `getHealthReport`) for the host to act on
 - Health status tracking (healthy, degraded, unhealthy, failed, recovering, unknown)
 - Metrics collection (uptime, memory, CPU, connections, error rate)
 
@@ -52,8 +54,7 @@ The Hot Reload Manager enables zero-downtime plugin updates with state preservat
 
 **Features:**
 - State preservation strategies (memory, disk, distributed, none)
-- File watching integration points
-- Debounced reload scheduling
+- Debounced reload scheduling (`scheduleReload`) — the host runs the watcher
 - Graceful shutdown with configurable timeout
 - Before/after reload hooks
 - State checksum verification
@@ -213,7 +214,7 @@ The Sandbox Runtime provides isolated execution environments with resource limit
 **Features:**
 - Multiple isolation levels (none, minimal, standard, strict, paranoid)
 - File system access control (allowed/denied paths)
-- Network access control (allowed/blocked hosts)
+- Network access control (allowed/denied hosts)
 - Process spawning control
 - Environment variable access control
 - Resource limit enforcement (memory, CPU, connections)
@@ -238,7 +239,7 @@ const context = sandbox.createSandbox('my-plugin', {
   network: {
     mode: 'restricted',
     allowedHosts: ['api.example.com'],
-    blockedHosts: ['malicious.com'],
+    deniedHosts: ['malicious.com'],
     maxConnections: 10,
   },
   process: {
@@ -312,6 +313,7 @@ These components are designed to integrate with the existing ObjectKernel:
 ```typescript
 import { 
   ObjectKernel,
+  createLogger,
   PluginHealthMonitor,
   HotReloadManager,
   DependencyResolver,
@@ -321,12 +323,17 @@ import {
 
 const kernel = new ObjectKernel({ logger: { level: 'info' } });
 
+// The kernel's own logger is private and has no public getter, so build the
+// `ObjectLogger` these five constructors take from the same config rather than
+// reaching into the kernel.
+const logger = createLogger({ level: 'info' });
+
 // Initialize Phase 2 components
-const healthMonitor = new PluginHealthMonitor(kernel.logger);
-const hotReload = new HotReloadManager(kernel.logger);
-const depResolver = new DependencyResolver(kernel.logger);
-const permManager = new PluginPermissionManager(kernel.logger);
-const sandbox = new PluginSandboxRuntime(kernel.logger);
+const healthMonitor = new PluginHealthMonitor(logger);
+const hotReload = new HotReloadManager(logger);
+const depResolver = new DependencyResolver(logger);
+const permManager = new PluginPermissionManager(logger);
+const sandbox = new PluginSandboxRuntime(logger);
 
 // Register plugins with enhanced features
 // ... plugin registration code ...
@@ -346,7 +353,7 @@ Comprehensive unit tests are provided for all components:
 Run tests with:
 
 ```bash
-npm test
+pnpm --filter @objectstack/core test
 ```
 
 ## Performance Considerations
@@ -376,6 +383,5 @@ Phase 3 and beyond will add:
 
 ## References
 
-- [MICROKERNEL_IMPROVEMENT_PLAN.md](../../MICROKERNEL_IMPROVEMENT_PLAN.md)
 - [ARCHITECTURE.md](../../ARCHITECTURE.md)
 - [Protocol Definitions](../spec/src/system/)

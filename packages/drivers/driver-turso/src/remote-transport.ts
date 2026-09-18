@@ -15,6 +15,11 @@
 import type { Client, InStatement, ResultSet } from '@libsql/client';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { FILTER_OPERATORS, LOGICAL_OPERATORS, RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
+// [#18408] The ONE definition of "is this field multi-valued" (#17469, decision
+// batch #128 item 5, option 1′) — the same predicate `SqlDriver` asks on this
+// driver's local transport, so the two cannot declare one field's column
+// differently. See {@link RemoteTransport.mapFieldTypeToSQL}.
+import { isMultiValueField } from '@objectstack/spec/data';
 // [#7872] The shared comparand-type door. `serializeComparand`'s allow-list and
 // `driver-sql`'s reached the identical six types twice independently — the
 // measured fact the door was ruled from — so the SET and the sentence the
@@ -2432,9 +2437,25 @@ export class RemoteTransport {
    * edit its expectations to match new output.
    */
   private mapFieldTypeToSQL(field: any): string {
-    if (field.multiple) return 'TEXT'; // JSON array stored as text
-
     const type = field.type || 'string';
+    // [#18408] The multi-value short-circuit — a JSON array stored as text.
+    //
+    // Was `if (field.multiple)`. Maintainer ruling 2026-09-13 (decision batch
+    // #128 item 5, option 1′): there is ONE definition of "is this field
+    // multi-valued", `@objectstack/spec`'s `isMultiValueField`, and storage
+    // follows it. The raw flag answered `true` on types that predicate calls
+    // single-valued, so this transport declared `TEXT` for a `number` /
+    // `integer` / `boolean` field carrying the flag while THIS SAME DRIVER's
+    // local transport — `SqlDriver`, aligned by #17469 — declared `float` /
+    // `boolean` for it: one declaration, two storage classes, chosen by which
+    // URL the deployment happens to hold. The flag is redundant rather than
+    // decisive on the inherently-multi option types, which the predicate
+    // answers `true` for with or without it.
+    //
+    // Resolved `type` first, so the one predicate and the switch below read the
+    // same type — the driver-internal `|| 'string'` default is applied once.
+    if (isMultiValueField({ type, multiple: field.multiple === true })) return 'TEXT';
+
     switch (type) {
       case 'string':
       case 'email':

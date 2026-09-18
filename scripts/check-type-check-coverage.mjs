@@ -533,10 +533,14 @@ import {
   workspaceEnumeratorFloorFailures,
   workspacePackageDirs,
 } from './workspace-enumerator.mjs';
-// `typecheck`-script -> tsconfig program set. Shared with
-// `check-type-source-resolution.mjs` since #11490, which needs the identical
-// answer to decide its POPULATION: two copies of this predicate drift, and the
-// symptom of drift is a green gate on either side.
+// `typecheck`-script -> tsconfig program set. It moved into its own module in
+// #11490, when `check-type-source-resolution.mjs` needed the identical answer
+// to decide its POPULATION; that gate was retired under the maintainer ruling
+// of 2026-09-18 on #18373, so this file is the only consumer left. ⛔ Folding
+// the predicate back in here is a separate decision, not a consequence of that
+// retirement -- it floors its own cases in its own battery (PR #15327), which
+// this file deliberately does not re-pin. Two copies of this predicate drift,
+// and the symptom of drift is a green gate on either side.
 import {
   configsNamedByTypecheck,
   typecheckScriptChain,
@@ -1253,40 +1257,71 @@ const TEST_DEBT = {
 // that half had no subject here. What the gap cost was the other half: 83
 // diagnostics that no gate this repo runs had ever reported.
 //
-// ⛔ WHAT DID NOT GRADUATE, and why it is still below: `@objectstack/http-conformance`.
-// Its 2 recorded errors reproduce exactly (TS2307 x1, TS2304 x1) and its own
-// note already says what they are — both inside `node_modules` `.d.ts` files, so
-// the entry moves with the lockfile rather than with this package's code. The
-// reason it cannot take the sibling route unchanged is one this file did not
-// record before: `packages/qa/http-conformance/tsconfig.json` is one of the six
-// package configs that do NOT extend the repo root config, and it is the only
-// one of those that also declares no `skipLibCheck` — which is the sole reason
-// those two third-party declarations are checked at all. Ledgering them per FILE
-// would key a shrink-only ratchet on `.pnpm` content-hash paths that move on any
-// unrelated dependency bump, and turning `skipLibCheck` on in a test program has
-// no precedent among the 31 sibling configs (none declares it). That is a
-// judgement about this repo's config policy rather than about this package, so
-// it is left to the card.
-
-  '@objectstack/http-conformance': {
-    errors: 2,
-    note: 'TS2307 x1, TS2304 x1, and BOTH are reported inside node_modules `.d.ts` files '
-      + '(@better-auth/core\'s `bun:sqlite` import, @better-fetch/fetch\'s `Timer`), so this entry now '
-      + 'moves with the lockfile and NOT with this package\'s own code at all -- every file this package '
-      + 'checks in is clean with the test exclusion lifted. Raw `tsc --noEmit` counts are what every '
-      + 'number in these ledgers means, so they are counted here rather than filtered out -- but they are '
-      + 'not this package\'s debt to fix, and this entry cannot graduate by fixing code. Re-measured 2 at '
-      + '3954fb7df, DOWN from 3 (#11788). The retired third diagnostic was a TS2307 on '
-      + '`@objectstack/spec/contracts` in conformance.integration.test.ts, which this package imported '
-      + 'without declaring @objectstack/spec: under pnpm\'s strict layout that specifier reached no '
-      + '@objectstack/spec anywhere on its resolution walk, so the old ceiling was a reading of the '
-      + 'INSTALL LAYOUT rather than of this package\'s types. Measured three ways on one tree at '
-      + '3954fb7df, same sources, same built closure: 3 as installed, 2 with @objectstack/spec merely '
-      + 'symlinked into the root node_modules and nothing else touched, 125 with packages/spec/dist moved '
-      + 'aside. #11788 declared the dependency, so the specifier now resolves through the closure this '
-      + 'gate refreshes and refuses on -- the number dropped because the program became well-defined, '
-      + 'not because anything was suppressed.',
-  },
+// ── #12511: `@objectstack/http-conformance` GRADUATED, and THIS LEDGER IS NOW
+// EMPTY ──────────────────────────────────────────────────────────────────────
+//
+// The eighth and last of the card, on 2026-09-17, by the same route as the
+// seven above and the six before them: it now has a `tsconfig.test.json` its
+// own `typecheck` script NAMES, so `hidesTests` is false for it and this gate's
+// per-PACKAGE approximation has nothing left to approximate. ⛔ Read that first
+// — a deleted TEST_DEBT entry normally means the errors are gone, and here it
+// does not. This change repairs no test file and edits none.
+//
+// ⭐ WHAT THIS ONE NEEDED THAT THE SEVEN DID NOT, because the deleted note said
+// the sibling route was unavailable and that reading was correct at the time:
+// `packages/qa/http-conformance/tsconfig.json` was one of the six package
+// configs that do NOT extend the repo root config, and the only one of those
+// that also declared no `skipLibCheck` — the sole reason its two third-party
+// declarations were checked at all. The note left the choice to the card
+// because it is a judgement about this repo's CONFIG POLICY and not about this
+// package. The director ruling of 2026-09-07 (decision batch #66, maintainer
+// verbatim: 「同意」) made it: the build config takes one `extends` line onto the
+// repo root, the way 73 of 79 packages already do, and the sibling then follows
+// unchanged. ⛔ No
+// per-package dialect, ⛔ no ratchet keyed on `.pnpm` content-hash paths that
+// move on an unrelated dependency bump, ⛔ no residual entry here.
+//
+// ⚠️ THE ATTRIBUTION HAS NO REMAINDER, and it does not run the way the other
+// thirteen graduations did — this is the first entry whose LEDGER is LARGER
+// than what it graduated with, so read the terms rather than the totals.
+// Measured on objectstack-ai/objectstack at f6c2eb7c865065943a474d1e49833d6184d76e32
+// with the dependency closure built (an error count taken against an unbuilt
+// closure is not a reading — unresolved-import cascades inflate it), each term
+// isolated by its own single-option probe rather than inferred from the ends:
+//
+//   RECORDED here                                                        2
+//   RAW — this gate's own `remeasureProject` shape against the
+//     UNCHANGED config (extends nothing, drops only the test glob):
+//     TS2307 x1, TS2304 x1, class for class and file for file            2
+//   dissolve — `skipLibCheck`, inherited from the root config. Both
+//     are inside `node_modules` `.d.ts` (@better-auth/core's
+//     `bun:sqlite` import, @better-fetch/fetch's `Timer`)               -2
+//   exposed — the root config DECLARES `lib`, which REPLACES the
+//     `lib.es2022.full` default that `target: ES2022` had been
+//     supplying, so `Response.json()` is read from @types/node's
+//     undici (`Promise<unknown>`) instead of from DOM
+//     (`Promise<any>`): TS18046 x14, TS2571 x6, TS2339 x5             +25
+//   exposed — the root config's `noUnusedParameters`: TS6133 x2        +2
+//   LEDGER, per file and per signature                                  27
+//
+// The `+25` is one idiom — `await res.json()` bound without a narrowing —
+// across three suites, which is `packages/mcp`'s population above almost
+// exactly (51 of its 53). It is NOT a config-tier artefact to be tuned away:
+// vitest runs this package with `environment: 'node'`, so the undici reading is
+// the one that matches the runtime and the DOM one was the fiction. The sibling
+// therefore declares `lib: ["ES2022"]` like all 31 of its siblings and ⛔ does
+// not re-add `DOM` to shrink its own ledger. Measured, not reasoned: with
+// `lib: ["ES2022", "DOM", "DOM.Iterable"]` the same program reports 2.
+//
+// ⚠️ PINS_CHECKED reported nothing for this package in either direction and
+// still does not: its test layer holds ZERO `@ts-expect-error` directives
+// (grepped with a positive control — the same grep hits 49 files under
+// `packages/spec/src`), so that half had no subject here either.
+//
+// ⛔ AN EMPTY LEDGER IS NOT A LICENCE TO REOPEN IT. TEST_DEBT is closed to new
+// entries exactly as it was while it held rows: a package whose tests sit
+// outside every tsc program onboards by WIRING a sibling config, never by
+// adding a row back here.
 };
 
 // Repo-relative path -> why this test file's `@ts-expect-error` directives are
@@ -4479,12 +4514,13 @@ function graduationRemedy({ ledger, isRoot = false }) {
       `    (a) The #5286 sibling route: add a \`tsconfig.test.json\` that reaches the ` +
       `tests and NAME it in the \`typecheck\` script. Always available -- it leaves \`tsconfig.json\` alone.\n` +
       `    (b) Drop the \`**/*.test.ts\` entry from \`exclude\` in \`tsconfig.json\` (or widen \`include\` to ` +
-      `reach the test tree). Available ONLY while \`pnpm check:type-source-resolution\` still passes with ` +
-      `the tests re-admitted: that gate reads \`tsconfig.json\` and nothing else, the re-admitted tests ` +
-      `import workspace packages this package's src program never held, and its registry is ⛔ SHRINK-ONLY ` +
-      `-- registering the new ones is not the way out. Measured red on 14 of the 18 entries that have an ` +
-      `exclusion to drop, so assume (b) is unavailable until that gate says otherwise. Run it before you ` +
-      `commit; nothing in this gate's own verdict will tell you.`
+      `reach the test tree). ⛔ The gate that DECIDED whether this route was available, ` +
+      `\`check:type-source-resolution\`, was RETIRED under the maintainer ruling of 2026-09-18 on #18373 ` +
+      `-- so nothing measures it for you any more, and ⛔ its silence is not a clearance. What it measured ` +
+      `has not changed: the re-admitted tests import workspace packages this package's src program never ` +
+      `held, its registry was ⛔ SHRINK-ONLY so registering the new ones was never the way out, and it read ` +
+      `red on 14 of the 18 entries that have an exclusion to drop. Treat (b) as the worse route and prefer ` +
+      `(a), which leaves \`tsconfig.json\` alone; nothing in this gate's own verdict will tell you.`
     );
   }
   if (ledger === 'DEBT') {
@@ -5589,9 +5625,11 @@ function selfTest() {
   // The observation half is where the :267 blind spot lived: `excludesTests`
   // read only `tsconfig.json`, so a sibling test config was invisible however
   // it was wired. `configsNamedByTypecheck` and `typecheckScriptChain` now
-  // decide it, and since #11490 they live in `scripts/typecheck-configs.mjs`
-  // because `check-type-source-resolution.mjs` needs the same answer for its
-  // population. Their cases moved WITH them -- one rule, one home, one battery
+  // decide it, and since #11490 they live in `scripts/typecheck-configs.mjs`,
+  // where they moved because `check-type-source-resolution.mjs` needed the same
+  // answer for its population -- that gate was retired on 2026-09-18 (#18373),
+  // leaving this file its only consumer. Their cases moved WITH them -- one
+  // rule, one home, one battery
   // -- and are folded in here so this gate still fails when the predicate it
   // depends on breaks.
   //
@@ -6367,13 +6405,15 @@ function selfTest() {
         + 'that remedy is a no-op on every one of them -- the misfire #11491 was filed on.',
     },
     {
-      label: 'TEST_DEBT graduation names the gate that DECIDES whether the exclusion route is available',
+      label: 'TEST_DEBT graduation still carries what the retired gate measured about the exclusion route',
       message: testDebtGrad,
       present: ['check:type-source-resolution', 'SHRINK-ONLY', 'tsconfig.test.json'],
       absent: [],
-      why: 'the exclusion route reds that gate on 14 of the 18 entries that have an exclusion, and this '
-        + 'gate never runs it. A message the author has to read a second gate\'s SOURCE to act on is the '
-        + 'half of #11491 that a correct-but-terse rewrite would leave unfixed.',
+      why: 'the exclusion route read red on 14 of the 18 entries that have an exclusion, and this gate '
+        + 'never ran it. A message the author has to read a second gate\'s SOURCE to act on is the half '
+        + 'of #11491 that a correct-but-terse rewrite would leave unfixed -- and once that gate was '
+        + 'retired (2026-09-18, #18373) the measurement is the ONLY thing left warning the author, so '
+        + 'these needles stay exactly as they were.',
     },
     {
       label: 'the workspace root graduates through `typecheck:root`, never through `typecheck`',

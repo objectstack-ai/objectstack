@@ -56,6 +56,7 @@ import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { maskComments } from '../../../scripts/js-comment-mask.mjs';
 import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
@@ -316,7 +317,12 @@ describe('the paths that must keep working (#6728 did not narrow them)', () => {
 });
 
 describe('the refusal stays structural, not one call site (#6728)', () => {
-  const loginSrc = () => readFileSync(LOGIN_SRC, 'utf-8');
+  // Masked: both cases below decide from the TEXT of `login.ts`. A docblock
+  // that quotes `rl.question(` without the abort signal — which is exactly what
+  // a comment explaining `askOrFailAtEof` would carry — reads as a live
+  // unsettleable prompt, and the flag-help extractor's non-greedy `})` stops at
+  // a `})` inside a comment. Neither failure is about the product (#18520).
+  const loginSrc = () => maskComments(readFileSync(LOGIN_SRC, 'utf-8'));
 
   it('asks no question that can outlive its input', () => {
     // `rl.question(...)` without the abort signal is the unsettleable form —

@@ -1,0 +1,398 @@
+# @objectstack/spec — the .d.ts DECLARATION TEXT of every export of `./qa`.
+#
+# The SHAPE half of the ADR-0059 public-API pin, and the readable counterpart of
+# api-surface/qa.json's breadth half. That file pins each export by
+# `name (kind)`, which a signature change, a renamed interface field and a dropped
+# union member all leave untouched. This file pins the declaration text, so each of
+# those moves a line here. Text and NOT a hash, deliberately: a diff a reviewer can
+# read is what makes contract review a guard rather than a rubber stamp.
+#
+# Verbatim from the PACKED `.d.ts` reached through this package's `exports` map — the
+# declarations a consumer installs, never `src/`. A declaration's leading TSDoc is
+# excluded: documentation drift is `check:docs`'s axis, not this one.
+#
+# entry: ./qa
+# exported names: 16
+# declarations: 16
+#
+# GENERATED — ⛔ never hand-edited. Regenerate after a real build:
+#   pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec gen:api-surface-declarations
+# Gated by `check:api-surface-declarations`; a hand edit is a red gate, not a change.
+
+// ── TestAction (type) ──
+type TestAction = z.input<typeof TestActionSchema>;
+
+// ── TestActionSchema (const) ──
+declare const TestActionSchema: z.ZodObject<{
+    type: z.ZodEnum<{
+        create_record: "create_record";
+        update_record: "update_record";
+        delete_record: "delete_record";
+        read_record: "read_record";
+        query_records: "query_records";
+        api_call: "api_call";
+        run_script: "run_script";
+        wait: "wait";
+    }>;
+    target: z.ZodString;
+    payload: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    user: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── TestActionType (type) ──
+type TestActionType = z.input<typeof TestActionTypeSchema>;
+
+// ── TestActionTypeSchema (const) ──
+declare const TestActionTypeSchema: z.ZodEnum<{
+    create_record: "create_record";
+    update_record: "update_record";
+    delete_record: "delete_record";
+    read_record: "read_record";
+    query_records: "query_records";
+    api_call: "api_call";
+    run_script: "run_script";
+    wait: "wait";
+}>;
+
+// ── TestAssertion (type) ──
+type TestAssertion = z.input<typeof TestAssertionSchema>;
+
+// ── TestAssertionSchema (const) ──
+declare const TestAssertionSchema: z.ZodObject<{
+    field: z.ZodString;
+    operator: z.ZodEnum<{
+        error: "error";
+        equals: "equals";
+        not_equals: "not_equals";
+        contains: "contains";
+        not_contains: "not_contains";
+        is_null: "is_null";
+        not_null: "not_null";
+        gt: "gt";
+        gte: "gte";
+        lt: "lt";
+        lte: "lte";
+    }>;
+    expectedValue: z.ZodUnknown;
+}, z.core.$strip>;
+
+// ── TestAssertionType (type) ──
+type TestAssertionType = z.input<typeof TestAssertionTypeSchema>;
+
+// ── TestAssertionTypeSchema (const) ──
+declare const TestAssertionTypeSchema: z.ZodEnum<{
+    error: "error";
+    equals: "equals";
+    not_equals: "not_equals";
+    contains: "contains";
+    not_contains: "not_contains";
+    is_null: "is_null";
+    not_null: "not_null";
+    gt: "gt";
+    gte: "gte";
+    lt: "lt";
+    lte: "lte";
+}>;
+
+// ── TestContext (type) ──
+type TestContext = z.input<typeof TestContextSchema>;
+
+// ── TestContextSchema (const) ──
+declare const TestContextSchema: z.ZodRecord<z.ZodString, z.ZodUnknown>;
+
+// ── TestScenario (type) ──
+type TestScenario = z.input<typeof TestScenarioSchema>;
+
+// ── TestScenarioSchema (const) ──
+declare const TestScenarioSchema: z.ZodObject<{
+    id: z.ZodString;
+    name: z.ZodString;
+    description: z.ZodOptional<z.ZodString>;
+    tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    setup: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        name: z.ZodString;
+        description: z.ZodOptional<z.ZodString>;
+        action: z.ZodObject<{
+            type: z.ZodEnum<{
+                create_record: "create_record";
+                update_record: "update_record";
+                delete_record: "delete_record";
+                read_record: "read_record";
+                query_records: "query_records";
+                api_call: "api_call";
+                run_script: "run_script";
+                wait: "wait";
+            }>;
+            target: z.ZodString;
+            payload: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+            user: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>;
+        assertions: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            field: z.ZodString;
+            operator: z.ZodEnum<{
+                error: "error";
+                equals: "equals";
+                not_equals: "not_equals";
+                contains: "contains";
+                not_contains: "not_contains";
+                is_null: "is_null";
+                not_null: "not_null";
+                gt: "gt";
+                gte: "gte";
+                lt: "lt";
+                lte: "lte";
+            }>;
+            expectedValue: z.ZodUnknown;
+        }, z.core.$strip>>>;
+        capture: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+    }, z.core.$strip>>>;
+    steps: z.ZodArray<z.ZodObject<{
+        name: z.ZodString;
+        description: z.ZodOptional<z.ZodString>;
+        action: z.ZodObject<{
+            type: z.ZodEnum<{
+                create_record: "create_record";
+                update_record: "update_record";
+                delete_record: "delete_record";
+                read_record: "read_record";
+                query_records: "query_records";
+                api_call: "api_call";
+                run_script: "run_script";
+                wait: "wait";
+            }>;
+            target: z.ZodString;
+            payload: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+            user: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>;
+        assertions: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            field: z.ZodString;
+            operator: z.ZodEnum<{
+                error: "error";
+                equals: "equals";
+                not_equals: "not_equals";
+                contains: "contains";
+                not_contains: "not_contains";
+                is_null: "is_null";
+                not_null: "not_null";
+                gt: "gt";
+                gte: "gte";
+                lt: "lt";
+                lte: "lte";
+            }>;
+            expectedValue: z.ZodUnknown;
+        }, z.core.$strip>>>;
+        capture: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+    }, z.core.$strip>>;
+    teardown: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        name: z.ZodString;
+        description: z.ZodOptional<z.ZodString>;
+        action: z.ZodObject<{
+            type: z.ZodEnum<{
+                create_record: "create_record";
+                update_record: "update_record";
+                delete_record: "delete_record";
+                read_record: "read_record";
+                query_records: "query_records";
+                api_call: "api_call";
+                run_script: "run_script";
+                wait: "wait";
+            }>;
+            target: z.ZodString;
+            payload: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+            user: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>;
+        assertions: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            field: z.ZodString;
+            operator: z.ZodEnum<{
+                error: "error";
+                equals: "equals";
+                not_equals: "not_equals";
+                contains: "contains";
+                not_contains: "not_contains";
+                is_null: "is_null";
+                not_null: "not_null";
+                gt: "gt";
+                gte: "gte";
+                lt: "lt";
+                lte: "lte";
+            }>;
+            expectedValue: z.ZodUnknown;
+        }, z.core.$strip>>>;
+        capture: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+    }, z.core.$strip>>>;
+    requires: z.ZodOptional<z.ZodObject<{
+        params: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        plugins: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+
+// ── TestStep (type) ──
+type TestStep = z.input<typeof TestStepSchema>;
+
+// ── TestStepSchema (const) ──
+declare const TestStepSchema: z.ZodObject<{
+    name: z.ZodString;
+    description: z.ZodOptional<z.ZodString>;
+    action: z.ZodObject<{
+        type: z.ZodEnum<{
+            create_record: "create_record";
+            update_record: "update_record";
+            delete_record: "delete_record";
+            read_record: "read_record";
+            query_records: "query_records";
+            api_call: "api_call";
+            run_script: "run_script";
+            wait: "wait";
+        }>;
+        target: z.ZodString;
+        payload: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+        user: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>;
+    assertions: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        field: z.ZodString;
+        operator: z.ZodEnum<{
+            error: "error";
+            equals: "equals";
+            not_equals: "not_equals";
+            contains: "contains";
+            not_contains: "not_contains";
+            is_null: "is_null";
+            not_null: "not_null";
+            gt: "gt";
+            gte: "gte";
+            lt: "lt";
+            lte: "lte";
+        }>;
+        expectedValue: z.ZodUnknown;
+    }, z.core.$strip>>>;
+    capture: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+}, z.core.$strip>;
+
+// ── TestSuite (type) ──
+type TestSuite = z.input<typeof TestSuiteSchema>;
+
+// ── TestSuiteSchema (const) ──
+declare const TestSuiteSchema: z.ZodObject<{
+    name: z.ZodString;
+    scenarios: z.ZodArray<z.ZodObject<{
+        id: z.ZodString;
+        name: z.ZodString;
+        description: z.ZodOptional<z.ZodString>;
+        tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        setup: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            name: z.ZodString;
+            description: z.ZodOptional<z.ZodString>;
+            action: z.ZodObject<{
+                type: z.ZodEnum<{
+                    create_record: "create_record";
+                    update_record: "update_record";
+                    delete_record: "delete_record";
+                    read_record: "read_record";
+                    query_records: "query_records";
+                    api_call: "api_call";
+                    run_script: "run_script";
+                    wait: "wait";
+                }>;
+                target: z.ZodString;
+                payload: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+                user: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            assertions: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                field: z.ZodString;
+                operator: z.ZodEnum<{
+                    error: "error";
+                    equals: "equals";
+                    not_equals: "not_equals";
+                    contains: "contains";
+                    not_contains: "not_contains";
+                    is_null: "is_null";
+                    not_null: "not_null";
+                    gt: "gt";
+                    gte: "gte";
+                    lt: "lt";
+                    lte: "lte";
+                }>;
+                expectedValue: z.ZodUnknown;
+            }, z.core.$strip>>>;
+            capture: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        }, z.core.$strip>>>;
+        steps: z.ZodArray<z.ZodObject<{
+            name: z.ZodString;
+            description: z.ZodOptional<z.ZodString>;
+            action: z.ZodObject<{
+                type: z.ZodEnum<{
+                    create_record: "create_record";
+                    update_record: "update_record";
+                    delete_record: "delete_record";
+                    read_record: "read_record";
+                    query_records: "query_records";
+                    api_call: "api_call";
+                    run_script: "run_script";
+                    wait: "wait";
+                }>;
+                target: z.ZodString;
+                payload: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+                user: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            assertions: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                field: z.ZodString;
+                operator: z.ZodEnum<{
+                    error: "error";
+                    equals: "equals";
+                    not_equals: "not_equals";
+                    contains: "contains";
+                    not_contains: "not_contains";
+                    is_null: "is_null";
+                    not_null: "not_null";
+                    gt: "gt";
+                    gte: "gte";
+                    lt: "lt";
+                    lte: "lte";
+                }>;
+                expectedValue: z.ZodUnknown;
+            }, z.core.$strip>>>;
+            capture: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        }, z.core.$strip>>;
+        teardown: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            name: z.ZodString;
+            description: z.ZodOptional<z.ZodString>;
+            action: z.ZodObject<{
+                type: z.ZodEnum<{
+                    create_record: "create_record";
+                    update_record: "update_record";
+                    delete_record: "delete_record";
+                    read_record: "read_record";
+                    query_records: "query_records";
+                    api_call: "api_call";
+                    run_script: "run_script";
+                    wait: "wait";
+                }>;
+                target: z.ZodString;
+                payload: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+                user: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            assertions: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                field: z.ZodString;
+                operator: z.ZodEnum<{
+                    error: "error";
+                    equals: "equals";
+                    not_equals: "not_equals";
+                    contains: "contains";
+                    not_contains: "not_contains";
+                    is_null: "is_null";
+                    not_null: "not_null";
+                    gt: "gt";
+                    gte: "gte";
+                    lt: "lt";
+                    lte: "lte";
+                }>;
+                expectedValue: z.ZodUnknown;
+            }, z.core.$strip>>>;
+            capture: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        }, z.core.$strip>>>;
+        requires: z.ZodOptional<z.ZodObject<{
+            params: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            plugins: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        }, z.core.$strip>>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;

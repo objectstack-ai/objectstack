@@ -929,14 +929,109 @@ export function scanTree(root?: string): { sites: DurationKey[]; findings: Findi
 
 // ── self-test ──────────────────────────────────────────────────────────────
 
+// Set by `selfTest()` only after its verdict line is printed, and read at the
+// dispatch in `main()`: a `return` that leaves the function above that line
+// prints nothing and still answers 0 — a self-test that never finished,
+// reported as one that passed (#13798).
+//
+// ⛔ AN EXIT CODE IS NOT A HANDSHAKE, and in this file that is worth spelling
+// out, because the code travels further than it does in the pattern this is
+// copied from: `selfTest()` RETURNS a number, `main()` returns that number and
+// `process.exit(main(...))` reports it. A 0 rides that whole path just as
+// happily when it comes from a `return` placed above the verdict. The flag is
+// the thing an early return cannot carry with it.
+let selfTestReachedVerdict = false;
+
+// ── The self-test's own battery roster and floor ─────────────────────
+//
+// `failures === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Measured
+// on this file rather than supposed: emptying {@link DURATION_ROOTS} DE-REGISTERS
+// the two per-root module-coupling cases the loop below generates, and the run
+// goes from 103 checkmarks to 101 — all of them green, no summary number moving,
+// because this self-test printed no count at all. That is the
+// 「a printed case count is EVIDENCE, NOT PROOF」 shape with the evidence
+// removed as well.
+//
+// Closed the way `scripts/check-agent-model-declared.mjs` closed it, COPIED and
+// ⛔ never imported — every self-test has to keep running standalone, so a
+// shared assertion module would be one point of failure for every instrument at
+// once. What is pinned is the registered NAMES, not a number.
+//
+// A BATTERY HERE IS A SECTION, not a table row. The pattern file is
+// table-driven, so its ROW is its battery and its roster is its row labels;
+// this self-test is a SEQUENCE of `expect()` calls grouped by the thing they
+// hold, so each group opens with `battery('<name>')` and every `expect()` after
+// it is attributed to that name until the next one opens. The same shape the
+// sequential port in `scripts/check-test-typecheck.mts` uses.
+//
+// ⛔ A pinned TOTAL is not the repair — a battery falling from 23 cases to 3
+// keeps a total "right" the moment a sibling grows — and ⛔ neither is a roster
+// DERIVED from the run: a count taken from the cases that ran can never notice
+// one that stopped.
+//
+// The counts are a FLOOR, not an equality: adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running.
+//
+// TWO FLOORS ARE DELIBERATELY BELOW THEIR LIVE COUNT, and it is not an
+// oversight: the two workspace-direction batteries generate one case per
+// workspace root (11 each today), and a root added or removed is ordinary work
+// that must not red this file. What their floor of 1 pins is REACH — the
+// silently-empty enumeration this file's own docblock names, which fakes a
+// clean run perfectly — not the size of the workspace.
+const SELF_TEST_BATTERIES: Readonly<Record<string, number>> = Object.freeze({
+  'the founding rule: a unit in the prose and not in the name (#14478)': 3,
+  'the RETIREMENT of the name-shape list (#18115 option A)': 3,
+  'the population: numeric roots, compliant spellings and the skipped idioms': 16,
+  'the two DECLARED exemptions: instant and external-vocabulary mirror (#15676)': 13,
+  'exemption (iii): DIMENSIONLESS, declared on the schema': 5,
+  'the TYPE channel: the closed duration vocabulary (#18122, step ①)': 9,
+  'the DIVERGENCE class: the JSDoc read only to refuse (#15939)': 23,
+  'the INSTANT root is really exported where this file names it': 1,
+  'the duration vocabulary is really exported, and its units are ones this reader knows': 4,
+  'the DECLARED population: every LIVE workspace root is declared here (#15682)': 1,
+  'the DECLARED population: every DECLARED root is still a live workspace root (#15682)': 1,
+  'the enumerated population reaches past packages/spec (#15682)': 3,
+  "the walk's exclusions, pinned BEHAVIOURALLY (#15682)": 2,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 13;
+
+// The key a case is filed under when no battery is open. It is not a declared
+// battery, so it reds by the same set difference rather than silently inflating
+// whichever battery happened to open last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest(): number {
   let failures = 0;
+  // The battery ledger this self-test's floor is evaluated against.
+  // `battery()` opens a battery; every `expect()` below is attributed to the
+  // one most recently opened, so a section that stops running stops
+  // registering and names ITSELF at the floor rather than going quiet.
+  //
+  // Registration is the FIRST statement of `expect()`, before the line is
+  // printed and before `failures` moves, because the floor asserts REACH: a
+  // case that runs and FAILS still registers, and only a case that never runs
+  // at all goes missing from the ledger. Routing registration through the
+  // failure sink instead would register a case only when it failed — a fully
+  // green run would register 0 and every battery would read DID NOT RUN, the
+  // floor inverted rather than installed.
+  const seen = new Map<string, number>();
+  let openBattery: string | undefined;
+  const battery = (name: string): void => {
+    openBattery = name;
+  };
   const expect = (label: string, ok: boolean) => {
+    const attributedTo = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(attributedTo, (seen.get(attributedTo) ?? 0) + 1);
     console.log(`  ${ok ? '✓' : '✗'} ${label}`);
     if (!ok) failures++;
   };
   const rulesOf = (code: string) => collectDurationKeys('fixture.ts', code).map(judge).map((f) => f?.rule);
 
+  battery('the founding rule: a unit in the prose and not in the name (#14478)');
   expect('offender: unit in describe, none in name → unit-in-prose-not-in-name',
     rulesOf(`const S = z.object({ ttl: z.number().int().min(0).default(3600).describe('Cache TTL in seconds') });`)
       .join() === 'unit-in-prose-not-in-name');
@@ -953,6 +1048,7 @@ function selfTest(): number {
   // key that merely LOOKS like a duration declares nothing. These cases pin the
   // cost as well as the rule — a repeal nobody can see in the self-test is a
   // repeal that comes back as a surprise.
+  battery('the RETIREMENT of the name-shape list (#18115 option A)');
   expect('RETIRED: a name-shaped key with no unit anywhere declares nothing — NOT admitted, NOT judged',
     (() => {
       const sites = collectDurationKeys('fixture.ts', `const S = z.object({ sessionTimeout: z.number().int().positive().default(3600).describe('Session timeout'), idleTimeout: z.number().optional() });`);
@@ -978,6 +1074,7 @@ function selfTest(): number {
       const control = 'export function ' + 'judge';
       return gone.every((ident) => !src.includes(ident)) && src.includes(control);
     })());
+  battery('the population: numeric roots, compliant spellings and the skipped idioms');
   expect('offender through `z.int()` and `z.coerce.number()` roots',
     rulesOf(`const S = z.object({ a: z.int().describe('Delay in seconds'), b: z.coerce.number().describe('Delay in hours') });`)
       .join() === 'unit-in-prose-not-in-name,unit-in-prose-not-in-name');
@@ -1033,6 +1130,7 @@ function selfTest(): number {
   // declaration does NOT exempt a contradiction. A marker that could never be
   // refused would be an allowlist wearing a `.meta()`.
 
+  battery('the two DECLARED exemptions: instant and external-vocabulary mirror (#15676)');
   expect('exempt (i): a key whose value IS `EpochMs` is an instant, not a duration',
     rulesOf(`const S = z.object({ createdAt: EpochMs.describe('Unix timestamp in milliseconds when the scope was created') });`)
       .join() === '');
@@ -1089,6 +1187,7 @@ function selfTest(): number {
   // exists for the key whose PROSE names a time unit that belongs to something
   // else in the sentence — the only shape the gate still refuses and the marker
   // can save.
+  battery('exemption (iii): DIMENSIONLESS, declared on the schema');
   expect('exempt (iii): `.meta({ dimensionless })` waives the rename on a count whose prose names a time unit',
     rulesOf(`const S = z.object({ recentFailures: z.number().describe('Failures seen in the last 5 minutes').meta({ dimensionless: 'failed attempts' }) });`)
       .join() === '');
@@ -1118,6 +1217,7 @@ function selfTest(): number {
   // ''` here passes just as well when the type channel is ablated away. The
   // `DurationSeconds` case below already asserts the root; this one now does
   // too, so both legs of the vocabulary are pinned to a reading that can fail.
+  battery('the TYPE channel: the closed duration vocabulary (#18122, step ①)');
   expect('admitted by TYPE: a `DurationMs` key needs no unit in its name',
     (() => {
       const sites = collectDurationKeys('fixture.ts', `const S = z.object({ gracePeriod: DurationMs.default(30000).describe('How long to wait before forcing the operation') });`);
@@ -1136,9 +1236,21 @@ function selfTest(): number {
   expect('REFUSED by TYPE: `DurationSeconds` whose NAME says Ms → duration-unit-contradicts-schema',
     rulesOf(`const S = z.object({ refreshIntervalMs: DurationSeconds.optional() });`)
       .join() === 'duration-unit-contradicts-schema');
+  // ⛔ Asserted through the SITE, never through `rulesOf(...) === ''` alone —
+  // the trap the two cases above already name, left standing on this one. A key
+  // OUTSIDE the population yields `''` too, so the bare form read GREEN with the
+  // type channel ablated away: it agreed with itself about a site the census
+  // never drew, and 「compliant」 was indistinguishable from 「absent」. Each leg
+  // of "name, describe and type all agree" is now a reading that can fail.
   expect('compliant by TYPE: name, describe and type all agree',
-    rulesOf(`const S = z.object({ refreshIntervalSeconds: DurationSeconds.describe('Refresh every N seconds') });`)
-      .join() === '');
+    (() => {
+      const sites = collectDurationKeys('fixture.ts', `const S = z.object({ refreshIntervalSeconds: DurationSeconds.describe('Refresh every N seconds') });`);
+      return sites.length === 1 && sites[0].durationType === 'DurationSeconds'
+        && sites[0].typeUnits.join() === 'seconds'
+        && sites[0].keyUnits.join() === 'seconds'
+        && sites[0].proseUnits.join() === 'seconds'
+        && declaresUnit(sites[0]) && judge(sites[0]) === undefined;
+    })());
   expect('the type channel is the CLOSED vocabulary alone — another identifier root stays outside the population',
     (() => {
       const sites = collectDurationKeys('fixture.ts', `const S = z.object({ gracePeriod: PositiveInt.describe('How long to wait, in seconds') });`);
@@ -1180,6 +1292,7 @@ function selfTest(): number {
   // the case below that keeps a JSDoc-plus-describe key failing
   // `unit-in-prose-not-in-name` is what stops this reader drifting into it.
 
+  battery('the DIVERGENCE class: the JSDoc read only to refuse (#15939)');
   expect('REFUSED (divergence): JSDoc says seconds, the NAME says ms, describe names none → unit-in-jsdoc-not-in-describe',
     rulesOf(`const S = z.object({\n  /**\n   * Execution timeout in seconds\n   */\n  timeoutMs: z.number().int().min(0).optional().describe('Maximum execution time') });`)
       .join() === 'unit-in-jsdoc-not-in-describe');
@@ -1308,6 +1421,7 @@ function selfTest(): number {
   // would be silently empty and every instant would read as an offender (or,
   // after a rename in the other direction, an unrelated local could inherit the
   // exemption). Held from this side, the same coupling ROOT_DIR_WATCH_HINTS has.
+  battery('the INSTANT root is really exported where this file names it');
   expect(`\`${INSTANT_ROOT}\` is exported from \`${INSTANT_ROOT_MODULE}\``,
     (() => {
       const src = readFileSync(join(pkgRoot, INSTANT_ROOT_MODULE), 'utf8');
@@ -1317,6 +1431,7 @@ function selfTest(): number {
   // an identifier this file names and the module no longer exports is an
   // admission channel that is silently empty, and every key step ③ converts
   // would drop straight back out of the census with nothing going red.
+  battery('the duration vocabulary is really exported, and its units are ones this reader knows');
   for (const root of DURATION_ROOTS.keys()) {
     expect(`\`${root}\` is exported from \`${DURATION_ROOT_MODULE}\``,
       (() => {
@@ -1324,8 +1439,22 @@ function selfTest(): number {
         return new RegExp(`export const ${root}\\b`).test(src);
       })());
   }
-  expect('the declared duration units are units this reader actually knows',
-    [...DURATION_ROOTS.values()].every((u) => Object.keys(UNIT_SPELLINGS).includes(u)));
+  // ⛔ An `every` over a map that can be EMPTY is vacuously true, and this one
+  // names the very map the ablation empties: with {@link DURATION_ROOTS} cleared
+  // it stayed GREEN while asserting nothing about anything — in the same run in
+  // which the two coupling cases above stopped existing. The non-emptiness is
+  // asserted FIRST, so the predicate is reached only when there is a declared
+  // unit to judge; how MANY there must be is the floor's job, not this line's.
+  expect('the declared duration units are units this reader actually knows — over a vocabulary that is not empty',
+    DURATION_ROOTS.size > 0
+      && [...DURATION_ROOTS.values()].every((u) => Object.keys(UNIT_SPELLINGS).includes(u)));
+  // The negative control for the line above, in this file's own convention: a
+  // source read that finds nothing proves nothing until the same read finds
+  // something it should. `Object.keys(UNIT_SPELLINGS)` must be capable of NOT
+  // containing a spelling, or "every declared unit is known" is a second
+  // vacuity — an assertion whose right-hand side accepts anything.
+  expect('negative control: a unit this reader does NOT know is absent from `UNIT_SPELLINGS`',
+    !Object.keys(UNIT_SPELLINGS).includes('fortnights'));
 
   // ── the DECLARED population, held against the LIVE workspace (#15682) ────
   //
@@ -1337,10 +1466,12 @@ function selfTest(): number {
   const liveHints = readWorkspaceGlobs(REPO_ROOT)
     .filter((g) => !isExclusionGlob(g))
     .map((g) => `${g}/src/**`);
+  battery('the DECLARED population: every LIVE workspace root is declared here (#15682)');
   for (const hint of liveHints) {
     expect(`pnpm-workspace.yaml's \`${hint.replace('/src/**', '')}\` is declared here as \`${hint}\``,
       ROOT_DIR_WATCH_HINTS.includes(hint));
   }
+  battery('the DECLARED population: every DECLARED root is still a live workspace root (#15682)');
   for (const hint of ROOT_DIR_WATCH_HINTS) {
     expect(`declared \`${hint}\` is still a workspace root pnpm-workspace.yaml names`,
       liveHints.includes(hint));
@@ -1352,6 +1483,7 @@ function selfTest(): number {
   // reading the widening exists to produce, and the one a silently-empty
   // enumeration fakes perfectly (measured next door: a `packages/*/src`
   // pathspec that returned zero and zeroed its positive control with it).
+  battery('the enumerated population reaches past packages/spec (#15682)');
   const roots = sourceRoots();
   const specSrc = join(pkgRoot, 'src');
   expect('the enumerated population contains `packages/spec/src`', roots.includes(specSrc));
@@ -1370,6 +1502,7 @@ function selfTest(): number {
   // first case of this self-test uses, plus two real source files, and asserts
   // the walk finds TWO files. Ten copies of the offender on disk — eight of
   // them behind an exclusion — two in the verdict.
+  battery("the walk's exclusions, pinned BEHAVIOURALLY (#15682)");
   const fixtureRoot = mkdtempSync(join(tmpdir(), 'duration-unit-keys-'));
   try {
     const offender = "const S = z.object({ ttl: z.number().describe('Cache TTL in seconds') });\n";
@@ -1397,14 +1530,86 @@ function selfTest(): number {
     rmSync(fixtureRoot, { recursive: true, force: true });
   }
 
-  console.log(failures === 0 ? '\nself-test: all cases pass' : `\nself-test: ${failures} case(s) FAILED`);
+  // ── The floor: every declared battery RAN, and ran its cases ──────────
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered EQUALS the set declared, each at or above its own
+  // count. A set difference names WHICH battery stopped; a count says only that
+  // something did — and, before this block existed, not even that.
+  const floorFailure = (message: string): void => {
+    console.error(`✗ self-test floor: ${message}`);
+    failures++;
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned `
+      + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+      + 'SELF_TEST_BATTERIES — a case attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — ${SELF_TEST_BATTERIES[name] - count} case(s) that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery below its floor means cases STOPPED RUNNING — the battery is the bug, not the number. '
+      + 'Find what stopped registering (a deleted case, a vocabulary the cases are GENERATED from that is '
+      + 'now empty, a guard that now skips) and restore it.',
+    );
+  }
+
+  // The count is printed because a reader had to hand-tally the checkmarks to
+  // get one, and it is printed AFTER the floor rather than instead of it: the
+  // number is evidence, the floor is the proof, and this round landed both.
+  const registered = [...seen.values()].reduce((a, b) => a + b, 0);
+  console.log(failures === 0
+    ? `\nself-test: all cases pass — ${registered} case(s) across ${declaredBatteries.length} batteries, `
+      + 'every battery at or above its pinned floor'
+    : `\nself-test: ${failures} failure(s) (cases and floor); ${registered} case(s) registered`);
+  selfTestReachedVerdict = true;
   return failures === 0 ? 0 : 1;
 }
 
 // ── main ───────────────────────────────────────────────────────────────────
 
 function main(argv: string[]): number {
-  if (argv.includes('--self-test')) return selfTest();
+  if (argv.includes('--self-test')) {
+    const selfTestCode = selfTest();
+    // The handshake. Without it a `return` above the verdict prints nothing,
+    // hands back a 0 that travels `selfTest()` → `main()` → `process.exit()`
+    // unchanged, and reports a self-test that never finished as one that
+    // passed. The self-test's own exit code stays load-bearing — this only
+    // refuses to believe a SILENT one.
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ check:duration-unit-keys self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no verdict line was printed. Exiting 0 here would report a self-test that never\n'
+        + 'finished as a self-test that passed.\n',
+      );
+      return 1;
+    }
+    return selfTestCode;
+  }
   const rootIdx = argv.indexOf('--root');
   const root = rootIdx >= 0 ? argv[rootIdx + 1] : undefined;
   if (rootIdx >= 0 && !root) {

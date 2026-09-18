@@ -2,29 +2,35 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Filter-slot wire-alias parity guard (#8002).
+ * Filter-slot transport-alias parity guard (#8002).
  *
  * ## The seam
  *
- * The ONE filter slot has four wire spellings, and they are declared in two
- * packages with different ownership:
+ * The ONE filter slot has four transport spellings. Since #16066 all four are
+ * declared, and declared in ONE file — `packages/spec/src/data/data-engine.zod.ts`:
  *
- *   - `where` / `filter` come from the spec's own table
- *     (`RPC_QUERY_ALIAS_SLOTS`, `packages/spec/src/data/data-engine.zod.ts`) —
- *     "the ONE place the alias to canonical mapping is declared".
- *   - `filters` / `$filter` are **wire-only**: no schema declares them.
- *     `packages/metadata-protocol` extends the spec table with them locally
- *     (`WIRE_QUERY_ALIAS_SLOTS`), which is what makes them fold into `where`.
+ *   - `where` / `filter` come from `RPC_QUERY_ALIAS_SLOTS`, "the ONE place the
+ *     alias to canonical mapping is declared".
+ *   - `filters` / `$filter` are the TRANSPORT-only spellings, declared beside it
+ *     as `QUERY_TRANSPORT_ONLY_SLOT_ALIASES` and folded into the exported
+ *     `QUERY_TRANSPORT_ALIAS_SLOTS`. They used to be module-private in
+ *     `packages/metadata-protocol` (`WIRE_QUERY_ALIAS_SLOTS`), which is what made
+ *     the `findData` door accept a vocabulary no schema named; #16066 hoisted
+ *     them onto the spec's export surface — the option this gate's original
+ *     write-up left open for the spec seat.
  *
- * #7390 added a third reader: `packages/rest` gates the filter slot's ARITY at
+ * #7390 added a second reader: `packages/rest` gates the filter slot's ARITY at
  * the querystring ingress (`FILTER_SLOT_QUERY_PARAMS`,
  * `packages/rest/src/query-multiplicity.ts`) and needs the same four spellings
- * to do it. It derives `where` / `filter` from the spec table; it cannot derive
- * `filters` / `$filter`, so it names them literally.
+ * to do it. It derives `where` / `filter` from the spec table; it does not derive
+ * `filters` / `$filter`, so it names them literally — which is why this gate is
+ * still load-bearing after the hoist, and why it was re-pointed rather than
+ * deleted. `packages/metadata-protocol` now folds by the spec export and adds
+ * nothing of its own; it is named below as the CONSUMER, never as a declarer.
  *
  * ## What goes wrong without this gate, and in which direction
  *
- * A **fifth** wire-only spelling added to `metadata-protocol`'s table folds
+ * A **fifth** transport-only spelling added to the spec table folds
  * correctly in the normalizer and is silently UNGATED at the ingress:
  * repetition on that spelling falls back to the misdiagnosis #7390 exists to
  * remove — a 400 telling the caller their filter is malformed when every filter
@@ -71,13 +77,12 @@
  *
  * ## What it does NOT do
  *
- * It does not decide whether the wire vocabulary belongs in `@objectstack/spec`
- * at all — hoisting these spellings onto the spec's export surface is the other
- * option on #8002 and is deliberately left open for the spec seat. This gate is
- * the reversible move: it adds no public API and no dependency-graph edge, and
- * it pays the drift risk down either way. If the hoist ever lands, both sides
- * become derived, the sets stay equal by construction, and this script can be
- * deleted rather than migrated.
+ * It does not decide anything about the REST side's own derivation. The hoist
+ * landed (#16066), so the ingress COULD now derive all four spellings from
+ * `QUERY_TRANSPORT_ALIAS_SLOTS` and make this script deletable — ⛔ but until it
+ * does, the ingress still names `filters` / `$filter` literally and the drift
+ * this gate exists for is still reachable. Deriving that side is its own change,
+ * in `packages/rest`, with this script's deletion as its second half.
  *
  * Run `--self-test` to prove the readers and the comparison against planted
  * fixtures before trusting a green run.
@@ -109,7 +114,7 @@ import { isEntrypoint } from './invoked-as.mjs';
 // remedy is to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
     '1. The tree as it stands: both sides name the same four spellings.': 2,
-    '2. A fifth spelling on the NORMALIZER side only — the direction #8002 is about, and the one nothing else in the repo refuses.': 3,
+    '2. A fifth spelling on the DECLARED side only — the direction #8002 is about, and the one nothing else in the repo refuses.': 3,
     '3. The same fifth spelling on BOTH sides is green again — the gate judges parity, not the size of the set.': 1,
     '4. A fifth spelling on the INGRESS side only.': 2,
     '5. A `$` alias folding INTO a filter spelling is a filter spelling. It reaches `where` through two hops, which is exactly the shape a reader comparing only the slot tables would miss.': 2,
@@ -135,8 +140,10 @@ const REST_FILE = 'packages/rest/src/query-multiplicity.ts';
 
 /** The declarations read out of them. */
 const SPEC_TABLE = 'RPC_QUERY_ALIAS_SLOTS';
-const WIRE_TABLE = 'WIRE_QUERY_ALIAS_SLOTS';
-const DOLLAR_TABLE = 'WIRE_DOLLAR_ALIASES';
+const WIRE_TABLE = 'QUERY_TRANSPORT_ALIAS_SLOTS';
+const DOLLAR_TABLE = 'QUERY_TRANSPORT_DOLLAR_ALIASES';
+/** The transport-only extras the exported slot table folds in. */
+const EXTRAS_TABLE = 'QUERY_TRANSPORT_ONLY_SLOT_ALIASES';
 const REST_SET = 'FILTER_SLOT_QUERY_PARAMS';
 
 /** The canonical key of the filter slot. Everything here is about this one slot. */
@@ -230,15 +237,16 @@ export function readSpecSlots(text, path = SPEC_FILE) {
 }
 
 /**
- * The wire-only spellings `metadata-protocol` adds on top of the spec table,
+ * The transport-only spellings the spec declares on top of its own RPC table,
  * as `canonical -> extra spellings`, plus the `$`-alias table.
  *
- * Shape read: an IIFE declaring `const extra: Record<string, readonly string[]> = { where: [...] }`
- * and mapping over `RPC_QUERY_ALIAS_SLOTS`. The mapping is ASSERTED, not
- * assumed: if `WIRE_QUERY_ALIAS_SLOTS` stops reading the spec table, the two
- * sides no longer share a derived half and this gate's model of them is wrong.
+ * Shape read: a `QUERY_TRANSPORT_ONLY_SLOT_ALIASES` object literal
+ * (`{ where: [...] }`) and a `QUERY_TRANSPORT_ALIAS_SLOTS` that maps over
+ * `RPC_QUERY_ALIAS_SLOTS`. The mapping is ASSERTED, not assumed: if the
+ * transport table stops reading the RPC table, the two sides no longer share a
+ * derived half and this gate's model of them is wrong.
  */
-export function readProtocolExtras(text, path = PROTOCOL_FILE) {
+export function readProtocolExtras(text, path = SPEC_FILE) {
     const source = parse(path, text);
     const decl = findDeclaration(source, WIRE_TABLE, path);
     if (!decl.initializer) throw new UnreadableShape(`${path}: \`${WIRE_TABLE}\` has no initializer.`);
@@ -253,26 +261,22 @@ export function readProtocolExtras(text, path = PROTOCOL_FILE) {
         );
     }
 
-    let extraObject = null;
-    for (const node of walk(decl.initializer)) {
-        if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === 'extra') {
-            extraObject = node.initializer;
-        }
-    }
+    const extraObject = findDeclaration(source, EXTRAS_TABLE, path).initializer;
     if (!extraObject || !ts.isObjectLiteralExpression(extraObject)) {
         throw new UnreadableShape(
-            `${path}: \`${WIRE_TABLE}\` no longer declares its wire-only spellings as an \`extra\` object literal.`,
+            `${path}: \`${EXTRAS_TABLE}\` is no longer an object literal, so the transport-only `
+            + `spellings \`${WIRE_TABLE}\` folds in cannot be read.`,
         );
     }
 
     const extras = new Map();
     for (const prop of extraObject.properties) {
         if (!ts.isPropertyAssignment(prop)) {
-            throw new UnreadableShape(`${path}: the \`extra\` table has a property this gate cannot read statically.`);
+            throw new UnreadableShape(`${path}: \`${EXTRAS_TABLE}\` has a property this gate cannot read statically.`);
         }
         const key = propertyName(prop);
-        if (key === null) throw new UnreadableShape(`${path}: the \`extra\` table has a computed key.`);
-        extras.set(key, stringLiterals(prop.initializer, `the \`extra\` table's \`${key}\` entry`, path));
+        if (key === null) throw new UnreadableShape(`${path}: \`${EXTRAS_TABLE}\` has a computed key.`);
+        extras.set(key, stringLiterals(prop.initializer, `\`${EXTRAS_TABLE}\`'s \`${key}\` entry`, path));
     }
     return { extras, dollarAliases: readDollarAliases(source, path) };
 }
@@ -394,7 +398,7 @@ export function readRestSpellings(text, specSlots, path = REST_FILE) {
  * Compare the two sides. Returns the problems (empty = parity holds) alongside
  * the sets, so the self-test can assert on both the verdict and what was read.
  */
-export function judge({ specText, protocolText, restText }) {
+export function judge({ specText, restText }) {
     const problems = [];
     let protocolSet = null;
     let restSet = null;
@@ -410,7 +414,7 @@ export function judge({ specText, protocolText, restText }) {
                 + `silencing it.`,
             );
         } else {
-            const { extras, dollarAliases } = readProtocolExtras(protocolText);
+            const { extras, dollarAliases } = readProtocolExtras(specText);
             protocolSet = new Set([...filterSlot, ...(extras.get(FILTER_SLOT) ?? [])]);
             for (const [dollar, bare] of dollarAliases) {
                 if (protocolSet.has(bare)) protocolSet.add(dollar);
@@ -445,8 +449,9 @@ export function judge({ specText, protocolText, restText }) {
 function formatDrift({ onlyProtocol, onlyRest, protocolSet, restSet }) {
     const lines = [];
     lines.push('The filter slot is spelled differently on its two sides:\n');
-    lines.push(`  normalizer  ${PROTOCOL_FILE}`);
+    lines.push(`  declared    ${SPEC_FILE}`);
     lines.push(`              ${WIRE_TABLE} -> ${[...protocolSet].sort().map((s) => `\`${s}\``).join(', ')}`);
+    lines.push(`              (folded by the normalizer, ${PROTOCOL_FILE})`);
     lines.push(`  ingress     ${REST_FILE}`);
     lines.push(`              ${REST_SET} -> ${[...restSet].sort().map((s) => `\`${s}\``).join(', ')}\n`);
     if (onlyProtocol.length) {
@@ -468,8 +473,8 @@ function formatDrift({ onlyProtocol, onlyRest, protocolSet, restSet }) {
         lines.push(`    The ingress refuses ${it} as a repeated filter parameter, but the normalizer does not`);
         lines.push(`    fold ${it} into \`${FILTER_SLOT}\` at all — so a SINGLE occurrence is not a filter, and`);
         lines.push('    the arity refusal describes a parameter that does nothing.');
-        lines.push(`    Fix: add ${quoted} to the \`extra\` table in \`${WIRE_TABLE}\``);
-        lines.push(`    (${PROTOCOL_FILE}), or drop ${it} from \`${REST_SET}\`.`);
+        lines.push(`    Fix: add ${quoted} to \`${EXTRAS_TABLE}\``);
+        lines.push(`    (${SPEC_FILE}), or drop ${it} from \`${REST_SET}\`.`);
     }
     lines.push('');
     lines.push('Both sides must name the same set: one slot, one spelling set, two readers (#8002).');
@@ -489,21 +494,26 @@ export const RPC_QUERY_ALIAS_SLOTS: readonly QueryAliasSlot[] = [
 ];
 `;
 
-/** A normalizer fixture. `extraWhere` / `dollars` are what the cases vary. */
+/**
+ * The transport half of the spec fixture. `extraWhere` / `dollars` are what the
+ * cases vary. Concatenated onto {@link FIXTURE_SPEC} by `run()`, because since
+ * #16066 both halves are declarations in the SAME file.
+ */
 function fixtureProtocol(extraWhere = ['filters', '$filter'], dollars = [['$top', 'top'], ['$select', 'select']]) {
     return `
-const WIRE_QUERY_ALIAS_SLOTS: readonly QueryAliasSlot[] = (() => {
-    const extra: Record<string, readonly string[]> = {
-        where: [${extraWhere.map((s) => `'${s}'`).join(', ')}],
-        expand: ['$expand'],
-    };
-    return RPC_QUERY_ALIAS_SLOTS.map((slot) => ({
-        canonical: slot.canonical,
-        aliases: [...slot.aliases, ...(extra[slot.canonical] ?? [])],
-    }));
-})();
+const QUERY_TRANSPORT_ONLY_SLOT_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  where: [${extraWhere.map((s) => `'${s}'`).join(', ')}],
+  expand: ['$expand'],
+};
 
-const WIRE_DOLLAR_ALIASES: readonly (readonly [string, string])[] = [
+export const QUERY_TRANSPORT_ALIAS_SLOTS: readonly QueryAliasSlot[] = RPC_QUERY_ALIAS_SLOTS.map(
+  (slot) => ({
+    canonical: slot.canonical,
+    aliases: [...slot.aliases, ...(QUERY_TRANSPORT_ONLY_SLOT_ALIASES[slot.canonical] ?? [])],
+  }),
+);
+
+export const QUERY_TRANSPORT_DOLLAR_ALIASES: readonly (readonly [string, string])[] = [
 ${dollars.map(([d, b]) => `    ['${d}', '${b}'],`).join('\n')}
 ];
 `;
@@ -544,8 +554,10 @@ function selfTest() {
         registerCase();
         if (!condition) failures.push(`${name}${detail ? ` — ${detail}` : ''}`);
     };
+    // One file carries both halves now, so the fixtures concatenate: the RPC
+    // table first, the transport declarations after it.
     const run = (protocolText, restText, specText = FIXTURE_SPEC) =>
-        judge({ specText, protocolText, restText });
+        judge({ specText: specText + protocolText, restText });
 
     // 1. The tree as it stands: both sides name the same four spellings.
     battery('1. The tree as it stands: both sides name the same four spellings.');
@@ -560,9 +572,9 @@ function selfTest() {
         );
     }
 
-    // 2. A fifth spelling on the NORMALIZER side only — the direction #8002 is
+    // 2. A fifth spelling on the DECLARED side only — the direction #8002 is
     //    about, and the one nothing else in the repo refuses.
-    battery('2. A fifth spelling on the NORMALIZER side only — the direction #8002 is about, and the one nothing else in the repo refuses.');
+    battery('2. A fifth spelling on the DECLARED side only — the direction #8002 is about, and the one nothing else in the repo refuses.');
     {
         const { problems } = run(fixtureProtocol(['filters', '$filter', 'where_clause']), fixtureRest());
         check('a normalizer-only fifth spelling is red', problems.length === 1, `saw ${problems.length}`);
@@ -573,7 +585,7 @@ function selfTest() {
         );
         check(
             'the failure names both files',
-            problems[0]?.includes(PROTOCOL_FILE) && problems[0]?.includes(REST_FILE),
+            problems[0]?.includes(SPEC_FILE) && problems[0]?.includes(REST_FILE),
             problems[0],
         );
     }
@@ -626,7 +638,7 @@ function selfTest() {
         const detached = fixtureProtocol().replace('RPC_QUERY_ALIAS_SLOTS.map', 'SOME_OTHER_TABLE.map');
         const { problems } = run(detached, fixtureRest());
         check(
-            'a normalizer that stops deriving from the spec table is red',
+            'a transport table that stops deriving from the RPC table is red',
             problems.length === 1 && problems[0].includes(SPEC_TABLE),
             problems[0],
         );
@@ -748,13 +760,12 @@ function main() {
     const read = (rel) => readFileSync(join(ROOT, rel), 'utf8');
     const { problems, protocolSet, restSet } = judge({
         specText: read(SPEC_FILE),
-        protocolText: read(PROTOCOL_FILE),
         restText: read(REST_FILE),
     });
 
     if (problems.length === 0) {
         console.log(
-            `check:filter-alias-parity: OK (${restSet.size} wire spelling(s) of the \`${FILTER_SLOT}\` slot, `
+            `check:filter-alias-parity: OK (${restSet.size} transport spelling(s) of the \`${FILTER_SLOT}\` slot, `
             + `identical on both sides: ${[...restSet].sort().join(', ')})`,
         );
         return;
