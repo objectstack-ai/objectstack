@@ -131,7 +131,11 @@ function makeStubDriver() {
         name: 'memory', version: '0.0.0', supports: {},
         async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
         async find(o: string, ast: any) {
-            return Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where));
+            const matched = Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where));
+            // The caller's bound, applied AFTER the filter and by PRESENCE
+            // (`check:objectql-double-limit`): a double that silently ignores a
+            // `limit` it was handed cannot witness a paged read at all.
+            return typeof ast?.limit === 'number' ? matched.slice(0, ast.limit) : matched;
         },
         async findOne(o: string, ast: any) {
             for (const r of storeFor(o).values()) if (matches(r, ast?.where)) return r;
