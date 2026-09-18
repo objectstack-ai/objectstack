@@ -2047,7 +2047,11 @@ declare const BulkActionDefSchema: z.ZodObject<{
         labelField: z.ZodOptional<z.ZodString>;
         multiple: z.ZodOptional<z.ZodBoolean>;
         placeholder: z.ZodOptional<z.ZodString>;
-    }, z.core.$loose>>>;
+        dependsOn: z.ZodOptional<z.ZodArray<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+            field: z.ZodString;
+            param: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>]>>>;
+    }, z.core.$strict>>>;
     confirmText: z.ZodOptional<z.ZodString>;
     confirmLabel: z.ZodOptional<z.ZodString>;
     visible: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
@@ -2164,7 +2168,11 @@ declare const BulkActionParamSchema: z.ZodObject<{
     labelField: z.ZodOptional<z.ZodString>;
     multiple: z.ZodOptional<z.ZodBoolean>;
     placeholder: z.ZodOptional<z.ZodString>;
-}, z.core.$loose>;
+    dependsOn: z.ZodOptional<z.ZodArray<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+        field: z.ZodString;
+        param: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>]>>>;
+}, z.core.$strict>;
 
 // ── CHART_AGGREGATE_COMPARISON_SUFFIX (const) ──
 declare const CHART_AGGREGATE_COMPARISON_SUFFIX = "__comparison";
@@ -10268,7 +10276,11 @@ declare const ListViewSchema: z.ZodObject<{
             labelField: z.ZodOptional<z.ZodString>;
             multiple: z.ZodOptional<z.ZodBoolean>;
             placeholder: z.ZodOptional<z.ZodString>;
-        }, z.core.$loose>>>;
+            dependsOn: z.ZodOptional<z.ZodArray<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+                field: z.ZodString;
+                param: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>]>>>;
+        }, z.core.$strict>>>;
         confirmText: z.ZodOptional<z.ZodString>;
         confirmLabel: z.ZodOptional<z.ZodString>;
         visible: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
@@ -11417,7 +11429,11 @@ declare const ObjectListViewSchema: z.ZodObject<{
             labelField: z.ZodOptional<z.ZodString>;
             multiple: z.ZodOptional<z.ZodBoolean>;
             placeholder: z.ZodOptional<z.ZodString>;
-        }, z.core.$loose>>>;
+            dependsOn: z.ZodOptional<z.ZodArray<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+                field: z.ZodString;
+                param: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>]>>>;
+        }, z.core.$strict>>>;
         confirmText: z.ZodOptional<z.ZodString>;
         confirmLabel: z.ZodOptional<z.ZodString>;
         visible: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
@@ -20294,7 +20310,11 @@ declare const VIEW_METADATA_MEMBERS: {
                     labelField: z.ZodOptional<z.ZodString>;
                     multiple: z.ZodOptional<z.ZodBoolean>;
                     placeholder: z.ZodOptional<z.ZodString>;
-                }, z.core.$loose>>>;
+                    dependsOn: z.ZodOptional<z.ZodArray<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+                        field: z.ZodString;
+                        param: z.ZodOptional<z.ZodString>;
+                    }, z.core.$strict>]>>>;
+                }, z.core.$strict>>>;
                 confirmText: z.ZodOptional<z.ZodString>;
                 confirmLabel: z.ZodOptional<z.ZodString>;
                 visible: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
@@ -21532,7 +21552,11 @@ declare const VIEW_METADATA_MEMBERS: {
                     labelField: z.ZodOptional<z.ZodString>;
                     multiple: z.ZodOptional<z.ZodBoolean>;
                     placeholder: z.ZodOptional<z.ZodString>;
-                }, z.core.$loose>>>;
+                    dependsOn: z.ZodOptional<z.ZodArray<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+                        field: z.ZodString;
+                        param: z.ZodOptional<z.ZodString>;
+                    }, z.core.$strict>]>>>;
+                }, z.core.$strict>>>;
                 confirmText: z.ZodOptional<z.ZodString>;
                 confirmLabel: z.ZodOptional<z.ZodString>;
                 visible: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
@@ -23132,7 +23156,11 @@ declare const VIEW_METADATA_MEMBERS: {
                 labelField: z.ZodOptional<z.ZodString>;
                 multiple: z.ZodOptional<z.ZodBoolean>;
                 placeholder: z.ZodOptional<z.ZodString>;
-            }, z.core.$loose>>>;
+                dependsOn: z.ZodOptional<z.ZodArray<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+                    field: z.ZodString;
+                    param: z.ZodOptional<z.ZodString>;
+                }, z.core.$strict>]>>>;
+            }, z.core.$strict>>>;
             confirmText: z.ZodOptional<z.ZodString>;
             confirmLabel: z.ZodOptional<z.ZodString>;
             visible: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
@@ -24624,7 +24652,11 @@ declare const ViewSchema: z.ZodObject<{
                 labelField: z.ZodOptional<z.ZodString>;
                 multiple: z.ZodOptional<z.ZodBoolean>;
                 placeholder: z.ZodOptional<z.ZodString>;
-            }, z.core.$loose>>>;
+                dependsOn: z.ZodOptional<z.ZodArray<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+                    field: z.ZodString;
+                    param: z.ZodOptional<z.ZodString>;
+                }, z.core.$strict>]>>>;
+            }, z.core.$strict>>>;
             confirmText: z.ZodOptional<z.ZodString>;
             confirmLabel: z.ZodOptional<z.ZodString>;
             visible: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
@@ -25862,7 +25894,11 @@ declare const ViewSchema: z.ZodObject<{
                 labelField: z.ZodOptional<z.ZodString>;
                 multiple: z.ZodOptional<z.ZodBoolean>;
                 placeholder: z.ZodOptional<z.ZodString>;
-            }, z.core.$loose>>>;
+                dependsOn: z.ZodOptional<z.ZodArray<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+                    field: z.ZodString;
+                    param: z.ZodOptional<z.ZodString>;
+                }, z.core.$strict>]>>>;
+            }, z.core.$strict>>>;
             confirmText: z.ZodOptional<z.ZodString>;
             confirmLabel: z.ZodOptional<z.ZodString>;
             visible: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
