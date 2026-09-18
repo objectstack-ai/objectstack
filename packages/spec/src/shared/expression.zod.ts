@@ -395,13 +395,74 @@ export type TemplateExpressionInput = z.input<typeof TemplateExpressionInputSche
 
 /**
  * Predicate — an Expression whose evaluation is expected to be boolean.
- * Spec layer cannot enforce return type at parse time; this alias exists for
- * intent documentation and future runtime type-check wiring.
+ * Spec layer cannot enforce return type at parse time; this alias carries the
+ * intent, and since ADR-0136 it also carries the one thing the spec layer CAN
+ * enforce about a predicate: that the engine can run it at all.
+ *
+ * ## A predicate is an EVALUATED slot, by definition (ADR-0136 D1)
+ *
+ * These two composed {@link ExpressionSchema} / {@link ExpressionInputSchema}
+ * — the PERSISTENCE contract, whose rule is "`source` OR `ast`" — for as long
+ * as the alias was only intent documentation. That was the defect, not the
+ * documentation: a predicate exists to be EVALUATED, so the envelope it accepts
+ * has to be one the engine can evaluate, and the engine reads `source` alone
+ * (`cel-engine.ts` `evaluate`: "AST-only evaluation not yet supported; persist
+ * `source`"). An `ast`-only envelope and a `source` that is blank after
+ * trimming both parsed here, registered, passed `objectstack validate`, and
+ * then faulted or short-circuited at evaluation time — declared, never
+ * enforced. So these compose {@link EvaluatedExpressionSchema} /
+ * {@link EvaluatedExpressionInputSchema} and refuse both spellings at
+ * authoring, with the published sentence
+ * {@link EVALUATED_EXPRESSION_SOURCE_REQUIRED}.
+ *
+ * `ExpressionSchema` / `ExpressionInputSchema` are NOT narrowed: they remain
+ * the persistence contract. This is the same move `FlowEdgeSchema.condition`
+ * made, one rule reaching a second family of slots rather than a second rule.
+ *
+ * ## The fault semantics this contract declares (ADR-0136 D2–D4)
+ *
+ * A predicate has THREE states, not two, and each has a declared consequence.
+ * The states are "absent", "authored", and "authored but not evaluable" —
+ * and a BLANK predicate is the third, never the first: it is refused at
+ * authoring by the rule above, and where one is already stored it takes the
+ * fault path, never a silent pass.
+ *
+ *  - **At SUBMIT, a faulting field-rule predicate refuses the write, loudly,
+ *    naming the field and the rule** (D2). Nothing is persisted. A rule that
+ *    could not run has produced no verdict, and treating "no verdict" as the
+ *    author's verdict is what let one misspelled column show more, lock less
+ *    and demand less at once, with no state that said "this rule did not run".
+ *  - **At RENDER, visibility stays fail-OPEN** (D3). A faulting `visibleWhen`
+ *    SHOWS the field. This direction is load-bearing and is not a softening of
+ *    D2: hiding a control whose rule faulted is how a form comes to write
+ *    `null` over a column the user never saw, and the submit-time refusal is
+ *    what makes the pair safe. `readonlyWhen` / `requiredWhen` keep their
+ *    existing render directions for display.
+ *  - **A blank or faulting GATE predicate is diagnosed, never a silent `true`**
+ *    (D4) — the action / visibility gate path, which answered a bare `true`
+ *    for a blank source before it ever reached the evaluator.
+ *
+ * D2–D4 are consequences a CONSUMER delivers — the renderer, the submit path,
+ * the gate evaluator — and `packages/spec` carries no business logic
+ * (Prime Directive #2). They are declared here because the declaration is the
+ * contract those consumers are held to, and because a consumer cannot be held
+ * to a direction no protocol states. What this file ENFORCES is the authoring
+ * refusal above.
+ *
+ * ## What this contract deliberately does NOT do
+ *
+ * It does not bake a fault direction into the evaluation HELPER. The helper's
+ * fallback stays freely specifiable, because two shipped strategies depend on
+ * that freedom — fault-to-flag (asking `true` and `false` and diffing the
+ * answers) and fault-to-throw (a caller that wants the fault to propagate).
+ * A contract that fixed the helper's fallback would delete both. The direction
+ * is declared at the field-rule and gate layer, which is where the author's
+ * intent lives; the helper stays a mechanism.
  */
-export const PredicateSchema = ExpressionSchema;
+export const PredicateSchema = EvaluatedExpressionSchema;
 export type Predicate = z.input<typeof PredicateSchema>;
 
-export const PredicateInputSchema = ExpressionInputSchema;
+export const PredicateInputSchema = EvaluatedExpressionInputSchema;
 export type PredicateInput = z.input<typeof PredicateInputSchema>;
 
 /**
