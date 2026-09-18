@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { evaluatedExpressionUnionRefusal } from '../shared/evaluated-slot-union';
+import { bannedKeys } from '../shared/refinement-projection';
 
 /**
  * Tracing Protocol - Distributed Tracing & Observability
@@ -386,7 +387,7 @@ export const TraceSamplingConfigSchema = lazySchema(() => z.object({
       // carrying the published sentence for an `ast`-only envelope or a blank
       // bare string.
       z.record(z.string(), z.unknown())
-        .refine((value) => !('dialect' in value), {
+        .refine(bannedKeys(['dialect']), {
           message: STRUCTURED_FILTER_DIALECT_REFUSED,
           abort: true,
         }),
