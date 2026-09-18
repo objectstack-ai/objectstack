@@ -17257,6 +17257,46 @@ export const ISSUE_BODY_LIMIT = 262144;
 export const MARKDOWN_BODY_BUDGET = 60000;
 
 /**
+ * The largest COMMENT body the platform stores, in the same unit: UTF-8 BYTES.
+ *
+ * The sibling surface, bisected separately. `post-stamped.mjs` imports this to
+ * name the cap in a size refusal, and it is declared HERE rather than there
+ * because this file is already where this fleet's measured body caps live: five
+ * workflow comments send a reader to `ISSUE_BODY_LIMIT` in this file for the
+ * number, and the 65,536 folklore this pair replaces is the kind that grows back
+ * wherever one of two caps is kept somewhere else.
+ *
+ * Bisected on a throwaway probe opened for it (objectstack#18826, 2026-09-17),
+ * twelve measurement writes, every one read back byte-exact:
+ *
+ *   262,144 bytes  STORED   (read-back class `identical`)
+ *   262,145 bytes  REFUSED  (HTTP 422, nothing written)
+ *
+ * ⭐ The same value as `ISSUE_BODY_LIMIT`, reached by a SECOND, independent
+ * bisection — two surfaces, two brackets, one number: 256 KiB exactly. ⛔ And
+ * therefore two constants and not one: two measurements that agree is not one
+ * measurement, and the day the platform moves one surface a shared number would
+ * lie about the other.
+ *
+ * ⛔ The unit is measured here too. A comment of 262,145 bytes carrying only
+ * 222,145 characters (a run of 3-byte U+4E2D plus ASCII padding) was REFUSED —
+ * a cap counted in characters, or in UTF-16 code units, would have taken it with
+ * 40,000 to spare — and the same multi-byte shape at 262,144 bytes / 222,144
+ * characters STORED.
+ *
+ * ⚠️ What the two surfaces do NOT share is the SHAPE of the refusal. Over the
+ * cap, a comment create answers a real HTTP 422 and writes nothing, while an
+ * issue-body update refuses SILENTLY — 200, the old body kept, nothing reported
+ * (#18793). `post-stamped.mjs` carries one exit code for each.
+ *
+ * ⛔ And the platform's own 422 text says `maximum is 65536 characters`, which
+ * is false in unit AND value: write 3 of that probe stored a 65,537-character
+ * comment and write 4 a 262,144-byte one, four times the claimed maximum. ⛔
+ * Nothing here is derived from that sentence.
+ */
+export const COMMENT_BODY_LIMIT = 262144;
+
+/**
  * A body's size as the PLATFORM counts it: UTF-8 bytes.
  *
  * ⛔ Never `.length` for anything judged against `ISSUE_BODY_LIMIT` or
@@ -24375,7 +24415,7 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // docblock — unit, both sides of the bracket, the date and the probe issue —
   // because a number with no provenance is what got re-derived from memory the
   // first time.
-  'ISSUE_BODY_LIMIT measured cap': 37,
+  'ISSUE_BODY_LIMIT measured cap': 52,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
@@ -28558,6 +28598,32 @@ async function selfTest() {
   b(BATTERY18664, '#18664 cap: …which is 256 KiB exactly, checkable by hand', ISSUE_BODY_LIMIT === 256 * 1024, true);
   b(BATTERY18664, '#18664 cap: ⛔ the retired 65,536 is gone', ISSUE_BODY_LIMIT === 65536, false);
   b(BATTERY18664, '#18664 cap: …and the measured cap is four times it', ISSUE_BODY_LIMIT === 65536 * 4, true);
+
+  // #18843: the COMMENT surface's cap, declared beside its sibling. Pinned in
+  // THIS battery because what the battery floors is a measurement and its unit,
+  // and the sibling is the same measurement on the other surface — ⛔ not in a
+  // battery of its own, which would leave the name-roster pin below describing
+  // a ledger it no longer covers.
+  const commentCapDocblock = (() => {
+    const at = selfSource.indexOf('\nexport const COMMENT_BODY_LIMIT =');
+    const open = at < 0 ? -1 : selfSource.lastIndexOf('/**', at);
+    return at < 0 || open < 0 ? '' : selfSource.slice(open, at);
+  })();
+  b(BATTERY18664, '#18843 provenance: ⭐ the extractor really found the comment cap\'s own docblock', commentCapDocblock.startsWith('/**') && commentCapDocblock.endsWith('*/'), true);
+  b(BATTERY18664, '#18843 provenance: ⛔ …and not the whole file, which would satisfy every pin below with its own text', commentCapDocblock.includes('export const'), false);
+  b(BATTERY18664, '#18843 provenance: the docblock names the UNIT', commentCapDocblock.includes('UTF-8 BYTES'), true);
+  b(BATTERY18664, '#18843 provenance: …the landed side of the bracket', commentCapDocblock.includes('262,144 bytes  STORED'), true);
+  b(BATTERY18664, '#18843 provenance: …the refused side, one byte up', commentCapDocblock.includes('262,145 bytes  REFUSED'), true);
+  b(BATTERY18664, '#18843 provenance: …the date it was taken', commentCapDocblock.includes('2026-09-17'), true);
+  b(BATTERY18664, '#18843 provenance: …the issue it was measured on', commentCapDocblock.includes('objectstack#18826'), true);
+  b(BATTERY18664, '#18843 provenance: …and that THIS surface refuses LOUDLY, which the issue body does not', commentCapDocblock.includes('HTTP 422'), true);
+  b(BATTERY18664, '#18843 cap: the comment cap is the bisected value', COMMENT_BODY_LIMIT, 262144);
+  b(BATTERY18664, '#18843 cap: …which is 256 KiB exactly, checkable by hand', COMMENT_BODY_LIMIT === 256 * 1024, true);
+  b(BATTERY18664, '#18843 cap: ⛔ the retired 65,536 is gone here too', COMMENT_BODY_LIMIT === 65536, false);
+  b(BATTERY18664, '#18843 cap: …and the measured cap is four times it', COMMENT_BODY_LIMIT === 65536 * 4, true);
+  b(BATTERY18664, '#18843 pair: ⭐ the two surfaces agree — two bisections, one number', COMMENT_BODY_LIMIT === ISSUE_BODY_LIMIT, true);
+  b(BATTERY18664, '#18843 pair: ⛔ …and each stands on its OWN probe, so neither provenance borrows the other\'s', capDocblock.includes('objectstack#18793') && capDocblock.includes('objectstack#18826') === false, true);
+  b(BATTERY18664, '#18843 pair: ⛔ …the comment one likewise cites only the probe that measured it', commentCapDocblock.includes('objectstack#18793') === false, true);
 
   // The unit, at the primitive the guard is built on.
   b(BATTERY18664, '#18664 unit: bodyBytes counts UTF-8 bytes', bodyBytes('\u4e2d'), 3);
