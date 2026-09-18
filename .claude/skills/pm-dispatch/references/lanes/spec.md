@@ -4,9 +4,9 @@
 
 ## 范围
 
-- `packages/spec` 整包唯一契约,语义、文本、机器三面同席。
+- `packages/spec` 整包唯一契约,契约、辅助、机器三面同席。
 - 含 schema 形状、`contracts/**`、退役行为半边、strictness 台账。
-- 含 describe 与 JSDoc、墓碑散文、错误 guidance 与 alias 表。
+- 含 describe/JSDoc、墓碑散文、错误 guidance、alias 表;其重生成的 references 产物归源 PR。
 - 含 `packages/spec/scripts/**`、`packages/spec/docs/**`。
 - 同含围着 spec 契约转的工具链:门禁、生成器、lint 规则、报错散文、references 管线。
 - 一般开发工具面留 devx;`packages/spec` 恒归本席,不论谁需要它。
@@ -14,23 +14,23 @@
 
 ## 席内分派参考
 
-- 语义与文本按合法元数据集合变没变分:改动前过校验的输入改动后同判 ⇒ 文本面。
-- 文本面的 changeset 恒 patch,默认 sweep-first;否则语义面。
-- 放宽接受集或扩大公开面的卡,不论多小,即条款②;收窄仍是语义面,不触条款②。
+- 契约面 = 「改动前后同一份输入的接受/拒绝结果变了」;判定逐字节不变 ⇒ 辅助面。
+- 契约面五形任一命中:收紧、放宽、公开导出面增删、declared ≠ enforced、退役。
+- 辅助面的 changeset 恒 patch,默认 sweep-first;第二刀问「它误导了 AI 吗」。
+- 误导 ⇒ P2 保留;不误导 ⇒ 关 not planned,或搭下一个触碰它的 PR 的 Acceptance notes。
+- 放宽接受集或扩大公开面的卡,不论多小,即条款②;收窄仍是契约面,只触条款①。
 - 收窄不触发条款②,但按 `yes` 申报恒不是错误;⛔ 个案裁决不改本行。
-- 机器面改围契约的机器,与文本面不交,⛔ 不碰 `packages/spec/src/**/*.zod.ts` 与 strictness 台账。
-- 产物随源走:describe 与 JSDoc 改动重生成的 references 产物归触发它的源 PR。
+- 机器面改围契约的仪器,与辅助面不交,⛔ 不碰 `packages/spec/src/**/*.zod.ts` 与 strictness 台账。
+- 机器面卡只按北极星「仪器为车队服务」的那一问评级。
 - 改元数据格式或接受面的照旧归 `domain:spec`;`/meta` 路由本体在 `packages/rest` 归 `domain:cli`。
-- 拿不准 FLAG 回分诊,⛔ 不自设第二套判据。
-- 档位随面走的现行表在 SKILL.md 模型分档,单源,⛔ 不另抄。
+- 拿不准 FLAG 回分诊,⛔ 不自设判据;档位随面走,表在 SKILL.md 模型分档,⛔ 不另抄。
 
 ## 常设承诺
 
 - findings 首触定级归分诊席,本席只供证据。
 - 门禁强制的跨车道 ledger 追加整类预批(`error-code-ledger.zod.ts`),三条全中即免本席签字。
-- ①:码的存在已在归属卡裁过。
-- ②:纯增量 —— 不动 schema 形状、既有条目与 ledger 机制,只落追加方自己的包分节。
-- ③:兜底不变 —— 条款②路径肢照命中,入队前仍过契约复核。
+- ①:码的存在已在归属卡裁过;②:兜底不变,条款②路径肢照命中,入队前仍过契约复核。
+- ③:纯增量 —— 不动 schema 形状、既有条目与 ledger 机制,只落追加方自己的包分节。
 - 出类(新 ledger 字段、重构、别道条目、准入或拒收语义)⇒ 本席卡,不论谁需要它。
 - 分支信息测试(原文不译):Does this defect give a consumer a branch it could act on differently?
   No ⇒ widen the existing member's comment/message; yes ⇒ new code under the pre-approved class.

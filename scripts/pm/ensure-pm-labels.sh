@@ -422,6 +422,16 @@ for D in engine services devx spec cli skills; do
   gh label create "domain:$D" -R objectstack-ai/objectstack -c bfd4f2 -d "Domain lane — seat card indexed by label:pm:seat" 2>/dev/null || true
 done
 
+# domain:cloud is a PARKING label, not a lane: no seat, never dispatched in this
+# repo. Cloud-service journeys found in objectstack / objectui keep it until the
+# cloud PM migrates them — maintainer ruling 2026-09-18, verbatim: 「云服务旅程
+# 混在 objectstack / objectui 里的 ⇒保留 domain:cloud 标签 等 cloud 项目经理迁移」.
+# The object already exists in objectstack (auto-created, so `--reconcile` is
+# what aligns it) and is absent in objectui; the roster makes both. SKILL.md's
+# domain table carries the matching row (北极星「现在不做」).
+gh label create domain:cloud -R objectstack-ai/objectstack -c bfd4f2 -d "Cloud-service journey parked for the cloud PM to migrate — not dispatched in this repo (云服务旅程,本仓不派)" 2>/dev/null || true
+gh label create domain:cloud -R objectstack-ai/objectui    -c bfd4f2 -d "Cloud-service journey parked for the cloud PM to migrate — not dispatched in this repo (云服务旅程,本仓不派)" 2>/dev/null || true
+
 # objectui workload streams — maintainer rulings 2026-08-21, quoted verbatim:
 # 「B:两车道」→「现在本身就有 domain:devx」→「不要搞出那么多车道名称」→「也有
 # domain:spec」「其他就是 domain:ui ?」, naming finalized 「按 domain:ui 定稿」.

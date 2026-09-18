@@ -46,7 +46,7 @@
  * correct prose. Recognising a governed prefix inside free bilingual prose is
  * the intractability #9491 hit and cut, and this check does not re-attempt it:
  * it inverts the assertion instead — the REGISTER is the thing enumerated, the
- * prose is only searched. Containment covers all five entries; over-claim
+ * prose is only searched. Containment covers all six entries; over-claim
  * covers the three glob-shaped ones. That boundary is the honest claim, and it
  * is stated here rather than implied by the code.
  *
