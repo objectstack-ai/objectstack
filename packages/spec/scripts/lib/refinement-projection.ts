@@ -226,10 +226,49 @@ export interface ProjectionOverrideContext {
 }
 
 /**
- * ⭐ The ONE call through which `z.toJSONSchema` is reached anywhere the
- * published projection is produced — the generator's three attempts, the
- * union-branch projector behind the third, and the detector's differential in
- * `dropped-refinements.ts`.
+ * ⭐ The ONE call through which `z.toJSONSchema` is reached anywhere
+ * **`packages/spec` writes a published JSON Schema artifact**. Four producers,
+ * named because the claim is only worth as much as its enumeration:
+ *
+ *   1. `build-schemas.ts` — the generator's three attempts, writing
+ *      `json-schema/<category>/<Name>.json`;
+ *   2. `lib/union-branch-projection.ts` — the union-branch projector behind the
+ *      third of those attempts;
+ *   3. `lib/dropped-refinements.ts` — the detector's differential, which is
+ *      only about the real published file while it projects the way (1) does;
+ *   4. `build-openapi.ts` — the OpenAPI generator, writing
+ *      `json-schema/openapi.json`. That file ships in the tarball (`files[]`
+ *      carries `json-schema`) and is exported as `./openapi.json`, so it is a
+ *      published projection like any other; it reached this list late, and the
+ *      shape of the gap is the point — see below.
+ *
+ * ## ⛔ What is NOT behind it — stated so the next reader need not re-derive it
+ *
+ * This helper governs the projection CALL for the four producers above. It is
+ * ⛔ not a repo-wide guarantee, and three populations sit deliberately outside
+ * it. Naming them is the difference between a claim and a slogan; each was
+ * measured, not assumed:
+ *
+ *   - **The representability probe** in `union-branch-projection.ts`
+ *     (`projectsUnderStrictMode`) calls `z.toJSONSchema(..., { unrepresentable:
+ *     'throw' })` to ask zod a yes/no question and DISCARDS the result. Nothing
+ *     it produces is published, so routing it here would answer a different
+ *     question.
+ *   - **Producers outside `packages/spec`'s own artifacts** — the CLI's
+ *     `os generate` writes a JSON Schema of `ObjectStackDefinitionSchema` into
+ *     an author's project, and `build-react-blocks-contract.ts` renders block
+ *     prop tables into the published skills catalog. Both call
+ *     `z.toJSONSchema` directly, and the first was measured DIVERGENT from this
+ *     projection at seven declared sites. They are a separate decision about
+ *     how wide the published-projection guarantee reaches, ⛔ not an oversight
+ *     to be silently swept in here.
+ *   - **Runtime derivations** (`packages/metadata-protocol`) project schemas to
+ *     SERVE them, not to publish an artifact; they are governed by their own
+ *     contracts.
+ *
+ * `published-projection-choke-point.test.ts` holds the first bullet's boundary
+ * mechanically — it fails when a producer in this package grows a direct call —
+ * so the enumeration above cannot rot into prose.
  *
  * ## Why a choke point and not a convention
  *
