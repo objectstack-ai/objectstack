@@ -2,7 +2,7 @@
 '@objectstack/spec': minor
 ---
 
-`@objectstack/spec/data` now exports the typed hook `ctx.api` face — `HookApi`, `HookObjectApi`, `HookQuery`, `HookCountQuery`, `HookUpdateDoc`, `HookUpdateOptions`, `HookDeleteOptions`, `HookDoc` and `HookDriverPassthroughOptions` — so a metadata app's `*.hook.ts` imports the platform's type instead of hand-declaring one (#18163). The same entry additionally re-exports `EngineTransactionInfo`, `EngineTransactionOptions` and `IScopedContext`, which its public declarations reference structurally: without them a consumer that imports only `@objectstack/spec/data` and emits declarations answers `TS2883: The inferred type ... cannot be named without a reference to ...`. Type-only re-exports of the declarations `@objectstack/spec/contracts` already publishes, not second declarations.
+`@objectstack/spec/data` now exports the typed hook `ctx.api` face — `HookApi`, `HookObjectApi`, `HookQuery`, `HookCountQuery`, `HookUpdateDoc`, `HookUpdateOptions`, `HookDeleteOptions`, `HookDoc` and `HookDriverPassthroughOptions` — so a metadata app's `*.hook.ts` imports the platform's type instead of hand-declaring one (#18163). The same entry additionally re-exports `EngineTransactionInfo`, `EngineTransactionOptions`, `IScopedContext` and `IScopedObjectRepository`, which its public declarations reference structurally: without them a consumer that imports only `@objectstack/spec/data` and emits declarations answers `TS2883: The inferred type ... cannot be named without a reference to ...`. Type-only re-exports of the declarations `@objectstack/spec/contracts` already publishes, not second declarations.
 
 ```ts
 import type { HookApi } from '@objectstack/spec/data';
@@ -19,6 +19,6 @@ The platform already implemented this surface; it just never published a type an
 - **Every option shape is DERIVED, not transcribed.** Each is an `Omit`/`Pick` over the `Engine*Options` schemas that the engine's own per-method legal-key sets are pinned against, so a key added to a schema reaches the published type in the same run it reaches the engine's accepted set. `count` is the one shape without the driver pass-through keys, because the engine forwards no bag on that method and rejects them there — engine behaviour no document states, and exactly what a hand-written copy gets wrong.
 - **What is deliberately absent, each for a stated reason**: `context` (the repository injects it and discards a caller's), the `cursor` / `distinct` / `upsert` tombstones, `sudo()` (the #5945 exclusion stands — `Hook.runAs: 'system'` is the declared way to run elevated), and `aggregate` / `execute` / `create` / `deleteById`.
 
-Additive only: twelve new exported names from `./data` (nine new declarations plus three type-only re-exports), no removal and no signature change, so nothing an existing consumer imports moves.
+Additive only: thirteen new exported names from `./data` (nine new declarations plus four type-only re-exports), no removal and no signature change, so nothing an existing consumer imports moves.
 
 Clause-②: yes (widening)

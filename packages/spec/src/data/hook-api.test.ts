@@ -60,6 +60,7 @@ import type {
   HookQuery,
   HookUpdateOptions,
   IScopedContext as ReExportedScopedContext,
+  IScopedObjectRepository as ReExportedScopedRepository,
 } from './hook-api';
 import type { IScopedContext, IScopedObjectRepository } from '../contracts/scoped-context';
 
@@ -190,15 +191,19 @@ describe('HookApi — the published hook ctx.api face', () => {
     // `@objectstack/spec/data` and emitting declarations answers TS2883 without
     // them, and `check:entry-nameability` cannot see it (it probes the call
     // surface of VALUE exports; `HookApi` is a type).
-    it('the transaction signature\'s two types, and the type ctx.api already carries', () => {
+    it('the transaction signature\'s two types, and the ctx.api pair', () => {
       const infoIsReachable: Assignable<EngineTransactionInfo, EngineTransactionInfo> = true;
       const optsIsReachable: Assignable<EngineTransactionOptions, EngineTransactionOptions> = true;
       // Same declaration, reached through both entries — one declaration, two
       // paths, which is what `check:dual-source-exports` asks about.
       const oneDeclaration: Assignable<ReExportedScopedContext, IScopedContext> = true;
       const andBack: Assignable<IScopedContext, ReExportedScopedContext> = true;
-      expect([infoIsReachable, optsIsReachable, oneDeclaration, andBack]).toEqual([
-        true, true, true, true,
+      // The repository comes with it: `IScopedContext.object(name)` returns it,
+      // so exporting the context without it is a HALF closure — measured as a
+      // surviving TS2883 on `ctx.api.object(...)`.
+      const repoReachable: Assignable<ReExportedScopedRepository, IScopedObjectRepository> = true;
+      expect([infoIsReachable, optsIsReachable, oneDeclaration, andBack, repoReachable]).toEqual([
+        true, true, true, true, true,
       ]);
     });
   });

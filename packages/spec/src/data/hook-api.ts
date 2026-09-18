@@ -328,13 +328,24 @@ export interface HookApi {
  * ```
  *
  * The second position — `transaction`'s `opts` — answers the same way for
- * `EngineTransactionOptions`, and `HookContext.api` has answered it for
- * `IScopedContext` since #5945, which is why that third name is here too: it is
- * the SAME defect in the SAME entry, its remedy is this same one-line form, it
- * lands in this file rather than in any file another card holds, and it adds no
- * gate beyond the three this diff already regenerates. Leaving it would publish
- * a hook seam that still cannot be written from one entry — the exact gap this
- * card was opened to close.
+ * `EngineTransactionOptions`. Those two are the blocking finding.
+ *
+ * The other two names close the SAME defect one frame out, and they come as a
+ * PAIR because that is what the measurement said. `HookContext.api` has leaked
+ * `IScopedContext` since #5945, and exporting that name alone is a HALF
+ * closure: `IScopedContext.object(name)` returns `IScopedObjectRepository`, so
+ * with three names `(ctx) => ctx.api!.object('deal')` still answered TS2883 on
+ * that fourth name. With all four, a probe carrying every position — both
+ * `transaction` arguments, `ctx.api`, `ctx.api.object(…)`, `api.object(…)` and
+ * a repository read — emits at exit 0, and the emitted declarations resolve
+ * every inferred type through `@objectstack/spec/data`. The chain terminates
+ * there: the repository's own members answer in structural types
+ * (`Promise` of `Record` of `string` to `any`, or `null`) that name nothing
+ * further. Taken in one stroke because leaving it publishes a hook seam whose
+ * own `ctx.api` cannot be named from the entry that publishes the seam — the
+ * exact gap this card was opened to close — and because all four are one-line
+ * re-exports in this file, of declarations `@objectstack/spec/contracts`
+ * already publishes, adding no gate beyond the three this diff regenerates.
  *
  * ⛔ `check:entry-nameability` is NOT the instrument that answers this. By its
  * own docblock it probes the CALL surface of VALUE exports that have a call
@@ -344,9 +355,9 @@ export interface HookApi {
  * are a known target outside it. The instrument that answers is a consumer
  * program with `declaration` emit, which is what the excerpt above is.
  *
- * Type-only re-exports: they add three names to this entry and no runtime byte,
+ * Type-only re-exports: they add four names to this entry and no runtime byte,
  * and each is ONE declaration reachable from two entries rather than two
  * declarations sharing a name, which is what `check:dual-source-exports` asks.
  */
 export type { EngineTransactionInfo, EngineTransactionOptions } from '../contracts/objectql-engine';
-export type { IScopedContext } from '../contracts/scoped-context';
+export type { IScopedContext, IScopedObjectRepository } from '../contracts/scoped-context';
