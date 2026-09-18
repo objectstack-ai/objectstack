@@ -1,8 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
-import { evaluatedExpressionUnionRefusal } from '../shared/evaluated-slot-union';
 
 /**
  * Tracing Protocol - Distributed Tracing & Observability
@@ -296,22 +294,69 @@ export const SamplingStrategyType = z.enum([
 export type SamplingStrategyType = z.input<typeof SamplingStrategyType>;
 
 /**
- * Why the structured-filter arm of `TraceSamplingConfig.composite[].condition`
- * refused an object (#15811).
+ * Why `tracing.sampling.composite[].condition` no longer takes a CEL predicate
+ * (#18118).
  *
- * Module-local on purpose: it is ONE arm's rule at ONE slot, not a published
- * contract, so it stays off `api-surface/` — the same reason
- * `evaluatedExpressionUnionRefusal` is package-internal. It is deliberately
- * NOT `EVALUATED_EXPRESSION_SOURCE_REQUIRED`: this arm does not refuse for a
- * missing `source`, it refuses because the object is not a structured filter
- * at all, and an arm that borrows the other arm's sentence is how
- * `{ dialect: 'js', source: 'x' }` came to be blamed on `source`.
+ * The slot was `z.union([<a structured filter record>, <the evaluated
+ * expression schema>])`. The expression arm parsed, normalized a bare string to
+ * `{ dialect: 'cel', source }`, registered, and was served back — and NOTHING
+ * anywhere evaluated it. No composite sampler reads this key; an author (very
+ * often an AI reading the generated reference page, ADR-0033) who wrote a
+ * sampling condition got a green parse and no signal, indistinguishable from a
+ * predicate that ran and answered. ADR-0049 enforce-or-remove, ruled A on this
+ * card: application platforms do not carry trace-sampling conditions as
+ * authorable application metadata — that lives in observability infrastructure
+ * (OTel sampling policy), where it is structured rather than a free expression.
+ * So the arm is REMOVED, not wired.
+ *
+ * Module-local on purpose: it is ONE slot's rule, not a published contract, so
+ * it stays off `api-surface/` — the same reason `evaluatedExpressionUnionRefusal`
+ * (which this replaces here) is package-internal.
+ *
+ * The REFUSED SET at this slot is unchanged from #15811 in one direction and
+ * narrower in the other. An object carrying a `dialect` key was already refused
+ * there (a bare record accepted `{ dialect: 'cel', ast }` as an ordinary filter,
+ * which made #15811's narrowing inert until that arm learned to decline); it is
+ * still refused, and now says WHY in the retirement's words instead of routing
+ * the author to an arm that no longer exists. What genuinely narrows is the
+ * expression arm's own accept set: a bare string and a healthy
+ * `{ dialect: 'cel', source: '…' }` envelope were accepted and now are not. A
+ * structured filter carrying no `dialect` key is accepted exactly as before.
+ *
+ * ⛔ No `os migrate meta` sentence: the house sentence is owed only where an
+ * ADR-0087 conversion covers the surface (`shared/retired-key.ts` module
+ * docblock). This retirement's disposition is a D3 SEMANTIC entry
+ * (`observability-cel-predicates-retired`) — no transform can turn a predicate
+ * into an attribute filter without inventing the attributes.
+ *
+ * ⚠️ The structured-filter arm is UNTOUCHED, and whether it is read by anything
+ * is a separate measurement on its own card — this retirement makes no claim
+ * about it.
  */
-const STRUCTURED_FILTER_DIALECT_REFUSED =
-  'A structured sampling filter must not carry a `dialect` key: an object that does is an '
-  + 'expression attempt, and it is judged by this slot\'s expression arm — which needs a dialect '
-  + 'this platform evaluates and a non-blank `source`. Drop the `dialect` key to author a '
-  + 'structured filter, or write `{ dialect: \'cel\', source: \'…\' }`.';
+const SAMPLING_CONDITION_EXPRESSION_RETIRED =
+  '`tracing.sampling.composite[].condition` no longer accepts a CEL predicate — the expression '
+  + 'arm was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — nothing ever '
+  + 'evaluated it, so a condition authored as an expression parsed, registered and read back '
+  + 'while sampling nothing. Delete the expression and write a structured filter instead: a '
+  + 'plain object of match criteria carrying no `dialect` key, e.g. '
+  + '`{ service: \'api\', attributes: { \'http.route\': \'/v1/orders\' } }`. A sampling rule the '
+  + 'structured filter cannot express belongs in your OpenTelemetry sampler configuration, not '
+  + 'in application metadata.';
+
+/**
+ * The refusal for an input that is recognisably a RETIRED expression attempt.
+ *
+ * Deliberately narrow, the same discipline as `evaluatedExpressionUnionRefusal`:
+ * the surviving arm is a structured filter, so blaming a mistyped filter on a
+ * retired CEL arm would send the author to the wrong key. It answers only for a
+ * string — the bare-string spelling the reference page advertised — and returns
+ * `undefined` for everything else, so zod's own message stands. The ENVELOPE
+ * spelling is answered by the `dialect` refine below, which sees the object
+ * itself.
+ */
+function samplingConditionExpressionRefusal(input: unknown): string | undefined {
+  return typeof input === 'string' ? SAMPLING_CONDITION_EXPRESSION_RETIRED : undefined;
+}
 
 /**
  * Trace Sampling Configuration Schema
@@ -363,36 +408,25 @@ export const TraceSamplingConfigSchema = lazySchema(() => z.object({
   composite: z.array(z.object({
     strategy: SamplingStrategyType.describe('Strategy type'),
     ratio: z.number().min(0).max(1).optional(),
-    condition: z.union([
-      // ⚠️ The structured-filter arm must refuse an EXPRESSION-shaped object or
-      // it swallows the one this union's other arm exists to judge: a bare
-      // `z.record(z.string(), z.unknown())` accepts `{ dialect: 'cel', ast }`
-      // as an ordinary record, so #15811's narrowing was inert here until this
-      // arm learned to decline. An object carrying `dialect` is an expression
-      // attempt and belongs to the arm below, whatever it got wrong.
-      //
-      // ⚠️ `abort: true` is about the MESSAGE and never the accept set — the
-      // refused set is identical either way, measured. zod 4.4 reports the one
-      // arm that did not abort, else `invalid_union` at the slot. Left
-      // non-aborting this arm was the survivor for every expression-shaped
-      // refusal here, and it answered for all of them: a blank `source` — the
-      // one shape the expression arm refuses WITHOUT aborting — collided with
-      // it, so the slot published a bare `Invalid input` while the real
-      // sentence sat nested out of sight, and `{ dialect: 'js', source: 'x' }`
-      // was refused with a sentence about `source` that misnames its fault.
-      // Aborting hands each refusal back to the arm or map that owns it, and
-      // the slot answers exactly what every other evaluated slot answers: one
-      // `custom` issue at `source` for a blank `source`, one `invalid_union`
-      // carrying the published sentence for an `ast`-only envelope or a blank
-      // bare string.
-      z.record(z.string(), z.unknown())
-        .refine((value) => !('dialect' in value), {
-          message: STRUCTURED_FILTER_DIALECT_REFUSED,
-          abort: true,
-        }),
-      EvaluatedExpressionInputSchema,
-    ], { error: (issue) => evaluatedExpressionUnionRefusal(issue.input) })
-      .optional().describe('Condition for this strategy — a structured filter object, or a CEL predicate an engine evaluates. ⚠️ The two are told apart by the `dialect` key: a structured filter must NOT carry one, and an object that does is judged as an expression — so it needs a dialect this platform evaluates and a non-blank `source` (`{ dialect: \'cel\', source: \'record.amount > 10\' }`). `{ dialect: \'cel\', ast: … }` with no `source` is refused here.'),
+    // ⚠️ The structured-filter arm must refuse an EXPRESSION-shaped object or
+    // it swallows the shape this slot's RETIRED arm used to judge: a bare
+    // `z.record(z.string(), z.unknown())` accepts `{ dialect: 'cel', source }`
+    // as an ordinary filter, so an author whose predicate stopped being
+    // evaluated would go on writing one and it would go on parsing — the exact
+    // silent no-op #18118 removed. An object carrying `dialect` is an
+    // expression attempt and is answered with the retirement prescription.
+    //
+    // ⚠️ `abort: true` is about the MESSAGE and never the accept set — the
+    // refused set is identical either way, measured. It is kept from #15811 so
+    // the refusal is answered once, at the slot, instead of being nested.
+    condition: z.record(z.string(), z.unknown(), {
+      error: (issue) => samplingConditionExpressionRefusal(issue.input),
+    })
+      .refine((value) => !('dialect' in value), {
+        message: SAMPLING_CONDITION_EXPRESSION_RETIRED,
+        abort: true,
+      })
+      .optional().describe('Condition for this strategy — a structured filter object of match criteria, carrying no `dialect` key. ⚠️ A CEL predicate is NOT accepted here: that arm was removed in 17.5.0 because nothing evaluated it, and an object carrying a `dialect` key is refused as an expression attempt.'),
   })).optional(),
 
   /**

@@ -786,3 +786,96 @@ describe('metrics duration rows declare seconds through the type (#18124)', () =
     expect(MetricsConfigSchema.parse(config(60)).retention?.downsampling?.[0]?.resolution).toBe(60);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// #18118 — ServiceLevelIndicator.successCriteria
+// ---------------------------------------------------------------------------
+
+/**
+ * The slot whose CEL arm was RETIRED, and the structured rule that survived it.
+ *
+ * The union was `z.union([{ threshold, operator, percentile? }, <the evaluated
+ * expression schema>])`. Nothing anywhere evaluated the expression arm, so a
+ * criterion authored as a predicate parsed, registered and read back while
+ * deciding nothing (ADR-0049 enforce-or-remove, ruled A). The arm is gone; the
+ * structured object is untouched.
+ *
+ * Three facts, and any one alone is a green that proves nothing:
+ *
+ *  - ACCEPT SET, the surviving half. The structured rule parses exactly as it
+ *    did before, `percentile` included. Without this control a table of
+ *    `false`s below would be a schema that refuses everything.
+ *  - ACCEPT SET, the retired half. The bare-string spelling and the
+ *    `{ dialect, source }` envelope were accepted before and are refused now —
+ *    that pair IS the retirement.
+ *  - MESSAGES, INCLUDING WHERE THEY DO NOT REACH. The prescription answers the
+ *    STRING spelling, which is the one the reference page advertised and the
+ *    one the ruling names (`successCriteria: 'p95 < 300ms'`). It does NOT
+ *    answer the envelope spelling: zod 4.4 consults a schema's `error` map for
+ *    the top-level `invalid_type` a non-object raises and NOT for the child
+ *    issues a wrong-shaped OBJECT raises, so an envelope is refused by the
+ *    structured arm's own missing-key issues. Both directions are pinned. ⛔ The
+ *    second pin is not a wish — it is the measured cell, and a future change
+ *    that makes the prescription reach the envelope must move it rather than
+ *    delete it, because the day it silently stops being true is the day the
+ *    retirement stops being audible in one of its two spellings.
+ */
+describe('#18118 ServiceLevelIndicator.successCriteria — the retired CEL arm', () => {
+  const sli = (successCriteria: unknown) => ServiceLevelIndicatorSchema.safeParse({
+    name: 'api_latency',
+    label: 'API Latency',
+    metric: 'http_request_duration_seconds',
+    type: 'latency' as const,
+    successCriteria,
+    window: { durationSeconds: 2592000 },
+  });
+  const issuesAt = (successCriteria: unknown) => {
+    const r = sli(successCriteria);
+    expect(r.success, `expected a refusal for ${JSON.stringify(successCriteria)}`).toBe(false);
+    return r.success ? [] : r.error.issues;
+  };
+  const PRESCRIPTION = /`metrics\.slis\[\]\.successCriteria` no longer accepts a CEL predicate.*removed in @objectstack\/spec 17\.5\.0 \(ADR-0049 enforce-or-remove\).*threshold: 300/s;
+
+  it('CONTROL — the structured rule is accepted, as before', () => {
+    expect(sli({ threshold: 99.9, operator: 'gte' }).success).toBe(true);
+    expect(sli({ threshold: 300, operator: 'lt', percentile: 0.95 }).success).toBe(true);
+  });
+
+  it.each([
+    ['a bare CEL predicate', 'p95 < 300ms'],
+    ['an empty bare string', ''],
+    ['a blank bare string', '   '],
+  ] as const)('REFUSES %s with the retirement prescription — it parsed before this card', (_label, criteria) => {
+    const issues = issuesAt(criteria);
+    const own = issues.filter((i) => i.path.join('.') === 'successCriteria');
+    expect(own).toHaveLength(1);
+    expect(own[0].code).toBe('invalid_type');
+    expect(own[0].message).toMatch(PRESCRIPTION);
+  });
+
+  it.each([
+    ["a HEALTHY { dialect: 'cel', source } envelope", { dialect: 'cel', source: 'p95 < 300ms' }],
+    ["{ dialect: 'cel' }", { dialect: 'cel' }],
+  ] as const)('REFUSES %s — but by the structured arm\'s own missing keys, NOT the prescription (measured limit)', (_label, criteria) => {
+    const issues = issuesAt(criteria);
+    expect(issues.map((i) => i.path.join('.'))).toEqual(
+      expect.arrayContaining(['successCriteria.threshold', 'successCriteria.operator']),
+    );
+    expect(issues.map((i) => i.message).join('\n')).not.toMatch(PRESCRIPTION);
+  });
+
+  it('does NOT borrow the retirement sentence for a refusal that is not the retirement', () => {
+    // A number is not an expression attempt in any spelling; zod's own
+    // `expected object` message is the honest answer and must stand.
+    const issues = issuesAt(5);
+    expect(issues.map((i) => i.message).join('\n')).not.toMatch(PRESCRIPTION);
+    expect(issues.some((i) => /expected object/.test(i.message))).toBe(true);
+  });
+
+  it('publishes the retirement in the `describe()` the reference page renders', () => {
+    const successCriteria = (ServiceLevelIndicatorSchema as any).shape.successCriteria as { description?: string };
+    expect(successCriteria.description).toBeTypeOf('string');
+    expect(successCriteria.description).toContain('A CEL predicate is NOT accepted here');
+  });
+});

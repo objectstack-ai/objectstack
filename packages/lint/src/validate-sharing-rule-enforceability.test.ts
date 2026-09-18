@@ -528,3 +528,49 @@ describe('the hint names REAL sharing-model and depth vocabulary', () => {
     expect(new Set<string>(ShareRecipientType.options).has('position')).toBe(true);
   });
 });
+
+/**
+ * [#18550] `masterOf` must refuse a `reference` carrier it cannot read, rather
+ * than reading the master_detail as naming no master.
+ *
+ * One of the measured residue sites of ruling letter E item 2 on #18095. The
+ * read was `typeof ref === 'string' && ref`, which gives an unreadable carrier
+ * the same answer as an absent one — so a `controlled_by_parent` detail whose
+ * master IS declared answered `undefined` here, and the fix-hint that names
+ * the master went out naming nothing.
+ *
+ * Absence keeps its answer: a `master_detail` that names no master leaves
+ * `masterOf` at `undefined`, and the finding is still produced.
+ */
+describe('validateSharingRuleEnforceability — an unreadable master carrier is refused (#18550)', () => {
+  const detailAnchoredOn = (carrier: Record<string, unknown>) =>
+    anchoredOn('controlled_by_parent', {
+      fields: {
+        name: { type: 'text', label: 'Name' },
+        account: { type: 'master_detail', label: 'Account', ...carrier },
+      },
+    });
+
+  it('control: a READABLE master carrier still produces the controlled-by-parent finding', () => {
+    // Without this, the refusal below could pass on a rule that had stopped
+    // judging anchors at all.
+    expect(ids(detailAnchoredOn({ reference: 'crm_account' })))
+      .toContain(SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT);
+  });
+
+  it('an OBJECT-valued carrier REFUSES — ⛔ not "this detail names no master"', () => {
+    const run = () => validateSharingRuleEnforceability(detailAnchoredOn({ reference: { object: 'crm_account' } }));
+    expect(run).toThrow(TypeError);
+    expect(run).toThrow(/validate-sharing-rule-enforceability masterOf/);
+    expect(run).toThrow(/`reference` is an object/);
+    expect(run).toThrow(/FieldSchema declares it as an optional STRING/);
+  });
+
+  it.each([
+    ['undefined (the key omitted)', {}],
+    ['null (`StrictField` declares it nullable)', { reference: null }],
+    ["'' (names no object)", { reference: '' }],
+  ])('absence keeps the ordinary finding and does NOT throw: %s', (_label, carrier) => {
+    expect(ids(detailAnchoredOn(carrier))).toContain(SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT);
+  });
+});

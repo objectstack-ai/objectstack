@@ -335,8 +335,27 @@ jq '.release | {fromVersion, toVersion,
 named — `"./ai: AgentSchema (const)"`, the entry point followed by the export
 and its kind. `converted` and `migrated` are the ADR-0087 conversions and
 semantic migrations first registered in that release. The same file's
-`aggregate` and `perMajor` records are unchanged and still answer the
-major-boundary question.
+`perMajor` records are unchanged and still answer the major-boundary question,
+and so does `aggregate` — for its `converted` and `migrated`, which are derived
+from the ADR-0087 registries across the whole `from` → `to` range.
+
+⛔ **But not for `aggregate.added` / `aggregate.removed`.** Those come from the
+same one-release export diff as the section above, not from the major range the
+record is keyed by, so when they are filled the `aggregate` record carries a
+`surfaceScope` naming the exact pair they span:
+
+```bash
+jq '.aggregate | {from, to, surfaceScope,
+                  added: (.added | length), removed: (.removed | length)}' \
+  node_modules/@objectstack/spec/spec-changes.json
+```
+
+`surfaceScope` absent means that record claims no export diff at all and its
+`added` / `removed` are empty — the registry-only shape. ⛔ Read that as "this
+record does not say", never as "nothing was added between `from` and `to`",
+which is the same rule the `release` section states for itself below. A release
+whose `aggregate` arrays disagree with the two published tarballs, or carry no
+`surfaceScope`, does not publish.
 
 The `os` CLI reads the same section, so a CI job does not have to know the file
 exists:
