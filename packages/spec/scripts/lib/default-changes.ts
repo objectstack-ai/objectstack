@@ -356,5 +356,55 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + 'executor applies two different values for an absent key (GET inline, POST durable), '
         + 'so any single declared default would change what a stored flow sends.',
     },
+    {
+      key: 'system/MetricsConfig:slis',
+      from: '(none)',
+      to: '[]',
+      reason:
+        'The runtime default did NOT move, and that is measured twice: the `.default([])` on the '
+        + 'key is byte-identical at the base and after the change — it is not in this diff at all '
+        + '— and `MetricsConfigSchema.parse({ name, label })` answers `slis: []` on the built '
+        + 'package. What appeared is the `default` KEYWORD in the published JSON Schema, and the '
+        + 'cause is the `ai/KnowledgeSource:refresh` mechanism run BACKWARDS. That row recorded a '
+        + 'default vanishing when a `.transform()` entered the subtree a `.default()` wrapper '
+        + 'covers; this diff takes the last transform OUT of the `system/MetricsConfig` subtree — '
+        + 'the string-to-envelope shorthand of the evaluated-expression schema, removed with the '
+        + 'CEL arm of `ServiceLevelIndicator.successCriteria` (#18118) — and the keyword comes '
+        + 'back. Isolated rather than inferred: one `z.array(<element>).optional().default([])` '
+        + 'wrapper projected twice, once with a transform-bearing element and once with a '
+        + 'transform-free one, publishes `default: []` only for the transform-free element while '
+        + '`parse({})` answers `[]` for both. The direction is read off a second artifact in this '
+        + 'same diff rather than assumed: `content/docs/references/system/metrics.mdx` loses the '
+        + '`?` from every default-bearing key of every `system/MetricsConfig` nested type cell '
+        + '(`summary`, `retention`, `cardinalityLimits`, `batch`, `errorBudget`, the aggregation '
+        + '`window`), which is the output-mode signature — post-parse a defaulted key is always '
+        + 'present — and those cells carried `?` at the base. Nothing '
+        + 'deployed changes behaviour; the consumer affected is one outside this repo who reads '
+        + 'the published JSON Schema\'s `default` himself, and what he now reads is what the '
+        + 'parser has always applied. To keep the old value there is nothing to write — the key, '
+        + 'its type and its default are unchanged.',
+    },
+    {
+      key: 'system/TracingConfig:sampling',
+      from: '(none)',
+      to: '{"rules":[],"type":"always_on"}',
+      reason:
+        'The runtime default did NOT move, measured the same two ways as the '
+        + '`system/MetricsConfig:slis` row above: the '
+        + '`.default({ type: \'always_on\', rules: [] })` on the key is byte-identical at the base '
+        + 'and after the change — not in this diff — and '
+        + '`TracingConfigSchema.parse({ name, label })` answers '
+        + '`{ type: \'always_on\', rules: [] }` on the built package. Same mechanism and same '
+        + 'direction: retiring the CEL arm of `TraceSamplingConfig.composite[].condition` (#18118) '
+        + 'takes the last `.transform()` out of the `system/TracingConfig` subtree, so the '
+        + '`default` keyword the key always had at parse time becomes expressible in the published '
+        + 'JSON Schema. Same evidence as above, on this def\'s own page: '
+        + '`content/docs/references/system/tracing.mdx` loses the `?` from every default-bearing '
+        + 'key of every `system/TracingConfig` nested type cell (`parentBased`, `propagation`, '
+        + '`spanLimits`, `performance`, `instrumentation`), the output-mode signature. '
+        + 'Nothing deployed changes behaviour; the consumer affected is one outside this '
+        + 'repo who reads the published JSON Schema\'s `default` himself. To keep the old value '
+        + 'there is nothing to write — the key, its type and its default are unchanged.',
+    },
   ],
 };

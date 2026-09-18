@@ -56961,7 +56961,7 @@ declare const MetricsConfigSchema: z.ZodObject<{
             error_rate: "error_rate";
             saturation: "saturation";
         }>;
-        successCriteria: z.ZodUnion<readonly [z.ZodObject<{
+        successCriteria: z.ZodObject<{
             threshold: z.ZodNumber;
             operator: z.ZodEnum<{
                 gt: "gt";
@@ -56971,27 +56971,7 @@ declare const MetricsConfigSchema: z.ZodObject<{
                 eq: "eq";
             }>;
             percentile: z.ZodOptional<z.ZodNumber>;
-        }, z.core.$strip>, z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
-            dialect: "cel" | "cron" | "template";
-            source: string;
-            ast?: unknown;
-            meta?: {
-                rationale?: string | undefined;
-                generatedBy?: string | undefined;
-            } | undefined;
-        }, string>>, z.ZodObject<{
-            dialect: z.ZodEnum<{
-                cel: "cel";
-                cron: "cron";
-                template: "template";
-            }>;
-            ast: z.ZodOptional<z.ZodUnknown>;
-            meta: z.ZodOptional<z.ZodObject<{
-                rationale: z.ZodOptional<z.ZodString>;
-                generatedBy: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>>;
-            source: z.ZodString;
-        }, z.core.$strip>]>]>;
+        }, z.core.$strip>;
         window: z.ZodObject<{
             durationSeconds: z.ZodNumber;
             size: z.ZodOptional<z.ZodNever>;
@@ -69196,7 +69176,7 @@ declare const ServiceLevelIndicatorSchema: z.ZodObject<{
         error_rate: "error_rate";
         saturation: "saturation";
     }>;
-    successCriteria: z.ZodUnion<readonly [z.ZodObject<{
+    successCriteria: z.ZodObject<{
         threshold: z.ZodNumber;
         operator: z.ZodEnum<{
             gt: "gt";
@@ -69206,27 +69186,7 @@ declare const ServiceLevelIndicatorSchema: z.ZodObject<{
             eq: "eq";
         }>;
         percentile: z.ZodOptional<z.ZodNumber>;
-    }, z.core.$strip>, z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
-        dialect: "cel" | "cron" | "template";
-        source: string;
-        ast?: unknown;
-        meta?: {
-            rationale?: string | undefined;
-            generatedBy?: string | undefined;
-        } | undefined;
-    }, string>>, z.ZodObject<{
-        dialect: z.ZodEnum<{
-            cel: "cel";
-            cron: "cron";
-            template: "template";
-        }>;
-        ast: z.ZodOptional<z.ZodUnknown>;
-        meta: z.ZodOptional<z.ZodObject<{
-            rationale: z.ZodOptional<z.ZodString>;
-            generatedBy: z.ZodOptional<z.ZodString>;
-        }, z.core.$strip>>;
-        source: z.ZodString;
-    }, z.core.$strip>]>]>;
+    }, z.core.$strip>;
     window: z.ZodObject<{
         durationSeconds: z.ZodNumber;
         size: z.ZodOptional<z.ZodNever>;
@@ -71411,27 +71371,7 @@ declare const TraceSamplingConfigSchema: z.ZodObject<{
             probability: "probability";
         }>;
         ratio: z.ZodOptional<z.ZodNumber>;
-        condition: z.ZodOptional<z.ZodUnion<readonly [z.ZodRecord<z.ZodString, z.ZodUnknown>, z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
-            dialect: "cel" | "cron" | "template";
-            source: string;
-            ast?: unknown;
-            meta?: {
-                rationale?: string | undefined;
-                generatedBy?: string | undefined;
-            } | undefined;
-        }, string>>, z.ZodObject<{
-            dialect: z.ZodEnum<{
-                cel: "cel";
-                cron: "cron";
-                template: "template";
-            }>;
-            ast: z.ZodOptional<z.ZodUnknown>;
-            meta: z.ZodOptional<z.ZodObject<{
-                rationale: z.ZodOptional<z.ZodString>;
-                generatedBy: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>>;
-            source: z.ZodString;
-        }, z.core.$strip>]>]>>;
+        condition: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
     }, z.core.$strip>>>;
     rules: z.ZodDefault<z.ZodOptional<z.ZodArray<z.ZodObject<{
         name: z.ZodString;
@@ -71527,27 +71467,7 @@ declare const TracingConfigSchema: z.ZodObject<{
                 probability: "probability";
             }>;
             ratio: z.ZodOptional<z.ZodNumber>;
-            condition: z.ZodOptional<z.ZodUnion<readonly [z.ZodRecord<z.ZodString, z.ZodUnknown>, z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
-                dialect: "cel" | "cron" | "template";
-                source: string;
-                ast?: unknown;
-                meta?: {
-                    rationale?: string | undefined;
-                    generatedBy?: string | undefined;
-                } | undefined;
-            }, string>>, z.ZodObject<{
-                dialect: z.ZodEnum<{
-                    cel: "cel";
-                    cron: "cron";
-                    template: "template";
-                }>;
-                ast: z.ZodOptional<z.ZodUnknown>;
-                meta: z.ZodOptional<z.ZodObject<{
-                    rationale: z.ZodOptional<z.ZodString>;
-                    generatedBy: z.ZodOptional<z.ZodString>;
-                }, z.core.$strip>>;
-                source: z.ZodString;
-            }, z.core.$strip>]>]>>;
+            condition: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
         }, z.core.$strip>>>;
         rules: z.ZodDefault<z.ZodOptional<z.ZodArray<z.ZodObject<{
             name: z.ZodString;
