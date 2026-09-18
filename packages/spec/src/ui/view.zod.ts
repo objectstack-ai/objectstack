@@ -1746,33 +1746,42 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * Closed (strict) from the start, and the strictness stands on its own: it does
  * NOT rest on the renderer refusing an undeclared key, because nothing
  * downstream refuses one. Measured at the `.objectui-sha` pin `53ded82b` by
- * EXECUTING the pinned declarations, not by reading them:
+ * EXECUTING the pinned declarations, not by reading them — and each anchor
+ * below quotes the line it was read at, so the next pin bump reds instead of
+ * rotting (`check:objectui-pin-citations`):
  *
  * - **The block this face feeds is FLATTENED, not forwarded.** `ListView`
- *   (`plugin-list/src/ListView.tsx`, `resolveListMapConfig`) and `ObjectView`
- *   (`plugin-view/src/ObjectView.tsx`, `case 'map'`) copy it through the
- *   hand-listed `FLAT_MAP_CONFIG_KEYS` whitelist — this block's keys minus
- *   `style` — and emit those as flat props. An undeclared key is dropped
+ *   (`packages/plugin-list/src/ListView.tsx:113` first line
+ *   `function resolveListMapConfig(schema: { map?: unknown; options?: { map?: unknown } }): Record<string, unknown> {`)
+ *   and `ObjectView` (`packages/plugin-view/src/ObjectView.tsx:1381` first line
+ *   `case 'map':`) copy it through a HAND-LISTED whitelist
+ *   (`packages/plugin-list/src/ListView.tsx:67` first line
+ *   `export const FLAT_MAP_CONFIG_KEYS = [`) — this block's keys minus
+ *   `style` — and emit those as flat props. An undeclared key IS dropped
  *   there, but by a whitelist and in SILENCE: no parse, no warning, no
  *   diagnostic of any kind.
  * - **The renderer's own zod schema does not close the set.**
- *   `ObjectMapConfigSchema` (`packages/types/src/zod/objectql.zod.ts:562`) is a
- *   plain `z.object`, NOT strict, so an undeclared key parses clean there —
- *   zero issues, no warning — and `getMapConfig`
- *   (`packages/plugin-map/src/ObjectMap.tsx:373-376`) consults that `safeParse`
- *   only to decide whether to `console.warn`, then returns a spread of the
- *   AUTHORED block (`:378`), undeclared key and all. That spread is reached by
- *   objectui's own component-node `map` prop, never by this face's flatten
- *   product ("neither flattener emits a `map` key at all", `getMapConfig`).
+ *   `packages/types/src/zod/objectql.zod.ts:562` first line
+ *   `export const ObjectMapConfigSchema = z.object({` — a plain `z.object`,
+ *   NOT strict, so an undeclared key parses clean there: zero issues, no
+ *   warning. `getMapConfig` consults that `safeParse`
+ *   (`packages/plugin-map/src/ObjectMap.tsx:373` first line
+ *   `const result = ObjectMapConfigSchema.safeParse(config);`) only to decide
+ *   whether to `console.warn`, then returns a spread of the AUTHORED block
+ *   (`:378` first line `return { ...config, style: config.style || style };`),
+ *   undeclared key and all. That spread is reached by objectui's own
+ *   component-node `map` prop, never by this face's flatten product ("neither
+ *   flattener emits a `map` key at all", `getMapConfig`).
  *
  * ⛔ So relaxing this block to `passthrough` would hand the extra key to no
  * checker at all: it dies in the whitelist without a word, and the one schema
  * that could have reported it is open and warn-only. And this parse is the only
  * place an author is told ANYWHERE: `map` is not in objectui's
- * `LIST_VIEW_LOCAL_OVERRIDES` (`packages/types/src/zod/objectql.zod.ts:313`),
- * so objectui's own `ListViewSchema` imports THIS block by reference and the
- * document check on that side is this same schema. The two key sets MIRROR
- * each other, key for key. That parity was one key
+ * `LIST_VIEW_LOCAL_OVERRIDES` (`packages/types/src/zod/objectql.zod.ts:313`
+ * first line `const LIST_VIEW_LOCAL_OVERRIDES = [`), so objectui's own
+ * `ListViewSchema` imports THIS block by reference and the document check on
+ * that side is this same schema. The two key sets MIRROR each other, key for
+ * key. That parity was one key
  * SHORT until the `style` row below landed: the renderer's own
  * `ObjectMapConfigSchema` declares `style` and `getMapConfig` reads it
  * (`schema.map?.style`) while this block did not declare it, so strictness here
