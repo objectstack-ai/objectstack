@@ -658,6 +658,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 import {
+  COMMENT_BODY_LIMIT,
   EXIT_PREREQUISITE_NOT_MET,
   H56_STAMP_TOLERANCE_MIN,
   ISSUE_BODY_LIMIT,
@@ -673,33 +674,6 @@ import {
 const SELF_PATH = fileURLToPath(import.meta.url);
 const API = 'https://api.github.com';
 const TOKEN = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
-
-/**
- * The largest comment body the platform STORES, in the unit it refuses in:
- * UTF-8 BYTES.
- *
- * Bisected on a throwaway probe opened for it (objectstack#18826,
- * 2026-09-17), twelve measurement writes, every one read back byte-exact:
- *
- *   262,144 bytes  STORED   (read-back class `identical`)
- *   262,145 bytes  REFUSED  (HTTP 422, nothing written)
- *
- * ⭐ The same value as `ISSUE_BODY_LIMIT`, reached by a SECOND, independent
- * bisection — two surfaces, two brackets, one number: 256 KiB exactly.
- *
- * ⛔ The unit is measured, not assumed. A body of 262,145 bytes carrying only
- * 222,145 characters (a run of 3-byte U+4E2D plus ASCII padding) was REFUSED —
- * a cap counted in characters, or in UTF-16 code units, would have taken it
- * with 40,000 to spare — and the same multi-byte shape at 262,144 bytes /
- * 222,144 characters STORED.
- *
- * ⛔ And the platform's own 422 says `maximum is 65536 characters`, which is
- * false in unit AND value: write 3 of that probe stored a 65,537-character
- * comment and write 4 stored a 262,144-byte one, four times the claimed
- * maximum. That string is the likely provenance of the 65,536 folklore this
- * fleet has already had to correct once, so ⛔ nothing here is derived from it.
- */
-export const COMMENT_BODY_LIMIT = 262144;
 
 export const EXIT_OK = 0;
 export const EXIT_USAGE = 1;
