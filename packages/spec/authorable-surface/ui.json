@@ -620,6 +620,7 @@
     "ui/ListMapConfig:latitudeField",
     "ui/ListMapConfig:locationField",
     "ui/ListMapConfig:longitudeField",
+    "ui/ListMapConfig:style",
     "ui/ListMapConfig:titleField",
     "ui/ListMapConfig:zoom",
     "ui/ListView:addRecord",

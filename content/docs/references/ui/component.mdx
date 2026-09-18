@@ -640,7 +640,7 @@ View filter rule
 | **staticData** | `any[]` | optional | Inline records — read SECOND by `getDataConfig`, wrapped into a `{ provider: 'value' }` config |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Marker order for the fetched records — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array` |
-| **map** | `any` | optional | Map field config, the author face: `{ latitudeField, longitudeField, locationField?, titleField?, descriptionField?, zoom?, center?, style? }`. Taken WHOLE when present — the flat top-level spelling beside it is ignored |
+| **map** | `{ latitudeField?: string; longitudeField?: string; locationField?: string; titleField?: string; … }` | optional | Map field config, the author face — the same block `ListViewSchema.map` declares, and the one the renderer validates this node against. Taken WHOLE when present: the flat top-level spelling beside it is ignored |
 | **mapStyle** | `string` | optional | MapLibre style URL or spec, overriding the public demo tiles. Read before `map.style`; NOT the base node `style`, which is an inline CSS record |
 | **navigation** | `any` | optional | Marker-click navigation config (`{ mode: page \| drawer \| modal \| split \| popover \| none }`) |
 | **enableClustering** | `boolean` | optional | Group nearby markers into clusters. Absent, the renderer clusters only above 100 markers |
@@ -693,6 +693,19 @@ Sort field and direction pair
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field name to sort by |
 | **order** | `Enum<'asc' \| 'desc'>` | ✅ | Sort direction |
+
+### Nested Shape: `ObjectMapProps.map`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **latitudeField** | `string` | optional | Field providing the marker latitude (used with longitudeField) |
+| **longitudeField** | `string` | optional | Field providing the marker longitude (used with latitudeField) |
+| **locationField** | `string` | optional | Field providing a combined location — a "lat,lng" string or a `{ lat, lng }` object — as the alternative to the latitudeField/longitudeField pair |
+| **titleField** | `string` | optional | Field displayed as the marker title (popup heading, mobile record card, and what the map search box matches on) |
+| **descriptionField** | `string` | optional | Field displayed as the marker description |
+| **zoom** | `number` | optional | Initial zoom level (1-20). Omit to let the renderer fit the camera to the queried records |
+| **center** | `[number, number]` | optional | Initial camera center as [latitude, longitude]. Omit to let the renderer fit the camera to the queried records |
+| **style** | `string` | optional | Map style URL — the MapLibre style document the renderer loads in place of the public demo tiles. The component-level `mapStyle` is read FIRST and wins when both are present; this is NOT the inline CSS `style` record a component node carries |
 
 
 ---
