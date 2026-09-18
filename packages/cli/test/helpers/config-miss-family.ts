@@ -26,6 +26,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 
@@ -135,7 +136,13 @@ function commandId(abs: string): string {
  */
 export function discoverConfigMissFamily(): string[] {
   const files = commandFiles(COMMANDS_DIR);
-  const sources = new Map(files.map((abs) => [abs, readFileSync(abs, 'utf-8')]));
+  // Masked. Both halves below are regexes over command SOURCE, and both are
+  // satisfiable by prose: a docblock naming `json: Flags.boolean(` beside an
+  // import of `utils/config.js` invents a direct member, and a commented-out
+  // `export default class X extends Y` invents an alias. The discovery feeds a
+  // `toEqual` in two nightly-tier files, where a phantom member is a red no
+  // pull request can be shown (#18520).
+  const sources = new Map(files.map((abs) => [abs, maskComments(readFileSync(abs, 'utf-8'))]));
 
   const direct = new Set<string>();
   for (const [abs, src] of sources) {
