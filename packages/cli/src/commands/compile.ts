@@ -452,8 +452,22 @@ export default class Compile extends Command {
       //     DE-DUPLICATED against the union run, because the union contains
       //     every package's items: without this, a two-package project reports
       //     every finding twice and the author cannot tell a real per-package
-      //     finding from an echo. What survives the filter is exactly the set
-      //     the union could not see.
+      //     finding from an echo.
+      //
+      //     ⚠️ [#18779] This comment used to end "What survives the filter is
+      //     exactly the set the union could not see", and that was FALSE for
+      //     as long as the de-duplication key carried the POSITIONAL `path`:
+      //     a package body re-bases its collections from 0, so one finding got
+      //     two keys and its echo survived the very filter described here. The
+      //     sentence was quoted as authority by #18677 and #18778 without the
+      //     definition being opened, and copied into the `os validate` and
+      //     `os lint` doors as each was wired. `findingKey` now neutralises
+      //     the top-level collection index, so what survives is the set of
+      //     per-package findings no union finding already carried under the
+      //     same rule, `where`, message and non-top-level position. ⛔ Do not
+      //     re-inflate that to "exactly the set the union could not see" —
+      //     `utils/artifact-packages.ts` states the bound and why it is
+      //     narrower than that sentence.
       //
       //     [#16611] Each package's stack is handed the artifact's `packages[]`
       //     as RESOLUTION CONTEXT — see `packageBodyAsStack`. The list read here

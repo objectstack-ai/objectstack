@@ -2,8 +2,8 @@
   "description": "Shrink-only ledger of every PUBLISHED JSON Schema that is WIDER than the Zod type it was generated from, because a rule written as `.refine()` reaches the runtime and not the file (#18670). `z.toJSONSchema()` has no arm for a `custom` check: a plain record, the same record with a `.refine()`, and the same record with an ABORTING `.refine()` all project byte-identically (measured on zod 4.4.3, the version packages/spec resolves). So a document one of these files ACCEPTS can still be refused at parse time, and an author -- or an AI -- validating against packages/spec/json-schema/** finds out a release later. Each `sites` path is a position under that schema at which a refinement is dropped; the same paths are written onto the artifact itself as `x-dropped-refinements`. Hand-edited on purpose and with no `gen:` script: a generator would let a new gap be admitted by running a command instead of by a decision, which is the silence this ledger exists to end. Adding, removing or moving a site fails packages/spec/scripts/build-schemas.ts until the line moves with it, and the failure prints the corrected entry in full. ⛔ Do not delete or weaken a refinement to shorten this file -- the runtime rule is correct; it is the projection that is silent. Narrowing the published shape to match the Zod type is a public contract change and is NOT what this ledger does.",
   "measured": {
     "zod": "4.4.3",
-    "publishedSchemasWithDroppedRefinements": 245,
-    "droppedRefinementSites": 748,
+    "publishedSchemasWithDroppedRefinements": 246,
+    "droppedRefinementSites": 750,
     "refinementSitesThatDidProject": 0,
     "refinementSitesWithNoJsonFormToCompare": 3
   },
@@ -403,6 +403,12 @@
         "data.listViews.valueType.timeline.groupByField",
         "data.titleFormat.options[0].in",
         "data.titleFormat.options[1]"
+      ]
+    },
+    "api/PackageInstallBody": {
+      "sites": [
+        "options[1].navigationContributions.element.items.element.lazy.options[0]",
+        "options[1].navigationContributions.element.items.element.lazy.options[0].visible.options[1]"
       ]
     },
     "api/PackageInstallRequest": {
