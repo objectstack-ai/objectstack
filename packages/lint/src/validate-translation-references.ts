@@ -110,11 +110,37 @@
  * §4 ladder of the assessment, with the field-level S3 rule intact:
  *
  *   1. own object                          → check its fields/views/actions/
- *                                             sections/tabs
+ *                                             sections/tabs, PLUS whatever an
+ *                                             `objectExtensions[]` entry merges
+ *                                             into it (#18441)
  *   2. platform object in the registry     → skip WHOLLY (we cannot see its
  *                                             fields, so we cannot judge them)
+ *   2b. an `objectExtensions[]` target      → skip WHOLLY, for rung 2's reason:
+ *       this stack does NOT define            the owner's field set is not
+ *                                             visible from here (#18441)
  *   3. platform-prefixed, not in registry  → warn on the object key only
  *   4. unresolved, unprefixed              → warn on the object key only
+ *
+ * ── Contributed surfaces: what a package translates without declaring ────
+ *
+ * A package contributes into metadata another package owns through two
+ * DECLARED surfaces, and ships the labels for what it contributed. Neither
+ * contribution enters the target's own authored collection — the runtime folds
+ * them on every read — so a universe built from the authored collections alone
+ * calls every one of those locale keys an orphan, at `error`, with a remedy
+ * (`or drop it`) that deletes a translation the runtime honours. Both are
+ * therefore folded into the universe:
+ *
+ *   | surface                        | what it makes addressable          |
+ *   |--------------------------------|------------------------------------|
+ *   | `manifest.navigationContributions` | the contributed items' ids, under the target app — including an app this stack only contributes into and does not declare (#18442) |
+ *   | `objectExtensions[]`           | the fields and validation rules it merges into the target object (#18441) |
+ *
+ * ⛔ Each fold widens what a key may RESOLVE against and nothing else: a name
+ * no declaration and no contribution carries is still an orphan and still
+ * errors, on the per-package leg exactly as on the union one. See
+ * {@link contributedNavItemsByApp} and {@link objectExtensionsByTarget} for the
+ * fold facts each rests on, and this rule's test file for the lit controls.
  */
 
 import { expandViewContainer } from '@objectstack/spec';
@@ -290,8 +316,24 @@ interface FlowFacts {
 
 interface Universe {
   objects: Map<string, ObjectFacts>;
+  /**
+   * Every object an `objectExtensions[]` entry TARGETS (#18441) — the declared
+   * cross-package field-injection surface, whether or not this stack also
+   * defines the target. A target that IS defined here has its injected names
+   * folded into {@link ObjectFacts} above; a target that is not is rung 2b of
+   * the §4 ladder — see the object branch of {@link validateTranslationReferences}.
+   */
+  extended: Set<string>;
   /** App name → every navigation item id declared by that app. */
   apps: Map<string, Set<string>>;
+  /**
+   * The subset of {@link apps} this stack does NOT declare and only
+   * CONTRIBUTES into (#18442). Only the diagnosis differs: an unresolved
+   * navigation key under one of these is not "the app declares no such item"
+   * — the app's own items are invisible from here — it is "this package
+   * contributed no such item".
+   */
+  contributedOnlyApps: Set<string>;
   dashboards: Map<string, { widgets: Set<string>; actions: Set<string> }>;
   /** Flow name (`Flow.name`) → its screen nodes and their declared fields. */
   flows: Map<string, FlowFacts>;
@@ -696,6 +738,101 @@ function contributedNavItemsByApp(stack: AnyRec): Map<string, unknown[]> {
 }
 
 /**
+ * Target object name → every `objectExtensions[]` entry aimed at it (#18441).
+ *
+ * ## Why the universe has to include these at all
+ *
+ * A package adds fields to an object ANOTHER package owns by declaring
+ * `objectExtensions: [{ extend: '<target>', fields: { … } }]` — the declared
+ * cross-package field-injection surface, canonical target key `extend`
+ * (`ObjectExtensionSchema`, `aliases: { object|objectName|target|name|extends
+ * → extend }`). Those fields never enter the target's own `fields`
+ * declaration: `ObjectQL.registerApp` registers the extension as its own
+ * layer (`registerObject(extDef, id, undefined, 'extend', priority)`) and the
+ * registry merges the layers. So a universe built from `stack.objects` alone
+ * reports the locale key for a CORRECTLY injected field as an orphan, at
+ * `error`, in the same words as a real typo — measured on the probe stack of
+ * #18441: `objects: [crm_lead { name }]` + `objectExtensions: [{ extend:
+ * 'crm_lead', fields: { sla_tier } }]` yielded one `error` at
+ * `translations[0]["zh-CN"].objects.crm_lead.fields.sla_tier` advising the
+ * author to "Point the key at a declared field, or drop it", byte-identical to
+ * the finding a genuinely undeclared `zzz_gone` produced on the same stack.
+ *
+ * ## Which rungs an extension can actually reach — measured, not assumed
+ *
+ * `ObjectExtensionSchema` is a `strictObject`, so the fold surface is EXACTLY
+ * its declared keys: `extend`, `priority`, `fields`, `validations`, `indexes`,
+ * `label`, `pluralLabel`, `description`. Everything else is refused BY NAME at
+ * the extension level with authoring guidance (`actions`, `listViews`,
+ * `fieldGroups`, `hooks` carry their own `guidance` text; `views`, `sections`
+ * and `tabs` fall to the shared unknown-key refusal). Measured against the
+ * schema rather than read off the merge: each of those seven produced an
+ * extension-level `unrecognized_keys` issue, while `fields` and `validations`
+ * parsed.
+ *
+ * ⇒ Only TWO of this rule's rungs are reachable through an extension:
+ * `objects.<obj>.fields.*` and `objects.<obj>._validations.*`. `indexes` is
+ * not translatable; `label` / `pluralLabel` / `description` are leaf copy on
+ * an object that already resolved, and this rule checks no leaf. ⛔ Do not
+ * grow this fold to `_views` / `_sections` / `_tabs` / `_actions` "for
+ * symmetry": an extension cannot contribute any of them, so a key there is an
+ * orphan exactly as it was, and widening those rungs would silence real ones.
+ *
+ * ## Why a union is FAITHFUL here rather than a second implementation
+ *
+ * Same property as {@link contributedNavItemsByApp}, one collection over: the
+ * registry merges EVERY extension layer onto the target and `priority` decides
+ * only which layer WINS A CONFLICT — never whether a name arrives. So the set
+ * of addressable names is invariant under the merge, and set membership is the
+ * only question asked here. ⛔ The registry is not imported to answer it
+ * (`@objectstack/lint` depends on `@objectstack/spec` and never on a runtime).
+ *
+ * ## Which two carriers are read, and why both
+ *
+ * `objectExtensions` is a STACK collection (`StackSchema`, disposition
+ * `concat`), not a manifest key — so unlike the nav surface there is no
+ * `stack.manifest` form to read:
+ *
+ *   1. `stack.objectExtensions` — the stack in hand. On the union leg that is
+ *      every package's extensions already concatenated; on the per-package leg
+ *      (`packageBodyAsStack`) it is this package's own, at the top level of its
+ *      assembled body.
+ *   2. `packages[].manifest.objectExtensions` — the ADR-0130 D4 artifact
+ *      entries, whose bodies carry the collection (`concat` is one of the
+ *      `ASSEMBLED_PACKAGE_BODY_DISPOSITIONS`). Read for the reason #16611 gave
+ *      for object NAMES: the artifact is the co-ownership boundary, so a
+ *      per-package leg that cannot see a sibling package's extension reports
+ *      THIS RUN's blind spot as the author's mistake. Without it the union leg
+ *      and the per-package leg would disagree about one key.
+ *
+ * ⛔ What this cannot see, stated rather than implied: fields injected
+ * IMPERATIVELY by plugin code are not metadata and no static rule can read
+ * them — the same bound {@link contributedNavItemsByApp} records for
+ * contributions registered from a plugin's `init`.
+ */
+function objectExtensionsByTarget(stack: AnyRec): Map<string, AnyRec[]> {
+  const byTarget = new Map<string, AnyRec[]>();
+  const add = (extensions: unknown) => {
+    for (const extension of recordsOf(extensions)) {
+      // An extension names ONE target object. An entry with no `extend` merges
+      // into nothing at runtime, so it must not make anything addressable.
+      const target = strName(extension.extend);
+      if (!target) continue;
+      const entries = byTarget.get(target) ?? [];
+      entries.push(extension);
+      byTarget.set(target, entries);
+    }
+  };
+  add(stack.objectExtensions);
+  for (const entry of recordsOf(stack.packages)) {
+    const body = entry.manifest;
+    if (!isRec(body)) continue;
+    add(body.objectExtensions);
+  }
+  return byTarget;
+}
+
+/**
  * Collect every name a translation bundle may resolve against. Built once per
  * run: the same universe answers all bundles and all locales.
  */
@@ -756,6 +893,47 @@ function buildUniverse(stack: AnyRec): Universe {
     }
   }
 
+  // ── Object extensions: the fields and validation rules a package MERGES
+  //    into an object another package owns (#18441) ──
+  //
+  // Folded AFTER the declaration loop above, into the facts it built, so the
+  // two layers answer one question: is this name addressable at all. Only the
+  // two rungs an extension can reach are folded — see
+  // `objectExtensionsByTarget` for the measured surface, and ⛔ do not add the
+  // others.
+  //
+  // A target this stack does NOT define gets no entry here: inventing one
+  // would resolve the object key and then judge its fields against the
+  // INJECTED set alone, reporting the owner's own field keys as orphans —
+  // which is the false positive this fold exists to remove, moved one level
+  // up. Those targets are rung 2b of the §4 ladder instead (skipped wholly,
+  // for rung 2's reason), and `extended` below is what the object branch asks.
+  const extensionsByTarget = objectExtensionsByTarget(stack);
+  const extended = new Set(extensionsByTarget.keys());
+  for (const [target, extensions] of extensionsByTarget) {
+    const facts = objects.get(target);
+    if (!facts) continue;
+    for (const extension of extensions) {
+      for (const field of recordsOf(extension.fields)) {
+        const fieldName = strName(field.name);
+        if (!fieldName) continue;
+        // The object's OWN declaration keeps the slot. Which layer's
+        // `options` a merged field ends up carrying is the registry's
+        // precedence question (`priority`), and the only consumer of the
+        // stored definition here is `checkOptionKeys` — re-deriving that
+        // precedence to feed it would be a second opinion on it. The NAME is
+        // addressable either way, which is all this universe answers.
+        if (!facts.fields.has(fieldName)) facts.fields.set(fieldName, field);
+      }
+      // `_validations.<rule>` is keyed by the rule's own `name` (#14253), and
+      // an extension's `validations[]` merge into the target's rule set — so
+      // the same recursion the declaration loop uses, branches included.
+      for (const rule of recordsOf(extension.validations)) {
+        collectValidationRuleNames(rule, facts.validations);
+      }
+    }
+  }
+
   // ── Stack-level views: `_views` names + form-section names ──
   for (const view of recordsOf(stack.views)) {
     collectViewRecord(view, factsFor);
@@ -803,28 +981,68 @@ function buildUniverse(stack: AnyRec): Universe {
   // ── Apps: navigation item ids (`apps.<app>.navigation.<id>.label`) ──
   const contributedNav = contributedNavItemsByApp(stack);
   const apps = new Map<string, Set<string>>();
+  // One walker for both populations — a declared navigation tree and a
+  // contributed one are the same shape, and the `into` parameter is what let
+  // the contribution-only pass below reuse it instead of growing a second
+  // copy that can disagree about `children`.
+  const walkNav = (items: unknown, into: Set<string>) => {
+    for (const item of recordsOf(items)) {
+      const id = strName(item.id);
+      if (id) into.add(id);
+      if (item.children) walkNav(item.children, into);
+    }
+  };
   for (const app of recordsOf(stack.apps)) {
     const appName = strName(app.name);
     if (!appName) continue;
     const navIds = apps.get(appName) ?? new Set<string>();
-    const walkNav = (items: unknown) => {
-      for (const item of recordsOf(items)) {
-        const id = strName(item.id);
-        if (id) navIds.add(id);
-        if (item.children) walkNav(item.children);
-      }
-    };
-    walkNav(app.navigation);
+    walkNav(app.navigation, navIds);
     for (const area of recordsOf(app.areas)) {
       const areaId = strName(area.id);
       if (areaId) navIds.add(areaId);
-      walkNav(area.navigation);
+      walkNav(area.navigation, navIds);
     }
     // [#18203] …and everything CONTRIBUTED into this app, walked by the same
     // `walkNav` so a contributed subtree resolves exactly as a declared one
     // does. This is the population the runtime serves, not the authored array.
-    for (const items of contributedNav.get(appName) ?? []) walkNav(items);
+    for (const items of contributedNav.get(appName) ?? []) walkNav(items, navIds);
     apps.set(appName, navIds);
+  }
+
+  // [#18442] …and every app this stack CONTRIBUTES into but does not declare.
+  //
+  // Declaring the target app is the OTHER package's job — that is what makes
+  // `navigationContributions` a cross-package surface — so a contributor that
+  // ships the labels for the items it contributed was told the app is one
+  // "which this stack does not define", at `error`, with the remedy "Match the
+  // key to an app's `name`, or drop it". Measured on the #18442 probe: the
+  // per-package leg (`packageBodyAsStack(contributorBody, artifactPackages)`)
+  // reported one such finding whether or not the app's OWNER was an entry of
+  // the same artifact — the app rung `continue`s before the nav rung, so the
+  // whole subtree went with it.
+  //
+  // ⛔ This is not a new resolution-context decision. The runtime's own
+  // contribution diagnostic already took it, one field over and in the
+  // opposite direction of severity: `checkNavContributionGroups` yields
+  // NOTHING for a contribution whose target app is absent, because "a package
+  // may legally contribute into an app shipped by a DIFFERENT artifact
+  // installed separately" — reporting the absent-app case there "would refuse
+  // the supported cross-artifact case at build time". A rule that fails the
+  // run over the TRANSLATION of such a contribution refuses that same
+  // supported case, through the one door the author cannot argue with.
+  //
+  // What stays judged: the nav rung. An id under one of these apps must be one
+  // this stack contributes — the app's own entries are not visible from here
+  // and are its owner's to translate — so a typo in a contributed id is still
+  // an `error`, just diagnosed as "contributed no such item" rather than "the
+  // app declares none".
+  const contributedOnlyApps = new Set<string>();
+  for (const [appName, itemArrays] of contributedNav) {
+    if (apps.has(appName)) continue;
+    const navIds = new Set<string>();
+    for (const items of itemArrays) walkNav(items, navIds);
+    apps.set(appName, navIds);
+    contributedOnlyApps.add(appName);
   }
 
   // ── Dashboards: widget ids + header action urls ──
@@ -884,7 +1102,7 @@ function buildUniverse(stack: AnyRec): Universe {
     flows.set(flowName, { screens, otherNodes });
   }
 
-  return { objects, apps, dashboards, flows, globalActions, actionOwners };
+  return { objects, extended, apps, contributedOnlyApps, dashboards, flows, globalActions, actionOwners };
 }
 
 /** Quote a locale for the config path — BCP-47 tags carry `-`. */
@@ -939,6 +1157,20 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
           // platform name is legitimate — and unreadable from here, which is
           // why the whole subtree is skipped rather than half-checked.
           if (isPlatformProvidedObjectName(objectName)) continue;
+          // Rung 2b (#18441): an object this stack EXTENDS through the declared
+          // `objectExtensions[]` surface without defining it — the ordinary
+          // cross-package shape, since an extension exists precisely to reach
+          // an object another package owns. The extension is proof the stack
+          // means this name, so reporting it as "which no object in this stack
+          // defines" is wrong; and the owner's field set is no more visible
+          // here than a platform object's, so the subtree is skipped WHOLLY for
+          // rung 2's reason rather than judged against the injected names
+          // alone. The sibling rule takes the same decision on the same
+          // surface for the same reason (`validate-object-references.ts`:
+          // `objectExtensions[].fields` is deliberately not walked, because
+          // judging it "would refuse the legitimate cross-ARTIFACT case by the
+          // rule that exists to catch the typo").
+          if (universe.extended.has(objectName)) continue;
           orphan(
             `${inLocale} · object "${objectName}"`,
             objPath,
@@ -1142,24 +1374,48 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
           orphan(
             `${inLocale} · app "${appName}"`,
             appPath,
-            `Translations are keyed to app "${appName}", which this stack does not define. ` +
-              `The app launcher shows the source-locale label.` + suggest(appName, universe.apps.keys()),
+            `Translations are keyed to app "${appName}", which this stack neither defines nor ` +
+              `contributes into. The app launcher shows the source-locale label.` +
+              suggest(appName, universe.apps.keys()),
             `Match the key to an app's \`name\`, or drop it.` +
-              (universe.apps.size > 0 ? ` Defined apps: ${listNames(universe.apps.keys())}.` : ''),
+              // Every resolvable name, declared or only contributed into
+              // (#18442) — a remedy list that omitted the contribution targets
+              // would omit half the keys this rule accepts.
+              (universe.apps.size > 0
+                ? ` Apps this stack defines or contributes into: ${listNames(universe.apps.keys())}.`
+                : ''),
           );
           continue;
         }
         if (!isRec(rawApp)) continue;
+        // An app this stack only CONTRIBUTES into (#18442) resolves, but its
+        // OWN navigation entries are invisible from here — so the diagnosis for
+        // an unresolved id under it is "this package contributed no such item",
+        // never "the app declares none", and the remedy names the owning
+        // package instead of advising a deletion the runtime would honour.
+        const contributedOnly = universe.contributedOnlyApps.has(appName);
         for (const navId of Object.keys(asRecord(rawApp.navigation))) {
           if (navIds.has(navId)) continue;
           orphan(
             `${inLocale} · app "${appName}" · navigation "${navId}"`,
             `${appPath}.navigation.${navId}`,
-            `Translations are keyed to navigation item "${navId}", which app "${appName}" ` +
-              `does not declare. The menu entry keeps its source-locale label.` +
-              suggest(navId, navIds),
-            `Match the key to the navigation item's \`id\`, or drop it.` +
-              (navIds.size > 0 ? ` Declared navigation ids: ${listNames(navIds)}.` : ''),
+            contributedOnly
+              ? `Translations are keyed to navigation item "${navId}" of app "${appName}", ` +
+                `which this stack contributes into (\`manifest.navigationContributions\`) ` +
+                `without declaring — and it contributes no item with that id. Only the ids ` +
+                `contributed from here are addressable; the app's own entries are declared, ` +
+                `and translated, by the package that owns it.` + suggest(navId, navIds)
+              : `Translations are keyed to navigation item "${navId}", which app "${appName}" ` +
+                `does not declare. The menu entry keeps its source-locale label.` +
+                suggest(navId, navIds),
+            contributedOnly
+              ? `Match the key to a contributed item's \`id\`, or move it to the package that ` +
+                `owns app "${appName}".` +
+                (navIds.size > 0
+                  ? ` Contributed navigation ids: ${listNames(navIds)}.`
+                  : ` This stack contributes no identified item into "${appName}" at all.`)
+              : `Match the key to the navigation item's \`id\`, or drop it.` +
+                (navIds.size > 0 ? ` Declared navigation ids: ${listNames(navIds)}.` : ''),
           );
         }
       }
