@@ -123,9 +123,16 @@ The slot is multi-provider. To back the cache with Redis, Memcached or anything 
 register an object satisfying `ICacheService` under `'cache'` from your own plugin:
 
 ```typescript
-import type { ICacheService } from '@objectstack/spec/contracts';
+import type { CacheStats, ICacheService } from '@objectstack/spec/contracts';
 
-class MyCache implements ICacheService { /* the six members above */ }
+class MyCache implements ICacheService {
+  async get<T = unknown>(key: string): Promise<T | undefined> { /* … */ return undefined; }
+  async set<T = unknown>(key: string, value: T, ttl?: number): Promise<void> { /* … */ }
+  async delete(key: string): Promise<boolean> { /* … */ return false; }
+  async has(key: string): Promise<boolean> { /* … */ return false; }
+  async clear(): Promise<void> { /* … */ }
+  async stats(): Promise<CacheStats> { return { hits: 0, misses: 0, keyCount: 0 }; }
+}
 
 // inside your plugin's init(ctx):
 ctx.registerService('cache', new MyCache());
