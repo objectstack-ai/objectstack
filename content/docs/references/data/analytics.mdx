@@ -164,7 +164,7 @@ Type: `[string, string]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Target cube name — the object this join reaches. The ON clause is DERIVED from the declared relationship between the two cubes' objects (a foreign-key equality) and is never authored. |
+| **name** | `string` | ✅ | Target cube name — the object this join reaches. The ON clause is DERIVED from the declared relationship between the two cubes' objects (a foreign-key equality) and is never authored. The KEY this join is declared under in the `joins` record is the FOREIGN-KEY FIELD on this cube's own object, not a second spelling of the object it reaches: the runtime emits `LEFT JOIN <name> <key> ON <base>.<key> = <key>.id` and resolves a member written `<key>.<field>` through that alias. A join keyed after the TARGET object joins on a column the base object does not have, so nothing resolves. |
 
 ### Nested Shape: `Cube.refreshKey`
 
@@ -182,7 +182,7 @@ Type: `[string, string]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Target cube name — the object this join reaches. The ON clause is DERIVED from the declared relationship between the two cubes' objects (a foreign-key equality) and is never authored. |
+| **name** | `string` | ✅ | Target cube name — the object this join reaches. The ON clause is DERIVED from the declared relationship between the two cubes' objects (a foreign-key equality) and is never authored. The KEY this join is declared under in the `joins` record is the FOREIGN-KEY FIELD on this cube's own object, not a second spelling of the object it reaches: the runtime emits `LEFT JOIN <name> <key> ON <base>.<key> = <key>.id` and resolves a member written `<key>.<field>` through that alias. A join keyed after the TARGET object joins on a column the base object does not have, so nothing resolves. |
 
 
 ---

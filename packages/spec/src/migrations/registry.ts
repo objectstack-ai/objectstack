@@ -6685,30 +6685,39 @@ const step18: MigrationStep = {
         'analyticsCubes[].joins.<alias>.name alone. The ON clause is DERIVED from the declared '
         + 'relationship between the two cubes\' objects, as a foreign-key equality: NativeSQLStrategy '
         + 'emits the LEFT JOIN and its ON from the dotted member path, and ObjectQLStrategy lowers the '
-        + 'same alias to a relationship traversal with no ON clause at all.',
+        + 'same alias to a relationship traversal with no ON clause at all. The record KEY is the '
+        + 'foreign-key FIELD on the base object, never a second spelling of the object the join '
+        + 'reaches.',
       reason:
-        'Not losslessly convertible, because the two keys never had an effect and a mechanical strip '
-        + 'would hide which cube was affected. `sql` was REQUIRED and documented as the ON clause, and '
-        + 'no reader ever consulted it: an authored condition was REPLACED by the synthesised '
+        'The KEYS convert mechanically and do: the paired D2 conversion '
+        + '`cube-join-sql-and-relationship-removed` deletes both from every join, which is lossless '
+        + 'because neither ever had an effect to lose, and names the cube in each notice. What does '
+        + 'NOT convert is the INTENT. `sql` was REQUIRED and documented as the ON clause, and no '
+        + 'reader ever consulted it: an authored condition was REPLACED by the synthesised '
         + 'foreign-key equality and the aggregate came back under a 200, joined on something the '
         + 'author had not asked for. `relationship` carried a `.default(\'many_to_one\')` that nothing '
-        + 'dispatched on, so `one_to_many` parsed, changed no SQL, and kept the many-to-one arithmetic. '
-        + 'Deleting the keys restores honesty but does not give an author who wanted a non-FK join the '
-        + 'thing they wanted, which is why this is a TODO addressed to them rather than a rewrite '
-        + 'applied on their behalf. A custom join condition is a capability card with its injection / '
-        + 'allow-list boundary decided first, which the ruling deferred deliberately.',
+        + 'dispatched on, so `one_to_many` parsed, changed no SQL, and kept the many-to-one '
+        + 'arithmetic. Deleting the keys restores honesty but does not give an author who wanted a '
+        + 'non-FK join the thing they wanted, and it does not re-check the numbers the replaced join '
+        + 'already produced. That is why this entry is a TODO addressed to them rather than a claim '
+        + 'that the strip finished the job. A custom join condition is a capability card with its '
+        + 'injection / allow-list boundary decided first, which the ruling deferred deliberately.',
       acceptanceCriteria:
-        'Delete `sql` and `relationship` from every entry of every cube `joins` map; keep `name`. Then '
-        + 'check two things. (1) Did any deleted `sql` express something OTHER than the foreign-key '
+        'Delete `sql` and `relationship` from every entry of every cube `joins` map; keep `name`. '
+        + '`os migrate meta --from 17` lists those edits site by site (the chain applies the same '
+        + 'strip to metadata already at rest, so a deployed artifact keeps booting either way). Then '
+        + 'check three things. (1) Did any deleted `sql` express something OTHER than the foreign-key '
         + 'equality between the two objects — a filtered join, a non-key column, a literal predicate? '
         + 'If so, the query you were getting was already the FK-equality answer and not the one you '
         + 'wrote, so re-read the numbers that join produced before assuming this change moved them; the '
         + 'fix is to model the relationship on the object, or to open a capability request for an '
         + 'authorable join condition. (2) Did any deleted `relationship` say anything but '
         + '`many_to_one`? If so, the aggregate was already computed as many-to-one and still is — this '
-        + 'change alters no result, it only stops the declaration from claiming otherwise. Nothing else '
-        + 'regresses: `joins.<alias>.name` is unchanged, and it is what both the joined table and the '
-        + 'per-object RLS/tenant read scope are resolved from.',
+        + 'change alters no result, it only stops the declaration from claiming otherwise. (3) Is each '
+        + 'join KEYED by a foreign-key field of the cube\'s own base object? The key is the column the '
+        + 'derived ON clause reads, so a join keyed after the object it REACHES never resolved at all. '
+        + 'Nothing else regresses: `joins.<alias>.name` is unchanged, and it is what both the joined '
+        + 'table and the per-object RLS/tenant read scope are resolved from.',
     },
     {
       id: 'dashboard-header-modal-target-page-only',
@@ -12972,8 +12981,11 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     //
     // Same route and same registration reasoning as the `sql` entry beside this
     // one: strict deletion plus a `guidance` prescription on the `strictObject`,
-    // registered under 18, no D2 conversion, the judgement carried by the D3
-    // semantic entry `cube-join-sql-and-relationship-retired`.
+    // registered under 18. The D2 conversion
+    // `cube-join-sql-and-relationship-removed` strips this key too, and it is owed
+    // for the mirror-image reason: the key was DEFAULTED, so the value was
+    // MATERIALIZED into every cube artifact the old schema ever parsed, whether or
+    // not its author typed it.
     'data/CubeJoin:relationship',
     // #18612 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-18, director
     // batch #154 item 4, letter 2). `CubeJoin.sql` was REQUIRED and described itself
@@ -12993,12 +13005,16 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `strictObject`, so the route is strict deletion plus a `guidance` entry
     // carrying the prescription — no `retiredKey()` tombstone, the key is out of
     // the walked shape entirely, and its liveness-ledger row left with it.
-    // ⛔ NO D2 conversion covers this surface: the ruling's census found zero
-    // authored cube joins outside this repository, and the one in-repo producer
-    // (examples/app-showcase) was fixed in the same diff. The judgement handed to a
-    // consumer is therefore the D3 SEMANTIC entry
-    // `cube-join-sql-and-relationship-retired`, and the guidance prescription
-    // deliberately carries no `os migrate meta` sentence.
+    //
+    // A D2 conversion DOES cover this surface: `cube-join-sql-and-relationship-removed`
+    // (`toMajor: 18`, `retiredFromLoadPath: true`) strips the key wherever the chain
+    // is replayed. It is owed because the key was REQUIRED, so every cube artifact
+    // ever written from the old schema's parse output carries it and would meet the
+    // boot door's refusal with no remedy short of hand-editing JSON. The guidance
+    // prescription therefore closes with the house `os migrate meta --from 17`
+    // sentence, and the D3 semantic entry `cube-join-sql-and-relationship-retired`
+    // carries the judgement the strip cannot: an author who wrote a non-FK
+    // condition wanted a join this runtime does not perform.
     'data/CubeJoin:sql',
     // #14478 — maintainer ruling 2026-09-02 ("ruled B"): the unit of a
     // duration-shaped `z.number()` key lives in the key name, and no existing
