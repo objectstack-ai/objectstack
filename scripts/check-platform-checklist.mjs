@@ -95,7 +95,7 @@
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { maskComments } from './js-comment-mask.mjs';
 import * as symbolAnchorsModule from './symbol-anchors.mjs';
-import { ANCHORABLE_EXTENSIONS, defineCorpus, sweepCorpus, symbolSegmentResolution } from './symbol-anchors.mjs';
+import { ANCHORABLE_EXTENSIONS, defineCorpus, extractAnchors, sweepCorpus, symbolSegmentResolution } from './symbol-anchors.mjs';
 import { join, basename, relative } from 'node:path';
 
 const ROOT = new URL('..', import.meta.url).pathname;
@@ -773,7 +773,7 @@ let trapReachedVerdict = false;
 let provisioningReachedVerdict = false;
 let unreferencedReachedVerdict = false;
 let metaCallReachedVerdict = false;
-let citationsReachedVerdict = false;
+let lineCitationsReachedVerdict = false;
 let symbolAnchorsReachedVerdict = false;
 
 // ── The self-test's own battery roster and floor (#13489, adopted here) ────
@@ -803,7 +803,7 @@ const BATTERY_TRAP_VOCABULARY = 'selfTestTrapVocabulary: the trap table, read an
 const BATTERY_PROVISIONING_USE = 'selfTestProvisioningUse: both `use` spellings and all three dangling shapes';
 const BATTERY_UNREFERENCED_RECIPES = 'selfTestUnreferencedRecipes: the reverse direction';
 const BATTERY_META_CALL_SPELLING = 'selfTestMetaCallSpelling: the folded `/meta` plural, read from the live contract';
-const BATTERY_SOURCE_LINE_CITATIONS = 'selfTestSourceLineCitations: the `:NNN` refusal and its silent neighbours';
+const BATTERY_LINE_CITATION_BINDING = 'selfTestLineCitationBinding: the corpus declaration, the absent fork, and the binding driven both ways';
 const BATTERY_SYMBOL_ANCHORS = 'selfTestSymbolAnchors: the corpus registration, the binding to the shared resolver, the residual and the floor';
 
 const SELF_TEST_BATTERIES = Object.freeze({
@@ -811,7 +811,16 @@ const SELF_TEST_BATTERIES = Object.freeze({
   [BATTERY_PROVISIONING_USE]: 34,
   [BATTERY_UNREFERENCED_RECIPES]: 19,
   [BATTERY_META_CALL_SPELLING]: 53,
-  [BATTERY_SOURCE_LINE_CITATIONS]: 19,
+  // 19 → 9 at #18592, and the SHAPE of the battery changed under it exactly as
+  // the symbol-anchor battery's did at #18107: the 19 spelling cases that
+  // pinned this file's own forked LINE-CITATION grammar moved into
+  // `scripts/symbol-anchors.mjs`'s battery (122 → 149 there), and 9 took their
+  // place — the corpus declaration, the source read that says no fork survives
+  // here, its control, the binding driven ON and OFF against ONE text, the DARK
+  // case that a citation both grammars already agreed on keeps its verdict, the
+  // over-firing refusal on this ledger's own colon-then-digit neighbours, and
+  // the live reading with its control.
+  [BATTERY_LINE_CITATION_BINDING]: 9,
   // 40 → 42 at #18107, and the SHAPE of the battery changed under it: the 25
   // detector/resolver cases that pinned this file's own forked grammar moved
   // into `scripts/symbol-anchors.mjs`'s battery (93 → 122 there) and 27 took
@@ -1303,102 +1312,121 @@ export const NEIGHBOURING_MAP: Readonly<Record<string, string>> = Object.freeze(
   return { checked, failures };
 }
 
-// ── Source-line citations ───────────────────────────────────────────────────
+// ── Line citations ─ ONE grammar, reached by the SAME registration ─────────
+//
 // An item's `source` (and the prose beside it) is the evidence pointer a later
 // runner uses to decide whether the item still describes reality. This ledger
 // used to pin those pointers at `file:line` — and a line number is the ONE part
 // of a citation that rots on an edit the citation has nothing to do with: two
 // TSDoc blocks widening in the cited file shift every symbol below them, and
-// every pinned line silently starts naming something else. Nothing here
-// resolved a citation, so the rot was exit-0 by construction: the pointer keeps
-// reading as "verified against source" while pointing somewhere else, which is
-// strictly worse than no pointer at all.
+// every pinned line silently starts naming something else. Nothing resolved a
+// citation, so the rot was exit-0 by construction: the pointer keeps reading as
+// "verified against source" while pointing somewhere else, which is strictly
+// worse than no pointer at all. The whole class was stripped (#13482 → #13786),
+// and what remains is keeping it from coming back.
 //
-// The whole class was stripped: `file` plus the symbol name is the load-bearing
-// half and does not rot in place. This check keeps them from coming back. It is
-// deliberately NOT a symbol resolver (that is the follow-up) — it is the cheap
-// half, and the cheap half is the one that removes a false signal today.
+// ⛔ THERE IS NO DETECTOR HERE ANY MORE, and its absence is the deliverable
+// (#18592). It used to be `SOURCE_LINE_CITATION` / `findSourceLineCitations`
+// plus a family-file loop of their own — a SECOND grammar for the same rule,
+// beside the shared one the symbol-anchor limb had already moved to at #18107.
+// The two had drifted in BOTH directions, each recognising spellings the other
+// did not, and neither could see it: two graders, two greens, one rule.
 //
-// A citation is a colon-then-digits reached one of two ways, because the ledger
-// spelled it both ways: anchored to a source filename (`<file>.ts:158`, the
-// placeholder spelling `scripts/symbol-anchors.mjs#ANCHOR_GRAMMAR` uses),
-// or BARE, continuing a filename named earlier in the same sentence
-// (`ManifestSchema id :140 and version :202`). The bare half is why a plain
-// "filename followed by a colon" rule is not enough — and the bare half is the
-// worse one, since it carries no file at all, only a number.
+// ⭐ The direction is the 2026-09-01 ruling written in the shared core's own
+// header, verbatim: 「⛔ Do not fork this file for a second corpus; if a corpus
+// needs behaviour this core lacks, **widen the core**」and「Two copies of that
+// rule drift, and they drift **SILENTLY**」. So the core was widened, and the
+// five spelling classes that were this file's alone went with it:
 //
-// The second branch is a negative lookbehind rather than a list of allowed
-// prefixes: it is what separates a citation from the neighbours that share the
-// colon-then-digit shape, all of which occur in this ledger and must stay
-// silent — HTTP status (`status:409`), config literals (`{maxRetries:3}`),
-// ports (`http://localhost:3000`), clock times (`08:00`, `...T00:00:00Z`) and
-// JSON quoted in prose (`{"scannedTypes":1}`). Each is pinned below.
+//   the bare colon continuation      `ManifestSchema id :140 and version :202`
+//   the parenthesised bare form      `holds ONLY auditor (:395)`
+//   the `~:` approximation           `computeAuthGate ~:5084-5160`
+//   the `L` line pin                 `registerRecordShareEndpoints ~L7246-7331`
+//   the `html` extension             a citation into a template page
 //
-// A THIRD branch was added by #13788, measured rather than reasoned: sweeping
-// the ledger for anchorable citations turned up four line pins the two
-// branches above do not reach — `AiChatPage.tsx:~605-615` (the tilde INSIDE
-// the colon form, where the battery only ever pinned `~:`) and the `~L7246-7331`
-// spelling, which carries no colon at all. Both read exactly like the class
-// step (1) removed, and both sat green through it. The `L` form needs its own
-// left boundary so an identifier ending in a capital L before digits
-// (`SQL2019`) is not read as a line pin.
-const SOURCE_LINE_CITATION =
-  /(?:\.(?:ts|tsx|mts|cts|js|mjs|cjs|json|jsonc|md|mdx|ya?ml|sql|css|html|sh|py|toml)|(?<![A-Za-z0-9_"])):~?\d+(?:-\d+)?|(?<![A-Za-z0-9_])~?L\d{2,}(?:-\d+)?(?![A-Za-z0-9_])/g;
+// The first four are the corpus declaration `pathlessLineCitations` and the
+// approximation tilde now admitted inside the colon form; the fifth is a row in
+// the shared anchorable vocabulary. The verdict a citation gets is unchanged in
+// every case — this is a FOLD, not a re-grading — and the direction the fold
+// moved in the OTHER sense is a strict gain: the shared grammar already caught
+// the tilde bare-number form, the comma continuation and five extensions this
+// file's grammar was blind to, and those now reach this corpus too.
+//
+// What this limb owes now is exactly what the symbol-anchor limb owes: that
+// THIS corpus reaches that one grammar, declares what it needs from it, and
+// carries none of its own. `selfTestLineCitationBinding` below is that, driven
+// live in both directions on a synthetic corpus — the citation is a finding
+// with the declaration, and is not one without it.
 
 /**
- * @param {string} text
- * @returns {string[]} every line-number citation in `text`, with context
+ * ⛔ NOT a grammar, and not a detector — the two things this limb used to be.
+ * Every spelling case that lived here moved into
+ * `scripts/symbol-anchors.mjs`'s own battery, firing rows and silent
+ * neighbours alike. ⭐ A case is not deleted by moving; it is deleted by
+ * stopping. What is owed here is the BINDING: that this corpus reaches the one
+ * grammar, declares from it what its data shape needs, and carries none of its
+ * own — driven in BOTH directions, because a case that only ever says "found"
+ * cannot tell a working declaration from a text that would have matched
+ * anyway.
  */
-function findSourceLineCitations(text) {
-  const hits = [];
-  for (const m of text.matchAll(SOURCE_LINE_CITATION)) {
-    const from = Math.max(0, m.index - 55);
-    hits.push(`${text.slice(from, m.index)}«${m[0]}»${text.slice(m.index + m[0].length, m.index + m[0].length + 20)}`.replace(/\s+/g, ' '));
-  }
-  return hits;
-}
-
-/**
- * Both directions, because this detector's whole value is the boundary: it must
- * fire on every spelling of a line citation the ledger actually used, and stay
- * silent on the five colon-then-digit shapes that legitimately live beside them.
- * A detector that over-fires would be silenced by the first author it blocked.
- */
-function selfTestSourceLineCitations() {
+function selfTestLineCitationBinding() {
   const failures = [];
   let checked = 0;
-  const t = (what, ok) => {
+  const t = (what, ok, note = '') => {
     checked++;
-    if (!ok) failures.push(what);
+    if (!ok) failures.push(`${what}${note ? ` — ${note}` : ''}`);
   };
-  const n = (s) => findSourceLineCitations(s).length;
+  const OWN_SOURCE = readFileSync(new URL(import.meta.url).pathname, 'utf8');
 
-  // FIRES — the spellings this ledger actually carried.
-  t('C1 a file-anchored citation is caught', n('packages/spec/src/kernel/manifest.zod.ts:158') === 1);
-  t('C2 a line RANGE is caught, as one hit not two', n('rest-server.ts:1276-1331') === 1);
-  t('C3 a bare continuation citation is caught', n('ManifestSchema id :140 and version :202') === 2);
-  t('C4 a parenthesised bare citation is caught', n('Ada Auditor holds ONLY auditor (:395)') === 1);
-  t('C5 an approximate `~:` citation is caught', n('computeAuthGate ~:5084-5160') === 1);
-  t('C6 a comma/slash-chained run is caught in full', n('storage-routes.ts:241-243,:255,:267') === 3);
+  // ── the DECLARATION, and no grammar behind it ────────────────────────────
+  t('D1 the corpus DECLARES its path-less citations — this ledger continues a filename it has already named, and without the declaration the shared grammar requires a path',
+    CORPUS.pathlessLineCitations === true);
+  /* ⚠️ NAME-BASED and PREFIX-matched, exactly as V2 below: a fork under a
+   * nearby name is a fork. The residual gap is the same one and is stated
+   * rather than papered over — a grammar under a name sharing none of these
+   * tokens is invisible here, which is why D3 keeps the READ honest. */
+  const noLocal = (name) => !new RegExp(`\\b(?:const|let|var)\\s+${name}\\w*\\s*=`).test(OWN_SOURCE);
+  t('D2 this gate defines NO line-citation grammar of its own — no citation regex, no detector, no family loop of its own',
+    noLocal('SOURCE_LINE_CITATION') && noLocal('LINE_CITATION') && noLocal('LINE_ANCHOR')
+      && !/\bfunction\s+findSourceLineCitations\w*\b/.test(OWN_SOURCE)
+      && !/\bfunction\s+findLineCitations\w*\b/.test(OWN_SOURCE));
+  t('D3 CONTROL for D2 — the same source read DOES find the declaration, so a green above is "no fork" and not "the read returned nothing"',
+    /pathlessLineCitations:\s*true/.test(OWN_SOURCE) && /sweepCorpus\(CORPUS, ROOT\)/.test(OWN_SOURCE));
 
-  // FIRES — the two spellings #13788 measured still in the ledger after step (1).
-  t('C7 a colon-TILDE citation is caught — the tilde inside the colon form', n('AiChatPage.tsx:~605-615') === 1);
-  t('C8 a `~L` line pin is caught, colon or no colon', n('registerRecordShareEndpoints ~L7246-7331') === 1);
-  t('C9 a bare `L` line pin is caught', n('the evaluate leg L7477-7493') === 1);
+  // ── the binding, BOTH DIRECTIONS on the SAME text ────────────────────────
+  //
+  // ⭐ The declaration is read off `CORPUS` rather than written as a literal,
+  // so deleting it from the registration fails B1 instead of leaving a case
+  // that passes on a flag nothing reads.
+  const declared = { unspannedAnchors: CORPUS.unspannedAnchors, pathlessLineCitations: CORPUS.pathlessLineCitations };
+  const cited = 'ManifestSchema id :140 and the leg ~L7246-7331';
+  t('B1 ON — a path-less citation in THIS ledger’s shape is read as a line anchor by the shared grammar, through the declarations this corpus makes',
+    extractAnchors(cited, declared).lineAnchors.length === 2,
+    JSON.stringify(extractAnchors(cited, declared).lineAnchors.map((l) => l.raw)));
+  t('B2 OFF — the SAME text is not read without the declaration, so B1 is the declaration doing the work and not a text that would have matched anyway',
+    extractAnchors(cited, { unspannedAnchors: CORPUS.unspannedAnchors }).lineAnchors.length === 0);
+  t('B3 DARK — a citation BOTH grammars already agreed on keeps its verdict, with the declaration and without it: the fold re-grades nothing that was already judged',
+    extractAnchors('a pin at packages/spec/src/kernel/x.zod.ts:158 here', declared).lineAnchors.length === 1
+      && extractAnchors('a pin at packages/spec/src/kernel/x.zod.ts:158 here', {}).lineAnchors.length === 1);
+  /* ⛔ The over-firing direction, which is the whole risk of admitting a
+   * citation that carries no path: THIS ledger is dense with colon-then-digit
+   * text that is not a pin. One case, not a battery — every one of these is
+   * pinned by name beside the grammar, and repeating them here would be the
+   * second copy this card exists to delete. */
+  t('B4 the neighbours this ledger is full of stay silent under the declaration — an HTTP status, a config literal, a URL port, a clock time and JSON quoted in prose',
+    extractAnchors('status:409 {maxRetries:3} http://localhost:3000/_console/ 08:00 {"scannedTypes":1}', declared).lineAnchors.length === 0);
 
-  // STAYS SILENT — the neighbours that share the colon-then-digit shape.
-  t('S1 an HTTP status in prose is not a citation', n("thrown {code:'DELETE_RESTRICTED', status:409}") === 0);
-  t('S2 a config literal is not a citation', n('retry {maxRetries:3, backoffMs:1000}') === 0);
-  t('S3 a URL port is not a citation', n('probe http://localhost:3000/_console/') === 0);
-  t('S4 a clock time is not a citation', n('daily 08:00 UTC; today() == 2026-08-31T00:00:00Z') === 0);
-  t('S5 JSON quoted in prose is not a citation', n('a 200 {"scannedTypes":1,"stats":{}}') === 0);
-  t('S6 an ADR section reference is not a citation', n('ADR-0025 §3.3 and #13479') === 0);
-  t('S7 the README placeholder spelling of the ban is not itself a citation', n('never pin `file.ts:NNN` or a bare `:NNN`') === 0);
-  t('S8 a capital L ending an identifier before digits is not a line pin', n('SQL2019 and a TTL3600 budget') === 0);
-  t('S9 an i18n-style token is not a line pin', n('the L10n bundle') === 0);
-  t('S10 a one-digit `L` reference is not a line pin — the floor is two digits', n('lane L1 of the queue') === 0);
+  // ── the LIVE reading, so the zero above the console line prints is a
+  //    reading and not an instrument that stopped ──────────────────────────
+  const liveSweep = sweepCorpus(CORPUS, ROOT);
+  const liveLineAnchors = liveSweep.findings.filter((f) => f.kind === 'line-anchor');
+  t('B5 the live family carries NO line citation — the class the migration deleted has not come back',
+    liveLineAnchors.length === 0,
+    liveLineAnchors.map((f) => `${f.doc}:${f.line} ${f.raw}`).join(', '));
+  t('B6 CONTROL for B5 — the same sweep over the same family DID read anchors, so the zero above is a reading and not a sweep that reached nothing',
+    liveSweep.counts.anchors > 0, `${liveSweep.counts.anchors} anchor(s)`);
 
-  citationsReachedVerdict = true;
+  lineCitationsReachedVerdict = true;
   return { failures, checked };
 }
 
@@ -1513,6 +1541,16 @@ function selfTestSourceLineCitations() {
 //   `excludeDirs: ['runs']`   `docPattern` is a regex on the BASENAME and
 //       cannot see a directory, so "the family MINUS `runs/`" had no spelling.
 //       Run records are outputs; see `familyFiles` above.
+//   `pathlessLineCitations: true`  (#18592) This ledger writes a second pointer
+//       into a file it has already named — `ManifestSchema id :140 and version
+//       :202` — and an `L` pin beside it. Both carry NO path of their own, and
+//       both were the last thing this file still detected with a grammar of its
+//       own. ⛔ Default OFF everywhere else, and that is a measurement rather
+//       than caution: in PROSE a colon before digits is punctuation, and these
+//       two turned on corpus-wide fire 245 times across `docs/adr/**`,
+//       `scripts/**` and `packages/spec/src/**`, essentially all of them ports,
+//       scenario labels and docblock back-references. In DATA, beside the
+//       filename they continue, they are line pins.
 //
 // The dotted `#Outer.member` form this ledger's grammar carried is now the
 // shared grammar's, and `sweepCorpus` requires EVERY segment to resolve — the
@@ -1530,6 +1568,7 @@ const CORPUS = defineCorpus({
   docPattern: /\.(json|md)$/,
   excludeDirs: ['runs'],
   unspannedAnchors: true,
+  pathlessLineCitations: true,
 });
 
 // ── The residual the binding measured (#16898) ────────────────────────
@@ -1949,20 +1988,20 @@ if (process.argv.slice(2).includes('--self-test')) {
   const prov = selfTestProvisioningUse();
   const unref = selfTestUnreferencedRecipes();
   const metaCall = selfTestMetaCallSpelling();
-  const cites = selfTestSourceLineCitations();
+  const cites = selfTestLineCitationBinding();
   const anchors = selfTestSymbolAnchors();
   requireReachedVerdict('selfTestTrapVocabulary', trapReachedVerdict);
   requireReachedVerdict('selfTestProvisioningUse', provisioningReachedVerdict);
   requireReachedVerdict('selfTestUnreferencedRecipes', unreferencedReachedVerdict);
   requireReachedVerdict('selfTestMetaCallSpelling', metaCallReachedVerdict);
-  requireReachedVerdict('selfTestSourceLineCitations', citationsReachedVerdict);
+  requireReachedVerdict('selfTestLineCitationBinding', lineCitationsReachedVerdict);
   requireReachedVerdict('selfTestSymbolAnchors', symbolAnchorsReachedVerdict);
   const rosterFailures = batteryRosterFailures({
     [BATTERY_TRAP_VOCABULARY]: trap.checked,
     [BATTERY_PROVISIONING_USE]: prov.checked,
     [BATTERY_UNREFERENCED_RECIPES]: unref.checked,
     [BATTERY_META_CALL_SPELLING]: metaCall.checked,
-    [BATTERY_SOURCE_LINE_CITATIONS]: cites.checked,
+    [BATTERY_LINE_CITATION_BINDING]: cites.checked,
     [BATTERY_SYMBOL_ANCHORS]: anchors.checked,
   });
   const failures = [...trap.failures, ...prov.failures, ...unref.failures, ...metaCall.failures, ...cites.failures, ...anchors.failures, ...rosterFailures];
@@ -1972,7 +2011,7 @@ if (process.argv.slice(2).includes('--self-test')) {
         ' `fixtures.provisioning.use` resolves both spellings (own-area key and `<area>:<recipe>`) and fires on all three dangling shapes;' +
         ' the unreferenced-recipe direction fires on a recipe nobody uses while leaving a cross-area consumer, a retired consumer and a `$`-annotation alone;' +
         ' and the `/meta` call-spelling refusal reads its vocabulary out of the live generated contract, fires on every folded spelling a `call` can instruct, and stays silent on the canonical singular, on parameter placeholders, and on the `why`/`expect`/`source`/`requires` prose that narrates the fold;' +
-        ' and the source-line-citation refusal fires on every spelling this ledger carried (file-anchored, range, bare continuation, parenthesised, `~:`, comma/slash-chained) while staying silent on HTTP status, config literals, URL ports, clock times, JSON quoted in prose and the README placeholder that documents the ban;' +
+        ' and the line-citation limb DETECTS NOTHING ITSELF EITHER: the last forked grammar in this file went into the shared core at #18592, so what is pinned here is the BINDING — the corpus declaring `pathlessLineCitations`, a source read finding no citation regex and no detector while the same read DOES find the declaration, the binding driven ON and OFF against ONE text so the green is the declaration working rather than a text that would have matched anyway, the DARK case that a citation both grammars already agreed on keeps its verdict either way, the refusal to over-fire on this ledger\'s own HTTP statuses, config literals, URL ports, clock times and quoted JSON, and the live zero with the control that says it is a reading;' +
         ' and the symbol-anchor limb DETECTS NOTHING AND RESOLVES NOTHING ITSELF: it is a registered corpus (#18107), so the grammar, the walk and the verdict are all `scripts/symbol-anchors.mjs`\'s, pinned here by a source read that finds no local extension set, no anchor regex and no detector while the same read DOES find the registration, by the anchorable-extension vocabulary being the shared OBJECT rather than a copy of it, by the `runs/` exclusion driven three ways on the live corpus (the subtree holds files, none is swept, the areas beside it still are, and dropping the exclusion puts them back), and by the #16898 binding re-taken through the registration — a call site / import / local parameter / string-substring all reading ABSENT, the positive control that a declaration and a complete quoted token still resolve, a `.json` key resolving where a `.json` value does not, an INLINE object-literal key reading absent where one at the start of a line resolves — with the closed, grow-never residual and the per-file anchor floor held in both directions beside it.',
     );
     process.exit(0);
@@ -2026,16 +2065,16 @@ if (metaCallControl.failures.length) {
   process.exit(1);
 }
 
-// And for the source-line-citation refusal. The control matters more here than
-// anywhere else in this file: the ledger is CLEAN of line citations now, so
-// this check's real output is permanently empty and its green says nothing on
-// its own. A detector that silently stopped matching would be indistinguishable
-// from the ledger staying clean — which is precisely the exit-0-by-construction
-// shape this check was added to end.
-const citationControl = selfTestSourceLineCitations();
-requireReachedVerdict('selfTestSourceLineCitations', citationsReachedVerdict);
+// And for the line-citation binding. The control matters more here than
+// anywhere else in this file: the ledger is CLEAN of line citations, so this
+// limb's real output is permanently empty and its green says nothing on its
+// own. A binding that silently stopped reaching the grammar would be
+// indistinguishable from the ledger staying clean — which is precisely the
+// exit-0-by-construction shape this check was added to end.
+const citationControl = selfTestLineCitationBinding();
+requireReachedVerdict('selfTestLineCitationBinding', lineCitationsReachedVerdict);
 if (citationControl.failures.length) {
-  console.error('check-platform-checklist: the source-line-citation refusal\'s own positive control FAILED — a rotting `file:line` pointer would pass unreported, and because the ledger is clean nothing else here would ever notice.\n');
+  console.error('check-platform-checklist: the line-citation binding\'s own positive control FAILED — a rotting `file:line` pointer would pass unreported, and because the ledger is clean nothing else here would ever notice.\n');
   for (const f of citationControl.failures) console.error(`  ✗ ${f}`);
   process.exit(1);
 }
@@ -2057,7 +2096,7 @@ const inlineRosterFailures = batteryRosterFailures({
   [BATTERY_PROVISIONING_USE]: provisioningControl.checked,
   [BATTERY_UNREFERENCED_RECIPES]: unreferencedControl.checked,
   [BATTERY_META_CALL_SPELLING]: metaCallControl.checked,
-  [BATTERY_SOURCE_LINE_CITATIONS]: citationControl.checked,
+  [BATTERY_LINE_CITATION_BINDING]: citationControl.checked,
   [BATTERY_SYMBOL_ANCHORS]: symbolAnchorControl.checked,
 });
 if (inlineRosterFailures.length) {
@@ -2404,22 +2443,6 @@ if (!existsSync(COVERAGE_FILE)) {
   }
 }
 
-// The source-line-citation sweep, over the whole family rather than the area
-// files alone: the same rot lives in README/RUNNER/SWEEP/FOLLOW-UPS prose, and
-// FOLLOW-UPS in particular carried more citations than most area files.
-let citationsScanned = 0;
-for (const rel of familyFiles(CHECKLIST_DIR)) {
-  const hits = findSourceLineCitations(readFileSync(join(CHECKLIST_DIR, rel), 'utf8'));
-  citationsScanned++;
-  for (const hit of hits) {
-    err(
-      rel,
-      null,
-      `SOURCE LINE CITATION — \`${hit}\`. Line numbers rot on the next unrelated edit to the cited file and nothing can tell a stale one from a fresh one, so the pointer keeps reading as "verified against source" while naming something else. Cite the FILE plus the SYMBOL instead (README.md → "Every call cites framework source as \`file\` plus the symbol it lands in").`,
-    );
-  }
-}
-
 // ── The symbol-anchor sweep ─ ONE call into the registered corpus ───────
 //
 // ⛔ There is no loop over family files here any more, and no detector: the
@@ -2427,15 +2450,22 @@ for (const rel of familyFiles(CHECKLIST_DIR)) {
 // reached through the `CORPUS` registration above. What stays local is what is
 // genuinely this corpus's own — the closed #16898 residual, and the per-file
 // shrink-never floor — and both are keyed off what the sweep reports.
+//
+// ⭐ ONE call, and it now carries BOTH limbs. The line-citation loop that used
+// to stand beside this one is gone with its grammar (#18592): a surviving
+// `file:line`, a bare `:NNN` continuation and an `L` pin all arrive here as
+// `line-anchor` findings from the same sweep, reported below with every other
+// finding kind. Two walkers over one corpus became one.
 const sweep = sweepCorpus(CORPUS, ROOT);
 
 // The population the sweep walked, held against the one `familyFiles` walks.
-// ⚠️ They are TWO walkers over one corpus while the source-line-citation limb
-// beside this one still owns its own detector (#18101 / #18104 own that half),
-// and two walkers that silently disagree is the drift this card exists to
-// close, one level up. So they are compared on every run rather than assumed
-// equal: a `docPattern` or an `excludeDirs` that stops matching shows up here
-// as a number, not as a quietly smaller sweep.
+// ⚠️ The second walker is no longer a second GRADER — the line-citation limb
+// that owned one went into the registration at #18592 — but `familyFiles` is
+// still walked for the ledger's own structural checks, and two walkers that
+// silently disagree about the POPULATION is drift of its own. So they are
+// compared on every run rather than assumed equal: a `docPattern` or an
+// `excludeDirs` that stops matching shows up here as a number, not as a
+// quietly smaller sweep.
 const familyPopulation = familyFiles(CHECKLIST_DIR);
 if (sweep.counts.docs !== familyPopulation.length) {
   err(
@@ -2563,8 +2593,8 @@ console.log(
     ` traps: ${TRAPS.size} documented, ${usedTraps.size} in use;` +
     ` provisioning: ${recipeTotal} area recipes, ${recipeRefs} item references resolved (${qualifiedRefs} area-qualified), ${recipesReferenced}/${recipeTotal} recipes referenced;` +
     ` meta-URL spelling: ${metaCallsScanned} \`call\` strings scanned against ${FOLDED_META_SPELLINGS.size} folded spellings;` +
-    ` source citations: ${citationsScanned} family files carry no \`file:line\` pin;` +
+    ` line citations: 0 survive across ${sweep.counts.docs} swept documents — \`file:line\`, a bare \`:NNN\` continuation and an \`L\` pin are all judged by \`symbol-anchors.mjs\`, through the same registration;` +
     ` symbol anchors: ${anchorsResolved}/${anchorsScanned} resolved by \`symbol-anchors.mjs\` (the ONE resolver, reached as a REGISTERED corpus) across ${sweep.counts.docs} swept documents against ${sweep.counts.citedSources} cited sources` +
     `, ${anchorsResidual} on the named #16898 residual, ${Object.keys(anchorFloors).length} file floors held;` +
-    ` (self-checks: ${trapControl.checked} trap-vocabulary + ${provisioningControl.checked} provisioning-resolve + ${unreferencedControl.checked} unreferenced-recipe + ${metaCallControl.checked} meta-call-spelling + ${citationControl.checked} source-line-citation + ${symbolAnchorControl.checked} symbol-anchor assertions).`,
+    ` (self-checks: ${trapControl.checked} trap-vocabulary + ${provisioningControl.checked} provisioning-resolve + ${unreferencedControl.checked} unreferenced-recipe + ${metaCallControl.checked} meta-call-spelling + ${citationControl.checked} line-citation-binding + ${symbolAnchorControl.checked} symbol-anchor assertions).`,
 );
