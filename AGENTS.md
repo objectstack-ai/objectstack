@@ -459,7 +459,7 @@ Even inside your own worktree, operate defensively:
 2. **One feature branch + one PR per task.** Branch off `main`. **Never commit task work
    straight to `main`.** Name the branch after the issue it fixes: `claude/issue-<n>-<slug>`.
    The issue number is what makes in-flight work *discoverable* — `git ls-remote --heads
-   origin | grep issue-<n>` is a one-command pre-check, and the Duplicate Fix Guard
+   origin | grep -E 'issue-<n>(-|$)'` is a one-command pre-check, and the Duplicate Fix Guard
    workflow warns on fix PRs whose branch names no declared issue. A hit is a hint, not a
    claim — most heads carry no PR: ⛔ never skip a card on one, the `Claim:` comment decides.
 
