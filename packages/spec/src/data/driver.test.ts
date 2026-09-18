@@ -121,9 +121,16 @@ describe('[#4634] the 31 inert capability bits are tombstoned, not stripped', ()
     );
   });
 
-  it('the transactions prescription points at method presence, and says the live bit is not it restored', () => {
+  it('the transactions prescription points at the DECLARATION gate, not method presence alone, and says the live bit is not it restored', () => {
+    // [#18996] Anchored on what #18890 made load-bearing: the NEGATION and the
+    // predicate that replaced method presence. An anchor on `METHOD PRESENCE`
+    // alone matched this prescription's PREVIOUS, now-false opening ('gated on
+    // METHOD PRESENCE — `driver.beginTransaction`') exactly as happily as the
+    // true one, so it could not fail on the one shape it exists to catch. ⛔ Not
+    // a ban on the phrase — `schemaSync`'s own 'gated on METHOD PRESENCE'
+    // sentence is true of the runtime and stays.
     expect(() => DriverCapabilitiesSchema.parse({ transactions: true })).toThrow(
-      /DriverCapabilities\.transactions.*removed.*METHOD PRESENCE.*beginTransaction.*Delete the key/s,
+      /DriverCapabilities\.transactions.*removed.*no longer on METHOD PRESENCE.*driverSupportsTransactions.*beginTransaction.*Delete the key/s,
     );
     // [#18063] The trap this sentence exists to close: a reader who sees a live
     // `transactionsUnsupported` and concludes the retired key came back. It did
