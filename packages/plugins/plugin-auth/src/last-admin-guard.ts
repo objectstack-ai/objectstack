@@ -1129,7 +1129,7 @@ export function registerLastAdminGuard(
     const walledRemedy = postureEnforcesWall(resolveTenancyPosture())
       ? ` ⚠️ This deployment runs a WALLED tenancy posture, where an unscoped '${ADMIN_FULL_ACCESS}' `
         + 'grant row is no longer an anchor for platform admin standing at all — restoring or '
-        + `re-activating that row will NOT give this environment an administrator. Declare one in `
+        + 're-activating that row will NOT give this environment an administrator. Declare one in '
         + `${PLATFORM_OWNER_EMAIL_ENV} (a verified account's address, comma-separated for several) `
         + 'instead; that is the only channel to platform admin standing under a wall.'
       : '';
