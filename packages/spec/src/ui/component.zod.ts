@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { ViewFilterRuleSchema, ViewDataSchema, GanttConfigSchema, TreeConfigSchema } from './view.zod';
+import { ViewFilterRuleSchema, ViewDataSchema, GanttConfigSchema, TreeConfigSchema, ListMapConfigSchema } from './view.zod';
 import { InlineActionSchema, ActionLocationSchema } from './action.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
@@ -3163,8 +3163,12 @@ export type ObjectMasterDetailFormProps = z.input<typeof ObjectMasterDetailFormP
  *
  * The member list is objectui's own `FLAT_MAP_CONFIG_KEYS` — `ObjectMapConfig`'s
  * keys minus `style` — and `component.test.ts` holds it equal to the spec's own
- * {@link ListMapConfigSchema} shape, so a key added to the config block on
- * either face cannot leave this prescription behind.
+ * {@link ListMapConfigSchema} shape minus that same `style`, so a key added to
+ * the config block on either face cannot leave this prescription behind.
+ * `style` is subtracted on BOTH sides for one reason: flattened to the top level
+ * it collides with `BaseSchema.style`, the node's inline CSS record — which is
+ * why the renderer stopped reading a top-level `style` as a map style at all
+ * (objectui#5017) and why the prescription below routes it to `mapStyle`.
  */
 const OBJECT_MAP_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
   ...COMPONENT_LEVEL_GUIDANCE,
@@ -3208,13 +3212,15 @@ const OBJECT_MAP_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  *    `onEdit` / `onDelete`, `className` and `dataSource` — React props of
  *    `ObjectMapProps`, host-injected, never authored metadata.
  *
- * VALUE posture for `map`: `z.unknown()`, the section's "the value contract
- * still lives in objectui" arm, and measured rather than assumed. The spec's own
- * {@link ListMapConfigSchema} is strict and declares the same seven field keys,
- * but NOT the `style` key `getMapConfig` reads at `:365` (`schema.map?.style`),
- * so pointing this door at it would refuse a value the renderer honours today.
- * Tightening it is the later value ratchet this section describes, once that
- * one-key gap is closed on the list-view face it belongs to.
+ * VALUE posture for `map`: {@link ListMapConfigSchema}, this repo's own block —
+ * the later value ratchet the previous posture here deferred, taken now that the
+ * one-key gap is closed. `:373` validates the authored block against objectui's
+ * `ObjectMapConfigSchema` and this block declares the same eight keys, `style`
+ * included; until that declaration landed the door had to stay `z.unknown()`,
+ * because pointing it at a schema missing `style` would have refused a value
+ * `getMapConfig` honours at `:365` (`schema.mapStyle || schema.map?.style`).
+ * `mapStyle` above is unaffected: it stays the component-level spelling read
+ * FIRST, and is not a member of the config block.
  */
 export const ObjectMapPropsSchema = lazySchema(() => strictObject({
   surface: 'this `object-map`',
@@ -3269,8 +3275,8 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    */
   sort: z.array(SortItemSchema).optional()
     .describe('Marker order for the fetched records — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array`'),
-  map: z.unknown().optional()
-    .describe('Map field config, the author face: { latitudeField, longitudeField, locationField?, titleField?, descriptionField?, zoom?, center?, style? }. Taken WHOLE when present — the flat top-level spelling beside it is ignored'),
+  map: ListMapConfigSchema.optional()
+    .describe('Map field config, the author face — the same block `ListViewSchema.map` declares, and the one the renderer validates this node against. Taken WHOLE when present: the flat top-level spelling beside it is ignored'),
   mapStyle: z.string().optional()
     .describe('MapLibre style URL or spec, overriding the public demo tiles. Read before `map.style`; NOT the base node `style`, which is an inline CSS record'),
   navigation: z.unknown().optional()
