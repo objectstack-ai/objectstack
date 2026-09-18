@@ -1,10 +1,10 @@
 {
-  "description": "Shrink-only ledger of every PUBLISHED JSON Schema that is WIDER than the Zod type it was generated from, because a rule written as `.refine()` reaches the runtime and not the file (#18670). `z.toJSONSchema()` has no arm for a `custom` check: a plain record, the same record with a `.refine()`, and the same record with an ABORTING `.refine()` all project byte-identically (measured on zod 4.4.3, the version packages/spec resolves). So a document one of these files ACCEPTS can still be refused at parse time, and an author -- or an AI -- validating against packages/spec/json-schema/** finds out a release later. Each `sites` path is a position under that schema at which a refinement is dropped; the same paths are written onto the artifact itself as `x-dropped-refinements`. Hand-edited on purpose and with no `gen:` script: a generator would let a new gap be admitted by running a command instead of by a decision, which is the silence this ledger exists to end. Adding, removing or moving a site fails packages/spec/scripts/build-schemas.ts until the line moves with it, and the failure prints the corrected entry in full. ⛔ Do not delete or weaken a refinement to shorten this file -- the runtime rule is correct; it is the projection that is silent. Narrowing the published shape to match the Zod type is a public contract change and is NOT what this ledger does.",
+  "description": "Shrink-only ledger of every PUBLISHED JSON Schema that is STILL WIDER than the Zod type it was generated from, because a rule written as `.refine()` reaches the runtime and not the file (#18670). `z.toJSONSchema()` has no arm for a `custom` check: a plain record, the same record with a `.refine()`, and the same record with an ABORTING `.refine()` all project byte-identically (measured on zod 4.4.3, the version packages/spec resolves). So a document one of these files ACCEPTS can still be refused at parse time, and an author -- or an AI -- validating against packages/spec/json-schema/** finds out a release later. Each `sites` path is a position under that schema at which a refinement is dropped; the same paths are written onto the artifact itself as `x-dropped-refinements`. Item 2 closed the first patterns: a refinement DECLARED through the closed list in src/shared/refinement-projection.ts is emitted into the published file, reads `projected` rather than `dropped`, and its row LEAVES this ledger in the same PR -- which is why the ledger shrinks and never grows on a repair. Every refinement outside that closed list stays here, and adding an arm to the list is a public-contract decision, not a refactor. Hand-edited on purpose and with no `gen:` script: a generator would let a new gap be admitted by running a command instead of by a decision, which is the silence this ledger exists to end. Adding, removing or moving a site fails packages/spec/scripts/build-schemas.ts until the line moves with it, and the failure prints the corrected entry in full. ⛔ Do not delete or weaken a refinement to shorten this file -- the runtime rule is correct; it is the projection that is silent, and the remedy is to teach the closed list a NAMED pattern, never to drop the rule.",
   "measured": {
     "zod": "4.4.3",
-    "publishedSchemasWithDroppedRefinements": 246,
-    "droppedRefinementSites": 750,
-    "refinementSitesThatDidProject": 0,
+    "publishedSchemasWithDroppedRefinements": 201,
+    "droppedRefinementSites": 553,
+    "refinementSitesThatDidProject": 197,
     "refinementSitesWithNoJsonFormToCompare": 3
   },
   "entries": {
@@ -21,30 +21,6 @@
     "ai/BlueprintSummaryOperations": {
       "sites": [
         "filter.lazy"
-      ]
-    },
-    "ai/KnowledgeRefreshPolicy": {
-      "sites": [
-        "cron.options[0].in",
-        "cron.options[1]"
-      ]
-    },
-    "ai/KnowledgeSource": {
-      "sites": [
-        "refresh.cron.options[0].in",
-        "refresh.cron.options[1]"
-      ]
-    },
-    "ai/ModelRegistry": {
-      "sites": [
-        "promptTemplates.valueType.user.options[0].in",
-        "promptTemplates.valueType.user.options[1]"
-      ]
-    },
-    "ai/PromptTemplate": {
-      "sites": [
-        "user.options[0].in",
-        "user.options[1]"
       ]
     },
     "ai/Skill": {
@@ -69,8 +45,7 @@
     },
     "api/AppDefinitionResponse": {
       "sites": [
-        "data.navigation.element.lazy.options[0]",
-        "data.navigation.element.lazy.options[0].visible.options[1]"
+        "data.navigation.element.lazy.options[0]"
       ]
     },
     "api/AssembledInstalledPackage": {
@@ -84,13 +59,8 @@
         "manifest.datasets.element.include.element",
         "manifest.datasources.element",
         "manifest.flows.element",
-        "manifest.flows.element.edges.element.condition.options[0].in",
-        "manifest.flows.element.edges.element.condition.options[1]",
-        "manifest.flows.element.edges.element.condition.options[1].source",
         "manifest.flows.element.errorHandling",
         "manifest.flows.element.nodes.element.in.waitEventConfig",
-        "manifest.jobs.element.schedule.options[0].expression.options[0].in",
-        "manifest.jobs.element.schedule.options[0].expression.options[1]",
         "manifest.navigationContributions.element.items.element.lazy.options[0]",
         "manifest.objectExtensions.element",
         "manifest.objects.element",
@@ -98,8 +68,6 @@
         "manifest.objects.element.fields.valueType",
         "manifest.objects.element.fields.valueType.currencyConfig",
         "manifest.objects.element.lifecycle",
-        "manifest.objects.element.titleFormat.options[0].in",
-        "manifest.objects.element.titleFormat.options[1]",
         "manifest.pages.element",
         "manifest.pages.element.slots.header.options[0].in.type",
         "manifest.permissions.element.objects.valueType.out",
@@ -107,7 +75,6 @@
         "manifest.reports.element",
         "manifest.reports.element.blocks.element",
         "manifest.reports.element.runtimeFilter.lazy",
-        "manifest.sharingRules.element.condition.options[1]",
         "manifest.sharingRules.element.sharedWith",
         "manifest.skills.element.triggerConditions.element",
         "manifest.views.element.form",
@@ -125,9 +92,6 @@
     "api/CreateFlowRequest": {
       "sites": [
         "",
-        "edges.element.condition.options[0].in",
-        "edges.element.condition.options[1]",
-        "edges.element.condition.options[1].source",
         "errorHandling",
         "nodes.element.in.waitEventConfig"
       ]
@@ -135,9 +99,6 @@
     "api/CreateFlowResponse": {
       "sites": [
         "data",
-        "data.edges.element.condition.options[0].in",
-        "data.edges.element.condition.options[1]",
-        "data.edges.element.condition.options[1].source",
         "data.errorHandling",
         "data.nodes.element.in.waitEventConfig"
       ]
@@ -149,14 +110,12 @@
     },
     "api/DisablePackageResponse": {
       "sites": [
-        "package.manifest.navigationContributions.element.items.element.lazy.options[0]",
-        "package.manifest.navigationContributions.element.items.element.lazy.options[0].visible.options[1]"
+        "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/EnablePackageResponse": {
       "sites": [
-        "package.manifest.navigationContributions.element.items.element.lazy.options[0]",
-        "package.manifest.navigationContributions.element.items.element.lazy.options[0].visible.options[1]"
+        "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/ExportRequest": {
@@ -175,9 +134,6 @@
     "api/GetFlowResponse": {
       "sites": [
         "data",
-        "data.edges.element.condition.options[0].in",
-        "data.edges.element.condition.options[1]",
-        "data.edges.element.condition.options[1].source",
         "data.errorHandling",
         "data.nodes.element.in.waitEventConfig"
       ]
@@ -194,21 +150,14 @@
         "data.options[1].manifest.datasets.element.include.element",
         "data.options[1].manifest.datasources.element",
         "data.options[1].manifest.flows.element",
-        "data.options[1].manifest.flows.element.edges.element.condition.options[0].in",
-        "data.options[1].manifest.flows.element.edges.element.condition.options[1]",
-        "data.options[1].manifest.flows.element.edges.element.condition.options[1].source",
         "data.options[1].manifest.flows.element.errorHandling",
         "data.options[1].manifest.flows.element.nodes.element.in.waitEventConfig",
-        "data.options[1].manifest.jobs.element.schedule.options[0].expression.options[0].in",
-        "data.options[1].manifest.jobs.element.schedule.options[0].expression.options[1]",
         "data.options[1].manifest.objectExtensions.element",
         "data.options[1].manifest.objects.element",
         "data.options[1].manifest.objects.element.fieldGroups",
         "data.options[1].manifest.objects.element.fields.valueType",
         "data.options[1].manifest.objects.element.fields.valueType.currencyConfig",
         "data.options[1].manifest.objects.element.lifecycle",
-        "data.options[1].manifest.objects.element.titleFormat.options[0].in",
-        "data.options[1].manifest.objects.element.titleFormat.options[1]",
         "data.options[1].manifest.pages.element",
         "data.options[1].manifest.pages.element.slots.header.options[0].in.type",
         "data.options[1].manifest.permissions.element.objects.valueType.out",
@@ -216,7 +165,6 @@
         "data.options[1].manifest.reports.element",
         "data.options[1].manifest.reports.element.blocks.element",
         "data.options[1].manifest.reports.element.runtimeFilter.lazy",
-        "data.options[1].manifest.sharingRules.element.condition.options[1]",
         "data.options[1].manifest.sharingRules.element.sharedWith",
         "data.options[1].manifest.skills.element.triggerConditions.element",
         "data.options[1].manifest.views.element.form",
@@ -238,8 +186,7 @@
     },
     "api/GetPackageResponse": {
       "sites": [
-        "package.manifest.navigationContributions.element.items.element.lazy.options[0]",
-        "package.manifest.navigationContributions.element.items.element.lazy.options[0].visible.options[1]"
+        "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/GetUiViewResponse": {
@@ -249,7 +196,6 @@
         "form.submitBehavior.options[1].url",
         "list",
         "list.bulkActionDefs.element",
-        "list.conditionalFormatting.element.condition.options[1]",
         "list.filter.element",
         "list.gantt.groupByField",
         "list.grouping.fields.element.field",
@@ -264,14 +210,12 @@
     },
     "api/InstallPackageRequest": {
       "sites": [
-        "manifest.navigationContributions.element.items.element.lazy.options[0]",
-        "manifest.navigationContributions.element.items.element.lazy.options[0].visible.options[1]"
+        "manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/InstallPackageResponse": {
       "sites": [
-        "package.manifest.navigationContributions.element.items.element.lazy.options[0]",
-        "package.manifest.navigationContributions.element.items.element.lazy.options[0].visible.options[1]"
+        "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/InstalledPackageAtEitherStage": {
@@ -286,21 +230,14 @@
         "options[1].manifest.datasets.element.include.element",
         "options[1].manifest.datasources.element",
         "options[1].manifest.flows.element",
-        "options[1].manifest.flows.element.edges.element.condition.options[0].in",
-        "options[1].manifest.flows.element.edges.element.condition.options[1]",
-        "options[1].manifest.flows.element.edges.element.condition.options[1].source",
         "options[1].manifest.flows.element.errorHandling",
         "options[1].manifest.flows.element.nodes.element.in.waitEventConfig",
-        "options[1].manifest.jobs.element.schedule.options[0].expression.options[0].in",
-        "options[1].manifest.jobs.element.schedule.options[0].expression.options[1]",
         "options[1].manifest.objectExtensions.element",
         "options[1].manifest.objects.element",
         "options[1].manifest.objects.element.fieldGroups",
         "options[1].manifest.objects.element.fields.valueType",
         "options[1].manifest.objects.element.fields.valueType.currencyConfig",
         "options[1].manifest.objects.element.lifecycle",
-        "options[1].manifest.objects.element.titleFormat.options[0].in",
-        "options[1].manifest.objects.element.titleFormat.options[1]",
         "options[1].manifest.pages.element",
         "options[1].manifest.pages.element.slots.header.options[0].in.type",
         "options[1].manifest.permissions.element.objects.valueType.out",
@@ -308,7 +245,6 @@
         "options[1].manifest.reports.element",
         "options[1].manifest.reports.element.blocks.element",
         "options[1].manifest.reports.element.runtimeFilter.lazy",
-        "options[1].manifest.sharingRules.element.condition.options[1]",
         "options[1].manifest.sharingRules.element.sharedWith",
         "options[1].manifest.skills.element.triggerConditions.element",
         "options[1].manifest.views.element.form",
@@ -335,28 +271,20 @@
         "data.packages.element.options[1].manifest.datasets.element.include.element",
         "data.packages.element.options[1].manifest.datasources.element",
         "data.packages.element.options[1].manifest.flows.element",
-        "data.packages.element.options[1].manifest.flows.element.edges.element.condition.options[0].in",
-        "data.packages.element.options[1].manifest.flows.element.edges.element.condition.options[1]",
-        "data.packages.element.options[1].manifest.flows.element.edges.element.condition.options[1].source",
         "data.packages.element.options[1].manifest.flows.element.errorHandling",
         "data.packages.element.options[1].manifest.flows.element.nodes.element.in.waitEventConfig",
-        "data.packages.element.options[1].manifest.jobs.element.schedule.options[0].expression.options[0].in",
-        "data.packages.element.options[1].manifest.jobs.element.schedule.options[0].expression.options[1]",
         "data.packages.element.options[1].manifest.objectExtensions.element",
         "data.packages.element.options[1].manifest.objects.element",
         "data.packages.element.options[1].manifest.objects.element.fieldGroups",
         "data.packages.element.options[1].manifest.objects.element.fields.valueType",
         "data.packages.element.options[1].manifest.objects.element.fields.valueType.currencyConfig",
         "data.packages.element.options[1].manifest.objects.element.lifecycle",
-        "data.packages.element.options[1].manifest.objects.element.titleFormat.options[0].in",
-        "data.packages.element.options[1].manifest.objects.element.titleFormat.options[1]",
         "data.packages.element.options[1].manifest.pages.element",
         "data.packages.element.options[1].manifest.permissions.element.objects.valueType.out",
         "data.packages.element.options[1].manifest.permissions.element.rowLevelSecurity.element",
         "data.packages.element.options[1].manifest.reports.element",
         "data.packages.element.options[1].manifest.reports.element.blocks.element",
         "data.packages.element.options[1].manifest.reports.element.runtimeFilter.lazy",
-        "data.packages.element.options[1].manifest.sharingRules.element.condition.options[1]",
         "data.packages.element.options[1].manifest.sharingRules.element.sharedWith",
         "data.packages.element.options[1].manifest.skills.element.triggerConditions.element",
         "data.packages.element.options[1].manifest.views.element.form",
@@ -372,15 +300,13 @@
     },
     "api/ListPackagesResponse": {
       "sites": [
-        "packages.element.manifest.navigationContributions.element.items.element.lazy.options[0]",
-        "packages.element.manifest.navigationContributions.element.items.element.lazy.options[0].visible.options[1]"
+        "packages.element.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/MetadataTypeInfoResponse": {
       "sites": [
         "data.actions.element.in",
-        "data.actions.element.in.params.element.in",
-        "data.actions.element.in.visible.options[1].options[1]"
+        "data.actions.element.in.params.element.in"
       ]
     },
     "api/ObjectDefinitionResponse": {
@@ -391,7 +317,6 @@
         "data.fieldGroups",
         "data.fields.valueType",
         "data.fields.valueType.currencyConfig",
-        "data.fields.valueType.expression.options[1]",
         "data.fields.valueType.relatedListFilter.lazy",
         "data.lifecycle",
         "data.listViews.valueType",
@@ -400,52 +325,37 @@
         "data.listViews.valueType.gantt.groupByField",
         "data.listViews.valueType.grouping.fields.element.field",
         "data.listViews.valueType.kanban.groupByField",
-        "data.listViews.valueType.timeline.groupByField",
-        "data.titleFormat.options[0].in",
-        "data.titleFormat.options[1]"
+        "data.listViews.valueType.timeline.groupByField"
       ]
     },
     "api/PackageInstallBody": {
       "sites": [
-        "options[1].navigationContributions.element.items.element.lazy.options[0]",
-        "options[1].navigationContributions.element.items.element.lazy.options[0].visible.options[1]"
+        "options[1].navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/PackageInstallRequest": {
       "sites": [
-        "manifest.navigationContributions.element.items.element.lazy.options[0]",
-        "manifest.navigationContributions.element.items.element.lazy.options[0].visible.options[1]"
+        "manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/PackageInstallResponse": {
       "sites": [
-        "data.package.manifest.navigationContributions.element.items.element.lazy.options[0]",
-        "data.package.manifest.navigationContributions.element.items.element.lazy.options[0].visible.options[1]"
+        "data.package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/PackageUpgradeRequest": {
       "sites": [
-        "manifest.navigationContributions.element.items.element.lazy.options[0]",
-        "manifest.navigationContributions.element.items.element.lazy.options[0].visible.options[1]"
+        "manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/ResolveDependenciesRequest": {
       "sites": [
-        "manifest.navigationContributions.element.items.element.lazy.options[0]",
-        "manifest.navigationContributions.element.items.element.lazy.options[0].visible.options[1]"
-      ]
-    },
-    "api/UpdateAiConversationRequest": {
-      "sites": [
-        ""
+        "manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/UpdateFlowRequest": {
       "sites": [
         "definition",
-        "definition.edges.element.condition.options[0].in",
-        "definition.edges.element.condition.options[1]",
-        "definition.edges.element.condition.options[1].source",
         "definition.errorHandling",
         "definition.nodes.element.in.waitEventConfig"
       ]
@@ -453,9 +363,6 @@
     "api/UpdateFlowResponse": {
       "sites": [
         "data",
-        "data.edges.element.condition.options[0].in",
-        "data.edges.element.condition.options[1]",
-        "data.edges.element.condition.options[1].source",
         "data.errorHandling",
         "data.nodes.element.in.waitEventConfig"
       ]
@@ -468,12 +375,6 @@
     "automation/AssignmentConfig": {
       "sites": [
         "assignments.valueType"
-      ]
-    },
-    "automation/AssignmentExpressionValue": {
-      "sites": [
-        "",
-        "source"
       ]
     },
     "automation/AssignmentValue": {
@@ -489,18 +390,8 @@
     "automation/Flow": {
       "sites": [
         "",
-        "edges.element.condition.options[0].in",
-        "edges.element.condition.options[1]",
-        "edges.element.condition.options[1].source",
         "errorHandling",
         "nodes.element.in.waitEventConfig"
-      ]
-    },
-    "automation/FlowEdge": {
-      "sites": [
-        "condition.options[0].in",
-        "condition.options[1]",
-        "condition.options[1].source"
       ]
     },
     "automation/FlowNode": {
@@ -510,27 +401,18 @@
     },
     "automation/FlowRegion": {
       "sites": [
-        "edges.element.lazy.condition.options[0].in",
-        "edges.element.lazy.condition.options[1]",
-        "edges.element.lazy.condition.options[1].source",
         "nodes.element.lazy.in.waitEventConfig"
       ]
     },
     "automation/FlowVersionHistory": {
       "sites": [
         "definition",
-        "definition.edges.element.condition.options[0].in",
-        "definition.edges.element.condition.options[1]",
-        "definition.edges.element.condition.options[1].source",
         "definition.errorHandling",
         "definition.nodes.element.in.waitEventConfig"
       ]
     },
     "automation/LoopConfig": {
       "sites": [
-        "body.edges.element.lazy.condition.options[0].in",
-        "body.edges.element.lazy.condition.options[1]",
-        "body.edges.element.lazy.condition.options[1].source",
         "body.nodes.element.lazy.in.waitEventConfig"
       ]
     },
@@ -541,17 +423,11 @@
     },
     "automation/ParallelBranch": {
       "sites": [
-        "edges.element.lazy.condition.options[0].in",
-        "edges.element.lazy.condition.options[1]",
-        "edges.element.lazy.condition.options[1].source",
         "nodes.element.lazy.in.waitEventConfig"
       ]
     },
     "automation/ParallelConfig": {
       "sites": [
-        "branches.element.edges.element.lazy.condition.options[0].in",
-        "branches.element.edges.element.lazy.condition.options[1]",
-        "branches.element.edges.element.lazy.condition.options[1].source",
         "branches.element.nodes.element.lazy.in.waitEventConfig"
       ]
     },
@@ -572,9 +448,6 @@
     },
     "automation/TryCatchConfig": {
       "sites": [
-        "try.edges.element.lazy.condition.options[0].in",
-        "try.edges.element.lazy.condition.options[1]",
-        "try.edges.element.lazy.condition.options[1].source",
         "try.nodes.element.lazy.in.waitEventConfig"
       ]
     },
@@ -594,11 +467,6 @@
         "path"
       ]
     },
-    "data/ConditionalValidation": {
-      "sites": [
-        "when.options[1]"
-      ]
-    },
     "data/ContextToken": {
       "sites": [
         ""
@@ -607,11 +475,6 @@
     "data/ContextTokenPlaceholder": {
       "sites": [
         ""
-      ]
-    },
-    "data/CrossFieldValidation": {
-      "sites": [
-        "condition.options[1]"
       ]
     },
     "data/CurrencyConfig": {
@@ -733,7 +596,6 @@
       "sites": [
         "",
         "currencyConfig",
-        "expression.options[1]",
         "relatedListFilter.lazy"
       ]
     },
@@ -762,13 +624,7 @@
     },
     "data/Hook": {
       "sites": [
-        "condition.options[1]",
         "object"
-      ]
-    },
-    "data/InlineGridColumn": {
-      "sites": [
-        "readonlyWhen.options[1]"
       ]
     },
     "data/InstantValue": {
@@ -820,7 +676,6 @@
         "fieldGroups",
         "fields.valueType",
         "fields.valueType.currencyConfig",
-        "fields.valueType.expression.options[1]",
         "fields.valueType.relatedListFilter.lazy",
         "lifecycle",
         "listViews.valueType",
@@ -829,9 +684,7 @@
         "listViews.valueType.gantt.groupByField",
         "listViews.valueType.grouping.fields.element.field",
         "listViews.valueType.kanban.groupByField",
-        "listViews.valueType.timeline.groupByField",
-        "titleFormat.options[0].in",
-        "titleFormat.options[1]"
+        "listViews.valueType.timeline.groupByField"
       ]
     },
     "data/ObjectExtension": {
@@ -839,13 +692,7 @@
         "",
         "fields.valueType",
         "fields.valueType.currencyConfig",
-        "fields.valueType.expression.options[1]",
         "fields.valueType.relatedListFilter.lazy"
-      ]
-    },
-    "data/ObjectFieldGroup": {
-      "sites": [
-        "visibleWhen.options[1]"
       ]
     },
     "data/PostgresConfig": {
@@ -890,11 +737,6 @@
         ""
       ]
     },
-    "data/RowCrudActionOverride": {
-      "sites": [
-        "visibleWhen.options[1]"
-      ]
-    },
     "data/SQLDriverConfig": {
       "sites": [
         "",
@@ -904,16 +746,6 @@
     "data/SSLConfig": {
       "sites": [
         ""
-      ]
-    },
-    "data/ScriptValidation": {
-      "sites": [
-        "condition.options[1]"
-      ]
-    },
-    "data/SelectOption": {
-      "sites": [
-        "visibleWhen.options[1]"
       ]
     },
     "data/SetOperator": {
@@ -938,11 +770,6 @@
         "encryptionKey",
         "syncUrl",
         "url"
-      ]
-    },
-    "data/ValidationRule": {
-      "sites": [
-        "lazy.options[0].condition.options[1]"
       ]
     },
     "identity/SCIMError": {
@@ -981,63 +808,49 @@
     },
     "kernel/DisablePackageResponse": {
       "sites": [
-        "package.manifest.navigationContributions.element.items.element.lazy.options[0]",
-        "package.manifest.navigationContributions.element.items.element.lazy.options[0].visible.options[1]"
+        "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "kernel/EnablePackageResponse": {
       "sites": [
-        "package.manifest.navigationContributions.element.items.element.lazy.options[0]",
-        "package.manifest.navigationContributions.element.items.element.lazy.options[0].visible.options[1]"
+        "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "kernel/GetPackageResponse": {
       "sites": [
-        "package.manifest.navigationContributions.element.items.element.lazy.options[0]",
-        "package.manifest.navigationContributions.element.items.element.lazy.options[0].visible.options[1]"
+        "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "kernel/InstallPackageRequest": {
       "sites": [
-        "manifest.navigationContributions.element.items.element.lazy.options[0]",
-        "manifest.navigationContributions.element.items.element.lazy.options[0].visible.options[1]"
+        "manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "kernel/InstallPackageResponse": {
       "sites": [
-        "package.manifest.navigationContributions.element.items.element.lazy.options[0]",
-        "package.manifest.navigationContributions.element.items.element.lazy.options[0].visible.options[1]"
+        "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "kernel/InstalledPackage": {
       "sites": [
-        "manifest.navigationContributions.element.items.element.lazy.options[0]",
-        "manifest.navigationContributions.element.items.element.lazy.options[0].visible.options[1]"
+        "manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "kernel/ListPackagesResponse": {
       "sites": [
-        "packages.element.manifest.navigationContributions.element.items.element.lazy.options[0]",
-        "packages.element.manifest.navigationContributions.element.items.element.lazy.options[0].visible.options[1]"
+        "packages.element.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "kernel/Manifest": {
       "sites": [
-        "navigationContributions.element.items.element.lazy.options[0]",
-        "navigationContributions.element.items.element.lazy.options[0].visible.options[1]"
+        "navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "kernel/MetadataTypeRegistryEntry": {
       "sites": [
         "",
         "actions.element.in",
-        "actions.element.in.params.element.in",
-        "actions.element.in.visible.options[1].options[1]"
-      ]
-    },
-    "kernel/MultiVersionSupport": {
-      "sites": [
-        "routing.element.condition.options[1]"
+        "actions.element.in.params.element.in"
       ]
     },
     "kernel/OpsDomainModule": {
@@ -1060,36 +873,18 @@
         ""
       ]
     },
-    "kernel/PluginPermission": {
-      "sites": [
-        "filter.condition.options[1]"
-      ]
-    },
-    "kernel/PluginPermissionSet": {
-      "sites": [
-        "permissions.element.filter.condition.options[1]"
-      ]
-    },
-    "kernel/PluginSecurityManifest": {
-      "sites": [
-        "permissions.permissions.element.filter.condition.options[1]"
-      ]
-    },
     "kernel/UpgradePackageRequest": {
       "sites": [
-        "manifest.navigationContributions.element.items.element.lazy.options[0]",
-        "manifest.navigationContributions.element.items.element.lazy.options[0].visible.options[1]"
+        "manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "kernel/UpgradeSnapshot": {
       "sites": [
-        "previousManifest.navigationContributions.element.items.element.lazy.options[0]",
-        "previousManifest.navigationContributions.element.items.element.lazy.options[0].visible.options[1]"
+        "previousManifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "security/CriteriaSharingRule": {
       "sites": [
-        "condition.options[1]",
         "sharedWith"
       ]
     },
@@ -1116,7 +911,6 @@
     },
     "security/SharingRule": {
       "sites": [
-        "condition.options[1]",
         "sharedWith"
       ]
     },
@@ -1125,56 +919,10 @@
         "options[2].organizationIds"
       ]
     },
-    "shared/CronExpressionInput": {
-      "sites": [
-        "options[0].in",
-        "options[1]"
-      ]
-    },
-    "shared/EvaluatedExpression": {
-      "sites": [
-        "",
-        "source"
-      ]
-    },
-    "shared/EvaluatedExpressionInput": {
-      "sites": [
-        "options[0].in",
-        "options[1]",
-        "options[1].source"
-      ]
-    },
-    "shared/Expression": {
-      "sites": [
-        ""
-      ]
-    },
-    "shared/ExpressionInput": {
-      "sites": [
-        "options[1]"
-      ]
-    },
-    "shared/Predicate": {
-      "sites": [
-        ""
-      ]
-    },
-    "shared/PredicateInput": {
-      "sites": [
-        "options[1]"
-      ]
-    },
-    "shared/TemplateExpressionInput": {
-      "sites": [
-        "options[0].in",
-        "options[1]"
-      ]
-    },
     "system/AddFieldOperation": {
       "sites": [
         "field",
         "field.currencyConfig",
-        "field.expression.options[1]",
         "field.relatedListFilter.lazy"
       ]
     },
@@ -1197,7 +945,6 @@
       "sites": [
         "operations.element.options[0].field",
         "operations.element.options[0].field.currencyConfig",
-        "operations.element.options[0].field.expression.options[1]",
         "operations.element.options[0].field.relatedListFilter.lazy",
         "operations.element.options[3].object",
         "operations.element.options[3].object.actions.element.in",
@@ -1211,9 +958,7 @@
         "operations.element.options[3].object.listViews.valueType.gantt.groupByField",
         "operations.element.options[3].object.listViews.valueType.grouping.fields.element.field",
         "operations.element.options[3].object.listViews.valueType.kanban.groupByField",
-        "operations.element.options[3].object.listViews.valueType.timeline.groupByField",
-        "operations.element.options[3].object.titleFormat.options[0].in",
-        "operations.element.options[3].object.titleFormat.options[1]"
+        "operations.element.options[3].object.listViews.valueType.timeline.groupByField"
       ]
     },
     "system/CreateObjectOperation": {
@@ -1224,7 +969,6 @@
         "object.fieldGroups",
         "object.fields.valueType",
         "object.fields.valueType.currencyConfig",
-        "object.fields.valueType.expression.options[1]",
         "object.fields.valueType.relatedListFilter.lazy",
         "object.lifecycle",
         "object.listViews.valueType",
@@ -1233,21 +977,7 @@
         "object.listViews.valueType.gantt.groupByField",
         "object.listViews.valueType.grouping.fields.element.field",
         "object.listViews.valueType.kanban.groupByField",
-        "object.listViews.valueType.timeline.groupByField",
-        "object.titleFormat.options[0].in",
-        "object.titleFormat.options[1]"
-      ]
-    },
-    "system/CronSchedule": {
-      "sites": [
-        "expression.options[0].in",
-        "expression.options[1]"
-      ]
-    },
-    "system/Job": {
-      "sites": [
-        "schedule.options[0].expression.options[0].in",
-        "schedule.options[0].expression.options[1]"
+        "object.listViews.valueType.timeline.groupByField"
       ]
     },
     "system/LifecyclePolicyConfig": {
@@ -1260,16 +990,10 @@
         ""
       ]
     },
-    "system/MetricsConfig": {
-      "sites": [
-        "slis.element.successCriteria.options[1].options[1]"
-      ]
-    },
     "system/MigrationOperation": {
       "sites": [
         "options[0].field",
         "options[0].field.currencyConfig",
-        "options[0].field.expression.options[1]",
         "options[0].field.relatedListFilter.lazy",
         "options[3].object",
         "options[3].object.actions.element.in",
@@ -1283,9 +1007,7 @@
         "options[3].object.listViews.valueType.gantt.groupByField",
         "options[3].object.listViews.valueType.grouping.fields.element.field",
         "options[3].object.listViews.valueType.kanban.groupByField",
-        "options[3].object.listViews.valueType.timeline.groupByField",
-        "options[3].object.titleFormat.options[0].in",
-        "options[3].object.titleFormat.options[1]"
+        "options[3].object.listViews.valueType.timeline.groupByField"
       ]
     },
     "system/ObjectStorageConfig": {
@@ -1293,43 +1015,29 @@
         "buckets.element.lifecyclePolicy.rules.element"
       ]
     },
-    "system/Schedule": {
-      "sites": [
-        "options[0].expression.options[0].in",
-        "options[0].expression.options[1]"
-      ]
-    },
     "system/ServerRateLimitConfig": {
       "sites": [
         ""
-      ]
-    },
-    "system/ServiceLevelIndicator": {
-      "sites": [
-        "successCriteria.options[1].options[1]"
       ]
     },
     "system/SettingsManifest": {
       "sites": [
         "",
         "specifiers.element",
-        "visible",
-        "visible.options[1]"
+        "visible"
       ]
     },
     "system/SettingsNamespacePayload": {
       "sites": [
         "manifest",
         "manifest.specifiers.element",
-        "manifest.visible",
-        "manifest.visible.options[1]"
+        "manifest.visible"
       ]
     },
     "system/Specifier": {
       "sites": [
         "",
-        "visible",
-        "visible.options[1]"
+        "visible"
       ]
     },
     "system/StackServerConfig": {
@@ -1342,44 +1050,25 @@
         "rateLimit"
       ]
     },
-    "system/TraceSamplingConfig": {
-      "sites": [
-        "composite.element.condition.options[1].options[1]"
-      ]
-    },
-    "system/TracingConfig": {
-      "sites": [
-        "sampling.composite.element.condition.options[1].options[1]"
-      ]
-    },
     "ui/Action": {
       "sites": [
         "in",
-        "in.params.element.in",
-        "in.visible.options[1].options[1]"
-      ]
-    },
-    "ui/ActionNavItem": {
-      "sites": [
-        "visible.options[1]"
+        "in.params.element.in"
       ]
     },
     "ui/ActionParam": {
       "sites": [
-        "in",
-        "in.visible.options[1]"
+        "in"
       ]
     },
     "ui/App": {
       "sites": [
-        "navigation.element.lazy.options[0]",
-        "navigation.element.lazy.options[0].visible.options[1]"
+        "navigation.element.lazy.options[0]"
       ]
     },
     "ui/BulkActionDef": {
       "sites": [
-        "",
-        "visible.options[1]"
+        ""
       ]
     },
     "ui/ChartAggregate": {
@@ -1387,21 +1076,11 @@
         ""
       ]
     },
-    "ui/ComponentNavItem": {
-      "sites": [
-        "visible.options[1]"
-      ]
-    },
     "ui/Dashboard": {
       "sites": [
         "globalFilters.element",
         "widgets.element",
         "widgets.element.filter.lazy"
-      ]
-    },
-    "ui/DashboardNavItem": {
-      "sites": [
-        "visible.options[1]"
       ]
     },
     "ui/DashboardWidget": {
@@ -1425,8 +1104,7 @@
     "ui/ElementButtonProps": {
       "sites": [
         "action.out",
-        "action.out.params.element.in",
-        "action.out.params.element.in.visible.options[1]"
+        "action.out.params.element.in"
       ]
     },
     "ui/ElementDataSource": {
@@ -1446,8 +1124,7 @@
     },
     "ui/FormField": {
       "sites": [
-        "in.publicPicker.filter.element",
-        "in.visibleWhen.options[1]"
+        "in.publicPicker.filter.element"
       ]
     },
     "ui/FormFieldPublicPicker": {
@@ -1458,13 +1135,7 @@
     "ui/FormSection": {
       "sites": [
         "in",
-        "in.fields.element.options[1].in.publicPicker.filter.element",
-        "in.visibleWhen.options[1]"
-      ]
-    },
-    "ui/FormSelectOption": {
-      "sites": [
-        "visibleWhen.options[1]"
+        "in.fields.element.options[1].in.publicPicker.filter.element"
       ]
     },
     "ui/FormView": {
@@ -1472,7 +1143,6 @@
         "",
         "sections.element.in",
         "sections.element.in.fields.element.options[1].in.publicPicker.filter.element",
-        "sections.element.in.visibleWhen.options[1]",
         "submitBehavior.options[1].url"
       ]
     },
@@ -1492,11 +1162,6 @@
         "filter.lazy"
       ]
     },
-    "ui/GroupNavItem": {
-      "sites": [
-        "visible.options[1]"
-      ]
-    },
     "ui/GroupingConfig": {
       "sites": [
         "fields.element.field"
@@ -1510,8 +1175,7 @@
     "ui/InlineAction": {
       "sites": [
         "out",
-        "out.params.element.in",
-        "out.params.element.in.visible.options[1]"
+        "out.params.element.in"
       ]
     },
     "ui/InterfacePageConfig": {
@@ -1534,7 +1198,6 @@
       "sites": [
         "",
         "bulkActionDefs.element",
-        "conditionalFormatting.element.condition.options[1]",
         "filter.element",
         "gantt.groupByField",
         "grouping.fields.element.field",
@@ -1544,20 +1207,17 @@
     },
     "ui/NavigationArea": {
       "sites": [
-        "navigation.element.lazy.options[0]",
-        "navigation.element.lazy.options[0].visible.options[1]"
+        "navigation.element.lazy.options[0]"
       ]
     },
     "ui/NavigationContribution": {
       "sites": [
-        "items.element.lazy.options[0]",
-        "items.element.lazy.options[0].visible.options[1]"
+        "items.element.lazy.options[0]"
       ]
     },
     "ui/NavigationItem": {
       "sites": [
-        "lazy.options[0]",
-        "lazy.options[0].visible.options[1]"
+        "lazy.options[0]"
       ]
     },
     "ui/ObjectCalendarProps": {
@@ -1585,7 +1245,6 @@
       "sites": [
         "",
         "bulkActionDefs.element",
-        "conditionalFormatting.element.condition.options[1]",
         "filter.element",
         "gantt.groupByField",
         "grouping.fields.element.field",
@@ -1603,11 +1262,6 @@
         "filter.element"
       ]
     },
-    "ui/ObjectNavItem": {
-      "sites": [
-        "visible.options[1]"
-      ]
-    },
     "ui/ObjectTreeProps": {
       "sites": [
         "filter.element"
@@ -1617,37 +1271,19 @@
       "sites": [
         "",
         "interfaceConfig.filterBy.element",
-        "slots.header.options[0].in.type",
-        "slots.header.options[0].in.visibleWhen.options[1]"
+        "slots.header.options[0].in.type"
       ]
     },
     "ui/PageComponent": {
       "sites": [
         "in.dataSource.filter.element",
-        "in.type",
-        "in.visibleWhen.options[1]"
-      ]
-    },
-    "ui/PageNavItem": {
-      "sites": [
-        "visible.options[1]"
+        "in.type"
       ]
     },
     "ui/PageRegion": {
       "sites": [
         "components.element.lazy.in.dataSource.filter.element",
-        "components.element.lazy.in.type",
-        "components.element.lazy.in.visibleWhen.options[1]"
-      ]
-    },
-    "ui/PageTabsProps": {
-      "sites": [
-        "items.element.visibleWhen.options[1]"
-      ]
-    },
-    "ui/RecordAlertProps": {
-      "sites": [
-        "visible.options[1].options[1]"
+        "components.element.lazy.in.type"
       ]
     },
     "ui/RecordDetailsProps": {
@@ -1667,19 +1303,9 @@
         "runtimeFilter.lazy"
       ]
     },
-    "ui/ReportNavItem": {
-      "sites": [
-        "visible.options[1]"
-      ]
-    },
     "ui/TimelineConfig": {
       "sites": [
         "groupByField"
-      ]
-    },
-    "ui/UrlNavItem": {
-      "sites": [
-        "visible.options[1]"
       ]
     },
     "ui/UserFilters": {
@@ -1694,7 +1320,6 @@
         "form.submitBehavior.options[1].url",
         "list",
         "list.bulkActionDefs.element",
-        "list.conditionalFormatting.element.condition.options[1]",
         "list.filter.element",
         "list.gantt.groupByField",
         "list.grouping.fields.element.field",
@@ -1711,7 +1336,6 @@
       "sites": [
         "options[0].config",
         "options[0].config.bulkActionDefs.element",
-        "options[0].config.conditionalFormatting.element.condition.options[1]",
         "options[0].config.filter.element",
         "options[0].config.gantt.groupByField",
         "options[0].config.grouping.fields.element.field",
@@ -1726,7 +1350,6 @@
       "sites": [
         "options[0].config",
         "options[0].config.bulkActionDefs.element",
-        "options[0].config.conditionalFormatting.element.condition.options[1]",
         "options[0].config.filter.element",
         "options[0].config.gantt.groupByField",
         "options[0].config.grouping.fields.element.field",
