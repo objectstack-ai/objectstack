@@ -1,6 +1,9 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+// [#18378] The live control below asserts the two axes are independent, which
+// needs the wall predicate beside the policy.
+import { postureEnforcesWall } from '@objectstack/spec/security';
 import {
   _resetEnvDeprecationWarnings,
   collectConfiguredLocales,
@@ -505,7 +508,7 @@ describe('resolveScheduledWorkEnabled (#17396, ruling G items 1-2)', () => {
  * and the packaged-job loop cannot disagree about which of the three a
  * deployment is in; this is the table its docblock states.
  */
-describe('resolveScheduledWorkPolicy (#17396, ruling G — the three bind states)', () => {
+describe('resolveScheduledWorkPolicy (#17396 ruling G, #18378 ruling A′ — the four bind states)', () => {
   const originalSwitch = process.env[SCHEDULED_WORK_ENV];
   const originalPosture = process.env.OS_TENANCY_POSTURE;
   const originalMultiOrg = process.env.OS_MULTI_ORG_ENABLED;
@@ -531,17 +534,26 @@ describe('resolveScheduledWorkPolicy (#17396, ruling G — the three bind states
       enabled: false,
       posture: 'single',
       requiresActingOrganization: false,
+      runOwnership: 'unscoped',
     });
   });
 
   it('row 1 holds under a WALL too — the OFF reason is the one to report, not an authoring remedy', () => {
     clean();
-    for (const posture of ['group', 'isolated'] as const) {
+    // ⚠️ `runOwnership` still reports the posture's rule while the switch is
+    // OFF — it is a fact about the posture, not about the switch — but nothing
+    // binds, so no run can reach it. `enabled` is the discriminator, and the
+    // pin asserts both rather than letting the pair drift.
+    for (const [posture, runOwnership] of [
+      ['group', 'per-record'],
+      ['isolated', 'declared'],
+    ] as const) {
       process.env.OS_TENANCY_POSTURE = posture;
       expect(resolveScheduledWorkPolicy()).toEqual({
         enabled: false,
         posture,
         requiresActingOrganization: false,
+        runOwnership,
       });
     }
   });
@@ -554,20 +566,52 @@ describe('resolveScheduledWorkPolicy (#17396, ruling G — the three bind states
       enabled: true,
       posture: 'single',
       requiresActingOrganization: false,
+      runOwnership: 'unscoped',
     });
   });
 
-  it('row 3 — ON under a wall (`group` and `isolated` alike): the declaration is required', () => {
+  // [#18378, ruling A′] The row that used to pair `group` with `isolated`.
+  //
+  // ⚠️ THE DISCRIMINATING ASSERTION IS THAT THE TWO POSTURES DISAGREE. A pin
+  // that looped over both and expected one shape is exactly what this card
+  // retired, so these are deliberately two cases with two different
+  // expectations rather than one parameterised case — a future edit that
+  // re-merges them has to delete an assertion to do it.
+  it('row 3 — ON under `group`: binds WITHOUT a declaration, owning its writes per record', () => {
     clean();
     process.env[SCHEDULED_WORK_ENV] = 'true';
-    for (const posture of ['group', 'isolated'] as const) {
-      process.env.OS_TENANCY_POSTURE = posture;
-      expect(resolveScheduledWorkPolicy()).toEqual({
-        enabled: true,
-        posture,
-        requiresActingOrganization: true,
-      });
-    }
+    process.env.OS_TENANCY_POSTURE = 'group';
+    expect(resolveScheduledWorkPolicy()).toEqual({
+      enabled: true,
+      posture: 'group',
+      requiresActingOrganization: false,
+      runOwnership: 'per-record',
+    });
+  });
+
+  it('row 4 — ON under `isolated`: the declaration is required, unchanged', () => {
+    clean();
+    process.env[SCHEDULED_WORK_ENV] = 'true';
+    process.env.OS_TENANCY_POSTURE = 'isolated';
+    expect(resolveScheduledWorkPolicy()).toEqual({
+      enabled: true,
+      posture: 'isolated',
+      requiresActingOrganization: true,
+      runOwnership: 'declared',
+    });
+  });
+
+  it('`group` enforces a wall and STILL does not require the declaration — the two axes are independent', () => {
+    // The live control for the finding that motivated A′: the separating
+    // predicate is read reach (`postureUsesUnionScope`), not the wall
+    // (`postureEnforcesWall`), and `group` answers true to BOTH. A resolver
+    // that regressed to `enabled && postureEnforcesWall(posture)` passes every
+    // other case in this block and fails only here.
+    clean();
+    process.env[SCHEDULED_WORK_ENV] = 'true';
+    process.env.OS_TENANCY_POSTURE = 'group';
+    expect(postureEnforcesWall('group')).toBe(true);
+    expect(resolveScheduledWorkPolicy().requiresActingOrganization).toBe(false);
   });
 
   it('reports the REQUESTED posture, derived from the legacy boolean when unset', () => {
@@ -578,6 +622,7 @@ describe('resolveScheduledWorkPolicy (#17396, ruling G — the three bind states
       enabled: true,
       posture: 'isolated',
       requiresActingOrganization: true,
+      runOwnership: 'declared',
     });
   });
 

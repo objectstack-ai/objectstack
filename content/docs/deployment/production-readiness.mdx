@@ -140,8 +140,12 @@ the [HARDENING.md recipes](https://github.com/objectstack-ai/objectstack/blob/ma
       the startup summary: anything listed there as *disabled by deployment
       policy* is not broken, it is simply not switched on. Leaving it off is
       also a legitimate answer — an unsized clock-driven workload is a real cost
-      — but it should be one somebody made. Under `group` / `isolated`, every
-      flow you do arm must declare `config.organization`; see
+      — but it should be one somebody made. Under `isolated`, every flow you do
+      arm must declare `config.organization`. Under `group` the declaration is
+      optional — an undeclared sweep acts as each swept record's organization —
+      but check the bind lines for any record-less cron flow that writes
+      per-organization rows: it carries no organization and those writes are
+      refused, so it needs a declaration. See
       [Tenancy Modes & Membership](/docs/deployment/tenancy-modes).
 - [ ] Backup / restore drill documented and tested.
 - [ ] Data-retention windows reviewed (ADR-0057): the platform's default
