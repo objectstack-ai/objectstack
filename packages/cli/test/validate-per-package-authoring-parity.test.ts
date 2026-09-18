@@ -33,19 +33,31 @@
  *   os build    --json  warnings: 4   <- 3 union + 1 per-package survivor
  *   os validate --json  warnings: 3   <- the survivor is the defect
  *
- * ## The survivor on that fixture is an ECHO, and this file says so
+ * ## This file's fixture used to be carried by an ECHO — [#18779] it is not now
  *
- * ⚠️ The de-duplication key includes the POSITIONAL `path`, and a collection
- * index inside one package's own body is not the index the flattened top level
- * gives the same item — so on `examples/app-multi-package` what survives is the
- * union's own `crm_account.industry` finding re-reported at the package-local
- * index, not something the union could not see. That is a separate defect in
- * the key (filed, not fixed here — fixing it changes what `os build` reports,
- * which is a different decision from making the two doors agree). It does not
- * weaken these pins: whatever the pass produces, the assertion is that BOTH
- * doors produce it, so the pins measure parity rather than the survivor's
- * pedigree. The `where` prefix (`package '<id>' — …`) is what identifies a
- * per-package finding here, and it is the pass's own, not this file's guess.
+ * ⚠️ The version of `CONFIG_MULTI` this file shipped with had NO consumer for
+ * `pp_account.industry` anywhere, so the union run raised that finding too and
+ * the per-package survivor was the same finding re-reported at the
+ * package-local index. Once the de-duplication key stopped comparing the
+ * top-level index (#18779) that survivor was correctly filtered, the fixture's
+ * per-package set went EMPTY, and the non-vacuity case below went red — which
+ * is how the echo was discovered to be the only thing holding this pin up.
+ *
+ * ⇒ the fixture now carries the FALSIFIER shape instead, the same one
+ * `lint-per-package-authoring-parity.test.ts` uses: `core` owns `pp_account`
+ * and `orders` owns the view that displays `pp_account.industry`. Folded into
+ * one union the field HAS a consumer and nothing is raised; judged per package,
+ * `core` declares a field nothing in `core` reads. So the union run is clean
+ * and the per-package run is not — a survivor the union genuinely could not
+ * see, ⛔ not a duplicate of something it already reported. Measured on the new
+ * fixture: `os build --json` warnings 2, of which exactly 1 carries the
+ * per-package `where` prefix and no union finding names `industry` at all.
+ *
+ * ⭐ The pins themselves are unchanged and still measure PARITY rather than the
+ * survivor's pedigree — but a parity pin whose per-package set is empty
+ * measures nothing, so the pedigree is what decides whether the pin is alive.
+ * The `where` prefix (`package '<id>' — …`) is what identifies a per-package
+ * finding here, and it is the pass's own, not this file's guess.
  *
  * ## Tier
  *
@@ -108,6 +120,14 @@ const perPackageWarnings = (warnings: unknown[]): string[] =>
  * owning `pp_account` and publishing the navigation container, plus a module
  * owning `pp_order`, whose `account` lookup points at the sibling's object —
  * legal under ADR-0130 §1.5, and the point of the shape.
+ *
+ * ⚠️ [#18779] `orders` also owns the VIEW that displays `pp_account.industry`,
+ * and that is load-bearing rather than decoration: it is what makes the union
+ * run clean while the per-package run is not, so the survivor these pins
+ * compare is one the union could not see. Without it the only survivor was an
+ * echo of a union finding, and it stopped surviving the moment the
+ * de-duplication key was corrected — leaving the pins below comparing two empty
+ * sets. ⛔ Do not remove the view to "simplify" the fixture.
  */
 const CONFIG_MULTI = `
 const coreManifest = {
@@ -141,6 +161,16 @@ const ordersObjects = [{
     account: { name: 'account', type: 'lookup', label: 'Account', reference: 'pp_account' },
   },
 }];
+const ordersViews = [
+  {
+    name: 'pp_account_list', label: 'Account List', object: 'pp_account',
+    list: { label: 'Account List', columns: ['name', 'industry'] },
+  },
+  {
+    name: 'pp_order_list', label: 'Order List', object: 'pp_order',
+    list: { label: 'Order List', columns: ['name', 'account'] },
+  },
+];
 
 export default {
   // The ARTIFACT's own identity: \`preserve\` is additive, so the singular
@@ -150,12 +180,13 @@ export default {
   manifest: coreManifest,
   objects: [...ordersObjects, ...coreObjects],
   apps: [...coreApps],
+  views: [...ordersViews],
   // …and the per-package view the runtime registers from (ADR-0130 D4/D5). Each
   // entry's \`manifest\` is that package ASSEMBLED — its manifest fields with the
   // collections it owns written over them — which is the superset
   // \`packageBodyAsStack\` reads back as one package's stack.
   packages: [
-    { manifest: { ...ordersManifest, objects: ordersObjects } },
+    { manifest: { ...ordersManifest, objects: ordersObjects, views: ordersViews } },
     { manifest: { ...coreManifest, objects: coreObjects, apps: coreApps } },
   ],
 };
@@ -212,7 +243,7 @@ describe('#18677 — `os validate` and `os build` report the same per-package ad
     for (const dir of Object.values(dirs)) if (dir) rmSync(dir, { recursive: true, force: true });
   });
 
-  it('the multi-package fixture reaches the pass at all — `os build` raises a per-package finding', async () => {
+  it('the multi-package fixture reaches the pass at all — and its survivor is NOT an echo', async () => {
     // Asserted BEFORE any claim about parity: a fixture that never reaches the
     // per-package pass makes every comparison below vacuous, which is the exact
     // way this defect stayed invisible.
@@ -220,6 +251,21 @@ describe('#18677 — `os validate` and `os build` report the same per-package ad
     expect(build.code, `os build --json failed:\n${build.stdout}${build.stderr}`).toBe(0);
     const warnings = payloadOf(build, 'os build --json').warnings as unknown[];
     expect(perPackageWarnings(warnings).length).toBeGreaterThan(0);
+
+    // ⭐ [#18779] And the second half, which is what this file was missing: a
+    // per-package survivor that merely ECHOES a union finding keeps the count
+    // above zero while measuring nothing. `industry` must be raised ONLY behind
+    // the per-package prefix — if a union finding names it too, the fixture has
+    // drifted back to the shape whose survivor the de-duplication now (rightly)
+    // removes, and every parity case below is comparing two empty sets.
+    const named = (w: unknown): string =>
+      typeof (w as { where?: unknown })?.where === 'string' ? (w as { where: string }).where : '';
+    const industryWarnings = warnings.filter((w) => /industry/.test(named(w)));
+    expect(industryWarnings.length, 'the fixture no longer raises the per-package finding').toBe(1);
+    expect(
+      PER_PACKAGE_WHERE.test(named(industryWarnings[0])),
+      'the `industry` finding is being raised by the UNION run — the survivor would be an echo',
+    ).toBe(true);
   }, 180_000);
 
   it('`os validate` reports every per-package advisory `os build` does', async () => {
