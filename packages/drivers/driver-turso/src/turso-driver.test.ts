@@ -429,10 +429,17 @@ describe('TursoDriver Capabilities', () => {
     expect(typeof driver.syncSchemasBatch).toBe('function');
   });
 
-  it('claims batchSchemaSync + an emptied queryDateGranularity in remote mode', () => {
+  it('claims batchSchemaSync, an emptied queryDateGranularity and no transactions in remote mode', () => {
     const remote = new TursoDriver({ url: 'libsql://test-db.turso.io', authToken: 'test-token' });
     expect(remote.transportMode).toBe('remote');
-    expect(ownCapabilityClaims(remote)).toEqual(['batchSchemaSync', 'queryDateGranularity']);
+    // [#18063] `transactionsUnsupported` joins the remote-only diff. It is a
+    // claim HERE and not in local mode for the reason this census exists: the
+    // bit is per-INSTANCE, and a value equal to the base's is not a claim.
+    expect(ownCapabilityClaims(remote)).toEqual([
+      'batchSchemaSync',
+      'queryDateGranularity',
+      'transactionsUnsupported',
+    ]);
   });
 
   it('does NOT advertise native date-granularity in remote mode (avoids the "[object Object]" aggregate 500)', () => {

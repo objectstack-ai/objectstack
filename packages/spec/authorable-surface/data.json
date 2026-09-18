@@ -261,6 +261,7 @@
     "data/DriverCapabilities:schemaSync [RETIRED]",
     "data/DriverCapabilities:streaming [RETIRED]",
     "data/DriverCapabilities:transactions [RETIRED]",
+    "data/DriverCapabilities:transactionsUnsupported",
     "data/DriverCapabilities:update [RETIRED]",
     "data/DriverCapabilities:vectorSearch [RETIRED]",
     "data/DriverConfig:capabilities",

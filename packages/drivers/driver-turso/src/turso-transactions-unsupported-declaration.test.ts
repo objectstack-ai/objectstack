@@ -25,6 +25,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { SqlDriver } from '@objectstack/driver-sql';
 import { TursoDriver } from './turso-driver.js';
 
 const remote = () => new TursoDriver({ url: 'libsql://probe.turso.io', authToken: 't' });
@@ -59,8 +60,11 @@ describe('[#18063] TursoDriver.supports.transactionsUnsupported', () => {
   it('inherits the value from SqlDriver rather than restating it — the base declares false', () => {
     // `false` reaches the local face through `...super.supports`, which is why
     // a future base-level change cannot leave this subclass behind.
-    const base = Object.getPrototypeOf(TursoDriver.prototype);
-    expect(base.constructor.name).toBe('SqlDriver');
+    //
+    // ⛔ Asserted with `instanceof` and not `constructor.name`: the built
+    // bundle renames the class to `_SqlDriver`, so a name comparison is green
+    // or red depending on whether the suite resolved source or dist.
+    expect(TursoDriver.prototype).toBeInstanceOf(SqlDriver);
     expect(local().supports.transactionsUnsupported).toBe(false);
   });
 
