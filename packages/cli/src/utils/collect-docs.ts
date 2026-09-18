@@ -356,9 +356,9 @@ export function docsPackageRefs(packages: unknown): DocsPackageRef[] {
 }
 
 /**
- * Walk `src/*/docs/` once and split it two ways: collected into the package
- * that owns it, or reported as unread (#18170's warning, kept by the #18431
- * ruling's clause 4).
+ * Walk every `src/<dir>/docs/` once and split the result two ways: collected
+ * into the package that owns it, or reported as unread (#18170's warning, kept
+ * by the #18431 ruling's clause 4).
  *
  * ⭐ ONE traversal, and it is the traversal that was already here. The warning
  * this function grew out of already read every `src/<dir>/docs/` and already
