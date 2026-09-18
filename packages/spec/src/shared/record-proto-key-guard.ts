@@ -50,7 +50,7 @@ export function refuseRecordProtoKey<Schema extends z.ZodType>(
   schema: Schema,
   slotLabel: string,
 ): Schema {
-  return z.preprocess((value, ctx) => {
+  const guarded = z.preprocess((value, ctx) => {
     if (
       value !== null &&
       typeof value === 'object' &&
@@ -70,5 +70,36 @@ export function refuseRecordProtoKey<Schema extends z.ZodType>(
       });
     }
     return value;
-  }, schema) as unknown as Schema;
+  }, schema);
+
+  // [objectstack#17852] `z.preprocess`'s `in` half is a `ZodTransform`, which
+  // unconditionally hardcodes `_zod.optin = "optional"` (zod v4 core,
+  // `$ZodTransform.init`) — a preprocess accepts any input, including
+  // `undefined`, REGARDLESS of whether the wrapped schema does. Left alone,
+  // that makes a REQUIRED slot (e.g. `ObjectSchema.fields`, which carries no
+  // `.optional()`) report as optional to anything that reads `optin`/`optout`
+  // instead of actually parsing: `$ZodObject`'s own requiredness check for an
+  // "input shape" JSON Schema (`objectProcessor`, `io === 'input'` branch)
+  // reads exactly this flag, so — measured — the published JSON Schema for
+  // `data/Object` silently dropped `fields` from its `required` array without
+  // this correction, while the RUNTIME parse still refuses a missing
+  // `fields` exactly as before (confirmed separately: `optout`, which
+  // governs the OTHER direction and this object's own accept/reject
+  // behaviour, already mirrors `schema`, unaffected by this bug — only the
+  // requiredness *declaration* was wrong).
+  //
+  // The patch lands on `def.in` — the inner `ZodTransform` — rather than on
+  // `guarded` itself, and that placement is load-bearing, not stylistic:
+  // every classic combinator this schema is chained with afterward
+  // (`.describe()`, `.optional()`, …) CLONES the outer pipe into a fresh
+  // instance whose `optin`/`optout` are RE-DERIVED from `def.in._zod.optin`
+  // (measured — a patch on the outer instance is silently dropped by the
+  // very first `.describe()` a caller chains). `def.in` itself is carried
+  // over by reference across every such clone, so patching it here is what
+  // makes the correction survive the callers' own `.describe()` / `.optional()`
+  // chaining below.
+  guarded._zod.def.in._zod.optin = schema._zod.optin;
+  guarded._zod.def.in._zod.optout = schema._zod.optout;
+
+  return guarded as unknown as Schema;
 }
