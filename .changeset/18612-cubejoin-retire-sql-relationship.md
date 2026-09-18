@@ -47,23 +47,38 @@ computed for) and the declared relationship the runtime derives the equality fro
 - **`on` is no longer an alias.** It pointed at `sql`; an alias naming a key the shape
   cannot accept answers an author with a second rejection, so it became a `guidance` entry
   of its own and the rename suggestion is gone. Pinned in both directions.
-- **ADR-0087: a D3 SEMANTIC entry**, `cube-join-sql-and-relationship-retired`, plus the two
-  exact-key registrations `data/CubeJoin:sql` and `data/CubeJoin:relationship` in
-  `RETIRED_KEYS_BY_MAJOR[18]`. Not a D2 conversion: the ruling's census found zero authored
-  cube joins outside this repository, so there is no consumer source to rewrite, and a
-  mechanical strip would delete the key without recording which cube lost it — an author who
-  wrote a non-FK `sql` wanted a join the runtime does not perform, and that want needs a
-  decision rather than a rewrite. The `list-view-navigation-view-retired` entry took the same
-  route for the same reason.
-- **No `os migrate meta` sentence** in either prescription: that sentence is owed only where
-  an ADR-0087 conversion covers the surface, and none does.
+- **ADR-0087: a D2 conversion AND a D3 semantic entry**, plus the two exact-key
+  registrations `data/CubeJoin:sql` and `data/CubeJoin:relationship` in
+  `RETIRED_KEYS_BY_MAJOR[18]`. The conversion is
+  `cube-join-sql-and-relationship-removed` (`toMajor: 18`,
+  `retiredFromLoadPath: true`), chained into step 18: it strips both keys from every
+  `analyticsCubes[].joins.*` wherever the chain is replayed, one notice per stripped site,
+  each naming the cube that lost the key. It is owed because the removal is measured
+  against **metadata at rest**, not only against sources: `sql` was required and
+  `relationship` was defaulted, so every cube artifact ever written from the old schema's
+  own parse output carries both keys, and the boot door
+  (`ObjectStackDefinitionSchema` → `analyticsCubes: z.array(CubeSchema)`) would otherwise
+  refuse it with no remedy short of hand-editing JSON. The strip is lossless in the only
+  sense that applies: a key that never had an effect has none to lose. The D3 entry
+  `cube-join-sql-and-relationship-retired` stays as the human-facing record — the strip
+  removes the key, the entry says why an author who wrote a non-FK `sql` should re-read the
+  numbers that join produced.
+- **The `os migrate meta --from 17` sentence** closes all three prescriptions, which is what
+  a covered surface owes.
+- **The `joins` record KEY is documented.** `name`'s describe now states that the key a join
+  is declared under is the FOREIGN-KEY FIELD on the cube's own base object — the column the
+  derived `ON` reads — not a second spelling of the object the join reaches.
 - **The liveness ledger rows went WITH the keys** (`liveness/analytics_cube.json`), which is
   the strict-deletion route's disposition — the opposite of the tombstone route, which keeps
   the row because `retiredKey()` keeps the key in the walked shape. `analytics_cube` drops
   from 12 `dead` to 10.
 - **The one in-repo producer is fixed in the same diff.** `examples/app-showcase`'s
   `DeliveryCube` authored both keys, including an `ON` clause the runtime was replacing;
-  `dataset-compiler.ts` minted them as two constants no reader consulted.
+  `dataset-compiler.ts` minted them as two constants no reader consulted. Its join was also
+  keyed `showcase_project` — the object it reaches — while `showcase_task`'s foreign key is
+  `project`, so the derived `ON` named a column the base object does not have and the join
+  never resolved. It is re-keyed `project` here and pinned against the object's own field
+  map.
 
 Clause-②: yes (narrowing)
 

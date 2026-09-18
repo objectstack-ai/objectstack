@@ -77,8 +77,18 @@ export const DeliveryCube = defineCube({
   // join declares only WHICH object it reaches (#18612 removed `sql` and
   // `relationship`; before that, the ON clause written here was silently
   // replaced by exactly this derivation).
+  //
+  // The record KEY is the FOREIGN-KEY FIELD on the base object —
+  // `showcase_task.project`, declared as `Field.masterDetail('showcase_project')`
+  // — never a second spelling of the object it reaches. Both strategies read it
+  // that way: NativeSQLStrategy emits
+  // `LEFT JOIN "showcase_project" "project" ON "showcase_task"."project" = "project"."id"`
+  // and ObjectQLStrategy lowers `fkField: 'project'`. Keyed `showcase_project`
+  // (as it was until #18612) the derivation asked for a
+  // `showcase_task.showcase_project` column that does not exist, so the join
+  // never resolved and the example demonstrated nothing.
   joins: {
-    showcase_project: {
+    project: {
       name: 'showcase_project',
     },
   },

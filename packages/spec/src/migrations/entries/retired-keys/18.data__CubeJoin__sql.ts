@@ -18,10 +18,14 @@
 // `strictObject`, so the route is strict deletion plus a `guidance` entry
 // carrying the prescription — no `retiredKey()` tombstone, the key is out of
 // the walked shape entirely, and its liveness-ledger row left with it.
-// ⛔ NO D2 conversion covers this surface: the ruling's census found zero
-// authored cube joins outside this repository, and the one in-repo producer
-// (examples/app-showcase) was fixed in the same diff. The judgement handed to a
-// consumer is therefore the D3 SEMANTIC entry
-// `cube-join-sql-and-relationship-retired`, and the guidance prescription
-// deliberately carries no `os migrate meta` sentence.
+//
+// A D2 conversion DOES cover this surface: `cube-join-sql-and-relationship-removed`
+// (`toMajor: 18`, `retiredFromLoadPath: true`) strips the key wherever the chain
+// is replayed. It is owed because the key was REQUIRED, so every cube artifact
+// ever written from the old schema's parse output carries it and would meet the
+// boot door's refusal with no remedy short of hand-editing JSON. The guidance
+// prescription therefore closes with the house `os migrate meta --from 17`
+// sentence, and the D3 semantic entry `cube-join-sql-and-relationship-retired`
+// carries the judgement the strip cannot: an author who wrote a non-FK
+// condition wanted a join this runtime does not perform.
 export const entry = 'data/CubeJoin:sql';

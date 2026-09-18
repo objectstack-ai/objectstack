@@ -5511,6 +5511,7 @@ const step18: MigrationStep = {
     'field-column-lists-canonicalized',
     'metric-filters-removed',
     'cube-sub-day-granularities-removed',
+    'cube-join-sql-and-relationship-removed',
     'record-highlights-field-icon-removed',
     'mapping-lookup-params-removed',
     'translation-component-submit-label-removed',

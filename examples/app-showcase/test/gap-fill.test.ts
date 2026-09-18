@@ -33,7 +33,24 @@ describe('showcase gap fill — analytics cube', () => {
     );
     // A join declares the object it reaches and nothing else: the ON clause is
     // derived from the declared relationship (#18612 removed `sql`/`relationship`).
-    expect(DeliveryCube.joins?.showcase_project?.name).toBe('showcase_project');
+    expect(DeliveryCube.joins?.project?.name).toBe('showcase_project');
+  });
+
+  it('keys every join by a FOREIGN-KEY FIELD of its own base object, not by the target', () => {
+    // #18612: the `joins` record KEY is what both strategies join ON — native
+    // emits `ON "<base>"."<key>" = "<key>"."id"`, ObjectQL lowers `fkField: key`
+    // — so a key that is not a field of the base object joins on a column that
+    // does not exist. Pinned against the object's REAL field map rather than a
+    // literal, so this fails the moment either side moves.
+    const objects = ((stack as { objects?: Array<{ name: string; fields?: Record<string, unknown> }> }).objects ?? []);
+    const base = objects.find((o) => o.name === DeliveryCube.sql);
+    expect(base, `cube base object '${DeliveryCube.sql}' is not in the stack`).toBeDefined();
+    const fields = new Set(Object.keys(base?.fields ?? {}));
+    const joinKeys = Object.keys(DeliveryCube.joins ?? {});
+    expect(joinKeys.length).toBeGreaterThan(0);
+    for (const key of joinKeys) {
+      expect(fields.has(key), `join key '${key}' is not a field of '${DeliveryCube.sql}'`).toBe(true);
+    }
   });
 });
 
