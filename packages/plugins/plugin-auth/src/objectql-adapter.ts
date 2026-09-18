@@ -22,6 +22,7 @@ import {
   reattachInternalFieldsOnRead,
   type InternalFieldResolvingEngine,
 } from './internal-field-readback.js';
+import { decodeOrganizationMetadataOnRead } from './organization-metadata-decode.js';
 
 /**
  * Mapping from better-auth model names to ObjectStack protocol object names.
@@ -910,6 +911,15 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
           result,
           bridged && select ? select.map(camelToSnake) : select,
         );
+        // [#18728] Ruling C's producer half: `sys_organization.metadata` is a
+        // text column holding JSON, and better-auth decodes it on its two
+        // write echoes only. Decode it here so all four READ routes
+        // (`set-active`, `get-full-organization`, `delete`, `list` — every one
+        // of them reaches the row through this verb, `list` via the factory's
+        // fallback join) serve the object `OrganizationSchema` declares.
+        // ⛔ Deliberately NOT in `create` / `update`: see
+        // `organization-metadata-decode.ts`.
+        decodeOrganizationMetadataOnRead(objectName, result as Record<string, unknown>);
         const norm = normaliseLegacyDates(model, result);
         return (bridged ? remapKeys(norm, snakeToCamel) : norm) as T;
       },
@@ -950,6 +960,9 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         await reattachInternalFieldsOnRead(internalFieldEngine, objectName, results);
 
         return results.map((r) => {
+          // [#18728] Same producer half as `findOne` above — an organization
+          // page serves the decoded object too.
+          decodeOrganizationMetadataOnRead(objectName, r as Record<string, unknown>);
           const norm = normaliseLegacyDates(model, r as Record<string, any>);
           return bridged ? remapKeys(norm, snakeToCamel) : norm;
         }) as T[];
