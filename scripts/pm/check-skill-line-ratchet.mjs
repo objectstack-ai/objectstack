@@ -1043,9 +1043,11 @@ export const CEILINGS = new Map([
   // raise. The prescription row 「PR 正文页脚不带前置横线」, whose spelling is
   // precisely what TRIGGERS the create-side append, is split per action. The
   // PATCH row is re-stated as a RULE instead of one of two rows of inputs. And
-  // the append-size row's 「恰 90 字节」 becomes 「字节数非常量，实测 90 与 91」:
-  // this increment's send measured 91 on a body with no trailing newline, and
-  // ⛔ no cause is asserted for the spread — one reading each, and no controlled
+  // the append-size row's 「恰 90 字节」 becomes 「字节数非常量(90/91)」:
+  // this increment's send measured 91 bytes on a body with no trailing newline,
+  // the appended line being the session-URL spelling, which the row now NAMES
+  // instead of leaving it to be inferred from a constant that is not one. ⛔ No
+  // cause is asserted for the spread — one reading each, and no controlled
   // contrast on the trailing newline or on session-id length.
   // Nothing else was paid in place: re-wrap funding is refused per the
   // 2026-08-17 rule in any case. Landed count, headroom 0, same convention.
