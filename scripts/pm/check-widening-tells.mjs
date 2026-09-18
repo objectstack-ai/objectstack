@@ -447,22 +447,55 @@
  * again now: the predicate requires the value to BE the call and nothing after
  * it, and the battery carries them as controls.
  *
- * ⚠️ What stays quiet is exactly ONE shape, named here so the next reader meets
- * it instead of rediscovering it: a MULTI-LINE tombstone whose CLOSING line
- * chains that arm — `legacy: retiredKey(` on the key line, `).or(z.string()),`
- * two lines down. The key line is a tombstone by every byte it shows, and the
- * closing line declares no key, so no line-shaped reading reports it. Measured
- * population on this tree: 0. ⭐ Control: the same scanner locates all 254
+ * ⚠️ What stays quiet is exactly ONE LINE-SHAPE — one, among the lines this
+ * reader can READ, which is the qualification #18488 made this sentence carry
+ * and the whole subject of the paragraph after it. Named here so the next
+ * reader meets it instead of rediscovering it: a MULTI-LINE tombstone whose
+ * CLOSING line chains that arm — `legacy: retiredKey(` on the key line, with
+ * `).or(z.string()),` two lines down. The key line is a tombstone by every byte
+ * it shows, and the closing line declares no key, so no line-shaped reading
+ * reports it. Measured population on this tree: 0.
+ * ⭐ Control: the same scanner locates all 255
  * tombstone key lines across 66 files, of which 178 are multi-line, and the
- * SINGLE-line chained form it is the twin of reads T1. The gate owner ruled it
- * open rather than reading forward to the balancing paren — a forward read
- * crosses lines to decide a population of zero, while the single-line escape
- * closes on the key line at no cost, and the identical question was answered
- * the same way on #18095 the same day. ⭐ The OVERTURN CONDITION is written
+ * SINGLE-line chained form it is the twin of reads T1. (That control was
+ * re-measured at 1fb36ca44d; every other census figure in this file is the
+ * 1cb6a06195 reading, which found 254 with one fewer closing on the key line.)
+ * The gate owner ruled it open rather than reading forward to the balancing
+ * paren — a forward read crosses lines to decide a population of zero, while
+ * the single-line escape closes on the key line at no cost, and the identical
+ * question was answered the same way on #18095 the same day.
+ * ⭐ The OVERTURN CONDITION is written
  * down so it needs no second discussion: the FIRST real multi-line chained
  * carrier — landed, never a synthetic sample — closes it by reading forward.
  * This paragraph and the self-test case pinned beside the #17955 battery's
  * vocabulary assertion are that carrier's discovery device.
+ *
+ * ⭐ #18488 — the qualification that sentence now carries, and why closing it
+ * is not a second quiet direction. The decline reads "the call is still open at
+ * the end of the line" off a line-shaped scan that answered `-1` for THAT and
+ * for "this reader cannot read the rest of the line" with the same number.
+ * `legacy: retiredKey(/\(/.source).or(z.string()),` is valid TypeScript that
+ * CLOSES the call and chains a live arm onto it, so it leaves a key an author
+ * may still write; the unpaired paren inside the regex literal is pushed onto
+ * the stack by a reader that does not lex regex literals, the line reads as
+ * open, and the decline swallows the key. ⭐ And it does NOT arrive through one
+ * of the four "cannot parse" returns — a `/` is neither `/*` nor `//`, so the
+ * scan falls off the end of the line with a non-empty stack, the ONE ending
+ * that means genuinely open. Flagging those four would have left this line
+ * exactly as silent as it was, which is why {@link readToCloser} reports
+ * CERTAINTY separately from the index and the decline requires both; that
+ * docblock is the authority on which endings are certain and why.
+ *
+ * ⛔ The opposite reading is the expensive error, and it is the easy one to
+ * reach for: treating EVERY `-1` as "keep firing" re-fires all 178 multi-line
+ * tombstone key lines in this tree, which is the false positive #17955 exists
+ * to remove. So the two are separated rather than merged, and the measured cost
+ * of the separation is 0 — all 255 in-tree tombstone key lines and all 299
+ * tombstone-shaped rows in this tree's available history keep their verdicts,
+ * line for line, the 49 that carry a quote and the 4 that carry a backtick
+ * inside a quoted prescription included (1fb36ca44d). ⚠️ This corner is a
+ * PARSER limit and the shape above it is a LINE-SHAPE choice: closing this one
+ * closes nothing of that one, and leaves its overturn condition where it is.
  *
  * ⚠️ One boundary this deliberately does NOT touch, recorded rather than left
  * to be found: the PRESCRIPTION a tombstone carries is bare-string lines, so a
@@ -1175,7 +1208,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#16943 — the net member/key delta: a replaced line is not a net addition': 23,
   '#17618 — a PARAMETER is not a key, and a closed set RE-SPELLED around fewer values is not a new one': 24,
   '#17300 — the retirement ledger is a record of REMOVALS, not a set that gained a value': 27,
-  '#17955 — a `retiredKey()` tombstone declares a key UNWRITABLE, and never adds a spelling': 29,
+  '#17955 — a `retiredKey()` tombstone declares a key UNWRITABLE, and never adds a spelling': 37,
   '#17848 — a key RE-DECLARED with a zod `error` param is not a key ADDED': 8,
   '#18234 — a key narrowed OUT of a universal acceptor is not a set that gained a value': 33,
   'T3 — a new row in a published entry point': 8,
@@ -1927,33 +1960,83 @@ function endOfStringLiteral(s, start) {
   return -1;
 }
 
-/** The index of the closer matching the opener at `open`, or -1 if it does not close on this line. */
-function matchingCloser(s, open) {
+/**
+ * How far a line-shaped read of the call got — and, the half an index cannot
+ * carry, whether this reader was CERTAIN of what it passed on the way.
+ *
+ * ⭐ #18488 — `-1` is two different facts wearing one number, and a caller that
+ * cannot tell them apart is wrong in one direction or the other. "The call is
+ * genuinely still open at the end of the line" is what a multi-line
+ * declaration looks like, and 178 of this tree's tombstone key lines are
+ * exactly that. "This reader could not read the rest of the line" is not a
+ * claim about the source at all. The decline in `declaresUnwritableKey` rests
+ * on the FIRST reading — every remaining byte is inside the argument list — so
+ * it needs the second one separated out rather than folded in.
+ *
+ * The question this answers is therefore not "which `return` did the scan
+ * take" but **is it CERTAIN the call does not close on this line**:
+ *
+ * - CERTAIN, `unreadable: false` — the scan fell off the end with a non-empty
+ *   stack; a `//` took the rest of the line; a delimited comment or a TEMPLATE
+ *   literal opened and ran past the end of the line. The last two legitimately
+ *   span lines, so everything left is inside a comment or inside one argument
+ *   either way.
+ * - NOT certain, `unreadable: true` — a `'`/`"` string opened and never closed
+ *   (neither spans lines in TypeScript, so the source is malformed or this
+ *   reader mis-lexed the opener); a closer matched nothing on the stack (the
+ *   stack is already wrong); or a `/` opened neither comment form, which in
+ *   TypeScript is a division operator or a REGEX LITERAL this reader does not
+ *   lex — from there on the stack it built is a guess.
+ *
+ * ⭐ The regex-literal case does NOT abort the scan, and that asymmetry is the
+ * design rather than an oversight: aborting would move the INDEX this function
+ * answers, and the index has four callers with nothing to do with tombstones.
+ * The `/` only records that the stack is no longer trustworthy, so `close` is
+ * byte-for-byte what it was before this reading existed.
+ *
+ * ⭐ It is string-aware for free, because the flag is raised INSIDE the scan
+ * that already skips string literals and comments. A prescription quoting a
+ * path or a spelling carries slashes and backticks between quotes and raises
+ * nothing — measured: 49 tombstone-shaped rows in this tree's history carry a
+ * quote and 4 carry a backtick inside a quoted prescription, and a line-level
+ * `includes` of either character would have fired on every one of them.
+ *
+ * @param {string} s @param {number} open
+ * @returns {{ close: number, unreadable: boolean }}
+ */
+function readToCloser(s, open) {
   const stack = [s[open]];
+  let unreadable = false;
   for (let k = open + 1; k < s.length; k += 1) {
     const ch = s[k];
     const next = s[k + 1];
     if (ch === '/' && next === '*') {
       const end = s.indexOf('*/', k + 2);
-      if (end === -1) return -1;
+      if (end === -1) return { close: -1, unreadable };
       k = end + 1;
       continue;
     }
-    if (ch === '/' && next === '/') return -1;
+    if (ch === '/' && next === '/') return { close: -1, unreadable };
+    if (ch === '/') { unreadable = true; continue; }
     if (ch === "'" || ch === '"' || ch === '`') {
       const end = endOfStringLiteral(s, k);
-      if (end === -1) return -1;
+      if (end === -1) return { close: -1, unreadable: ch !== '`' };
       k = end;
       continue;
     }
     if (BRACKET_CLOSERS[ch] !== undefined) { stack.push(ch); continue; }
     if (ch === ')' || ch === ']' || ch === '}') {
-      if (BRACKET_CLOSERS[stack[stack.length - 1]] !== ch) return -1;
+      if (BRACKET_CLOSERS[stack[stack.length - 1]] !== ch) return { close: -1, unreadable: true };
       stack.pop();
-      if (stack.length === 0) return k;
+      if (stack.length === 0) return { close: k, unreadable };
     }
   }
-  return -1;
+  return { close: -1, unreadable };
+}
+
+/** The index of the closer matching the opener at `open`, or -1 if it does not close on this line. */
+function matchingCloser(s, open) {
+  return readToCloser(s, open).close;
 }
 
 /** The top-level, comma-separated members between `open` and its closer at `close`. */
@@ -2447,6 +2530,11 @@ export function replacesUniversalAcceptorKey(text, removedTexts) {
  *   whatever it is passed. The line is a tombstone, and a chain can only appear
  *   on the line that CLOSES the call — a line that declares no key, which is
  *   the residual quiet direction the header names with its overturn condition.
+ *   ⛔ #18488 — "does NOT close there" is a claim about the SOURCE, so it is
+ *   only available when {@link readToCloser} was CERTAIN of what it read. A
+ *   regex literal is not lexed by that scan, so a closed call can end this line
+ *   with a stack that only looks open; an uncertain ending keeps the tell
+ *   firing instead of buying this branch's decline.
  *
  * ⚠️ ⛔ Do not "tighten" ② to "only whitespace or a comment may follow
  * `retiredKey(`". Measured: that re-fires 30 of the 254 landed tombstones, all
@@ -2520,10 +2608,22 @@ export function declaresUnwritableKey(text, localRefusal = null) {
     ?? (localRefusal instanceof RegExp ? localRefusal.exec(s) : null);
   if (opening === null) return false;
   const open = opening[0].length - 1;
-  const close = matchingCloser(s, open);
+  const { close, unreadable } = readToCloser(s, open);
   // ② The call is still OPEN at the end of the line, so every byte after
   // `retiredKey(` is one of its arguments — and an argument chains onto nothing.
-  if (close === -1) return true;
+  //
+  // ⛔ #18488 — unless the reader could not READ the rest of the line, in which
+  // case it has no idea whether the call is open and the sentence above is
+  // about a stack it guessed at. `legacy: retiredKey(/\(/.source).or(z.string()),`
+  // is valid TypeScript that CLOSES the call and chains a live arm onto it; the
+  // unpaired paren inside the regex literal is what makes the stack look open.
+  // An unreadable tail keeps the tell firing — positive evidence only, the same
+  // direction `enclosingDelimiter` takes when a hunk does not show it a
+  // neighbour. ⭐ It is the CERTAINTY that is read, not the return path: this
+  // line falls off the end of the line with a non-empty stack, which is the one
+  // `-1` that means genuinely open, so flagging only the "cannot parse" returns
+  // would leave it exactly as silent as it was.
+  if (close === -1) return !unreadable;
   // ① It closed here, so the value ends here too, give or take a comma.
   return TOMBSTONE_TAIL.test(withoutComments(s.slice(close + 1)));
 }
@@ -4365,6 +4465,48 @@ export function selfTest() {
   // very false positive this reading exists to remove — if this case weakens.
   t('⭐ a prescription helper whose ARGUMENTS continue on the next line is still a tombstone — 30 landed lines take this shape', declaresUnwritableKey("  create: retiredKey(capRemoved('create',") === true);
   t('⭐ the vocabulary is INTACT — `memberTellKind` still classifies a tombstone as a key of kind T1, so both sides of the budget read one question', memberTellKind("  legacy: retiredKey('gone'),", { onContractSource: true }) === 'T1');
+
+  // -- #18488: the tail this reader cannot READ is not a tail it read as OPEN --
+  //
+  // ⭐ The card's line, constructed by the review that passed PR #18427 against
+  // the code it was passing. It is valid TypeScript, it CLOSES the call, and it
+  // chains a live arm onto the result — so it leaves a key an author may still
+  // write, which is T1's sentence exactly. It went silent because a `/` opens
+  // neither comment form: the reader does not lex regex literals, pushes the
+  // unpaired `(` inside the pattern onto its stack, and reaches the end of the
+  // line with the stack non-empty.
+  //
+  // ⛔ That is the ONE ending that means GENUINELY open — not one of the four
+  // "cannot parse" returns — so a repair that flagged only those four would
+  // leave this case exactly as silent as it was. The case is written with the
+  // card's own line for that reason: it is where the boundary runs.
+  const REGEX_TAILED_CHAIN = '  legacy: retiredKey(/\\(/.source).or(z.string()),';
+  t('⛔ #18488 — a CLOSED call whose tail this reader cannot lex FIRES: a regex literal hides a live `.or()` arm behind a stack that only looks open', tombstoneTells(`+${REGEX_TAILED_CHAIN}`)[0]?.tell === 'T1');
+  t('…and it is the DECLINE that moved, never the vocabulary — the row is still read as a key of kind T1', declaresUnwritableKey(REGEX_TAILED_CHAIN) === false && memberTellKind(REGEX_TAILED_CHAIN, { onContractSource: true }) === 'T1');
+  // ⭐ THE BOUNDARY, pinned in one case because the other direction is this
+  // repair's whole risk: reading every `-1` as "keep firing" re-fires all 178
+  // multi-line tombstone key lines in this tree, which is the false positive
+  // #17955 exists to remove. "Cannot read" fires; "genuinely still open at the
+  // end of the line" is still a tombstone, on both landed spellings.
+  t('⭐ BOUNDARY — an unreadable tail fires while a call GENUINELY still open at end of line stays a tombstone, on both spellings this tree lands (148 + 30)', declaresUnwritableKey(REGEX_TAILED_CHAIN) === false && declaresUnwritableKey('  legacy: retiredKey(') === true && declaresUnwritableKey("  create: retiredKey(capRemoved('create',") === true);
+  t('…and the endings that legitimately SPAN lines are certain, not unreadable: a line comment, an open delimited comment, an open template literal', declaresUnwritableKey('  legacy: retiredKey( // the prescription is below') === true && declaresUnwritableKey('  legacy: retiredKey( /* the prescription runs on') === true && declaresUnwritableKey('  legacy: retiredKey(`the prescription runs on') === true);
+  t('⛔ …while the endings that are not certain fire: a `/` outside a string or comment, a closer matching nothing, and an unterminated quoted string', declaresUnwritableKey('  legacy: retiredKey(/\\(/.source,') === false && declaresUnwritableKey('  legacy: retiredKey(gone]),') === false && declaresUnwritableKey("  legacy: retiredKey('opens and never closes") === false);
+  // ⭐ STRING-AWARE, and measured rather than asserted: 49 tombstone-shaped rows
+  // in this tree's available history carry a quote and 4 carry a BACKTICK
+  // inside a quoted prescription, so a line-level `includes` of either
+  // character fires on every one of them. The flag is raised inside the scan
+  // that already skips string literals, so a prescription quoting a path or a
+  // spelling raises nothing — on either branch.
+  t('⭐ …and a slash or a backtick INSIDE the quoted prescription raises nothing — the reading is the string-aware scan, never the line', declaresUnwritableKey("  legacy: retiredKey('see /docs/x'),") === true && declaresUnwritableKey("  legacy: retiredKey(useInstead('see /docs/x',") === true && declaresUnwritableKey("  legacy: retiredKey(useInstead('use `newKey` instead',") === true);
+  // ⭐ DARK CONTROL, the reading the repair is priced by: the same scanner over
+  // this tree locates 255 tombstone key lines across 66 files — 178 not closing
+  // on the key line, 77 closing — and not one verdict moves. The two shapes
+  // below are the branch-① twins of the two above, and they bracket the
+  // decline from the closing side: a balanced regex literal that really is the
+  // whole value is still a tombstone, and the same value with an arm chained
+  // onto it still fires, both decided by the tail rather than by the slash.
+  t('⭐ DARK — a BALANCED regex literal that closes the call on the key line is still a tombstone; the slash alone decides nothing on the closing branch', declaresUnwritableKey('  legacy: retiredKey(/x/.source),') === true && declaresUnwritableKey('  legacy: retiredKey(a / b),') === true);
+  t('⛔ …and the same value with a live arm chained onto it still fires, the way it did before this reading existed', declaresUnwritableKey('  legacy: retiredKey(/x/.source).or(z.string()),') === false);
 
   // ⚠️ The residual QUIET direction, asserted rather than described so the next
   // reader meets it HERE instead of rediscovering it: a MULTI-LINE tombstone
