@@ -499,7 +499,7 @@ export function runFilterPreflight(options: {
  */
 export {
   TIMEOUT_OVERRIDE_OPTIONS,
-  VITEST_PROJECT_CLI_OVERRIDES,
+  PROJECT_CLI_OVERRIDES,
   inertTimeoutOverrides,
   renderInertOverrideNotice,
   runProjectCliOverridePreflight,

@@ -20,7 +20,7 @@
  *     test: { ...options.test, ...cliOverrides }
  *
  * where `cliOverrides` is a CLOSED ALLOWLIST of twenty CLI option names —
- * `VITEST_PROJECT_CLI_OVERRIDES` below. Every other CLI option is applied to the
+ * `PROJECT_CLI_OVERRIDES` below. Every other CLI option is applied to the
  * ROOT config and stops there. `testTimeout` is on that list. `hookTimeout` and
  * `teardownTimeout` are not.
  *
@@ -128,7 +128,7 @@
  *
  * ## ⛔ Why the allowlist is transcribed ONCE, here
  *
- * `VITEST_PROJECT_CLI_OVERRIDES` is a transcription of a private vitest code
+ * `PROJECT_CLI_OVERRIDES` is a transcription of a private vitest code
  * path, the second one this package owns (`matchesVitestFilter` in `index.ts` is
  * the first) and for the same reason: eight packages in this repo declare
  * vitest `projects`, every one of them has this defect, and eight copies of a
@@ -145,9 +145,13 @@
  * own sentence above as a documented, unfixed defect in seven places, and
  * `test/config-wiring-sweep.test.ts` — which DERIVES its population rather than
  * listing it — would then have had to carry a maintained exemption list for
- * them, which is the artefact #17978 removed. So the sweep requires this call in
- * every config that declares `projects`, and spawns a real vitest child per
- * package to prove the refusal is a behaviour and not a spelling.
+ * them, and a maintained exemption list is the artefact THIS PACKAGE'S OWN
+ * EXISTENCE removed: read `src/index.ts`'s header for the one-copy argument and
+ * the sweep's header for the derived-population one. (⚠️ Cite those two headers
+ * rather than a card number — #17978 is a finding card and does not carry this
+ * reasoning in its text; the argument stands on the tree.) So the sweep requires
+ * this call in every config that declares `projects`, and spawns a real vitest
+ * child per package to prove the refusal is a behaviour and not a spelling.
  *
  * ⭐ Unlike the first transcription, this one is PINNED AGAINST ITS SOURCE:
  * `test/project-cli-override-preflight.test.ts` extracts the real array out of
@@ -164,8 +168,36 @@
  *
  * ⛔ Re-read `dist/chunks/cli-api.*.js` on a vitest bump; the pin named in this
  * file's header does that reading for you and reddens on any difference.
+ *
+ * ## ⛔ Why this constant carries NO `VITEST_` prefix, and must not grow one
+ *
+ * It was first written `VITEST_PROJECT_CLI_OVERRIDES`, and
+ * `pnpm check:runner-env-posture` reddened on all three of its code positions.
+ * That gate was RIGHT, and the reason is worth keeping next to the name rather
+ * than in a commit message: SCREAMING_SNAKE plus a `VITEST_` prefix is the
+ * shape of a RUNNER ENVIRONMENT VARIABLE, and the gate's first pass is a bare
+ * IDENTIFIER scan — deliberately, because a destructured read
+ * (`const { VITEST } = process.env`) carries no `env.` prefix at its use site,
+ * so requiring one would reopen exactly the hole that gate exists to close.
+ *
+ * ⭐ So the gate could not tell this constant from a runner variable — and
+ * neither can a human reader, which is the part that made the old name a real
+ * defect rather than a false positive. It is not an environment read: nothing
+ * in this package's `src/` reads `process.env` at all.
+ *
+ * ⛔ Nor is `OS_`-prefixing it the repair. AGENTS.md Prime Directive #9 reserves
+ * `OS_` for ObjectStack's own environment variables, so that spelling trades one
+ * env-var-shaped name for another in a namespace this repo owns — the same
+ * misreading, one namespace over. The fix is to leave the env-var SHAPE.
+ *
+ * Measured before renaming, so this is not a guess: vitest 4.1.11 names
+ * `VITEST_PROJECT_CLI_OVERRIDES` nowhere in its distribution (0 hits, against a
+ * LIT control — the same scan finds `VITEST_WORKER_ID`, `VITEST_POOL_ID`,
+ * `VITEST_MODE` and nine more). The name was this repo's invention, so no
+ * mechanism depended on it; and the pin below compares this constant's VALUE
+ * against the installed array, never its name.
  */
-export const VITEST_PROJECT_CLI_OVERRIDES: readonly string[] = [
+export const PROJECT_CLI_OVERRIDES: readonly string[] = [
   'logHeapUsage',
   'detectAsyncLeaks',
   'allowOnly',
@@ -234,7 +266,7 @@ export function inertTimeoutOverrides(
     return [];
   }
   return TIMEOUT_OVERRIDE_OPTIONS.filter(
-    (name) => options[name] !== undefined && !VITEST_PROJECT_CLI_OVERRIDES.includes(name),
+    (name) => options[name] !== undefined && !PROJECT_CLI_OVERRIDES.includes(name),
   );
 }
 

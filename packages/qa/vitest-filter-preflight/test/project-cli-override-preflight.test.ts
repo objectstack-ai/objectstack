@@ -37,7 +37,7 @@ import { parseCLI } from 'vitest/node';
 import { describe, expect, it } from 'vitest';
 import {
   TIMEOUT_OVERRIDE_OPTIONS,
-  VITEST_PROJECT_CLI_OVERRIDES,
+  PROJECT_CLI_OVERRIDES,
   inertTimeoutOverrides,
   renderInertOverrideNotice,
   runProjectCliOverridePreflight,
@@ -73,7 +73,7 @@ function installedProjectCliOverrides(): string[] {
       `expected exactly one \`cliOverrides\` array in ${chunks} (searched ` +
         `${candidates.length} cli-api chunk(s), found ${found.length}). vitest's ` +
         'bundle shape changed — re-read `resolveProjects` and update both this ' +
-        'reader and VITEST_PROJECT_CLI_OVERRIDES.',
+        'reader and PROJECT_CLI_OVERRIDES.',
     );
   }
   return found[0];
@@ -84,7 +84,7 @@ describe('the transcription is held against its source', () => {
     const installed = installedProjectCliOverrides();
 
     expect(installed.length).toBeGreaterThan(0);
-    expect([...VITEST_PROJECT_CLI_OVERRIDES]).toEqual(installed);
+    expect([...PROJECT_CLI_OVERRIDES]).toEqual(installed);
   });
 
   it('places the three timeout knobs on the two sides the module depends on', () => {
