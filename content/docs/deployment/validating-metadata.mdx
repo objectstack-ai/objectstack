@@ -189,6 +189,30 @@ The react `<ObjectChart>` block is **object-bound** (`objectName` + an inline
 gate below against a different rule — its result rows are keyed by the raw field
 names, exactly the opposite of the dataset case.
 
+One level down from the axis, the measure itself is checked against the field it
+aggregates. A measure pairs an `aggregate` with a `field`, and
+`AGGREGATE_FIELD_TYPE_COMPATIBILITY` (`@objectstack/spec`) declares which pairs
+every backend answers the same way. A pair outside it is refused
+(`measure-aggregate-field-type-refused`) naming the aggregate, the field, its
+declared type and the accepted set:
+
+```ts
+// object declares `closed_at` as `datetime`
+measures: [{ name: 'avg_closed', aggregate: 'avg', field: 'closed_at' }]
+//                                          ↑ refused: the answer would be the dialect's, not the data's
+```
+
+`avg` over a temporal column is where this bites hardest: one SQL family coerces
+the stored text and returns a plausible number (the average *year*), another has
+no such function and fails at query time. `min`/`max` over the same field are
+**accepted** — they return a real instant of the field's own type — and
+`count`/`count_distinct` are accepted over every type, because they read no
+arithmetic off the value. The analytics service refuses the same pair with
+`400 DATASET_INVALID` when a query is built; this is the identical verdict,
+from the identical table, one door earlier. The rule stays silent wherever the
+field's type cannot be resolved (an object this stack does not define, a
+dangling field path, an untyped field) rather than guessing.
+
 ### 7. Navigation exposing objects nobody can read
 
 Navigation and permissions are separate metadata, each valid on its own — so an
@@ -396,6 +420,7 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | Zod-valid but functionally inert declarations — a `summary` with no operations (ADR-0078), a managed object advertising an API method its affordances refuse (#7521) | ✓ | ✓ | ✓ | ✓ᵒ |
 | View container shape | ✓ | ✓ | ✓ | — |
 | Widget-binding integrity (ADR-0021) | ✓ | ✓ | ✓ | ✓ᵈ |
+| Dataset measure `aggregate` × the field's declared type — a pair the spec's compatibility table refuses, e.g. `avg` over a `datetime` field (#16354) | ✓ | ✓ | ✓ | — |
 | Dashboard action/route references (ADR-0049) | ✓ | ✓ | ✓ | — |
 | Filter placeholder resolvability (#3574) | ✓ | ✓ | ✓ | — |
 | Ordering comparands naming a date-range preset — `last_30_days` in a `>=` position (#8793) | ✓ | ✓ | ✓ | ✓ᵈᵛᵒᵖᶠ |
