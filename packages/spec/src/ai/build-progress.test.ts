@@ -23,6 +23,10 @@
  * someone re-measured — not an edit to wave through.
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { describe, it, expect } from 'vitest';
 
 import {
@@ -178,5 +182,58 @@ describe('BuildProgressPhase (type)', () => {
   it('admits every declared member and is assignable from the array', () => {
     const everyPhase: BuildProgressPhase[] = [...BUILD_PROGRESS_PHASES];
     expect(everyPhase).toHaveLength(BUILD_PROGRESS_PHASES.length);
+  });
+});
+
+/**
+ * The provenance leg — and the one leg whose subject is TEXT on purpose.
+ *
+ * This module's docblock is not incidental prose. The published
+ * `@objectstack/spec` tarball ships the `.zod.ts` sources themselves, and the
+ * same text is rendered verbatim into
+ * `content/docs/references/ai/build-progress.mdx`. For a CLOSED vocabulary it
+ * is the audit trail the "re-measure before you move the array" discipline
+ * reads: a reader who cannot tell a MEASUREMENT from a RULING re-cites the
+ * ruling as evidence, and the next member goes in on a claim nobody ever made.
+ *
+ * So what is pinned here is narrow and load-bearing: that the three labels are
+ * defined, that `verify` is labelled as the ruling it is rather than as a
+ * measurement, and that the liveness watch is still present — ⛔ not the
+ * wording around any of them. Nothing else in this file asserts on text.
+ */
+describe('module docblock provenance', () => {
+  const SOURCE = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'build-progress.zod.ts'),
+    'utf-8',
+  );
+
+  it('defines all three provenance labels', () => {
+    for (const label of ['measured on a named reachable source', 'declared by ruling', 'inferred']) {
+      expect(SOURCE).toContain(label);
+    }
+  });
+
+  it('labels `verify` as declared by ruling, and ⛔ never as measured membership', () => {
+    // The bullet itself, not the surrounding paragraph: `verify` is in the
+    // enum because cloud#2172 ruled it in, which is a good reason and is not
+    // an observation of any producer or consumer.
+    const bullet = SOURCE.slice(SOURCE.indexOf(' * - `verify`'));
+    expect(bullet.slice(0, 200)).toContain('**declared by ruling**');
+
+    // The retired headline claimed every member was measured against a real
+    // end of the channel. It was false for `verify` on the day it was written.
+    expect(SOURCE).not.toContain('Membership was MEASURED');
+    expect(SOURCE).not.toContain('every member below is one a real producer emits');
+  });
+
+  it('keeps the liveness watch for the three declared-ahead surfaces', () => {
+    expect(SOURCE).toContain('## Liveness watch');
+    for (const surface of ['`verify` phase', '`hop`', '`tool`']) {
+      expect(SOURCE).toContain(surface);
+    }
+    // The point of the watch: no gate notices, so the paragraph is the notice.
+    expect(SOURCE).toContain('ADR-0049');
+    expect(SOURCE).toContain('cloud#2172');
+    expect(SOURCE).toContain('objectui#7388 block 2');
   });
 });

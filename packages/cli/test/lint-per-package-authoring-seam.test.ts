@@ -6,10 +6,16 @@
  *
  * `os build` has run the table a second time, once per `artifactPackages(…)`
  * entry with `packageBodyAsStack(…)` as resolution context, since #16611;
- * `os validate` joined it in #18677. `os lint` did not. `compile.ts` step 3b-ii
- * says what survives that de-duplication is "exactly the set the union could
- * not see" ⇒ that whole set was findings `os build` reported and `os lint`
+ * `os validate` joined it in #18677. `os lint` did not, so every survivor of
+ * that de-duplication was a finding `os build` reported and `os lint`
  * structurally could not — FALSE-CLEAN, on the fastest of the three doors.
+ *
+ * ⚠️ [#18779] This header used to size that set by quoting `compile.ts` step
+ * 3b-ii — "exactly the set the union could not see" — and the sentence was
+ * false when it was quoted: the de-duplication key carried the POSITIONAL
+ * `path`, so echoes of union findings survived it. The key was corrected
+ * there. The fixture below is unaffected and is the reason why: it raises a
+ * finding the union genuinely cannot produce, ⛔ not an echo.
  *
  * ## ⭐ Why symbol presence scored this door as covered
  *
@@ -58,10 +64,16 @@ const PER_PACKAGE = /^package '[^']+' — /;
  * The `core` package owns `pp_account`; the `orders` package owns the view that
  * displays `pp_account.industry`. Judged as one flattened union the field has a
  * consumer and `field-no-consumers` says nothing; judged per package, `core`
- * declares a field nothing IN CORE reads. That is not an echo of a union
- * finding — it is a member of "the set the union could not see", which is the
- * only shape that can falsify this card, and the reason this fixture is not the
+ * declares a field nothing IN CORE reads. That is ⛔ not an echo of a union
+ * finding — the union produced no such finding at all — which is the only
+ * shape that can falsify this card, and the reason this fixture is not the
  * sibling file's.
+ *
+ * [#18779] It is also the positive control for the corrected de-duplication
+ * key: a key that stopped discriminating would swallow this finding too, and
+ * this file goes red. The echo the corrected key DOES remove is pinned in
+ * `per-package-dedup-positional-echo.test.ts`, on a fixture built the other
+ * way round.
  */
 function twoPackageArtifact(): Record<string, unknown> {
   const core = defineStack({

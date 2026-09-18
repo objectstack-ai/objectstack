@@ -392,13 +392,23 @@ export default class Validate extends Command {
       //
       //     `os build` has run it since #16611; `os validate` ran the union
       //     fold and stopped, importing neither `artifactPackages` nor
-      //     `packageBodyAsStack`. `compile.ts` step 3b-ii says what survives
-      //     the de-duplication is "exactly the set the union could not see" ⇒
-      //     that whole set was findings `os build` reported and this command
-      //     structurally could not. Same FALSE-CLEAN direction #17069 fixed one
-      //     layer up, and the worse door for it: the fast inner-loop check is
-      //     what an author runs BEFORE shipping, so its clean bill of health is
-      //     the strongest false assurance the three commands can give.
+      //     `packageBodyAsStack`. Every finding this pass yields is therefore
+      //     one `os build` reported and this command structurally could not.
+      //     Same FALSE-CLEAN direction #17069 fixed one layer up, and the worse
+      //     door for it: the fast inner-loop check is what an author runs
+      //     BEFORE shipping, so its clean bill of health is the strongest false
+      //     assurance the three commands can give.
+      //
+      //     ⚠️ [#18779] This step used to size that gap by quoting `compile.ts`
+      //     step 3b-ii — "exactly the set the union could not see" — and that
+      //     sentence was FALSE when it was copied here: the de-duplication key
+      //     carried the POSITIONAL `path`, so a package-local finding and its
+      //     flattened twin got two keys and the ECHO survived. Part of every
+      //     survivor set was therefore something THIS door's own union run
+      //     already reported. The key was corrected in
+      //     `utils/artifact-packages.ts`; the gap this step closed is real and
+      //     its direction is unchanged, but ⛔ do not re-derive its size from
+      //     that sentence — it was quoted, never measured.
       //
       //     ⛔ Not a second copy of the loop — `runPerPackageAuthoringRules` is
       //     the one the build door calls, so the de-duplication key, the

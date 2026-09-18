@@ -1272,6 +1272,7 @@
     "api/PackageInstallRequest:artifactRef",
     "api/PackageInstallRequest:enableOnInstall",
     "api/PackageInstallRequest:manifest",
+    "api/PackageInstallRequest:overwrite",
     "api/PackageInstallRequest:platformVersion",
     "api/PackageInstallRequest:settings",
     "api/PackageInstallResponse:data",

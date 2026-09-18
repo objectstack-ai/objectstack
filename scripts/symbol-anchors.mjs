@@ -115,9 +115,11 @@
  *       span (`id :140 and version :202`) and an `L` pin (`~L7246-7331`), both
  *       continuing a filename named earlier in the same sentence. This is the
  *       LAST half of the checklist's fork (#18592); the symbol half left at
- *       #18107. ⛔ Default OFF is a measurement: in PROSE a colon before digits
- *       is punctuation, and turning these on corpus-wide would fire 245 times
- *       across the prose corpora, essentially all false positives.
+ *       #18107. ⛔ Default OFF is a measurement, and ⛔ a corpus declaring a
+ *       `docProjection` may not declare it AT ALL: `defineCorpus` refuses that
+ *       pair by name (#18845), because a projection has already said the judged
+ *       text is prose and in PROSE a colon before digits is punctuation. What
+ *       the option admits there is re-measured below.
  *
  * ⭐ A dotted `#Outer.member` is also part of the grammar, and `sweepCorpus`
  * requires EVERY segment to resolve. Admitting it was additive: a dotted symbol
@@ -399,16 +401,33 @@ const TILDE_LINE = /~\s*`(\d{2,5})`/g;
  * carries no path at all, only a number, so nothing can even report WHICH file
  * rotted out from under it.
  *
- * ⛔ DEFAULT OFF, and that is a MEASUREMENT, not caution. Turned on for every
- * corpus, these two would fire 222 and 23 times respectively across
- * `docs/adr/**`, `scripts/**` and `packages/spec/src/**` -- a dev-server port
- * written as a parenthesised colon-port, a two-character scenario label, a
- * docblock pointing back at a line of its own -- essentially all of them false
- * positives, because in PROSE a
- * colon before digits is punctuation. In this checklist's DATA, where every
- * citation lives inside a JSON string value beside the filename it continues,
- * it is a line pin. Which of the two a corpus is, is the corpus's declaration
- * to make -- exactly as `unspannedAnchors` is.
+ * ⛔ DEFAULT OFF, and that is a MEASUREMENT, not caution -- RE-TAKEN on
+ * `b0b5f31cc6` in this repository, because the first reading of it travelled
+ * onto three cards as the whole cost argument and had never been run twice.
+ * Turned on for the three registered corpora that read prose, these two admit
+ * 112 and 25 citations across `docs/adr/**`, `scripts/**` and
+ * `packages/spec/src/**`: a dev-server port written as a parenthesised
+ * colon-port, a two-character scenario label, a docblock pointing back at a
+ * dated read position in a sibling repository's file, and this module's own
+ * header teaching the spellings it bans. ⚠️ The figures that travelled as 222
+ * and 23 count RAW REGEX MATCHES over the same text (230 and 25 when re-run
+ * that way on the same tree): they subtract neither the fenced blocks the
+ * extractor skips nor the citations the path-anchored passes already recorded,
+ * so they overstate what the option actually admits by about a half.
+ *
+ * ⭐ The sharper half of the same re-take, and the half that makes this a RULE
+ * rather than advice: of the 120 admitted in the two PROJECTED corpora, ZERO
+ * inherit a path this tree tracks. Both of those corpora decline what they
+ * cannot resolve, so opting in there buys unjudged residual -- the `scripts/**`
+ * gate's own waived count goes 15 to 65 -- and NOT ONE finding an author could
+ * act on, at exit 0, with nothing red to notice it by. That is the combination
+ * `defineCorpus` now refuses outright (#18845).
+ *
+ * In this checklist's DATA, where every citation lives inside a JSON string
+ * value beside the filename it continues, it is a line pin. Which of the two a
+ * corpus is, is the corpus's declaration to make -- exactly as
+ * `unspannedAnchors` is -- but a corpus declaring a `docProjection` has already
+ * made it.
  *
  * ⚠️ The numeric shape here is deliberately TIGHTER than `LINE_SPEC`: a plain
  * run of digits with one optional hyphen range, no comma list, no slash list,
@@ -812,6 +831,33 @@ export function defineCorpus(spec) {
   if (!Array.isArray(excludeDirs) || excludeDirs.some((d) => typeof d !== 'string' || d === '' || d.includes('/'))) {
     throw new Error('defineCorpus: `excludeDirs` must be an array of plain directory NAMES (no separators)');
   }
+  /* ⛔ A corpus that declares a PROJECTION may not declare `pathlessLineCitations`,
+   * and the pair is refused at REGISTRATION because the two declarations say
+   * opposite things about the same document. A projection is the corpus saying
+   * the judged text is authored PROSE carved out of something else; the two
+   * path-less spellings are a DATA corpus's way of writing a second pointer
+   * beside a filename it has already named. The cost of getting that backwards
+   * is measured in the header above, and it is paid SILENTLY -- a projected
+   * corpus that opts in declines every one of the citations it admits, so the
+   * gate stays green while its unjudged residual grows.
+   *
+   * ⭐ Keyed on ANY projection, ⛔ not on one projection function's identity.
+   * Both readings name the same two corpora today, so this is a choice about
+   * whom the rule governs LATER, and the two failure directions are not
+   * symmetric: an identity test is evaded by a wrapper of the same function, or
+   * by the next projection of the same kind, silently and with nobody deciding
+   * it; this one over-refuses a hypothetical PROJECTED DATA corpus loudly, at
+   * registration, and the ruling this module implements already names that exit
+   * -- widen the core rather than fork the rule. */
+  if (docProjection !== null && pathlessLineCitations) {
+    throw new Error(
+      `defineCorpus: corpus \`${id}\` declares a \`docProjection\` AND \`pathlessLineCitations: true\`. `
+        + 'A projection declares the judged text is authored PROSE, where a colon before digits is punctuation; '
+        + 'the two path-less spellings are for a DATA corpus writing a second pointer beside a filename it has '
+        + 'already named. Drop one of the two: sweep the raw document if this corpus is data, or leave '
+        + '`pathlessLineCitations` off and keep citing a path.',
+    );
+  }
   return {
     id, label, docRoots, docPattern, crossRepos, checkBarePaths, docProjection,
     judgeUntrackedLineAnchors, excludeDirs, unspannedAnchors, pathlessLineCitations,
@@ -1131,8 +1177,17 @@ function assert(cond, msg) { if (!cond) { console.error(`❌ symbol-anchors --se
 //           line-citation grammar moved here — every spelling it caught and
 //           every colon-then-digit neighbour it refused — and the de-duplication
 //           pair, the inheritance pair and the default-off control joined them.
+// 149 → 156 when `defineCorpus` began REFUSING a `docProjection` beside
+//           `pathlessLineCitations` (#18845): the refusal, the two things its
+//           message must name, the wrapped-projection row that pins the rule to
+//           the declaration rather than to one function's identity, and three
+//           controls — the live DATA opt-in, a projected corpus that never
+//           mentions the option, and the option declared OFF beside a
+//           projection. ⛔ The cases ride the file's ONE battery on purpose:
+//           the roster is per SECTION BANNER and this file carries none, which
+//           is why a single hoisted battery is its landed shape.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'symbol-anchors self-test': 149,
+  'symbol-anchors self-test': 156,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1550,6 +1605,40 @@ export function selfTest() {
     `the approximation tilde INSIDE the colon form is a line anchor for EVERY corpus — got ${JSON.stringify(tildeInColon.map((l) => l.raw))}`);
   check(extractAnchors('a template at packages/a/page.html:42 here').lineAnchors.length === 1,
     '`html` is in the shared anchorable vocabulary — a citation into a template page is read like any other');
+
+  // 11f. ⭐ WHO MAY DECLARE `pathlessLineCitations` (#18845). The option is a
+  //      DATA corpus's declaration, and a corpus declaring a `docProjection`
+  //      has already said its documents are prose — so the pair is refused at
+  //      REGISTRATION instead of being left to whoever writes the next corpus.
+  //      ⛔ Driven in BOTH directions on the SAME two spellings, because a
+  //      refusal that also bit the one LIVE opt-in would delete a working
+  //      corpus: the control rows below are that corpus's exact shape (no
+  //      projection, the option on) and the two prose corpora's exact shape (a
+  //      projection, the option never mentioned).
+  const proseSpec = { id: 'prose-corpus', label: 'prose', docRoots: ['a'], docProjection: commentProse };
+  let pairError = null;
+  try { defineCorpus({ ...proseSpec, pathlessLineCitations: true }); } catch (err) { pairError = err; }
+  check(pairError !== null,
+    'a corpus declaring BOTH a `docProjection` and `pathlessLineCitations: true` must be REFUSED at registration');
+  check(String(pairError && pairError.message).includes('prose-corpus'),
+    `the refusal must NAME the corpus — got ${JSON.stringify(String(pairError && pairError.message).slice(0, 140))}`);
+  check(String(pairError && pairError.message).includes('docProjection')
+    && String(pairError && pairError.message).includes('pathlessLineCitations'),
+  'the refusal must name BOTH declarations — an author told only that something is wrong cannot know which of the two to drop');
+  check(defineCorpus({ id: 'data-corpus', label: 'data', docRoots: ['a'], unspannedAnchors: true, pathlessLineCitations: true }).pathlessLineCitations === true,
+    'CONTROL: a DATA corpus — no projection — may still declare `pathlessLineCitations`; this rule bites PROSE only');
+  check(defineCorpus(proseSpec).docProjection === commentProse,
+    'CONTROL: a projected corpus that never mentions the option registers exactly as it did before');
+  check(defineCorpus({ ...proseSpec, pathlessLineCitations: false }).pathlessLineCitations === false,
+    'CONTROL: the refusal is about the PAIR — declaring the option OFF beside a projection is not a refusal');
+  // ⭐ Keyed on ANY projection, ⛔ never on one function's identity: an identity
+  //   test is evaded by a wrapper around the very same projection, silently.
+  let wrappedError = null;
+  try {
+    defineCorpus({ id: 'wrapped-corpus', label: 'wrapped', docRoots: ['a'], docProjection: (src) => commentProse(src), pathlessLineCitations: true });
+  } catch (err) { wrappedError = err; }
+  check(wrappedError !== null && String(wrappedError.message).includes('wrapped-corpus'),
+    'a projection WRAPPED in another function is refused too — the rule reads the DECLARATION, not one projection function\'s identity');
 
   // 12. ⛔ THE ENVIRONMENT ISOLATION PIN (#16624), and it is the one case here
   //     that spawns `git`. `sweepCorpus` resolves through `git ls-files`, and
