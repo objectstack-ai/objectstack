@@ -12,8 +12,8 @@
 # excluded: documentation drift is `check:docs`'s axis, not this one.
 #
 # entry: ./data
-# exported names: 832
-# declarations: 845
+# exported names: 833
+# declarations: 846
 #
 # GENERATED — ⛔ never hand-edited. Regenerate after a real build:
 #   pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec gen:api-surface-declarations
@@ -5288,6 +5288,7 @@ declare const DriverCapabilitiesSchema: z.ZodObject<{
     }>, z.ZodBoolean>>;
     autonumber: z.ZodOptional<z.ZodBoolean>;
     batchSchemaSync: z.ZodOptional<z.ZodBoolean>;
+    transactionsUnsupported: z.ZodOptional<z.ZodBoolean>;
     create: z.ZodOptional<z.ZodNever>;
     read: z.ZodOptional<z.ZodNever>;
     update: z.ZodOptional<z.ZodNever>;
@@ -5355,6 +5356,7 @@ declare const DriverConfigSchema: z.ZodObject<{
         }>, z.ZodBoolean>>;
         autonumber: z.ZodOptional<z.ZodBoolean>;
         batchSchemaSync: z.ZodOptional<z.ZodBoolean>;
+        transactionsUnsupported: z.ZodOptional<z.ZodBoolean>;
         create: z.ZodOptional<z.ZodNever>;
         read: z.ZodOptional<z.ZodNever>;
         update: z.ZodOptional<z.ZodNever>;
@@ -5428,6 +5430,7 @@ declare const DriverInterfaceSchema: z.ZodObject<{
         }>, z.ZodBoolean>>;
         autonumber: z.ZodOptional<z.ZodBoolean>;
         batchSchemaSync: z.ZodOptional<z.ZodBoolean>;
+        transactionsUnsupported: z.ZodOptional<z.ZodBoolean>;
         create: z.ZodOptional<z.ZodNever>;
         read: z.ZodOptional<z.ZodNever>;
         update: z.ZodOptional<z.ZodNever>;
@@ -15136,6 +15139,7 @@ declare const NoSQLDriverConfigSchema: z.ZodObject<{
         }>, z.ZodBoolean>>;
         autonumber: z.ZodOptional<z.ZodBoolean>;
         batchSchemaSync: z.ZodOptional<z.ZodBoolean>;
+        transactionsUnsupported: z.ZodOptional<z.ZodBoolean>;
         create: z.ZodOptional<z.ZodNever>;
         read: z.ZodOptional<z.ZodNever>;
         update: z.ZodOptional<z.ZodNever>;
@@ -21562,6 +21566,7 @@ declare const SQLDriverConfigSchema: z.ZodObject<{
         }>, z.ZodBoolean>>;
         autonumber: z.ZodOptional<z.ZodBoolean>;
         batchSchemaSync: z.ZodOptional<z.ZodBoolean>;
+        transactionsUnsupported: z.ZodOptional<z.ZodBoolean>;
         create: z.ZodOptional<z.ZodNever>;
         read: z.ZodOptional<z.ZodNever>;
         update: z.ZodOptional<z.ZodNever>;
@@ -22871,6 +22876,14 @@ declare function driverConfigJsonSchema(schema: z.ZodType): () => Record<string,
 
 // ── driverHasLocalDefault (function) ──
 declare function driverHasLocalDefault(driver: unknown): boolean;
+
+// ── driverSupportsTransactions (function) ──
+declare function driverSupportsTransactions(driver: {
+    beginTransaction?: unknown;
+    supports?: {
+        transactionsUnsupported?: boolean | undefined;
+    } | undefined;
+} | null | undefined): boolean;
 
 // ── effectiveOperationsArray (function) ──
 declare function effectiveOperationsArray(eff: EffectiveApiMethods): ApiOperation[];
