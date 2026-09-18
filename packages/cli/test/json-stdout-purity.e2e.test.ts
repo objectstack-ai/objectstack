@@ -62,6 +62,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync, statSync
 import { tmpdir } from 'node:os';
 import { join, resolve, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { maskComments } from '../../../scripts/js-comment-mask.mjs';
 import { childEnv } from './helpers/serve-process.js';
 import { CONFIG_MISS_FAMILY, discoverConfigMissFamily } from './helpers/config-miss-family.js';
 
@@ -137,7 +138,12 @@ function commandFiles(dir: string): string[] {
 function discoverFamily(): string[] {
   const ids: string[] = [];
   for (const abs of commandFiles(COMMANDS_DIR)) {
-    const src = readFileSync(abs, 'utf-8');
+    // Masked: both halves are text probes, and both are satisfiable by prose. A
+    // command whose only `bootSchemaStack(` is inside a docblock explaining that
+    // it does NOT boot one would join this family and be driven against boot
+    // diagnostics it never writes — a red in a tier no pull request collects,
+    // wearing this file's title rather than the docblock's (#18520).
+    const src = maskComments(readFileSync(abs, 'utf-8'));
     if (!src.includes('bootSchemaStack(')) continue;
     if (!/\bjson:\s*Flags\.boolean\(/.test(src)) continue;
     const rel = relative(COMMANDS_DIR, abs).replace(/\.ts$/, '');
@@ -233,7 +239,21 @@ describe('the family this contract has to hold across', () => {
     // assertion goes red.
     const preBoot = discoverConfigMissFamily();
     expect(preBoot).toEqual(Object.keys(CONFIG_MISS_FAMILY).sort());
-    expect(preBoot).toHaveLength(10);
+
+    // ⛔ Not `toHaveLength(10)`. The line above already binds the SET, against a
+    // map a sibling nightly file drives member by member — that equality IS the
+    // contract, and a new member reddening it until it is driven is the point.
+    // The integer bound nothing that equality did not, and it bound it in a
+    // SECOND place that has to be hand-edited: two frozen numbers over one fact,
+    // in a tier where the author who moves the fact is never shown the failure.
+    // What it was load-bearing for is the vacuum the pair shares — a discovery
+    // that stops matching returns `[]`, and an emptied map would agree with it —
+    // so it stays as a FLOOR. Ten is the population the pre-boot family was
+    // measured over, not a count of today (#18520).
+    expect(
+      preBoot.length,
+      'the pre-boot `--json` discovery reports fewer faces than the family was measured over',
+    ).toBeGreaterThanOrEqual(10);
 
     // The two families are NOT disjoint, and measuring that was worth more
     // than assuming it: `os migrate meta` is in both, legitimately and by
