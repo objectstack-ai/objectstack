@@ -134,12 +134,11 @@ export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>
       'The grant that makes a user a platform admin UNDER A NON-WALLED POSTURE: an UNSCOPED, '
       + 'in-window (ADR-0091) grant of `admin_full_access` (§6b). Re-pointing it, scoping it to an '
       + 'organization or moving it out of its window revokes the standing while leaving the row in '
-      + 'place. ⚠️ Under a WALLED posture (`group`/`isolated`) it confers NOTHING since #11663 L5 '
-      + 'retired the walled half of the legacy anchor: there, standing comes from '
-      + '`OS_PLATFORM_OWNER_EMAIL` (§6b-config) and from nothing else, and this row is read only '
-      + 'for the permission set it names. Under `single` — the default — the row is unchanged and '
-      + 'still the anchor that rig\'s zero-config first-user promotion mints (Choice 4A; #11979 '
-      + 'is the card that disposes of it).',
+      + 'place. ⚠️ Under a WALLED posture (`group`/`isolated`) it confers NOTHING: the walled half '
+      + 'of this legacy anchor is retired, so standing there comes from `OS_PLATFORM_OWNER_EMAIL` '
+      + '(§6b-config) and from nothing else, and this row is read only for the permission set it '
+      + 'names. Under `single` — the default — the row is unchanged and still the anchor that '
+      + "rig's zero-config first-user promotion mints.",
     columns: [
       'user_id',
       'permission_set_id',
