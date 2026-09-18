@@ -36,6 +36,7 @@ import {
   collectDocsFromSrc,
   docsPackageRefs,
   type DocItem,
+  type DocIssue,
 } from './collect-docs.js';
 
 let tmp: string;
@@ -322,8 +323,7 @@ describe('same-prefix links resolve ARTIFACT-WIDE, not per package (C2)', () => 
     packages: SHARED_NS,
     ...extra,
   });
-  const brokenLinks = (issues: ReadonlyArray<{ rule: string }>) =>
-    issues.filter((i) => i.rule === 'docs/broken-link');
+  const brokenLinks = (issues: readonly DocIssue[]) => issues.filter((i) => i.rule === 'docs/broken-link');
 
   it('a link across two packages sharing one namespace resolves, in both directions', () => {
     // `core` links to a doc `orders` owns, and `orders` links back.
