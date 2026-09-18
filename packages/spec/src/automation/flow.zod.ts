@@ -69,8 +69,16 @@ export const FLOW_BUILTIN_NODE_TYPES: readonly string[] = FlowNodeAction.options
 export const FLOW_STRUCTURAL_NODE_TYPES: readonly string[] = ['start', 'end'];
 
 /**
- * Built-in node types that park a run on a **durable pause** (ADR-0019) on
- * EVERY execution — the vocabulary a structured region body may not contain.
+ * The node types a structured region body may not contain — the population the
+ * `FlowSchema.superRefine` region rule below keys on.
+ *
+ * ⚠️ **Read the contents, not the name.** This is NOT every type that can
+ * pause; it is the four that pause UNCONDITIONALLY, on every execution, decided
+ * by THIS flow's own text. The name predates that narrowing and is kept
+ * deliberately: the identifier is in `api-surface/automation.json`, and
+ * `check:api-surface` grades a removed export breaking — trading a whole-stack
+ * major for a better name is a ruled decision of its own, ⛔ not a tidy-up to
+ * make in passing.
  *
  * ⭐ The unconditional half of the pause-capable population, and that
  * distinction is the whole rule. Six shipped executors declare
@@ -98,7 +106,7 @@ export const FLOW_STRUCTURAL_NODE_TYPES: readonly string[] = ['start', 'end'];
  * engine's own run-time refusal is what meets it. Extending this list is how a
  * first-party type joins the rule.
  */
-export const FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES: readonly string[] = [
+export const FLOW_PAUSE_CAPABLE_NODE_TYPES: readonly string[] = [
   'screen',
   'wait',
   APPROVAL_NODE_TYPE,
@@ -340,7 +348,7 @@ export const FlowNodeSchema = lazySchema(() => flowNodeObject().transform(
  *
  * ⚠️ Since #15646 a `wait` nested in a region body meets an EARLIER refusal than
  * either of those, and it is not about this block: a region body cannot durably
- * pause, so {@link FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES} may not appear in one at all
+ * pause, so {@link FLOW_PAUSE_CAPABLE_NODE_TYPES} may not appear in one at all
  * and the flow parse says so on the node's `type`. ⛔ Do not read the paragraph
  * above as "a nested block-less `wait` parses" — it no longer does, for a
  * different reason. The two-door reading it describes still governs every node
@@ -1230,7 +1238,7 @@ export const FlowSchema = lazySchema(() => strictObject(
   //   has never once been honoured.
   //
   // Judged on the node TYPE, and the population is the UNCONDITIONAL one —
-  // {@link FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES}. `map` and `subflow` are
+  // {@link FLOW_PAUSE_CAPABLE_NODE_TYPES}. `map` and `subflow` are
   // pause-capable but are ⛔ NOT judged here: whether they pause is decided by
   // a DIFFERENT metadata record, so refusing them by type would also refuse
   // `loop { map(synchronous child) }`, a shape that runs correctly. Three
@@ -1261,7 +1269,7 @@ export const FlowSchema = lazySchema(() => strictObject(
         });
         return;
       }
-      if (FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES.includes(type)) {
+      if (FLOW_PAUSE_CAPABLE_NODE_TYPES.includes(type)) {
         ctx.addIssue({
           code: 'custom',
           path: [...graph.path, 'nodes', index, 'type'],

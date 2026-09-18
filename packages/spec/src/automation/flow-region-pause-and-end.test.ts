@@ -32,7 +32,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   FlowSchema,
-  FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES,
+  FLOW_PAUSE_CAPABLE_NODE_TYPES,
   defineFlow,
   type Flow,
   type FlowNode,
@@ -84,7 +84,7 @@ const issuesOf = (flow: Flow): Array<[string, string]> => {
   return result.error.issues.map((i) => [i.path.join('.'), i.message]);
 };
 
-describe('FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES — the declared set, and how it was derived', () => {
+describe('FLOW_PAUSE_CAPABLE_NODE_TYPES — the declared set, and how it was derived', () => {
   it('names the four built-in types that park a run on EVERY execution', () => {
     // Read off the descriptors, not recalled. SIX shipped executors declare
     // `supportsPause: true` — `screen` / `wait` / `subflow` / `map` in
@@ -92,7 +92,7 @@ describe('FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES — the declared set, and how it w
     // `plugin-approvals`, the same six the ADR-0044 `resumeAuthority`
     // default-flip migration entry names. Four of them pause from this flow's
     // own text; those four are the region rule's population.
-    expect([...FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES]).toEqual([
+    expect([...FLOW_PAUSE_CAPABLE_NODE_TYPES]).toEqual([
       'screen', 'wait', 'approval', 'approval_revise',
     ]);
   });
@@ -103,18 +103,18 @@ describe('FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES — the declared set, and how it w
     // a different metadata record, unreadable from here. Pinned as a DECISION
     // so re-adding either is an edit somebody makes on purpose, against the
     // ruling, rather than a tidy-up that looks like completing a list.
-    expect(FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES).not.toContain('subflow');
-    expect(FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES).not.toContain('map');
+    expect(FLOW_PAUSE_CAPABLE_NODE_TYPES).not.toContain('subflow');
+    expect(FLOW_PAUSE_CAPABLE_NODE_TYPES).not.toContain('map');
   });
 
   it('carries the approval node types by their declared constants, so a rename cannot desynchronise the two', () => {
-    expect(FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES).toContain(APPROVAL_NODE_TYPE);
-    expect(FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES).toContain(APPROVAL_REVISE_NODE_TYPE);
+    expect(FLOW_PAUSE_CAPABLE_NODE_TYPES).toContain(APPROVAL_NODE_TYPE);
+    expect(FLOW_PAUSE_CAPABLE_NODE_TYPES).toContain(APPROVAL_REVISE_NODE_TYPE);
   });
 });
 
 describe('a region body refuses a pause-capable node (#15646)', () => {
-  it.each(FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES)('refuses a `%s` node in a loop body, anchored on its `type`', (type) => {
+  it.each(FLOW_PAUSE_CAPABLE_NODE_TYPES)('refuses a `%s` node in a loop body, anchored on its `type`', (type) => {
     expect(issuesOf(flowWith([loopOver([pausingNode(type)])]))).toEqual([[
       'nodes.1.config.body.nodes.0.type',
       expect.stringContaining(
@@ -224,7 +224,7 @@ describe('a region body refuses an `end` node (#18112, absorbed into #15646)', (
 
 describe('the rule does NOT over-reach', () => {
   it('accepts every pause-capable type on the TOP-LEVEL graph — a refusal that over-reaches is worse than the silence it replaces', () => {
-    for (const type of [...FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES, 'subflow', 'map']) {
+    for (const type of [...FLOW_PAUSE_CAPABLE_NODE_TYPES, 'subflow', 'map']) {
       const flow = flowWith([pausingNode(type)], [{ id: 'e1', source: 'start', target: 'pauser' }]);
       expect(FlowSchema.safeParse(flow).success, type).toBe(true);
     }
@@ -280,7 +280,7 @@ describe('the declared boundaries — measured, so they move deliberately', () =
     // ⚠️ Not an oversight and not a gap to quietly close: `FlowNodeSchema.type`
     // is a validated `string`, and a plugin registers pause-capable types at run
     // time. The engine's own run-time refusal is what meets this one. Extending
-    // `FLOW_UNCONDITIONAL_PAUSE_NODE_TYPES` is how a first-party type joins the
+    // `FLOW_PAUSE_CAPABLE_NODE_TYPES` is how a first-party type joins the
     // rule — and this pin is what makes that an edit somebody makes on purpose.
     const flow = flowWith([loopOver([{ id: 'vendor', type: 'vendor_signature_pause', label: 'Sign' }])]);
     expect(FlowSchema.safeParse(flow).success).toBe(true);
