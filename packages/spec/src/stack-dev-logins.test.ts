@@ -32,12 +32,12 @@ import { describe, it, expect } from 'vitest';
 
 import {
   ObjectStackDefinitionSchema,
-  DevLoginSchema,
   defineStack,
   composeStacks,
   COMPOSE_KEY_DISPOSITIONS,
   STACK_DEFINITION_KEYS,
 } from './stack.zod';
+import { DevLoginSchema } from './system/dev-login.zod';
 
 const manifest = {
   id: 'com.example.hiring',
@@ -105,7 +105,7 @@ describe('#17556 accept — an application may declare its own first-run credent
     // The #8687 defect was a key that parsed green and was then stripped before
     // anything could read it. `defineStack` is where that happened, so the
     // round-trip through it is the reading that matters to an author.
-    const stack = defineStack({ ...base(), devHint: 'sign in as the Hiring admin', devLogins: [{ email: 'a@b.example' }] });
+    const stack = defineStack({ manifest, devHint: 'sign in as the Hiring admin', devLogins: [{ email: 'a@b.example' }] });
     expect(stack.devHint).toBe('sign in as the Hiring admin');
     expect(stack.devLogins).toEqual([{ email: 'a@b.example' }]);
   });

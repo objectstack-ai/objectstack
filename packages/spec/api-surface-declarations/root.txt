@@ -396,9 +396,11 @@ declare const COMPOSE_KEY_DISPOSITIONS: Readonly<{
     readonly requires: "concat";
     readonly tiers: "concat";
     readonly devPlugins: "concat";
+    readonly devLogins: "concat";
     readonly api: "single";
     readonly server: "single";
     readonly runtimeModule: "single";
+    readonly devHint: "single";
     readonly onEnable: "single";
     readonly i18n: "single";
 }>;
@@ -22786,6 +22788,12 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
         main: z.ZodOptional<z.ZodString>;
         integrity: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
     }, z.core.$strict>, z.ZodString]>>>;
+    devHint: z.ZodOptional<z.ZodString>;
+    devLogins: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        email: z.ZodString;
+        password: z.ZodOptional<z.ZodString>;
+        label: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>>;
     runtimeModule: z.ZodOptional<z.ZodString>;
     manifest: z.ZodOptional<z.ZodObject<{
         id: z.ZodString;
@@ -44633,6 +44641,12 @@ declare const ObjectStackSchema: z.ZodObject<{
         main: z.ZodOptional<z.ZodString>;
         integrity: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
     }, z.core.$strict>, z.ZodString]>>>;
+    devHint: z.ZodOptional<z.ZodString>;
+    devLogins: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        email: z.ZodString;
+        password: z.ZodOptional<z.ZodString>;
+        label: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>>;
     runtimeModule: z.ZodOptional<z.ZodString>;
     manifest: z.ZodOptional<z.ZodObject<{
         id: z.ZodString;
