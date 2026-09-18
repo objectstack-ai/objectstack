@@ -449,7 +449,7 @@ export type TemplateExpressionInput = z.input<typeof TemplateExpressionInputSche
  * to a direction no protocol states. What this file ENFORCES is the authoring
  * refusal above.
  *
- * ## What this contract deliberately does NOT do
+ * ## What this contract deliberately does NOT do (ADR-0136 D5)
  *
  * It does not bake a fault direction into the evaluation HELPER. The helper's
  * fallback stays freely specifiable, because two shipped strategies depend on

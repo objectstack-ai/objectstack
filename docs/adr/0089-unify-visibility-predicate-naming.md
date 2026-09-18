@@ -8,6 +8,16 @@
 
 ---
 
+> **Addendum (2026-09-18, #17778) — what the `*When` family does when it cannot RUN is decided by [ADR-0136](./0136-predicate-fault-semantics-are-contract.md), not here.**
+> This record unified the family under one NAME and is unchanged by that one. ADR-0136 D1 holds a
+> predicate slot to what the engine can actually run (the `FieldSchema` field-rule triad composes
+> `PredicateInputSchema`, so an `ast`-only envelope and a blank `source` are refused at authoring);
+> D2 refuses the SUBMIT loudly on a fault, naming the field and the rule; D3 keeps visibility
+> fail-OPEN at RENDER. A reader who arrived here asking what a broken `visibleWhen` does should
+> read that record.
+
+---
+
 ## TL;DR
 
 One concept — *"show this only when the CEL predicate is TRUE"* — is spelled three

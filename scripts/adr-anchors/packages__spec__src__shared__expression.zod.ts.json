@@ -1,0 +1,7 @@
+{
+  "file": "packages/spec/src/shared/expression.zod.ts",
+  "adrs": [
+    "ADR-0136"
+  ],
+  "invariant": "`PredicateSchema` / `PredicateInputSchema` compose the EVALUATED rule (`EvaluatedExpressionSchema` / `EvaluatedExpressionInputSchema`), not the persistence `ExpressionSchema` / `ExpressionInputSchema` — ADR-0136 D1. A predicate exists to be evaluated and the CEL engine reads `source` alone, so an `ast`-only envelope and a `source` blank after trimming are refused at authoring with `EVALUATED_EXPRESSION_SOURCE_REQUIRED`. ⛔ Do not point these aliases back at the persistence contract to admit a stored shape: that is the exact defect ADR-0136 closed, where a predicate parsed, registered, passed `objectstack validate` and then silently no-op'd. `ExpressionSchema` / `ExpressionInputSchema` stay un-narrowed on purpose (persistence, `source` OR `ast`), and an `ast` BESIDE a string `source` stays admitted. The docblock's D2/D3/D4 fault semantics are declared here and delivered by CONSUMERS (no business logic in spec, PD #2); D5 is why no fault direction may be baked into the evaluation helper — fault-to-flag and fault-to-throw both depend on that fallback staying a parameter."
+}
