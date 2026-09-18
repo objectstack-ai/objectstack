@@ -1743,9 +1743,36 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * (same collision, same resolution as `ListChartConfigSchema` vs the
  * `chart.zod.ts` `ChartConfigSchema`).
  *
- * Closed (strict) from the start: the map renderer's read set is itself closed
- * — it validates `schema.map` against a local zod schema with exactly these
- * keys, so an extra key here would be dropped there. That parity was one key
+ * Closed (strict) from the start, and the strictness stands on its own: it does
+ * NOT rest on the renderer refusing an undeclared key, because nothing
+ * downstream refuses one. Measured at the `.objectui-sha` pin `53ded82b` by
+ * EXECUTING the pinned declarations, not by reading them:
+ *
+ * - **The block this face feeds is FLATTENED, not forwarded.** `ListView`
+ *   (`plugin-list/src/ListView.tsx`, `resolveListMapConfig`) and `ObjectView`
+ *   (`plugin-view/src/ObjectView.tsx`, `case 'map'`) copy it through the
+ *   hand-listed `FLAT_MAP_CONFIG_KEYS` whitelist — this block's keys minus
+ *   `style` — and emit those as flat props. An undeclared key is dropped
+ *   there, but by a whitelist and in SILENCE: no parse, no warning, no
+ *   diagnostic of any kind.
+ * - **The renderer's own zod schema does not close the set.**
+ *   `ObjectMapConfigSchema` (`packages/types/src/zod/objectql.zod.ts:562`) is a
+ *   plain `z.object`, NOT strict, so an undeclared key parses clean there —
+ *   zero issues, no warning — and `getMapConfig`
+ *   (`packages/plugin-map/src/ObjectMap.tsx:373-376`) consults that `safeParse`
+ *   only to decide whether to `console.warn`, then returns a spread of the
+ *   AUTHORED block (`:378`), undeclared key and all. That spread is reached by
+ *   objectui's own component-node `map` prop, never by this face's flatten
+ *   product ("neither flattener emits a `map` key at all", `getMapConfig`).
+ *
+ * ⛔ So relaxing this block to `passthrough` would hand the extra key to no
+ * checker at all: it dies in the whitelist without a word, and the one schema
+ * that could have reported it is open and warn-only. And this parse is the only
+ * place an author is told ANYWHERE: `map` is not in objectui's
+ * `LIST_VIEW_LOCAL_OVERRIDES` (`packages/types/src/zod/objectql.zod.ts:313`),
+ * so objectui's own `ListViewSchema` imports THIS block by reference and the
+ * document check on that side is this same schema. The two key sets MIRROR
+ * each other, key for key. That parity was one key
  * SHORT until the `style` row below landed: the renderer's own
  * `ObjectMapConfigSchema` declares `style` and `getMapConfig` reads it
  * (`schema.map?.style`) while this block did not declare it, so strictness here
