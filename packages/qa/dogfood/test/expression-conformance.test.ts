@@ -393,7 +393,15 @@ function discoverSurfaces(): Set<string> {
  */
 const SCAN_CONTROLS: ReadonlyArray<{ via: Declaration['via']; min: number; mechanism: string }> = [
   { via: 'head', min: 37, mechanism: 'a roster name immediately after `field:` (the pre-#17630 scan)' },
-  { via: 'inline', min: 3, mechanism: 'mechanism A — a roster name used as a UNION MEMBER, not at the head of the declaration' },
+  // [#18118] Lowered 3 → 1 in the commit that deleted the `cel-declared-unwired-observability`
+  // ledger row. The two positions that went away are named rather than subtracted:
+  // `system/metrics.zod.ts:ServiceLevelIndicatorSchema.successCriteria` and
+  // `system/tracing.zod.ts:TraceSamplingConfigSchema.condition` — both mounted the roster
+  // schema as a union member, and both of those CEL arms were RETIRED under ADR-0049
+  // enforce-or-remove because nothing evaluated them. `ui/component.zod.ts` `RecordAlertProps.visible`
+  // is the one survivor of mechanism A, which is why the floor is 1 and not 0: a floor of 0
+  // would stop measuring the mechanism instead of measuring less of it.
+  { via: 'inline', min: 1, mechanism: 'mechanism A — a roster name used as a UNION MEMBER, not at the head of the declaration' },
   { via: 'alias', min: 2, mechanism: 'mechanism B — a slot typed with a file-local alias const of a roster member' },
 ];
 

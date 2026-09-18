@@ -1,6 +1,6 @@
 # @objectstack/cloud-connection
 
-The runtime-side client for an ObjectStack cloud control plane (ADR-0008).
+The runtime-side client for an ObjectStack cloud control plane (cloud ADR-0008).
 
 Connects any ObjectStack runtime — vanilla `objectstack dev`, a self-hosted
 single-environment deployment, or a multi-tenant fleet — to a control plane
@@ -186,5 +186,5 @@ rules. Plan-derived feature flags are injected by the host via
 working via inline manifests handed to `install-local`, and the SPA telemetry
 sink above is refused rather than served.
 
-See `docs/adr` in the cloud repository (ADR-0008) for the full architecture
+See `docs/adr` in the cloud repository (cloud ADR-0008) for the full architecture
 decision.

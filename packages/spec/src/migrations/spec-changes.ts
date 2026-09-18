@@ -25,6 +25,13 @@
  * consumer gets one aggregate answer instead of N documents to reconcile.
  * {@link composeSpecChanges} is that fold, computed from the registries; the
  * `added`/`removed` arrays are supplied by the release-time api-surface diff.
+ *
+ * ⚠️ **Those two arrays are NOT at the record's `from` → `to` resolution**, and
+ * that is what {@link SpecSurfaceScopeSchema} exists to say out loud: the diff
+ * that fills them compares this artifact against the previously PUBLISHED one,
+ * so they span one release, not the major range the record is keyed by. A record
+ * whose arrays are non-empty carries `surfaceScope` naming that version pair,
+ * and {@link surfaceScopeProblem} is what refuses one that does not.
  */
 
 import { z } from 'zod';
@@ -47,6 +54,47 @@ export const SpecSurfaceRemoveSchema = z
     replacement: z.string().optional().describe('The canonical replacement, if any.'),
   })
   .describe('A removed public export.');
+
+/**
+ * The published-version pair a record's `added`/`removed` arrays were actually
+ * diffed between (ADR-0087 D4).
+ *
+ * ## Why the arrays need this, and why a major on each entry was not enough
+ *
+ * `added`/`removed` are not registry-derived: they are supplied by a release-time
+ * api-surface diff of the artifact being published against the previously
+ * PUBLISHED one. That diff is **one release wide**. Under an aggregate record
+ * keyed `from: 10, to: 17` the arrays therefore looked like the whole
+ * major-boundary delta, while every entry carried only `since: 17` /
+ * `removedIn: 17` — true of the entry (it did arrive in major 17) and false of
+ * the array (major 17's earlier minors are not in it), with
+ * `perMajor[16 → 17].added/removed` sitting at `0`/`0` beside it. A consumer had
+ * no field to tell the two apart, which is the one thing a machine-readable
+ * surface may not do.
+ *
+ * So the scope is declared once, on the record, rather than repeated on 400
+ * entries — the same choice {@link SpecReleaseChangesSchema} already makes for
+ * the same reason. Present means "these arrays span exactly this version pair";
+ * absent means the record carries no export diff at all (the committed,
+ * registry-only projection, and every `perMajor` record).
+ *
+ * ⛔ It is deliberately NOT enforced by {@link SpecChangesSchema}: a previously
+ * published manifest carries unscoped arrays, and a schema that refused those
+ * would narrow what an already-shipped artifact parses as. The producer
+ * ({@link surfaceScopeProblem}, called by `scripts/build-spec-changes.ts`) and
+ * the publish gate (`scripts/check-release-spec-changes.mjs`) are where it is
+ * refused.
+ */
+export const SpecSurfaceScopeSchema = z
+  .object({
+    fromVersion: z
+      .string()
+      .describe('The previously published @objectstack/spec version the export diff started at.'),
+    toVersion: z
+      .string()
+      .describe('The @objectstack/spec version this artifact ships — where every entry arrived or left.'),
+  })
+  .describe('The published-version pair an export-surface diff was computed between.');
 
 /** A losslessly converted surface (from the D2 conversion table). */
 export const SpecConvertedSchema = z
@@ -129,6 +177,11 @@ export const SpecChangesSchema = z
     converted: z.array(SpecConvertedSchema),
     migrated: z.array(SpecMigratedSchema),
     removed: z.array(SpecSurfaceRemoveSchema),
+    surfaceScope: SpecSurfaceScopeSchema.optional().describe(
+      'The published-version pair `added`/`removed` were diffed between. Absent exactly when ' +
+        'this record carries no export diff — ⛔ `added`/`removed` are then empty and say nothing ' +
+        'about the `from` → `to` range, and a non-empty array without this key is refused at publish.',
+    ),
   })
   .describe('ADR-0087 D4 machine-readable change manifest for a protocol version pair.');
 
@@ -137,6 +190,7 @@ export type SpecSurfaceRemove = z.infer<typeof SpecSurfaceRemoveSchema>;
 export type SpecConverted = z.infer<typeof SpecConvertedSchema>;
 export type SpecMigrated = z.infer<typeof SpecMigratedSchema>;
 export type SpecChanges = z.infer<typeof SpecChangesSchema>;
+export type SpecSurfaceScope = z.infer<typeof SpecSurfaceScopeSchema>;
 export type SpecReleaseSurface = z.infer<typeof SpecReleaseSurfaceSchema>;
 export type SpecReleaseChanges = z.infer<typeof SpecReleaseChangesSchema>;
 
@@ -144,6 +198,31 @@ export type SpecReleaseChanges = z.infer<typeof SpecReleaseChangesSchema>;
 export interface SurfaceDiff {
   added?: SpecSurfaceAdd[];
   removed?: SpecSurfaceRemove[];
+  /** The published-version pair `added`/`removed` were diffed between. */
+  scope?: SpecSurfaceScope;
+}
+
+/**
+ * Why a record's `added`/`removed` arrays cannot be published as they stand, or
+ * `null` when they can.
+ *
+ * The one refusable shape is a non-empty export diff with no
+ * {@link SpecSurfaceScopeSchema}: the arrays then sit under a MAJOR-keyed
+ * `from` → `to` record carrying no statement of the range they really cover, so
+ * a consumer reads one release's slice as the whole major-boundary delta. This
+ * is a producer-side and publish-side assertion on purpose — see
+ * {@link SpecSurfaceScopeSchema} for why {@link SpecChangesSchema} does not
+ * refuse it.
+ */
+export function surfaceScopeProblem(record: SpecChanges): string | null {
+  const entries = record.added.length + record.removed.length;
+  if (entries === 0 || record.surfaceScope) return null;
+  return (
+    `the ${record.from} → ${record.to} record carries ${record.added.length} added and ` +
+    `${record.removed.length} removed export(s) with no \`surfaceScope\`. Those arrays come from a ` +
+    'ONE-RELEASE api-surface diff, so without the version pair they read as the whole ' +
+    `${record.from} → ${record.to} delta — which they are not.`
+  );
 }
 
 /**
@@ -188,6 +267,10 @@ export function composeSpecChanges(
     converted,
     migrated,
     removed: surfaceDiff.removed ?? [],
+    // Spread, never `scope: undefined`: a record with no export diff must carry
+    // no key at all, so the committed registry-only projection and every
+    // `perMajor` record serialise exactly as they did before this field existed.
+    ...(surfaceDiff.scope ? { surfaceScope: surfaceDiff.scope } : {}),
   };
 }
 
