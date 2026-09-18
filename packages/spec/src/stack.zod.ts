@@ -3024,9 +3024,15 @@ export function defineStack(
     throw new StackTriggerCapabilityRequiredError(`${header}\n\n${lines.join('\n')}`, triggerErrors);
   }
 
-  // Post-parse and advisory: the stack is valid and is returned unchanged.
-  // `locale` carries a default, so this has to run AFTER the parse or a row
-  // that omits the key would read as a missing floor it actually has.
+  // Post-parse and advisory only: this call has no effect on what is
+  // returned. `locale` carries a default, so this has to run AFTER the parse
+  // or a row that omits the key would read as a missing floor it actually
+  // has. [objectstack#17852] The stack is NOT "returned unchanged" — that
+  // was true of neither half of this function: the parse itself can drop an
+  // authored key a record's key schema never gets to see (the defect this
+  // card fixes), and `mergeActionsIntoObjects` below rewrites `actions`
+  // and/or `objects` (bound-action merge, `order` sort) before the result
+  // reaches the caller.
   warnEmailTemplateLocaleFloor(data);
 
   return mergeActionsIntoObjects(data);
