@@ -139,8 +139,8 @@ declare const ActionCategorySchema: z.ZodEnum<{
     io: "io";
     control: "control";
     data: "data";
-    logic: "logic";
     human: "human";
+    logic: "logic";
 }>;
 
 // ── ActionDescriptor (type) ──
@@ -161,8 +161,8 @@ declare const ActionDescriptorSchema: z.ZodObject<{
         io: "io";
         control: "control";
         data: "data";
-        logic: "logic";
         human: "human";
+        logic: "logic";
     }>>;
     paradigms: z.ZodDefault<z.ZodArray<z.ZodEnum<{
         flow: "flow";
@@ -188,8 +188,8 @@ declare const ActionDescriptorSchema: z.ZodObject<{
         reserved: "reserved";
     }>>;
     source: z.ZodDefault<z.ZodEnum<{
-        builtin: "builtin";
         plugin: "plugin";
+        builtin: "builtin";
     }>>;
     deprecated: z.ZodDefault<z.ZodBoolean>;
     aliasOf: z.ZodOptional<z.ZodString>;
@@ -805,13 +805,13 @@ declare const ExecutionLogSchema: z.ZodObject<{
     flowName: z.ZodString;
     flowVersion: z.ZodOptional<z.ZodNumber>;
     status: z.ZodEnum<{
-        completed: "completed";
+        failed: "failed";
         refused: "refused";
         pending: "pending";
+        completed: "completed";
         running: "running";
-        paused: "paused";
-        failed: "failed";
         cancelled: "cancelled";
+        paused: "paused";
         timed_out: "timed_out";
         retrying: "retrying";
     }>;
@@ -829,8 +829,8 @@ declare const ExecutionLogSchema: z.ZodObject<{
         nodeLabel: z.ZodOptional<z.ZodString>;
         status: z.ZodEnum<{
             success: "success";
-            failure: "failure";
             skipped: "skipped";
+            failure: "failure";
         }>;
         startedAt: z.ZodString;
         completedAt: z.ZodOptional<z.ZodString>;
@@ -871,8 +871,8 @@ declare const ExecutionLogSchema: z.ZodObject<{
             nodeLabel: z.ZodOptional<z.ZodString>;
             status: z.ZodEnum<{
                 success: "success";
-                failure: "failure";
                 skipped: "skipped";
+                failure: "failure";
             }>;
             runs: z.ZodNumber;
             failures: z.ZodNumber;
@@ -903,13 +903,13 @@ declare const ExecutionLogSchema: z.ZodObject<{
 
 // ── ExecutionStatus (const) ──
 declare const ExecutionStatus: z.ZodEnum<{
-    completed: "completed";
+    failed: "failed";
     refused: "refused";
     pending: "pending";
+    completed: "completed";
     running: "running";
-    paused: "paused";
-    failed: "failed";
     cancelled: "cancelled";
+    paused: "paused";
     timed_out: "timed_out";
     retrying: "retrying";
 }>;
@@ -930,8 +930,8 @@ declare const ExecutionStepLogSchema: z.ZodObject<{
     nodeLabel: z.ZodOptional<z.ZodString>;
     status: z.ZodEnum<{
         success: "success";
-        failure: "failure";
         skipped: "skipped";
+        failure: "failure";
     }>;
     startedAt: z.ZodString;
     completedAt: z.ZodOptional<z.ZodString>;
@@ -1585,8 +1585,8 @@ declare const FlowRunNodeSummarySchema: z.ZodObject<{
     nodeLabel: z.ZodOptional<z.ZodString>;
     status: z.ZodEnum<{
         success: "success";
-        failure: "failure";
         skipped: "skipped";
+        failure: "failure";
     }>;
     runs: z.ZodNumber;
     failures: z.ZodNumber;
@@ -1615,8 +1615,8 @@ declare const FlowRunSummarySchema: z.ZodObject<{
         nodeLabel: z.ZodOptional<z.ZodString>;
         status: z.ZodEnum<{
             success: "success";
-            failure: "failure";
             skipped: "skipped";
+            failure: "failure";
         }>;
         runs: z.ZodNumber;
         failures: z.ZodNumber;
@@ -2909,20 +2909,20 @@ declare const ScheduleStateSchema: z.ZodObject<{
     status: z.ZodDefault<z.ZodEnum<{
         disabled: "disabled";
         active: "active";
-        paused: "paused";
         expired: "expired";
+        paused: "paused";
     }>>;
     nextRunAt: z.ZodOptional<z.ZodString>;
     lastRunAt: z.ZodOptional<z.ZodString>;
     lastExecutionId: z.ZodOptional<z.ZodString>;
     lastRunStatus: z.ZodOptional<z.ZodEnum<{
-        completed: "completed";
+        failed: "failed";
         refused: "refused";
         pending: "pending";
+        completed: "completed";
         running: "running";
-        paused: "paused";
-        failed: "failed";
         cancelled: "cancelled";
+        paused: "paused";
         timed_out: "timed_out";
         retrying: "retrying";
     }>>;
@@ -3508,10 +3508,10 @@ type WaitEventType = z.input<typeof WaitEventTypeSchema>;
 // ── WaitEventTypeSchema (const) ──
 declare const WaitEventTypeSchema: z.ZodEnum<{
     condition: "condition";
+    manual: "manual";
+    webhook: "webhook";
     timer: "timer";
     signal: "signal";
-    webhook: "webhook";
-    manual: "manual";
 }>;
 
 // ── WaitExecutorConfig (type) ──
@@ -3525,8 +3525,8 @@ declare const WaitExecutorConfigSchema: z.ZodObject<{
     defaultTimeoutMs: z.ZodDefault<z.ZodNumber>;
     defaultTimeoutBehavior: z.ZodDefault<z.ZodEnum<{
         continue: "continue";
-        fallback: "fallback";
         fail: "fail";
+        fallback: "fallback";
     }>>;
     conditionPollIntervalMs: z.ZodDefault<z.ZodNumber>;
     conditionMaxPolls: z.ZodDefault<z.ZodNumber>;
@@ -3545,10 +3545,10 @@ declare const WaitResumePayloadSchema: z.ZodObject<{
     nodeId: z.ZodString;
     eventType: z.ZodEnum<{
         condition: "condition";
+        manual: "manual";
+        webhook: "webhook";
         timer: "timer";
         signal: "signal";
-        webhook: "webhook";
-        manual: "manual";
     }>;
     signalName: z.ZodOptional<z.ZodString>;
     webhookPayload: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
@@ -3563,8 +3563,8 @@ type WaitTimeoutBehavior = z.input<typeof WaitTimeoutBehaviorSchema>;
 // ── WaitTimeoutBehaviorSchema (const) ──
 declare const WaitTimeoutBehaviorSchema: z.ZodEnum<{
     continue: "continue";
-    fallback: "fallback";
     fail: "fail";
+    fallback: "fallback";
 }>;
 
 // ── Webhook (type) ──
