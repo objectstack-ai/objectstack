@@ -7,7 +7,7 @@ feat(spec): refuse unknown keys inside a rate-limit budget — `RateLimitConfigS
 **BREAKING** accept-set narrowing on a published spec schema, landing after the
 v17.0.0 cut (the lockstep launch-window convention ships it as `minor`).
 
-Clause-②: yes (widening)
+Clause-②: no (narrowing)
 
 <!-- adr-0087: not-required (no-migration-prescription) this change retires NO key. The budget vocabulary is byte-identical and only the unknown-key POSTURE moves, from strip to reject, on one of its two mounts. Nothing exists for `objectstack migrate meta` to rewrite, because an undeclared key was never honoured: it was dropped at parse, so neither the inbound token bucket (`@objectstack/runtime` `security/inbound-rate-limit.ts`), nor the endpoint policy chain, nor the publish gate ever read one — measured with the gate's own instrument, which reports this def as accepting the key and returning a document without it. There is no single FROM/TO rule a ledger entry could state either, since what is now refused is an open set of author typos rather than a renamed key. The upgrade channel is the schema rejection itself, which is strictly more specific than any ledger line: it names the offending key at the author's own path and carries either the canonical spelling or the wrong-layer pointer. This is the same disposition, on the same stored metadata type, that #5384 took one level up when it closed `ApiEndpointSchema` itself; the `declarative-apis-endpoints-live` entry that governs this surface is already registered for protocol 17 and needs no change here. -->
 
