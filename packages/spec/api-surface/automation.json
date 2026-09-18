@@ -111,6 +111,7 @@
     "ExecutionStepSkipReasonSchema (const)",
     "FLOW_BUILTIN_NODE_TYPES (const)",
     "FLOW_NODE_EXPRESSION_PATHS (const)",
+    "FLOW_PAUSE_CAPABLE_NODE_TYPES (const)",
     "FLOW_REGION_CONFIG_KEYS (const)",
     "FLOW_REGION_SLOTS (const)",
     "FLOW_REGION_SLOTS_BY_TYPE (const)",
