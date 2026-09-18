@@ -27,6 +27,7 @@ import { describe, it, expect, vi } from 'vitest';
 import type { IDataEngine } from '@objectstack/core';
 import { SystemObjectName } from '@objectstack/spec/system';
 import { organization } from 'better-auth/plugins/organization';
+import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { decodeOrganizationMetadataOnRead } from './organization-metadata-decode.js';
 import { createObjectQLAdapterFactory } from './objectql-adapter.js';
 import { buildOrganizationPluginSchema } from './auth-schema-config.js';
@@ -101,7 +102,12 @@ describe('⭐ the four read routes serve the decoded object, through the real ad
       findOne: vi.fn().mockResolvedValue(row ? { ...row } : null),
       find: vi.fn().mockResolvedValue(row ? [{ ...row }] : []),
       count: vi.fn().mockResolvedValue(0),
-      update: vi.fn().mockImplementation((_m: string, d: any) => Promise.resolve({ ...STORED_ROW, ...d })),
+      update: vi.fn().mockImplementation((_m: string, d: any, options?: any) => {
+        // The real engine's three-way dispatch — a double looser than this is
+        // no double at all (`check:engine-double-contract`).
+        assertEngineUpdateDispatch(d, options);
+        return Promise.resolve({ ...STORED_ROW, ...d });
+      }),
       delete: vi.fn().mockResolvedValue(undefined),
     } as unknown as IDataEngine;
     // The plugin must be mounted: better-auth's factory validates the model
