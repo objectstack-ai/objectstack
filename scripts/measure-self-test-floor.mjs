@@ -693,6 +693,62 @@ const HANDSHAKE_RETURN_COMPARED =
 const LITERAL_OPERAND = /^(?:undefined|null|true|false|NaN)$/;
 
 /**
+ * SENTINEL, SECOND SPELLING -- the return value is BOUND first and the
+ * comparison reads that binding, or ONE PROPERTY of it:
+ *
+ *   const verdict = selfTest();   if (verdict !== SELF_TEST_VERDICT)
+ *   const r = selfTest();         if (r.verdict !== SELF_TEST_VERDICT)
+ *
+ * Three files landed this way while the recogniser read only the direct
+ * comparison above: `scripts/check-workflow-step-name-quoting.mjs` (the plain
+ * binding) and `scripts/pm/check-expected-skips.mjs` /
+ * `scripts/pm/check-prior-rulings.mjs` (the record, whose other field is the
+ * exit code the dispatch then hands to `process.exit`). All three read `none`
+ * -- the flattering direction -- and the live completeness check below refused
+ * the whole census over that gap, on every invocation, for three days (#18329).
+ *
+ * The boundaries are the ones the direct spelling already draws, and they are
+ * what keep an ordinary local decision from reading as a handshake:
+ *
+ *   CROSSES   the binding AND the comparison sit OUTSIDE every self-test body.
+ *             A value bound and compared inside one is that function's own
+ *             business; nothing was handed back to a dispatch.
+ *   NAMED     the right operand is an IDENTIFIER and not a word literal, for
+ *             the reason the direct spelling excludes them: a comparison
+ *             against a literal is the ACCIDENT shape, decided by the
+ *             arithmetic of a missing return value rather than by anything
+ *             noticing.
+ *   NO ARGS   the call is `<name>()`, as the direct spelling requires. A
+ *             dispatched self-test TAKING arguments has no carrier in this tree
+ *             today and stays unadmitted rather than written blind.
+ *   GUARDED   the comparison heads an `if (...)` condition. This one is not
+ *             symmetry with the direct spelling, it is a MEASURED boundary:
+ *             `scripts/check-plugin-teardown-shape.mjs` binds
+ *             `const selfTestCode = selfTest();`, refuses on the FLAG one line
+ *             later, and then compares that binding against
+ *             `EXIT_PREREQUISITE_NOT_MET` inside `process.exit(<cmp> ? a : b)`
+ *             to pick WHICH code to exit with. Read without this half, a
+ *             flag-shaped file answers `sentinel` -- a wrong answer in the one
+ *             column #14968 exists to make checkable. Choosing a value is not
+ *             asking a question; the control below pins it.
+ *
+ * ⚠️ What the recogniser answers is WHICH SPELLING a file is written in, never
+ * whether the refusal it spells actually prints. In the record form the early
+ * return makes the binding `undefined`, so `r.verdict` THROWS before the
+ * dispatch can print its own message: a real non-zero exit that speaks with a
+ * stack trace rather than with the sentence the author wrote. That reading
+ * belongs to the probe, which publishes `mutatedHead` verbatim, and it is the
+ * same division of labour the header draws for every other shape here.
+ */
+const HANDSHAKE_RETURN_BOUND =
+  /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:await\s+)?([A-Za-z_$][\w$]*)\s*\(\s*\)/g;
+const boundComparedInGuard = (name) =>
+  new RegExp(
+    String.raw`if\s*\(\s*${name}\b(?:\.[A-Za-z_$][\w$]*)?\s*(?:!==|===|!=|==)\s*([A-Za-z_$][\w$]*)\b`,
+    'g',
+  );
+
+/**
  * The FLAG and HELPER shapes share one carrier and differ only in WHO reads it.
  *
  * The carrier is a variable that CROSSES THE BOUNDARY out of the self-test: a
@@ -764,14 +820,23 @@ const handedToCall = (name) => new RegExp(String.raw`([A-Za-z_$][\w$]*)\s*\(\s*[
 export function classifyHandshake(src) {
   const code = maskCommentsAndLiterals(src);
 
-  for (const m of code.matchAll(HANDSHAKE_RETURN_COMPARED)) {
-    if (/self.?test/i.test(m[1]) && !LITERAL_OPERAND.test(m[2])) return 'sentinel';
-  }
-
+  // Read before the sentinel spellings, not after: the BOUND spelling's whole
+  // boundary is that the value crosses OUT of the self-test, so it needs this
+  // predicate too. The spans are a pure reading of the same masked text.
   const spans = selfTestDefs(src)
     .map((name) => definitionSpan(code, name))
     .filter((s) => s !== null);
   const insideSelfTest = (at) => spans.some((s) => at >= s.at && at < s.end);
+
+  for (const m of code.matchAll(HANDSHAKE_RETURN_COMPARED)) {
+    if (/self.?test/i.test(m[1]) && !LITERAL_OPERAND.test(m[2])) return 'sentinel';
+  }
+  for (const m of code.matchAll(HANDSHAKE_RETURN_BOUND)) {
+    if (!/self.?test/i.test(m[2]) || insideSelfTest(m.index)) continue;
+    for (const c of code.matchAll(boundComparedInGuard(m[1]))) {
+      if (!insideSelfTest(c.index) && !LITERAL_OPERAND.test(c[1])) return 'sentinel';
+    }
+  }
 
   const moduleLevel = new Set([...code.matchAll(MODULE_LEVEL_BINDING)].map((m) => m[1]));
   const carried = new Set();
@@ -1166,6 +1231,138 @@ const EARLY_BRACE_GATE = [
   '  selfTest();',
   "  if (!selfTestReachedVerdict) { console.error('no verdict'); process.exit(1); }",
   '}',
+  '',
+].join('\n');
+
+
+/**
+ * The BOUND sentinel, reduced: the return value held in a variable and compared
+ * one statement later. This is `scripts/check-workflow-step-name-quoting.mjs`,
+ * whose `--self-test` runs in lint.yml and which read `none` until #18329.
+ */
+const BOUND_SENTINEL_GATE = [
+  '#!/usr/bin/env node',
+  "const SELF_TEST_VERDICT = 'reached';",
+  'function selfTest() {',
+  '  const failures = [];',
+  "  if (1 !== 1) failures.push('x');",
+  "  if (failures.length) { console.error(failures.join(String.fromCharCode(10))); process.exit(1); }",
+  "  console.log('fixture self-test: 1 case passes');",
+  '  return SELF_TEST_VERDICT;',
+  '}',
+  "if (process.argv.includes('--self-test')) {",
+  '  const verdict = selfTest();',
+  '  if (verdict !== SELF_TEST_VERDICT) {',
+  "    console.error('fixture: selfTest returned without reaching its verdict');",
+  '    process.exit(1);',
+  '  }',
+  '}',
+  '',
+].join('\n');
+
+/** The comparison this fixture IS, the anchor its negative variants replace. */
+const BOUND_SENTINEL_COMPARISON = 'verdict !== SELF_TEST_VERDICT';
+
+/**
+ * The BOUND RECORD sentinel, reduced: the self-test hands back its verdict AND
+ * its exit code, and the dispatch reads one field of each. Two files land this
+ * way (`scripts/pm/check-expected-skips.mjs`, `scripts/pm/check-prior-rulings.mjs`).
+ *
+ * ⚠️ In this spelling the early return makes the binding `undefined`, so the
+ * property read THROWS before the dispatch prints its own sentence: the refusal
+ * is real and loud, but the words are the runtime's. The recogniser answers
+ * WHICH SPELLING, and the probe publishes whatever the mutated run said.
+ */
+const BOUND_RECORD_SENTINEL_GATE = [
+  '#!/usr/bin/env node',
+  "const SELF_TEST_VERDICT = 'reached';",
+  'const EXIT_OK = 0;',
+  'function selfTest() {',
+  '  const failures = [];',
+  "  if (1 !== 1) failures.push('x');",
+  "  console.log('fixture self-test: 1 case passes');",
+  '  return { code: EXIT_OK, verdict: SELF_TEST_VERDICT };',
+  '}',
+  "if (process.argv.includes('--self-test')) {",
+  '  const r = selfTest();',
+  '  if (r.verdict !== SELF_TEST_VERDICT) {',
+  "    console.error('fixture: selfTest returned without reaching its verdict');",
+  '    process.exit(1);',
+  '  }',
+  '  process.exit(r.code);',
+  '}',
+  '',
+].join('\n');
+
+/** The record comparison, the anchor the literal-operand variant replaces. */
+const BOUND_RECORD_COMPARISON = 'r.verdict !== SELF_TEST_VERDICT';
+
+/**
+ * The EXIT-CODE SELECTION gate, reduced, and it is a fixture about a BOUNDARY
+ * rather than about a shape: `scripts/check-plugin-teardown-shape.mjs` binds the
+ * self-test's return value, refuses on its FLAG, and then compares that binding
+ * against a named constant to choose WHICH code to exit with. Read without the
+ * guard half of the bound spelling, this file answers `sentinel` -- the wrong
+ * spelling reported for a flag-shaped gate, in the one column #14968 exists to
+ * make checkable. Measured: it is the only row in this census that moved when
+ * the bound spelling was admitted without that half.
+ */
+const EXIT_CODE_SELECTION_GATE = [
+  '#!/usr/bin/env node',
+  'const EXIT_PREREQUISITE_NOT_MET = 3;',
+  'let selfTestReachedVerdict = false;',
+  'function selfTest() {',
+  '  const failures = [];',
+  "  if (1 !== 1) failures.push('x');",
+  "  console.log('fixture self-test: 1 case passes');",
+  '  selfTestReachedVerdict = true;',
+  '  return failures.length;',
+  '}',
+  "if (process.argv.includes('--self-test')) {",
+  '  const selfTestCode = selfTest();',
+  '  if (!selfTestReachedVerdict) {',
+  "    console.error('fixture: selfTest returned without reaching its verdict');",
+  '    process.exit(selfTestCode === EXIT_PREREQUISITE_NOT_MET ? EXIT_PREREQUISITE_NOT_MET : 1);',
+  '  }',
+  '  process.exit(selfTestCode);',
+  '}',
+  '',
+].join('\n');
+
+/**
+ * The bound spelling read and compared INSIDE the self-test: a sub-battery's
+ * completion checked by the self-test itself. Nothing crossed out to a
+ * dispatch, so it is a local decision and not a handshake.
+ */
+const BOUND_INSIDE_SELF_TEST_GATE = [
+  '#!/usr/bin/env node',
+  "const SUBTOTAL_VERDICT = 'subtotal reached';",
+  'function selfTestSubtotal() {',
+  '  return SUBTOTAL_VERDICT;',
+  '}',
+  'function selfTest() {',
+  '  const subtotal = selfTestSubtotal();',
+  "  if (subtotal !== SUBTOTAL_VERDICT) { console.error('fixture: the subtotal did not finish'); process.exit(1); }",
+  "  console.log('fixture self-test: 1 case passes');",
+  '}',
+  "if (process.argv.includes('--self-test')) selfTest();",
+  '',
+].join('\n');
+
+/**
+ * The bound spelling spelled ONLY in a comment -- the convention described, not
+ * performed. Un-hidden by deleting the marker, the same text is the dispatch,
+ * which is what makes the verdict below a reading of the MASK.
+ */
+const BOUND_SENTINEL_DECOY_GATE = [
+  '#!/usr/bin/env node',
+  "const SELF_TEST_VERDICT = 'reached';",
+  '// const verdict = selfTest(); if (verdict !== SELF_TEST_VERDICT) process.exit(1);',
+  'function selfTest() {',
+  "  console.log('fixture self-test: 1 case passes');",
+  '  return SELF_TEST_VERDICT;',
+  '}',
+  "if (process.argv.includes('--self-test')) selfTest();",
   '',
 ].join('\n');
 
@@ -1590,6 +1787,52 @@ export function runControls() {
     'CONTROL FIXTURE INVALID: the fixture no longer closes a brace at column 0 AHEAD of its flag assignment, so a first-column-brace body rule would reach the assignment anyway and the verdict below tests nothing');
   say(classifyHandshake(EARLY_BRACE_GATE) === 'flag',
     `BODY EXTENT CONTROL FAILED: a self-test whose body contains a column-0 \`});\` read ${classifyHandshake(EARLY_BRACE_GATE)}; its flag is set INSIDE the function and the body extent is what says so -- three live files carry exactly this and read none without brace counting`);
+
+
+  // ⭐ THE BOUND SENTINEL SPELLING (#18329), in both directions and on both its
+  // carriers' shapes. What was at stake is not a classification but the CENSUS:
+  // three landed files read `none`, the live completeness check below saw the
+  // disagreement, and every invocation of this instrument refused -- the probe
+  // included, so nothing could be measured at all until this was widened.
+  const matches = (re, text) => [...text.matchAll(re)].length > 0;
+  say(classifyHandshake(BOUND_SENTINEL_GATE) === 'sentinel',
+    `HANDSHAKE CONTROL FAILED: a return value BOUND and then compared against a named verdict read ${classifyHandshake(BOUND_SENTINEL_GATE)}, not sentinel`);
+  say(classifyHandshake(BOUND_RECORD_SENTINEL_GATE) === 'sentinel',
+    `HANDSHAKE CONTROL FAILED: a return value bound as a RECORD, with its verdict field compared, read ${classifyHandshake(BOUND_RECORD_SENTINEL_GATE)}, not sentinel`);
+  // ... and neither fixture matches the DIRECT comparison, so the two verdicts
+  // above can only be the new half being read.
+  say(!matches(HANDSHAKE_RETURN_COMPARED, maskCommentsAndLiterals(BOUND_SENTINEL_GATE))
+    && !matches(HANDSHAKE_RETURN_COMPARED, maskCommentsAndLiterals(BOUND_RECORD_SENTINEL_GATE)),
+    'CONTROL FIXTURE INVALID: a bound-sentinel fixture also carries a DIRECT `selfTest() !== VERDICT` comparison, so the verdicts above would pass without the bound spelling being read at all');
+  // The LITERAL operand, both shapes: the ACCIDENT boundary the direct spelling
+  // already draws, one binding (and one property) deeper.
+  say(classifyHandshake(BOUND_SENTINEL_GATE.replace(BOUND_SENTINEL_COMPARISON, 'verdict !== undefined')) === 'none',
+    'HANDSHAKE CONTROL FAILED: a bound return value compared against a word LITERAL read as a handshake; that is the accident shape, where a missing return value decides the comparison and nothing notices anything');
+  say(classifyHandshake(BOUND_RECORD_SENTINEL_GATE.replace(BOUND_RECORD_COMPARISON, 'r.verdict !== null')) === 'none',
+    'HANDSHAKE CONTROL FAILED: a bound RECORD field compared against a word literal read as a handshake');
+  // ⛔ The GUARD half, which is a measured boundary and not symmetry: a binding
+  // compared to pick an EXIT CODE is choosing a value, not asking whether the
+  // self-test finished -- and the file that does it carries the FLAG shape.
+  say(classifyHandshake(EXIT_CODE_SELECTION_GATE) === 'flag',
+    `BOUNDARY CONTROL FAILED: a flag-shaped gate that also compares its self-test's bound return value to choose an exit code read ${classifyHandshake(EXIT_CODE_SELECTION_GATE)}, not flag; the bound spelling must read a GUARD, not any comparison of the binding`);
+  say(matches(HANDSHAKE_RETURN_BOUND, maskCommentsAndLiterals(EXIT_CODE_SELECTION_GATE)),
+    'CONTROL FIXTURE INVALID: the exit-code fixture no longer binds its self-test\'s return value at all, so the verdict above says nothing about the GUARD half -- the binding half would be carrying it');
+  // The CROSSES half: bound and compared INSIDE the self-test is a sub-battery's
+  // own bookkeeping, and nothing was handed back to a dispatch.
+  say(classifyHandshake(BOUND_INSIDE_SELF_TEST_GATE) === 'none',
+    `CROSSING CONTROL FAILED: a value bound from a self-test-shaped helper and compared INSIDE the self-test read ${classifyHandshake(BOUND_INSIDE_SELF_TEST_GATE)}; a decision taken and consumed within one function crosses no boundary`);
+  say(matches(HANDSHAKE_RETURN_BOUND, maskCommentsAndLiterals(BOUND_INSIDE_SELF_TEST_GATE)),
+    'CONTROL FIXTURE INVALID: the inside-the-body fixture no longer carries a bound call this criterion would otherwise match, so the verdict above passes for the wrong reason');
+  // The MASK, and the un-hiding that makes it a reading of the mask: the same
+  // text as a comment, then as the dispatch.
+  say(classifyHandshake(BOUND_SENTINEL_DECOY_GATE) === 'none',
+    `HANDSHAKE DECOY CONTROL FAILED: the bound spelling written only in a COMMENT was recognised as ${classifyHandshake(BOUND_SENTINEL_DECOY_GATE)}`);
+  say(classifyHandshake(BOUND_SENTINEL_DECOY_GATE.replace('// ', '')) === 'sentinel',
+    'CONTROL FIXTURE INVALID: with its comment marker removed the bound decoy is still not recognised, so it was never a handshake spelling and the decoy verdict passes for the wrong reason');
+  // ... and NAME-INDEPENDENCE on both new fixtures, the direction #14968 is about.
+  say(classifyHandshake(renamed(BOUND_SENTINEL_GATE)) === 'sentinel'
+    && classifyHandshake(renamed(BOUND_RECORD_SENTINEL_GATE)) === 'sentinel',
+    'NAME-INDEPENDENCE CONTROL FAILED: a bound-sentinel fixture stopped reading sentinel once its verdict constant was renamed; the recogniser is keyed on a NAME, which is the defect one level up');
 
   // Instrument 1, both directions.
   say(classifyFloor(maskComments(HOLED_GATE)) === 'NONE',
