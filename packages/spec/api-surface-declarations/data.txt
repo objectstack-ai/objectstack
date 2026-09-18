@@ -12,8 +12,8 @@
 # excluded: documentation drift is `check:docs`'s axis, not this one.
 #
 # entry: ./data
-# exported names: 832
-# declarations: 845
+# exported names: 841
+# declarations: 854
 #
 # GENERATED — ⛔ never hand-edited. Regenerate after a real build:
 #   pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec gen:api-surface-declarations
@@ -14285,6 +14285,26 @@ declare const GroupByNodeSchema: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
 // ── Hook (type) ──
 type Hook = z.input<typeof HookSchema>;
 
+// ── HookApi (interface) ──
+interface HookApi {
+    /** The repository for `name`, bound to this context. */
+    object(name: string): HookObjectApi;
+    /**
+     * Run `callback` inside one driver transaction: committed when it returns,
+     * rolled back when it throws.
+     *
+     * The callback receives a NEW `HookApi` whose operations share the
+     * transaction handle — reach objects through THAT context (`tx.object(…)`),
+     * not the outer one, or the writes land outside the transaction.
+     *
+     * The second parameter is declared because the PRODUCER hands it
+     * unconditionally (`ScopedContext.transaction`, #5696). Contravariance keeps
+     * the zero- and one-argument callbacks authors actually write assignable, so
+     * the truthful signature is also the more permissive one.
+     */
+    transaction<T>(callback: (trxCtx: HookApi, info: EngineTransactionInfo) => Promise<T>, opts?: EngineTransactionOptions): Promise<T>;
+}
+
 // ── HookBody (type) ──
 type HookBody = z.input<typeof HookBodySchema>;
 
@@ -14379,8 +14399,20 @@ declare const HookContextSchema: z.ZodObject<{
     }, z.core.$strip>>;
 }, z.core.$strip>;
 
+// ── HookCountQuery (type) ──
+type HookCountQuery = Omit<EngineCountOptions, 'context'>;
+
+// ── HookDeleteOptions (type) ──
+type HookDeleteOptions = Omit<EngineDeleteOptions, 'context'> & HookDriverPassthroughOptions;
+
 // ── HookDispatch (type) ──
 type HookDispatch = NonNullable<HookContext['dispatch']>;
+
+// ── HookDoc (type) ──
+type HookDoc = Record<string, unknown>;
+
+// ── HookDriverPassthroughOptions (type) ──
+type HookDriverPassthroughOptions = Pick<DriverOptions, 'transaction' | 'tenantId' | 'tenantIds' | 'timezone' | 'bypassTenantAudit' | 'preserveAudit'>;
 
 // ── HookEvent (const) ──
 declare const HookEvent: z.ZodEnum<{
@@ -14397,8 +14429,50 @@ declare const HookEvent: z.ZodEnum<{
 // ── HookEventType (type) ──
 type HookEventType = z.input<typeof HookEvent>;
 
+// ── HookObjectApi (interface) ──
+interface HookObjectApi {
+    /**
+     * Read every record the query selects.
+     *
+     * `Promise<any[]>` mirrors `IScopedObjectRepository.find` and
+     * `IDataEngine.find`; narrowing it here would make this face disagree with
+     * the two declarations it forwards through.
+     */
+    find(query?: HookQuery): Promise<any[]>;
+    /** Read the ONE record the query selects, or `null`. */
+    findOne(query?: HookQuery): Promise<Record<string, any> | null>;
+    /** Count the records the query selects. */
+    count(query?: HookCountQuery): Promise<number>;
+    /** Insert one record, or an array of records. */
+    insert(data: HookDoc | HookDoc[]): Promise<any>;
+    /**
+     * Update records: the record for the single-record form, the affected-row
+     * count for the predicate form (`{ where, multi: true }`), `null` when the
+     * write matched nothing.
+     */
+    update(data: HookUpdateDoc, options?: HookUpdateOptions): Promise<Record<string, any> | number | null>;
+    /**
+     * Update a single record by id — the id travels as the first argument.
+     *
+     * Answers the written record, or `null` when the id matched nothing. A falsy
+     * id is not a narrower answer but a REFUSAL: `0` and `''` identify no row, so
+     * the dispatch rejects and the call throws.
+     */
+    updateById(id: string | number, data: HookUpdateDoc): Promise<Record<string, any> | null>;
+    /**
+     * Delete records — `{ where, multi: true }` for the predicate form.
+     *
+     * `Promise<boolean | number>` is what `IDataEngine.delete` declares, one door
+     * down from this method.
+     */
+    delete(options?: HookDeleteOptions): Promise<boolean | number>;
+}
+
 // ── HookParsed (type) ──
 type HookParsed = z.infer<typeof HookSchema>;
+
+// ── HookQuery (type) ──
+type HookQuery = Omit<EngineQueryOptions, 'context' | 'top' | 'cursor' | 'distinct'> & HookDriverPassthroughOptions;
 
 // ── HookSchema (const) ──
 declare const HookSchema: z.ZodObject<{
@@ -14492,6 +14566,12 @@ declare const HookSchema: z.ZodObject<{
         inherit: "inherit";
     }>>;
 }, z.core.$strict>;
+
+// ── HookUpdateDoc (type) ──
+type HookUpdateDoc = HookDoc;
+
+// ── HookUpdateOptions (type) ──
+type HookUpdateOptions = Omit<EngineUpdateOptions, 'context' | 'upsert'> & WriteObservabilityOptions & HookDriverPassthroughOptions;
 
 // ── IMPORT_BOOLEAN_FALSE_TOKENS (const) ──
 declare const IMPORT_BOOLEAN_FALSE_TOKENS: ReadonlySet<string>;
