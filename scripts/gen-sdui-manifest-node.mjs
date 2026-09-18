@@ -5,7 +5,7 @@
  * gen-sdui-manifest-node — regenerate the repo-root `sdui.manifest.json` from
  * objectui's PUBLISHED registry packages, without a browser.
  *
- *   node scripts/gen-sdui-manifest-node.mjs                      # temp npm install (network)
+ *   node scripts/gen-sdui-manifest-node.mjs                      # temp npm install (network); version from the PIN
  *   node scripts/gen-sdui-manifest-node.mjs --modules-root DIR   # use a preinstalled node_modules parent
  *   node scripts/gen-sdui-manifest-node.mjs --objectui-version V # override the version to install
  *
@@ -48,15 +48,33 @@
  * tombstone there; this header is what both of them now send readers to for
  * the readings.
  *
- * ## Versioning contract
+ * ## Versioning contract — ONE oracle, shared with the gate
  *
  * The manifest must describe the registry the SHIPPED console runs — i.e. the
  * `@object-ui/*` version that `.objectui-sha` ships. This script installs that
- * version from npm; the version is read from `scripts/sdui-manifest.record.json`
- * unless `--objectui-version` overrides it. After a pin bump, pass the version
- * the new pin carries (its `packages/core/package.json` in the objectui
- * checkout the bump already required) — `check-sdui-manifest.mjs` goes red on
- * a moved pin until this script has been re-run and the record re-written.
+ * version from npm. Which version that is has exactly one source:
+ * `--objectui-version` when it is passed, otherwise what
+ * `packages/core/package.json` DECLARES at the pinned commit — read through
+ * `check-sdui-manifest.mjs`'s exported `readPinnedDeclaredVersion`, the SAME
+ * function its check 4 judges the written record with, imported rather than
+ * re-typed.
+ *
+ * ⛔ The version is NOT defaulted from `scripts/sdui-manifest.record.json`.
+ * That default is what this file was fixed for: `objectuiSha` below is re-read
+ * from the LIVE pin while `objectuiPackagesVersion` fell back to the value
+ * already in the record, so the two fields were read at two different moments.
+ * A regeneration after a pin bump therefore wrote the NEW pin under the OLD
+ * version string — a record whose two objectui fields describe two different
+ * commits, which check 4 reds. The person it reds is the one who followed the
+ * documented bump procedure, so the producer is where it is fixed. Two readers
+ * consulting two oracles is precisely where that drift came from; there is now
+ * one oracle and both read it.
+ *
+ * When the oracle cannot answer — no objectui checkout, or one that does not
+ * carry the pinned commit — this script REFUSES. An unread version is never
+ * converted into a version string (Route & surface ownership §3: prefer failing
+ * to falling back). Point `OBJECTUI_ROOT` at a checkout that carries the pin,
+ * or pass `--objectui-version` explicitly.
  *
  * ## Preconditions (all loud)
  *
@@ -70,6 +88,8 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+
+import { readPinnedDeclaredVersion } from './check-sdui-manifest.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const RECORD_PATH = join(ROOT, 'scripts', 'sdui-manifest.record.json');
@@ -126,12 +146,26 @@ if (existsSync(RECORD_PATH)) {
   }
 }
 
-const version = arg('--objectui-version') ?? record.objectuiPackagesVersion;
+// The version this run installs AND records. `--objectui-version` wins; the
+// default is what the PIN declares, through check 4's own oracle — never the
+// version already sitting in the record (see the versioning contract above).
+const explicitVersion = arg('--objectui-version');
+let version = explicitVersion;
+let versionSource = '--objectui-version, as passed';
 if (!version) {
-  fail(
-    'no --objectui-version and no version in scripts/sdui-manifest.record.json.\n' +
-      "  Pass the @object-ui/* version the pin ships (the objectui checkout's packages/core/package.json).",
-  );
+  const leg = readPinnedDeclaredVersion(pin, { root: ROOT });
+  if (leg.status !== 'resolved') {
+    fail(
+      `no --objectui-version, and the pinned commit's declared version could not be read: ${leg.reason}\n` +
+        '  ⛔ This script does NOT fall back to the version in scripts/sdui-manifest.record.json: after a pin\n' +
+        '  bump that re-records the NEW pin under the OLD version string, and check-sdui-manifest.mjs check 4\n' +
+        '  reds exactly that record. Either:\n' +
+        `    - point OBJECTUI_ROOT at an objectui checkout carrying ${pin.slice(0, 12)}…, or\n` +
+        '    - pass --objectui-version {the @object-ui version that pin ships} explicitly.',
+    );
+  }
+  version = leg.version;
+  versionSource = `packages/core/package.json at objectui ${pin.slice(0, 12)}… (read from ${leg.where})`;
 }
 
 let modulesRoot = arg('--modules-root');
@@ -205,4 +239,7 @@ const nextRecord = {
 };
 writeFileSync(RECORD_PATH, JSON.stringify(nextRecord, null, 2) + '\n');
 console.error(`✓ wrote sdui.manifest.json (${count} components, ${Buffer.byteLength(json)} bytes, sha256 ${sha256.slice(0, 12)}…)`);
-console.error(`✓ re-recorded scripts/sdui-manifest.record.json at pin ${pin.slice(0, 12)} / @object-ui ${version}`);
+console.error(
+  `✓ re-recorded scripts/sdui-manifest.record.json at pin ${pin.slice(0, 12)} / @object-ui ${version}\n` +
+    `  (version from ${versionSource})`,
+);
