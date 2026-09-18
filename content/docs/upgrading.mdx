@@ -368,6 +368,16 @@ enforcing a constraint that was declared and inert, without adding or removing a
 single export. A delta of `0 added, 0 removed` is a real measurement of the
 export surface and says nothing about the accept-sets behind it — the release
 checklist above is still the record for those.
+
+**And it does not report withdrawals.** All four arrays report what a release
+**added**: `converted` and `migrated` list the ADR-0087 ids *first registered*
+in it. An id that **left** the published chain between the two releases is in
+none of them — `converted: []` means "this release registered none", never
+"none was withdrawn". ADR-0087 D4 names these four arrays and this section
+carries exactly those four; to see a withdrawal, compare the `aggregate`
+records of the two installed manifests (`.aggregate.converted[].conversionId`
+and `.aggregate.migrated[].migrationId`) — an id present in the older one and
+absent from the newer one was withdrawn.
 </Callout>
 
 ### The per-package changelogs are the exhaustive record

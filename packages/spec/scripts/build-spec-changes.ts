@@ -203,7 +203,12 @@ function build(): string {
     $comment:
       'GENERATED (ADR-0087 D4) — do not edit. Regenerate with: pnpm --filter @objectstack/spec gen:spec-changes. ' +
       'A projection of the D2 conversion table + D3 migration chain; the upgrade guide and the MCP spec_changes ' +
-      'tool derive from this same data.',
+      'tool derive from this same data. ' +
+      'When a `release` section is present, its four ADR-0087 D4 arrays report what that release ADDED: ' +
+      '`added`/`removed` are the export-surface diff of the two published tarballs, and `converted`/`migrated` ' +
+      'are the D2/D3 ids FIRST REGISTERED in it. An id that LEFT the published chain between the two releases ' +
+      'is reported in none of them — `converted: []` means "this release registered none", never "none was ' +
+      'withdrawn"; a withdrawal is visible only by comparing two published manifests.',
     protocolVersion: PROTOCOL_VERSION,
     supportFloor: MIGRATION_SUPPORT_FLOOR,
     migrateCommand: `objectstack migrate meta --from <N>  (N >= ${MIGRATION_SUPPORT_FLOOR})`,
