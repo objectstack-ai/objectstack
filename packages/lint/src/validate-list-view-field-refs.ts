@@ -54,6 +54,17 @@
  *    card into the uncolumned bucket; a `gantt` / `calendar` / `timeline`
  *    required date field leaves the renderer nothing to place, so the chart is
  *    blank; a map with no resolvable coordinate field plots no marker.
+ *    [#18835] A third consequence belongs to this tier and the two sentences
+ *    above did not name it: a binding whose job is to RESTRICT or to ROUTE,
+ *    where the miss is read as "no restriction" / "no route" on every row.
+ *    Nothing is missing from the picture — which is exactly why it gates: a
+ *    `gantt.lockField` that resolves to nothing unfreezes every row the author
+ *    declared view-only, and a `gantt.objectField` that resolves to nothing
+ *    makes every row answer the renderer's synthetic-row test, so no bar in
+ *    the chart opens anything. Both are the shape Prime Directive #10 names —
+ *    a capability advertised in the metadata and not delivered by the runtime
+ *    — and both are worse DECLARED than omitted, because each renderer guards
+ *    its behaviour on the key's mere presence.
  *  - **`warning`** — the renderer drops one decoration and renders the rest:
  *    an optional colour / title / tooltip / cover binding, a stale
  *    `hiddenFields` entry that hides nothing, a stale `fieldOrder` entry that
@@ -345,6 +356,19 @@ const POSITIONS: Record<string, BlockPositions> = {
       endDateField: 'warning',
       titleField: 'warning',
       colorField: 'warning',
+      // [#18835] `allDayField` names a BOOLEAN field, and a declared one is
+      // ABSOLUTE — the spec's own `⛔ No default field name` note. Measured in
+      // objectui `dda8f3815`: `ObjectCalendar` maps every event with
+      // `allDay: allDayField ? Boolean(record[allDayField]) : !endDate`, so a
+      // name no record carries reads `undefined` on every row, `Boolean()`
+      // answers false for all of them, AND the `!endDate` inference that would
+      // have banded a dateless event is switched off by the key's mere
+      // presence. Every event still renders and is still placed at its start:
+      // what is lost is the all-day BAND, one decoration, which is this tier
+      // and not `startDateField`'s (nothing to place at all). Not the error
+      // tier's third consequence either — no restriction and no route rides on
+      // it; a wrongly-banded event is still an event the user can click.
+      allDayField: 'warning',
     },
   },
   gantt: {
@@ -362,6 +386,34 @@ const POSITIONS: Record<string, BlockPositions> = {
       groupByField: 'warning',
       assigneeField: 'warning',
       effortField: 'warning',
+      // ── [#18835] Three of the ten objectui-lifted members (#15469) are
+      // field bindings, and they share only their `.optional()`. Each is tiered
+      // by what its own renderer does with a name no record carries, measured
+      // in objectui `dda8f3815` (`plugin-gantt/src/ObjectGantt.tsx`).
+      //
+      // The stroke is opt-in and exceptional, and the renderer says so:
+      // `borderColorRaw = borderColorField ? record[borderColorField] :
+      // undefined` leaves `borderColor` undefined for every task, so every bar
+      // keeps its fill and renders without an outline. `colorField`'s case,
+      // eight rows up — one decoration dropped, the chart intact.
+      borderColorField: 'warning',
+      // ⛔ NOT a decoration: a declared WRITE GUARD that fails OPEN.
+      // `locked: lockField ? !!record[lockField] : undefined` reads `undefined`
+      // on every row and the drawer's `recLocked` falls the same way, so every
+      // row the author froze becomes draggable, resizable, progress-draggable,
+      // link-able, inline-editable and deletable — and the drag PERSISTS. The
+      // chart looks perfect and the restriction the author declared is simply
+      // not in force, which is the error tier's third consequence above.
+      lockField: 'error',
+      // The row's OWN object api name, and a miss takes the whole detail
+      // surface with it: `isSyntheticRow` is `!!objectField &&
+      // !String(rec[objectField] ?? '').trim()`, so a name no record carries
+      // answers TRUE for every row. `onTaskClick` then never calls
+      // `navigation.handleClick` and `renderRecordOverlay` returns null — no
+      // bar in the chart opens a drawer or a detail page, uniformly and
+      // silently. Strictly worse than omitting the key, which is what the
+      // `!!objectField &&` guard exists to make safe.
+      objectField: 'error',
     },
     // A quick filter is a FILTER: a stale one filters on a column that does
     // not exist and empties the chart.
