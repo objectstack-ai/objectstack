@@ -127,7 +127,7 @@ describe('InstalledPackageSchema', () => {
 
   it('should reject invalid manifest', () => {
     expect(() => InstalledPackageSchema.parse({
-      manifest: { id: 'test' },
+      manifest: { id: 'com.example.test' },
     })).toThrow();
   });
 });

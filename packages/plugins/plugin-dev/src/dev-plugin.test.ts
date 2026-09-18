@@ -61,7 +61,7 @@ describe('DevPlugin', () => {
       seedAdminUser: false,
       verbose: false,
       services: { auth: false, dispatcher: false, security: false },
-      stack: { manifest: { id: 'test', name: 'test', version: '1.0.0', type: 'app' } },
+      stack: { manifest: { id: 'com.example.test', name: 'test', version: '1.0.0', type: 'app' } },
     });
     expect(plugin).toBeDefined();
   });

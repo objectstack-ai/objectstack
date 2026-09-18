@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest';
 import { deriveCrudCases, fillRelationalRefs, type CrudCase } from '@objectstack/verify';
 
 const obj = (name: string, fields: Record<string, any>) => ({ name, fields });
-const cfg = (...objects: any[]) => ({ manifest: { id: 'fixture' }, objects });
+const cfg = (...objects: any[]) => ({ manifest: { id: 'com.example.fixture' }, objects });
 
 function byName(cases: CrudCase[]): Map<string, CrudCase> {
   return new Map(cases.map((c) => [c.object, c]));

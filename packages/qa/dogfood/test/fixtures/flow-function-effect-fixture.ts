@@ -61,7 +61,7 @@ const sweepFlow = (name: string, fn: string): Flow => ({
 
 export const flowFunctionEffectStack = defineStack({
   manifest: {
-    id: 'com.dogfood.flow_function_effect',
+    id: 'com.dogfood.flow-function-effect',
     namespace: 'fxn',
     version: '0.0.0',
     type: 'app',

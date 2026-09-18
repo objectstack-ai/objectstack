@@ -50,7 +50,7 @@ const UfmPlain = ObjectSchema.create({
 
 const ufmStack = defineStack({
   manifest: {
-    id: 'com.dogfood.user_facing_marking',
+    id: 'com.dogfood.user-facing-marking',
     namespace: 'ufm',
     version: '0.0.0',
     type: 'app',

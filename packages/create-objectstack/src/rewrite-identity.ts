@@ -78,6 +78,44 @@ export function readTemplateNamespace(targetDir: string): string | undefined {
   return undefined;
 }
 
+/**
+ * The reverse-domain prefix a scaffolded project is named under.
+ *
+ * `example.com` is the IETF-reserved documentation domain (RFC 2606), so a
+ * scaffold can carry it without colliding with anyone's real namespace, and an
+ * author who publishes is told to change it rather than discovering a clash.
+ */
+const SCAFFOLD_ID_PREFIX = 'com.example.';
+
+/**
+ * The package id a scaffolded project gets, derived from its project name.
+ *
+ * `manifest.id` is a reverse-domain identifier (`MANIFEST_ID_PATTERN`,
+ * `@objectstack/spec/kernel`): dot-separated lowercase segments, hyphens
+ * allowed inside a segment, **underscores not**. That last clause is why this
+ * cannot reuse `sanitizeNamespace`: a namespace is snake_case by rule, so
+ * `my-app` sanitizes to the namespace `my_app`, and `com.example.my_app` is
+ * refused by the very schema the scaffold has to satisfy. The two identifiers
+ * are derived from the same project name under DIFFERENT rules, and deriving
+ * one from the other is the bug.
+ *
+ * Nor can the raw project name be used: `id: '<projectName>'` is what shipped,
+ * and a bare word carries no dot at all, so every scaffolded project failed
+ * `manifest.id` the moment the rule was enforced.
+ *
+ * Held against the real pattern by `rewrite-identity.test.ts`.
+ */
+export function deriveManifestId(projectName: string): string {
+  // Drop an npm scope: `@acme/my-app` is the project `my-app`.
+  let s = projectName.replace(/^@[^/]+\//, '');
+  s = s.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  s = s.replace(/^-+|-+$/g, '');
+  // A segment must OPEN with a letter, so a name that is empty or starts with a
+  // digit gets a literal prefix rather than a silently invalid id.
+  if (!/^[a-z]/.test(s)) s = `app-${s}`.replace(/-+$/, '');
+  return `${SCAFFOLD_ID_PREFIX}${s}`;
+}
+
 /** Every `*.ts` file under `dir`, recursively. Missing dir → empty. */
 function tsFiles(dir: string, out: string[] = []): string[] {
   if (!fs.existsSync(dir)) return out;
