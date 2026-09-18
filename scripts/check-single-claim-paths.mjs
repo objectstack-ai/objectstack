@@ -145,10 +145,18 @@
  * names a tree that does not exist, so a hint on one can never match anything.
  */
 
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
+import { maskCommentsAndLiterals } from './js-comment-mask.mjs';
+// ⛔ Not copied. The proxy-rearm PLAN is ONE source for every instrument in this
+// tree, so this gate and the sweeps can never disagree about whether this
+// container's fetch reaches GitHub at all. Only the guard variable below is
+// this file's own, and the block above `rearmThroughProxy` says why.
+import { PROXY_FLAG, PROXY_REARM_GUARD, proxyRearmPlan } from './pm/check-half-states.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -182,11 +190,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'UNDETERMINED is its own answer. It must never read as clean, and it': 5,
   'Wiring absent: never clean, never an accusation.': 16,
   'The short-circuit. This is the property that makes the gate affordable,': 22,
+  'The route to GitHub. A 401 from a bypassed proxy reads as a dead': 9,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 8;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -261,6 +270,9 @@ function batteryFloorFailures() {
 }
 
 const ROOT = new URL('..', import.meta.url).pathname;
+
+/** This file, resolved for the proxy re-exec and for the self-test's own structural reads. */
+const SELF_PATH = fileURLToPath(import.meta.url);
 
 /** The wiring that gives this gate a PR to judge. */
 const WIRING_WORKFLOW = '.github/workflows/single-claim-path-guard.yml';
@@ -533,6 +545,84 @@ const githubApi = (token) => async (path) => {
 };
 
 // ---------------------------------------------------------------------------
+// The route to GitHub (#18314) — why this gate re-execs itself.
+//
+// Every real run reads a PR's file list over the network, and in an agent
+// container that network is reachable only through the session proxy. Node's
+// `fetch` does not read the proxy variables, so an unrouted run left WITHOUT
+// its credential and GitHub answered 401. That 401 has three readings available
+// to whoever sees it — the token is wrong, the PR does not exist, the repo is
+// wrong — and none of them is the true one, so a seat that tries to pre-run the
+// gate its own PR will be judged by records NOT MEASURED where a real reading
+// was one flag away.
+//
+// The switch is read at process START, which is the whole reason this is a
+// re-exec rather than an assignment.
+//
+// The DECISION is imported, not restated: one spelling of "go through the
+// proxy" for the whole tree. What is local is the guard VARIABLE, deliberately.
+// Sharing a sibling's guard would let that sibling's re-exec suppress this
+// one's — a grandchild is spawned without the flag in its argv, so it needs the
+// re-exec even though the guard the parent set says one already happened.
+//
+// ⭐ On a GitHub Actions runner there is no proxy in the environment, so the
+// plan never re-arms and this gate behaves exactly as it did before. The fix is
+// inert in CI, which is all this card ever claimed about CI.
+// ---------------------------------------------------------------------------
+
+/** This file's OWN re-exec guard — deliberately not any sibling's. */
+export const OWN_PROXY_REARM_GUARD = 'OS_SINGLE_CLAIM_PATHS_PROXY_REARMED';
+
+/**
+ * The environment the imported plan is asked about: this file's own guard,
+ * presented under the name the plan reads. Pure, so the self-test drives every
+ * branch offline — and the branch worth pinning is a SIBLING's guard being set,
+ * which must NOT stop this run from re-arming.
+ */
+export function proxyPlanEnv(env) {
+  return { ...env, [PROXY_REARM_GUARD]: env[OWN_PROXY_REARM_GUARD] };
+}
+
+/**
+ * Hand this run off through the proxy, or `null` to carry on in-process.
+ *
+ * A returned number is the child's exit status, forwarded VERBATIM: the three
+ * exit codes above are this gate's contract with CI, so the hand-off has to be
+ * invisible in them.
+ *
+ * Everything printed here goes to STDERR. The clean verdict is this script's
+ * only stdout, and a status line there would land inside whatever reads it.
+ *
+ * @param {string[]} args  this run's own argv tail, forwarded unchanged
+ */
+function rearmThroughProxy(args) {
+  const plan = proxyRearmPlan({
+    env: proxyPlanEnv(process.env),
+    execArgv: process.execArgv,
+    flagSupported: process.allowedNodeEnvironmentFlags.has(PROXY_FLAG),
+  });
+  if (plan.hint) {
+    console.error(`ℹ️  ${plan.reason}. A refusal below may be about the route, not this container.`);
+    return null;
+  }
+  if (!plan.rearm) return null;
+  console.error(`ℹ️  re-exec with ${plan.flag}: ${plan.reason}.`);
+  // The env proxy agent is experimental and says so once per run. Nobody can
+  // act on that notice, so silence it where the node in use can.
+  const quiet = process.allowedNodeEnvironmentFlags.has('--disable-warning') ? ['--disable-warning=UNDICI-EHPA'] : [];
+  const child = spawnSync(process.execPath, [plan.flag, ...quiet, SELF_PATH, ...args], {
+    stdio: 'inherit',
+    env: { ...process.env, [OWN_PROXY_REARM_GUARD]: '1' },
+  });
+  if (typeof child.status === 'number') return child.status;
+  console.error(
+    `⚠️  could not re-exec with ${plan.flag} (${child.error?.message ?? 'no exit status'}); ` +
+      'continuing in-process — every request will bypass the proxy.',
+  );
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Self-test — the verdict layer, the exit-code contract, the declared list's
 // own invariants, the short-circuit that makes this affordable, and the wiring.
 // ---------------------------------------------------------------------------
@@ -676,6 +766,25 @@ function selfTest() {
     { number: '16326', repo: 'o/r', token: 't' },
   );
 
+  // --- The route to GitHub. A 401 from a bypassed proxy reads as a dead
+  // credential, so both legs are pinned rather than one: the CI leg must stay
+  // untouched (no proxy in the environment, no re-exec, no behaviour change at
+  // all), and a container must re-arm EXACTLY once. The fixture proxy names no
+  // tree in any repo, per this file's header rule on quoted literals.
+  battery('The route to GitHub. A 401 from a bypassed proxy reads as a dead');
+  const proxied = { HTTPS_PROXY: 'http://127.0.0.1:41733' };
+  t('the Actions-runner leg: no proxy in the env, so no re-exec and nothing changes in CI', proxyRearmPlan({ env: proxyPlanEnv({}) }).rearm, false);
+  t('an agent container re-arms, which is the whole of the fix', proxyRearmPlan({ env: proxyPlanEnv(proxied), flagSupported: true }).rearm, true);
+  t("...exactly once — this run's OWN guard is what stops the loop", proxyRearmPlan({ env: proxyPlanEnv({ ...proxied, [OWN_PROXY_REARM_GUARD]: '1' }), flagSupported: true }).rearm, false);
+  t("...and a SIBLING instrument's guard does NOT suppress it", proxyRearmPlan({ env: proxyPlanEnv({ ...proxied, [PROXY_REARM_GUARD]: '1' }), flagSupported: true }).rearm, true);
+  t("this file's guard is not the imported one, which is what makes that hold", OWN_PROXY_REARM_GUARD === PROXY_REARM_GUARD, false);
+  t('a run already routed through the proxy does not re-arm again', proxyRearmPlan({ env: proxyPlanEnv(proxied), execArgv: [PROXY_FLAG], flagSupported: true }).rearm, false);
+  const unsupported = proxyRearmPlan({ env: proxyPlanEnv(proxied), flagSupported: false });
+  t('a node that cannot take the flag SAYS so rather than bypassing silently', [unsupported.rearm, unsupported.hint], [false, true]);
+  const ownSource = maskCommentsAndLiterals(readFileSync(SELF_PATH, 'utf8'));
+  t('structural: the plan is imported, not restated here', /\bproxyRearmPlan\b/.test(ownSource) && !/function\s+proxyRearmPlan\b/.test(ownSource), true);
+  t('structural: the hand-off is decided BEFORE the first network read', ownSource.lastIndexOf('rearmThroughProxy(') < ownSource.lastIndexOf('await collect('), true);
+
   // --- The short-circuit. This is the property that makes the gate affordable,
   // and it is invisible in the verdict layer, so it is pinned here against a
   // recording fake API. Fixture paths name a tree that exists in no repo.
@@ -777,6 +886,13 @@ if (isMain) {
     }
   } else {
     const ctx = readPrContext(process.env);
+    // Only a run with a usable context reaches the network, so only that run
+    // needs the route. Re-execing a NOT WIRED run would spend a process to
+    // reprint the identical wiring verdict.
+    if (ctx !== null && ctx.wired !== false) {
+      const handed = rearmThroughProxy(process.argv.slice(2));
+      if (handed !== null) process.exit(handed);
+    }
     const resolved = ctx === null || ctx.wired === false ? ctx : await collect(ctx, githubApi(ctx.token));
     const result = judge(resolved);
     const emit = result.exit === EXIT_CLEAN ? console.log : console.error;
