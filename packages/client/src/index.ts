@@ -1523,11 +1523,13 @@ const SET_AUTH_TOKEN_HEADER = 'set-auth-token';
  * reads the row `internalAdapter.createSession` already committed, back by
  * the response's OWN token — the same seam `/get-session` uses — and attaches
  * it, rather than this lift inventing one. So `login` and `register` now
- * parse as the full declared `SessionResponse`, with one gap that is NOT
- * this: `data.user.image` served `null` against a declared
- * `string | undefined` (#17235, tracked separately). This does not touch the
- * `data.token` rule above: `session.token` is the SAME unsigned string the
- * body's own `token` already carried, not a second credential, and
+ * parse as the full declared `SessionResponse`. The one gap that remained
+ * when this was written — `data.user.image` served `null` against a declared
+ * `string | undefined` — closed with #17235, which widened that declaration
+ * to `z.string().nullish()`; the residue list those two routes are pinned
+ * against (`auth-login-register-envelope.test.ts` ②) is now empty. This does
+ * not touch the `data.token` rule above: `session.token` is the SAME unsigned
+ * string the body's own `token` already carried, not a second credential, and
  * `data.token` is still never synthesized FROM a session.
  *
  * The `!body` guard no longer carries the anonymous answer — since #17881 that
