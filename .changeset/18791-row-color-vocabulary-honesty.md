@@ -52,10 +52,15 @@ this change deliberately does not answer.
 
 Not breaking, and measured rather than assumed: the finding is `warning` severity,
 like its sibling. `@objectstack/lint`'s `splitBySeverity` sorts everything that is not
-`error` into advisories, so `os build` / `os validate` / `os lint` still exit 0, and the
-registration-time twin in `@objectstack/objectql` is field-only — it calls
-`checkFieldCompleteness` and never the view predicate — and warns without ever throwing.
-Nothing that builds today starts failing, and nothing authored today is refused.
+`error` into advisories, so `os build` / `os validate` / `os lint` still exit 0 on their
+DEFAULT paths, and the registration-time twin in `@objectstack/objectql` is field-only —
+it calls `checkFieldCompleteness` and never the view predicate — and warns without ever
+throwing. Nothing that builds today on a default run starts failing, and nothing authored
+today is refused. Under `os lint --strict` / `os validate --strict` a warning IS a
+failure — that is what the flag is for — so a stack carrying an unresolvable
+`rowColor.colors` value, typically a hex, starts failing those strict runs on upgrade;
+the fix is the one the finding prescribes: a resolvable colour name (`red`) or a complete
+Tailwind background class (`bg-red-200`).
 
 Blast radius measured over this repo, the five example apps and objectui at the pinned
 `.objectui-sha` `53ded82bf7a494f54e344e19099dbf00854b8694`: **zero** authored `colors`
