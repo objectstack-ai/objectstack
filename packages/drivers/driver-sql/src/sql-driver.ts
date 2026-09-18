@@ -4770,6 +4770,13 @@ export class SqlDriver implements IDataDriver {
       // Subclasses whose transport batches (Turso) implement the method AND
       // flip this bit — the engine requires both.
       batchSchemaSync: false,
+      // [#18063] knex transactions are real here, so this stays false — spelled
+      // rather than left absent for the same reason `batchSchemaSync` is: this
+      // literal is the baseline subclasses SPREAD, and the bit is the only way
+      // a subclass whose transport cannot carry a handle (TursoDriver's remote
+      // mode) opts out of the `beginTransaction()` it inherits from this class.
+      // Absence would mean the same thing and say nothing.
+      transactionsUnsupported: false,
     };
   }
 

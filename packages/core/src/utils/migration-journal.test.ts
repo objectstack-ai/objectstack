@@ -55,9 +55,21 @@ class FakeEngine {
   /** Every context object handed to `insert`, so tests can prove tx binding. */
   insertContexts: unknown[] = [];
   private driverHasTx: boolean;
+  /**
+   * [#18063] What the transport DECLARES about a handle it would issue, held
+   * apart from whether it publishes `beginTransaction` at all.
+   *
+   * `undefined` — the default and every pre-existing case — means the driver
+   * carries no opinion, which is the shape this double could ONLY produce
+   * before: its driver had no `supports` record, so a gate reading method
+   * presence and a gate reading the declaration were indistinguishable here and
+   * the pin below was green against both.
+   */
+  private driverDeclaresUnsupported: boolean | undefined;
 
-  constructor(opts: { driverHasTx?: boolean } = {}) {
+  constructor(opts: { driverHasTx?: boolean; driverDeclaresUnsupported?: boolean } = {}) {
     this.driverHasTx = opts.driverHasTx ?? true;
+    this.driverDeclaresUnsupported = opts.driverDeclaresUnsupported;
   }
 
   private rows(name: string): FakeRow[] {
@@ -111,7 +123,17 @@ class FakeEngine {
   getObject(name: string): unknown { return { name }; }
   getDefaultDriverName(): string { return 'fake'; }
   getDriverByName(): unknown {
-    return this.driverHasTx ? { beginTransaction: () => {}, commit: () => {}, rollback: () => {} } : {};
+    if (!this.driverHasTx) return {};
+    // [#18063] `beginTransaction` is published on every column — the inherited
+    // door. Only `supports` differs.
+    return {
+      beginTransaction: () => {},
+      commit: () => {},
+      rollback: () => {},
+      supports: this.driverDeclaresUnsupported === undefined
+        ? {}
+        : { transactionsUnsupported: this.driverDeclaresUnsupported },
+    };
   }
 
   async transaction<T>(cb: (trxCtx: unknown) => Promise<T>, baseContext?: unknown): Promise<T> {
@@ -182,6 +204,46 @@ describe('capability gate (ADR-0119 D2 item 7 / D4 probe)', () => {
     expect(engineCanRollBack(null)).toBe(false);
     // A test double with no driver registry keeps the engine-level answer.
     expect(engineCanRollBack({ transaction: () => {} })).toBe(true);
+  });
+
+  it('[#18063] the driver clause reads the DECLARATION, not method presence', () => {
+    // The shape neither column above can produce: `beginTransaction` present —
+    // INHERITED from a base class whose transport has transactions — on a
+    // transport that declared it cannot honour the handle. The engine takes its
+    // declared non-transactional path for exactly this driver, so a gate
+    // answering `true` here hands both callers a runtime that runs their
+    // callback with NO transaction: `batchData`'s atomic arm then reports a
+    // rollback that undid nothing, and the runner writes `chunk_done` rows its
+    // own header says would not mean committed.
+    expect(engineCanRollBack(new FakeEngine({ driverDeclaresUnsupported: true }))).toBe(false);
+    // LIT controls — same double, same published `beginTransaction`, the bit
+    // absent and the bit explicitly `false`. Both keep the transactional
+    // answer, so the `false` above is the declaration and not a double that
+    // stopped answering.
+    expect(engineCanRollBack(new FakeEngine({ driverDeclaresUnsupported: false }))).toBe(true);
+    expect(engineCanRollBack(new FakeEngine())).toBe(true);
+  });
+
+  it('[#18063] refuses to start when the transport DECLARED it cannot honour a handle', async () => {
+    const engine = new FakeEngine({ driverDeclaresUnsupported: true });
+    const plan: MigrationPlan = { id: 'p', steps: [makeStep(3)] };
+    const refusal = await runMigrationJournal(asEngine(engine), plan).then(
+      () => null,
+      (err: unknown) => err,
+    );
+    expect(refusal).toBeInstanceOf(MigrationJournalRefusal);
+    expect((refusal as MigrationJournalRefusal).code).toBe('NOT_IMPLEMENTED');
+    // Refused means NOTHING was written — the same bar the missing-method
+    // column above is held to.
+    expect(engine.tables.get(JOURNAL) ?? []).toHaveLength(0);
+
+    // LIT control: the same double with the bit removed runs to completion, so
+    // the refusal is the declaration rather than an inert fixture.
+    const control = new FakeEngine();
+    await expect(
+      runMigrationJournal(asEngine(control), { id: 'p', steps: [makeStep(3)] }),
+    ).resolves.toMatchObject({ status: 'completed' });
+    expect(kindsOf(control)).toContain('run_done');
   });
 });
 

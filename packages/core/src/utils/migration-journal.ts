@@ -53,6 +53,9 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
+// [#18063] The driver clause is the DECLARATION, not bare method presence, and
+// it is the same one definition the engine's own transaction entrances call.
+import { driverSupportsTransactions } from '@objectstack/spec/data';
 import {
   MIGRATION_JOURNAL_OBJECT,
   type MigrationJournalEvent,
@@ -76,11 +79,23 @@ const DEFAULT_CHUNK_SIZE = 200;
  * clause and leaves one caller believing it has atomicity it does not have.
  *
  * TWO levels, both necessary. `engine.transaction()` exists but runs the
- * callback with NO transaction and NO rollback when the default driver lacks
- * `beginTransaction` — a declared caveat of the contract member (ADR-0119 D1),
- * and one that turns "atomic" back into a lie precisely where it matters. So
- * where the driver registry is inspectable the driver is checked too; where it
- * is not (test doubles), the engine-level probe is all there is.
+ * callback with NO transaction and NO rollback when the default driver cannot
+ * carry one — a declared caveat of the contract member (ADR-0119 D1), and one
+ * that turns "atomic" back into a lie precisely where it matters. So where the
+ * driver registry is inspectable the driver is checked too; where it is not
+ * (test doubles), the engine-level probe is all there is.
+ *
+ * ⛔ The driver clause asks `driverSupportsTransactions` (`@objectstack/spec`)
+ * and NOT `typeof driver.beginTransaction === 'function'` (#18063). The two
+ * answer differently for a transport that INHERITED the method from a base
+ * class it cannot honour and declared `supports.transactionsUnsupported`: the
+ * engine takes its DECLARED non-transactional path for such a driver, so a
+ * presence test here would say "this runtime can roll back" about a runtime
+ * that is about to run the callback with no transaction at all — the
+ * `chunk_done` rows below, and `batchData`'s `atomic` response, would then
+ * report a rollback that undid nothing. Both gates read one predicate for the
+ * same reason the two callers read one helper: a gate that disagrees with the
+ * dispatch it guards is worse than no gate.
  *
  * A type predicate, not a bare boolean: every caller's next move is to CALL
  * `transaction`, and on the host surfaces that declare it optionally
@@ -96,7 +111,15 @@ export function engineCanRollBack<T>(engine: T): engine is T & EngineWithTransac
   if (typeof e?.transaction !== 'function') return false;
   const defaultDriverName = e.getDefaultDriverName?.();
   const defaultDriver = defaultDriverName ? e.getDriverByName?.(defaultDriverName) : undefined;
-  return !defaultDriver || typeof (defaultDriver as { beginTransaction?: unknown }).beginTransaction === 'function';
+  return (
+    !defaultDriver
+    || driverSupportsTransactions(
+      defaultDriver as {
+        beginTransaction?: unknown;
+        supports?: { transactionsUnsupported?: boolean | undefined } | undefined;
+      },
+    )
+  );
 }
 
 /**

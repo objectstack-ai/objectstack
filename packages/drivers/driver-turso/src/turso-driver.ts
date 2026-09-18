@@ -671,6 +671,26 @@ export class TursoDriver extends SqlDriver {
       ...(this.transportMode === 'remote'
         ? { queryDateGranularity: {} as Record<string, boolean> }
         : {}),
+
+      // [#18063] The remote transport has NO transactions, and this is the
+      // declaration that lets it say so. `TursoDriver extends SqlDriver`, whose
+      // `beginTransaction()` opens a real knex transaction, so method presence
+      // — the engine's gate until now — reported this face as transactional. It
+      // is not: `RemoteTransport`'s data methods take no `options` argument at
+      // all, so a handle cannot reach the statement that would have to join it;
+      // the write executed on the plain connection and was already durable, and
+      // `rollback()` resolved having undone nothing.
+      //
+      // With the bit set the engine stops opening a transaction it cannot
+      // honour and takes the DECLARED non-transactional path instead (ADR-0119
+      // D1) — warning once, or throwing `TransactionUnsupportedError` before
+      // any write when the caller passed `require: true`. That is also the path
+      // `refuseRemoteTransaction`'s own message already tells callers to take,
+      // nothing could reach while the gate read method presence.
+      //
+      // Local and embedded-replica modes inherit `false` from SqlDriver: they
+      // run knex against a real connection and honour `options.transaction`.
+      transactionsUnsupported: this.transportMode === 'remote',
     };
   }
 
@@ -1826,28 +1846,38 @@ export class TursoDriver extends SqlDriver {
   // Transactions (remote mode overrides)
   // ===================================
 
-  // ⛔ [#17690] This door stays `Promise<any>`, and that is a NAMED remainder
-  // rather than an oversight. `TursoDriver extends SqlDriver`, whose
+  // ⭐ [#18063] This door publishes the INHERITED declaration, and the `any` it
+  // used to publish is gone. The history is worth keeping because the `any` was
+  // a NAMED remainder, not an oversight: `TursoDriver extends SqlDriver`, whose
   // `beginTransaction()` publishes `Promise<Knex.Transaction>` — narrower than
   // the contract's `Promise<unknown>`, the honest direction, and the binding
-  // declaration for an override. Swapping this onto the contract's own type
-  // does not compile (TS2416: `Promise<unknown>` is not assignable to
-  // `Promise<Transaction<any, any[]>>`). So the `any` here is not masking an
-  // un-narrowed door — it is masking a real LSP violation: in remote mode this
-  // returns a libsql transaction while the inherited declaration promises a
-  // knex one. Closing it means widening `SqlDriver`'s honest narrowing
-  // (measured: +14 further consumer sites in the three driver packages, and a
-  // type-safety regression for every `driver-sql` consumer) or restructuring
-  // the remote handle. Both are above an annotation swap; the reasoning is
-  // recorded in `turso-driver-doors-declared-types.test.ts`.
+  // declaration for an override. While the remote arm RETURNED a libsql
+  // transaction there was no honest annotation available: the contract's own
+  // type does not compile against the base (TS2416), and the base's type would
+  // have been a lie on the remote arm. The `any` masked that real LSP
+  // violation, and closing it meant widening `SqlDriver`'s narrowing (measured
+  // at the time: +14 further consumer sites across the driver packages) or
+  // restructuring the remote handle — both above an annotation swap (#17690).
   //
-  // ⭐ [#18616] The remote arm now REFUSES instead of returning a handle. That
-  // also retires the LSP remainder above **on this arm only**: the remote
-  // branch no longer returns a libsql transaction against an inherited
-  // declaration that promises a knex one, because it returns nothing at all.
-  // The `Promise<any>` annotation stays, because the LOCAL/replica arm is still
-  // `super.beginTransaction()` and the analysis above is unchanged for it.
-  override async beginTransaction(): Promise<any> {
+  // What dissolved it is that the remote arm no longer returns anything.
+  // [#18616] made it REFUSE, and `refuseRemoteTransaction` returns `never`, so
+  // the branch is assignable to any return type; the only arm that still
+  // returns is `super.beginTransaction()`, whose type this now simply repeats.
+  // The LSP violation is not re-dressed here, it is absent: there is no longer
+  // a value that fails to be a knex transaction.
+  //
+  // And [#18063] closes the path that reached it. `supports` now declares
+  // `transactionsUnsupported` on the remote arm and the engine gates on the
+  // DECLARATION, so `engine.transaction()` takes the non-transactional path
+  // (ADR-0119 D1) rather than calling this and catching a 501 — the refusal
+  // below stays as the floor for a caller that reaches past the engine.
+  // ⛔ Spelled `ReturnType<SqlDriver['beginTransaction']>` and not
+  // `Promise<Knex.Transaction>`: `knex` is not a dependency of this package, so
+  // its types cannot be named here (`check:undeclared-dep-imports`; the same
+  // reason `turso-driver-doors-declared-types.test.ts` structurally types its
+  // knex slice). Deriving it from the base is also the stronger pin — it cannot
+  // drift from whatever `SqlDriver` publishes.
+  override async beginTransaction(): ReturnType<SqlDriver['beginTransaction']> {
     if (this.isRemote) {
       refuseRemoteTransaction(
         '`beginTransaction()`',
