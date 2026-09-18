@@ -8,6 +8,8 @@
  *   node scripts/check-single-claim-paths.mjs              # judge this PR (CI)
  *   node scripts/check-single-claim-paths.mjs --self-test  # verify it offline
  *
+ * A live run re-execs itself once through the session proxy (transport, below).
+ *
  * ⚠️ Repo paths are named UNQUOTED in this header on purpose, and the self-test
  * fixtures below use paths that exist in no repo. Both are load-bearing; the
  * last section carries the measurement that forces them.
@@ -145,10 +147,17 @@
  * names a tree that does not exist, so a hint on one can never match anything.
  */
 
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
+// ⛔ Not copied. The proxy-rearm plan is ONE source in the half-states patrol,
+// the same import post-stamped.mjs and check-prior-rulings.mjs take, so this gate
+// and they cannot come to disagree about whether this container's fetch reaches
+// the API. Only the guard variable below is this file's.
+import { PROXY_FLAG, PROXY_REARM_GUARD, proxyRearmPlan } from './pm/check-half-states.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -181,12 +190,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'The failure has to carry the remedy, not just the verdict.': 3,
   'UNDETERMINED is its own answer. It must never read as clean, and it': 5,
   'Wiring absent: never clean, never an accusation.': 16,
+  'The transport route: the decision, and the two runs that take none.': 18,
   'The short-circuit. This is the property that makes the gate affordable,': 22,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 8;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -520,6 +530,94 @@ export async function collect(ctx, api) {
   return { ...ctx, claimed, others, undetermined };
 }
 
+// ---------------------------------------------------------------------------
+// Transport — routing this process's `fetch` at the session proxy before it
+// asks GitHub anything.
+//
+// MEASURED in an agent container: `HTTPS_PROXY` is set, that proxy injects the
+// real credential, the token variables hold a placeholder, and node's `fetch`
+// does not read `HTTPS_PROXY` — so an unrouted read sends the placeholder and
+// the first call throws `GitHub API 401`. `curl` on the same container answers
+// 200, which is what says the failure is a ROUTE and not a credential anyone
+// could go and fix. Until this shim, that was the whole local story of this
+// gate: its verdict could be taken in CI only, and a dev running the derived
+// gate list in a container recorded it NOT MEASURED rather than a verdict.
+//
+// ⛔ Nothing about the verdict changes here. A transport error on a bypassed
+// route keeps the class it had before, no exit code is added, and the
+// EXIT_NOT_WIRED routing is untouched — a run with no usable PR context reads
+// nothing, so it re-execs nothing either.
+
+/** This file, resolved for the re-exec below. */
+const SELF_PATH = fileURLToPath(import.meta.url);
+
+/**
+ * This file's OWN re-exec guard, deliberately not the patrol's: one shared
+ * variable would let a re-exec of another instrument suppress the re-exec of
+ * this one, and the symptom would be the silent 401 this exists to close.
+ */
+export const OWN_PROXY_REARM_GUARD = 'OS_SINGLE_CLAIM_PATHS_PROXY_REARMED';
+
+/**
+ * Is a network read imminent? Only then is a route worth re-arming. Pure, so
+ * every branch is pinned offline with no proxy present.
+ *
+ * Two runs read nothing and must therefore spawn nothing: `--self-test`, which
+ * is offline by contract, and a run whose PR context is absent or incomplete,
+ * which exits EXIT_NOT_WIRED having made no request. Re-execing either would
+ * spawn a child to prove a route nothing is about to use, and would print an
+ * informational line in front of the NOT WIRED text a reader is there to read.
+ *
+ * @param {{ argv?: string[], ctx?: null | { wired?: boolean } }} [run]
+ */
+export function transportRouteApplies({ argv = [], ctx = null } = {}) {
+  if (argv.includes('--self-test')) return false;
+  return ctx !== null && ctx.wired !== false;
+}
+
+/**
+ * The re-exec decision for this file: the shared plan, read through this file's
+ * own guard name. Pure — env, execArgv and flag support in, decision out.
+ */
+export function proxyRearmDecision({ env = {}, execArgv = [], flagSupported = true } = {}) {
+  return proxyRearmPlan({
+    // Map this file's guard onto the name the shared plan reads, so the logic
+    // stays single-sourced while the guards stay independent.
+    env: { ...env, [PROXY_REARM_GUARD]: env[OWN_PROXY_REARM_GUARD] },
+    execArgv,
+    flagSupported,
+  });
+}
+
+/**
+ * Re-exec ONCE with the proxy flag — argv, env and stdio forwarded — and return
+ * the child's exit code, or `null` when this run carries on in-process.
+ */
+function rearmThroughProxy(args) {
+  const plan = proxyRearmDecision({
+    env: process.env,
+    execArgv: process.execArgv,
+    flagSupported: process.allowedNodeEnvironmentFlags.has(PROXY_FLAG),
+  });
+  if (plan.hint) {
+    console.error(`ℹ️  ${plan.reason}. A failure below may be about the route, not this container.`);
+    return null;
+  }
+  if (!plan.rearm) return null;
+  console.error(`ℹ️  re-exec with ${plan.flag}: ${plan.reason}.`);
+  const quiet = process.allowedNodeEnvironmentFlags.has('--disable-warning') ? ['--disable-warning=UNDICI-EHPA'] : [];
+  const child = spawnSync(process.execPath, [plan.flag, ...quiet, SELF_PATH, ...args], {
+    stdio: 'inherit',
+    env: { ...process.env, [OWN_PROXY_REARM_GUARD]: '1' },
+  });
+  if (typeof child.status === 'number') return child.status;
+  console.error(
+    `⚠️  could not re-exec with ${plan.flag} (${child.error?.message ?? 'no exit status'}); `
+      + 'continuing in-process — every request will bypass the proxy.',
+  );
+  return null;
+}
+
 const githubApi = (token) => async (path) => {
   const response = await fetch(`https://api.github.com${path}`, {
     headers: {
@@ -676,6 +774,32 @@ function selfTest() {
     { number: '16326', repo: 'o/r', token: 't' },
   );
 
+  // --- The transport route. The re-exec is what makes this gate readable
+  // outside CI, and it is invisible in the verdict layer, so the DECISION is
+  // what is pinned — offline, with no proxy present and no request made.
+  battery('The transport route: the decision, and the two runs that take none.');
+  t('a configured proxy routes this run', proxyRearmDecision({ env: { HTTPS_PROXY: 'http://127.0.0.1:45311' } }).rearm, true);
+  t('...with the flag node only reads at process start', proxyRearmDecision({ env: { HTTPS_PROXY: 'http://x' } }).flag, PROXY_FLAG);
+  t('...and a reason naming the variable, for a reader of the run log', proxyRearmDecision({ env: { HTTPS_PROXY: 'http://x' } }).reason.includes('HTTPS_PROXY'), true);
+  t('the lowercase spelling counts too', proxyRearmDecision({ env: { https_proxy: 'http://x' } }).rearm, true);
+  t('NO proxy in the environment takes no route (the CI runner leg, unchanged)', proxyRearmDecision({ env: {} }).rearm, false);
+  t('...and it says why it took none', proxyRearmDecision({ env: {} }).reason.includes('directly'), true);
+  t('the flag already in execArgv does not route a second time', proxyRearmDecision({ env: { HTTPS_PROXY: 'http://x' }, execArgv: [PROXY_FLAG] }).rearm, false);
+  t('...nor the same flag in NODE_OPTIONS', proxyRearmDecision({ env: { HTTPS_PROXY: 'http://x', NODE_OPTIONS: `--enable-source-maps ${PROXY_FLAG}` } }).rearm, false);
+  t('...nor the env spelling of that switch', proxyRearmDecision({ env: { HTTPS_PROXY: 'http://x', NODE_USE_ENV_PROXY: '1' } }).rearm, false);
+  t('this file\'s own guard stops a re-exec loop', proxyRearmDecision({ env: { HTTPS_PROXY: 'http://x', [OWN_PROXY_REARM_GUARD]: '1' } }).rearm, false);
+  t('...and that guard is this file\'s, not the patrol\'s', OWN_PROXY_REARM_GUARD === PROXY_REARM_GUARD, false);
+  t('the patrol\'s own guard does not suppress this file\'s re-exec', proxyRearmDecision({ env: { HTTPS_PROXY: 'http://x', [PROXY_REARM_GUARD]: '1' } }).rearm, true);
+  t('a node that will not take the flag hints instead of re-execing', proxyRearmDecision({ env: { HTTPS_PROXY: 'http://x' }, flagSupported: false }).hint, true);
+  t('...and re-execs nothing', proxyRearmDecision({ env: { HTTPS_PROXY: 'http://x' }, flagSupported: false }).rearm, false);
+
+  // WHERE the decision is taken: only by a run that is about to read the API.
+  const liveCtx = readPrContext({ PR_NUMBER: '18844', GITHUB_REPOSITORY: 'o/r', GITHUB_TOKEN: 't' });
+  t('a wired live run takes the routing decision', transportRouteApplies({ argv: [], ctx: liveCtx }), true);
+  t('the offline self-test never takes it', transportRouteApplies({ argv: ['--self-test'], ctx: liveCtx }), false);
+  t('no PR context at all reads nothing, so it routes nothing', transportRouteApplies({ argv: [], ctx: readPrContext({}) }), false);
+  t('an incomplete context (NOT WIRED) routes nothing either', transportRouteApplies({ argv: [], ctx: readPrContext({ PR_NUMBER: '1' }) }), false);
+
   // --- The short-circuit. This is the property that makes the gate affordable,
   // and it is invisible in the verdict layer, so it is pinned here against a
   // recording fake API. Fixture paths name a tree that exists in no repo.
@@ -777,6 +901,13 @@ if (isMain) {
     }
   } else {
     const ctx = readPrContext(process.env);
+    // Transport before the questions that need it: unrouted, the first read
+    // answers 401 in a container where the proxy holds the credential. Placed
+    // AFTER the context read so a NOT WIRED run never pays for a child.
+    if (transportRouteApplies({ argv: process.argv, ctx })) {
+      const rearmed = rearmThroughProxy(process.argv.slice(2));
+      if (rearmed !== null) process.exit(rearmed);
+    }
     const resolved = ctx === null || ctx.wired === false ? ctx : await collect(ctx, githubApi(ctx.token));
     const result = judge(resolved);
     const emit = result.exit === EXIT_CLEAN ? console.log : console.error;
