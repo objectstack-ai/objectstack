@@ -33,6 +33,7 @@ import {
   pruneMarkedUnionBranches,
   type PrunedBranch,
 } from './lib/union-branch-projection';
+import { PUBLISHED_JSON_SCHEMA_TARGET } from './lib/refinement-projection';
 import {
   ComparisonOperatorSchema,
   FieldOperatorsSchema,
@@ -42,7 +43,6 @@ import {
 } from '../src/data';
 import { FlowFunctionEntrySchema } from '../src/automation';
 
-const TARGET = { target: 'draft-2020-12' } as const;
 
 /** Convert with the marker override, the way the projection itself does. */
 function markedProjection(schema: z.ZodType, io: 'output' | 'input' = 'output'): Record<string, unknown> {
@@ -67,6 +67,9 @@ function collect(node: unknown, key: string, into: unknown[] = []): unknown[] {
   }
   return into;
 }
+
+/** The target the two DIRECT `z.toJSONSchema` controls below convert at. */
+const TARGET = { target: PUBLISHED_JSON_SCHEMA_TARGET } as const;
 
 describe('markUnprojectableNodes — what counts as "no JSON form"', () => {
   it('marks a bare z.date(), in BOTH io directions', () => {
@@ -137,7 +140,6 @@ describe('projectByPruningUnionBranches — the contract build-schemas.ts relies
   it('projects the ordering comparand union without its Date branch', () => {
     const projected = projectByPruningUnionBranches(
       z.object({ $gt: z.union([z.number(), z.date(), z.string()]).optional() }),
-      TARGET,
     );
     expect(projected).not.toBeNull();
     expect(projected!.pruned).toEqual([{ at: '#/properties/$gt/anyOf/1', type: 'date' }]);
@@ -150,13 +152,13 @@ describe('projectByPruningUnionBranches — the contract build-schemas.ts relies
 
   it('refuses when an unprojectable node is NOT a union member', () => {
     // Dropping a required `handler` would publish a shape no runtime value has.
-    expect(projectByPruningUnionBranches(z.object({ handler: z.function() }), TARGET)).toBeNull();
-    expect(projectByPruningUnionBranches(z.record(z.string(), z.function()), TARGET)).toBeNull();
-    expect(projectByPruningUnionBranches(z.array(z.date()), TARGET)).toBeNull();
+    expect(projectByPruningUnionBranches(z.object({ handler: z.function() }))).toBeNull();
+    expect(projectByPruningUnionBranches(z.record(z.string(), z.function()))).toBeNull();
+    expect(projectByPruningUnionBranches(z.array(z.date()))).toBeNull();
   });
 
   it('refuses a union whose every branch is unprojectable', () => {
-    expect(projectByPruningUnionBranches(z.union([z.date(), z.function()]), TARGET)).toBeNull();
+    expect(projectByPruningUnionBranches(z.union([z.date(), z.function()]))).toBeNull();
   });
 
   it('refuses a marked node NESTED inside a SURVIVING union branch', () => {
@@ -189,7 +191,7 @@ describe('projectByPruningUnionBranches — the contract build-schemas.ts relies
       expect(findSurvivingMark(marked)).toBe('#/anyOf/0/properties/handler');
     }
 
-    expect(projectByPruningUnionBranches(nested, TARGET)).toBeNull();
+    expect(projectByPruningUnionBranches(nested)).toBeNull();
   });
 
   it('leaves Automation.FlowFunctionEntrySchema skipped, marker and all', () => {
@@ -215,11 +217,11 @@ describe('projectByPruningUnionBranches — the contract build-schemas.ts relies
       expect(JSON.stringify(marked)).toContain(UNPROJECTABLE_MARK);
     }
 
-    expect(projectByPruningUnionBranches(FlowFunctionEntrySchema as z.ZodType, TARGET)).toBeNull();
+    expect(projectByPruningUnionBranches(FlowFunctionEntrySchema as z.ZodType)).toBeNull();
   });
 
   it('returns null when there was nothing to drop', () => {
-    expect(projectByPruningUnionBranches(z.object({ a: z.string() }), TARGET)).toBeNull();
+    expect(projectByPruningUnionBranches(z.object({ a: z.string() }))).toBeNull();
   });
 
   it('prefers the direction that drops FEWER branches, not output-first', () => {
@@ -231,7 +233,7 @@ describe('projectByPruningUnionBranches — the contract build-schemas.ts relies
       z.string().transform((s) => s.length),
       z.number(),
     ]);
-    const projected = projectByPruningUnionBranches(withTransform, TARGET);
+    const projected = projectByPruningUnionBranches(withTransform);
     expect(projected).not.toBeNull();
     expect(projected!.io).toBe('input');
     expect(projected!.pruned.map((b) => b.type)).toEqual(['date']);
@@ -239,7 +241,7 @@ describe('projectByPruningUnionBranches — the contract build-schemas.ts relies
   });
 
   it('never returns a schema still carrying a marker, and never an empty `{}` branch', () => {
-    const projected = projectByPruningUnionBranches(ComparisonOperatorSchema, TARGET);
+    const projected = projectByPruningUnionBranches(ComparisonOperatorSchema);
     expect(projected).not.toBeNull();
     expect(findSurvivingMark(projected!.schema)).toBeNull();
     expect(JSON.stringify(projected!.schema)).not.toContain(UNPROJECTABLE_MARK);
@@ -266,15 +268,15 @@ describe('the four filter exports #16431 measured, and the boundary beside them'
         /cannot be represented in JSON Schema/,
       );
     }
-    const projected = projectByPruningUnionBranches(schema as z.ZodType, TARGET);
+    const projected = projectByPruningUnionBranches(schema as z.ZodType);
     expect(projected).not.toBeNull();
     expect(projected!.pruned).toHaveLength(dropped);
     expect(new Set(projected!.pruned.map((b) => b.type))).toEqual(new Set(['date']));
   });
 
   it('publishes the five operators the card named, with their prose intact', () => {
-    const comparison = projectByPruningUnionBranches(ComparisonOperatorSchema, TARGET)!;
-    const range = projectByPruningUnionBranches(RangeOperatorSchema, TARGET)!;
+    const comparison = projectByPruningUnionBranches(ComparisonOperatorSchema)!;
+    const range = projectByPruningUnionBranches(RangeOperatorSchema)!;
     const slots = comparison.schema.properties as Record<string, { description?: string }>;
     for (const op of ['$gt', '$gte', '$lt', '$lte']) {
       expect(slots[op]?.description).toContain('null is NOT a comparand');
@@ -286,6 +288,6 @@ describe('the four filter exports #16431 measured, and the boundary beside them'
   it('leaves a driver interface of z.function() members skipped', () => {
     // The population the #16431 ratchet holds closed must not be emptied by a
     // projection that publishes shapes nobody authors.
-    expect(projectByPruningUnionBranches(PersistenceAdapterSchema, TARGET)).toBeNull();
+    expect(projectByPruningUnionBranches(PersistenceAdapterSchema)).toBeNull();
   });
 });

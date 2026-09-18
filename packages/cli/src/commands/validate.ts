@@ -44,6 +44,7 @@ import {
   isReportedError,
 } from '../utils/format.js';
 import { checkProtocolVersionGap } from '../utils/protocol-version-gap.js';
+import { readSpecReleaseChanges } from '../utils/spec-release-changes.js';
 // [#14553] The navigation-contribution group check, shared with `os compile`.
 // Reports; never refuses — the runtime still relocates, deliberately.
 import { findNavGroupDiagnostics } from '../utils/nav-contribution-groups.js';
@@ -590,6 +591,14 @@ export default class Validate extends Command {
       // point at the migration guide.
       const protocolGap = checkProtocolVersionGap(config.manifest);
 
+      // The minor-resolution half of the same question. `protocolGap` is null
+      // for an app on `^17` running spec 17.4.0 — compatible at the major, and
+      // silent about a release that narrowed accept-sets under the launch-window
+      // convention. This reads the installed artifact's own per-release delta
+      // (ADR-0087 D4), so `--json` answers "what moved in the release I have"
+      // without a second worktree and a hand diff of two node_modules trees.
+      const specReleaseChanges = readSpecReleaseChanges();
+
       // 4b. Structural advisories (non-blocking) — computed HERE, above the
       //     `if (flags.json)` branch, for exactly the reason `unknownKeyWarnings`
       //     is computed up beside `normalized`: everything below that branch only
@@ -696,6 +705,12 @@ export default class Validate extends Command {
             // rename is one stroke, no alias, no dual-key window; its value
             // shape is unchanged.
             protocolVersionGap: protocolGap,
+            // A sibling key, deliberately, rather than a widening of the one
+            // above: `protocolVersionGap` non-null means "the platform on disk
+            // is outside the range you declared", and a consumer gating CI on
+            // that must not start failing because an ordinary minor shipped
+            // exports. One key, one question.
+            specReleaseChanges,
             duration: timer.elapsed(),
           },
           // `--strict` means one thing — "treat warnings as errors" — and it now

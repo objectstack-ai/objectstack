@@ -1817,7 +1817,52 @@ export const ElementTextPropsSchema = lazySchema(() => strictObject({
    * pages.
    */
   content: I18nLabelSchema.describe('Text or Markdown content — a plain string, or an inline locale map'),
-  variant: z.enum(['heading', 'subheading', 'body', 'caption'])
+  /**
+   * Text style variant, declared as the PUBLISHED NINE plus the two spellings
+   * this declaration has always accepted.
+   *
+   * objectui#7450's ruling (director batch #71, 2026-09-07, maintainer
+   * verbatim 「其他同意」) converges `element:text` on the nine values
+   * `@object-ui/types` publishes for its text node — `h1`-`h6`, `body`,
+   * `caption`, `overline` — with `heading` / `subheading` becoming named
+   * refusals carrying migration hints. The maintainer then split the landing
+   * (2026-09-09, option B): release 1 widens and refuses NOTHING, so
+   * out-of-repo authors converge on a released pin before any spelling stops
+   * working; release 2 carries the refusals and waits on a value-level
+   * retirement mechanism that does not exist yet (`retiredKey()` / ADR-0087 D2
+   * retire a KEY, not a VALUE). This entry is release 1. So the accepted set
+   * GROWS by seven and loses nothing: `h1`-`h6` and `overline` were refused
+   * here with `invalid_value` on the 17.3.0 pin, measured, and `heading` /
+   * `subheading` stay accepted.
+   *
+   * Why the widening is authored HERE rather than in objectui: this
+   * declaration is the authoring gate, and it already refused the seven. The
+   * accurate statement of the defect the ruling names is 「the renderer
+   * swallows what the authoring gate already refuses」 — objectui declaring
+   * the nine against a spec that refuses them is the consumer-side widening
+   * AGENTS.md #0.1 bans, and objectui's own per-PR registry↔spec parity gate
+   * catches it.
+   *
+   * ⚠️ `.optional().default('body')` is KEPT, deliberately, not inherited.
+   * Absence is the one thing a widening must not move: a parsed
+   * `element:text` node with no `variant` materialises `variant: 'body'`
+   * today, and it still does — identical bytes in, identical bytes out. The
+   * `ui:text` side of the platform deliberately does NOT synthesise `body`
+   * for an absent `variant` (objectui#6942, protecting unannotated corpus
+   * nodes); that asymmetry is pre-existing, is not this card's to resolve,
+   * and is left exactly where it was. Removing the default here would refuse
+   * nothing and break nothing at the door, but it WOULD change what every
+   * downstream reader sees for an absent key — a silent behaviour change
+   * wearing an additive changeset, which is what the ruling's split exists to
+   * prevent.
+   */
+  variant: z.enum([
+    // The published nine (`@object-ui/types` `TextProps['variant']`).
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'body', 'caption', 'overline',
+    // Accepted since this shape was declared; release 2 turns these two into
+    // named refusals with migration hints, ⛔ not release 1.
+    'heading', 'subheading',
+  ])
     .optional().default('body').describe('Text style variant'),
   align: z.enum(['left', 'center', 'right'])
     .optional().default('left').describe('Text alignment'),

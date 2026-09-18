@@ -225,7 +225,15 @@ describe('the differential isolates the refinement, not the node', () => {
 });
 
 describe('the ratchet adjudicates against the ledger', () => {
-  const site = (path: string) => ({ path, nodeType: 'string', count: 1, aborting: false, verdict: 'dropped' as const, declaredPatterns: [] });
+  const site = (path: string) => ({
+    path,
+    nodeType: 'string',
+    count: 1,
+    aborting: false,
+    verdict: 'dropped' as const,
+    declaredPatterns: [],
+    projectionMoved: false,
+  });
   const census = (defKey: string, paths: string[]) => ({
     defKey,
     dropped: paths.map(site),

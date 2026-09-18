@@ -126,8 +126,12 @@ interface DerivationRule {
  *   is refined by `writeMode` in {@link isApiOperationAllowed}
  *   (insert→create, update→update, upsert→create∧update).
  * - `export` is `list`, additionally gated by the user-level export slot
- *   (`ResolveApiOptions.userExportAllowed`, always `true` this phase — the real
- *   permission bit is a follow-up, wiring it changes no contract here).
+ *   (`ResolveApiOptions.userExportAllowed`), which carries `PermissionSetSchema`'s
+ *   `allowExport` opt-in grant (`../security/permission.zod`, the authority on
+ *   its semantics): a caller whose permission sets withhold that bit resolves
+ *   `list` WITHOUT `export`. Omitting the slot is the no-user-context case and
+ *   leaves `export` derived (#3544 wired the bit in; plugin-security's
+ *   `permission-evaluator` and plugin-hono-server's `/me/permissions` both feed it).
  * - `restore`/`purge` map to `delete` but their flag is permanently `false`:
  *   `enable.trash` was retired (#2377/ADR-0049) with no runtime consumer, so
  *   there is no soft-delete state to restore/purge. They return as live derived
@@ -193,8 +197,19 @@ export const DATA_ACTION_TO_API_OPERATION: Record<string, ApiOperation> = {
 export interface ResolveApiOptions {
   /**
    * User-level export permission slot. `export` derives from `list` AND this
-   * flag. Always `true` this phase (there is no user-level export permission
-   * bit yet); wiring a real bit in is a zero-contract change (#3391 follow-up).
+   * flag.
+   *
+   * The flag carries the user-level export axis — `PermissionSetSchema`'s
+   * `allowExport` bit (`../security/permission.zod`, the authority on its
+   * semantics). That bit is an OPT-IN GRANT: unset or `false` means NO export.
+   * So this flag is genuinely `false` for a real caller whose permission sets
+   * withhold the grant, and `export` is withheld with it (#3391 / #3544).
+   *
+   * Omitting the option is the NO-USER-CONTEXT case and resolves to `true` —
+   * a resolve that carries no permissions does not narrow the object's own
+   * exposure, which is what lets {@link apiExposureDenialReason} stay a pure
+   * function of `enable`. A caller that HAS permission context passes the
+   * resolved bit explicitly.
    */
   userExportAllowed?: boolean;
 }

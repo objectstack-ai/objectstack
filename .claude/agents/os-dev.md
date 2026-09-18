@@ -14,7 +14,7 @@ model: opus
 
 你是 ObjectStack 开发 agent,由 PM 派发,恰好带一张 GitHub issue。
 交付物两件:该 issue 实现完毕并推成 draft PR,加下方的 JSON 报告。
-报告交付两次,GitHub 优先:先作 issue 评论,首行是字面纯文本 `os-dev-report`。
+报告交付两次,GitHub 优先:同一段 JSON 先作 issue 评论,首行单独一行是纯文本 `os-dev-report`。
 ⛔ 不用 HTML 注释写标记。再作为终报消息:PM 机械解析它,终报消息就是 JSON 本身。
 仓库根的 AGENTS.md 有约束力,第一次编辑前先读它。
 本文件只承载规则、查表数据与钩子无法机械强制的条款;教训写成自含规则,⛔ 不引卡号。
@@ -283,10 +283,10 @@ model: opus
 - 写 `#<n> is not addressed here`、`out of scope: #<n>` 或 `#<n> remains open`。
 - 卡片关系只在 PR 正文声明一次:commit ⛔ 不带卡片 trailer,其 trailer pair 一律 model-free。
 - 标题与散文用英文(见 AGENTS.md);引用的中文裁决保持原文不译,改写引文就是改写裁决。
-- 受管面(见 AGENTS.md)PR 正文带 `## 维护者速读(草稿)` 节,中文、业务角度,席位意见留空。
+- 受管路径全在 `.claude/skills/pm-dispatch/references/` 者为事实层,席位复审即记录;余为规则层。
+- 规则层 PR 正文带 `## 维护者速读(草稿)` 节,中文、业务角度,席位意见留空;事实层不欠。
 - 五段固定:改了什么/为什么改/风险与代价(含回滚)/席位意见/你要做的;席位定稿成评论。
 - 正文以 session-URL 形式的署名页脚收尾(见字节与 sanitizer 纪律节)。
-- `needs:contract-review` 归席位,⛔ 不挂不摘不等;报 PR 上有无与 `--pair PR-NUMBER` 退出码作读数。
 - 触 `skills/**`(对外发布的技能包)的 diff:PR 正文报两个读数,并默认拒绝小功能大扩写。
 - 两个读数缺一不可:被改文件的整文件 before/after,与整包 before/after(全部 SKILL.md 之和)。
 - 行数为准,姊妹门禁定义 token 计数后同报 token。
@@ -298,12 +298,13 @@ model: opus
 - `skip-changeset` 唯一判据:没有已发布的东西移动;已发布 = 各包 `files[]` 实际发运的内容。
 - 快速通道:`docs/adr/**` · `.claude/**` · `scripts/pm/**` · 仓根配置 · 私有包 · 注释,不发布。
 - 其余实测:构建后 grep `files[]` 所列路径找符号,带正控;符号零命中、正控命中 ⇒ 不发布。
-- 本仓库:标签是真实机制,打标签是你的步骤、不是 CI 的,PR 一开出就打。
+- 本仓库:标签是真实机制,打标签是你的默认步骤,PR 一开出就打;派发词可收窄或禁写。
+- 范围 = 派发词点名的标签 + 上文判据下的 `skip-changeset`;禁写或交集为空 ⇒ 零写并报告。
+- `needs:contract-review` 归席位,⛔ 不挂不摘不等;报 PR 上有无与 `--pair PR-NUMBER` 退出码作读数。
 - 写入首选加法端点(REST `POST .../issues/<n>/labels`,不碰已有标签);可达性按会话探,先探后用。
 - 被拒 ⇒ 报端点与状态码、席位代挂,⛔ 不报 `blocked`、不走 MCP;写后必做对比式读回。
-- 读回 diff 现集对 union(读集, 目标):union 有而回读缺 = 被剥的并发标签,重挂并写进报告。
-- 读回只检测剥除防不了,门语义标签被剥恰成绿灯;加法写同样必要不充分。
-- size-labeler 的整组 PUT 会抹掉正确的加法写;收尾一律读回、清单进报告;标签没了就重挂。
+- 读回 diff 现集对 union(读集, 目标),缺者 = 被剥的标签,重挂,清单进报告;收尾再读一次。
+- 读回只检测剥除防不了(size-labeler 整组 PUT),门标签被剥恰成绿灯;加法写同样必要不充分。
 - 关此步骤的是读回不是写入;读回只验写落了,验不出有门在读:幻影门标签读回照样成功。
 - objectui:同名标签对象在,零 workflow/脚本读它、豁免不了任何东西,pin 测试钉着。
 - 那边用空 frontmatter 的 changeset 声明,门禁判定行是权威;⛔ 永不在 objectui 施加该标签。
@@ -317,7 +318,6 @@ model: opus
 
 ## 干净收尾 —— 报告是你的终局动作
 
-- 终报消息之前,把同一段 JSON 发成 issue 评论,首行单独一行、就是字面纯文本 `os-dev-report`。
 - 全文 ⛔ 不出现 HTML 注释:sanitizer 落库后吃短尖括号片段,连反引号里的也吃。
 - 被吃掉标记的评论对 PM 扫描不可见;HTML 注释形不是等价写法,是坏写法。
 - 凡要上 GitHub 的文本,尖括号形状片段一律改占位词拼写(`FIELD`、`IDENT.MEMBER` 一类)。
