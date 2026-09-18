@@ -381,17 +381,21 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + 'present — and those cells carried `?` at the base. Nothing '
         + 'deployed changes behaviour; the consumer affected is one outside this repo who reads '
         + 'the published JSON Schema\'s `default` himself, and what he now reads is what the '
-        + '⚠️ FOUR published JSON Schemas change projection direction in this diff, not the two this '
-        + 'table has rows for, and the other two are disclosed nowhere else: `system/MetricsConfig` and '
-        + '`system/TracingConfig` lose `x-io: input` AND gain a `default` (these two rows), while the '
-        + 'nested `system/ServiceLevelIndicator` and `system/TraceSamplingConfig` lose `x-io: input` '
-        + 'and gain a `required` MEMBER with no default to declare — `enabled` and `rules` respectively — '
-        + 'so this ratchet never sees them. Measured at head: all four carry no `x-io` and `required` '
-        + 'lists the defaulted keys; ten other `system` defs are still input-mode, and the same-category '
-        + 'control `system/CacheConfig` is untouched. A `required` that lists defaulted keys is this '
-        + 'repo\'s existing output-mode convention, not a new one. '
         + 'parser has always applied. To keep the old value there is nothing to write — the key, '
-        + 'its type and its default are unchanged.',
+        + 'its type and its default are unchanged.'
+        + ' ⚠️ FOUR published JSON Schemas change projection direction in this diff, not the two '
+        + 'this table has rows for, and the other two are disclosed nowhere else: '
+        + '`system/MetricsConfig` and `system/TracingConfig` lose `x-io: input` AND gain a `default` '
+        + '(these two rows), while the nested `system/ServiceLevelIndicator` and '
+        + '`system/TraceSamplingConfig` lose `x-io: input` and gain a `required` MEMBER — `enabled` '
+        + 'and `rules` respectively — whose defaults (`true` and `[]`) were ALREADY PUBLISHED at the '
+        + 'base and did not move. Only the first two carry a `default` MOVE, so only those two are '
+        + 'declarable here: this ratchet records default VALUES per key, so it is blind to `required` '
+        + 'growth by construction, and the nested pair has no row it could live in. Measured at head: '
+        + 'all four carry no `x-io` and `required` lists the defaulted keys; ten other `system` defs '
+        + 'are still input-mode, and the same-category control `system/CacheConfig` is untouched. A '
+        + '`required` that lists defaulted keys is this repo\'s existing output-mode convention, not '
+        + 'a new one.',
     },
     {
       key: 'system/TracingConfig:sampling',
@@ -412,17 +416,21 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + 'key of every `system/TracingConfig` nested type cell (`parentBased`, `propagation`, '
         + '`spanLimits`, `performance`, `instrumentation`), the output-mode signature. '
         + 'Nothing deployed changes behaviour; the consumer affected is one outside this '
-        + '⚠️ FOUR published JSON Schemas change projection direction in this diff, not the two this '
-        + 'table has rows for, and the other two are disclosed nowhere else: `system/MetricsConfig` and '
-        + '`system/TracingConfig` lose `x-io: input` AND gain a `default` (these two rows), while the '
-        + 'nested `system/ServiceLevelIndicator` and `system/TraceSamplingConfig` lose `x-io: input` '
-        + 'and gain a `required` MEMBER with no default to declare — `enabled` and `rules` respectively — '
-        + 'so this ratchet never sees them. Measured at head: all four carry no `x-io` and `required` '
-        + 'lists the defaulted keys; ten other `system` defs are still input-mode, and the same-category '
-        + 'control `system/CacheConfig` is untouched. A `required` that lists defaulted keys is this '
-        + 'repo\'s existing output-mode convention, not a new one. '
         + 'repo who reads the published JSON Schema\'s `default` himself. To keep the old value '
-        + 'there is nothing to write — the key, its type and its default are unchanged.',
+        + 'there is nothing to write — the key, its type and its default are unchanged.'
+        + ' ⚠️ FOUR published JSON Schemas change projection direction in this diff, not the two '
+        + 'this table has rows for, and the other two are disclosed nowhere else: '
+        + '`system/MetricsConfig` and `system/TracingConfig` lose `x-io: input` AND gain a `default` '
+        + '(these two rows), while the nested `system/ServiceLevelIndicator` and '
+        + '`system/TraceSamplingConfig` lose `x-io: input` and gain a `required` MEMBER — `enabled` '
+        + 'and `rules` respectively — whose defaults (`true` and `[]`) were ALREADY PUBLISHED at the '
+        + 'base and did not move. Only the first two carry a `default` MOVE, so only those two are '
+        + 'declarable here: this ratchet records default VALUES per key, so it is blind to `required` '
+        + 'growth by construction, and the nested pair has no row it could live in. Measured at head: '
+        + 'all four carry no `x-io` and `required` lists the defaulted keys; ten other `system` defs '
+        + 'are still input-mode, and the same-category control `system/CacheConfig` is untouched. A '
+        + '`required` that lists defaulted keys is this repo\'s existing output-mode convention, not '
+        + 'a new one.',
     },
   ],
 };
