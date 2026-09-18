@@ -19,6 +19,7 @@
 // is reported `blocked` with a precise reason — the gate stays honest.
 
 
+import { referenceCarrierOf } from '@objectstack/spec/data';
 import { declaredCollection } from './artifact-collections.js';
 
 const COMPUTED = new Set(['formula', 'summary', 'autonumber', 'rollup', 'vector']);
@@ -133,8 +134,16 @@ const REJECTED_REFERENCE_ALIASES = ['reference_to', 'referenceTo'] as const;
  * reports THAT.
  */
 function relationTarget(f: any): string | null {
-  const ref = f?.reference;
-  return typeof ref === 'string' && ref.length > 0 ? ref : null;
+  // [#18550] The carrier read through the ONE arbiter, which is the same
+  // argument the docblock above makes for {@link rejectedReferenceAlias}, one
+  // step further: degrading an UNREADABLE carrier to the generic "has no
+  // `reference` target" is the trade this reader already refused to make for a
+  // rejected alias. The operator would read "this object could not be derived"
+  // and never learn the carrier was the reason. Absence keeps its answer —
+  // `undefined` / `null` / `''` all become `null` here, exactly as before, and
+  // the report line about an absent target is still a report line.
+  const ref = referenceCarrierOf(f, 'verify deriveCrudCases relationTarget');
+  return ref ?? null;
 }
 
 /**

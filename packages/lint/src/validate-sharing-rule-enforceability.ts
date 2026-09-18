@@ -137,6 +137,7 @@
  */
 
 import { compileCelToFilter } from '@objectstack/formula';
+import { referenceCarrierOf } from '@objectstack/spec/data';
 import { recordsOf } from './object-graph.js';
 
 /** A `condition` outside the pushdown subset — the rule is never seeded. */
@@ -258,8 +259,13 @@ function effectiveSharingModelOf(obj: AnyRec): 'private' | 'read' | 'public' {
 function masterOf(obj: AnyRec): string | undefined {
   for (const f of recordsOf(obj.fields)) {
     if (f.type === 'master_detail') {
-      const ref = f.reference;
-      if (typeof ref === 'string' && ref) return ref;
+      // [#18550] Through the ONE arbiter. An unreadable carrier used to read
+      // as "this master_detail names no master", so a `controlled_by_parent`
+      // detail whose master IS declared answered `undefined` here and the
+      // arm that needs the master went quiet. Absence still answers
+      // `undefined` and falls through to the `return undefined` below.
+      const ref = referenceCarrierOf(f, 'validate-sharing-rule-enforceability masterOf');
+      if (ref) return ref;
     }
   }
   return undefined;

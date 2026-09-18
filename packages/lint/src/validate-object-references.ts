@@ -79,6 +79,7 @@ import {
   isPlatformProvidedObjectName,
   PLATFORM_PROVIDED_OBJECT_NAMES,
 } from '@objectstack/spec/system';
+import { referenceCarrierOf } from '@objectstack/spec/data';
 
 import { recordsOf, suggestName } from './object-graph.js';
 
@@ -293,8 +294,16 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
       const type = strName(field.type);
       if (!type || !RELATIONSHIP_TARGET_FIELD_TYPES.has(type)) continue;
       const fieldName = strName(field.name) ?? `#${fi}`;
+      // [#18550] Through the ONE arbiter. `strName` gave an unreadable carrier
+      // the same answer as an absent one, and `check` returns early on
+      // `undefined` — so the field that most needs a target reported NOTHING:
+      // not `relationship/missing-reference` (the target is not missing), and
+      // not this rule's unknown-object error either. Absence still answers
+      // `undefined` and this rule still, deliberately, says nothing about it —
+      // an absent target is `field/relationship-without-reference`'s subject,
+      // not this rule's.
       check(
-        strName(field.reference),
+        referenceCarrierOf(field, 'validate-object-references field target'),
         `object "${objName}" · field "${fieldName}"`,
         `objects[${oi}].fields.${fieldName}.reference`,
         `${type} target`,
@@ -312,8 +321,12 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
       if (!param || typeof param !== 'object') continue;
       const paramLabel = strName(param.name) ?? strName(param.field) ?? `#${pi}`;
       const where = `${actionLabel} · param "${paramLabel}"`;
+      // [#18550] Same arbiter, same split. The carrier here is
+      // `ActionParamSchema.reference`, whose own docblock says the key name
+      // "deliberately mirrors `FieldSchema.reference` so the same spelling"
+      // carries the target object's name — one contract, so one reader.
       check(
-        strName(param.reference),
+        referenceCarrierOf(param, 'validate-object-references action param target'),
         where,
         `${actionPath}.params[${pi}].reference`,
         'record-picker target',

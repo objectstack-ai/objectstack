@@ -121,6 +121,7 @@
 
 import { deriveFieldGroupLayout, resolveDisplayField } from '@objectstack/spec/data';
 import type { DisplayNameObjectMeta } from '@objectstack/spec/data';
+import { referenceCarrierOf } from '@objectstack/spec/data';
 import { collectionEntries } from './collection-entries.js';
 import { recordsOf } from './object-graph.js';
 import { injectedColumnsFor } from './system-fields.js';
@@ -549,7 +550,12 @@ function walkObject(ledger: ConsumerLedger, obj: AnyRec, objectName: string, obj
     walk(ledger, value, objectName, 'objects', `${objPath}.${key}`, [key], key);
   }
   for (const { rec: field, path: fieldPath } of collectionEntries(obj.fields, fieldsPath)) {
-    const reference = strName(field.reference);
+    // [#18550] The carrier through the ONE arbiter: `strName` answered
+    // `undefined` for an unreadable one exactly as it does for an absent one,
+    // so the `displayField` consumer edge below was never recorded and the
+    // ledger under-reported — a field a lookup DOES display read as unused.
+    // Absence still answers `undefined` and records nothing.
+    const reference = referenceCarrierOf(field, 'validate-field-consumers walkObject');
     const displayField = strName(field.displayField);
     if (reference && displayField && ledger.declares(reference, displayField)) {
       ledger.record(reference, displayField, { root: 'objects', path: `${fieldPath}.displayField`, kind: 'display' });
