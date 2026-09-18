@@ -1406,10 +1406,10 @@ export interface OrganizationRemoveMemberResult {
 
 /**
  * What `GET /organization/get-full-organization` answers: the row (metadata
- * as stored JSON text, see {@link OrganizationWire}) plus every invitation of
- * any status, every member with its user joined, and — because this platform
- * mounts the organization plugin with `teams: { enabled: true }`
- * unconditionally — the organization's teams.
+ * decoded, see {@link OrganizationWire}) plus every invitation of any status,
+ * every member with its user joined, and — because this platform mounts the
+ * organization plugin with `teams: { enabled: true }` unconditionally — the
+ * organization's teams.
  */
 export interface OrganizationFullWire extends OrganizationWire {
     invitations: OrganizationInvitationWire[];
@@ -3644,8 +3644,8 @@ export class ObjectStackClient {
      *
      * POST /api/v1/auth/organization/set-active
      *
-     * Answers the organization row as STORED (`metadata` is the JSON text,
-     * see {@link OrganizationWire}). Answers `null` — measured, a 4-byte body
+     * Answers the organization row with `metadata` DECODED (see
+     * {@link OrganizationWire}). Answers `null` — measured, a 4-byte body
      * — when `organizationId` is the empty string and the session has no
      * active organization to fall back to; a non-member is a thrown 403.
      */
@@ -3662,7 +3662,7 @@ export class ObjectStackClient {
      * Get full organization detail (members, invitations, teams).
      * GET /api/v1/auth/organization/get-full-organization?organizationId=...
      *
-     * `metadata` is the stored JSON text here (see {@link OrganizationWire}).
+     * `metadata` is decoded here (see {@link OrganizationWire}).
      * Answers `null` (measured) when `organizationId` is the empty string and
      * the session has no active organization; an unknown id is a thrown 400.
      */
@@ -3774,7 +3774,8 @@ export class ObjectStackClient {
      *
      * POST /api/v1/auth/organization/delete
      *
-     * Answers the deleted organization's row as it was stored (measured) —
+     * Answers the deleted organization's row as it stood immediately before
+     * deletion (measured; `metadata` decoded, see {@link OrganizationWire}) —
      * NOT the bare id string the vendor's OpenAPI stub declares.
      *
      * better-auth removes the organization row, all members, and all
