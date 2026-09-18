@@ -585,14 +585,14 @@
  * wraps closes it by reading the block's removed run forward instead of one
  * line.
  *
- * ⚠️ And the direction this deliberately does NOT touch: a key re-typed INTO a
- * universal acceptor (`z.union([…])` → `z.unknown()`) is a real widening and
- * goes unreported. ⛔ That silence is #16943's replacement budget and it
- * PREDATES this reading — measured identical at 21b7c12b4 with the new-key and
- * widened-enum controls firing on the same harness — so it is filed as its own
- * finding rather than repaired here: reporting it is a change to the budget for
- * every key, not to this class. The battery carries it as an asserted quiet
- * direction, which is the case that reds the day it is repaired.
+ * ⚠️ And the direction this reading deliberately did NOT touch — now CLOSED
+ * by #18629 rather than left standing: a key re-typed INTO a universal acceptor
+ * (`z.union([…])` → `z.unknown()`) is a real widening and went unreported.
+ * ⛔ That silence was #16943's replacement budget and it PREDATED this reading
+ * — measured identical at 21b7c12b4 with the new-key and widened-enum controls
+ * firing on the same harness — so it was filed as its own finding rather than
+ * repaired here. Its section is below; the repair is a second piece of positive
+ * evidence a BLOCK can carry, not a change to the budget for every key.
  *
  * ## The eighth accidental variable #18560 removed — a DECLARING FORM the
  * vocabulary never learned
@@ -942,6 +942,83 @@
  * was silent before. One repair, one false positive closed and one false
  * negative with it.
  *
+ * ## The twelfth accidental variable #18629 removed — the budget's DIRECTION
+ * BLINDNESS, on the one value whose direction a line can carry
+ *
+ * #16943's budget is stated in its own section as "replacement-vs-net-addition,
+ * not spelling", and that arithmetic is deliberately DIRECTIONLESS: it confirms
+ * that the same key was rewritten and ⛔ never asks whether the rewrite accepts
+ * MORE or LESS. For nearly every key that is the right instrument — a line
+ * cannot say what `FilterSchema` admits — and #18234's section is the reading
+ * that supplied the one exception on the REMOVED side: a removed value that
+ * accepted EVERYTHING proves the replacement is a subset by construction.
+ *
+ * ⭐ #18629 is that same fact read on the ADDED side, and the two are one
+ * predicate seen from either end. `- filter: z.union([A, B]),` replaced by
+ * `+ filter: z.unknown().optional(),` is a REAL widening — the accept set goes
+ * from two shapes to the universe — and the budget paid for it silently: the
+ * removed `filter:` line is T1-shaped, buys one T1 unit, and the added line is
+ * no closed-set opener, so nothing even asked for evidence. Measured on this
+ * tree before the repair, with both of the filing card's controls lit on the
+ * same harness (a brand-new key and an enum widened in place both FIRE): the
+ * inverse patch read exit 0.
+ *
+ * ⛔ This is NOT a change to the budget for every key, which is what the
+ * filing card and #18234's section both said it would take. It is a third way
+ * for a BLOCK to carry positive evidence about direction, in the same place the
+ * other two are read and subject to the same default: absence of evidence
+ * leaves the budget paying, exactly as absence of evidence leaves a tell firing
+ * everywhere else in this file. Two facts, both on lines the block shows:
+ *
+ *   ① the ADDED line declares the key as a universal acceptor —
+ *     {@link declaresUniversalAcceptorKey}, the SAME reading #18234 certifies a
+ *     removed value with, so the two ends of the budget cannot disagree about
+ *     what "accepts everything" means; and
+ *   ② the same block removed the SAME key, on a line that carries NO universal
+ *     acceptor call at all.
+ *
+ * Fact ② is the precision, and it is written as a mention rather than as
+ * "⛔ not certified by ①" on purpose. A removed acceptor whose chain WRAPS onto
+ * a second line is not certifiable — 33 of this tree's 132 acceptor key lines
+ * do not terminate on their own line — so a negated ① would fire on a pure
+ * REFORMAT of an already-universal key, a false positive on a diff that changes
+ * no accept set at all. Reading the mention declines there instead.
+ *
+ * ⭐ And the widening still SPENDS its unit before it is reported, which is the
+ * half that is easy to get wrong. Refusing to spend would hand the unit to the
+ * next added line in the block, so a genuinely new key riding along with the
+ * widening would go silent — this file's surplus rule inverted, buying one
+ * report at the price of another. The spend is unchanged and the row is
+ * reported on top of it: `- filter: z.union([A, B]),` `+ filter: z.unknown(),`
+ * `+ other: z.string(),` reports BOTH lines, each with its own file:line.
+ *
+ * ⚠️ The quiet directions this buys, stated rather than left to be discovered,
+ * and all three are the SAME default — no evidence, no report:
+ *
+ *   • a removed value that merely MENTIONS an acceptor is not read as narrower,
+ *     so `z.array(z.unknown())` → `z.unknown()` and `z.unknown().refine(f)` →
+ *     `z.unknown()` both decline. Both are real widenings; both would need a
+ *     reading of what the removed value did with the acceptor it names, which is
+ *     a shape reading this file does not have.
+ *   • an added acceptor whose own chain wraps onto a second line is not
+ *     certified by ① and declines, the mirror of #18234's residual and closed by
+ *     the same overturn condition.
+ *   • a key re-typed into an acceptor with NO removed line naming it is not this
+ *     row at all, and what becomes of it is #16943's business, unchanged. A
+ *     block that removed some OTHER key still PAYS for it — the one-for-one
+ *     rename silence that section already states — and a block that removed
+ *     nothing reports it as the ordinary new key it is. ⚠️ The first of those
+ *     two is a real remaining silence on this very transition; it is #16943's
+ *     direction blindness on a DIFFERENT key, which no line in the block can
+ *     speak to, and ⛔ not something fact ② could be widened to reach without
+ *     giving up the key match that makes it evidence at all. Both measured,
+ *     both pinned below.
+ *
+ * ⭐ The OVERTURN CONDITION, written down so it needs no second discussion: the
+ * first landed pair whose removed value mentions an acceptor inside a narrower
+ * one closes the first bullet by reading the removed value's shape rather than
+ * its text.
+ *
  * ## The remedy with no reader — #17848, and a pin the shape never had
  *
  * #17848 filed two halves against this family. Re-measuring both on the tree
@@ -1211,6 +1288,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#17955 — a `retiredKey()` tombstone declares a key UNWRITABLE, and never adds a spelling': 37,
   '#17848 — a key RE-DECLARED with a zod `error` param is not a key ADDED': 8,
   '#18234 — a key narrowed OUT of a universal acceptor is not a set that gained a value': 33,
+  '#18629 — a key re-typed INTO a universal acceptor is a real widening the budget must not pay for': 27,
   'T3 — a new row in a published entry point': 8,
   'T4 — a new registration in a registry': 10,
   '#16448 acceptance: the four positive controls, each with its file:line': 8,
@@ -2416,6 +2494,15 @@ const INERT_CHAIN_STEP = /^\.(?:optional|describe|meta)\(/;
 const UNIVERSAL_ACCEPTOR_TAIL = /^[ \t]*,[ \t]*$/;
 
 /**
+ * A universal-acceptor CALL anywhere in a value — the negative half of #18629's
+ * fact ②, and ⛔ never a certification. It answers "this removed value had
+ * something to do with the universe", which is all that is needed to DECLINE;
+ * certifying that a value IS the universe stays {@link declaresUniversalAcceptorKey}'s
+ * one reading.
+ */
+const UNIVERSAL_ACCEPTOR_MENTION = /z\.(?:unknown|any)\(/;
+
+/**
  * The key this line declares as a UNIVERSAL ACCEPTOR, or `null` (#18234).
  *
  * `z.unknown()` is zod's universal acceptor, so a key carrying it accepts
@@ -2493,6 +2580,48 @@ export function replacesUniversalAcceptorKey(text, removedTexts) {
   const key = keyedPropertyName(text);
   if (key === null || !Array.isArray(removedTexts)) return false;
   return removedTexts.some((r) => declaresUniversalAcceptorKey(r) === key);
+}
+
+/**
+ * Does this added line re-type a key the same change block removed INTO a
+ * universal acceptor — a real WIDENING the #16943 budget would otherwise pay
+ * for in silence? (#18629)
+ *
+ * The mirror of {@link replacesUniversalAcceptorKey}, read on the ADDED side,
+ * and the one direction fact a line can carry about a value this file cannot
+ * otherwise shape-read. Two facts, both on lines the BLOCK shows:
+ *
+ *   ① the added line declares the key as a universal acceptor, by the SAME
+ *     reading #18234 certifies a removed one with — so the two ends of the
+ *     budget cannot drift apart about what "accepts everything" means; and
+ *   ② a removed line names the SAME key and carries NO universal-acceptor call
+ *     at all.
+ *
+ * ⛔ Fact ② is a MENTION, deliberately, and not "⛔ not certified by ①". A
+ * removed acceptor whose chain wraps onto a second line cannot be certified —
+ * 33 of this tree's 132 acceptor key lines do not terminate on their own line —
+ * so negating ① would fire on a pure REFORMAT of an already-universal key,
+ * which changes no accept set. Reading the mention declines there instead, and
+ * pays for that with the quiet direction the header states: a removed value that
+ * merely mentions an acceptor inside a narrower one (`z.array(z.unknown())`)
+ * buys the silence too.
+ *
+ * ⛔ The KEY must match, for the reason it must in #18234: a removed
+ * `other: z.string()` says nothing about what `filter` now accepts.
+ *
+ * @param {string} text — one ADDED patch line's text, with its `+` stripped
+ * @param {string[]} removedTexts — the lines this change block REMOVED
+ * @returns {boolean} true when the block carries positive evidence that this
+ *   key's accept set became the universe
+ */
+export function widensKeyIntoUniversalAcceptor(text, removedTexts) {
+  const key = declaresUniversalAcceptorKey(text);
+  if (key === null || !Array.isArray(removedTexts)) return false;
+  return removedTexts.some(
+    (r) =>
+      keyedPropertyName(r) === key &&
+      !UNIVERSAL_ACCEPTOR_MENTION.test(withoutComments(String(r ?? ''))),
+  );
 }
 
 /**
@@ -3456,12 +3585,23 @@ export function tellsInFile(
       !declaresClosedSet ||
       respellsExistingClosedSetKey(text, removedHere) ||
       replacesUniversalAcceptorKey(text, removedHere);
+    // #18629 — … and the SAME fact read on the added side, which is the one
+    // direction the budget was blind to. A key re-typed INTO a universal
+    // acceptor is a real widening: the block removed that key carrying no
+    // acceptor at all and put the universe on it.
+    //
+    // ⭐ It still SPENDS. Refusing the spend would hand the unit to the next
+    // added line in the block, so a genuinely new key riding along with the
+    // widening would go silent — the surplus rule inverted, one report bought
+    // at the price of another. The unit is consumed exactly as before and the
+    // row is reported on top of it.
+    const widensIntoAcceptor = widensKeyIntoUniversalAcceptor(text, removedHere);
     if (kind !== null && spendable) {
       const budget = budgetOfLine.get(i);
       const paid = budget?.get(kind) ?? 0;
       if (paid > 0) {
         budget.set(kind, paid - 1);
-        continue;
+        if (!widensIntoAcceptor) continue;
       }
     }
     // #17300 — a retirement-ledger row this DIFF mints the licence for is a
@@ -3493,7 +3633,13 @@ export function tellsInFile(
       // object-level refinement, so without this reading every diff that adds a
       // cross-field REFUSAL raised a widening tell for the refusal itself.
       if (inParameterList(newFile, newAt.get(i))) continue;
-      rows.push({ tell: 'T1', ...at, why: 'a new key on a Zod object schema — the accept set gains a spelling an author may now write' });
+      rows.push({
+        tell: 'T1',
+        ...at,
+        why: widensIntoAcceptor
+          ? 'a key re-typed INTO a universal acceptor (`z.unknown()` / `z.any()`) — the accept set for a key the same block removed becomes every value an author may write'
+          : 'a new key on a Zod object schema — the accept set gains a spelling an author may now write',
+      });
       continue;
     }
     // #16822 — an opener that re-declares a set the same hunk removed adds no
@@ -4683,15 +4829,68 @@ export function selfTest() {
   t('⭐ the vocabulary is INTACT — `memberTellKind` still classifies a universal-acceptor key line as T1, so both sides of the budget read one question', memberTellKind('  filter: z.unknown().optional(),', { onContractSource: true }) === 'T1');
   t('⭐ …and the narrowed key SPENDS the budget rather than being exempt from it: two removed acceptors pay for two narrowed keys, and a third key fires', tells(uaHere('@@ -30,2 +30,3 @@\n-  a: z.unknown(),\n-  b: z.unknown(),\n+  a: z.union([X]),\n+  b: z.union([Y]),\n+  c: z.union([Z]),')).length === 1);
 
-  // ⚠️ The direction this reading deliberately does NOT touch, asserted rather
-  // than described: a key re-typed INTO a universal acceptor — `z.union([…])`
-  // → `z.unknown()` — is a real WIDENING and goes unreported. ⛔ That silence
-  // is #16943's replacement budget and it predates this reading: measured
-  // identical at 21b7c12b4, with the new-key and widened-enum controls firing
-  // on the same harness. It is filed as its own finding rather than repaired
-  // here, because reporting it is a change to the budget for EVERY key rather
-  // than to this one class, and this case is what reds the day that lands.
-  t('⚠️ QUIET — the inverse direction (a key re-typed INTO `z.unknown()`) is unreported, unchanged by this reading and filed as its own card', tells(uaHere('@@ -30,1 +30,1 @@\n-  filter: z.union([A, B]),\n+  filter: z.unknown().optional(),')).length === 0);
+  // ⭐ The direction this reading deliberately did NOT touch was asserted here
+  // as a QUIET one, on the stated ground that "this case is what reds the day
+  // that lands". #18629 is that day, and its own battery is below. What stays
+  // here is the half that must NOT have moved: repairing the inverse must not
+  // be bought by breaking this reading's own direction, so the live pair is
+  // re-asserted in the same case that asserts the inverse now fires.
+  t('⭐ #18629 closed the inverse direction (a key re-typed INTO `z.unknown()` now FIRES) — and this reading\'s own direction is UNCHANGED by it', tells(uaHere('@@ -30,1 +30,1 @@\n-  filter: z.union([A, B]),\n+  filter: z.unknown().optional(),')).length === 1 && uaTells(UNIVERSAL_ACCEPTOR_NARROWED).length === 0);
+
+  // -- #18629: the same fact read on the ADDED side --------------------------
+  //
+  // #16943's budget confirms that a key was REWRITTEN and never asks whether the
+  // rewrite accepts more or less. #18234 supplied the one direction fact a line
+  // can carry, on the REMOVED side; this battery is that fact on the ADDED side,
+  // and the two are one predicate seen from either end.
+  //
+  // ⭐ Read the FIRING half first, as every battery above it is ordered: a
+  // reading that can only suppress is untestable in the direction that matters,
+  // and this one can only REPORT, so the decline is bracketed on every side —
+  // an acceptor re-spelled as an acceptor, a wrapped acceptor pulled onto one
+  // line, an acceptor mentioned inside a narrower value, an added acceptor whose
+  // own chain wraps, and a rename onto a key no removed line names.
+  battery('#18629 — a key re-typed INTO a universal acceptor is a real widening the budget must not pay for');
+  const inv = (...lines) => uaHere(['@@ -30,4 +30,4 @@ export const S = z.object({', ...lines, ' '].join('\n'));
+  const invTells = (...lines) => tells(inv(...lines));
+  const invAt = (...lines) => at(inv(...lines));
+  const INV_REMOVED = '-  filter: z.union([A, B]),';
+  const INV_ADDED = '+  filter: z.unknown().optional(),';
+  const INV_WHY = 'a key re-typed INTO a universal acceptor';
+
+  // -- the firing half: what the budget must no longer pay for ---------------
+  t('⭐ THE FINDING — the filing card\'s own patch: a key re-typed from `z.union([A, B])` into `z.unknown()` FIRES, where the replacement budget paid for it in silence', invTells(INV_REMOVED, INV_ADDED).length === 1);
+  t('…at the line that declares the key, which is the row an author has to answer for', invAt(INV_REMOVED, INV_ADDED)[0] === 'packages/spec/src/a.zod.ts:30');
+  t('⭐ …and the row NAMES the direction rather than reporting a key that was never added', invTells(INV_REMOVED, INV_ADDED)[0]?.why.startsWith(INV_WHY));
+  t('⭐ `z.any()` is in the class on the SAME measurement #18234 read it by — both accept every value', invTells(INV_REMOVED, '+  filter: z.any(),').length === 1);
+  t('⛔ a removed value that was never a closed set is evidence too — `z.string()` is not the universe either', invTells('-  filter: z.string(),', '+  filter: z.unknown(),').length === 1);
+  t('⛔ …and so is a removed multi-line OPENER on the same key, whose own list never closes on its line', invTells('-  filter: z.union([', '-    A,', '-  ]),', '+  filter: z.unknown(),').length === 1);
+  const INV_SURPLUS = ['-  filter: z.union([A, B]),', '+  filter: z.unknown(),', '+  other: z.string(),'];
+  t('⭐ SPEND CONTROL — the widening SPENDS its unit and is reported ON TOP of it, so a genuine new key riding along still fires', invTells(...INV_SURPLUS).length === 2);
+  t('…and the two rows are the widened key and the new key, each with its own file:line — refusing the spend would have silenced the second', invAt(...INV_SURPLUS).join(' ') === 'packages/spec/src/a.zod.ts:30 packages/spec/src/a.zod.ts:31');
+  t('…and only the first carries the direction wording; the new key is reported as the new key it is', invTells(...INV_SURPLUS)[0]?.why.startsWith(INV_WHY) && !invTells(...INV_SURPLUS)[1]?.why.startsWith(INV_WHY));
+  t('⛔ a removal in a DIFFERENT change block is a different edit — the acceptor fires there as the ordinary new key it is', invTells(INV_REMOVED, '   ctx', '+  filter: z.unknown(),').length === 1);
+  t('⛔ DARK CONTROL — the same added acceptor with NOTHING removed still fires: the row is bought by the removal, never by the added shape', invTells('+  filter: z.unknown(),').length === 1);
+  t('…and THAT row is the plain new-key reading, which is the whole difference this reading makes', invTells('+  filter: z.unknown(),')[0]?.why.startsWith(INV_WHY) === false);
+  t('⛔ a trailing COMMENT mentioning the acceptor is not the value — comments are stripped before the mention is read', invTells('-  filter: z.string(), // was z.unknown()', '+  filter: z.unknown(),').length === 1);
+  t('⭐ the reading is about the BLOCK, never the board — the same shape on the objectui mirror reads the same', uaTells({ filename: UA_MIRROR, status: 'modified', patch: uaPatch(INV_REMOVED, INV_ADDED) }).length === 1);
+  t('⛔ …and nothing at all fires off the contract source surface', tellsInFile({ filename: 'packages/core/src/a.ts', status: 'modified', patch: uaPatch(INV_REMOVED, INV_ADDED) }, {}).length === 0);
+
+  // -- the declining half: what is NOT a widening ----------------------------
+  t('⛔ NEUTRAL CONTROL — an acceptor re-spelled as an acceptor gained nothing and still declines', invTells('-  filter: z.unknown().optional(),', '+  filter: z.unknown(),').length === 0);
+  t('⛔ REFORMAT CONTROL — a removed acceptor whose chain WRAPS is read as a MENTION, so pulling it onto one line is not read as a widening', invTells('-  filter: z.unknown()', "-    .describe('x'),", "+  filter: z.unknown().describe('x'),").length === 0);
+  t('⚠️ QUIET — a removed value that merely MENTIONS an acceptor inside a narrower one declines; the header states it with its overturn condition', invTells('-  filter: z.array(z.unknown()),', '+  filter: z.unknown(),').length === 0);
+  t('⚠️ QUIET — an added acceptor whose own chain wraps onto a second line is not certified, the mirror of #18234\'s residual and closed by the same condition', invTells(INV_REMOVED, '+  filter: z.unknown().optional()', "+    .describe('x'),").length === 0);
+  t('⚠️ QUIET — a rename ONTO a key no removed line names is not this row: #16943\'s budget pays for it exactly as before', invTells('-  other: z.string(),', '+  filter: z.unknown(),').length === 0);
+  t('⭐ SIBLING INTACT — #18234\'s live pair, a key narrowed OUT of an acceptor, still declines under this reading', uaTells(UNIVERSAL_ACCEPTOR_NARROWED).length === 0);
+
+  // -- the reader itself -----------------------------------------------------
+  t('`widensKeyIntoUniversalAcceptor` needs the SAME key — a removed `other` says nothing about what `filter` now accepts', widensKeyIntoUniversalAcceptor('  filter: z.unknown(),', ['  filter: z.union([A, B]),']) === true && widensKeyIntoUniversalAcceptor('  filter: z.unknown(),', ['  other: z.union([A, B]),']) === false);
+  t('⛔ …and declines when the removed line carries an acceptor CALL anywhere on it, certified or not', widensKeyIntoUniversalAcceptor('  filter: z.unknown(),', ['  filter: z.unknown().optional(),']) === false && widensKeyIntoUniversalAcceptor('  filter: z.unknown(),', ['  filter: z.array(z.unknown()),']) === false);
+  t('⛔ …and when the ADDED line is not a CERTIFIED acceptor — unterminated, or carrying a narrowing step', widensKeyIntoUniversalAcceptor('  filter: z.unknown().optional()', [INV_REMOVED.slice(1)]) === false && widensKeyIntoUniversalAcceptor('  filter: z.unknown().refine(f),', [INV_REMOVED.slice(1)]) === false);
+  t('…and reads the key in every spelling `declaresUniversalAcceptorKey` admits — quoted, and optional-marked', widensKeyIntoUniversalAcceptor("  'a.b': z.unknown(),", ["  'a.b': z.union([A]),"]) === true && widensKeyIntoUniversalAcceptor('  filter?: z.unknown(),', ['  filter?: z.union([A]),']) === true);
+  t('⛔ …and a `removedTexts` that is not an array is not evidence', widensKeyIntoUniversalAcceptor('  filter: z.unknown(),', null) === false);
+  t('⭐ …and it is the MIRROR of `replacesUniversalAcceptorKey`: one pair of lines, read from either end, and the neutral pair is a replacement to one and a widening to neither', widensKeyIntoUniversalAcceptor('  filter: z.unknown(),', ['  filter: z.union([A, B]),']) === true && replacesUniversalAcceptorKey('  filter: z.union([A, B]),', ['  filter: z.unknown(),']) === true && widensKeyIntoUniversalAcceptor('  filter: z.unknown(),', ['  filter: z.unknown(),']) === false);
 
   // -- T3 --------------------------------------------------------------------
   battery('T3 — a new row in a published entry point');
@@ -5577,6 +5776,7 @@ export function selfTest() {
       '#17955\'s tombstone decline — read before the budget so a rename is still paid for, and requiring the value to BE the call — with the un-retiring control, the two chained-arm controls that fire, and the multi-line chained close pinned as the residual quiet direction, ' +
       "#17848's re-declared key with a zod `error` param — declined by #16943's budget, bracketed by the dark control that fires when nothing paid and the surplus control that fires on a real new key beside it, " +
       "#18234's key narrowed out of a universal acceptor — certified by the REMOVED value's own semantics rather than by the added value's spelling, with the dark, different-key, never-universal, narrowing-step and surplus controls that still fire, " +
+      "#18629's key re-typed INTO one — the same fact read on the ADDED side, closing the direction #18234 asserted as quiet, spending its unit and reporting on top of it so a genuine new key beside it still fires, bracketed by the neutral, reformat, mention, wrapped-chain and rename declines, " +
       "#18640's inline closed set re-spelled at the same binding — bounded by the control set that IS the finding, the same edit spelled one member per line and at a keyed property, with the added-arm, different-binding, brand-new, widened-enum and new-key controls that still fire, " +
       "#18702's FILE-LOCAL declaring factory, resolved through its own definition at the head BLOB and classified by what its body returns — every factory the filing card names pinned against its own arm, the refusal arm read off a `z.never` definition rather than a name with its chained-arm control, the counterfactual bracketed by the same fixture with the resolver blind, and both boundaries (an imported factory, an unclassifiable body) pinned as a STATED silence the reader prints, " +
       "#18721's hunk LEADING CONTEXT — an underflowing closer drops and the walk goes on, so #17618's parameter decline reaches a real diff: PR #18720's own hunk silent at its reported line, bracketed by the same file's true-positive control that fires, by a new key behind the same underflowing context, by a key added after the parameter list closes, and by the removed side where a phantom budget disappearing makes a genuine key fire, " +
