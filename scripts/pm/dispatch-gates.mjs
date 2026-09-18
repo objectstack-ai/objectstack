@@ -23763,14 +23763,30 @@ function selfTest() {
   // filter is `packages/**` and already covered them; it gains the right
   // PROVENANCE, and it is what this case exists to keep honest.
   const CLASS_SEVENTH = 'check:dual-build-cjs-loads';
+  // ⭐ THE EIGHTH, and it is the same question answered a second time by a gate
+  // that did not exist when the seventh was recorded. `check:api-surface-declarations`
+  // (#16045) walks the spec `exports` map to the packed `.d.ts` of every entry
+  // point and snapshots the declaration text it finds there, so that export
+  // surface is its subject in exactly the sense the six and the seventh are. It
+  // is declared here for one reason: the edge ALREADY gave it a population on
+  // the run that landed it, before any list named it — which is the ruling's
+  // question ("does the next gate of this class get covered automatically")
+  // answered live for a second time, by a family nobody wired in.
+  const CLASS_EIGHTH = 'check:api-surface-declarations';
   t(
     `and every family the edge gives a population to really re-derives from an export surface` +
       ` (${[...new Set(manifestInherited.map(([c]) => c))].join(' · ') || 'none'})`,
-    manifestInherited.every(([c]) => EXPORT_SURFACE_SIX.includes(c) || c === CLASS_SEVENTH),
+    manifestInherited.every(
+      ([c]) => EXPORT_SURFACE_SIX.includes(c) || c === CLASS_SEVENTH || c === CLASS_EIGHTH,
+    ),
   );
   t(
     `⭐ and a SEVENTH live gate the card never named is covered by the same edge (${CLASS_SEVENTH})`,
     manifestInherited.some(([c]) => c === CLASS_SEVENTH),
+  );
+  t(
+    `⭐ …and an EIGHTH, added after that reading was taken (${CLASS_EIGHTH})`,
+    manifestInherited.some(([c]) => c === CLASS_EIGHTH),
   );
 
   // Additive BY CONSTRUCTION, the claim the wiring comment makes: the manifest
