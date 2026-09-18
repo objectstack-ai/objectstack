@@ -59,36 +59,44 @@
 // `TursoDriver`.
 //
 // [#17690] Three more overridden doors join the driver half — `find`,
-// `upsert` and `bulkUpdate` — plus `RemoteTransport.beginTransaction`, which
-// lives in this package and in this same tsc program. All four nested their
+// `upsert` and `bulkUpdate` — plus (at the time) `RemoteTransport.beginTransaction`,
+// which lived in this package and in this same tsc program. All four nested their
 // `any` inside a wider type (`Promise<any[]>`, `Promise<Record<string, any>>`,
 // `Promise<Record<string, any>[]>`, `Promise<any>`), which is exactly why
 // #15267's literal-string census never named them: the characters
 // `Promise<any>` were not there to match on three of the four. An instrument's
 // silence is only evidence if the instrument could have spoken.
 //
-// ⛔ `TursoDriver.beginTransaction()` is the one door of that card's nine that
-// is NOT pinned here, and the reason is structural rather than an omission.
+// `TursoDriver.beginTransaction()` was the one door of that card's nine that
+// was NOT pinned here, and the reason was structural rather than an omission.
 // `TursoDriver extends SqlDriver`, and `SqlDriver.beginTransaction()` publishes
 // `Promise<Knex.Transaction>` — NARROWER than the contract's `Promise<unknown>`,
 // the honest direction, and the binding declaration for an override. Swapping
-// this override onto the contract's own type therefore does not compile:
+// this override onto the contract's own type therefore did not compile:
 //
 //     src/turso-driver.ts(1662,18): error TS2416: Property 'beginTransaction'
 //     in type 'TursoDriver' is not assignable to the same property in base type
 //     'SqlDriver'. Type 'Promise<unknown>' is not assignable to type
 //     'Promise<Transaction<any, any[]>>'.
 //
-// The `any` there is not masking an un-narrowed door; it is masking a genuine
-// LSP violation — in remote mode this override hands back a libsql transaction
-// while the inherited declaration promises a knex one. Closing it means either
+// The `any` there was not masking an un-narrowed door; it was masking a genuine
+// LSP violation — in remote mode the override handed back a libsql transaction
+// while the inherited declaration promised a knex one. Closing it meant either
 // widening `SqlDriver`'s honest narrowing (measured: +14 further consumer sites
 // in these three driver packages alone, and a type-safety REGRESSION for every
-// `driver-sql` consumer) or restructuring the remote transaction handle. Both
-// are decisions above an annotation swap, so the door is left named rather than
-// quietly re-masked or forced with a cast.
+// `driver-sql` consumer) or restructuring the remote transaction handle.
 //
-// `beginTransaction()` on `TursoDriver` therefore remains unasserted here.
+// ⭐ [#18063] It is pinned now, and neither of those two prices was paid — the
+// third option was that the remote arm stop returning a handle at all. [#18616]
+// made it refuse, `refuseRemoteTransaction` returns `never`, and a `never`
+// branch is assignable to any declared return type; the only arm that still
+// returns is `super.beginTransaction()`. So the override republishes the base's
+// own declaration, the `any` is gone, and there is no longer a value that fails
+// to be a knex transaction. `RemoteTransport`'s three transaction members —
+// unreachable once the driver refused — were deleted in the same change, which
+// is why the pin below moved from that class's door to this one's. The
+// destination is spelled as the BASE's resolved type because `knex` is not a
+// dependency of this package.
 //
 // The runtime cases below drive the LOCAL face (`:memory:`); the remote face's
 // shapes are pinned by the `RemoteTransport` suites.
@@ -96,7 +104,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 import { TursoDriver } from './turso-driver.js';
-import { RemoteTransport } from './remote-transport.js';
+import { SqlDriver } from '@objectstack/driver-sql';
 
 /** `any` defeats ordinary assignability checks; this is the standard detector. */
 type IsAny<T> = 0 extends 1 & T ? true : false;
@@ -204,7 +212,12 @@ type TursoAggregate = Resolved<TursoDriver['aggregate']>;
 type TursoFind = Resolved<TursoDriver['find']>;
 type TursoUpsert = Resolved<TursoDriver['upsert']>;
 type TursoBulkUpdate = Resolved<TursoDriver['bulkUpdate']>;
-type RemoteBeginTransaction = Resolved<RemoteTransport['beginTransaction']>;
+// [#18063] `RemoteTransport.beginTransaction` is gone — see the header block.
+// Its pin is replaced by the one it made impossible: `TursoDriver`'s own door,
+// asserted against the declaration it inherits rather than against a knex type
+// this package cannot name.
+type SqlBeginTransaction = Resolved<SqlDriver['beginTransaction']>;
+type TursoBeginTransaction = Resolved<TursoDriver['beginTransaction']>;
 
 // 1. The contract half — what `IDataDriver` already declared before this change.
 const contractFindOne: Equals<ContractFindOne, Record<string, unknown> | null> = true;
@@ -237,12 +250,16 @@ const tursoUpsertHasAny: ContainsAny<TursoUpsert> = false;
 const tursoUpsertIsContract: Equals<TursoUpsert, Record<string, unknown>> = true;
 const tursoBulkUpdateHasAny: ContainsAny<TursoBulkUpdate> = false;
 const tursoBulkUpdateIsContract: Equals<TursoBulkUpdate, Record<string, unknown>[]> = true;
-// `RemoteTransport` is not an `IDataDriver` implementer, but it is the remote
-// branch of every door above, so the same two halves are owed here. The
-// `IsAny` leg carries most of the weight on an `unknown` destination:
-// `Equals<any, unknown>` is already `false`.
-const remoteBeginTransactionHasAny: ContainsAny<RemoteBeginTransaction> = false;
-const remoteBeginTransactionIsContract: Equals<RemoteBeginTransaction, unknown> = true;
+// [#18063] `TursoDriver.beginTransaction()`, the door the header block used to
+// record as structurally unassertable. Both halves, and the destination is the
+// BASE's declaration rather than a literal type: `knex` is not a dependency of
+// this package (the same constraint `KnexSlice` below works around), and
+// deriving the expectation from `SqlDriver` is the stronger pin anyway — it
+// cannot drift from whatever the base publishes. `Equals` is the leg that
+// fires on the historical regression shape, since the door's own history is a
+// bare `Promise<any>` and `Equals<any, …>` is `false`.
+const tursoBeginTransactionHasAny: ContainsAny<TursoBeginTransaction> = false;
+const tursoBeginTransactionIsBase: Equals<TursoBeginTransaction, SqlBeginTransaction> = true;
 
 /**
  * The slice of the inherited (protected) Knex instance this fixture touches.
@@ -329,18 +346,20 @@ describe('TursoDriver declared return types on the doors it overrides (#15267)',
     expect(result === null ? 'absent' : result.name).toBe('before');
   });
 
-  // [#17690] The three further overridden doors, plus the remote branch's own
-  // `beginTransaction`. Both halves each: put any one annotation back and
-  // `ContainsAny` flips to `true` while `Equals` flips to `false` — verified by
-  // ablating all four, two errors apiece and nothing else.
-  it('pins both halves of find(), upsert(), bulkUpdate() and RemoteTransport.beginTransaction()', () => {
+  // [#17690] The three further overridden doors, plus the transaction door.
+  // [#18063] That fourth slot moved from `RemoteTransport.beginTransaction` —
+  // deleted with the rest of that transport's decorative transaction members —
+  // to `TursoDriver.beginTransaction`, which this card made assertable. Both
+  // halves each: put any one annotation back and `ContainsAny` flips to `true`
+  // while `Equals` flips to `false`.
+  it('pins both halves of find(), upsert(), bulkUpdate() and TursoDriver.beginTransaction()', () => {
     expect([contractFind, contractUpsert, contractBulkUpdate, contractBeginTransaction]).toEqual([
       true,
       true,
       true,
       true,
     ]);
-    expect([tursoFindHasAny, tursoUpsertHasAny, tursoBulkUpdateHasAny, remoteBeginTransactionHasAny]).toEqual([
+    expect([tursoFindHasAny, tursoUpsertHasAny, tursoBulkUpdateHasAny, tursoBeginTransactionHasAny]).toEqual([
       false,
       false,
       false,
@@ -350,7 +369,7 @@ describe('TursoDriver declared return types on the doors it overrides (#15267)',
       tursoFindIsContract,
       tursoUpsertIsContract,
       tursoBulkUpdateIsContract,
-      remoteBeginTransactionIsContract,
+      tursoBeginTransactionIsBase,
     ]).toEqual([true, true, true, true]);
   });
 
