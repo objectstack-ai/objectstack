@@ -21414,8 +21414,19 @@ declare const ReplicationConfigSchema: z.ZodObject<{
 interface ResolveApiOptions {
     /**
      * User-level export permission slot. `export` derives from `list` AND this
-     * flag. Always `true` this phase (there is no user-level export permission
-     * bit yet); wiring a real bit in is a zero-contract change (#3391 follow-up).
+     * flag.
+     *
+     * The flag carries the user-level export axis — `PermissionSetSchema`'s
+     * `allowExport` bit (`../security/permission.zod`, the authority on its
+     * semantics). That bit is an OPT-IN GRANT: unset or `false` means NO export.
+     * So this flag is genuinely `false` for a real caller whose permission sets
+     * withhold the grant, and `export` is withheld with it (#3391 / #3544).
+     *
+     * Omitting the option is the NO-USER-CONTEXT case and resolves to `true` —
+     * a resolve that carries no permissions does not narrow the object's own
+     * exposure, which is what lets {@link apiExposureDenialReason} stay a pure
+     * function of `enable`. A caller that HAS permission context passes the
+     * resolved bit explicitly.
      */
     userExportAllowed?: boolean;
 }
