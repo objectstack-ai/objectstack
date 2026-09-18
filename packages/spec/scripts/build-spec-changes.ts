@@ -28,6 +28,22 @@
  * both is not consumer leniency — a published tarball is immutable, so there is
  * no producer to fix. This repo's OWN surface is always the directory.
  *
+ * Per-release section: `--previous-package <dir>` points at the UNPACKED
+ * previous tarball (its `package/` root) and is the publish-time superset of
+ * `--previous-surface`. From that one directory it reads the previous version
+ * (its `package.json`), the previous export surface and the previous
+ * `spec-changes.json`, and writes a `release` section — `from → to` at
+ * PACKAGE-VERSION resolution — into the manifest that is about to be packed.
+ * The committed copy never carries it (generating it needs a published tarball,
+ * so it could not be deterministic), which is exactly how the ruling answers
+ * the determinism concern: publish time only.
+ *
+ * ⛔ The section is OMITTED, loudly, rather than emitted empty when the previous
+ * tarball lacks either input — an empty `release` is indistinguishable from
+ * "this release changed nothing", which is the misreading this whole section
+ * exists to end. `scripts/check-release-spec-changes.mjs` derives the same
+ * condition from the same artifacts and accepts the absence for the same reason.
+ *
  * `spec-changes.json` itself stays a single file, deliberately (#5837), and #8344
  * re-measured that call rather than inheriting it. The original reason — "two PRs
  * append under different majors" — is not what actually holds: in-flight
@@ -48,8 +64,11 @@ import { fileURLToPath } from 'node:url';
 import { PROTOCOL_MAJOR, PROTOCOL_VERSION } from '../src/kernel/protocol-version';
 import { MIGRATION_SUPPORT_FLOOR } from '../src/migrations/registry';
 import {
+  composeReleaseChanges,
   composeSpecChanges,
   SpecChangesSchema,
+  SpecReleaseChangesSchema,
+  type SpecReleaseChanges,
   type SpecSurfaceAdd,
   type SpecSurfaceRemove,
 } from '../src/migrations/spec-changes';
@@ -60,7 +79,30 @@ const SNAPSHOT = resolve(PKG_DIR, 'spec-changes.json');
 const SURFACE = resolve(PKG_DIR, API_SURFACE_DIR_NAME);
 const CHECK = process.argv.includes('--check');
 const prevSurfaceIdx = process.argv.indexOf('--previous-surface');
-const PREV_SURFACE = prevSurfaceIdx >= 0 ? process.argv[prevSurfaceIdx + 1] : undefined;
+const prevPackageIdx = process.argv.indexOf('--previous-package');
+const PREV_PACKAGE = prevPackageIdx >= 0 ? process.argv[prevPackageIdx + 1] : undefined;
+/** The version this tree is about to publish — read, never transcribed. */
+const THIS_VERSION = (JSON.parse(readFileSync(resolve(PKG_DIR, 'package.json'), 'utf8')) as { version: string })
+  .version;
+
+/**
+ * The export snapshot inside an unpacked published tarball, in whichever of the
+ * two shapes that release shipped (`api-surface/` from #5837, `api-surface.json`
+ * before it), or `null` when it shipped neither (pre-protocol-15).
+ */
+function previousSurfacePath(pkgDir: string): string | null {
+  const dir = resolve(pkgDir, API_SURFACE_DIR_NAME);
+  if (existsSync(dir)) return dir;
+  const monolith = resolve(pkgDir, `${API_SURFACE_DIR_NAME}.json`);
+  if (existsSync(monolith)) return monolith;
+  return null;
+}
+
+const PREV_SURFACE = PREV_PACKAGE
+  ? (previousSurfacePath(PREV_PACKAGE) ?? undefined)
+  : prevSurfaceIdx >= 0
+    ? process.argv[prevSurfaceIdx + 1]
+    : undefined;
 
 /** Flatten an export surface ({ entry: ["name (kind)", …] }) into one set. */
 function flattenSurface(path: string): Set<string> {
@@ -72,19 +114,75 @@ function flattenSurface(path: string): Set<string> {
   return out;
 }
 
-/** Diff two flattened surfaces into the manifest's added/removed arrays. */
-function diffSurfaces(prevPath: string): { added: SpecSurfaceAdd[]; removed: SpecSurfaceRemove[] } {
+/** The raw `entry: name` rows a release added and removed, before attribution. */
+function diffSurfaceNames(prevPath: string): { added: string[]; removed: string[] } {
   const prev = flattenSurface(prevPath);
   const curr = flattenSurface(SURFACE);
-  const added: SpecSurfaceAdd[] = [...curr]
-    .filter((s) => !prev.has(s))
-    .sort()
-    .map((surface) => ({ surface, since: PROTOCOL_MAJOR }));
-  const removed: SpecSurfaceRemove[] = [...prev]
-    .filter((s) => !curr.has(s))
-    .sort()
-    .map((surface) => ({ surface, removedIn: PROTOCOL_MAJOR }));
-  return { added, removed };
+  return {
+    added: [...curr].filter((s) => !prev.has(s)).sort(),
+    removed: [...prev].filter((s) => !curr.has(s)).sort(),
+  };
+}
+
+/** Diff two flattened surfaces into the manifest's added/removed arrays. */
+function diffSurfaces(prevPath: string): { added: SpecSurfaceAdd[]; removed: SpecSurfaceRemove[] } {
+  const names = diffSurfaceNames(prevPath);
+  return {
+    added: names.added.map((surface) => ({ surface, since: PROTOCOL_MAJOR })),
+    removed: names.removed.map((surface) => ({ surface, removedIn: PROTOCOL_MAJOR })),
+  };
+}
+
+/**
+ * The previous release's registry ids and version, read out of its own unpacked
+ * tarball. `null` when that tarball carries no `spec-changes.json` (before
+ * #2897's release side) — the caller then omits the section rather than
+ * claiming an empty delta.
+ */
+function previousRelease(
+  pkgDir: string,
+): { version: string; conversionIds: string[]; migrationIds: string[] } | null {
+  const manifestPath = resolve(pkgDir, 'spec-changes.json');
+  if (!existsSync(manifestPath)) return null;
+  const pkgPath = resolve(pkgDir, 'package.json');
+  if (!existsSync(pkgPath)) return null;
+  const version = (JSON.parse(readFileSync(pkgPath, 'utf8')) as { version?: string }).version;
+  if (!version) return null;
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+    aggregate?: { converted?: { conversionId: string }[]; migrated?: { migrationId: string }[] };
+  };
+  if (!manifest.aggregate) return null;
+  return {
+    version,
+    conversionIds: (manifest.aggregate.converted ?? []).map((c) => c.conversionId),
+    migrationIds: (manifest.aggregate.migrated ?? []).map((m) => m.migrationId),
+  };
+}
+
+/**
+ * The publish-time `release` section, or `null` with the reason printed.
+ *
+ * ⛔ Never returns an empty-but-present section on missing inputs: `release`
+ * present means "this is the delta", and a consumer cannot tell a true empty
+ * delta from an uncomputable one.
+ */
+function buildReleaseSection(current: ReturnType<typeof composeSpecChanges>): SpecReleaseChanges | null {
+  if (!PREV_PACKAGE) return null;
+  const prevSurface = previousSurfacePath(PREV_PACKAGE);
+  const prev = previousRelease(PREV_PACKAGE);
+  if (!prevSurface || !prev) {
+    console.error(
+      `No per-release section: the previous tarball at ${PREV_PACKAGE} ships ` +
+        `${!prevSurface ? 'no api-surface snapshot' : 'no readable spec-changes.json'}, ` +
+        'so the delta cannot be computed. Omitting the section — an empty one would read as ' +
+        '"this release changed nothing".',
+    );
+    return null;
+  }
+  const names = diffSurfaceNames(prevSurface);
+  return SpecReleaseChangesSchema.parse(
+    composeReleaseChanges(prev.version, THIS_VERSION, current, prev, names),
+  );
 }
 
 function build(): string {
@@ -99,15 +197,26 @@ function build(): string {
   const aggregate = SpecChangesSchema.parse(
     composeSpecChanges(MIGRATION_SUPPORT_FLOOR, PROTOCOL_MAJOR, surfaceDiff),
   );
+  const release = buildReleaseSection(aggregate);
 
   const doc = {
     $comment:
       'GENERATED (ADR-0087 D4) — do not edit. Regenerate with: pnpm --filter @objectstack/spec gen:spec-changes. ' +
       'A projection of the D2 conversion table + D3 migration chain; the upgrade guide and the MCP spec_changes ' +
-      'tool derive from this same data.',
+      'tool derive from this same data. ' +
+      'When a `release` section is present, its four ADR-0087 D4 arrays report what that release ADDED: ' +
+      '`added`/`removed` are the export-surface diff of the two published tarballs, and `converted`/`migrated` ' +
+      'are the D2/D3 ids FIRST REGISTERED in it. An id that LEFT the published chain between the two releases ' +
+      'is reported in none of them — `converted: []` means "this release registered none", never "none was ' +
+      'withdrawn"; a withdrawal is visible only by comparing two published manifests.',
     protocolVersion: PROTOCOL_VERSION,
     supportFloor: MIGRATION_SUPPORT_FLOOR,
     migrateCommand: `objectstack migrate meta --from <N>  (N >= ${MIGRATION_SUPPORT_FLOOR})`,
+    // Publish-time only, and placed BEFORE the major-keyed records on purpose:
+    // it is the section a consumer crossing one release needs first, and the
+    // one whose absence sent the filer of #17080 to a hand diff of two
+    // `node_modules` trees.
+    ...(release ? { release } : {}),
     aggregate,
     perMajor,
   };
@@ -117,8 +226,11 @@ function build(): string {
 const next = build();
 
 if (CHECK) {
-  if (PREV_SURFACE) {
-    console.error('check mode compares the committed (registry-only) manifest; drop --previous-surface');
+  if (PREV_SURFACE || PREV_PACKAGE) {
+    console.error(
+      'check mode compares the committed (registry-only) manifest; drop ' +
+        (PREV_PACKAGE ? '--previous-package' : '--previous-surface'),
+    );
     process.exit(2);
   }
   const current = existsSync(SNAPSHOT) ? readFileSync(SNAPSHOT, 'utf8') : '';
