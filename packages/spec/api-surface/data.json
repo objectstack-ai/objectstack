@@ -365,7 +365,6 @@
     "IMPORT_REFERENCE_TYPES (const)",
     "INLINE_CREDENTIAL_REFUSED (const)",
     "INSTANT_TYPES (const)",
-    "IScopedContext (interface)",
     "ImportFieldMapping (type)",
     "ImportFieldMappingParsed (type)",
     "ImportFieldMappingSchema (const)",

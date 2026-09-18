@@ -328,24 +328,36 @@ export interface HookApi {
  * ```
  *
  * The second position — `transaction`'s `opts` — answers the same way for
- * `EngineTransactionOptions`. Those two are the blocking finding.
+ * `EngineTransactionOptions`. Those two are what this card owes, and they are
+ * what this file exports: they are names THIS card's own new declarations
+ * introduced to the entry.
  *
- * The other two names close the SAME defect one frame out, and they come as a
- * PAIR because that is what the measurement said. `HookContext.api` has leaked
- * `IScopedContext` since #5945, and exporting that name alone is a HALF
- * closure: `IScopedContext.object(name)` returns `IScopedObjectRepository`, so
- * with three names `(ctx) => ctx.api!.object('deal')` still answered TS2883 on
- * that fourth name. With all four, a probe carrying every position — both
- * `transaction` arguments, `ctx.api`, `ctx.api.object(…)`, `api.object(…)` and
- * a repository read — emits at exit 0, and the emitted declarations resolve
- * every inferred type through `@objectstack/spec/data`. The chain terminates
- * there: the repository's own members answer in structural types
- * (`Promise` of `Record` of `string` to `any`, or `null`) that name nothing
- * further. Taken in one stroke because leaving it publishes a hook seam whose
- * own `ctx.api` cannot be named from the entry that publishes the seam — the
- * exact gap this card was opened to close — and because all four are one-line
- * re-exports in this file, of declarations `@objectstack/spec/contracts`
- * already publishes, adding no gate beyond the three this diff regenerates.
+ * ⛔ A THIRD instance of the same defect is deliberately NOT closed here, and
+ * the reason is a measurement rather than a scope reflex. `HookContext.api` has
+ * leaked `IScopedContext` off this entry since #5945 — pre-existing, present on
+ * this card's base and unchanged by it. Closing it is not the one-line job it
+ * looks like:
+ *
+ *   - It needs TWO names, not one. `IScopedContext.object(name)` returns
+ *     `IScopedObjectRepository`, so with `IScopedContext` exported alone a
+ *     consumer writing `ctx.api.object('deal')` still answers TS2883 on the
+ *     repository — measured, at head, with the three-name variant applied. A
+ *     one-name patch publishes a HALF closure that READS closed, which is the
+ *     declared-not-enforced shape this repo refuses.
+ *   - The second of those two names is not free. Adding
+ *     `IScopedObjectRepository` to this entry moves the dts bundler's module
+ *     order enough to reorder members inside object type literals in the
+ *     UNRELATED `ui` shard: 330 lines, which `check:api-surface-declarations`
+ *     reports as "33 reshaped" and asks a reviewer to rule on. Measured as
+ *     order-only — identical token multiset, identical line count, nothing
+ *     added, removed or renamed — and the generator is stable against a fixed
+ *     dist, so it is noise rather than drift. But it is a verdict somebody has
+ *     to read, in a shard this card does not touch.
+ *
+ * Two names with a clean surface delta, or four names plus an adjudication in
+ * someone else's shard: that is a trade for its own card and its own review,
+ * not a rider on a FAIL remediation. The pre-existing leak is reported with
+ * both measurements so that card can be written without re-deriving them.
  *
  * ⛔ `check:entry-nameability` is NOT the instrument that answers this. By its
  * own docblock it probes the CALL surface of VALUE exports that have a call
@@ -355,9 +367,8 @@ export interface HookApi {
  * are a known target outside it. The instrument that answers is a consumer
  * program with `declaration` emit, which is what the excerpt above is.
  *
- * Type-only re-exports: they add four names to this entry and no runtime byte,
+ * Type-only re-exports: they add two names to this entry and no runtime byte,
  * and each is ONE declaration reachable from two entries rather than two
  * declarations sharing a name, which is what `check:dual-source-exports` asks.
  */
 export type { EngineTransactionInfo, EngineTransactionOptions } from '../contracts/objectql-engine';
-export type { IScopedContext, IScopedObjectRepository } from '../contracts/scoped-context';

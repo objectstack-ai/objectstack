@@ -12,8 +12,8 @@
 # excluded: documentation drift is `check:docs`'s axis, not this one.
 #
 # entry: ./data
-# exported names: 845
-# declarations: 858
+# exported names: 844
+# declarations: 857
 #
 # GENERATED — ⛔ never hand-edited. Regenerate after a real build:
 #   pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec gen:api-surface-declarations
@@ -14630,39 +14630,6 @@ declare const INLINE_CREDENTIAL_REFUSED: (key: string) => string;
 
 // ── INSTANT_TYPES (const) ──
 declare const INSTANT_TYPES: ReadonlySet<string>;
-
-// ── IScopedContext (interface) ──
-interface IScopedContext {
-    /** The repository for `name`, bound to this context. */
-    object(name: string): IScopedObjectRepository;
-    /**
-     * Run `callback` inside one driver transaction: committed when it returns,
-     * rolled back when it throws.
-     *
-     * The callback receives a NEW `IScopedContext` whose operations share the
-     * transaction handle — reach objects through THAT context (`tx.object(…)`),
-     * not the outer one, or the writes land outside the transaction.
-     *
-     * ## Why the callback's second parameter is declared even though no corpus
-     * site reads it
-     *
-     * The evidence bar above governs WHICH MEMBERS exist, not what a declared
-     * member's signature is allowed to say. A parameter list describes what the
-     * PRODUCER hands the callback, and the producer hands it two arguments
-     * unconditionally (`ScopedContext.transaction`, #5696): declaring one would
-     * be a false statement that additionally makes `async (tx, info) => …`
-     * — legal, working code — a compile error. Contravariance means the
-     * zero-argument and one-argument callbacks the corpus actually writes still
-     * satisfy this, so the truthful signature is also the more permissive one.
-     * {@link EngineTransactionInfo} is reused rather than re-spelled, for the
-     * same reason `opts` is: ADR-0119 D1 and #5696 rule that this surface is a
-     * second IMPLEMENTATION of `IObjectQLEngine.transaction`, never a second
-     * DIALECT of it — `opts.require`'s fail-closed refusal is honoured here
-     * identically, and a contract that omitted it would re-open in declaration
-     * the dialect the implementation was made to close.
-     */
-    transaction<T>(callback: (trxCtx: IScopedContext, info: EngineTransactionInfo) => Promise<T>, opts?: EngineTransactionOptions): Promise<T>;
-}
 
 // ── ImportFieldMapping (type) ──
 type ImportFieldMapping = z.input<typeof ImportFieldMappingSchema>;
