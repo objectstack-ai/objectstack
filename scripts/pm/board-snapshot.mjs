@@ -1766,17 +1766,24 @@ async function main(argv) {
 }
 
 function rearmThroughProxy(args) {
+  // `guard` is THIS tool's own variable (#18939). Without it the plan read the
+  // patrol's shared name straight out of `process.env`, so a sibling
+  // instrument's inherited guard answered "already re-armed" here — silently —
+  // and the un-re-armed run then bypassed the proxy and answered 401 Bad
+  // credentials, a false story about the credential. The own-guard `if` that
+  // used to sit below was never reached for that case; the plan's own branch
+  // now covers it, and PRINTS the variable through `plan.hint`.
   const plan = proxyRearmPlan({
     env: process.env,
     execArgv: process.execArgv,
     flagSupported: process.allowedNodeEnvironmentFlags.has(PROXY_FLAG),
+    guard: PROXY_REARM_GUARD,
   });
   if (plan.hint) {
     console.error(`ℹ️  ${plan.reason}. A refusal below may be about the route, not this container.`);
     return null;
   }
   if (!plan.rearm) return null;
-  if (process.env[PROXY_REARM_GUARD] === '1') return null;
   console.error(`ℹ️  re-exec with ${plan.flag}: ${plan.reason}.`);
   const quiet = process.allowedNodeEnvironmentFlags.has('--disable-warning') ? ['--disable-warning=UNDICI-EHPA'] : [];
   const child = spawnSync(process.execPath, [plan.flag, ...quiet, SELF_PATH, ...args], {
@@ -1888,6 +1895,7 @@ function measuredHistoryManifest(over = {}) {
 }
 
 const SELF_TEST_BATTERIES = Object.freeze({
+  'the re-exec guard: the name this tool sets, and the patrol name that must not silence it': 11,
   'the record shapes: fixed key order, declared absence': 9,
   'the page walk: only a short page ends it': 10,
   'the walk plan: the open board first, then the closed history, then incremental': 15,
@@ -1900,7 +1908,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the delta walk, driven: the archive catches up with the live board': 19,
   'the freshness row: a stale archive is never a green run': 18,
 });
-const SELF_TEST_BATTERY_FLOOR = 10;
+const SELF_TEST_BATTERY_FLOOR = 12;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 let selfTestReachedVerdict = false;
@@ -1945,6 +1953,31 @@ export async function selfTest() {
   });
 
   // -- the record shapes -----------------------------------------------------
+  // ── the re-exec guard (#18939) ────────────────────────────────────────────
+  // The plan reads the guard name THIS file sets, never a shared one. A sibling
+  // instrument's inherited guard used to answer 'already re-armed' here, and the
+  // un-re-armed run then bypassed the proxy and answered 401 Bad credentials —
+  // a false story about the credential, printed nowhere at all.
+  battery('the re-exec guard: the name this tool sets, and the patrol name that must not silence it');
+  {
+    const PATROL_GUARD = 'OS_HALF_STATES_PROXY_REARMED';
+    const proxied = { HTTPS_PROXY: 'http://127.0.0.1:40309' };
+    const rearm = (env) => proxyRearmPlan({ env, guard: PROXY_REARM_GUARD, flagSupported: true });
+    const own = { ...proxied, [PROXY_REARM_GUARD]: '1' };
+    const ownSource = readFileSync(SELF_PATH, 'utf8');
+    t('this tool\'s guard is its own name, never the patrol\'s', PROXY_REARM_GUARD !== PATROL_GUARD);
+    t('…and the patrol name pinned here IS the plan\'s default, so a rename reds this battery', proxyRearmPlan({ env: { ...proxied, [PATROL_GUARD]: '1' } }).guarded === PATROL_GUARD);
+    t('a proxied run with no guard set re-execs', rearm(proxied).rearm === true);
+    t('…this tool\'s OWN guard is what stops the loop', rearm(own).rearm === false);
+    t('…while the patrol\'s inherited guard does NOT suppress it', rearm({ ...proxied, [PATROL_GUARD]: '1' }).rearm === true);
+    t('a suppressed run SPEAKS — silence is the whole cost of this chain', rearm(own).hint === true);
+    t('…naming the variable a reader has to unset', rearm(own).reason.includes(PROXY_REARM_GUARD));
+    t('…and naming the 401 the silence would otherwise be read as', rearm(own).reason.includes('401 Bad credentials'));
+    t('the Actions-runner leg is unchanged: no proxy, no re-exec, no extra line', rearm({ [PROXY_REARM_GUARD]: '1' }).rearm === false && rearm({ [PROXY_REARM_GUARD]: '1' }).hint === false);
+    t('structural: the dispatch really hands the plan THIS file\'s guard', /\n\s+guard: PROXY_REARM_GUARD,\n/.test(ownSource));
+    t('structural: the plan is imported, not restated here', /\bproxyRearmPlan\b/.test(ownSource) && !/function\s+proxyRearmPlan\b/.test(ownSource));
+  }
+
   battery('the record shapes: fixed key order, declared absence');
   const record = issueRecord(RAW());
   t('the key order is the one this file writes, not the order GitHub answered in',
