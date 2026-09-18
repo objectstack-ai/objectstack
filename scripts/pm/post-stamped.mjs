@@ -1875,7 +1875,14 @@ export function platformRefusalText(raw) {
  */
 export function sizeRefusal({ status, refusalText, mode, sentBytes } = {}) {
   if (Number(status) !== SIZE_REFUSAL_STATUS) return null;
-  if (!new RegExp(BODY_TOO_LONG_RE.source, 'iu').test(String(refusalText ?? ''))) return null;
+  // ⛔ The DECLARED regex, tested directly — never a copy rebuilt from its
+  // `.source` with flags retyped here. A rebuilt copy takes the pattern and
+  // leaves the flags behind, so the `i` that makes the two measured spellings
+  // one class would live in this line and not in the constant that documents
+  // it: an ablation dropping the flag from the declaration changed nothing and
+  // every case-insensitivity pin stayed green. Safe to test in place because
+  // this one is pinned non-global, so it carries no `lastIndex`.
+  if (!BODY_TOO_LONG_RE.test(String(refusalText ?? ''))) return null;
   const surface = Object.prototype.hasOwnProperty.call(WRITE_SURFACES, String(mode)) ? WRITE_SURFACES[String(mode)] : null;
   const cap = surface ? surface.cap : null;
   const sent = Number.isFinite(sentBytes) ? Number(sentBytes) : null;
@@ -2496,7 +2503,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the re-anchored footer: a newline the platform MOVED is not a byte lost': 41,
   'the CLI: the one decision a typo must never make': 16,
   'the unread-knock check: a refresh cannot void what nobody read': 49,
-  'the size refusal: a 422 the platform answered is not a route that never existed': 52,
+  'the size refusal: a 422 the platform answered is not a route that never existed': 53,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
 });
 const SELF_TEST_BATTERY_FLOOR = 14;
@@ -3131,6 +3138,7 @@ export function selfTest() {
   t('the trigger reads the SENTENCE, so a text carrying no `maximum is` clause still classifies', sizeRefusal({ status: 422, refusalText: 'Body is too long', mode: 'comment', sentBytes: 300000 }) !== null);
   t("⛔ …and the platform's false clause ALONE does not classify — the class is never keyed on that number", sizeRefusal({ status: 422, refusalText: 'maximum is 65536 characters', mode: 'comment', sentBytes: 300000 }) === null);
   t('⛔ the exported trigger regex is not global — a `g` regex carries a cursor between callers', BODY_TOO_LONG_RE.global === false);
+  t('⛔ …and the case-insensitivity lives on the DECLARATION, not retyped at the call site', BODY_TOO_LONG_RE.flags.includes('i'));
 
   t("the envelope's per-error message is read, which is where the sentence arrived", platformRefusalText(CREATE_422).includes('Body is too long (maximum is 65536 characters)'));
   t('…and the top-level one beside it, in that order', platformRefusalText(CREATE_422).startsWith('Validation Failed · Body is too long'));
