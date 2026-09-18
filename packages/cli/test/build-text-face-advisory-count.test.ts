@@ -44,6 +44,30 @@
  * per-package prefix is not something the command emits unconditionally, and
  * the equality holds there on a shape that never had the defect.
  *
+ * ⚠️ [#18779] That control was itself being lit by an ECHO, and it went red
+ * when the echo stopped surviving. `CONFIG_MULTI` gave `bc_account.industry` no
+ * consumer anywhere, so the union run raised that finding too and the
+ * per-package "survivor" was the same finding re-reported at the package-local
+ * index. The de-duplication key used to compare the POSITIONAL `path`, which is
+ * why a duplicate reached the list at all; once the key stopped comparing the
+ * top-level collection index the survivor count went to 0 and
+ * `toBeGreaterThan(0)` failed — correctly.
+ *
+ * ⇒ `orders` now owns the VIEW that displays `bc_account.industry`, the same
+ * falsifier shape `lint-per-package-authoring-parity.test.ts` and
+ * `validate-per-package-authoring-parity.test.ts` carry. Folded into one union
+ * the field HAS a consumer and nothing is raised; judged per package, `core`
+ * declares a field nothing in `core` reads. So the control is now lit by a
+ * survivor the union genuinely could not see, ⛔ not by a duplicate of
+ * something it already printed. ⛔ Do not remove the view to "simplify" the
+ * fixture, and ⛔ do not relax `toBeGreaterThan(0)` — that assertion is what
+ * stops every equality below it from going vacuous.
+ *
+ * ⚠️ The `warnings: 4` in the measurement block above is a reading of the
+ * DEFECT on `examples/app-multi-package` at 17.4.0 and is kept as the record of
+ * it. That same fixture reports 3 since #18779 removed the echo; the equality
+ * these pins assert is unaffected, because it was never a number.
+ *
  * ## Tier
  *
  * SPAWNS the CLI ⇒ INTEGRATION tier by `packages/cli/vitest-tiers.ts`'
@@ -161,13 +185,24 @@ const ordersObjects = [{
     account: { name: 'account', type: 'lookup', label: 'Account', reference: 'bc_account' },
   },
 }];
+const ordersViews = [
+  {
+    name: 'bc_account_list', label: 'Account List', object: 'bc_account',
+    list: { label: 'Account List', columns: ['name', 'industry'] },
+  },
+  {
+    name: 'bc_order_list', label: 'Order List', object: 'bc_order',
+    list: { label: 'Order List', columns: ['name', 'account'] },
+  },
+];
 
 export default {
   manifest: coreManifest,
   objects: [...ordersObjects, ...coreObjects],
   apps: [...coreApps],
+  views: [...ordersViews],
   packages: [
-    { manifest: { ...ordersManifest, objects: ordersObjects } },
+    { manifest: { ...ordersManifest, objects: ordersObjects, views: ordersViews } },
     { manifest: { ...coreManifest, objects: coreObjects, apps: coreApps } },
   ],
 };
@@ -235,8 +270,24 @@ describe("#18780 — `os build`'s text face prints every advisory its summary li
     expect(multiText.code, `${multiText.stdout}\n${multiText.stderr}`).toBe(0);
     expect(multiText.stdout).toContain('Running author-time rules per package (2)');
     expect(multiJson.code, `${multiJson.stdout}\n${multiJson.stderr}`).toBe(0);
-    const perPackage = perPackageWarnings(payloadOf(multiJson, 'os build --json').warnings as unknown[]);
+    const warnings = payloadOf(multiJson, 'os build --json').warnings as unknown[];
+    const perPackage = perPackageWarnings(warnings);
     expect(perPackage.length).toBeGreaterThan(0);
+
+    // ⭐ [#18779] And the survivor's PEDIGREE, because the count alone is what
+    // this control had before: it was lit by an ECHO of a union finding, and a
+    // duplicate keeps the count above zero while proving nothing about the pass.
+    // `industry` must be named ONLY behind the per-package prefix — a union
+    // finding naming it too means the fixture has drifted back to the shape
+    // whose survivor the de-duplication now correctly removes.
+    const named = (w: unknown): string =>
+      typeof (w as { where?: unknown })?.where === 'string' ? (w as { where: string }).where : '';
+    const industry = warnings.filter((w) => /industry/.test(named(w)));
+    expect(industry.length, 'the fixture no longer raises the per-package finding').toBe(1);
+    expect(
+      PER_PACKAGE_WHERE.test(named(industry[0])),
+      'the `industry` finding is being raised by the UNION run — this control would be lit by an echo',
+    ).toBe(true);
   });
 
   it('the summary line counts exactly what the list above it renders', () => {
