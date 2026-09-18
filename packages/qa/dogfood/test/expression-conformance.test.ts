@@ -98,19 +98,6 @@ const DIALECTS = new Set(['cel', 'cron', 'template', 'js', 'settings-visibility'
  * moved it listed it here: without this row the edge condition would have
  * dropped out of discovery and its `cel-interpret` cover gone STALE — measured,
  * on that commit's first CI run (#7327's shape, one more time).
- *
- * `PredicateInputSchema` (#17778) is the THIRD time, and the first where the
- * ledger had written the trap down before it sprang. It is an EXPORTED alias
- * — of `EvaluatedExpressionInputSchema` since ADR-0136 D1 — and alias
- * resolution here is FILE-LOCAL, so the ledger header's limitation 2 recorded
- * it as a latent blind spot that types no slot anywhere. ADR-0136 made it live
- * by binding the `FieldSchema` field-rule triad (`visibleWhen` / `readonlyWhen`
- * / `requiredWhen`) to it from ANOTHER file, and the first CI run after that
- * reported all three covers STALE and discovery 3 short of its `head` floor
- * (34 of 37) — the same two symptoms, one fact. ⛔ The floor was NOT lowered
- * and no ledger row was deleted: the three surfaces still exist and are still
- * exactly what this scan looks for, so the repair is the roster, which is what
- * the paragraph above already prescribed.
  */
 const EXPRESSION_INPUT_SCHEMAS = [
   'ExpressionInputSchema',
@@ -118,7 +105,6 @@ const EXPRESSION_INPUT_SCHEMAS = [
   'SettingsVisibilityInputSchema',
   'CronExpressionInputSchema',
   'TemplateExpressionInputSchema',
-  'PredicateInputSchema',
 ];
 /**
  * A roster (or alias) name as an IDENTIFIER, anywhere on the line — #17630.
