@@ -1562,11 +1562,17 @@ export function renderGeneratedRegion(census) {
 /**
  * The audit ledger: every site, regenerated WHOLE.
  *
- * No prose to preserve, so nothing here is spliced -- the file is rewritten. That
- * is what makes `merge=os-regen` the right resolution for it, the same as its
- * strictness-ledger sibling: two branches that each add a write call site produce
- * rows that git merges cleanly and a header that merges cleanly and WRONG. The
- * correct resolution is always "recompute from the merged tree".
+ * No prose to preserve, so nothing here is spliced -- the file is rewritten. Two
+ * branches that each add a write call site produce rows that git merges cleanly and
+ * a header that merges cleanly and WRONG, so the correct resolution is always
+ * "recompute from the merged tree" -- `node scripts/tenant-audit-census.mjs --write`,
+ * which is what the header this function emits tells a merging author to do.
+ *
+ * That resolution is not delegated to a merge driver: no `.gitattributes` entry
+ * covers this path, so `git check-attr merge` over it reads `unspecified` and git
+ * text-merges it like any other file. `scripts/check-tenant-audit-census.mjs` is the
+ * backstop -- a wrongly merged file fails the build loudly instead of landing
+ * silently.
  */
 export function renderCountsFile(census) {
   const t = census.totals;
