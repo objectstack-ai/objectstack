@@ -142,7 +142,10 @@ function relationTarget(f: any): string | null {
   // and never learn the carrier was the reason. Absence keeps its answer —
   // `undefined` / `null` / `''` all become `null` here, exactly as before, and
   // the report line about an absent target is still a report line.
-  const ref = referenceCarrierOf(f, 'verify deriveCrudCases relationTarget');
+  // The literal `.reference` read stays in the argument, so this function's
+  // subject — WHICH KEY it reads — is still greppable here beside
+  // {@link REJECTED_REFERENCE_ALIASES}; only the shape judgment moves out.
+  const ref = referenceCarrierOf({ reference: f?.reference }, 'verify deriveCrudCases relationTarget');
   return ref ?? null;
 }
 
