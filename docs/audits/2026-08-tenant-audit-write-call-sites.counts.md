@@ -19,9 +19,13 @@ line numbers, so a pure displacement cannot move them. Run the generator with
 
 ⚠️ **On a merge conflict here, regenerate — never resolve by hand.** Two branches
 that each add a write call site produce rows git merges cleanly and totals that
-merge cleanly and WRONG. This file is deliberately NOT `merge=os-regen`: that
-driver resolves an artefact's `gen:`/`check:` scripts in `@objectstack/spec`
-only, and these are root-level tooling. The gate is the backstop — a wrongly
+merge cleanly and WRONG. This file is NOT `merge=os-regen`: no `.gitattributes`
+row names it, so `git check-attr merge` over it reads `unspecified`. Routing it
+would take a `REGEN_ARTIFACTS` row whose `gen:`/`check:` names exist in the
+manifest that row declares as owner, and no manifest declares such a pair for
+this census — the gate runs straight from the lint workflow. Root-level tooling
+is no obstacle by itself: the driver resolves those names in whichever manifest
+the row names, the root one included. The gate is the backstop — a wrongly
 merged file fails `check-tenant-audit-census`, so the error is loud rather than
 silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
@@ -80,7 +84,7 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-09-18 at `0ec81857a`.
+Measured on 2026-09-18 at `d4cb05cbf`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |

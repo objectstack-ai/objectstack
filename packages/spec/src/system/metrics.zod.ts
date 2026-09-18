@@ -2,7 +2,8 @@
 
 import { z } from 'zod';
 import { DurationSeconds } from '../shared/duration.zod';
-import { ExpressionInputSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
+import { evaluatedExpressionUnionRefusal } from '../shared/evaluated-slot-union';
 
 /**
  * Metrics Protocol - Performance and Operational Metrics
@@ -479,8 +480,9 @@ export const ServiceLevelIndicatorSchema = lazySchema(() => z.object({
       operator: z.enum(['lt', 'lte', 'gt', 'gte', 'eq']).describe('Comparison operator'),
       percentile: z.number().min(0).max(1).optional().describe('Percentile (0-1)'),
     }),
-    ExpressionInputSchema,
-  ]).describe('Success criteria — structured or CEL predicate'),
+    EvaluatedExpressionInputSchema,
+  ], { error: (issue) => evaluatedExpressionUnionRefusal(issue.input) })
+    .describe('Success criteria — structured or CEL predicate'),
 
   /**
    * Measurement window

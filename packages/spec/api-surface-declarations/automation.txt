@@ -3740,7 +3740,7 @@ declare const flowForm: {
         description?: string | undefined;
         visibleWhen?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -3748,7 +3748,7 @@ declare const flowForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -3757,7 +3757,7 @@ declare const flowForm: {
         } | undefined;
         visibleOn?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -3765,7 +3765,7 @@ declare const flowForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -3788,7 +3788,7 @@ declare const flowForm: {
         description?: string | undefined;
         visibleWhen?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -3796,7 +3796,7 @@ declare const flowForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -3805,7 +3805,7 @@ declare const flowForm: {
         } | undefined;
         visibleOn?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -3813,7 +3813,7 @@ declare const flowForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;

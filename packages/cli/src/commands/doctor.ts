@@ -273,10 +273,13 @@ export function scheduledWorkCheck(reading: DotenvReading): HealthCheckResult {
       ? `ON — packaged time-triggered flows and packaged \`defineJob\` cron jobs are armed (${SCHEDULED_WORK_ENV})`
       : `OFF (the default) — no packaged time-triggered flow and no packaged \`defineJob\` runs on this deployment`,
     fix: enabled
-      ? `Unset ${SCHEDULED_WORK_ENV} to turn it back off. While it is on, a time-triggered\n`
-        + '      flow under a WALLED tenancy posture (group/isolated) must declare\n'
-        + '      config.organization on its start node or it is not armed; under `single` it\n'
-        + '      needs no declaration and its runs carry no organization.\n'
+      ? `Unset ${SCHEDULED_WORK_ENV} to turn it back off. While it is on, what a\n`
+        + '      time-triggered flow owes depends on the tenancy posture: under `isolated` it\n'
+        + '      must declare config.organization on its start node or it is not armed; under\n'
+        + '      `group` the declaration is optional and an undeclared sweep acts as each\n'
+        + "      swept record's own organization (a record-less cron there carries none, and\n"
+        + '      its tenant-scoped writes are refused — declare one if it writes); under\n'
+        + '      `single` it needs no declaration and its runs carry no organization.\n'
         + `      ${envSourceSentence(reading, provenance)}`
       : `Set ${SCHEDULED_WORK_ENV}=true to run package-authored scheduled work here.\n`
         + '      OFF is the global default in every posture and every kernel: a clock-driven\n'

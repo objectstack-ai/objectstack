@@ -578,7 +578,11 @@ export const SetOperatorSchema = lazySchema(() => z.object({
  * sentence is in {@link RangeOperatorSchema}'s docblock.
  */
 const RANGE_ENDPOINT_DESCRIPTION =
-  'Closed interval [min, max]. Each endpoint is a number, a Date, or a string. '
+  'Closed interval [min, max]. Each endpoint is a number, a Date, or a string, and '
+  + 'BOTH are required NON-BLANK: an empty string, null and undefined are refused, '
+  + 'and the refusal names the blank side. A range bounded on ONE side only is not a '
+  + '$between at all — write the side you have as a scalar comparison '
+  + '($gte for a lower bound, $lte for an upper one). '
   + 'A { $field } reference is NOT an endpoint shape: no backend resolves one '
   + 'inside a list — put it in a scalar comparison '
   + '($gt/$gte/$lt/$lte), which does compile to a column-to-column bound. '
@@ -679,9 +683,45 @@ const RANGE_ENDPOINT_DESCRIPTION =
  * nothing, at every backend.
  */
 /**
- * [#7596] One `$between` endpoint, with the `{ $field }` shape ruled out.
+ * [#18012] The author-facing refusal for a BLANK `$between` endpoint — the
+ * empty string and `undefined`, at either bound. Ruled 2026-09-17 (decision
+ * batch #146 item 5, letter A): both endpoints present and non-empty.
  *
- * ## Why the refusal rides on the union's `error` and not on a `superRefine`
+ * ## Why the message names the SIDE
+ *
+ * The only measured producer of this shape is a builder padding a HALF-TYPED
+ * pair, so what arrives is two endpoints of which exactly one means anything —
+ * and the author, who typed one bound and watched the row turn complete, is the
+ * one person who cannot see which. Naming `MIN` / `MAX` and the index makes the
+ * half that is missing the subject of the sentence.
+ *
+ * ## `null` is deliberately NOT routed here
+ *
+ * `null` is blank too, and it is already refused — by the 2026-08-31 ruling's
+ * own pointed message ({@link nullListComparandMemberMessage}), which
+ * prescribes the NULL PREDICATE because an author who wrote `null` was
+ * reaching for absence. An author who left a bound empty was reaching for a
+ * bound. Two blank spellings, two intents, two remedies; ⛔ do not unify them.
+ */
+function blankRangeBoundMessage(index: 0 | 1): string {
+  const side = index === 0 ? 'MIN' : 'MAX';
+  return (
+    `A blank value is not a valid $between endpoint at index ${index} (the ${side} bound). `
+    + 'A closed interval [min, max] requires BOTH endpoints present and non-empty: an empty '
+    + 'string is not an interval endpoint at any backend — it is compared as a value, so the '
+    + 'range stops bounding on that side while still reading as a complete range. Write the '
+    + 'bound you meant; and if only ONE side is genuinely bounded, that is not a range at all '
+    + '— drop $between and write the side you have as a scalar comparison '
+    + '({"$gte": min} for a lower bound, {"$lte": max} for an upper one). '
+    + 'Ruled 2026-09-17: a blank $between bound is refused at the validation entrance.'
+  );
+}
+
+/**
+ * [#7596] One `$between` endpoint, with the `{ $field }` shape ruled out — and,
+ * since the 2026-09-17 ruling (#18012), the BLANK endpoint likewise.
+ *
+ * ## Why the union's `error` carries three of the four refusals
  *
  * Measured on zod 4.4.3: a check attached to the TUPLE does not run once an
  * ELEMENT has failed, so a tuple-level refinement could never see the endpoint
@@ -689,9 +729,19 @@ const RANGE_ENDPOINT_DESCRIPTION =
  * `invalid_union` / "Invalid input" and nothing else. The union's own `error`
  * callback runs exactly when the union rejects and sees the offending input, so
  * it replaces that generic text with {@link listPositionFieldReferenceMessage}
- * for this one shape and returns `undefined` for every other rejection, leaving
- * zod's default wording — and, importantly, the issue's `code` and `path` —
- * untouched for the endpoint shapes that were already invalid.
+ * or {@link blankRangeBoundMessage} for those shapes and returns `undefined`
+ * for every other rejection, leaving zod's default wording — and, importantly,
+ * the issue's `code` and `path` — untouched for the endpoint shapes that were
+ * already invalid.
+ *
+ * ## Why the EMPTY STRING is the one that needs a check
+ *
+ * `null`, `undefined` and `{ $field }` never passed the union; for all three
+ * the ruling adds only a POINTED SENTENCE. `''` is a string and the union
+ * ACCEPTS it, so the empty-string arm is the one place where #18012 changes
+ * what parses. It rides an ELEMENT-level `superRefine` — not the tuple-level
+ * one the paragraph above rules out — which runs exactly when this endpoint
+ * passed the union, i.e. precisely when there is an `''` to report.
  *
  * `index` is baked in per endpoint rather than read from the issue: at the time
  * the union reports, the path is still relative to the union itself and the
@@ -706,9 +756,19 @@ const rangeEndpointSchema = (index: 0 | 1) =>
       // mechanism the `{ $field }` shape uses one line down.
       issue.input === null
         ? nullListComparandMemberMessage(`$between endpoint at index ${index}`)
-        : isFieldReferenceShape(issue.input)
-          ? listPositionFieldReferenceMessage(`$between endpoint at index ${index}`)
-          : undefined,
+        // [#18012] `undefined` never passed it either — an absent bound is the
+        // same replace-only substitution, pointed at the side that is missing.
+        : issue.input === undefined
+          ? blankRangeBoundMessage(index)
+          : isFieldReferenceShape(issue.input)
+            ? listPositionFieldReferenceMessage(`$between endpoint at index ${index}`)
+            : undefined,
+  }).superRefine((endpoint, ctx) => {
+    // [#18012] The empty string is the one blank spelling the union accepts.
+    // ⛔ Not a trim and not a whitespace rule: the ruling is the empty string,
+    // and widening it here would narrow a published face further than ruled.
+    if (endpoint !== '') return;
+    ctx.addIssue({ code: 'custom', message: blankRangeBoundMessage(index) });
   });
 
 /**

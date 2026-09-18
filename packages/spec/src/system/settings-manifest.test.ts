@@ -333,8 +333,25 @@ describe('`visible` — the settings visibility grammar (#7327)', () => {
   it('accepts the unwrapped spelling and the `{ dialect, source }` envelope', () => {
     expect(withVisible("data.provider === 'smtp'").success).toBe(true);
     expect(withVisible({ dialect: 'cel', source: "${data.provider === 'smtp'}" }).success).toBe(true);
-    // An `ast`-only envelope is opaque at this layer — nothing to walk.
-    expect(withVisible({ dialect: 'cel', ast: { kind: 'opaque' } }).success).toBe(true);
+  });
+
+  it('REFUSES an `ast`-only envelope — #15811 moved this slot onto the evaluated rule', () => {
+    // It used to pass: the AST is opaque at this layer and the grammar walk had
+    // nothing to read, so the slot admitted an envelope `evaluateVisibility`
+    // could never run and the refusal arrived at the tenant's next save. Since
+    // #15811 the slot composes `EvaluatedExpressionInputSchema`, so the door
+    // refuses it — and the two refusals stay independent: this one says there
+    // is no `source` to judge, the grammar says a `source` is out of grammar.
+    const r = withVisible({ dialect: 'cel', ast: { kind: 'opaque' } });
+    expect(r.success).toBe(false);
+    const messages = r.success ? [] : r.error.issues.map((i) => i.message);
+    expect(messages.some((m) => m.includes('cannot evaluate `ast` alone'))).toBe(true);
+    expect(messages.some((m) => m.includes('Unsupported `visible` predicate'))).toBe(false);
+  });
+
+  it('REFUSES a `source` that is blank after trimming, through both keys', () => {
+    expect(withVisible({ dialect: 'cel', source: '   ' }).success).toBe(false);
+    expect(withVisible('   ').success).toBe(false);
   });
 
   it('normalises a bare string to the canonical envelope, unchanged by the narrowing', () => {

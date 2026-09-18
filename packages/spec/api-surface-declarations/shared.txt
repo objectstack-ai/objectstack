@@ -727,13 +727,13 @@ declare function applyProtection<T extends Record<string, unknown>>(item: T, ctx
 declare function canonicalMetaUrlType(type: string): string;
 
 // ── cel (function) ──
-declare function cel(strings: TemplateStringsArray, ...values: unknown[]): Expression;
+declare function cel(strings: TemplateStringsArray, ...values: unknown[]): EvaluatedExpression;
 
 // ── cron (function) ──
-declare function cron(strings: TemplateStringsArray, ...values: unknown[]): Expression;
+declare function cron(strings: TemplateStringsArray, ...values: unknown[]): EvaluatedExpression;
 
 // ── expression (function) ──
-declare function expression(source: string, dialect?: ExpressionDialect, meta?: ExpressionMeta): Expression;
+declare function expression(source: string, dialect?: ExpressionDialect, meta?: ExpressionMeta): EvaluatedExpression;
 
 // ── findClosestMatches (function) ──
 declare function findClosestMatches(input: string, candidates: readonly string[], maxDistance?: number, maxResults?: number): string[];
@@ -811,7 +811,7 @@ declare function strictUnknownKeyError(options: StrictUnknownKeyErrorOptions): z
 declare function suggestFieldType(input: string): string[];
 
 // ── tmpl (function) ──
-declare function tmpl(strings: TemplateStringsArray, ...values: unknown[]): Expression;
+declare function tmpl(strings: TemplateStringsArray, ...values: unknown[]): EvaluatedExpression;
 
 // ── unrecognisedMetaTypeRefusal (function) ──
 declare function unrecognisedMetaTypeRefusal(urlType: string): {

@@ -231,7 +231,7 @@ function evaluatedExpressionInputRefusal(input: unknown): string | undefined {
  * required and non-blank there too. `ExpressionSchema` / `ExpressionInputSchema`
  * are NOT narrowed: they remain the persistence contract (`source` OR `ast`).
  *
- * The first slot to compose it is `FlowEdgeSchema.condition`, the branch
+ * The first slot to compose it was `FlowEdgeSchema.condition`, the branch
  * predicate `evaluateCondition` runs: an `ast`-only envelope authored there
  * used to parse, register, pass `objectstack validate`, and then land in the
  * evaluator's empty-source arm and answer a SILENT `false` — a branch that
@@ -244,6 +244,21 @@ function evaluatedExpressionInputRefusal(input: unknown): string | undefined {
  * The string arm's transform returns the narrowed `{ dialect: 'cel', source }`
  * as an `EvaluatedExpression`, so the parsed value of an evaluated slot stays
  * assignable to its own input type — the same move the typed arms make.
+ *
+ * Since #15811 it is the schema of EVERY evaluated slot in the spec, not of one
+ * of them: the flow-node ledger's rule generalised to the other declaring
+ * positions the #15811 census enumerated by identity — the formula
+ * `expression`, the field / option / grid-column / form / section / component
+ * `visibleWhen` / `visibleOn` / `readonlyWhen` / `requiredWhen` / `visibility`
+ * predicates, validation `condition` / `when`, hook `condition`, the object
+ * field-group and row-CRUD `visibleWhen` / `disabledWhen`, the sharing-rule
+ * `condition`, plugin-security-advanced and plugin-versioning `condition`,
+ * action `visible` / `disabled` / per-option `visibleWhen` / param `visible`,
+ * app nav `visible`, bulk-action `visible`, settings-manifest visibility, and
+ * the metrics / tracing expression union members. What is deliberately NOT
+ * narrowed is the pair above it: `ExpressionSchema` and
+ * `ExpressionInputSchema` remain the persistence contract (`source` OR `ast`),
+ * and so does `PredicateInputSchema`, which is a plain alias of the latter.
  */
 export const EvaluatedExpressionInputSchema = z.union([
   z.string()
@@ -407,8 +422,26 @@ export type PredicateInput = z.input<typeof PredicateInputSchema>;
 /**
  * Construct an Expression literal from a CEL source string. Used by DX
  * shorthand (`cel\`...\``) and by codegen tools.
+ *
+ * ## Why these four constructors return {@link EvaluatedExpression}
+ *
+ * `expression`, {@link cel}, {@link tmpl} and {@link cron} each assign a
+ * `string` to `source` unconditionally — read their four bodies — so the wider
+ * `Expression` return type they used to carry was never a statement about what
+ * they PRODUCE. It was slop, and the evaluated-slot narrowing of #15811 is what
+ * made it cost something: an evaluated slot requires `source`, `Expression`
+ * does not carry it, and so ``visibleWhen: P`…` `` stopped type-checking at the
+ * one spelling this file's own docblock tells authors to use.
+ *
+ * `EvaluatedExpression` is assignable to `Expression`, so every
+ * persistence-contract slot still accepts these values unchanged; what the
+ * narrower type adds is that an evaluated slot accepts them too.
+ *
+ * ⛔ Never widen these back to buy a call site. A caller that genuinely has no
+ * `source` is constructing an `ast`-only envelope — it does not come from here,
+ * it writes the object literal, and an evaluated slot refuses it on purpose.
  */
-export function expression(source: string, dialect: ExpressionDialect = 'cel', meta?: ExpressionMeta): Expression {
+export function expression(source: string, dialect: ExpressionDialect = 'cel', meta?: ExpressionMeta): EvaluatedExpression {
   return { dialect, source, ...(meta ? { meta } : {}) };
 }
 
@@ -447,8 +480,12 @@ function renderTemplate(strings: TemplateStringsArray, values: readonly unknown[
   return out;
 }
 
-/** Tagged template — produces a CEL Expression envelope. */
-export function cel(strings: TemplateStringsArray, ...values: unknown[]): Expression {
+/**
+ * Tagged template — produces a CEL Expression envelope.
+ *
+ * Returns {@link EvaluatedExpression} — see {@link expression} for why.
+ */
+export function cel(strings: TemplateStringsArray, ...values: unknown[]): EvaluatedExpression {
   return { dialect: 'cel', source: renderTemplate(strings, values) };
 }
 
@@ -463,7 +500,7 @@ export const P = cel;
  * notification subjects, prompt bodies, titleFormat strings, etc. Variable
  * scope is the same as CEL (`{{record.x}}`, `{{os.user.id}}`).
  */
-export function tmpl(strings: TemplateStringsArray, ...values: unknown[]): Expression {
+export function tmpl(strings: TemplateStringsArray, ...values: unknown[]): EvaluatedExpression {
   // Templates do not get JSON.stringify on substitution — interpolation happens
   // at evaluate time via `{{path}}` markers, so we keep raw substitutions here.
   let out = strings[0] ?? '';
@@ -475,7 +512,7 @@ export function tmpl(strings: TemplateStringsArray, ...values: unknown[]): Expre
 }
 
 /** Tagged template — produces a cron Expression envelope. */
-export function cron(strings: TemplateStringsArray, ...values: unknown[]): Expression {
+export function cron(strings: TemplateStringsArray, ...values: unknown[]): EvaluatedExpression {
   let out = strings[0] ?? '';
   for (let i = 0; i < values.length; i++) {
     out += String(values[i]);

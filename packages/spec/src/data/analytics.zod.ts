@@ -242,26 +242,92 @@ export const DimensionSchema = lazySchema(() => strictObject(
 ));
 
 /**
+ * The ON clause a cube join used to let an author write, and the cardinality it
+ * used to let them declare. Both were REMOVED (#18612, ADR-0049
+ * enforce-or-remove); the prescriptions are `guidance` entries on
+ * {@link CubeJoinSchema}, shared with the `on` spelling that used to be an alias
+ * for `sql`.
+ *
+ * The derivation they point at is not a plan — it is what both strategies have
+ * always done:
+ * `packages/services/service-analytics/src/strategies/native-sql-strategy.ts#qualifyAndRegisterJoin`
+ * emits `LEFT JOIN <name> <alias> ON "<parent>"."<segment>" = "<alias>"."id"` from the
+ * dotted member path alone, and
+ * `packages/services/service-analytics/src/strategies/objectql-strategy.ts#isCrossObjectField`
+ * resolves the join through `cube.joins?.[alias]?.name` and lowers it to a
+ * relationship traversal with no ON clause at all.
+ */
+const CUBE_JOIN_DERIVED_ON =
+  'A cube join has no authorable ON clause: it is DERIVED from the declared relationship '
+  + 'between the two cubes\' objects, as a foreign-key equality. `joins.<alias>.name` names the '
+  + 'joined object and is the whole of the contract.';
+
+const CUBE_JOIN_MIGRATE =
+  'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+const CUBE_JOIN_SQL_REMOVED =
+  '`joins.<alias>.sql` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — it '
+  + 'never had an effect, and the absence of effect was not visible: both strategies SYNTHESISE '
+  + 'the ON clause and neither ever read this key, so an authored join condition was silently '
+  + 'REPLACED by a foreign-key equality and the aggregate came back under a 200, joined on '
+  + 'something the author had not asked for. Delete the key. '
+  + CUBE_JOIN_DERIVED_ON + ' ' + CUBE_JOIN_MIGRATE;
+
+const CUBE_JOIN_RELATIONSHIP_REMOVED =
+  '`joins.<alias>.relationship` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) '
+  + '— it never had an effect: nothing dispatched on the cardinality, so `one_to_many` parsed, '
+  + 'changed no SQL, and the aggregate silently kept the many-to-one arithmetic. Delete the key. '
+  + CUBE_JOIN_DERIVED_ON + ' ' + CUBE_JOIN_MIGRATE;
+
+const CUBE_JOIN_ON_REMOVED =
+  '`joins.<alias>.on` is not a cube-join key, and `sql` — the key it used to be the curated '
+  + 'near-miss for — was itself removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove). '
+  + 'Delete the key. ' + CUBE_JOIN_DERIVED_ON + ' ' + CUBE_JOIN_MIGRATE;
+
+/**
  * Join Schema
- * Defines how this cube relates to others.
+ * Declares that this cube can reach another cube's object, and under which alias.
+ *
+ * The ON clause is **derived**, never authored: the runtime builds a foreign-key
+ * equality from the declared relationship between the two cubes' objects. That is
+ * why `name` is the whole shape — see {@link CUBE_JOIN_DERIVED_ON}.
  *
  * Strict as of #4001 batch D — same doors as {@link MetricSchema}. Before the
  * close, a join authored with `relationshipp:` (or any near-miss) parsed clean
  * and fell back to the `many_to_one` default — a different join shape than the
- * author declared, under a successful parse.
+ * author declared, under a successful parse. #18612 then removed `relationship`
+ * and `sql` outright (ADR-0049 enforce-or-remove, maintainer-ruled batch #154):
+ * the near-miss was the smaller half of the defect, because the DECLARED
+ * spellings were being replaced just as silently. `MetricSchema.filters` above
+ * took the same route one shape over — every cube shape is a `strictObject`, so
+ * the route is strict deletion plus a `guidance` entry carrying the prescription,
+ * never a `retiredKey()` tombstone (the key leaves the walked shape entirely).
  */
 export const CubeJoinSchema = lazySchema(() => strictObject(
   {
     surface: 'this cube join',
     history: 'Until this shape was closed, an undeclared join key was silently dropped — a typo\'d '
       + '`relationship` fell back to the `many_to_one` default.',
-    // The join condition is spelled `sql` here (its doc says "ON clause").
-    aliases: { on: 'sql' },
+    // No `aliases` entry for `on` any more: it pointed at `sql`, and #18612
+    // removed that key. An alias naming a key the shape cannot accept is the
+    // `triggerPhrase` failure `strict-object.ts` records — it answers the author
+    // with a second rejection — so `on` carries its own prescription below.
+    guidance: {
+      sql: CUBE_JOIN_SQL_REMOVED,
+      relationship: CUBE_JOIN_RELATIONSHIP_REMOVED,
+      on: CUBE_JOIN_ON_REMOVED,
+    },
   },
   {
-    name: z.string().describe('Target cube name'),
-    relationship: z.enum(['one_to_one', 'one_to_many', 'many_to_one']).default('many_to_one'),
-    sql: z.string().describe('Join condition (ON clause)'),
+    name: z.string().describe(
+      'Target cube name — the object this join reaches. The ON clause is DERIVED from the '
+      + 'declared relationship between the two cubes\' objects (a foreign-key equality) and is '
+      + 'never authored. The KEY this join is declared under in the `joins` record is the '
+      + 'FOREIGN-KEY FIELD on this cube\'s own object, not a second spelling of the object it '
+      + 'reaches: the runtime emits `LEFT JOIN <name> <key> ON <base>.<key> = <key>.id` and '
+      + 'resolves a member written `<key>.<field>` through that alias. A join keyed after the '
+      + 'TARGET object joins on a column the base object does not have, so nothing resolves.'
+    ),
   },
 ));
 
