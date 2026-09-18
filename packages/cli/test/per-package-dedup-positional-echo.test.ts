@@ -32,10 +32,19 @@
  * because a key that stopped discriminating would satisfy the echo case
  * trivially. The controls are what make a green here mean something:
  *
- *   - a union twin differing in its NESTED position — the coordinate the
+ *   - a union twin differing only in its NESTED INDEX — the coordinate the
  *     rewrite deliberately leaves alone;
  *   - a union twin differing in `where` — a different entity;
  *   - a union twin differing in `rule`.
+ *
+ * ⚠️ The first control is built on `unique/unscoped-declared-index`, ⛔ not on
+ * the `field-no-consumers` finding the echo cases use, and the fixture carries
+ * a bare `unique: true` index for no other reason. Measured, ⛔ not reasoned:
+ * an ablation that widens the rewrite from the top-level index to EVERY index
+ * left all six cases green while that control was written against a
+ * `field-no-consumers` twin, because such a path ends in a field NAME and the
+ * twin therefore differed in a name rather than in a position. A control that
+ * cannot fail is decoration; re-run that ablation if this file is edited.
  *
  * `REAL_UNION` closes it end to end on a fixture shaped like the example: the
  * union run really does raise the twin at a different index, so the case is
@@ -118,6 +127,16 @@ const ORDERS_OBJECTS = [
       name: { name: 'name', type: 'text', label: 'Order Number', required: true },
       account: { name: 'account', type: 'lookup', label: 'Account', reference: 'pp_account' },
     },
+    // ⛔ Not decoration. A bare `unique: true` trips
+    // `unique/unscoped-declared-index`, whose path carries a NESTED index
+    // (`objects[0].indexes[0]`) — and a finding with a nested index is the ONLY
+    // thing the NESTED control below can discriminate on. Every other rule this
+    // fixture raises produces `objects[N].fields.<name>`, where the sole index
+    // is the top-level one, so a "nested position" control written against one
+    // of those cannot fail and is not a control. Measured: without this, an
+    // ablation that rewrites EVERY index instead of the top-level one keeps all
+    // six cases green.
+    indexes: [{ name: 'pp_order_name_uq', fields: ['name'], unique: true }],
   },
 ];
 
@@ -171,6 +190,10 @@ describe('#18779 — the per-package de-duplication key is position-insensitive'
     const raw = rawSurvivors(parsedArtifact());
     expect(raw.length).toBeGreaterThan(0);
     expect(raw.some((f) => f.rule === 'field-no-consumers' && /industry/.test(f.path))).toBe(true);
+    // The carrier the NESTED control needs — asserted here so its absence reads
+    // as "the fixture stopped raising it" rather than as a silently weakened
+    // control further down.
+    expect(raw.some((f) => /^objects\[\d+\]\.indexes\[\d+\]$/.test(f.path))).toBe(true);
     expect(raw.every((f) => /^package '/.test(f.where))).toBe(true);
   });
 
@@ -195,19 +218,32 @@ describe('#18779 — the per-package de-duplication key is position-insensitive'
     ).toEqual([]);
   });
 
-  it('CONTROL: a union twin differing in its NESTED position still lets the survivor through', () => {
+  it('CONTROL: a union twin differing only in its NESTED index still lets the survivor through', () => {
     // The rewrite is the top-level index ONLY. Nested positions address the
     // author's own document and read the same in both views, so widening the
     // rewrite to every index would swallow genuinely different findings — this
     // case is what goes red if someone does.
+    //
+    // ⚠️ It has to be built on a finding whose path ACTUALLY carries a nested
+    // index. `unique/unscoped-declared-index` is that finding here
+    // (`objects[0].indexes[0]`); `field-no-consumers` is not — its path ends in
+    // a field NAME, so a twin built from it differs in a name rather than in a
+    // position and stays distinct under any index rewrite at all. Measured: the
+    // over-wide ablation keeps a `field-no-consumers` twin green and turns this
+    // one red, which is the whole difference between a control and a decoration.
     const parsed = parsedArtifact();
-    const target = rawSurvivors(parsed).find((f) => f.rule === 'field-no-consumers')!;
-    const local = unprefixed(target);
-    const twin: AuthoringFinding = {
-      ...local,
-      path: `objects[1].fields.some_other_field`,
-    };
-    expect(survivorsAgainst(parsed, [twin]).map((f) => f.where)).toContain(target.where);
+    const target = rawSurvivors(parsed).find((f) => f.rule === 'unique/unscoped-declared-index');
+    expect(target, 'fixture no longer raises a finding with a NESTED index in its path').toBeTruthy();
+    const local = unprefixed(target!);
+    expect(local.path).toMatch(/^objects\[\d+\]\.indexes\[\d+\]$/);
+
+    // Same top-level index, DIFFERENT nested one — the coordinate the rewrite
+    // must leave alone.
+    const twin: AuthoringFinding = { ...local, path: local.path.replace(/\.indexes\[0\]$/, '.indexes[1]') };
+    expect(twin.path).not.toBe(local.path);
+    expect(twin.path.replace(/^objects\[\d+\]/, '')).not.toBe(local.path.replace(/^objects\[\d+\]/, ''));
+
+    expect(survivorsAgainst(parsed, [twin]).map((f) => f.where)).toContain(target!.where);
   });
 
   it('CONTROL: a union twin differing in `where` or `rule` still lets the survivor through', () => {
