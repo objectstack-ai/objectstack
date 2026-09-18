@@ -50,6 +50,13 @@
  * covers the three glob-shaped ones. That boundary is the honest claim, and it
  * is stated here rather than implied by the code.
  *
+ * ⛔ The register's `tier` (H / S, the 2026-09-18 landing tiers) is likewise
+ * NOT parsed out of the prose. Tiers are an attribute of a row, not a second
+ * set: a two-tier paragraph still yields ONE set of globs, and that set is
+ * what this gate pins. Which row lands on which record is pinned where the
+ * attribute lives — `check-governed-merges.mjs --self-test` — and the prose
+ * states it in words this gate deliberately does not read.
+ *
  * ## Regions, and why a missing anchor is RED
  *
  * A region is delimited by two literal anchors that already exist in the file,
@@ -145,7 +152,7 @@ export const PROSE_SURFACES = Object.freeze([
   Object.freeze({
     path: 'AGENTS.md',
     what: 'Prime Directive #14 — the definition every seat reads before a ready-flip',
-    start: 'A governed surface is confirmed and merged by the maintainer, by hand',
+    start: 'A governed surface lands only the way its tier allows',
     end: 'A version release is performed by the maintainer, by hand',
   }),
   Object.freeze({
