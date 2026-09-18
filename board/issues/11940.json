@@ -1,0 +1,30 @@
+{
+  "number": 11940,
+  "kind": "issue",
+  "title": "flow designer: the Start node's Entry condition is raw-CEL-only — ConditionBuilder ships in five other inspectors but not the one condition most users meet",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T01:42:50Z",
+  "updated_at": "2026-08-25T02:25:49Z",
+  "closed_at": "2026-08-25T02:25:49Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11940",
+  "body": "## What\n\n`ConditionBuilder` — the row-based visual condition editor that compiles to CEL (field · operator · value rows joined by `&&` / `||`, with a raw-expression editor as the fallback mode) — is wired into five inspectors:\n\n- `views/studio-design/ObjectValidationsPanel.tsx` (validation rules)\n- `views/metadata-admin/inspectors/PageBlockInspector.tsx` (visible-when)\n- `views/metadata-admin/inspectors/HookDefaultInspector.tsx` (hook condition)\n- `views/metadata-admin/inspectors/ActionDefaultInspector.tsx` (visible-when / disabled-when)\n- `views/metadata-admin/widgets.tsx`\n\nIt is **not** wired into the flow designer. `inspectors/flow-node-config.ts` declares the Start node's gate as\n\n```ts\ncfg('condition', 'Entry condition', 'expression', {\n  placeholder: 'status == \"qualifying\" && previous.status != \"qualifying\"',\n  help: 'CEL predicate — the flow runs only when this is true …',\n})\n```\n\nand `FlowNodeConfigField.tsx` renders `kind: 'expression'` through the same branch as plain `text` — a single-line mono `VariableTextInput`. So authoring a record-change flow's entry gate means hand-writing CEL into a narrow one-line box, with no row builder, while authoring a *validation rule* two panels over gets the visual builder.\n\n## Why it matters\n\nThe flow entry condition is arguably the most user-facing predicate in the product — it is the thing a business admin sets when they build an approval or automation in Studio, and the flow designer is sold as the visual authoring surface. Today that surface's central decision is the one place that demands raw CEL.\n\nPractical consequences observed while authoring `contract_term_review` in Studio (real run, HotCRM demo org):\n\n- A realistic create-or-update gate is long enough to be **truncated in the one-line field** — `contract_term_months > 24 && (previous == null || previous.contract_term_months <= 24)` is unreadable in place, so you cannot review what the flow gates on without selecting the text or reading the metadata.\n- The `previous == null` create-path idiom (documented only in the field's `help`) is exactly the kind of thing a row builder would offer as a choice instead of requiring recall.\n- The inconsistency is visible to a single user in a single session: same product, two condition fields, two entirely different authoring experiences.\n\n## Suggested fix\n\nWire the flow node inspector's `expression` fields (at minimum the Start node's `condition`; `decision` branch conditions have the same shape) to `ConditionBuilder`, keeping its raw-expression mode as the escape hatch for predicates the row builder cannot express. That yields one condition-authoring experience across validations, hooks, actions, page blocks and flows — and the compiled output is the same CEL the runtime already evaluates, so nothing downstream changes.\n\n## Provenance\n\nFound while fact-checking a promo video's on-screen claims against the running product (video-studio #4): the film demonstrates a business admin drawing an approval flow in the designer, and the threshold-change beat had to be rendered as a magnified code card because the product's own field shows a truncated CEL string. The product owner asked whether presenting the condition as code was the right thing to show — this issue is the answer: it is accurate today, and it is the gap worth closing.\n\nFiling as a finding — unassigned, not claimed."
+}

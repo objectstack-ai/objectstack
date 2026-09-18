@@ -1,0 +1,34 @@
+{
+  "number": 11674,
+  "kind": "issue",
+  "title": "Seed pass-2 deferral is structurally unreachable for a KEYLESS dataset — so a declared pointer pair on an engine-owned object is order-dependent",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T11:43:37Z",
+  "updated_at": "2026-08-25T04:55:33Z",
+  "closed_at": "2026-08-25T04:55:09Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11674",
+  "body": "Found while implementing #11386 (adopting the `referenceVia` pointer pair on four system objects). Filed unassigned, not fixed there — fixing it means touching the seed loader, which is outside that card.\n\n## What was measured\n\n`SeedLoaderService` defers an unresolvable reference to pass 2 by **deleting the column from the row** and recording a `DeferredUpdate` keyed on `recordExternalId` (`packages/metadata-protocol/src/seed-loader.ts`, the `config.multiPass` branch). Pass 2 then looks the row back up **by its externalId** to write the resolved value.\n\nA dataset that declares no `externalId` — `mode: 'insert'`, the honest authoring for an object with no natural key — has no such key. Pass 2 resolves the target and then has nowhere to write it, and takes the `recordExternalId === ''` branch: *\"Deferred reference DROPPED … has an empty externalId, so no internal id\"*, `success: false`.\n\nMeasured directly, with a positive control that isolates the cause (both now pinned in `packages/metadata-protocol/src/seed-loader-pointer-pair.test.ts`):\n\n- ledger dataset seeded BEFORE its target, `mode: 'insert'` (no externalId) → `success: false`, the pointer is dropped with the empty-externalId error;\n- the same seeds, same order, with `externalId` declared on the ledger dataset → heals in pass 2, pointer resolves.\n\nSo the cause is **keylessness of the dataset**, not the pointer pair and not the deferral machinery.\n\n## Why it matters more after #11386\n\nThis is pre-existing and applies to any reference kind, but #11386 widened the blast radius: the four newly adopted objects (`sys_audit_log`, `sys_approval_request`, `sys_record_share`, `sys_share_link`) are exactly the engine-owned rows that have **no natural key of their own**, so their seed datasets are the keyless case by default. `sys_activity` — the object #11339 adopted — is not affected in the same way in practice, and a reader who carried its order-independence over to these four would be wrong.\n\nThe failure is LOUD, which is the ruled family direction, so nothing is silently wrong. The cost is that the \"pointer pairs contribute no static ordering edge, pass 2 heals it\" property that #11339's design leans on does not hold for keyless datasets.\n\n## Options (not decided here)\n\n1. Leave as is, and document the constraint where pointer pairs are declared (cheapest; the error message already names `externalId`, though it does not say \"or order the target dataset first\").\n2. Make pass 2 able to write back by the internal id captured at insert time, rather than re-resolving through `externalId` — removes the constraint for every reference kind, and is the only option that makes the deferral property honest.\n3. Have the loader refuse or warn at load time when a dataset both declares a pointer pair (or any reference) and has no `externalId`, so the author learns the constraint before the ordering bites.\n\n## Second, NOT measured\n\nOn `sys_approval_request`, `sys_record_share` and `sys_share_link` the id half is also `required: true`. Since pass 1 defers by deleting the column, a real engine enforcing `required` on seed writes would reject that insert too — a second, independent road to the same loud failure. The engine double in the seed-loader suite does not validate, so this was deliberately left unasserted rather than claimed either way. Worth confirming against a real driver when this is triaged."
+}

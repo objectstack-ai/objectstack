@@ -1,0 +1,34 @@
+{
+  "number": 11377,
+  "kind": "issue",
+  "title": "driver-sql (PG): a cross-schema foreign key is reported with an UNQUALIFIED `referencedTable`, and the bare name does not resolve on the session's search_path",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T14:59:39Z",
+  "updated_at": "2026-08-25T01:12:18Z",
+  "closed_at": "2026-08-25T01:07:18Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11377",
+  "body": "Found while implementing #11324, which repairs the join correlations in `SqlDriver.introspectForeignKeys`' Postgres arm. Deliberately **not** fixed there: this is a shape question about `IntrospectedForeignKey`, a different class from the join-correlation defects that card owns, and its resolution changes an interface every consumer reads. #11324 is a separate subject and is not addressed by this issue.\n\n## What\n\n`packages/drivers/driver-sql/src/sql-driver.ts` — `IntrospectedForeignKey` carries\n\n```ts\nreferencedTable: string;\n```\n\nwith no schema qualification, and every arm fills it from a bare relation name (`ccu.table_name` before #11324, `parent.relname` after).\n\nUntil #11324 that key was never observably wrong on Postgres, because a foreign key whose target lived in another schema contributed **zero rows** and never reached a consumer at all. Repairing that defect is what makes this one reachable: the cross-schema constraint is now returned, and it is returned naming its parent by a bare name that the session's `search_path` does not resolve.\n\n## Measured\n\nOn live PostgreSQL 16.13, `search_path = os11324_probe`:\n\n```sql\ncreate schema os11324_far;\ncreate table os11324_far.remote_parent (id varchar(64) primary key);\ncreate table cross_child (\n  id varchar(64) primary key, p varchar(64),\n  constraint fk_cross foreign key (p) references os11324_far.remote_parent(id));\n```\n\n`introspectForeignKeys('cross_child')` now answers\n\n```\n{ columnName: 'p', referencedTable: 'remote_parent', referencedColumn: 'id', constraintName: 'fk_cross' }\n```\n\n`remote_parent` is not reachable by that name from `os11324_probe`. The answer is true of the constraint and unusable as an address.\n\n## Why it is not merely cosmetic\n\n`packages/objectql/src/util.ts:209` turns each foreign key straight into a lookup field:\n\n```ts\nreference: foreignKey.referencedTable,\n```\n\nSo the bare name becomes an object reference. Two outcomes, both silent: it points at nothing, or — the worse one, and the same collision family #11201 documented — it points at a **same-named table in the current schema**, i.e. a lookup wired to the wrong object with no diagnostic anywhere.\n\n## Options, not a recommendation\n\nRecording the shape rather than choosing it, because the choice reaches every consumer of `IntrospectedTable`:\n\n1. Add an optional `referencedSchema` and leave `referencedTable` bare — additive, but every consumer must learn to read it or nothing changes.\n2. Qualify `referencedTable` when (and only when) the parent is outside the session's `search_path` — no interface change, but the key's spelling becomes conditional, which is its own trap.\n3. Decide the driver should not report a cross-schema target at all and say so loudly rather than by omission.\n\nOption 1 is the shape `introspectSchema`'s other keys would suggest; option 2 is the one that needs no consumer change and is therefore the one most likely to be chosen for the wrong reason. This wants a decision, not a patch.\n\n## Not measured here\n\nWhether any in-tree deployment currently declares a cross-schema foreign key. The reachability above was reproduced directly against the driver on a live server; it does not depend on a consumer to be wrong.\n"
+}

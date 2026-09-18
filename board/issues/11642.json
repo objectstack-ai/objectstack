@@ -1,0 +1,35 @@
+{
+  "number": 11642,
+  "kind": "issue",
+  "title": "Eight more silent 50-entry truncations in the CLI's `build` / `validate` / `init` printers",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T10:25:54Z",
+  "updated_at": "2026-08-24T16:45:08Z",
+  "closed_at": "2026-08-24T16:45:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11642",
+  "body": "Found while fixing #11529, which was scoped by triage to the `build` author-time **warning** printer alone (\"widening beyond that is not asked for\"). The same silent cut exists at eight other call sites in `packages/cli`, and none of them was in that card's scope.\n\n## The sites\n\nAll at `origin/main` commit `50fb191d`, all `.slice(0, 50)` with no line naming the remainder:\n\n| file | line | list | what happens after |\n| --- | --- | --- | --- |\n| `packages/cli/src/commands/compile.ts` | 235 | `ruleErrors` | `exit 1` |\n| `packages/cli/src/commands/compile.ts` | 293 | `unknownKeyFindings` | advisory, build continues |\n| `packages/cli/src/commands/compile.ts` | 333 | access-matrix `drift` | `exit 1` |\n| `packages/cli/src/commands/compile.ts` | 360 | `docErrors` | `exit 1` |\n| `packages/cli/src/commands/validate.ts` | 140 | `ruleErrors` | `exit 1` |\n| `packages/cli/src/commands/validate.ts` | 212 | `docErrors` | `exit 1` |\n| `packages/cli/src/commands/init.ts` | 893 | `report.advisories` | scaffold continues |\n| `packages/cli/src/commands/init.ts` | 908 | `report.errors` | — |\n\nLine 217 of `compile.ts` is the ninth, and is the one #11529 fixes.\n\n## Why this is not just bookkeeping\n\nTwo of these are the exact defect #11529 describes, on an advisory list that does not fail the command:\n\n- **`compile.ts:293`** already prints the true total in its header — `Undeclared authoring keys (N) — dropped at load (#3786)` — and then shows at most 50. So the output states two numbers that disagree and explains neither, which is the shape #11529 measured on hotcrm. These are keys that drop silently on the way to storage; an author past the cut ships metadata with the key quietly gone.\n- **`init.ts:893`** is a scaffold-time advisory list with the same silent cut.\n\nThe six error-path sites are a weaker but real case. The code's own comment at `validate.ts:126` gives the rationale the truncation undercuts:\n\n> Every failing rule reports at once. The command used to exit at the first failing gate, so an author with three unrelated problems fixed them in three round trips and could not see how deep the hole went.\n\nA 50-entry cut with no notice restores a smaller version of that: past 50 the author cannot see how deep the hole goes, and each round of fixes reveals a new batch that reads as fresh breakage.\n\n## Suggested shape\n\n#11529 lands `printAuthoringAdvisories` in `packages/cli/src/utils/format.ts`, which prints a list and then names the remainder when it cut one. Whatever is decided here, the mechanism already exists in the package and these sites can adopt it rather than growing a second concept. Deliberately **not** proposed: new flags, verbosity tiers or paging — #11529's triage ruled that out for the warning printer and the same reasoning applies.\n\nNot filed as a sub-issue of #11529: these sites sit outside the scope that card completes, rather than inside it.\n"
+}

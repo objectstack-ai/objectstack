@@ -1,0 +1,34 @@
+{
+  "number": 18895,
+  "kind": "issue",
+  "title": "[finding] os-regen-merge.sh tells you to rerun it after resolving a conflict, but no tree state lets the rerun perform step 2 — dirty is refused and clean makes merge-base read origin/main tip, so a dropped side stays dropped with exit 0",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T04:42:19Z",
+  "updated_at": "2026-09-18T07:06:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18895",
+  "body": "Found by the `os-dev` merge round on #18058 (PR #18752) and handed to the seat to file — devs do not `POST /issues`. **The seat verified both halves independently from the source before filing**; the readings below are the seat's own.\n\n## The defect\n\nAll three conflict paths in `scripts/pm/os-regen-merge.sh` end by telling the operator to rerun the script:\n\n```\n:699  \"(semantic merge, both intents stack), then rerun this script to redo the\"\n:717  \"Resolve both, then rerun this script to redo the generated-artifact half.\"\n:737  \"Resolve every class above by ITS OWN rule, then rerun this script to redo\"\n```\n\n⭐ **There is no tree state in which that rerun can perform step 2.** The two preconditions are mutually exclusive:\n\n1. **While the conflict is being resolved, the tree is dirty — and `mode_run` refuses a dirty tree** (`:475-478`): 「working tree not clean — commit or drop local changes first (⛔ never git stash)」, `exit 1`.\n2. **Once the merge is committed to make the tree clean, the base is wrong.** `mode_run` computes `merge_base=\"$(git merge-base HEAD origin/main)\"` (`:489`) and derives `main_edited` from it (`:593`). After the merge, HEAD contains origin/main.\n\n⇒ `main_edited` is **empty**, every regen path reads as branch-edited, and step 2 takes nothing.\n\n⚠️ **The script's own header already documents the exact mechanism** (`:127-129`), which is why this is a defect in the INSTRUCTION rather than a discovery about git:\n\n> ⚠️ The base must be read BEFORE step 1. After the merge, HEAD contains origin/main, so `git merge-base HEAD origin/main` is origin/main's own tip and every file reads as 「the branch edited it」.\n\nThe single-run path honours that warning — `:486` captures the base 「BEFORE step 1, on purpose — see the header」. **Only the rerun instruction contradicts it.**\n\n## Why it matters, measured on a real round rather than argued\n\nOn PR #18752's merge round the os-regen driver resolved `content/docs/references/index.mdx` to **the branch's bytes and dropped main's side** — with **exit 0 and no marker in any diffstat**. That is the driver's documented, designed behaviour, and step 2 is the thing that exists to undo it.\n\nMain's side was restored **only because the round performed step 2 by hand, using the pre-merge base `a84da6096a5`**. An operator who followed the printed instruction instead would have: reran, been refused (dirty) or taken nothing (clean), seen exit 0, and shipped main's side silently dropped.\n\n⇒ the failure mode is **silent**, and the prescribed recovery is **inert**. That combination is what makes this worth a card rather than a docs nit.\n\n⭐ For the record, the same round shows what a correct step 2 buys: after regeneration the index was a **THIRD blob**, neither side's — carrying main's `QueryTransportParams` / `QueryWithTransport` (data 173 → 175) together with the branch's `PackageInstallBody` (api 440 → 441), 1530 total. Neither side's bytes were the answer.\n\n## What this card does NOT claim\n\n- ⛔ **Not observed as a run.** The rerun was deliberately NOT executed. This is a reading of the source plus the script's own header, and it should be reproduced before any fix is accepted — ⛔ a fix validated only against this card's prose would be validated against a reading.\n- ⛔ **No remedy prescribed.** Several shapes exist (persist the pre-merge base in the `$GIT_DIR/os-regen-pending` record the script already writes and have the rerun read it; add a resume mode that takes an explicit base; or change the message to prescribe the by-hand step 2 the round actually performed). They trade differently against the script's stated no-CI-path constraint and its bash-3.2 floor. ⚠️ Whichever is taken, it must not make the rerun GUESS a base — a wrong base here drops a side silently, which is the defect.\n- ⛔ **Not measured:** whether the other two conflict classes (`:699`, `:737`) reach the same dead end by the same route; only the class the round actually hit was traced.\n\n## Adjacent, noted and deliberately NOT filed as defects\n\n- `packages/spec/dropped-refinements.baseline.json` is adjudicated by `build-schemas.ts` but appears in neither `.gitattributes`' `merge=os-regen` list nor `NOT_DRIVER_MANAGED` in `scripts/regen-artifacts.mjs`, so the script reports it under class 1 with 「Do not resolve generated files textually」. For this file that line is **correct** and class 1 is the right instruction — recorded only because the file reads as generator-adjacent and the next reader may expect class 3.\n- The driver dropping main's side of the docs index with exit 0 is the documented designed behaviour the driver prints a notice for, and the regeneration re-derived the true union. ⇒ a confirmation of the mechanism, ⛔ not a second defect.\n\nDedupe words: `os-regen-merge rerun this script`, `step 2 inert after merge`, `merge-base reads origin/main tip`, `main_edited empty on rerun`, `generated artifact side dropped silently`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

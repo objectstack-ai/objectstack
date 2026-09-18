@@ -1,0 +1,36 @@
+{
+  "number": 11765,
+  "kind": "issue",
+  "title": "`showcase-smoke.yml` acquires pnpm via `pnpm/action-setup@v6` — a third acquisition path that a `corepack enable`-keyed census cannot see",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T15:42:43Z",
+  "updated_at": "2026-08-24T16:56:39Z",
+  "closed_at": "2026-08-24T16:56:39Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11765",
+  "body": "Filed unassigned by the dev seat working #11369. ⛔ Not touched there — #11369's population was defined by `corepack enable`, and this site does not contain that string.\n\n## The observation\n\n#11369 adopted `.github/actions/setup-pnpm` at all 16 `corepack enable` sites, taking `.github/workflows/` to **0** occurrences across **0** files. That count is true and still leaves one workflow downloading pnpm per job, because it acquires pnpm by a different mechanism:\n\n```yaml\n# .github/workflows/showcase-smoke.yml\n      - uses: actions/checkout@v7\n      - uses: pnpm/action-setup@v6      # <- not Corepack, so invisible to the census\n      - uses: actions/setup-node@v7\n        with:\n          node-version: '22'\n          cache: pnpm\n```\n\nMeasured on `origin/main`: `pnpm/action-setup` appears in exactly **1** workflow (`showcase-smoke.yml`), and it is the only workflow using it. Control, so the 1 is not an artefact: `corepack enable` across `.github/workflows/` is **0** post-#11369, while `uses: ./.github/actions/setup-pnpm` is **23**.\n\n## Why this is worth recording rather than just fixing\n\nThis is the **same asymmetry the #11369 card itself named**, one level up. That card observed that a signature keyed on the step name `Verify pnpm version` under-reported the sites, because the unpaired ones downloaded inside a differently-named step. The same thing is true of the census keyed on `corepack enable`: it is now a *complete* answer about Corepack and reads as a complete answer about **pnpm acquisition**, which it is not. Anyone who greps `corepack enable` in six months gets 0 and concludes the class is closed.\n\n## Stakes: low, and deliberately stated as such\n\n`showcase-smoke.yml` is `workflow_dispatch` + nightly (`0 7 * * *`), explicitly **NON-BLOCKING** (\"it never gates PRs\" — its own header). So a flake here is a red nightly, not a queue ejection and not a failed release. This is an observation, not a defect worth pre-empting a queued card for.\n\nAlso note it is not a pure swap: this job relies on `actions/setup-node`'s `cache: pnpm`, which requires pnpm to be on `PATH` **before** the `setup-node` step runs — the opposite of the ordering every `setup-pnpm` caller uses (`setup-node` first, then the composite). Whoever picks this up should treat it as an ordering question, not a find-and-replace.\n\n## Dedup\n\nSearched open issues before filing (`showcase-smoke`, `pnpm/action-setup`, pnpm acquisition, corepack, composite action): nothing covers this. #11369 is scoped to the Corepack population by its own measurement and does not reach here."
+}

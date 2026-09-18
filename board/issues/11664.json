@@ -1,0 +1,36 @@
+{
+  "number": 11664,
+  "kind": "issue",
+  "title": "docs: metadata-lifecycle overlay-whitelist table contradicts the registry on `flow` — table says allowOrgOverride ✅, code and tests say ❌",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T10:59:08Z",
+  "updated_at": "2026-08-24T15:33:59Z",
+  "closed_at": "2026-08-24T15:33:59Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11664",
+  "body": "## What\n\nThe \"Overlay whitelist (shared-DB tenancy invariant)\" table in `content/docs/concepts/metadata-lifecycle.mdx` lists:\n\n> | `flow` | ✅ | Per-org overlays are allowed for automation definitions. |\n\nBut the registry — which that very section declares to be the single machine-readable source (\"The whitelist lives in **one** place: `MetadataTypeRegistryEntry.allowOrgOverride`\") — says the opposite (`packages/spec/src/kernel/metadata-plugin.zod.ts`, `flow` entry):\n\n```ts\n{ type: 'flow', …, supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, … }\n```\n\nThe adjacent code comment documents the rationale (the #6190 phantom: an org-scoped flow overlay wrote successfully and lost its binding on the next cold start, because the loader cannot merge per-org flow overlays; rolling the flag back turned the silent phantom into a loud `403 not_overridable`). Conformance tests pin the refusal: `save-meta-response-conformance.test.ts` (\"`allowOrgOverride: false` for `flow`, so an org-scoped write is …\") and `publish-meta-response-conformance.test.ts` (\"org-scoped draft is refused\").\n\n## Why it matters\n\nThe table tells an integrator that an org-scoped flow overlay will persist; in reality the write 403s. Anyone building on the docs row plans a customization path that does not exist.\n\n## Suggested fix\n\n- Flip the `flow` row to ❌ with the two-tier note (org overlay closed; `allowRuntimeCreate` stays `true` — brand-new runtime flows remain supported per ADR-0070 package-first authoring).\n- While there, audit the remaining rows (`permission`, `position`, …) against the registry — the table appears to predate the #6190 rollback.\n\nFound while fact-checking a promo video's on-screen claims against the runtime (video-studio #4). Filing as a finding — unassigned, not claimed."
+}

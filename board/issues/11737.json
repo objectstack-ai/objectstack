@@ -1,0 +1,36 @@
+{
+  "number": 11737,
+  "kind": "issue",
+  "title": "[finding] docs-audit: the \"every key spelling a call site passes comes back ANCHORED\" pin checks 3 of the 4 spellings actually passed — `client` is omitted",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T14:31:10Z",
+  "updated_at": "2026-08-24T16:31:43Z",
+  "closed_at": "2026-08-24T16:31:43Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11737",
+  "body": "Noticed while implementing #11717 (PR #11736). **Not a live defect** — filed because the assertion's label over-claims relative to what it checks, and because the omission may equally have been deliberate. Recording it for triage rather than fixing it inside #11717's PR, which is about the anchor rather than about pin coverage.\n\n## What is there\n\n`scripts/docs-audit/affected-docs.mjs`, in `--self-test`:\n\n```js\ncheck('declLead', 'every key spelling a call site passes comes back ANCHORED', 'declLead',\n  /* expected */,\n  ['(route|client)', 'route', '(?:route|client)'].map((k) => declLead(k)).join(' | '));\n```\n\n## What the call sites actually pass\n\nAll eight `new RegExp(declLead(…))` call sites pass string literals, and there are **four** distinct spellings, not three:\n\n| spelling | call sites |\n| --- | --- |\n| `(route|client)` | 3 — `declarationsIn`, `declinedIn`, `outsideCode` |\n| `route` | 3 — `routeRe`, `nextRouteRe`, `routesDeclared` |\n| `(?:route|client)` | 1 — `codeLeads` |\n| **`client`** | **1 — `windowClientRe`** |\n\n`client` is the one the pin's array does not carry, so the assertion named \"every key spelling a call site passes\" is checking three quarters of them.\n\n## Why it is not currently a defect\n\nThe anchor is spelled once in `declLead` and a separate pin asserts that (`the run between a route:/client: colon and its value is spelled ONCE`, plus `no call site restates it`). Every spelling therefore gets the same anchor by construction, so the missing array element cannot currently diverge. The gap is that the **behavioural** pin — the one that exists precisely so the property is *checked rather than asserted* — would not see a regression that reached only the `client`-only spelling.\n\n## Two readings, hence triage rather than a fix\n\n1. **Oversight.** `client` was simply missed when #11542 built the list, and the label should be made true by adding it.\n2. **Deliberate.** `client` was judged redundant because `(route|client)` already exercises the same key, and the label is loose rather than wrong.\n\nEither way the resolution is a one-element change plus a label that matches, but which one it is decides whether the label or the array moves. Left for whoever picks it up.\n\nFound in: `scripts/docs-audit/affected-docs.mjs` · context: #11717 / PR #11736 · family: #11494, #11542 (PR #11634), #11630 (PR #11710), #11711.\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 11866,
+  "kind": "issue",
+  "title": "[finding] `affected-docs.mjs` passes `isTestFile` a BASENAME, so its three directory arms (`__tests__`/`__mocks__`/`__fixtures__`) are dead — latent today, 0 live",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T22:02:19Z",
+  "updated_at": "2026-08-25T04:57:08Z",
+  "closed_at": "2026-08-25T04:57:08Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11866",
+  "body": "Observed while implementing #11178 (PR #11865). **Latent, not live** — filed so it is recorded rather than re-discovered. Filed unassigned and unlabelled for queueing. ⛔ Not a claim on anyone's time.\n\n## The reading\n\n`scripts/docs-audit/affected-docs.mjs` defines the exclusion over a **path**:\n\n```js\nfunction isTestFile(path) {\n  return /(^|\\/)__(tests|mocks|fixtures)__\\//.test(path)\n      || /(^|\\/)[^/]+\\.(test|spec)\\.[^/]+$/.test(path);\n}\n```\n\nBoth `scanRouteSurface`'s walk and the `--bridge-coverage` ceiling added by PR #11865 call it with `e.name` — the **basename**:\n\n```js\nelse if (e.isFile() && e.name.endsWith('.ts') && !isTestFile(e.name)) {\n```\n\nThe first arm requires a `/`, so against a basename it can never match. Only the `*.test.ts` / `*.spec.ts` arm does any work. The function's directory-based exclusion is not happening at this call site.\n\n## Measured impact today: zero\n\nThree non-`.test`/`.spec` `.ts` files live in such directories under `packages/**` and are therefore walked:\n\n- `packages/services/service-datasource/src/__tests__/entitled-caller.fixture.ts`\n- `packages/cli/src/utils/__tests__/server-body.ts`\n- `packages/adapters/hono/src/__mocks__/runtime.ts`\n\n**0** of the three match `REGISTRAR_FILE_RE`, so none becomes a registrar and no route tail today comes from a test directory. (`server-body.ts` does not match the `-server.ts` alternative — that requires `-server` immediately before the extension.) Confirmed on `589758d22`: none of the 14 `discovery-gap` witnesses PR #11865 reports comes from any of these paths; all 14 are `packages/spec/src/api/*.zod.ts`.\n\nSo this is a **dormant** hole, not a current wrong number. It becomes live the moment a file named `*route*.ts` or `*-server.ts` is added under a `__tests__/`, `__mocks__/` or `__fixtures__/` directory — at which point a test double starts contributing production route tails silently.\n\n## Not claimed\n\n- **No opinion on the remedy.** Passing `rel` instead of `e.name` is the obvious shape, but `rel` is computed after the test in the current code, and whether the walk should exclude these directories at all is a real question — the ceiling in PR #11865 arguably *wants* the widest possible population.\n- Whether other callers of `isTestFile` pass a path or a basename was not swept.\n\n## Related but different\n\n#11857 records a **separate** gap in the same function — that it excludes neither `test/fixtures/*.ts` (no underscores) nor `*.bench.ts`. That one is about the patterns; this one is about the argument the patterns are tested against. Both would need to hold for a test double to be reliably kept out.\n\n## Refs\n\n#11178 · PR #11865 (where this was observed) · #11857 (the sibling `isTestFile` gap)"
+}

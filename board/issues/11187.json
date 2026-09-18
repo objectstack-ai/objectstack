@@ -1,0 +1,32 @@
+{
+  "number": 11187,
+  "kind": "issue",
+  "title": "[finding] Publish-time lint for a chained `controlled_by_parent` declaration (direction 3 of #11082) — and its value CHANGED once direction 1 was implemented",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T01:42:56Z",
+  "updated_at": "2026-08-25T03:29:31Z",
+  "closed_at": "2026-08-25T03:29:31Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11187",
+  "body": "Filed unassigned — recording, not claiming. The #11082 seat identified this and was rate-limited out of its own duplicate search, so it correctly refused to file. The PM is filing it on its behalf, having run that search (`#7503` is the *no-relation* case and is already implemented as `SECURITY_CBP_NO_RELATION`; `#9139` is the `master-detail-required` promotion — neither is this).\n\n⚠️ **Read the value section before grading this.** The finding as the seat first conceived it no longer applies. Grading it on its original premise would over-value it.\n\n## What direction 3 was, when it was written\n\n#11082's triage carved out three directions. Direction (1) — make the runtime derivation compose across a chain — is implemented in PR #11183 (**still draft**, `needs:contract-review` unresolved; not merged as of this filing). Direction (3) was a *publish-time* lint: refuse, or warn on, an authored object that declares `sharingModel: controlled_by_parent` whose master is **itself** `controlled_by_parent`.\n\nAt the time it was written, direction 3 carried a **safety** argument: if the runtime does not compose the chain, then a chained declaration is a shape whose metadata reads as narrowed while the runtime leaves it unnarrowed, and refusing the declaration at publish time is the only thing standing between an author and that state.\n\n## Why its value changed\n\nOnce #11183 lands, that safety argument is **gone**. The runtime composes the chain, and both guards fail **closed**. A chained declaration is then a *supported* shape, not a trap — so a lint that refuses it would be removing a capability the same day it was added, and a lint that merely warns would be warning about something correct.\n\nWhat remains is genuinely smaller, and is a **cost / authoring-signal** argument rather than a safety one:\n\n- Each additional hop costs one more master-id resolution **per hop, per request** on the read path, and one more master-row edit check on the write path. The bound is `CBP_MAX_CHAIN_DEPTH = 8` (`packages/plugins/plugin-security/src/security-plugin.ts:360`), and past it the walk **denies** — fail-closed by design.\n- So an author who declares a chain deeper than the bound gets a *runtime denial*, discovered by their users, when it is statically obvious at publish time. That is the only remaining defect-shaped thing here: a **statically detectable condition surfacing at runtime instead**, which is the same class as #7503.\n- Everything shallower than the bound is a cost curve, not an error. Whether the repo wants to signal on it at all is a judgement call about how loud a lint should be about performance.\n\nMeasured in this repo (from PR #11183's re-derivation): every authored `controlled_by_parent` object today has a chain of exactly **one** hop, and in each case the master is `public_read_write` or `private` — never itself derived. So the population this lint would speak to is currently **empty**. That is an argument for filing it and not doing it yet, which is what this card is.\n\n## Where it would land, if graded as worth doing\n\n`packages/lint/src/validate-security-posture.ts`, next to `SECURITY_CBP_NO_RELATION` (`:74`, emitted at `:326`). That rule already walks the same declaration and already knows how to find the master relation, so the chain walk is an extension of an existing traversal rather than a new one. Note `packages/lint/scripts/check-doc-security-posture.mjs:346` special-cases `SECURITY_CBP_NO_RELATION` when the `fields` subtree is incomplete — any sibling rule that reads the same subtree inherits that concern and should be checked against it rather than assumed independent.\n\n⚠️ This card is laned `domain:services` because the semantics are this lane's. The **file surface is `packages/lint/`**, which this lane does not otherwise own. If triage judges lint-package ownership sits elsewhere, re-lane it — that is a correction, not a dispute.\n\n## Possible gradings (not a recommendation — this wants grading)\n\n1. **Won't do.** The runtime composes and fails closed; the bound denies loudly and logs the chain it refused. A lint adds a second place to keep in sync with the constant, for an empty population.\n2. **Depth-bound only.** Refuse at publish time exactly what the runtime would refuse at request time — a chain longer than `CBP_MAX_CHAIN_DEPTH`. Narrow, mechanical, and the constant becomes a shared fact that must not drift; that shared fact is itself the cost.\n3. **Advisory on any chain ≥ 2.** Cheapest to write, and the least defensible: it would warn about the shape #11183 deliberately makes correct.\n\n## Premise this card rests on, stated so it can be checked\n\nDirection (1) is **not merged** at filing time — PR #11183 is draft pending contract review. If that PR does not land, or lands narrowed, the safety argument above comes back and this card should be re-graded on its original premise rather than this one.\n\n## Refs\n\n#11082 (the card; directions 1/2/3) · PR #11183 (direction 1, draft) · #7503 (the no-relation lint, the sibling this would sit beside) · #9139 (`relationship/master-detail-required` promotion, ruled for the v18 boundary) · ADR-0055 (and see the companion finding on its single-level-only text)"
+}

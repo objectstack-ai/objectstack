@@ -1,0 +1,35 @@
+{
+  "number": 11369,
+  "kind": "issue",
+  "title": "lint.yml and spec-liveness-check.yml still download pnpm through Corepack per job — 7 of the 24 jobs in a queue build keep the ejection exposure #11300 removes from ci.yml",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T14:39:03Z",
+  "updated_at": "2026-08-24T16:11:01Z",
+  "closed_at": "2026-08-24T16:11:01Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11369",
+  "body": "Filed unassigned by the dev seat working #11300. ⛔ Not fixed there: #11300's declared file surface was `.github/workflows/ci.yml` + `.github/actions/**`, and these sites live outside it.\n\n`Blocked-by:` #11300 — the composite action this card would adopt (`.github/actions/setup-pnpm`) is introduced by that PR.\n\n## What is left exposed\n\nA merge-queue build is **3 workflow runs on one queue sha**, measured at 24 jobs total:\n\n| workflow | jobs per build | Corepack sites | covered by #11300 |\n|---|---|---|---|\n| `ci.yml` | 17 | 7 | yes |\n| `lint.yml` | 6 | 5 | **no** |\n| `spec-liveness-check.yml` | 1 | 1 | **no** |\n\nSo after #11300 lands, **7 of 24 jobs** in every queue build still fetch `pnpm-10.31.0.tgz` from `registry.npmjs.org` before doing any work, each an independent chance to eject the PR and force every PR behind it to rebuild.\n\nSites, measured at `origin/main` `b863f01`:\n\n```\nlint.yml:60  :2363  :2922  :3099  :3294      corepack enable   (5)\nlint.yml:2365 :2924 :3101 :3295               Verify pnpm version (4 — :60 is unpaired)\nspec-liveness-check.yml:49                    corepack enable   (1, unpaired)\n```\n\nSame asymmetry as `ci.yml` had: the unpaired sites still download, they just do it inside a differently-named step, so a signature keyed on `Verify pnpm version` under-reports them.\n\n## Evidence this is the same defect\n\nMeasured over `merge_group` runs `2026-08-21T00:45Z` → `2026-08-23T09:02Z`: 5 jobs across 4 runs died materialising pnpm, out of 230 failed jobs. One of the four failing runs was a **`Lint & Type Check`** ejection, i.e. this is not hypothetical for the sibling workflows.\n\nTwo terminal symptoms observed, both inside Corepack's fetch:\n\n```\nAssertionError [ERR_ASSERTION]: assert(!this.paused)\n    at Parser.finish (node:internal/deps/undici/undici:6165:9)\n```\n```\nError: Client network socket disconnected before secure TLS connection was\nestablished { code: 'ECONNRESET', host: 'registry.npmjs.org' }\n```\n\n## Suggested shape\n\nAdopt `.github/actions/setup-pnpm` at all 6 remaining sites, exactly as `ci.yml` does:\n\n```yaml\n      - name: Setup pnpm\n        uses: ./.github/actions/setup-pnpm\n```\n\n⚠️ **Keep each caller's own `actions/setup-node` step with its literal `node-version` pin.** `scripts/check-node-version.mjs` scans `.github/workflows/*.yml` **only** and reports how many setup-node steps it audited (currently `OK (32 setup-node step(s) across 26 workflow(s))`). Moving those steps into the composite would drop them from its census while it still printed `OK` — a gate silently auditing less than it claims. That constraint is why #11300 left `setup-node` in place, and it applies identically here.\n\n## Dedup\n\nSearched before filing: no open card covers the sibling workflows. #11300 is the only live card on this defect and is scoped to `ci.yml` by its own claim comment."
+}

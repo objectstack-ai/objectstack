@@ -1,0 +1,36 @@
+{
+  "number": 11626,
+  "kind": "issue",
+  "title": "[finding] `check:engine-double-contract` cannot see a single-verb double — and the only way in is to pad the double with verbs its test never calls",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T09:50:47Z",
+  "updated_at": "2026-08-24T21:16:26Z",
+  "closed_at": "2026-08-24T21:16:26Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11626",
+  "body": "Measured during #11231 (PR #11625), 2026-08-24, and ruled out of that card's scope by the `domain:services` seat. Filing it because it is a general property of the gate, not a fact about that PR — the next author who writes a minimal engine double will hit the same wall and make the same choice, with no record of why.\n\n## The shape\n\n`check:engine-double-contract` discovers a double by **the verb plus ≥2 engine siblings**. A double that declares only `update` is therefore **never discovered**, and never pinned.\n\nMeasured, not inferred: PR #11625 added two such doubles, and the gate reported `OK — 397 pinned, 133 in the DEBT ledger, 2 exempt` while naming **neither**. The dev listed all 379 pinned rows exhaustively and confirmed both files were absent — a zero read against an enumerated population, not against a query that might simply have missed.\n\n## Why it matters more than a coverage gap\n\nThe gate's headline number is a **claim about how much is protected**. A whole class of doubles — the minimal, single-verb ones — is structurally outside it, so the number silently overstates coverage by an amount nobody can read off the output. That is the same class as **#11199** (`dispatch-gates.mjs` never naming `check:cross-package-test-inputs` for an edited test file): an instrument whose blind spot is invisible in its own green verdict.\n\n## ⭐ The part that makes it a finding rather than a gap\n\n**The only way to get a minimal double under the ratchet is to make it worse.**\n\nPR #11625 tried it: adding `find`/`insert` siblings makes the gate discover and pin both, and it then prints\n\n> `New pinned coverage is GOOD and nothing is wrong with your change — the ledger just has to learn about it, or it never protects this file`\n\n— so the gate actively invites the change. But those verbs exist **only to be discovered**; the tests never call them. A double padded to satisfy a discovery heuristic is a worse double: the next reader cannot tell which verbs are load-bearing and which are ceremony.\n\nSo today the author is forced to choose between **an honest double with no ratchet protection** and **a padded double with it**. Neither is right, and nothing in the gate's output says the choice exists.\n\n## Not measured / not decided\n\n- How many existing doubles fall in this class. The 379-row ledger enumerates the *discovered* population by construction, so counting the undiscovered ones needs a different instrument than the gate itself — exactly the difficulty that makes the blind spot durable.\n- Whether the discovery rule should change, the gap should be documented, or single-verb doubles should be declarable explicitly. ⛔ Not ruled here. The `≥2 siblings` heuristic presumably exists to avoid false positives on ordinary objects that happen to have an `update` method, so relaxing it is not free.\n\n## Why it was not fixed in #11231\n\nThat card's declared surface was two source files plus their tests. Writing rows into `scripts/engine-double-contract.pinned.json` — a hot shared artifact that parallel agents also write — was outside it, and the seat ruled **A (leave as shipped)** rather than widen a three-character-flip PR into a shared ledger. The doubles honour the contract by construction anyway: they call `assertEngineUpdateDispatch` directly, the same predicate `ObjectQL.update` dispatches on, so there is no present unsoundness — only absent future protection.\n\nRefs: #11231 / PR #11625 (where this was measured, and the seat ruling) · #11199 (the same class on a different gate) · `scripts/check-engine-double-contract.mjs` · `scripts/engine-double-contract.pinned.json`"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 11385,
+  "kind": "issue",
+  "title": "finding: `lintLivenessProperties` throws on a null collection item, against its own \"returns findings, never throws\" contract",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T15:08:22Z",
+  "updated_at": "2026-08-24T15:48:48Z",
+  "closed_at": "2026-08-24T15:42:02Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11385",
+  "body": "## Summary\n\n`lintLivenessProperties`' docblock states the contract: \"Advisory only — returns findings, never throws.\" The flat `TYPE_COLLECTIONS` loop does not hold it — it reads `item.name` off every element of every registered collection without checking the element is an object:\n\n```ts\nfor (const item of asArray(stack[key])) {\n  const name = typeof item.name === 'string' ? item.name : …\n```\n\n## Measurement (built `@objectstack/lint` dist, `main` @ `b863f01` plus PR #11383)\n\n```\nlintLivenessProperties({ agents: [null] })\n  -> THROWS: TypeError: Cannot read properties of null (reading 'name')\n```\n\nReproduces for any registered collection, not just `agents`.\n\n## Reachability — why this is a finding and not a bug report\n\nLatent, as far as measured. The rule is declared `input: 'parsed'` in `authoring-rules.ts`, so the stack it receives has already been through Zod, and a `null` element does not survive that parse. The throw is reachable only by a caller handing `lintLivenessProperties` an unparsed or hand-built stack — which the exported signature (`stack: AnyRec`) permits and the docblock invites, since a function that promises never to throw reads as safe to call on anything.\n\nWhat makes it worth recording rather than ignoring: this rule is the *advisory* tier, whose whole design premise is that it can never fail a build. A throw from an advisory rule is not a warning that is wrong, it is the linter aborting — a strictly worse failure than the one the tier exists to avoid.\n\n## Suggested shape\n\nOne guard in the flat loop, mirroring what the bespoke translation walk added in #11383 (`if (!isRecord(item)) continue;` — the helper already exists in the file after that PR). Whether the `object`/`field` walk above it wants the same guard is the same one-line question.\n\n## Provenance\n\nFound while implementing #11288 (PR #11383): a regression test there authors a deliberately malformed bundle, and on the pre-fix code that fixture failed with this TypeError rather than with the assertion it was written for. The PR's own bespoke walk guards its two new levels; the flat loop is untouched by it and out of that card's scope. No fix attempted here."
+}

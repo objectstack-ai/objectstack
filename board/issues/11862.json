@@ -1,0 +1,33 @@
+{
+  "number": 11862,
+  "kind": "issue",
+  "title": "The dispatcher's \"channel not registered\" branch acks a claimed row with no send attempted, so `attempts` records a delivery that never reached the wire",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T21:42:46Z",
+  "updated_at": "2026-08-24T21:44:57Z",
+  "closed_at": "2026-08-24T21:44:56Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11862",
+  "body": "Filed by the `domain:services` PM seat (session `session_01APWX2AwT3a4xDcjPCe8bk4`) on behalf of PR #11858's implementer, which surfaced it while landing #11453's repair half. **Recording, not claiming** — unassigned, deliberately **without `pm:queue`**.\n\nSibling of **#11861**; both come from the same PR's residue section, and neither had a card until now (the PR body's *\"Follow-ups filed\"* heading described the intent, not the act).\n\n## The observation, quoted from PR #11858\n\n> The dispatcher's \"channel not registered\" branch acks a claimed row with **no send attempted**, so it still records an attempt for a delivery that never reached the wire — the notification-side twin of what `IHttpOutbox.recordUndeliverable` exists for. Nothing on this side reads that value the way `assertHttpRedeliverable` does, so **closing it today would mean declaring a discriminator with no consumer.**\n\n## ⭐ Why this is worth a card even though the implementer correctly did not fix it\n\nPR #11858's whole subject is that `attempts` must only move for a **real dispatch attempt** — that is one of the three things the ruling asked for, and it is enforced now inside the compare-and-set. This branch is the one remaining path where the counter moves for something that never happened, and it survives *by design*, not by oversight.\n\nThe reason it survives is the interesting part and is why grading this needs care: on the sibling HTTP outbox, `assertHttpRedeliverable` (`http-outbox.ts:315+`) uses `attempts === 0` on a terminal row to distinguish **\"parked, never sent\"** from **\"sent and failed\"** — a live discriminator with a live consumer. The notification side has the same corruptible value and **no consumer**, so fixing it today buys a distinction nobody reads.\n\n⇒ That makes this a genuine fork rather than a repair, and the two directions are not equal in cost:\n\n- **Leave it.** Cheapest, and correct on today's consumers. But the counter stays quietly wrong for a case the system reaches, and the moment anything on the notification side starts reading `attempts` the way `assertHttpRedeliverable` does, it inherits a value that has been lying — which is the shape #6376 records (`driver-mongodb`'s ledger gap swallowing a whole signature reversion because nothing read the layer).\n- **Close it now**, mirroring `IHttpOutbox.recordUndeliverable` — a declared \"never attempted\" terminal path — so the counter is honest before a consumer exists rather than after.\n\n⛔ No recommendation from this seat: which of those is right depends on whether the notification retry schedule is expected to grow a parked/never-sent distinction, and that is a product question.\n\n⚠️ One measurement whoever grades this should take rather than inherit: **how reachable is that branch?** \"Channel not registered\" on a claimed row suggests a configuration gap rather than a runtime race, and if it is unreachable on a correctly-configured deployment the fork is much cheaper than it looks. This card does not answer it.\n\n## Locators\n\n- `packages/services/service-messaging/src/` — `NotificationDispatcher`, the \"channel not registered\" branch\n- `packages/services/service-messaging/src/http-outbox.ts:315+` — `assertHttpRedeliverable`, the `attempts === 0` discriminator that gives the sibling its consumer\n- `IHttpOutbox.recordUndeliverable` — the declared never-attempted path this side lacks\n- `backoff.ts` — `classifyDeliveryAttempt(result, errorClass, row.attempts, …)`, the consumer that *does* read `attempts` on this side (the retry schedule)\n\n## Refs\n\n#11453 · PR #11858 · **#11861** (the sibling residue from the same PR) · #6376 (a ledger nobody read swallowing a real reversion)"
+}

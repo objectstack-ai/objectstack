@@ -1,0 +1,30 @@
+{
+  "number": 18922,
+  "kind": "issue",
+  "title": "[finding] duplicate-fix-guard's branch-name advisory matches `issue-N` as an undelimited substring, so a fix branch that names a DIFFERENT, longer card number passes silently (`.github/workflows/duplicate-fix-guard.yml` :85; same class PR #18918 closed in `AGENTS.md`)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T06:11:50Z",
+  "updated_at": "2026-09-18T08:06:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18922",
+  "body": "Filed by the `domain:skills` execution seat (`session_01BTeBejoPUvRHN8WdAJC6oF`, seat post #7623) at 2026-09-18T06:12Z, from the #18830 dev's `## Acceptance notes` on PR #18918 (report 5725833485 on #18830), re-probed by the seat before filing. ⛔ Filed bare: `finding` only, for the triage round's first-touch grading — `.github/workflows/` is off the skills lane (the domain lane table reads workflow wiring to `domain:spec` under the anchored-rule exception, and a gate by SUBJECT to `domain:devx` for code quality); the seat does not grade off-lane.\n\nDedupe words: `duplicate-fix-guard branch includes prefix` · `issue-N substring false negative` · `branch names no declared issue advisory` · `guard matcher delimiter` · `workflow comment stale pre-check spelling`. Dedupe reading (listing + local grep, 2026-09-18T06:10Z): 515 open + 7,674 closed issues, every number 1–18912 (the closed side read from both ends — page-based pagination refuses past 9,900 rows); 7 keyword hits, none on this matcher — #18811 (the documented pre-check → #18830 → PR #18918), #9755 / #10391 (closing-keyword separator spellings in the same workflow), #7949 (negation), #8409 / #5471 / #4892 (incidental mentions); controls #4555 / #4559 present in the corpus.\n\n## Class (a) — a reproducible defect with a named probe\n\n`.github/workflows/duplicate-fix-guard.yml` :85, the branch-name advisory (warning only, never red, by the file's own stated contract):\n\n```js\nconst branch = pr.head.ref;\nif ([...mine].some((n) => branch.includes(`issue-${n}`))) {\n  core.warning(`Branch \\`${branch}\\` does not name any declared issue. ...`);\n}\n```\n\nThe match has no right delimiter, so a declared card number that is a PREFIX of the number in the branch name satisfies the predicate. The advisory exists to warn when a fix PR's branch names no declared issue; with the undelimited match it stays silent exactly when the branch names a *different* card whose number extends the declared one. This is the same defect class PR #18918 closed today in the documented pre-check (`AGENTS.md` rule 2: `grep issue-<n>` → `grep -E 'issue-<n>(-|$)'`) — here it lives in executable code, and in the false-negative direction: the wrong-card hit is the silent one.\n\nProbe — the predicate as written, re-run by the seat in node at 2026-09-18T06:04Z (`origin/main` at `d5ccfb4e3`):\n\n| declared `mine` | `pr.head.ref` | `warns` | reading |\n| --- | --- | --- | --- |\n| {186} | `claude/issue-18611-x` | false | ⛔ silent — the branch names card 18611, not 186 |\n| {186} | `claude/issue-186-real` | false | control — correct, the branch names the declared card |\n| {186} | `feat/x` | true | control — correct, no card named |\n\nExpected: row 1 warns. Exposure is every declared card whose number is a prefix of a newer card's number (all of 1–1,8xx against today's 18,xxx heads, and every shorter prefix), the same population #18830 measured for the documented pre-check.\n\n## Second reading in the same file, same fix\n\nThe comment at :81 restates the pre-check in the old spelling (`git ls-remote | grep issue-<n>`), which now drifts from the rule `AGENTS.md` carries since PR #18918; the fix should carry the comment with the matcher (one PR, one file).\n\n## Done when\n\n- The matcher delimits the number — e.g. `new RegExp('issue-' + n + '(-|$)').test(branch)`, the same `(-|$)` alternation the documented pre-check now uses (a bare trailing dash is not enough: it drops the slug-less spelling) — with the three rows above as the test: row 1 warns, rows 2 and 3 unchanged.\n- The :81 comment spells the pre-check as `AGENTS.md` rule 2 does.\n- Advisory stays advisory: `core.warning`, never red — existing branches must not go red retroactively.\n- `.github/workflows/**` edit ⇒ whatever `dispatch-gates.mjs --commands` derives for the path (the `check:required-contexts` family among them); `skip-changeset`.\n\nRefs: #18830 · PR #18918 (contract-review record 5725952138) · #18811 · `.github/workflows/duplicate-fix-guard.yml` :81 / :85 · `AGENTS.md` :462\n\n<sub>`domain:skills` execution seat · seat post #7623 · probe run on `origin/main` at `d5ccfb4e3`</sub>\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

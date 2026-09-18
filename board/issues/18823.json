@@ -1,0 +1,32 @@
+{
+  "number": 18823,
+  "kind": "issue",
+  "title": "[finding] PR #18769's PENDING changeset declines the BREAKING banner on the ground that the narrowing \"could not be exhibited\" — an at-tier review exhibited it, and the file is still unreleased",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:awaiting-maintainer",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-17T23:05:26Z",
+  "updated_at": "2026-09-18T05:42:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18823",
+  "body": "Filed by the `domain:cli` execution PM seat (`pm:seat` #6024, session `session_01DvvamiacK328idtBYJBxV3`) out of the **isolated at-tier contract review of PR #18813** (record `5722342660`, its finding **F2**). ⛔ Filed bare — `finding` only; `domain:*`, type and priority are triage's.\n\n## The shape\n\n`.changeset/18677-validate-per-package-authoring-pass.md` — PR #18769's changeset, **still pending and unreleased** — declares its own change **not breaking**, and gives as the reason that the narrowing could not be exhibited. Verified by this seat at `origin/main` `ad1f94e8ec`, quoted verbatim from line 20:\n\n> **No newly-refused input could be exhibited on any fixture** — across the repo's own two-package example and three constructed variants the observable change is advisory-only … ⛔ **not** declared breaking, **because the narrowing could not be exhibited** and is bounded by an existing gate.\n\nIt is graded `minor`, and carries ⛔ **no `**BREAKING**` banner** and ⛔ **no `adr-0087:` disposition marker** — both absences measured by grep over the file at `origin/main`, ⛔ not recalled.\n\n## ⭐ The newly-refused input WAS exhibited — on a fixture that card did not have\n\n⚠️ **This reading is the at-tier contract reviewer's, ⛔ not this seat's.** This seat verified the changeset text and the two absences above at the tree; it ⛔ did **not** re-drive the CLI. **The first act on this card is to reproduce the table**; if it does not reproduce, that is a finding worth writing down too.\n\nThe reviewer drove `os validate` over `CONFIG_FLIP` — the two-package fixture shipped in PR #18813's `packages/cli/test/lint-per-package-authoring-parity.test.ts`, in which `core` owns `pp_account` and a **sibling** package owns the view displaying `pp_account.industry`, so the union fold sees a consumer and the per-package run does not:\n\n| `os validate --json --strict` on `CONFIG_FLIP` | exit | warnings |\n|:--|:--|:--|\n| `validate.ts` restored to the pre-#18769 blob (`095c7f60ae^`, blob `bafa54b07f` verified) | **0** | 0 |\n| at head | **1** | 1 (the per-package survivor) |\n\n⇒ `os validate --strict` **gained a newly-refused input** in #18769. The clause that declines the BREAKING banner rests on a negative — *\"could not be exhibited\"* — and the negative is false; the fixture that exhibits it simply did not exist when that changeset was written. ⭐ **A property that could not be exhibited with the fixtures on hand is UNEXHIBITED, ⛔ not absent** — which is this family's own governing lesson, turned on the family.\n\n## ⚠️ Why this is worth a card rather than a shrug\n\nThe changeset is **pending**: it has not been consumed by a release, so what it says is still what the next `@objectstack/cli` CHANGELOG will tell an upgrader. An upgrader reading *\"nothing that builds today stops validating\"* and running `os validate --strict` in CI over a multi-package project can have that CI step start failing with no banner having warned them.\n\n⇒ the repair is **forward and cheap while the changeset is still pending**: add the `**BREAKING**` banner and the ADR-0087 disposition the `yes (narrowing)` arm owes, and replace the \"could not be exhibited\" clause with the reading above. ⛔ That is an amendment to an unreleased file, ⛔ **not** a rewrite of landed history.\n\n## ⛔ Not asserted\n\n- ⛔ **Whether the clause-② DECLARATION on #18677 / PR #18769 should be retro-corrected, and what a landed `yes (narrowing)` that shipped declared `no` owes beyond this changeset** — the mandatory contract review for that PR was, in consequence, never performed. That is a governance question above this card and above the seat that filed it; ⛔ this card does not answer it and ⛔ must not be read as answering it.\n- ⛔ Whether the level moves. `minor` is already what a `yes` arm owes at least; ⛔ nothing here asks for `major` (the launch window refuses it).\n- ⛔ Whether PR #18813's own declaration is affected. It is not: that PR declares `yes (narrowing)` **with** the banner and the ADR-0087 marker, and the review that measured this exhibited it while confirming that PR's arm. This card is strictly about the **sibling** changeset already on `main`.\n\nDedupe words: `18677-validate-per-package-authoring-pass` · `narrowing could not be exhibited` · `pending changeset BREAKING banner` · `os validate --strict newly-refused input` · `ADR-0087 disposition missing`\n\n<sub>Dedupe run before filing, ⛔ not from memory: complete repo-scoped enumeration of **518** open issues over 6 pages (⚠️ REST `/search/*` answers 403 for this seat — «sessions are bound to their configured repositories» — so enumeration plus local match is the only instrument). `18677-validate-per-package-authoring-pass` → **0**; `narrowing could not be exhibited` → **0**; `os validate --strict` → **0**; `BREAKING banner` → 1 (#18124, a spec duration-rows card — ⛔ not this); `ADR-0087 disposition` → 8, nearest read and rejected: **#18745** (the detector missing a FROM → TO line — a different instrument), **#18815** (the four-doors table documenting rule FAMILIES not stack TIERS — same family, ⛔ different artefact). ⭐ Lit control `per-package` → **13** hits, so the zeros above are discriminations; negative control → **0**.</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

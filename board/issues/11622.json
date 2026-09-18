@@ -1,0 +1,35 @@
+{
+  "number": 11622,
+  "kind": "issue",
+  "title": "MCP stdio: a data call landing between the transport attach and `kernel:bootstrapped` still memoizes a pre-bind localization for the life of the transport",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T09:43:54Z",
+  "updated_at": "2026-08-24T23:11:08Z",
+  "closed_at": "2026-08-24T23:11:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11622",
+  "body": "Found while implementing #11580 (PR on `claude/issue-11580-mcp-stdio-settings-bind-window`). **Not fixed there** — out of that card's scope, and closing it is a design choice with a cost, not a mechanical follow-on.\n\n## What #11580 fixed, and what it left\n\n#11580 moved the stdio transport's localization read out of `MCPServerPlugin.start()`. It now resolves from a `kernel:bootstrapped` hook — strictly after `SettingsServicePlugin` binds its data engine (`kernel:ready`) — memoized so it stays one resolution for the life of the transport (#7279).\n\nThe memo has a second, lazy entry point: `resolvePrincipal()` awaits the same memo, so a read that arrives before the hook fires resolves it then instead of deadlocking on a hook a bare host may never fire. That lazy entry is deliberate, and it is also the residual:\n\n```\nMCPServerPlugin.start()            ← runtime.start() attaches StdioServerTransport to stdin/stdout\n  … other plugins' start() …\nkernel:ready handlers              ← SettingsServicePlugin binds the engine HERE\nkernel:bootstrapped handlers       ← the localization read HERE\n```\n\nThe transport is live from the first line. A client that sends `initialize` + a data call while the boot is still working through the remaining `start()` bodies and every `kernel:ready` handler (schema sync, backfills — seconds on a real deployment) reaches `resolvePrincipal()` first. That call resolves localization pre-bind, gets `UTC` / `en-US` from the manifest defaults, **and memoizes it** — so the narrow race turns into the permanent wrong value #11580 was about, for that process.\n\n## Why it was left\n\nBoth cheap closures have a real cost, and picking one is a judgement, not a repair:\n\n1. **Make the early call WAIT for the bind** (await a deferred resolved by the hook). Correct value always; introduces a hang on any host that never fires `kernel:bootstrapped` — worse than a wrong locale.\n2. **Memoize only post-bind answers** (cache only once the hook has run; resolve fresh before that). No hang, correct steady state; makes the read per-call inside the window, and makes #7279's \"one resolution for the life of the transport\" conditional on a hook firing, which several bare/lite hosts do not.\n3. **Do not attach the transport until `kernel:bootstrapped`.** Closes the window at the source and is arguably where the transport belongs, but it changes when the stdio server starts answering at all — a visible behaviour change on the MCP surface.\n\n## Reproduction sketch\n\nNo test in the tree exercises it: `packages/mcp/src/__tests__/plugin-settings-bind-window.test.ts` drives every read after `bootstrap()` resolves. Reproducing it needs a read issued between `MCPServerRuntime.start()` and the `kernel:bootstrapped` dispatch — e.g. a `kernel:ready` handler registered after the settings provider's that calls the record reader.\n\n## Scope note\n\nNarrow: needs a client fast enough to land inside the boot, and only bites deployments whose persisted `localization` differs from the platform defaults. Filed rather than fixed so the choice above is made deliberately.\n"
+}

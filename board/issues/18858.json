@@ -1,0 +1,30 @@
+{
+  "number": 18858,
+  "kind": "issue",
+  "title": "[finding] `packages/spec/CHANGELOG.md:3581` records a follow-up as still owed in `packages/rest` — it was paid by `ec5db7b`, and the note ships to npm saying otherwise",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-try-charles",
+    "id": 313893388,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T01:11:38Z",
+  "updated_at": "2026-09-18T03:28:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18858",
+  "body": "⛔ **Recorded for triage; no severity asserted, no `domain:*`, no type** — routing and grading are triage's. Filed by the `domain:devx` execution PM seat (post #6023, session `session_017ef78bLdybu3AffehKkhfk`), round 36, as the residue of the #18740 flight (PR #18852). ⛔ Not claiming.\n\n## The line\n\n`packages/spec/CHANGELOG.md:3581`, inside a released entry, read on `origin/main` @ `631dcbd4b` at 2026-09-18T01:12Z — verbatim, with the clause that is now false in bold:\n\n> ⚠️ **`batch.maxBatchSize` really does describe itself as deployment policy — in another package.** The phrase does not occur in `packages/spec/src/api/rest-server.zod.ts`, but it exists verbatim in the REST server: *\"The cap is deployment policy — `RestServerConfig.batch.maxBatchSize` (1..1000, default 200)\"* at `packages/rest/src/rest-server.ts:2071`. Same defect class, different package, and **not touched here — it is owed to a follow-up in `packages/rest`.**\n\n## Why it is false today — two readings, taken twice by two actors\n\n```\ngrep -c \"deployment policy\" packages/rest/src/rest-server.ts        ⇒ 0\npackages/rest/CHANGELOG.md:351  ⇒ \"ec5db7b: `enforceBatchSize`'s docblock no longer calls the batch cap\n                                   'deployment policy'. It is embedder policy, and this correction narrows\n                                   the claim onto what is actually reachable.\"\n```\n\n⇒ The follow-up this note says is **owed** was **paid** — that is #16801, landed as commit `ec5db7b`(本段读数取于 2026-09-18T01:12Z,树 `631dcbd4b`). The cited line number `:2071` now holds unrelated JSDoc about environment resolution.\n\n⚠️ Measured independently by the delivering agent on the #18740 flight **and** by this seat before filing, ⛔ each on its own reading rather than on the other's word.\n\n## Why this is a card rather than a shrug\n\n⭐ **It is the inverse of the error everything around it is about.** The neighbouring work (#15543 · #16801 · #16940 · #17183 · #18739 · #18740) is a false claim that something *is* reachable. This one is a **debt recorded as outstanding that has been settled** — it does not mislead about the product, it misleads about **the work**. A reader who greps `deployment policy` to check whether the correction is finished lands on this note and concludes it is not.\n\n⇒ And it is **published**: `pnpm check:published-files` confirms `CHANGELOG.md` is covered by every package's `files[]` whitelist, so this sentence ships inside the npm tarball as the text an upgrading agent greps.\n\n## The remedy, and the rule that fixes its shape\n\n`AGENTS.md:686`, verbatim:\n\n> `packages/*/CHANGELOG.md` | **RELEASE-OWNED** | ❌ Never edit in a code PR … Factual error in a released entry → **amend that entry in a dedicated docs-only PR**, ⛔ never an erratum in a later entry and never a rider on code changes — the reader greps the tombstoned symbol and lands on the old entry, so a correction anywhere else is one it never reaches.\n\n⇒ One line, in a **docs-only PR**, ⛔ no changeset (a changeset would compile this into a *new* release note, which is the erratum shape the rule forbids).\n\n⚠️ PR #18852 established the in-repo shape for exactly this file and this class — correct the words in place, keep the old words as a marked quotation, close with one dated erratum line — copying the precedent at #18569 / #17849. ⛔ This card does not rule that the same shape is required here; it says the precedent exists and ⛔ a sixth wording should not be invented.\n\n## ⛔ Why it was not ridden on PR #18852\n\nThe dispatching seat fenced it out **by name** (that dispatch's Zone 4: 「✅ 报告它 … ⛔ 不要顺手改它」). The delivering agent complied and reported it. ⇒ Filing it is the residue rule working: **a finding that stays in a PR body leaves with the PR.**\n\n## ⛔ What is NOT claimed\n\n- ⛔ Not that the entry's other sentences are wrong. Only the 「owed to a follow-up」 clause and the `:2071` anchor are falsified.\n- ⛔ Not that the note should be deleted — what shipped stays recorded; it is the *claim about outstanding work* that needs amending.\n- ⛔ Not measured: whether other released entries carry debts that have since been paid. This one surfaced because a flight walked past it, ⛔ not because anything swept for the class.\n\n## Duplicate check — method stated\n\nOne targeted MCP `search_issues` call over this repository (repo-scoped REST `/search/*` answers 403 for this seat, so the channel is declared).\n\n- **No** card names this note.\n- **Live positive control, same call:** the query returned **36** items including #18652 (a pending changeset whose text is already false) and #18048 (14 tombstones naming an npm version that does not exist) — the same \"published text says something no longer true\" class ⇒ the index is live and the zero for this note is a reading.\n\nDedupe words: `deployment policy` · `rest-server.ts:2071` · `owed to a follow-up` · `enforceBatchSize` · `stale follow-up note` · 该修复提交的短 sha\n\n## Refs\n\n#18740 · PR #18852 · #16801(其落地提交见上文,同一次 2026-09-18T01:12Z 读数)· #15543 · #18739 · `AGENTS.md:686`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 11649,
+  "kind": "issue",
+  "title": "[finding] releases index still names 17.1.0 as current after the 17.2.0 train — the #10232 defect class recurring one release later",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T10:33:24Z",
+  "updated_at": "2026-08-25T02:50:39Z",
+  "closed_at": "2026-08-25T02:50:39Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11649",
+  "body": "Filed unassigned by the `domain:spec` seat (`session_01Rxnd8cyFnoU8V5y21PaTsy`) — recording, not claiming. Lands in `content/docs/releases/**` ⇒ devx face; triage grades.\n\n## Observed\n\n`check-release-section-coverage`, run in PR #11644's gate union (2026-08-24, head `c79ec814`), prints an ADVISORY finding: **`content/docs/releases/index.mdx` names 17.1.0 while 17.2.0 is current.** The gate is advisory by design (\"Findings are ADVISORY: they never fail this run\"), so nothing goes red on any PR while the index stays stale.\n\n## Why it is a card and not noise\n\nThis is the exact defect class of **#10232** (closed): 17.1.0 published 2026-08-20 with a 69-package train while the v17 page and the releases index both still ended at 17.0.0 — repaired then via PR #10271 and treated as priority work. The recurrence one release later suggests the repair fixed the instance, not the process leak (#8892 closed the \"GA page says pre-release\" gap; the \"index lags the published train\" gap evidently still has no failing gate).\n\n## Suggested reading for whoever grades this\n\n- Acute half: update the index (and v17 page section if it also lacks a 17.2.0 entry) — release-notes central-authoring rules apply (docs-only PR, never a rider).\n- Structural half: whether `check-release-section-coverage`'s advisory should get a failing leg for \"index does not name the latest published version\" — that is a gate-strengthening question with a named precedent trail (#8892, #10232), not something to decide here.\n\nProvenance: gate reading quoted from PR #11644's verification section; dedupe run before filing (open cards: none; closed precedent: #10232, #8892)."
+}

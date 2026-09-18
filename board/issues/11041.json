@@ -1,0 +1,35 @@
+{
+  "number": 11041,
+  "kind": "issue",
+  "title": "[finding] `sys_approval_request.payload_json`'s doc comment claims notifications render from the snapshot — measured false against all 12 notify call sites",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T13:07:10Z",
+  "updated_at": "2026-08-24T20:03:57Z",
+  "closed_at": "2026-08-24T20:03:57Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11041",
+  "body": "Found while implementing #10749 (read-time redaction of the approval payload snapshot), during the consumer inventory the ruling made step 1.\n\n## Observation\n\n`packages/plugins/plugin-approvals/src/sys-approval-request.object.ts` documents the column as:\n\n> `payload_json` captures a snapshot of the target record at submission time — **used by notifications so they can render before the record is locked or changed.**\n\nMeasured against every `this.notify(...)` call site in `approval-service.ts` — **12 of them**: routed-to-you, routed-to-delegate, auto-rejected, sent-back, handed-to-you, two reminder shapes, more-info-requested, new-comment, escalated-to-you, SLA-breached, submitter-SLA. Every one passes a payload of `{ title, message, actionUrl }` (two also carry `actions` with action-link URLs). **None of them reads `payload` or `payload_json`.** The messages are built from `raw.object_name` / `raw.record_id` and the caller's comment text.\n\nSo the stated consumer does not exist. This matters beyond tidiness: the sentence is the only documented justification for the column holding a *full* row, and it was cited as such during the #10749 inventory before being checked.\n\n## Why this is filed rather than fixed\n\nThe string is **extracted into the generated i18n bundles** (`translations/*.objects.generated.ts`), so rewording it is a translation-regeneration change (`node scripts/check-i18n-bundles.mjs --write`, four locales), not a comment edit. The same file already carries a precedent for exactly this constraint on its `organization_id` description, where the correction was deliberately made to ride a related fix rather than land as a drive-by.\n\nThe accurate replacement is roughly \"snapshot of the target record at submission time, retained as audit evidence of what was submitted and served (redacted per reader, #10749) to the approvals inbox\" — but the exact wording should be settled by whoever owns the regeneration pass.\n\n## Locator\n\n- `packages/plugins/plugin-approvals/src/sys-approval-request.object.ts` — the module docstring above `SysApprovalRequest`.\n- `packages/plugins/plugin-approvals/src/translations/{en,zh-CN,ja-JP,es-ES}.objects.generated.ts` — the extracted copies.\n\n## Notes\n\n- Observation only — no runtime behaviour is wrong, and nothing is currently misled by it except the next reader of the column.\n- No assignee — recording, not claiming. Not queued.\n"
+}

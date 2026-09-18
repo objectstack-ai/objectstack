@@ -1,0 +1,35 @@
+{
+  "number": 11684,
+  "kind": "issue",
+  "title": "rest: an UNDECLARED hook refusal answers 500 on `/analytics/dataset/query` where the same refusal answers 400 on `/data` — the route's fallback arm treats a business refusal as a server fault",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T12:04:15Z",
+  "updated_at": "2026-08-25T00:22:21Z",
+  "closed_at": "2026-08-25T00:22:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11684",
+  "body": "Filed unassigned while implementing #11588. That card fixed the **message** on this route (the QuickJS debug wrapper no longer reaches the client); this is the **status**, which #11588 deliberately did not move.\n\n## Measured\n\nOn `claude/issue-11588-sandbox-wrapper-bulk-routes` at `f93aa39e`, driving the real `POST /api/v1/analytics/dataset/query` handler in process, with a hook throwing `new Error('month-end close is in progress')` and declaring **no** `status` and **no** `code`:\n\n| face | answer |\n|---|---|\n| `POST /api/v1/data/:object` (and every other `/data` write) | `400` — `month-end close is in progress` |\n| `POST /api/v1/analytics/dataset/query` | `500 ANALYTICS_QUERY_FAILED` — `month-end close is in progress` |\n\nPinned as measured (green on both sides of #11588) in `packages/rest/src/rest-hook-refusal-message-parity.test.ts` §8b, which asserts the `500` explicitly and says in its comment that the status is a separate defect left standing.\n\n## Why\n\nThe analytics catch has three arms. ① serves a declared 4xx **plus** a `code`; a declared 5xx and everything else fall to ③, the hand-built `500 ANALYTICS_QUERY_FAILED`. Both halves of ①'s gate are deliberate and documented (#5352: a 4xx with no code \"would force this route to invent one\"). But that leaves the *undeclared* refusal — a hook that simply throws a sentence, which is the most common shape an app author writes — classified as a server fault.\n\n`classifyDataError`'s sandbox unwrap door answers exactly this case with `400` and the verbatim message, which is what `hook-error-format.dogfood.test.ts` pins end to end. So one hook body, one `throw`, two statuses depending on whether the caller hit a dashboard tile or a list view.\n\n## Why #11588 did not fix it\n\nIts dispatch carried a hard stop on contract-shaped moves, and changing which arm an undeclared refusal lands in is a classification change on a shipped route, not a message repair. It is also genuinely arguable: ADR-0112's \"the producer names the condition\" reading says an undeclared throw *is* unclassified and `500` is honest, while the `/data` door's reading says a hook's `throw` is a business rule and `400` is honest. The two doors currently disagree, and that disagreement is the defect regardless of which way it is settled.\n\n## Not established here\n\n- Which answer is right. The two candidate rulings are named above; picking between them is a contract call.\n- Whether the sibling `/analytics/query` face (through `dispatcher-plugin.errorResponseBase`) has the same split. Not exercised.\n- Severity not judged.\n\nRegion: `packages/rest/src/rest-server.ts`, the `/analytics/dataset/query` catch only."
+}

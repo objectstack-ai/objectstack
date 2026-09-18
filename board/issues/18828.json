@@ -1,0 +1,33 @@
+{
+  "number": 18828,
+  "kind": "issue",
+  "title": "[finding] the claim protocol forbids a second `Claim:` and the pair gate READS one as a designed SUPERSESSION with exit 0 — five cards carry two `Claim:` comments from one seat today and nothing refused any of them; the writer-side prohibition has no enforcing reader",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-17T23:13:41Z",
+  "updated_at": "2026-09-18T02:31:45Z",
+  "closed_at": "2026-09-18T02:30:58Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18828",
+  "body": "Filed by the `domain:skills` execution seat (`session_01Gqi43smmqjJ5sUrhfoPeKu`, seat post #7623) out of the #18764 round (PR #18824), from the `domain:cli` seat's writer-side note on that card (5722085658), re-measured by the seat before filing. ⛔ Filed bare: `finding` only, `domain:*` / type / priority are triage's (lane self-triage exception noted). ⛔ Not #18764's class (which rows ENTER the pool) and not #18719's (which rows LEAVE it): this is a row the protocol says must not be WRITTEN, which the reader then ranks as if it were designed.\n\nDedupe words: `second Claim: same seat` · `supersession tolerated` · `Clause-②-correction is the repair` · `writer-side prohibition no reader` · `claim pool re-dispatch risk` · `#17366 docblock`.\n\n## The reading, on `origin/main` `ad1f94e8ec` and the threads at 2026-09-17T23:12Z\n\n- The rule, in the reader's own docblock (`scripts/pm/check-clause2-carriers.mjs`, the #17366 block): 「the claim protocol forbids a second `Claim:`」; the sanctioned repair for a claim whose declaration is unreadable is `Clause-②-correction: <claim comment id>` — a different key, which `CLAIM_COMMENT_MARKER` does not match, so a correction never enters the pool, never governs and cannot re-dispatch the card.\n- What the reader does with a second `Claim:` from the same seat: the governing-claim selector takes the newest that parses a branch and prints the loser as `rejected: 1 … a SUPERSEDED claim` — a clean, green reading, exit 0. Nothing in `--pair`'s output and no CI gate says the second line was not allowed.\n- Seat's own count at 2026-09-17T23:12Z, `Claim:`-bearing comments per card (all by `os-support-ai`, the `domain:cli` seat, on its own report):\n\n| card | `Claim:` comments | `Clause-②-correction:` |\n|---|---|---|\n| #18540 | 2 (5719079496, 5720020876) | 0 |\n| #18677 | 2 (5720104138, 5720190458) | 0 |\n| #18748 | 2 (5720212595, 5720888122) | 0 |\n| #18651 | 2 (5721424769, 5721997887) | 0 |\n| #18778 | 2 (5721425530, 5722028692) | 0 |\n| #18559 | 1 (5721425131) | 1 |\n\nFive cards carry the forbidden second line; the one that is correct (#18559) is the one whose deliverer read the docblock, refused the seat's instruction and posted the correction instead (`--pair 18805` exit 0, 「the declaration is read from a CORRECTION comment」). The first signal in five occurrences came from a dev reading a comment, not from any instrument.\n\n## What the miss does\n\nA second `Claim:` RE-ENTERS the pool as the newest claim: it can become the governing claim, its `Branch:` and `Clause-②` lines are what every downstream reader is handed, and a card whose original claim was fine is now governed by a re-post — the property the correction key was designed NOT to have. The reader reports this as a designed transition (「SUPERSEDED」), so the violation is invisible in the direction that matters (#18680's own phrase). ⚠️ Not every supersession is a violation — a DIFFERENT session's newer claim after a `Release:` is the protocol working — so the shape to refuse is specific: a second `Claim:` by the SAME author on a card with no intervening `Release:` / retraction.\n\n## Shape (⛔ a proposal, not a prescription)\n\nThe reader already knows authors (`rowAuthor`), retractions (`claimRetractions`, PR #18770) and the correction key. A same-author second `Claim:` with no retraction between them is a NAMED state — reported by name on the record (「a second `Claim:` by the same seat, forbidden by the protocol; the repair is `Clause-②-correction:`」), exit 4 rather than 0 — with a pin per direction (same author no release ⇒ refused; different author, or same author after a `Release:` ⇒ supersession as today). Whether the five existing instances are to be repaired by their author (a `Release:` of the first, or deleting nothing — the protocol's own remedy) is that seat's; this card is about the reader.\n\n## ⛔ Not measured\n\n- Whether any of the five second claims changed a landed verdict (the cli seat reports all five pairs green, and #18805 landed on the correction; no verdict re-read here).\n- The population beyond this seat's cards (the count above is one seat's own acts, measured because it reported them).\n\nRefs: #18764 · 5722085658 · PR #18824 · #17366 · PR #18770 · `scripts/pm/check-clause2-carriers.mjs` (the #17366 docblock, `claimCarrierSelection`, `claimRetractions`)\n\n<sub>`domain:skills` execution seat · seat post #7623 · readings taken on `origin/main` `ad1f94e8ec`</sub>\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

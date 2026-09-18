@@ -1,0 +1,34 @@
+{
+  "number": 11988,
+  "kind": "pull_request",
+  "title": "pm-dispatch: finding triage runs to empty each fire, quality held by ≤5-card same-family batches",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T03:53:11Z",
+  "updated_at": "2026-08-25T05:25:50Z",
+  "closed_at": "2026-08-25T05:25:49Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T05:25:49Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11988",
+  "body": "Closes #11972\n\nGoverned surface (`.claude/**`) ⇒ draft, human merge. Verified at `a879b1e57`.\n\n## The ruling\n\nScheduled finding triage no longer carries a per-round total budget. Every fire\ngrades **all** ungraded `finding` cards; the rubber-stamp risk is controlled by\nbatch granularity instead of by capping the round. Maintainer, 2026-08-25,\nverbatim and untranslated:\n\n> 单轮跑数小时没关系啊。不读卡的批量盖章 可以通过每批5张这种约定来解决\n\nSo: **≤5 same-family cards per batch, read one by one**, and a run of several\nhours is an acceptable shape. A fire that exhausts its window resumes from where\nit stopped — graded cards are off-label and never re-read, so the label\ndiscipline already is the checkpoint.\n\n## What changed\n\n**`.claude/skills/pm-dispatch/SKILL.md`, 「发现分诊轮」**\n- `首触定级每轮跑:预算 3–5 张` → `每 fire 跑到清空`: no round total, all ungraded\n  findings graded this round, first-touch still ahead of old-card re-verification.\n- Quality clause added: `质量靠每批 ≤5 张同族卡逐张读,不靠封顶总量`, with the\n  2026-08-25 ruling quoted verbatim at the point where the rule is stated.\n- The `finding` >15 ⇒ 集中轮 trigger sentence is gone; 域分批 and the sweep\n  promotion five rules stay, now as standing practice rather than a mode switch.\n- Unchanged: 零定级评论优先, 判级在分诊不在立单, the skills-lane self-triage\n  exception, the `Restart-when:` daily sub-round, `pm:retriage` per-fire priority.\n\n**`.claude/skills/pm-dispatch/references/dispatch-runbook.md`, 发现分诊轮细则**\n- `自动集中轮批量参数:15–20 张` → `每批约定:≤5 张同族卡、同上下文逐张读`\n  (维护者 2026-08-25,取代 15–20/批). Standing authorization unchanged.\n- New `积压告警` bullet, the >15 trigger's destination: `连续 COMPLETED 清空 fire\n  后仍 >15 ⇒ 入流 > 吞吐,报维护者。` With run-to-empty as the steady state a raw\n  count is no longer a mode switch — it is only an alarm once it *survives*\n  consecutive completed fires, which is precisely the test that separates inflow\n  above triage capacity from a spike the next fire clears.\n- `旧 hold 重验不占预算` removed — 「预算」 no longer exists; the ordering it\n  encoded now reads `首触定级…优先于旧卡重验` in SKILL.md.\n- Section heading provenance now reads 2026-08-13 / 08-25.\n\n## Why run-to-empty rather than a larger budget\n\nThe current pile-up is an **outage** accumulation, not steady-state inflow.\nMaintainer, 2026-08-25, verbatim and untranslated:\n\n> 现在挤压这么多,是因为有一段时间我没token停了分诊,并且改成了两小时一次\n\nThat is the strongest argument for the ruled shape: a per-round budget never\nrecovers from an outage — it amortizes the backlog over dozens of fires while\nnew cards keep aging — whereas run-to-empty self-heals on the first fire after\nsupply returns. It is also why the alarm is calibrated on *survival across\ncompleted fires*: an outage gap is expected to produce a spike and one long\nrecovery round, and that is by design, not an alarm.\n\nThis outage narrative is deliberately **not** copied into the runbook. Repo\nconvention for the ceilinged instruction surfaces is that provenance is one line\nand stories live on cards, not in operational text — so the story stays here and\non the card's addendum, and the doc carries the rule it produced.\n\n## Ceilings — paid by consolidation, nothing raised\n\n| file | before | after | ceiling |\n| --- | --- | --- | --- |\n| `.claude/skills/pm-dispatch/SKILL.md` | 1008 | 1005 | **lowered** 1008 → 1005, headroom 0 |\n| `.claude/skills/pm-dispatch/references/dispatch-runbook.md` | 274 | 274 | 274, headroom 0 |\n\nThe superseded prose is the purse: the 3–5 budget clause, the >15 trigger\nsentence and the 15–20 batch parameter funded the ≤5 convention and the alarm\nline. `scripts/pm/check-skill-line-ratchet.mjs` moves only to **lower** the\nSKILL.md ceiling to the landed count — the shrink-only direction the ratchet\ncalls always legitimate. No registry entry was raised.\n\nEvery line stays within `MAX_LINE_BYTES=120`; the two verbatim rulings are\nbyte-intact, and no quote already spanning lines was re-flowed (the 出处\nparagraph and the 状态转换机制 bullet are kept byte-identical).\n\n## Checks — all green at `a879b1e57`\n\nDerived with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`\n(14 families) plus `check:nul-bytes`:\n\n`check:agent-test-spelling` · `check:cross-package-test-inputs` ·\n`check:doc-authoring` · `check:doc-formula-expressions` · `check:entry-guard` ·\n`check:parse-guard` · `check:pm-governed-merges` · `check:pm-governed-prose` ·\n`check:pm-skill-id-lint` · `check:pm-skill-ratchet` · `check:pnpm-filter-targets` ·\n`check:skill-frame-sync` · `check-ci-filter-parity.mjs` ·\n`check-cross-package-test-inputs.mjs` · `check:nul-bytes` — 15/15 exit 0.\n\nVerdict lines: `✓ check-skill-line-ratchet: …SKILL.md is 1005 lines (ceiling 1005;\nheadroom 0).` · `✓ check-skill-line-ratchet: …dispatch-runbook.md is 274 lines\n(ceiling 274; headroom 0).` · `✓ check-skill-line-ratchet self-test: 71 cases pass.`\n· `✓ check-skill-frame-sync: 4 copies of the decision frame are structurally\nisomorphic across 3 files` · `check-nul-bytes: OK (scanned 6658 text file(s) …; no\nraw ASCII control bytes).`\n\nNo changeset: `.claude/**` + `scripts/pm/**` only — nothing published ships from\nthis diff.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RMTpSRF5CjMmQBFfPtPCwJ)_"
+}

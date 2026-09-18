@@ -2,8 +2,8 @@
   "number": 18715,
   "kind": "issue",
   "title": "[finding] packages/core/PHASE2_IMPLEMENTATION.md's fenced TypeScript blocks are in no tsc program — a block that has NEVER compiled survived two sweeps, and the gate #15931 proposed would not have caught it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "huangyiirene",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:engine",
-    "needs-user-decision",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-17T16:23:53Z",
-  "updated_at": "2026-09-17T19:35:15Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-18T05:38:50Z",
+  "closed_at": "2026-09-18T05:38:50Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18715",
   "body": "Filed by the `domain:engine` execution seat (`session_01CqmCgU5RGDoJYhHUMVp2af`) out of the #18620 round (PR #18712), from the **seat's own spot-check**, ⛔ not from the dev's report — the dev correctly reported the instance and did not claim the class. ⛔ Filed bare: `finding` only; `domain:*` / type / priority are triage's.\n\n⚠️ ⭐ **This is a RECURRENCE with a named precedent, ⛔ not a discovery.** #15931 (closed **completed** 2026-09-06) already measured this exact blind spot, in this exact file, and wrote it into its own acceptance notes. This card exists because the blind spot is still open and has now produced a second instance — and because the remedy #15931 proposed **would not have caught it**.\n\nDedupe words: `PHASE2_IMPLEMENTATION fenced block` · `markdown code block typecheck` · `published-readme-exports population` · `tsconfig.examples include` · `doc example never compiled`.\n\n## The reading, on `origin/main` and at PR #18712's head `b6606cdc2d`\n\n`packages/core/PHASE2_IMPLEMENTATION.md`'s fenced TypeScript blocks are in **no tsc program**, and no gate reads them:\n\n| instrument | reading |\n|:--|:--|\n| `packages/core/tsconfig.examples.json` | `\"include\": [\"examples/**/*\"]` — the directory only, ⛔ never the Markdown |\n| what is left in that directory | **one** file, `kernel-features-example.ts`. ⚠️ `phase2-integration.ts` — the sibling that mirrored these very blocks, and whose breakage `tsconfig.examples.json`'s own header records — **no longer exists** |\n| `check-published-readme-exports.mjs` | population is a **PUBLISHED** README, i.e. a document in the package's `files[]`. `@objectstack/core`'s `files[]` is `[\"dist\",\"README.md\",\"CHANGELOG.md\"]` ⇒ this document is outside it |\n| a gate that typechecks fenced blocks anywhere | **none** — grep over `scripts/` and `.github/workflows/` for a fenced-block checker returns 0. ⭐ Firing control on the same instrument: the doc-adjacent script family lists **15** members (`check-doc-anchors`, `check-examples-live-imports`, `check-cli-examples-parity`, …) out of **185** `check-*` scripts, so the zero is a reading and ⛔ not a dead search. `check-cli-examples-parity` covers exactly one `.mdx` page and ⛔ not package-root Markdown |\n\n⇒ The document is **visible to every reader browsing the repo and invisible to every gate** — #15931's own words, still true.\n\n## ⭐ The second instance, and why it is worse than the first\n\nPR #18712's item (2): the `Integration with Kernel` block passed `kernel.logger` to five constructors. `ObjectKernel` declares `private logger` (`kernel.ts:107`), `KernelBase` declares `protected logger` (`kernel-base.ts:36`), and neither has a public getter. Measured with `tsc --noEmit --strict`: **exit 2**, `TS2341: Property 'logger' is private and only accessible within class 'ObjectKernel'`.\n\n⇒ **That block has never compiled, for anyone, ever.** It sat there through at least two prior sweeps of this file (#15931's and PR #18615's).\n\n⚠️⚠️ **And the remedy #15931 proposed in its acceptance notes would NOT have caught it.** That note asked for 「a gate that reads documented `@objectstack/*` import **specifiers** against the target package's own `exports` map」. The `kernel.logger` block's imports are all fine; what is wrong is **member visibility inside the example body**. ⇒ A specifier checker answers a strictly narrower question than 「does this block compile」, and this instance falls in the gap between them. ⭐ That is the single most useful thing this card has to say.\n\n## Scope — ⛔ measured, not assumed\n\n`packages/core` alone carries four more package-root Markdown files with the same exposure: `ADVANCED_FEATURES.md`, `README.md`, `REFACTORING_SUMMARY.md` (and this one). ⚠️ `README.md` **is** in `files[]`, so `check-published-readme-exports` reaches it — for symbols, ⛔ not for compilation. The other three are outside every gate.\n\n## Shape (⛔ a proposal, not a prescription)\n\nExtract fenced `ts`/`typescript` blocks from a declared population of Markdown files into a tsc program — the sibling-config pattern this repo already uses three times (`tsconfig.examples.json`, `plugin-auth`, `packages/spec/tsconfig.scripts.json`) — so a block that cannot compile goes red. ⚠️ It needs a way to mark a block as deliberately partial (`// ...` elisions are everywhere in these documents), and that convention is the real design question, ⛔ not the extraction.\n\n## ⛔ Not measured\n\n- How many fenced TS blocks across all package-root Markdown fail to compile today. ⇒ A census would size this and is the first thing a taker should do; ⛔ this card asserts one measured instance and ⛔ not a population.\n- Whether `content/docs/**` (a different population, with its own gates) has the same gap.\n\nRefs: #18620 · PR #18712 (the instance and its `tsc` measurement) · **#15931** (the precedent — same file, same blind spot, closed completed; its acceptance note proposed the specifier gate) · #18615 (the prior sweep that did not catch it) · #10870 (adjacent, closed not planned: package-root **tool configs** no tsc reads)\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

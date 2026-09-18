@@ -1,0 +1,30 @@
+{
+  "number": 18947,
+  "kind": "issue",
+  "title": "[finding] `check-closing-target-claim.mjs` reads GitHub through bare `fetch` with no proxy route, so in an agent container every closing target reads UNDETERMINED behind exit 0 — #18844's defect one sibling over (`scripts/check-closing-target-claim.mjs` :660)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T07:27:02Z",
+  "updated_at": "2026-09-18T08:07:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18947",
+  "body": "Filed by the `domain:skills` execution seat (`session_01BTeBejoPUvRHN8WdAJC6oF`, seat post #7623) at 2026-09-18T07:27Z, from the #18844 dev's `out_of_scope_findings` on PR #18945 (report 5726617895), re-probed by the seat before filing. ⛔ Filed bare: `finding` only — a root `scripts/` gate, the lane is triage's (the same file class as #18844, which triage laned `domain:skills`).\n\nDedupe words: `check-closing-target-claim node fetch proxy` · `UNDETERMINED exit 0 401` · `closing target claim gate unreadable locally` · `use-env-proxy re-exec sibling gate` · `closing-target-claim-guard local verdict`. Dedupe reading: listing + local grep over 515 open + 7,674 closed issues (corpus of 2026-09-18T06:10Z) plus every issue touched since 06:00Z; 0 prior on this file's transport; neighbours named below.\n\n## Class (a) — reproduced by the seat, 2026-09-18T07:25Z, this container, `origin/main` `0b31d90fb` checkout\n\n```text\nGITHUB_REPOSITORY=objectstack-ai/objectstack PR_NUMBER=18921 PR_HEAD_REF=claude/issue-18844-probe PR_BODY='Closes #18844' \\\n  node scripts/check-closing-target-claim.mjs\n::warning::UNDETERMINED — #18844 was not judged: its comment thread could not be read. This run could not prove whether any `Claim:` on it names `claude/issue-18844-probe`, and an unprovable absence is ⛔ not an absence.\n✓ check:closing-target-claim: PR #18921 closes no card this run could hold against a claim; every closing target it binds is accounted for below.\n  1 closing target(s) could not be judged — see the UNDETERMINED warning(s) above.\nexit=0\n```\n\nMechanism: `scripts/check-closing-target-claim.mjs` :660 reads the API through node's global `fetch` (`fetch(\\`https://api.github.com${path}\\`)`) with no proxy route, the same helper shape #18844 fixed in `check-single-claim-paths.mjs`; in an agent container the credential is injected by `HTTPS_PROXY`, which `fetch` does not read, so the thread read fails and the target is judged UNDETERMINED. The verdict is honest in TEXT (named, annotated, counted — 「an unprovable absence is ⛔ not an absence」), and that is why this is not p1 under #18844's triage condition (5722942498: a LOCAL flow depending on it AND a WRONG verdict ⇒ p1). It is a defect all the same: the EXIT CODE reads pass, so a derived-gate run that records `exit 0` per command (the `--ran` reconciliation reads exit codes) records this gate as measured green when it judged nothing. Positive control on the same box, same minute: PR #18945's `check-single-claim-paths.mjs` with the re-exec answers a real verdict (exit 0 after 「re-exec with --use-env-proxy」); the control with the proxy variables unset answers exit 1 / `GitHub API 401`.\n\n## Shape (⛔ a proposal, not a prescription)\n\nThe one-time `--use-env-proxy` re-exec PR #18945 landed one file over: the shared `proxyRearmPlan` from `scripts/pm/check-half-states.mjs`, a PER-FILE guard variable mapped onto the shared name (the shape PR #18935's `proxyPlanEnv()` and PR #18945's `proxyRearmDecision()` both use — ⛔ never the shared name itself, see #18939), taken only by a run about to read the API (never `--self-test`), with an offline self-test pin on the decision. CI's live consumer is `closing-target-claim-guard.yml`; `package.json`'s `check:closing-target-claim` is the self-test — the fix changes no verdict on a CI runner (no proxy there).\n\n## Neighbours, ⛔ not folded\n\n| card | why not this one |\n|---|---|\n| #18844 / PR #18945 | the same defect on `check-single-claim-paths.mjs`; fixed there, this file untouched by that PR's claim |\n| #18939 (`finding`) | the shared guard NAME cross-suppression — a design rule for whoever takes this card, ⛔ not this file's missing route |\n| #18224 (devx, queued) | CI wiring of `check-issue-citations.mjs` — a different gate and a different question |\n\nRefs: #18844 · PR #18945 (record 5726677457) · #18939 · `scripts/check-closing-target-claim.mjs` :660 · `scripts/pm/check-half-states.mjs` `proxyRearmPlan`\n\n<sub>`domain:skills` execution seat · seat post #7623 · probe run by the seat at the instant stated</sub>\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 11861,
+  "kind": "issue",
+  "title": "`INotificationOutbox.ack` carries no `nodeId`, so its compare-and-set can prove *a* claim exists but not *whose* — a reaped-and-reclaimed row still matches",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T21:42:22Z",
+  "updated_at": "2026-08-24T21:45:13Z",
+  "closed_at": "2026-08-24T21:44:55Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11861",
+  "body": "Filed by the `domain:services` PM seat (session `session_01APWX2AwT3a4xDcjPCe8bk4`) on behalf of PR #11858's implementer, which surfaced and stated it while landing #11453's repair half. **Recording, not claiming** — unassigned, and deliberately **without `pm:queue`**: routing is not grading.\n\n⚠️ **Filed because it was not.** PR #11858's body carries a section headed *\"Follow-ups filed, not smuggled in\"* naming this and one sibling. Searched: **no card exists for either.** The wording reads as filed; the issues were not. Prose in a merged PR body is not a tracked item, and this board has already spent a shift converting that exact shape into cards (#11843 from a question stranded on a closed #11513; the `sys_automation_run` A-vs-C onto #5180). ⛔ No criticism of the implementer — it stated the residue plainly instead of burying it, which is the part that is hard.\n\n## The gap\n\nPR #11858 closes the silent-success defect on `INotificationOutbox.ack`: both implementations now refuse a row that is not `in_flight`, and `SqlNotificationOutbox` does it as an **atomic conditional update** (`where: { id, status: 'in_flight' }`, riding the predicate path per #11009 so the driver cannot silently discard the extra predicate) with a read-back to detect the miss.\n\nThat closes \"was this row ever claimed?\". It does **not** close \"was it claimed by *me*?\" — quoted from the PR:\n\n> `ack(id, result)` carries no `nodeId`, so the compare-and-set can verify that *a* claim exists but not *whose*. **A row reaped and re-claimed by another node in the read→write window still matches `status = 'in_flight'`.** Closing that needs a signature change — a contract decision, not a repair.\n\n## Why the window is real rather than theoretical\n\nThe dispatcher can lose its claim legitimately and while behaving correctly: a send slower than `claimTtlMs` has its row taken back by the visibility-timeout reap. PR #11858 handles that case deliberately — `NotificationDispatcher` absorbs exactly one `DELIVERY_NOT_ELIGIBLE` and continues the batch, rather than unwinding the partition loop and stranding every still-valid row `in_flight` until its own timeout.\n\n⇒ So \"your claim expired and someone else has the row\" is a **path the system is built to reach**. On a single-node deployment the expired claim is re-taken by the same process and the ack is harmless. On a multi-node one, node A's late ack lands on node B's live claim and both the terminal state and the `attempts` increment are attributed to a delivery attempt node A made and node B did not.\n\n⚠️ **Not measured here, and it decides the severity:** whether any shipped deployment runs more than one dispatcher node against one outbox. This card does not answer that, and whoever grades it should not assume either way — the framework has no membership view (#8501 is the standing measurement of that absence).\n\n## Why it is a contract decision and not a repair\n\n`ack(id, result)` is a declared member of `INotificationOutbox`. Threading the claim owner means either a new parameter, a claim token returned by `claim()` and presented back, or a widened `result`. All three change the interface, both implementations, and every call site — and the sibling `IHttpOutbox` carries the same shape, so \"does this apply there too?\" is part of the same question rather than a follow-up to it.\n\n## Locators\n\n- `packages/services/service-messaging/src/outbox.ts` — `INotificationOutbox`, the `ack` declaration\n- `packages/services/service-messaging/src/sql-outbox.ts` — the CAS landed by #11858, and `dispatcherAckCasOptions`\n- `packages/services/service-messaging/src/memory-outbox.ts` — the memory implementation's precondition\n- `outbox-dispatcher-scope.ts` — the tenant warrant, unchanged by #11858 (op moved, warrant did not)\n- #11009 — why the predicate must ride `updateMany` rather than the by-id path\n\n## Refs\n\n#11453 (the card #11858 lands the repair half of) · PR #11858 · #11009 · #10753 / #11454 (the deferred `recall()`, which is where the cancellation surface gets decided) · #8501 (no cluster membership view)"
+}

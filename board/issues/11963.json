@@ -1,0 +1,36 @@
+{
+  "number": 11963,
+  "kind": "pull_request",
+  "title": "feat(spec)!: narrow ObjectMasterDetailFormPropsSchema.formType to the measured simple | tabbed",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ui",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T03:26:10Z",
+  "updated_at": "2026-08-25T03:54:53Z",
+  "closed_at": "2026-08-25T03:54:52Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T03:54:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11963",
+  "body": "Fixes #11873\n\n## What\n\n`ObjectMasterDetailFormPropsSchema.formType` narrows from bare `z.string()` to the **measured** `z.enum(['simple', 'tabbed'])` — the spec half of objectui#5939, which already tightened the objectui registry declaration to the same pair on the same measurement. Direction per triage (comment 5403285119): not open; only the retirement mechanics were this card's work.\n\n- The four `object-form` spellings that name real renderer branches (`wizard` / `split` / `drawer` / `modal`) refuse with a **per-value prescription** carried by the enum's own error map, keyed on `issue.input` — the `record:chatter` `position` precedent (#8762) and the `view.exportOptions` `'pdf'` precedent (#8010). Each prescription names the measured way that branch breaks the block's atomic parent+details contract (ADR-0001) and prescribes `simple` / `tabbed`, pointing at `object-form` for the overlay/wizard/split presentations.\n- Any never-vocabulary string (`'wizzard'`, the issue's own repro) now gets zod's plain enum refusal instead of parsing clean and rendering a silently sectionless parent form.\n- The sibling `ObjectFormPropsSchema.formType` keeps its six values — only the master-detail block narrows.\n- objectui#6176 (`tabbed` presentationally honoured but escaping the atomic batch) is a renderer defect tracked there; per triage constraint 3 it does not change this vocabulary.\n\n## Census (triage constraint 2 — run BEFORE narrowing)\n\nIn-repo authored-value census over every `formType` on master-detail blocks (fixtures, examples, catalog entries, tests, docs — `*.ts/tsx/js/json/md/mdx/yml/yaml`, excluding `node_modules`/`dist`/`.cache`): **106 repo-wide `formType` mentions, all classified; zero out-of-vocabulary values on master-detail blocks.** The three authored master-detail values are all `'simple'`:\n\n- `examples/app-showcase/src/ui/pages/project-workspace.page.ts:45`\n- `packages/spec/src/ui/component.test.ts` (showcase master-detail pin)\n- `packages/lint/src/validate-component-props.test.ts` (master-detail node)\n\n**Positive control:** the same sweep resolves real authored out-of-`simple|tabbed` values on the sibling `object-form` block — `'wizard'` (`component.test.ts`, `validate-component-props.test.ts`, `new-project-wizard.page.ts`) and `'drawer'`/`'modal'` (task-desk / renewals-pipeline JSX pages) — proving it sees authored values, not just declarations. objectui's equivalent census (objectui#5939) also read zero. No premise fork.\n\n## Retirement mechanics — why no ADR-0087 conversion entry\n\nBoth precedents (#8762, #8010) registered a conversion + migration entry; this narrowing deliberately does not, and the reasoning is recorded in the schema comment:\n\n1. **No gate requires one** (PM mechanism assumption, verified): `check:authorable-surface` tracks keys (the key survives), and no gate diffs enum values against the registries. `check-adr-0087-registration` requires the question answered in writing — the changeset carries the `adr-0087: not-required (no-migration-prescription)` disposition, and the gate accepts it (green).\n2. Unlike both precedents — where the dropped values were the schema's **own declared vocabulary** (and, for chatter, its default) — these four names were **never declared** for this block: the key was bare `z.string()`. There is nothing spec-promised to rewrite, and both censuses read zero authored occurrences.\n3. The conversion route would force `packages/spec/src/migrations/registry.ts` (`conversionIds` list + semantic entry), which is **HELD by a sibling family dispatch this wave** — the dispatch constraint forbids touching it. Since (1) and (2) make the entry unnecessary rather than deferred, this is a completed shape, not a debt; if the maintainer wants a belt-and-braces conversion (rewriting the four names → `'simple'`) it can land as a follow-up once the hold lifts.\n\n## Tests\n\n- Acceptance pins: `'simple'` and `'tabbed'` parse green on `object-master-detail-form`.\n- Rejection pins assert the specific zod issue — `code: 'invalid_value'`, `path: ['formType']` — for `'wizzard'` (plain enum refusal, no prescription) and for each of `wizard`/`split`/`drawer`/`modal` (per-value prescription naming the honoured pair and `object-form`).\n- `type-alias-convention.pin.test.ts` Iso844 (input ≡ infer) verified green without edits — an error-mapped enum with no default/transform stays isomorphic, so the pin file is deliberately not in the diff.\n\n## Gates\n\nFull `@objectstack/spec` build + `check:generated` (→ `gen:docs` regenerated `content/docs/references/ui/component.mdx`, included; re-run green after fix) + **full spec test suite: `Test Files  424 passed (424)` / `Tests  11281 passed (11281)`** (lock verdict `command-exit 0`, run at `7b3020f`; the one later commit `11294ac` touches only the `.changeset/` marker, no test input) + typecheck incl. the test layer, `check:liveness`, `check:empty-state`, `check:strictness-ledger`, `check:variant-docs` — all green at final head `11294ac` (`command-exit 0`). `check-adr-0087-registration` green at `11294ac` (disposition accepted). Reverse verification from the committed state: reverting the enum to `z.string()` (mutation disk-confirmed: injected=1 / removed-remaining=0) turns exactly the 5 rejection pins red (`5 failed | 2 passed`) with the 2 acceptance pins green, restore disk-confirmed (get-calls=1). Full gate readings quoted in the report comment on #11873. Gate family re-derived from the actual diff with `node scripts/pm/dispatch-gates.mjs`.\n\nBreaking ships as **minor** per the launch-window convention (`scripts/check-changeset-no-major.mjs`); the changeset names the four newly-rejected values and points authors at the two honoured ones.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01K93P8PbH7kVjsAXkqzH1zY)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01K93P8PbH7kVjsAXkqzH1zY)_"
+}

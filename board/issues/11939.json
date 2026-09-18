@@ -1,0 +1,35 @@
+{
+  "number": 11939,
+  "kind": "issue",
+  "title": "flaky: the ABLATION leg of `vitest-console-teardown-race.test.ts` reds a full-repo run — its instrument stops reproducing under load (1 red in 6 runs)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-25T01:42:09Z",
+  "updated_at": "2026-08-25T04:30:57Z",
+  "closed_at": "2026-08-25T04:30:57Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11939",
+  "body": "Found while taking the machine-lane baseline for the QA wave (#9296, round #9298). Filed as a finding, not fixed — R0 lands no code.\n\n## Summary\n\n`examples/app-showcase/test/vitest-console-teardown-race.test.ts` is the guard landed by `92a69d813` (#10293, #10374, PR #10605) for the vitest console-forwarding teardown race. It has two legs: a **GUARDED** leg (the fixture exits 0 under the app's real vitest config) and an **ABLATION** leg (the same fixture *still* reddens a green run under vitest defaults — i.e. the instrument still detects the thing it guards).\n\nThe **ABLATION leg is the one that fails**, and it fails by design-intent: it asserts its own instrument still reproduces the defect, and under a loaded full-repo run it does not.\n\nThis is the only test failure in the entire repo at this sha.\n\n## What failed\n\n```\nFAIL  test/vitest-console-teardown-race.test.ts > [#10293] vitest console-forwarding teardown race\n      > ABLATION: the fixture still reddens a green run under vitest defaults\n\nAssertionError: the instrument stopped reproducing: 8 attempts under vitest defaults\nproduced no \"Closing rpc while \"onUserConsoleLog\" was pending\". Either vitest changed its\nconsole forwarding (check sendLog/rpcDone in its dist chunks) or the fixture stopped\nleaking. Do NOT relax the guarded leg on the strength of this.: expected undefined to be defined\n\n ❯ test/vitest-console-teardown-race.test.ts (3 tests | 1 failed) 11284ms\n   × ABLATION: the fixture still reddens a green run under vitest defaults  7386ms\n\n Test Files  1 failed | 25 passed (26)\n      Tests  1 failed | 361 passed (362)\n```\n\nNote the assertion message's own instruction — **\"Do NOT relax the guarded leg on the strength of this\"** — which is exactly right and is why this is filed rather than touched.\n\n## It reproduced once in six runs — the load dependence is the finding\n\n| # | condition | result |\n|---|---|---|\n| 1 | `pnpm exec turbo run test --continue --concurrency=2` (full repo, 30m39s) | **RED** — the failure above |\n| 2 | `pnpm -C examples/app-showcase exec vitest run test/vitest-console-teardown-race.test.ts` | green, 3 passed (3), 4 s |\n| 3 | same, repeat | green, 3 passed (3), 4 s |\n| 4 | `pnpm --filter @objectstack/example-showcase test` (the file beside its 25 siblings) | green, 362 passed (362), 24 s |\n| 5 | same, repeat | green, 362 passed (362), 23 s |\n| 6 | the file alone under 8 synthetic CPU burners on 4 CPUs (load avg ~7) | green, 3 passed (3), 19 s |\n\nSo: the file is green in isolation, green at package scope, and green under raw CPU starvation. It went red exactly once, inside a full-repo run. Run 6 is the informative control — **plain CPU contention is not sufficient to trigger it**, so the trigger is something more specific to the full-repo condition (many concurrent node processes and their memory/scheduling pressure changing the child vitest's rpc teardown timing), not simply \"the box is busy\".\n\nThe ablation spawns child vitest runs and looks for a race window; its reproduction probability is inherently non-deterministic, and under full-repo conditions it apparently drops below what 8 attempts (`ABLATION_ATTEMPTS`) will catch.\n\n## Why this matters more than a normal flake\n\nThe failure direction is inverted from an ordinary flaky test. This one goes red when the defect it guards **fails to appear**. That has two consequences:\n\n1. It reds a run in which nothing is actually wrong, and the message reads like vitest changed under us — an expensive thing to investigate at the wrong moment.\n2. If vitest ever *genuinely* fixes its console forwarding, this leg reds permanently and looks identical to today's load flake. The two are indistinguishable from the assertion alone.\n\n## Environment\n\n- framework sha `1f6d04703df8f518c80d0fbaa8b19262068e405d` (tip of `main`)\n- `.objectui-sha` `190fbd01d0615e2e168faf9e08b8ad7844bc039d`\n- node v22.22.2, pnpm 10.31.0, linux x64, 4 CPU / 15 GB\n- fresh worktree, single `pnpm install`, deps prebuilt, run serialized under the shared verify lock\n\n## Suggested direction (not implemented here)\n\nDeliberately not proposing that the ablation be weakened — the guard's own comment forbids exactly that, and the leg is doing real work. Options worth a maintainer's judgement:\n\n- raise `ABLATION_ATTEMPTS`, or retry the ablation with a bounded budget, so a low-probability window under load does not red the leg;\n- give the ablation leg a distinct signal (skip-with-warning under detected load, rather than fail) so that \"instrument did not fire this time\" and \"instrument is permanently dead\" stop looking alike — that distinction is the actual gap;\n- or pin the file to a serial/isolated lane so it never runs under full-repo pressure.\n\nThe first and second change what the guard asserts, so neither is taken here.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015ahemw8RcTgqtxrj15PEZx)_"
+}

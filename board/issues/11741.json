@@ -1,0 +1,35 @@
+{
+  "number": 11741,
+  "kind": "issue",
+  "title": "Widen `SendEmailInput` with `organizationId` so `sys_email` can be stamped at its producers (Decision 2 of #11303)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T14:42:21Z",
+  "updated_at": "2026-08-24T22:16:18Z",
+  "closed_at": "2026-08-24T22:14:28Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11741",
+  "body": "Cut out of **#11303** by the `domain:services` seat on the maintainer's ruling of 2026-08-24, and filed **for the spec seat**. ⛔ No `pm:queue` — grading is triage's field.\n\n## The ruling this exists to carry out\n\nMaintainer, 2026-08-24, live PM chat: 「其他按照你的建议继续」, recorded on #11303 at `5396411781`, Decision 2 verbatim:\n\n> **`sys_email`: separate card, ruled to file.** Widening `SendEmailInput` in `packages/spec/src/contracts/email-service.ts` is Clause-② work with spec ownership: thread from callers that hold an organization (the email channel's `delivery.notification.organizationId`), absent stays legal where the caller genuinely has none (auth verification/reset mail). The services seat files it with this provenance; ⛔ never smuggled into the merged PR #11698.\n\nThe parent ruling it sits under (#11303, `5393621706`): 「11303 sys_inbox_message/sys_notification/sys_email 应该写 organization_id。」 — a **gap, not a design choice**, with the **producers** as the fix site.\n\n## Why `sys_email` was the one table the services PR could not do\n\nPR #11698 (merged) stamped the notification family at its two broken producers. `sys_email` stopped at a fence, deliberately:\n\n- Threading an organization to the `sys_email` writer **requires adding `organizationId` to `SendEmailInput`** — `packages/spec/src/contracts/email-service.ts`. The services lane has **zero `packages/spec` ownership**, so it reported rather than guessing at a public contract.\n- Measured on that branch: **`plugin-email` has no organization handling of any kind today** — zero matches across `email-service.ts`, `email-plugin.ts`, `sys-email-payload.ts`.\n- Its writer runs under a **constant `SYSTEM_CTX` with no execution context to read**, so there is nothing local to derive from. ⭐ That is precisely why the contract has to carry the value: any in-adapter resolution would be **fabrication**, which the parent ruling forbids outright.\n\n## The shape, as ruled\n\n- Add `organizationId` to `SendEmailInput` (optional — see below).\n- **Thread it from callers that hold one.** The named case: `service-messaging`'s email channel already has `delivery.notification.organizationId` in hand.\n- **Absent stays legal** where the caller genuinely has none — auth verification and password-reset mail have no organization, and forcing one there would be the fabrication this whole card exists to avoid.\n\n⭐ **The failure direction that matters**, carried over from the parent ruling and worth restating because it is the reason for the optionality: a wrong `organization_id` is **worse than a null**. A null is visibly missing; a wrong value is silently authoritative to every report, export and cleanup script that filters by organization.\n\n## ⚠️ Clause-② — yes\n\nWidening a public contract surface in `packages/spec` hits it on **both** limbs (path *and* content). `CONTRACT_REVIEW_TIER` was `claude-fable-5` when the services seat last read it live — re-read it at dispatch rather than trusting this line.\n\n## Suggested pins, for whoever takes it\n\n- A producer holding an organization stamps it; a producer genuinely without one writes no organization **and is not refused** (the over-denial control — refusing would break auth mail and every first boot, which is the same trade Decision 3 confirmed on the parent card).\n- ⭐ Pin **identities, not counts** — assert *which* producer stamped, not that \"some rows have it\".\n\n## Not measured\n\n- The full `SendEmailInput` caller census. Only the messaging email channel is named by the ruling as holding an organization; whether others do has not been swept.\n- Whether `sys_email`'s existing 96 org-less rows matter to anyone. **They do not need to**: the parent ruling is **forward-stamping only**, no backfill (maintainer's standing 2026-08-23 precedent 「10950 不考虑存量」).\n\nRefs: #11303 (parent, the ruling and the producer census) · PR #11698 (the merged services half; ⛔ this must not be retrofitted into it) · #8287 (subject-record organization precedence)"
+}

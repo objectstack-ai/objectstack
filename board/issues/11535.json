@@ -1,0 +1,34 @@
+{
+  "number": 11535,
+  "kind": "issue",
+  "title": "driver-sql: single→multi-value field change never migrates the existing column type (varchar/text kept), arrays silently stored as stringified literals — data corruption on Postgres",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T02:37:36Z",
+  "updated_at": "2026-08-25T05:30:55Z",
+  "closed_at": "2026-08-25T05:30:31Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11535",
+  "body": "## Summary\n\nWhen a field is changed from single-value to multi-value (e.g. a `lookup` gaining `multiple: true`), a **fresh** database creates the column as `json` — but on an **existing** PostgreSQL database the old `varchar`/`text` column is kept forever, silently. Writes then store the array as a stringified literal (`'[\"id1\",\"id2\"]'`) into the old column, reads return that raw string, and downstream code (hooks copying the value into child records) treats the whole string as a single id — i.e. **silent data corruption**, not just a display glitch.\n\n## Environment\n\n- `@objectstack/*@17.2.0` (driver-sql), PostgreSQL 16\n- App project with a long-lived database that has been through several metadata upgrades\n\n## Reproduction\n\n1. Define an object with a single-value lookup field on Postgres; boot; insert a record (column is created as `varchar`).\n2. Change the field to multi-value (`multiple: true`); reboot.\n3. Observe: no migration, no warning. `information_schema.columns` still shows `character varying`; a fresh DB of the same metadata shows `json`.\n4. Create a record selecting 2 users → stored value is the literal string `[\"userA\",\"userB\"]`; list/detail UI renders the raw string; any hook reading the field receives a string and (in our case) copied it verbatim into a child record's single-lookup column, producing a reference to a non-existent `sys_user#'[\"…\"]'`.\n\n## Root cause (as far as we can see)\n\nThe schema-drift repair in driver-sql 17.2 supports only: `relax/tighten_not_null`, `widen/narrow_varchar`, `drop_column`, `drop_column_default`, plus index actions. There is **no \"change column base type\" action**, and the mismatch is not reported either. Additionally the old single-value btree index on the column is left behind (json cannot carry btree; after our manual `ALTER`, the drift log correctly flags that index as orphaned).\n\nWrite path `formatInput` JSON.stringifies for json fields on non-SQLite drivers, but the read path only `JSON.parse`s on SQLite — on Postgres it relies on the pg driver's column-type-based decoding, which a stale `varchar` column defeats. SQLite dev environments therefore never expose the bug.\n\n## Expected\n\nEither migrate the column type when a field becomes multi-value (`ALTER TABLE … TYPE json USING …`, dropping/rebuilding incompatible indexes), or at minimum **fail loudly / log a drift error** so operators know the column must be migrated by hand before data gets corrupted.\n\n## Workaround we applied in production\n\nManual, inside one transaction: drop the legacy btree index, then\n`ALTER TABLE t ALTER COLUMN col TYPE json USING (CASE WHEN col = '' THEN NULL WHEN col LIKE '[%' THEN col::json ELSE to_json(col) END)`,\nthen repair the child rows that had already been corrupted. Works, but every project with a long-lived DB will hit this on any single→multi field change.\n"
+}

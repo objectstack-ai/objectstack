@@ -1,0 +1,36 @@
+{
+  "number": 11763,
+  "kind": "issue",
+  "title": "metadata-lifecycle's post-table sentence carries two hand-kept registry numbers that nothing checks",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T15:41:03Z",
+  "updated_at": "2026-08-24T17:18:20Z",
+  "closed_at": "2026-08-24T17:18:20Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11763",
+  "body": "Found while building the overlay-whitelist gate (#11752 / PR #11759). **Not a live defect** — both numbers are correct today. This records an unguarded drift risk of exactly the class #11752 was filed for, one line below the table that card gated.\n\n## What\n\n`content/docs/concepts/metadata-lifecycle.mdx:119`, the sentence immediately under the \"Overlay whitelist (shared-DB tenancy invariant)\" table:\n\n> Those five are the **complete** `allowOrgOverride: true` set: of the 27 types in `DEFAULT_METADATA_TYPE_REGISTRY`, every other one is `false`.\n\nTwo derived-from-the-registry quantities, both hand-kept:\n\n- **\"27\"** — the registry's total entry count;\n- **\"Those five\"** — the size of the `allowOrgOverride: true` set.\n\nBoth verified correct at `1f6d4507e`: `node scripts/check-overlay-whitelist-table.mjs --list` prints `27 types, 5 overridable`.\n\n## Why it is worth recording\n\nThe gate landing in #11759 checks the **table** against the registry in both directions. It does **not** read this sentence. So registering a 28th metadata type leaves the page asserting \"27\" with every gate green — the same shape as the original drift (a hand-kept copy of a registry fact sitting under the sentence that calls the registry the single machine-readable source), just moved one paragraph down.\n\nThe `allowOrgOverride: true` half is partly protected in practice: a new `true` type with no table row trips the new gate's leg 2. A new `false` type trips nothing, and \"27\" goes stale silently.\n\n## Why it was not fixed in #11759\n\nThe four-condition in-place-fix exemption fails on one condition: that sentence was authored by **PR #11750, which is still open** at time of filing, so another agent's in-flight work has a live claim on the exact line. Extending the gate to assert the number would also couple it to that PR's final wording. Filed rather than folded in.\n\n## Suggested shape (if picked up)\n\nExtend `scripts/check-overlay-whitelist-table.mjs`: search the section for `of the (\\d+) types in \\`DEFAULT_METADATA_TYPE_REGISTRY\\`` and for the `true`-set size, assert against the AST counts the gate already computes (`entries.length` and the `true` filter), and report in the green line whether the claim was found — so an absent or reworded sentence is visible rather than a silent no-op. Both numbers are already in hand; this is a small addition, not a new parse.\n\nPrior art for guarding a hand-kept count in prose against a derived one: `scripts/check-quick-reference-counts.mjs`.\n"
+}

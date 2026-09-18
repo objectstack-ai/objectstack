@@ -1,0 +1,35 @@
+{
+  "number": 11643,
+  "kind": "issue",
+  "title": "`os build --json` drops the undeclared-authoring-key warnings that `os validate --json` carries",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T10:26:12Z",
+  "updated_at": "2026-08-24T14:43:57Z",
+  "closed_at": "2026-08-24T14:43:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11643",
+  "body": "Found while fixing #11529. Out of that card's scope (the text-mode warning printer), but it is what stopped the fix from pointing `--json` at one of the two advisory lists.\n\n## Measured\n\nAt `origin/main` commit `50fb191d`, `packages/cli/src/commands/compile.ts`:\n\n- line 287 computes `unknownKeyFindings` — the ADR-0087 / #3786 keys that `ObjectSchema` / `FieldSchema` do not declare and that therefore drop silently on the way to storage;\n- line 291 guards the whole block with `!flags.json`, so in JSON mode they are computed and then discarded;\n- line 466, the success payload, carries `warnings: ruleAdvisories` — the authoring-rule advisories only.\n\n`packages/cli/src/commands/validate.ts:259` does carry them:\n\n```\nwarnings: [...ruleAdvisories, ...docWarnings, ...unknownKeyWarnings, ...capProviderWarnings, ...structuralWarnings],\n```\n\nSo a CI consumer reading `warnings` off `os build --json` sees a strictly smaller set than the same consumer reading it off `os validate --json` on the same tree — and the missing members are exactly the \"your key was dropped\" ones.\n\n## Why it matters\n\nThe `--json` payload's own comment at `compile.ts:462` states the intent this violates:\n\n> The whole registry's advisory set, in the shape `os validate --json` reports.\n\nIt is not the whole set. This is the same class as #10953 and #11174 — both closed — where `os validate --json` was found to omit advisories its text face printed. Same defect, one command over.\n\nIt also has a concrete downstream cost: #11529 adds a truncation notice that points readers at `--json` for the complete list. That pointer is true for the authoring-rule advisories and would be false for the undeclared-key list, which is one reason #11529 left the second list alone rather than giving it a notice with a remedy that does not work.\n\n## Suggested shape\n\nCarry the undeclared-key warnings in `os build --json` the way `os validate --json` does. Note the shape question the neighbouring comment at `compile.ts:465` already flags: `warnings` is typed as authoring-rule records (`{where,message,rule,path,hint}`) and `unknownKeyFindings` is a different record shape, which is precisely why `bodyExtractionWarnings` was given its own key rather than folded in. Whether these become a sibling key or are adapted into the advisory shape is a contract decision, not a mechanical one — `os validate --json` already made a choice, so parity with that choice is the cheap answer if it holds up.\n"
+}

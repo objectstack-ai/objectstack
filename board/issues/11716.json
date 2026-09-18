@@ -1,0 +1,36 @@
+{
+  "number": 11716,
+  "kind": "pull_request",
+  "title": "fix(spec): re-export the three types the root entry's own inferred types mention (#11350)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T13:49:00Z",
+  "updated_at": "2026-08-24T22:00:58Z",
+  "closed_at": "2026-08-24T22:00:56Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-08-24T22:00:56Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11716",
+  "body": "Fixes #11350\n\n## Ruling implemented\n\nMaintainer 2026-08-23 (recorded in issue comment 5386669705, verbatim 「10950 不考虑存量，其他接受你的建议」): **add the three type re-exports (`FormFieldInput`, `NavigationItemInput`, `StateNodeConfig`) to the spec root entry — the measured fix (3 errors → 0).**\n\n**Invariant recorded** (and carried as a comment on the new export block in `src/index.ts`): *a type that appears structurally in an entry's public declarations must be nameable from that same entry.* `defineStack` returns `ObjectStackDefinition`, declared as the `z.input` instantiation of `ObjectStackDefinitionSchema` — a generic instantiation the declaration emitter does not preserve as an alias — so an un-annotated `export default defineStack(...)` is emitted as the structural expansion, which mentions these three types. All three were already public on `/ui` and `/automation`; the root entry simply could not name them, so tsc reached for the hash-named dist chunk (TS2883, unaddressable through the `exports` map).\n\n## Changes\n\n- `packages/spec/src/index.ts` — the three `export type` re-exports, from the modules that declare them, with the invariant + card reference in the comment.\n- `packages/spec/api-surface/root.json` — regenerated via `gen:api-surface`; grows by exactly 3 rows (`FormFieldInput (type)`, `NavigationItemInput (type)`, `StateNodeConfig (type)`).\n- `packages/spec/export-origins/root.json` — regenerated via `gen:export-origins` (`check:generated` proved it stale; +3 origin rows).\n- `packages/spec/scripts/root-entry-type-nameability.pin.test.ts` — pin test compiling the consumer shape verbatim (un-annotated `export default defineStack(...)`) against the **built** root dts, resolved through a real `node_modules` symlink + the package's own `exports` map, with `declaration: true`. A second program is a hermetic declaration-emit canary (TS4094; measured red with `declaration: true`, green without), so dropping the declaration axis from the harness cannot silently turn the pin into a phantom check. Dist staleness is refused via the shared `inspectDistFreshness` rule.\n- `.changeset/root-entry-type-reexports-11350.md` — minor for `@objectstack/spec` (public face +3, additive; not breaking, so no ADR-0087 disposition marker is owed — `check:adr-0087-registration` green).\n\n## Measurements\n\n- **Before** (base `4ceae8ab0`, annotation from the earlier consumer-side repair reverted on `packages/plugins/plugin-audit/scripts/i18n-extract.config.ts`, dependency closure freshly built): `npx tsc --noEmit -p tsconfig.repro.json` → exactly 3 × TS2883 naming the three types from `dist/view.zod-DlqDxILi.js` / `dist/app.zod-CeA4DPnB.js` / `dist/state-machine.zod-BTAjKYaW.js`; exit 2.\n- **After** (same mutated consumer, spec rebuilt with the re-exports, names confirmed present in `dist/index.d.ts`): same command → 0 diagnostics, exit 0. The consumer file was then restored to its committed annotated form (untouched by this PR).\n- **Reverse verification** (from the committed fix): the three names were stripped from the built `dist/index.d.ts` final export statement (mutation proven on disk: replacement count 3, final-line grep 0, file differed from backup), the pin test went red with exactly the 3 TS2883s naming the three types, and the dist was restored byte-identically (`cmp` clean) with the pin green again.\n\n## Premise delta — reported, not silently fixed\n\nThe pin's minimal one-file program surfaced **two more** names leaking through the **chunked** build that the fixed root entry still cannot name: `BaseValidationRuleShape` and `FilterCondition` (both public on `/data`). The nine i18n-extract programs never see them because their object modules import `@objectstack/spec/data` — the card's own control effect. #11709 is not addressed here and remains open, filed with the measurement and options (including the card's Option C gate, which its dispatch reserved for a proposal rather than this PR). The pin test's consumer program deliberately mirrors the real consumers (a `context.ts` importing `/data`), scoping the pin to the ruled three; its docblock records the delta and points at #11709.\n\n## Verification at final head `ddf0566b2`\n\n- `pnpm --filter @objectstack/spec exec vitest run` — 421 files / 11224 tests passed (ran at `d62f9cc42`; the only later commit changes one docblock line inside the pin test, which was rerun green at `ddf0566b2`).\n- `pnpm --filter @objectstack/spec typecheck` — exit 0 (`tsc --noEmit` + scripts + test-layer; ledger line: \"55 file(s) / 263 error(s) held\", unchanged).\n- `pnpm --filter @objectstack/spec check:generated` — exit 0, all 14 artifacts current (`check:api-surface` ✓).\n- Derived local gates (`node scripts/pm/dispatch-gates.mjs`, no hand-built path list; derivation stamped `objectstack-ai/objectstack`): all 22 matched + test-kind convention gates green at `ddf0566b2`, except `check-dev-prereqs.mjs` exit 1 **solely on its environmental precondition** (\"The workspace is not built — 1 unmet precondition\": 52/67 package dists absent in this fresh worktree; spec's own dist is built and stamped; CI runs it after `pnpm build`).\n- Targeted eslint narrowing, declared: population = `pnpm lint` (`eslint . --no-inline-config`, one flat config); files linted from `--format json` = 2 (the only lintable files in this diff — the md/json artifacts report \"File ignored because no matching configuration was supplied\"); invariance = the config's own text states type-aware linting is never enabled for any file, so this diff cannot move untouched files' verdicts. Result: 0 errors / 0 warnings, exit 0.\n- `check:type-check-debt --re-measure` not run locally (needs the full workspace closure built), declared: the only ledger entries this diff can reach are spec's, re-measured green inside `pnpm --filter @objectstack/spec typecheck`; the change is additive on dist exports, which cannot remove or narrow anything a consumer package's program reads.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Rxnd8cyFnoU8V5y21PaTsy)_"
+}

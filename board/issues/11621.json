@@ -1,0 +1,33 @@
+{
+  "number": 11621,
+  "kind": "issue",
+  "title": "Three objectui seats in a row have recorded \"we bypassed the merge queue\" — measured false. The queue is enforced and cannot be bypassed; it merges without validating anything",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui-tw",
+    "id": 314596056,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T09:40:46Z",
+  "updated_at": "2026-08-24T17:39:10Z",
+  "closed_at": "2026-08-24T17:39:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11621",
+  "body": "⚠️ **This card was filed 20 minutes ago with the wrong framing and has been rewritten by its author before anyone acted on it.** The original text (asking the skills seat to record an out-of-queue auto-merge exception) is quoted and retracted in the first comment. The defect is real but is **not** what it said. Nothing in the skill needs an exception.\n\nFiled by the `domain:devx` @ **objectui** execution seat (post objectstack-ai/objectui#5748), round R6, PM session `session_019b5UBNMtTzKbVtZZGvFuxe`, as a cross-lane handoff to the `domain:skills` seat.\n\n## What three seats believed, and what is actually true\n\n**Believed** (recorded in two consecutive objectui seat handovers, then repeated by this seat): *objectui's merge queue is non-functional, so seats land PRs by GitHub auto-merge, bypassing the queue, in violation of the skill's* 「队列是唯一被认可的落地路径,⛔ 永不队列外 `--auto` 合并」.\n\n**Measured today, in this order:**\n\n| # | reading | result |\n|:--|:--|:--|\n| 1 | `PUT /repos/objectstack-ai/objectui/pulls/5963/merge` | **405 — \"Changes must be made through the merge queue\"** |\n| 2 | `enable_pr_auto_merge` on the same PR, all checks green | merged at 09:43:27Z |\n| 3 | repo-wide `event=merge_group` workflow runs, **after** that merge | **`total_count: 0`** |\n| 4 | positive control — `event=pull_request` on `ci.yml` | **4,978** runs, so the event filter works |\n| 5 | workflows declaring `merge_group` on `main` | **8**: `ci`, `lint`, `changeset-presence`, `control-bytes`, `doc-component-types`, `doc-snippet-types`, `docs-links`, `skills-paths` |\n\n**Therefore the belief is false in both halves:**\n\n- ⛔ **Seats are not bypassing the queue, and cannot.** Reading 1 shows direct merge is refused by a ruleset. Auto-merge is the only path available, and it satisfies that ruleset — so it *is* the sanctioned path here. **No seat violated the skill.** No exception is needed, and ⛔ none should be written.\n- ⚠️ **The queue is worse than non-functional — it is enforced and validates nothing.** Readings 3+5 together: eight workflows subscribe `merge_group`, and not one `merge_group` build has ever run, including for a PR that merged through the queue minutes ago.\n\n## The actual defect\n\nobjectstack-ai/objectui#3523's step 2 landed — the `merge_group` triggers are present in eight workflow files on `main`, and `ci.yml` carries a long comment explaining precisely why they were added. **Step 3 did not**: the queue's *required check set* is still empty, so GitHub's queue admits an entry and merges it without ever building it. `ci.yml`'s own comment describes the consequence of exactly this state:\n\n> A queue with nothing subscribed to it can only have an EMPTY required-check set, so it rebuilt each PR on the current `main` and let it through without validating anything.\n\nand records that this was cashed in on 2026-08-07, when #3503/#3510/#3516 merged with `Type Check` at `conclusion=failure` and #3505 had to hot-fix `main`. The triggers have since been added; the required-set half has not, so the hole is still open — the subscription exists but nothing requires it.\n\nThat is objectstack-ai/objectui#4986, which remains open and **accurate**. This card does not duplicate it.\n\n## What this card asks the skills seat for\n\n⛔ **Not** a landing-path exception. ⛔ Not a skill-text change to permit auto-merge. The rule as written was being obeyed.\n\nWhat is worth fixing is that **a false belief propagated across three seat handovers and cost each of them a maintainer interruption**, because the handover format carries conclusions well and the readings behind them poorly. Concretely:\n\n1. Consider whether the landing-path rule should say *how to tell* whether a repo's auto-merge routes through its queue — the distinguishing reading is `merge_group` run count plus a direct-merge attempt, and no seat ran either; all three inferred \"bypass\" from `merged_by` being a human-shaped account.\n2. `merged_by: <the PM's own account>` was read by two seats as evidence of bypass. It is **not** — GitHub attributes a queue merge to the actor who enqueued it. Worth naming as a platform-reading fact so the next seat does not re-derive it wrongly.\n\n## The maintainer's ruling today, recorded for completeness\n\nAsked in-session (having been given the incorrect framing above), the maintainer authorised auto-merge on every-check-green:\n\n> 授权 auto-merge（推荐）\n\nThat ruling remains **operationally correct and is what this round landed under** — auto-merge is the sanctioned path here. But it was granted as an *exception to a rule that was never being broken*, so it should ⛔ not be written into the skill as a carve-out. It is simply how landing works in objectui today.\n\n## Note on filing route\n\nThe filing seat has no git push access to this repo (`Claude doesn't have GitHub access to objectstack-ai/objectstack for your organization`), so this is filed via the issue API. Unassigned. `domain:*` and grading are the triage seat's to set."
+}

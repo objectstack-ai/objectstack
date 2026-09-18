@@ -1,0 +1,36 @@
+{
+  "number": 11774,
+  "kind": "issue",
+  "title": "Report CSV/HTML export infers its columns from the first 50 rows, so a field that first appears later is dropped from every row",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T15:59:59Z",
+  "updated_at": "2026-08-24T20:46:04Z",
+  "closed_at": "2026-08-24T20:46:04Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11774",
+  "body": "Found while re-deriving #11642's population — a sweep of the repo for renders that truncate a list and say nothing. This one is not a printer and not a display cut: the truncation is on the **column inference**, and the data it loses never appears anywhere in the exported artifact.\n\n## Measured (read from source at `origin/main` `945ffbea8`; not executed)\n\n`packages/plugins/plugin-reports/src/report-service.ts`:\n\n```ts\nfunction pickFields(rows: any[], explicit?: string[]): string[] {\n  if (explicit && explicit.length > 0) return explicit;\n  const seen = new Set<string>();\n  for (const r of rows.slice(0, 50)) {\n    if (r && typeof r === 'object') for (const k of Object.keys(r)) seen.add(k);\n  }\n  return Array.from(seen);\n}\n\nfunction renderCsv(rows: any[], fields?: string[]): string {\n  const cols = pickFields(rows, fields);\n  const head = cols.join(',');\n  const body = rows.map(r => cols.map(c => escapeCsvCell(r?.[c])).join(',')).join('\\r\\n');\n  return body.length > 0 ? `${head}\\r\\n${body}` : head;\n}\n```\n\nThe sample is the first **50** rows; the projection is applied to **all** of them. So when `fields` is not given explicitly, any key whose first occurrence is at row 51 or later is absent from the header and its values are dropped from every row of the output — including the rows that do carry it.\n\nTwo renderers are affected, and `renderReport`'s `default:` branch is CSV:\n\n- `renderCsv` (`:130`)\n- `renderHtmlTable` (`:147`)\n\n## Why this is not merely cosmetic\n\nSparse columns are the normal shape of report output: an optional field, a formula that only some records satisfy, a lookup that resolves for a subset. The first 50 rows are not a random sample either — they are the query's first page in its sort order, which for a report sorted by, say, status or created date is precisely the correlated case. And unlike a truncated print, the export gives no signal at all: the CSV is well-formed, every row has the same arity, and nothing says a column was inferred rather than declared. A recipient of a scheduled report attachment cannot tell.\n\n## Not proposed here\n\nScanning every row is the obvious fix and is O(rows x keys) on the export path, which is a real cost decision for large reports; a declared column set from the saved report's own schema may be the better answer. Either way it is a behaviour change on an export surface, so it is filed rather than folded into an unrelated card.\n\nFiled unassigned, no labels — severity and route are triage's call."
+}

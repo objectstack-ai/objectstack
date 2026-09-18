@@ -1,0 +1,34 @@
+{
+  "number": 11865,
+  "kind": "pull_request",
+  "title": "fix(devx): split the sdk bridge's unreachable rows by cause (#11178)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T22:00:10Z",
+  "updated_at": "2026-08-24T22:41:32Z",
+  "closed_at": "2026-08-24T22:41:31Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-24T22:41:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11865",
+  "body": "Fixes #11178\n\n`--bridge-coverage` printed two different findings in the same column and the same\nwords. Auth's `56 of 56` and rest's `46 of 87` read as one remediable cause — and that\nmisreading is what aimed #11178 at registrar discovery, whose own remedy was then\nmeasured to move the auth ledger by **zero** rows.\n\nThis changes what the report **says**, not what the bridge **discovers**.\n\n## Why discovery was never the constraint\n\n`auth-plugin.ts` carries **zero** route-registration sites. better-auth declares those\nroutes inside `node_modules`, and the plugin mounts them through one catch-all at\n`auth-plugin.ts:2455` — ``rawApp.all(`${basePath}/*`, …)`` — a template literal with a\nwildcard that `routeTailOf` cannot and should not turn into a tail.\n`auth-route-ledger.ts:8-10` has said exactly this since #3656.\n\nAdmitting `auth-plugin.ts` to `REGISTRAR_FILE_RE` moves `registrar files scanned`\n**12 → 13** — so the file *is* admitted, the ablation is not vacuous — and changes\nnothing else: 43 tails → 43, reachable 45 → 45, auth still `56 of 56`.\n\n## What this adds: a ceiling, and a partition\n\nEvery unreachable row is attributed against a **ceiling** — every `path:` any\n`packages/**` file declares, with the filename convention ignored entirely. Built by the\nnew `maximalTailsFrom` from the *same* `parseRegistrarSource` over the *same* walk, so it\nis a **superset by construction**: a ceiling that misses a reachable row is a `brokenScan`\nverdict, not a quieter number.\n\nOn `727a41e1f`, the 177 unreachable rows partition:\n\n| cause | rows | meaning |\n| --- | ---: | --- |\n| `discovery-gap` | 14 | an in-repo file declares this exact path; the convention did not scan it. The JSON **names the witness**. |\n| `no-in-repo-registrar` | 56 | on a ledger where **not one** row is declared in-repo. No discovery change reaches it, at any price. |\n| `undecided` | 107 | no in-repo declaration, on a ledger that *has* in-repo registrars. |\n\n`14 + 56 + 107 = 177`, pinned as a partition so a bucket cannot quietly absorb another.\n\n**Exactly one** of the seven ledgers is `no-in-repo-registrar` today — measured, not\nassumed. The other six either have witnesses or have no client-bound rows at all.\n\n## Honest where it cannot decide\n\n`undecided` is the #9747 rule applied to itself: for those 107 rows nothing here can tell\n\"no registration site\" apart from \"a registration site whose path this recognizer cannot\nread\", so **neither is claimed**. A caller that supplies no ceiling gets `unmeasured` on\nevery ledger and `null` counts — never `0`, so nobody reads \"no structural rows\" out of\n\"nobody looked\".\n\nDirection of error is deliberate: a *false* witness can only move a row **out of**\nstructural into remediable, so `no-in-repo-registrar` is conservative — it holds under the\nmost permissive reading of the tree available.\n\n⚠️ All 14 `discovery-gap` witnesses are `packages/spec/src/api/*.zod.ts` Zod **contract\ndeclarations**. The report claims only that *an in-repo file declares this path*, which is\ntrue either way; whether such a declaration should count as a *registrar* is the open\ncontract question in #11857 and is not decided here. None of #11857's three\nfalse-positive files witnesses any row.\n\n## Derived, never listed\n\nA hand-kept list of \"structural\" ledgers would reproduce the defect this card family keeps\nhitting. Control on the real tree: adding **one** in-repo file that declares **one** auth\nroute, under a filename `REGISTRAR_FILE_RE` does *not* match, moves the auth ledger out of\nthe bucket by itself — structural `56 → 0`, `reachable` still 45 — and removing it restores\n`56`. No ledger name appears anywhere in the classifier.\n\n## What did not move\n\n`REGISTRAR_FILE_RE` is **byte-identical**. The bridge still rides on `registrarByTail`\nalone. `registrar files scanned` 12, `route tails produced` 43, **`reachable` 45**,\n`UNREACHABLE` 177 — all identical before and after, and the reach-cannot-move property is\npinned in `--self-test`. ⛔ This deliberately does **not** implement #11857.\n\n## Verification — on `727a41e1f`, clean tree\n\n`--self-test` **417 → 437 cases**, green. Ablations, each with the anchor asserted present\nbefore the edit, proven on disk after (`OLD=0 NEW=1`, sha change), `node --check`, and a\nbyte-identical restore under `trap … EXIT INT TERM`:\n\n| ablation | self-test |\n| --- | --- |\n| `undecided` defaults into the structural bucket | ✗ **3 cases** |\n| the ceiling superset guard removed | ✗ **1 case** |\n| an absent ceiling renders `0` instead of `null` | ✗ **1 case** |\n| the ceiling reads prose as registration (mask dropped) | ✗ **2 cases** |\n\nA fifth leg was attempted first and produced **invalid JS** through a shell-quoting\nmistake — that leg did not run, and its exit code is not reported as a result; it was\nredone through Python, and is the mask row above.\n\nPrefilter soundness has a positive control: masking **all 1930** files instead of the 1093\n`includes('path')` keeps produces a byte-identical census — same 82 tails, same 14/163\nsplit.\n\nGate union re-run on this exact commit, exit codes captured before any pipe — all **10**\nderived families green (`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`,\nno paths passed): `check:nul-bytes`, `check:docs-audit-scope`, `check:agent-test-spelling`,\n`check:cross-package-test-inputs`, `check:entry-guard`, `check:parse-guard`,\n`check:pm-governed-merges`, `check:pnpm-filter-targets`,\n`docs-audit/check-affected-docs`, `docs-audit/check-drift-comment`.\n\nNo changeset: `scripts/`-only, publishes nothing — matching every recent scripts-only\ncommit in this repo.\n\nRefs #11857 (option A, measured and deliberately not landed here) · #10534 · #9572 ·\n#9747 · #9941 / #10050 (the incidents this silence allowed) · #3656\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015ahemw8RcTgqtxrj15PEZx)_"
+}

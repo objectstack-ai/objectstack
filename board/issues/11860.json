@@ -1,0 +1,33 @@
+{
+  "number": 11860,
+  "kind": "issue",
+  "title": "`NotificationDispatcher` records a delivery attempt for an unregistered channel, though nothing was ever sent — the notification-side twin of `recordUndeliverable`",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T21:41:56Z",
+  "updated_at": "2026-08-24T22:20:49Z",
+  "closed_at": "2026-08-24T22:20:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11860",
+  "body": "Measured while implementing the `ack()` status precondition on #11453 (PR #11858). Filed unassigned; deliberately left alone in that PR, for the reason in the last section.\n\n## The site\n\n`NotificationDispatcher` has two branches that ack a **claimed** row without attempting a send at all — the channel the row names is not in the registry:\n\n- `dispatcher.ts`, `processRow()` — `ack(row.id, { success: false, error: \"channel '<c>' not registered\", dead: true })`\n- `dispatcher.ts`, `processDigestGroup()` — the same, once per row in the group\n\n`ack` increments `attempts` for every accepted call, so the row lands terminal `dead` with `attempts >= 1`. Nothing went on the wire. The counter says something was tried.\n\nAfter #11453 that increment is conditional on the row being *claimed*, which is what closed the ack-as-cancel corruption route. It does not distinguish \"claimed, sent, failed\" from \"claimed, never sent\" — and this branch is the second one.\n\n## Why this is the shape `recordUndeliverable` already answers on the sibling\n\nThe HTTP outbox has this exact problem and solved it with a separate member: `IHttpOutbox.recordUndeliverable` writes a terminal row **without** incrementing `attempts`, precisely so `attempts === 0` on a terminal row stays a truthful discriminator. `assertHttpRedeliverable` (`http-outbox.ts:315+`) then reads it to refuse redelivering a \"parked, never sent\" row — a security refusal, since such a row carries no HMAC signature (#7799, #8069).\n\nThe notification outbox has no such member and no such reader.\n\n## Why it was not fixed under #11453\n\nBecause nothing on this side consumes the value the way the HTTP side does. Measured on `origin/main`: the only reader of a notification row's `attempts` is `classifyDeliveryAttempt(result, errorClass, row.attempts, …)`, which uses it to position the retry backoff — and a `dead` row is terminal, so its count is never read again.\n\nSo closing this today means declaring a discriminator (a new `AckFailure` field, or a `recordUndeliverable` twin) with **no consumer**, which is the capability expansion the #11453 scope ruling was explicitly narrowed to avoid. The honest sequence is the reverse: if a notification-side reader of \"terminal but never sent\" appears — an operator-facing redeliver, a delivery-health report, an alert that distinguishes misconfiguration from transport failure — it arrives needing this, and the discriminator lands with its consumer.\n\nRecording it now so that reader's author finds the analysis instead of re-deriving it, and so nobody reads the notification `attempts` column as trustworthy for this distinction in the meantime.\n\n## Links\n\n- Surfaced by: #11453 / PR #11858\n- The sibling's answer: #8069 (`recordUndeliverable` + the `attempts === 0` refusal)"
+}

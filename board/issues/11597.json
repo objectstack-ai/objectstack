@@ -1,0 +1,33 @@
+{
+  "number": 11597,
+  "kind": "issue",
+  "title": "Two agent-facing docs still teach the `gen:schema` wipes `gen:openapi` trap that #5371 fixed — it has already cost one filed issue",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T07:29:34Z",
+  "updated_at": "2026-08-24T15:26:06Z",
+  "closed_at": "2026-08-24T15:26:06Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11597",
+  "body": "Found while re-verifying the premise of #11216 (which turned out to be false, and this is *why* it was filed).\n\n## The claim, and why it is no longer true\n\nTwo internal agent docs assert that `gen:schema`'s cleanup deletes `gen:openapi`'s output, and prescribe a recovery command:\n\n- `.claude/agents/os-dev.md:190-192` — \"姊妹陷阱:`gen:schema` 的清理会抹掉 `gen:openapi` 的产物(rest 里冒出假 5xx 失败);用 `pnpm --filter @objectstack/spec gen:openapi` 恢复。\"\n- `.claude/skills/pm-dispatch/references/landing-operations.md:20-21` — \"**`gen:schema` 的清场会抹掉 `gen:openapi` 的产物**(rest 包成串 `expected 503 to be 200` 假红);补跑 `pnpm --filter @objectstack/spec gen:openapi` 即复原。\"\n\nThat was true until #5371, landed as `83f86077cd` — *\"fix(spec): gen:schema clears only its own outputs, sparing gen:openapi's openapi.json\"*. `build-schemas.ts` no longer removes the directory; it routes the clean through `clearOwnedOutputs()`, which skips every entry declared in `FOREIGN_JSON_SCHEMA_ARTIFACTS` (`packages/spec/scripts/lib/json-schema-out-dir.ts`), and `openapi.json` is the one entry there.\n\nMeasured on `origin/main` @ `2dc0a770b6`, `openapi.json` present before and after the exact command the docs blame:\n\n```\n### STEP 1: gen:schema then gen:openapi\nfiles: 1588\nopenapi.json: PRESENT (109369 bytes, sha fbb690ef5df7df4d)\n\n### STEP 2: check:authorable-surface (runs gen:schema --check in place)\ncheck:authorable-surface exit=0\nfiles: 1588\nopenapi.json: PRESENT (109369 bytes, sha fbb690ef5df7df4d)\n\n### What the clean printed\nCleaning output directory: .../packages/spec/json-schema\n  ↳ kept openapi.json — owned by gen:openapi (packages/spec/scripts/build-openapi.ts) (#5371)\n```\n\nThe behaviour is pinned in two layers, both green in the full `@objectstack/spec` run (420 files / 11213 tests, exit 0):\n`scripts/json-schema-out-dir.test.ts` (unit — *\"leaves gen:openapi's openapi.json byte-identical\"*) and `scripts/build-schemas-check-mode.test.ts` (integration — *\"build-schemas.ts — the output clean spares a sibling generator (#5371)\"*, which carries a `--check`-specific case precisely because `check:authorable-surface` was the reported trigger).\n\n`AGENTS.md` was already corrected — it carries no deletion clause today, only the \"two generators have no gate\" line at 627. These two files were missed.\n\n## Why it is a defect and not a tidy-up\n\nThe measured cost is one full card. #11216 was filed on the strength of this claim, citing \"AGENTS.md documents the deletion\" — AGENTS.md does not, the agent prompt does, and the author had it from their own prompt. Its supporting measurement (1584 files with `openapi.json` absent, then 1585 with it present) is fully explained without any deletion: `packages/spec/json-schema/` is gitignored (`.gitignore:61`), so on a fresh worktree it does not exist at all; `gen:schema` alone builds the tree *without* `openapi.json` because `gen:openapi` had never run there. Absence-because-never-generated, read as deletion — a reading the prompt supplies.\n\nA doc that names a fixed trap does not fail loudly; it converts every reader into a false-positive reporter, and it also prescribes a command (`gen:openapi`) that agents now run for no reason.\n\n## Suggested shape\n\nDelete both clauses, or rewrite them to state the current guarantee and where it is enforced (`FOREIGN_JSON_SCHEMA_ARTIFACTS` / `clearOwnedOutputs`, pinned by the two tests above) — the MERGE-state anchor trap sitting beside each of them is unaffected and still true.\n\nNote for whoever takes it: `.claude/skills/` is a governed surface under Prime Directive #14 (human-merge only, never queued or flipped out of draft), and `.claude/agents/os-dev.md` is the dispatch prompt itself, so this was left unfixed rather than folded into #11216's branch — it is outside that card's declared file surface in both directions.\n\nBacklink: #11216 · #5371 / `83f86077cd` · `packages/spec/scripts/lib/json-schema-out-dir.ts`\n"
+}

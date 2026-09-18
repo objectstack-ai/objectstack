@@ -1,0 +1,33 @@
+{
+  "number": 11778,
+  "kind": "pull_request",
+  "title": "fix(docs-audit): derive the declLead key-spelling pin's population from the source",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T16:11:18Z",
+  "updated_at": "2026-08-24T16:31:43Z",
+  "closed_at": "2026-08-24T16:31:42Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-24T16:31:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11778",
+  "body": "Fixes #11737\n\nThe `--self-test` pin labelled *\"every key spelling a call site passes comes back ANCHORED\"* compared a **hand-kept three-element list** against a literal, while the eight `new RegExp(declLead(…))` call sites pass **four** distinct spellings. The card is accurate: `client` — the spelling `windowClientRe` passes — was absent, so a pin naming *every* spelling checked three quarters of them.\n\n## Verdict: the array moves, not the label — and it moves to being *derived*\n\nThe population, enumerated from the tree rather than from the card (all eight arguments parse as string literals, so the enumeration is complete — nothing computed escapes it):\n\n| spelling | call sites | lines |\n| --- | --- | --- |\n| `(route\\|client)` | 3 | 1508, 1637, 1877 |\n| `route` | 3 | 1775, 1776, 1860 |\n| `(?:route\\|client)` | 1 | 1876 |\n| **`client`** | **1** | **1777 (`windowClientRe`)** |\n\n`new RegExp(declLead(` total **8**, parsed as literals **8**, distinct **4**. **There is no fifth spelling.**\n\nRather than correcting the list to four, the pin now **reads the population out of the source**. A corrected list re-rots the moment a ninth call site arrives with a fifth spelling — which is the same failure this family exists to close (\"seven agreeing and one differing looked exactly like eight agreeing\"), one level up. Only the **input** is derived; the **expected stays a literal**, so the comparison is not vacuous. A second pin asserts all eight keys parse as literals, so a computed key fails loudly instead of dropping out of the derived list unseen.\n\n## Non-vacuity — the whole deliverable on this card\n\nEvery reading below is from a mutation **confirmed on disk** by grepping the injected text (a zero-hit edit reports exit 0 and would read as a clean run). All mutation scripts carry `trap … EXIT INT TERM` restores.\n\n| mutation | list = 3 (before) | list = derived (after) | which case fires |\n| --- | --- | --- | --- |\n| none — control | green (417) | green (417) | — |\n| `client`-only **tightening**: allowlist `(?<[^\\s{,])` narrowed to `(?<[^\\s])` | **green, 0 failures** | **RED, 1 failure** | the pin, and only the pin |\n| a call site passes a **computed** key | n/a | RED, 2 failures | the new literal-count pin + the pin |\n| a call site **changes its spelling** (`(?:route\\|client)` to `(?:client\\|route)`) | n/a (frozen list cannot see it) | RED, 1 failure | the pin — derivation is live |\n| no-op edit elsewhere — negative control | green | green | — |\n\nRow 2 is the demonstration the card asked for: a real, `client`-only behavioural drift that **all 416 cases pass through today** and that exactly one case catches after this change.\n\n## Correcting the card's stated rationale\n\nThe card and the triage comment both reason that the behavioural pin *\"would not see a regression that reached only the `client`-only spelling\"*. **That is too strong, and I could not sustain it.** Measured: a `client`-only **widening** (allowlist back to `\\b`) is caught today, by two fixtures — `` a `$client:` does not become the row BINDING (#11630) `` and *\"and the real `client:` is bound, not swept up as unclaimed\"*. A gross `client`-only break (dropping the trailing `\\s*`) trips 83 cases.\n\nWhat survives is narrower and is the real gap: **tightening** drifts. No fixture defends the `{` and `,` members of the allowlist, and none can — the file's own sweep measured **0 leads preceded by `{` or by `,`** across all seven live ledgers, so those members are behaviourally silent on every fixture and every real ledger today. They are exactly the part of the anchor only a string pin can hold, and tightening is the direction a \"simplification\" takes. That is now stated in the comment block, replacing the over-broad claim.\n\n## The three falsification paths, checked\n\n1. **Do the neighbouring pins jointly constrain it?** No. Computed over a mutated source: `the run … spelled ONCE` stays **1**, `all eight lead scans` stays **8**, `no call site restates it` stays **0**. All three count *text* and never call the function, so a branch added inside `declLead` is invisible to every one of them. The array's job is not narrower than its label — the label was simply untrue.\n2. **A fifth spelling?** No — 8 call sites, 8 literals, 4 distinct.\n3. **Is `windowClientRe` comparable?** Yes. The missing `'g'` flag and `window.match()` are real but **orthogonal**: flags are a separate argument to `new RegExp(source, flags)` and cannot affect the source string this pin compares. If anything it argues the other way — `windowClientRe` is the only call site whose *value extraction* reads `client.index` and `client[0].length`, so lead drift there corrupts extracted client names rather than merely missing matches.\n\n## Verification\n\nDerived with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (9 families from the real changeset), all run at **`1253ea0e9`**, exit codes captured before any pipe:\n\n```\ncheck:agent-test-spelling          exit=0     check:parse-guard              exit=0\ncheck:cross-package-test-inputs    exit=0     check:pm-governed-merges       exit=0\ncheck:docs-audit-scope             exit=0     check:pnpm-filter-targets      exit=0\ncheck:entry-guard                  exit=0     check-affected-docs            exit=0\ncheck:nul-bytes                    exit=0\n```\n\n`affected-docs --self-test`: **417 cases pass** (416 before; one check became two). No changeset — this touches only internal CI tooling under `scripts/docs-audit/` and publishes nothing, so `skip-changeset` applies.\n\n_Generated by [Claude Code](https://claude.ai/code/session_015ahemw8RcTgqtxrj15PEZx)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015ahemw8RcTgqtxrj15PEZx)_"
+}

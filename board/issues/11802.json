@@ -1,0 +1,33 @@
+{
+  "number": 11802,
+  "kind": "issue",
+  "title": "READMEs remain anchorless to docs-drift — #11357 closed the reporting gap, not the coverage gap",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T17:01:00Z",
+  "updated_at": "2026-08-24T17:42:45Z",
+  "closed_at": "2026-08-24T17:42:19Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11802",
+  "body": "Filed by the devx lane PM seat while accepting PR #11798 (#11357). ⛔ **Recording a residual, not proposing a fix** — see the scope note at the bottom.\n\n## Why this row exists\n\n#11357 asked for two different things and its PR delivers one of them:\n\n- **The reporting gap** — a reviewer seeing *\"this run has no opinion\"* reasonably concludes *\"nothing to check\"*. PR #11798 closes this (#9282's **option 4**): the headline now names the unanchored files and says those pages are **NOT COVERED** by the run, on all three headline arms.\n- **The coverage gap** — a README exports no symbol, mounts no route, declares no SDK method and carries no `@docs-rule` block, so it is **anchorless by construction** and docs-drift cannot see it at all. This is untouched.\n\nMerging #11798 closes #11357 with `Fixes`, which is correct — the filed defect was the reporting one, and leaving a card open for work its own PR does not do is how \"open\" stops meaning anything. But it retires **the only open row naming this corpus**.\n\n⚠️ **#9632** (*\"no gate reads a published README's links at all\"*) is already **closed**. So once #11357 closes, the fact that READMEs are invisible to every docs gate is recorded **nowhere open**, and the next README defect gets re-discovered rather than recalled.\n\n## The class is live, not theoretical\n\nTwo README defects landed on one lane in one day, and **neither was detectable by any gate on any run**:\n\n- **#11180** — `packages/cli/README.md` advertised `os studio`, a command the CLI does not ship.\n- **#11262** — `packages/console/README.md` asserted a `@object-ui/console` fallback the code no longer performs.\n\nA README is the published front page of a package on npm. A class of documentation no gate can see is a real hole rather than a tolerable exclusion.\n\n## The two questions #11357 left unmeasured, carried forward verbatim\n\nBoth are still unmeasured, and this row exists mostly to keep them findable:\n\n1. **Option 3's noise cost.** #9282's option 3 — *fall back to the coarse package-mention list for an anchorless file's package rather than reporting no opinion* — reintroduces what #6893 / #7009 measured at **~106–112 rows** and were **learned-to-skip**, with #9037 having to cap the comment. ⛔ **I declined option 3 on that measurement when scoping #11357 and am not re-opening it here.** Buying coverage by regrowing a list people trained themselves to ignore is worse than the current honest silence. If anyone revisits it, the burden is to show why it would be read this time.\n2. **Whether any README could reasonably carry a `@docs-rule` block** and opt in under the mechanism PR #9394 already shipped (#9282's option 1). Never measured. This is the cheapest possible route to real coverage *if* the answer is yes for a meaningful subset — and a clean negative result would be worth having too, because it would establish that option 1 structurally cannot reach this corpus.\n\n## Scope\n\n⛔ This card proposes **no fix**. It records that the coverage half is open, with the two measurements a fix would need. Anyone picking it up should start by answering question 2, since a yes makes it small and a no narrows the remaining options to ones already priced and refused.\n\nRelated: #11357 (the reporting half, closed by PR #11798) · #9282 (the mechanism, closed by PR #9394 taking option 1) · #9394 · #9192 · #9632 (README **links**, same corpus, closed) · #6893 / #7009 / #9037 (the noise measurements) · #11180 · #11262."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 11793,
+  "kind": "issue",
+  "title": "A per-option `visibleWhen` written in a `*.form.ts` is silently inert — the metadata-admin renderer never reads it",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T16:43:17Z",
+  "updated_at": "2026-08-25T04:00:30Z",
+  "closed_at": "2026-08-25T04:00:30Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11793",
+  "body": "Filing unassigned — recording, not claiming. Measured while implementing #11410, where per-option visibility was the first shape considered and had to be ruled out.\n\n## The observation\n\n`FormFieldBaseSchema.options` is `z.array(SelectOptionSchema)`, and `SelectOptionSchema` declares a per-option `visibleWhen` (ADR-0068 / objectui#2284). So a metadata form (`packages/spec/src/data/*.form.ts` and its siblings, collected by `METADATA_FORM_REGISTRY`) **parses clean** with a per-option predicate on any select.\n\nIt has no effect there. The metadata-admin renderer that draws these forms — objectui `packages/app-shell/src/views/metadata-admin/SchemaForm.tsx` — maps `fieldSpec.options` straight to select items and never consults `opt.visibleWhen`. Its `evaluatePredicate` calls cover section, field and repeater-row visibility only.\n\nSo on this surface the key is accepted, stored, shipped, and ignored — the ADR-0049 declared-but-unenforced shape, scoped to one of the key's two consuming surfaces.\n\n## Why it is easy to get wrong in exactly the costly direction\n\nAn author reaching for it wants to *withdraw* an option. Both failure modes point the same way — the option stays offered:\n\n1. **Metadata-admin surface**: the predicate is never evaluated, so every option renders.\n2. **Runtime form surface** (`resolveCascadingOptions` to `evalFieldPredicate`, where the key *is* honored): the scope binds `record` / `previous` / `extra` and **never** `data`. Metadata forms spell their predicates `data.*`, so a `data.`-rooted per-option predicate is an unbound identifier — and visibility's fallback is `true`, i.e. the option is **kept**.\n\nA narrowing written this way therefore reads as done and does nothing. That is the same fail-open direction objectstack#6936 documented for the field-level evaluator, arriving one level down.\n\n## Not a claim that the docblock is wrong\n\n`SelectOptionSchema.visibleWhen`'s own docblock describes the runtime surface accurately and never promises metadata-form support. The gap is that nothing tells an author reading `FormFieldBaseSchema.options` that the key they may legally write is inert on the surface they are writing for, and no gate notices it.\n\n## Possible directions (not a recommendation — this wants triage)\n\n- Teach the metadata-admin `SchemaForm` to filter options by `visibleWhen` (fix in objectui; makes declared = enforced on both surfaces, and would need the `data` binding decided since that is the root metadata forms use).\n- Or state the boundary where it is reachable — on `FormFieldBaseSchema.options` — and consider a gate that fails a `*.form.ts` carrying a per-option `visibleWhen`, so the inert spelling cannot ship silently.\n\nZero `*.form.ts` in the repo uses the key today, so nothing is broken right now; this is about the next author who reaches for it. #11410 worked around it by using two field declarations with disjoint field-level `visibleWhen`, which is the shape the renderer does honor.\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 11559,
+  "kind": "issue",
+  "title": "[finding] `mcp__github__list_issues` treats `labels` as OR, not AND — any seat computing \"pm:queue ∩ domain:X\" from one query gets an inflated count that looks plausible",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T03:24:45Z",
+  "updated_at": "2026-08-25T05:18:49Z",
+  "closed_at": "2026-08-25T05:18:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11559",
+  "body": "Filed unassigned by the `domain:devx` @ objectui seat (objectui#5748), round R3, PM session `session_01PQ3NihCHE9LUtHoGxo6A9f`. A platform reading, so it belongs in the `pm-dispatch` fact table (`references/platform-readings.md`) rather than in a lane queue — one line, and it changes a number every seat reports.\n\n## Measured, both directions, 2026-08-24 against `objectstack-ai/objectui`\n\n| query | `totalCount` |\n|:--|--:|\n| `list_issues labels=[\"domain:devx\"] state=OPEN` | **61** |\n| `list_issues labels=[\"domain:devx\",\"pm:queue\"] state=OPEN` | **135** |\n\n**A subset cannot exceed its superset.** If `labels` were AND, the second result would be ≤ 61. It is more than double, so the filter is a union.\n\nConfirmed by inspecting the members rather than resting on the arithmetic — the 135-set contains both error directions:\n\n- **Cards in the lane that are not `pm:queue`**: `#5194` and `#4986` (`pm:on-hold` + `domain:devx`), `#5440` (`pm:blocked` + `domain:devx`). They qualify on the `domain:devx` term alone.\n- **Cards that are `pm:queue` but not in the lane**: `#5936`, `#5935`, `#5926`, `#5923`, `#5916`, `#5909`, `#5903` and others, none of which appear in the 61-card `domain:devx` read. They qualify on the `pm:queue` term alone.\n\n## Why it is worth a line in the fact table\n\nThe wrong number is **plausible and directionally comforting**, which is the dangerous kind. A seat reporting \"dispatchable inventory\" from a two-label query reports a figure roughly 2–3× the truth, and nothing about the result looks malformed — it is a well-formed list of real cards. Here the true reading is **49** `pm:queue` unassigned in the lane (47 once the two cards held behind objectui#5442 are excluded); the two-label query said **135**. That number feeds the round report's health indicators and the maintainer's read on whether a lane is draining.\n\nIt also silently breaks the **`pm:queue` without `domain:*`** sweep shape the triage seat runs: a card matching either term comes back, so a \"half-labelled cards\" query built this way returns mostly fully-labelled ones.\n\n## The rule that already defends against it, and why it should say so explicitly\n\nThe skill already prescribes the right shape — 「整车道一次读全,本地求交」 (read the whole lane in one query, intersect locally), on the stated grounds that per-state slices are a structural blind spot. This finding gives that rule a **second, sharper reason**: it is not only that a narrow query hides cards, it is that a multi-label query *invents* them. Suggested one-liner for the fact table:\n\n> `list_issues` `labels` is a **union**, ⛔ not an intersection — measured objectui 2026-08-24: `[\"domain:devx\"]` → 61, `[\"domain:devx\",\"pm:queue\"]` → 135. Never compute a lane ∩ state count from one query; read the lane on its single `domain:*` label and intersect locally.\n\n⚠️ Not verified here and worth one cheap check by whoever picks this up: whether `search_issues` with `label:a label:b` in the query string is AND (GitHub's own search syntax says it should be). If it is, that is the tool to reach for when a genuine intersection is wanted — but ⛔ do not assume it; the whole point of this card is that the plausible assumption was wrong.\n\nEvidence: objectui#5748 (seat post, R3 closing brief), objectui#5458 / #5367 / #3840 (the round in which it surfaced)."
+}

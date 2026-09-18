@@ -1,0 +1,35 @@
+{
+  "number": 11943,
+  "kind": "issue",
+  "title": "`pnpm-workspace.yaml`'s SCIM pin note under-counts stable's models — it enumerates six and omits `scimProjectionGrant`, in the exact file the pin-mover reads",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T01:56:56Z",
+  "updated_at": "2026-08-25T04:20:30Z",
+  "closed_at": "2026-08-25T04:20:30Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11943",
+  "body": "Filed unassigned by the `domain:services` seat while re-deriving #11632's leg seams. Not fixed here — PM writes no code.\n\n## The defect\n\n`pnpm-workspace.yaml`'s `@better-auth/scim` hold note (the block above the `'@better-auth/scim@<1.7.0-rc.1': '1.7.0-rc.1'` pin) describes what stable ships:\n\n> replaced by code-defined connections plus six new\n> models (scimUser, scimGroup, scimGroupMember, scimSubject,\n> scimConnectionBinding, scimIdentityTombstone — **all six present**). So\n> moving this pin is still the ADR-0071 feature migration tracked by #3653\n\nThat enumeration is **short by one**. `scimProjectionGrant` is missing from it.\n\n## Measured, not inferred\n\nThe authoritative reading is an **executed** probe, not a source read: #11697's parity pass constructed a real `@better-auth/scim@1.7.1` plugin from the published tarball (`npm pack`, shasum `715077319aeba4a35f114f7dfc2a8e0523aa9f6f`) and had it print its own declared model list (#11697 comment 5399511853, §3):\n\n```\ndeclared models: scimConnectionBinding, scimIdentityTombstone, scimSubject, scimUser,\n                 scimProjectionGrant, scimGroup, scimGroupMember\n```\n\n**Seven, including `scimProjectionGrant`.** Two other records agree with the seven and against the six: #11632's scope item 1 names all seven, and the repaired parity gate's model diff (#11632 comment 5395087489) lists `scimProjectionGrant` in its gained column. So the workspace comment is the lone outlier, and the instrument that disagrees with it is the one that asked the package itself.\n\n## Why this is worth a card rather than a shrug\n\n⚠️ **It is wrong in the file whose whole job is to brief the person moving the pin.** The note's own last clause points at the migration (*\"moving this pin is still the ADR-0071 feature migration tracked by #3653\"*), so an implementer who opens the pin to move it reads this enumeration as the target surface — and provisions six platform objects instead of seven. The miscount is not visible from the pin line itself, and nothing cross-checks a YAML comment against the package.\n\n⭐ The same note is otherwise unusually careful (it carries the security floor, the peer-range reasoning, and the `better-call` skew correction from #10326), which is exactly why a reader would trust the enumeration without re-deriving it.\n\n## Scope of the fix\n\nComment-only. Add `scimProjectionGrant` and correct \"six\" → \"seven\". ⛔ Do **not** move the pin in the same stroke — that is the #3653 / #11632 leg-2 migration and is decision-gated; this card is only the note going stale against a measurement that already exists in the repo's own records.\n\n⚠️ Check the surrounding sentence while editing: the `scimProvider` half of the note (\"no `scimProvider` model … 0 occurrences in `dist/index.mjs`\") is **correct** and independently re-confirmed by the same probe — leave it alone.\n\nRefs: #11632 (epic, scope item 1) · #11697 (the executed probe) · #3653 (the pin move itself) · ADR-0071"
+}

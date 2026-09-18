@@ -1,0 +1,32 @@
+{
+  "number": 11831,
+  "kind": "issue",
+  "title": "[Decision] ADR-0125's own landing (#10150) shows merge-queue-batch evidence on a governed-surface PR that said \"do not queue\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T19:13:16Z",
+  "updated_at": "2026-08-25T04:11:02Z",
+  "closed_at": "2026-08-25T04:11:02Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11831",
+  "body": "Escalated by the `domain:devx` lane PM (session `e2eac1a7-8000-5c95-9749-38aec2ace6fc`) out of PR #11829 (#11819). Its dev found this while establishing ADR-0125's acceptance date, **did not file it and did not act on it**, and flagged the conflict rather than picking a side:\n\n> PD #14 reserves the filing-and-rollback judgement on a governed-surface merge to the maintainer … Flagging the conflict rather than picking a side.\n\nThat was correct. Prime Directive #14 reserves this to you, so it comes here rather than becoming a lane card.\n\n## ⛔ What is asserted, and what is not\n\n**Asserted — verified by content, by me, independently:**\n\n```\n81d1fa11d  2026-08-20T13:05:44Z  ci(release): the human act is the environment approval … (#10150)\n57e00595c  2026-08-20T13:05:55Z  fix(tooling): read a defaulted mock initializer …\nparent of 57e00595c = 81d1fa11d          ← direct child\n```\n\n- Both PRs report `merged_at` in the **same second** (2026-08-20T13:27:49Z), ~22 minutes after their commits were created.\n- **9 workflows** in this repo carry a `merge_group` trigger.\n- `merged_by` on #10150 is its **own author** (`os-elon`).\n- ⭐ **#10150's own commit body**: *\"Governed surface (docs/adr/\\*\\*, AGENTS.md): pushed for the maintainer to merge by hand. **No auto-merge armed.**\"*\n\n**NOT asserted**: that a violation occurred. Two commits landing in a parent/child pair at one `merged_at` second is the *signature* of a queue batch, but it is circumstantial. A maintainer merging two PRs by hand in quick succession, or `merged_at` granularity, are alternative explanations I cannot rule out from outside. **You can.**\n\n## Why it is worth your minute despite being four days old\n\nThe PR in question is the one that **defines how the release lane is authorised**. If a governed-surface PR that explicitly said \"do not queue\" reached `main` through the queue, then the mechanism ADR-0125 establishes was bypassed by the very landing that established it — and Prime Directive #14 is enforced by convention rather than by a gate.\n\n⚠️ Note the adjacent fact from #11829: `check-governed-merges` exists and passes **129 assertions**. So either it does not cover this case, or the landing is fine. Both answers are useful and only you can tell which.\n\n## The decision\n\n1. **Is this a seat violation to record?** If yes, the dev has offered to file it and I will dispatch it.\n2. **If yes, is anything owed beyond a record?** ADR-0125 is on `main` and load-bearing; nobody is proposing to unwind it.\n3. **Should `check-governed-merges` learn to see this?** If a governed-surface PR can reach `main` through the queue with 129 assertions green, that is a gate gap, not just a history question — and it would be a devx card I can take.\n\n⛔ Nothing is blocked on this. PR #11829 corrects ADR-0125's status line either way, and it deliberately **does not repeat the phrase \"the maintainer's hand-merge\"** precisely because that actor is unverified — writing an unverified actor into the record that is the authority for the publish lane is the failure class #11819 exists to correct."
+}

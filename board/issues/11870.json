@@ -1,0 +1,34 @@
+{
+  "number": 11870,
+  "kind": "pull_request",
+  "title": "skills(pm): PM-supplied dedup reading rides the dispatch prompt; dev search-before-file goes REST",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T22:12:47Z",
+  "updated_at": "2026-08-25T00:52:51Z",
+  "closed_at": "2026-08-25T00:52:50Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T00:52:50Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11870",
+  "body": "Fixes #11365\n\nOption ② of the maintainer's 2026-08-23 quota ruling (verbatim, untranslated: 「1+2+3」) — **dev usage shaping**. The GraphQL pool is the scarce bucket and the dispatched dev, not PM patrol, is the fleet's biggest consumer of it: one dev measured ~5,658 GraphQL points in ~15 minutes, dominated by dedup/search reads that every dev in a batch re-runs independently.\n\nTwo shaping rules land, one per side, in the two files the claim comment declared.\n\n## PM side — `.claude/skills/pm-dispatch/references/dispatch-runbook.md`\n\nThe runbook already told the PM to take the **gate list** at the dispatch moment and hand it down (dev never enumerates the whole farm). The dedup/board reading is the same shape, so it landed as the second half of **one** row rather than a second row: a single judgement — *a reading the PM already holds is handed down once; N devs never re-run it* — then ① the gate list (unchanged content) and ② the dedup/board reading (query + timestamp, shared by the whole batch, dispatch word says \"treat as given, re-verify only the increment, never re-run the scan\"). The dev-side counterpart of both stays pointed at the os-dev definition, stated once instead of twice.\n\n## Dev side — `.claude/agents/os-dev.md` (rule 3, 立单纪律)\n\n`search-before-file` and list reads now go through the **REST channel** — list endpoint + local grep — composed **by pointer** with `references/rest-channel.md`, whose 「语义搜索」 row already spells that fallback. The channel table is not copied; one clause names the rule, the reason (GraphQL is the fleet's tightest bucket) and the pointer. The same clause carries the dev half of the PM rule: the dedup reading arriving in the dispatch prompt is treated as given, only its increment is re-verified.\n\n## Line ratchet — both files land exactly at ceiling, paid in place\n\n| file | before | after | ceiling |\n| --- | --- | --- | --- |\n| `.claude/agents/os-dev.md` | 403 | **405** | 405 (headroom 0) |\n| `.claude/skills/pm-dispatch/references/dispatch-runbook.md` | 242 | **242** | 242 (headroom 0) |\n\nNo ceiling was raised, and `scripts/pm/check-skill-line-ratchet.mjs` is untouched. os-dev.md spends the 2 lines of headroom the ratchet header calls \"the budget for ordinary rule edits\". The runbook had none, so its addition was paid twice over, in place:\n\n- the two dispatch-time reading rows merged into one (the shared judgement is stated once, and `条款住 os-dev 定义` collapsed from two occurrences to one);\n- the `文件面两句原文` bullet reflowed from 3 lines to 2 — **byte-identical text**, only the line breaks move. Verified mechanically, not by eye: whitespace-normalized old lines 219–221 vs new lines 220–221 compare equal, 121 characters each side.\n\n**No edit to `rest-channel.md` (46/46) or `platform-readings.md` (130/130)** — the two files the dispatch named as hard constraints. Composition with the first is by pointer only, so no ceiling arithmetic is owed for either. `state-machine.md` and the patrol scripts (owned by the sibling dispatch this wave) are likewise untouched — the file surface is exactly the two files above.\n\n## Gates\n\nDerived with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (no path args; the script took the change set from git itself). Nine families matched; all nine run and green **at the final commit `7b246a30`**, exit codes captured before any pipe:\n\n| gate | verdict line it printed |\n| --- | --- |\n| `check:agent-model-declared` | `✓ check-agent-model-declared: 1 agent definition(s) under .claude/agents/ all declare a model` |\n| `check:agent-test-spelling` | `✓ check-agent-test-spelling: 0 violations — 357 file(s) · 1108 launcher-rooted run(s) · 8 separator(s) JUDGED` |\n| `check:doc-authoring` | `✓ doc authoring guard: 389 files clean — no bare metadata literals.` |\n| `check:doc-formula-expressions` | `✓ check:doc-formula-expressions: 22 record-scoped formula example(s) across 421 files / 1448 TS blocks judged clean by @objectstack/formula.` |\n| `check:nul-bytes` | `check-nul-bytes: OK (scanned 6601 text file(s) … no raw ASCII control bytes).` |\n| `check:pm-governed-merges` | `✓ check-governed-merges --self-test: 129 assertions …` |\n| `check:pm-skill-id-lint` | `✓ check-skill-id-lint: 22 file(s) clean (pattern /#[0-9]{3,}/g).` |\n| `check:pm-skill-ratchet` | `✓ check-skill-line-ratchet: .claude/agents/os-dev.md is 405 lines (ceiling 405; headroom 0).` and `… dispatch-runbook.md is 242 lines (ceiling 242; headroom 0).` |\n| `check:skill-frame-sync` | `✓ check-skill-frame-sync: 4 copies of the decision frame are structurally isomorphic across 3 files` |\n\n`check:doc-formula-expressions` first exited 1 twice with `PREREQUISITE NOT MET` (`@objectstack/formula`, then `@objectstack/lint` not built) — nothing was measured on those runs; both packages were built and the gate then judged green. Reported because a reader of the first log would otherwise see a red that says nothing about this diff.\n\n**Repo-wide `pnpm lint` was narrowed to the changed files, and the narrowing is measured, not assumed:** (1) the population comes from eslint's own config, which supplies *no* configuration for `.md` — both changed files come back `File ignored because no matching configuration was supplied`; (2) `--format json` reports 2 files judged, 0 errors; (3) the diff contains no TS/JS and no eslint config change, so no untouched file's verdict can move. No changeset: the diff is `.claude/**`-only and publishes nothing — declared with the `skip-changeset` label.\n\nGoverned surface (`.claude/**`) ⇒ **draft PR, human merge**. Not flipped ready, auto-merge not enabled.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RMTpSRF5CjMmQBFfPtPCwJ)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 11357,
+  "kind": "issue",
+  "title": "finding: READMEs are still anchorless to docs-drift after #9282's close, so a README-staleness PR gets \"no opinion\" — two such cards landed today",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T13:54:02Z",
+  "updated_at": "2026-08-24T18:05:57Z",
+  "closed_at": "2026-08-24T18:05:57Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11357",
+  "body": "Filed unassigned from the `domain:cli` lane while landing #11180 and #11262. Recording only — **not graded here**, and no `domain:*` applied: this seat does not produce routing.\n\n## The observation\n\nThe docs-drift check answers a README-only diff with:\n\n> Nothing in this diff resolved to a documentable surface (no symbol, route or SDK anchor derived from **1** changed package(s)), so **this run has no opinion** about the docs.\n>\n> - **1** changed file(s) yielded no anchor (`packages/console/README.md`) — pages documenting those are invisible to this run\n\nMeasured live today on this lane's own PRs, twice, with the changed file named each time: `packages/console/README.md` (#11262) and `packages/cli/README.md` (#11180).\n\n## Why this is filed even though #9282 is closed\n\n⚠️ It is **not** a duplicate and **not** a regression. I checked by symptom rather than by issue number, per the shared-infrastructure rule, and then read how the sibling actually closed.\n\n#9282 recorded exactly this mechanism — *\"the file that CARRIES a rule several pages restate yields no anchor, so changing the rule produces 'no opinion'\"* — and listed four possible closes. It was closed by **PR #9394, `feat(docs-audit): anchor a changed @docs-rule block on the expressions it states`**, which is its **option 1**: an explicit opt-in marker.\n\nThat close is sound for what it covers, and it does not reach a README. A README carries no `@docs-rule` block, exports no symbol, mounts no route, and declares no SDK method — so it remains anchorless, and #9282's own options **3** (*fall back to the coarse package-mention list for an anchorless file's package rather than reporting no opinion*) and **4** (*record in the check's own output that anchorless files are not covered, so \"no opinion\" is never read as \"nothing to check\"*) were not taken.\n\n## Why READMEs specifically are worth the row\n\nA README **is** documentation — it is the published front page of a package on npm — so a class of documentation the docs-drift check cannot see at all is a real hole rather than a tolerable exclusion. And the class is live, not theoretical: **both README defects this lane landed today are precisely what the gate cannot detect.**\n\n- **#11180** — `packages/cli/README.md` advertised `os studio`, a command the CLI does not ship.\n- **#11262** — `packages/console/README.md` asserted a `@object-ui/console` fallback that the code no longer performs.\n\nNeither could have been surfaced by this check on any run. #9632 (*\"no gate reads a published README's links at all\"*, closed) established the adjacent hole for README **links**; this is the same corpus, for README **claims**.\n\n## Anti-vacuity framing\n\nThis is the standard shape: **a gate that extracts zero anchors passes perfectly.** The honest half — and it is genuinely honest, per #9192's precision-first rework — is that the run *names the file it could not anchor*. The gap is purely in how the headline reads: a reviewer sees \"no opinion\" and reasonably concludes \"nothing to check\". Option 4 alone would close that reading without touching the anchor logic at all.\n\n## Not measured here\n\n- Whether option 3's noise cost is acceptable on a hub package (#6893 / #7009 record that package-granular lists ran to ~106–112 rows and were learned-to-skip; #9037 capped the comment). Option 3 would partially reintroduce that, so it is not free and this seat has not weighed it.\n- Whether any README in the repo could reasonably carry a `@docs-rule` block and opt in under the existing mechanism.\n\nRouting note for triage: the tool is `scripts/docs-audit/affected-docs.mjs` and its workflow.\n\nRelated: #9282 (same mechanism, closed by PR #9394 taking option 1) · #9394 · #9192 · #9632 · #6893 · #7009 · #9037 · #11180 · #11262"
+}

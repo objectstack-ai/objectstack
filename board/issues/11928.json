@@ -1,0 +1,34 @@
+{
+  "number": 11928,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): state-machine rows for the pm-state ONE-OF, queue rot horizon and contract-review dual carrier",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T01:20:13Z",
+  "updated_at": "2026-08-25T01:51:26Z",
+  "closed_at": "2026-08-25T01:51:25Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T01:51:25Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11928",
+  "body": "Fixes #11889\n\nSeat-facing reference rows for the three invariants `scripts/pm/check-half-states.mjs`\nnow enforces (H29/H30/H31, both source PRs merged and on `main`). The rows are composed\nBY POINTER — a new `## 通则` section whose heading names `check-half-states.mjs`\nH29/H30/H31 as the judging authority, so no rule mechanics are duplicated into the doc.\n\nEach row was derived from the shipped block on `main`, not from memory:\n\n- **Six-state ONE-OF** — the vocabulary is `PM_EXCLUSIVE_STATE_LABELS` (five `pm:*`\n  positions + `needs-user-decision`); the row states the exclusivity and the measured\n  origin of every pair, a transition written as an ADD instead of a REPLACE, and\n  prescribes the single replace write.\n- **`pm:queue` rot horizon** — 3 days, H30's `QUEUE_ROT_STALE_DAYS`; the row carries why\n  the queue is the one state where waiting is not a state, and that the remedy is ONE\n  explicit transition (dispatch / convert to `needs-user-decision` / park / withdraw /\n  rewrite the premise), never a re-ranking.\n- **`needs:contract-review` dual carrier** — card AND delivering PR, hung in one stroke,\n  cleared in one stroke, read back each way, plus H31's deliberate silence: card-side\n  first with no PR yet is a legal intermediate state, not a half-write.\n\n## The line arithmetic — paid by consolidation, ceiling untouched at 43/43\n\nThe file sits at the ratchet ceiling with headroom 0, and the ratchet's raise clause\nrequires a maintainer ruling quoted in the raising PR. No such ruling exists for these\nrows, so the ceiling is NOT raised and `scripts/pm/check-skill-line-ratchet.mjs` is not\ntouched. The nine new lines are paid for in full:\n\n| | lines |\n| --- | --- |\n| new `## 通则` section (heading + blank + 6 bullet lines + separator) | **+9** |\n| provenance paragraph 2 → 1 | −1 |\n| `pm:on-hold` bullets 12 → 9 | −3 |\n| `pm:awaiting-maintainer` + `pm:retriage` merged into one section, 12 → 7 | −5 |\n| net | **0** (43 → 43) |\n\nWhat the consolidation actually did, so a reviewer can check that nothing was silently\ndropped:\n\n1. The `pm:awaiting-maintainer` row's exclusivity clause enumerated the five labels it\n   excludes. That clause IS the general ONE-OF row — it was consolidated into it rather\n   than deleted, and the awaiting entry now carries only its exit (no machine exit, by\n   construction; parked inventory in the in-flight view).\n2. The dual-channel contract (body or comment, either is the line) was stated twice\n   inside the `pm:on-hold` section; it now stands once, on the `Restart-touch:` bullet\n   that names all three canonical lines.\n3. Three provenance stories were dropped while the rules they came with all stand: the\n   dated four-spelling census on `Blocked-by:` (the rule 「指令是行,提及是散文」 stays),\n   the parser-tolerance aside on `Restart-touch:`, and the rationale parenthetical on the\n   second release check. This follows the ratchet's own doctrine — \"provenance is one\n   line; stories live on cards, not in operational text\".\n\nEverything else is byte-identical in substance; the re-wrap keeps every line inside the\nfile's 83-column convention.\n\n## Gates\n\nDerived, not recalled: `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`\n(no path args — the script takes the change set from the merge base itself) reports\n7 matched families for the one changed path. All seven were run at the final commit\n`2285fac4`, each verdict quoted from the gate's own output, exit codes captured before\nany pipe:\n\n```text\npnpm check:pm-skill-ratchet\n  ✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/references/state-machine.md is 43 lines (ceiling 43; headroom 0).\npnpm check:pm-skill-id-lint\n  ✓ check-skill-id-lint: 22 file(s) clean (pattern /#[0-9]{3,}/g).\npnpm check:doc-authoring\n  ✓ doc authoring guard: 389 files clean — no bare metadata literals.\npnpm check:skill-frame-sync\n  ✓ check-skill-frame-sync: 4 copies of the decision frame are structurally isomorphic across 3 files\npnpm check:agent-test-spelling\n  ✓ check-agent-test-spelling: 0 violations — 364 file(s) · 3609 bare `--` token(s) · 1115 launcher-rooted run(s) · 8 separator(s) JUDGED\npnpm check:pm-governed-merges\n  ✓ check-governed-merges --self-test: 129 assertions (the unified governed predicate + near misses, …)\npnpm --filter @objectstack/lint run check:doc-formula-expressions\n  ✓ check:doc-formula-expressions self-test: 50 cases passed\n  ✓ check:doc-formula-expressions: 22 record-scoped formula example(s) across 421 files / 1448 TS blocks judged clean by @objectstack/formula.\n```\n\nDocs-only: no changeset, `skip-changeset` label applied. Governed surface — draft PR,\nhuman merge; auto-merge NOT enabled.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01RMTpSRF5CjMmQBFfPtPCwJ)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RMTpSRF5CjMmQBFfPtPCwJ)_"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 18811,
+  "kind": "issue",
+  "title": "[finding] AGENTS.md :461–:463 names `git ls-remote --heads origin | grep issue-<n>` as the claim pre-check and never says what a HIT means — 257 of 291 `claude/issue-*` heads carry no PR, so the silent direction is a live card read as claimed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-17T22:18:26Z",
+  "updated_at": "2026-09-18T02:20:11Z",
+  "closed_at": "2026-09-18T02:19:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18811",
+  "body": "Filed by the `domain:skills` execution seat (`session_01Gqi43smmqjJ5sUrhfoPeKu`, seat post #7623) out of the #18774 round (PR #18808), from the dev's `open_questions`, re-read by the seat before filing. ⛔ Filed bare: `finding` only, `domain:*` / type / priority are triage's (lane self-triage exception noted — the seat did not grade its own filing). ⛔ A governed-text question (`AGENTS.md`, rules layer, the maintainer's word): the fact rows PR #18808 lands say the reading; the rules-layer sentence a dev actually reads does not.\n\nDedupe words: `ls-remote pre-check hit meaning` · `branch is a hint claim is the comment` · `AGENTS.md issue-<n> pre-check` · `stray claude/issue-* heads` · `pre-check silent direction`.\n\n## The reading, on `origin/main` `034f5a3afd`\n\n`AGENTS.md` :459–:463 (rule 2, 「One feature branch + one PR per task」):\n\n> The issue number is what makes in-flight work *discoverable* — `git ls-remote --heads origin | grep issue-<n>` is a one-command pre-check, and the Duplicate Fix Guard workflow warns on fix PRs whose branch names no declared issue.\n\nThat is the whole of what the rules layer says about the pre-check: what the command IS. It never says what a hit MEANS. Measured on the same tip:\n\n- **291** `claude/issue-*` heads on `origin` (seat census 2026-09-17T21:45Z; the #18774 dev's re-take at 21:48Z read 291 again) — **26** with an open PR, **8** with a closed / merged PR whose branch was never deleted, **257** with NO PR among the newest 1,200 PRs (back to 2026-09-05).\n- A dev container CREATES a remote branch and cannot DELETE one on either channel (`git push --delete` → HTTP 403; `DELETE /git/refs/heads/…` → 403 「not permitted through this proxy」) — measured by three sessions on three branches (#18774, PR #18808). So the stray population only grows from inside the loop.\n- The failure direction is silent: a dev whose pre-check hits a stray head reads 「already claimed」 for a card nobody is working, and nothing is red. The opposite reading — the one the protocol means — is written only in the fact layer after PR #18808: `platform-readings.md` :378 「「分支在」不是「卡已认领」:认领是 `Claim:` 评论,分支只是线索;291 个头里 257 个无 PR。」 and :379 「⛔ 不据 `ls-remote | grep issue-` 正命中回避该卡」. A dev reading `AGENTS.md` alone gets the command and no reading rule.\n\n## The options, as the dev put them (seat's view: A)\n\n- **A** — one clause on the existing sentence at :461–:463: a hit is a HINT; the claim is the `Claim:` comment on the card; most heads carry no PR. Rules layer, the maintainer's word, its own serial (no open PR touches `AGENTS.md` at filing; 1099 / 1099 at the ratchet, paid in-file).\n- **B** — leave `AGENTS.md` alone: the fact rows carry the reading and every seat reads the pm-dispatch references anyway. ⚠️ The dev does not: the os-dev definition points at `AGENTS.md`, not at `platform-readings.md`.\n- **C** — change the pre-check itself to a second read (branch AND an open PR or a `Claim:` comment). ⚠️ Adds a read to a one-command check whose value is that it is cheap; the reading rule in A gets the same outcome without it.\n\nFour axes on A: 实际业务需求 — the miss is measured today (257 / 291) on the surface a dev reads before claiming; 项目长远合理性 — the rule lives once where it binds, and the references table is declared the fact layer, not the rules layer; 防 AI 写错 — a pre-check with no stated reading is the tolerant-consumer shape, the reader supplies the semantics and supplies them in the silent direction; 创业阶段不扩散 — one clause, no new mechanism, no new gate.\n\n## ⛔ Not measured\n\n- How many devs have actually skipped a card on a stray hit (no record exists; the only signal would be a card that sat unclaimed with a stray head present).\n- Whether the Duplicate Fix Guard workflow reads the stray population at all (it warns on PR branch NAMES; it is not the pre-check).\n\nRefs: #18774 · PR #18808 · `AGENTS.md` :459–:463 · `.claude/skills/pm-dispatch/references/platform-readings.md` :374–:379 (post-PR #18808)\n\n<sub>`domain:skills` execution seat · seat post #7623 · readings taken on `origin/main` `034f5a3afd`</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

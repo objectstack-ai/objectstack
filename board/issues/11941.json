@@ -1,0 +1,34 @@
+{
+  "number": 11941,
+  "kind": "pull_request",
+  "title": "docs(README): add hero video — theme-aware cover linking to the 90-second overview",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T01:49:41Z",
+  "updated_at": "2026-08-25T03:01:13Z",
+  "closed_at": "2026-08-25T03:01:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T03:01:12Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11941",
+  "body": "Fixes #11534\n\n## Summary\n\nAdds a hero cover to the README, immediately after the chips line\n(`README.md:22`), linking to the official 90-second overview on YouTube\n(https://youtu.be/CX_FlOoOtr0).\n\n**Revised from the original two-cover plan** after maintainer review found\nboth covers rendering stacked on github.com. Current shape:\n\n- **One cover image, dark only** — `docs/screenshots/hero-cover-dark.png`,\n  no `#gh-` fragment on its `src`. GitHub's rendered HTML (see Verification)\n  emits `<img>` tags with `#gh-dark-mode-only` / `#gh-light-mode-only`\n  fragments intact but applies **no** theme CSS to hide either one — so a\n  themed pair always showed both, on every renderer, not just mobile.\n  `hero-cover-light.png` is removed (`git rm`); confirmed via `git grep`\n  that nothing else in the repo referenced it.\n- **A caption link below the image** —\n  `▶  Watch: ObjectStack in 90 Seconds` — because nothing in a bare `<img>`\n  signals \"this is a clickable video\" to a reader scrolling past on mobile\n  web, desktop, npm's README render, or a plain-text reader; none of those\n  surfaces draw a play-button overlay for you.\n\n## Assets\n\n`docs/screenshots/hero-cover-dark.png` was copied from the private\n`steedos-labs/video-studio` repo,\n`projects/2026-08-objectstack-hero-overview/covers/cover-en-dark.png`, and\nrenamed under `docs/screenshots/`. Verified byte-for-byte against the\nsource repo's `contents` API and by PNG magic-byte inspection before\ncommitting:\n\n| file | bytes | magic |\n|---|---|---|\n| `docs/screenshots/hero-cover-dark.png` | 406,703 | valid PNG, 2400×1200, 8-bit RGB |\n\n`hero-cover-light.png` (400,524 bytes, same provenance) was added in the\noriginal round and is **no longer shipped** — removed in this revision as\ndead weight once the block stopped referencing it.\n\n## Diff shape\n\n`README.md` diff vs `origin/main` is a pure 8-line insertion at the\nverified anchor (line 22, the chips line) — no pre-existing line touched,\nno deletions. `docs/screenshots/hero-cover-dark.png` is the sole new file\n(the light cover, added and then removed within this PR's history, is not\npart of the final tree).\n\n## Verification\n\nDone:\n- `docs/screenshots/hero-cover-dark.png` present with the byte count above,\n  valid PNG magic bytes.\n- README diff vs `origin/main` is a pure insertion — `git diff origin/main\n  -- README.md` shows `8 insertions(+), 0 deletions(-)`.\n- `git grep -n \"hero-cover\"` returns exactly one hit, in `README.md`,\n  pointing at the dark cover with no `#gh-` fragment.\n- **Re-rendered via GitHub's own HTML** (`Accept:\n  application/vnd.github.html` on the readme endpoint, `ref=` this branch)\n  after pushing — exactly one `hero-cover` `<img>` in the output, `src`\n  carries no `#gh-` fragment:\n  ```html\n  <p align=\"center\" dir=\"auto\">\n    <a href=\"https://youtu.be/CX_FlOoOtr0\" rel=\"nofollow\">\n      <img src=\"docs/screenshots/hero-cover-dark.png\" width=\"900\" alt=\"ObjectStack in 90 Seconds — watch the overview on YouTube\" style=\"max-width: 100%;\">\n    </a>\n    <br>\n    <a href=\"https://youtu.be/CX_FlOoOtr0\" rel=\"nofollow\"><b>▶  Watch: ObjectStack in 90 Seconds</b></a>\n  </p>\n  ```\n- Link and `<img>`/caption markup are well-formed HTML inside the\n  `<p align=\"center\">` block.\n- `grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]' README.md` — clean, no raw\n  control bytes introduced (the `▶` caption glyph is U+25B6, not a control\n  character).\n\nNot done, and not claimed: how the single cover *looks* to a themed human\nviewer (GitHub's rendered visual chrome) — only the structural HTML above\nwas checked. Left for maintainer eyeball on the rendered PR page.\n\n## Gates run\n\n**Declared narrowing — verification ran UNLOCKED.** `scripts/pm/os-verify-lock.sh`\ncould not take the shared verify lock on this host: no usable `flock`. The shared\nverify lock is declared Linux-only (`flock` is util-linux, and a stock macOS does\nnot ship it), so the commands below were run directly, without the lock —\na declared narrowing, not a silent one. No serialization guarantee held for\nthese runs, nor for any sibling agent in this container while they ran.\n\nGate family re-derived via `node scripts/pm/dispatch-gates.mjs` against the\nactual changed paths (`README.md`, `docs/screenshots/hero-cover-dark.png`,\n`docs/screenshots/hero-cover-light.png`) at commit `618c58a56` — same three\nas the original round:\n\n| gate | verdict |\n|---|---|\n| `pnpm check:nul-bytes` | ✅ PASS — \"OK (scanned 6650 text file(s) ... no raw ASCII control bytes)\" |\n| `pnpm check:doc-authoring` | ✅ PASS — \"389 files clean — no bare metadata literals\" |\n| `pnpm check:doc-anchors` | ⚠️ NOT MEASURED — exits with \"PREREQUISITE NOT MET: `github-slugger` is not installed\" (no `node_modules` in this docs-only worktree). The gate's own output: \"Nothing was measured... NOT a finding.\" CI will run this on the real farm. |\n| `pnpm --filter @objectstack/lint run check:doc-formula-expressions` | ⚠️ NOT MEASURED — same cause, missing `typescript` in `node_modules`. Same caveat as above. |\n\nNo changeset added (docs-only card; `content/docs/releases/` untouched).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_71836b57-5db6-459d-ae4d-c6d9d7dd2cc6)_\n"
+}

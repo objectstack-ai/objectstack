@@ -1,0 +1,32 @@
+{
+  "number": 11756,
+  "kind": "issue",
+  "title": "[Decision] 会说 Postgres 方言的另外两种数据库（Redshift、CockroachDB），平台要不要当 Postgres 来建表?（#11550 的宽半边）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T15:25:42Z",
+  "updated_at": "2026-08-25T03:58:38Z",
+  "closed_at": "2026-08-25T03:58:38Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11756",
+  "body": "由 `domain:engine` 执行席落卡（session `session_01VK8rFDtg8eREaxBGX99Csn`）。**这是 #11550 被切下来的宽半边。** 窄半边（认 knex 自己的规范拼写 `postgres` / `sqlite`）已派发 —— 那半边是「我们本来就支持这个方言，只是漏认了一种写法」，不需要谁裁。这半边不一样：它决定**平台对外声称支持哪些数据库**，属于扩大公开面，恒交维护者。\n\n## 一句话问题\n\n有两种数据库（Redshift、CockroachDB）**会说 Postgres 的话** —— 连上去、发查询、读结果都通。问题是：客户拿它们当数据库时，平台要不要**照 Postgres 的方式替他们建表**。它们在「怎么存、怎么建表」上和真 Postgres 是有差别的，Redshift 尤其明显。\n\n## 前提（带 re-check 命令）\n\n- 今天三张表互相不一致，这是本卡的由来：\n  `git grep -n \"isPostgres\\|DIALECT_CONNECT_TIMEOUT\\|POSTGRES_WIRE_CLIENTS\" origin/main -- packages/drivers/driver-sql/src/sql-driver.ts`\n  （2026-08-24 实测：身份 getter 只认 `pg` / `postgresql`；连接超时表另外还含 `cockroachdb`；wire 表另外还含 `redshift`）\n- 窄半边是否已落地：看 #11550 的 PR 是否已合。⚠️ 本卡的选项 C 有一部分**就是把窄半边落地后的现状写成明文契约**。\n\n## 三条路，和客户能感觉到的代价\n\n| | 做什么 | 客户感觉到的代价 |\n|---|---|---|\n| **A** | **认**：这两种也按 Postgres 发建表语句 | 客户配上就能跑。⚠️ 但 Redshift 的建表语法确实不同 —— 发错了要么当场建表失败，要么**建出一张形状不对的表**，而问题要到写数据时才露出来。我们等于永久承诺跟住它们的差异。 |\n| **B** | **不认**：只认真正的 Postgres 家族拼写 | 用这两种的客户拿不到任何方言行为（和今天一样）。⚠️ 但**失败是静默的** —— 和 #11550 窄半边修的那个缺陷一模一样：不报错，只是把表建错。 |\n| **C** | **认「连得上」，不认「照它建表」**，并把这条边界**写成明文** | 连接/解析继续按 Postgres 处理（今天就是这样，#11389 是故意的），建表发射不认。客户如果配了这两种，**当场拿到一句说清楚的拒绝**，而不是一张悄悄建错的表。 |\n\n**业务含义直译**：A =「我们说支持 Redshift」；B =「我们没说，你自己看着办」；C =「我们说清楚：连得上，但建表这块我们不替你负责」。\n\n`os-decision-facets`\n\n- **实际业务拉动**：⚠️ 我不知道有没有客户在用这两种数据库 —— 这是本卡最大的空白（见置信缺口）。如果**一个都没有**，A 就是在为零需求背一份永久义务；如果有真实客户，那 B 的静默失败就是在坑他们。**这一轴我给不出答案，只能交给你。**\n- **项目长远合理性**：A 让平台永久承担「跟住两个非 Postgres 数据库的 DDL 差异」的义务，而我们连它们差多少都还没量过。C 把边界画在**我们实际验证过的地方**（连接层验过、发射层没验过），这是一条能诚实守住的线。⇒ 偏 C。\n- **防 AI 写代码犯错**：这一轴看**出错时谁看到什么**。A 出错 = 表建错了、几天后写数据才炸；B 出错 = 完全静默，正是窄半边正在修的那种缺陷；C 出错 = **当场一句响亮的拒绝**，作者立刻知道该换数据库还是换配置。⇒ 强推 C，**反对 B 的静默**。\n- **创业阶段不扩散需求**：多声明一个受支持数据库 = 多一份永久测试面和永久维护义务。C 的成本接近于零（把已有的分裂写成明文），A 是三条里最大的一件。⇒ 反对 A。\n\n**推荐：C（认 wire、不认 emission，并把边界写明并给出响亮拒绝），回退 B。** 四轴里没有一条支持 A，但**其中一轴（实际业务拉动）我是空的** —— 如果你知道有客户在用 Redshift，这个推荐要重算。\n\n⚠️ **本分析看不见什么（强制置信缺口）**：① **有没有客户在用 Redshift / CockroachDB，我完全不知道** —— 这是决定 A 是否值得的那个数字，而我没有；② 我**没有实测** Redshift 的 DDL 到底和 Postgres 差多少，所以「A 风险大」是从它的公开文档推的，不是量出来的；③ CockroachDB 和 Redshift 很可能不该同命运（CockroachDB 的 Postgres 兼容性明显更高），把它们绑成一个选项可能本身就是错的 —— 如果你倾向拆开分别裁，说一声。\n\n## 裁后我会怎么执行（你不用管）\n\n- 回 **C** ⇒ 立卡进 `domain:engine` 队列：把三张表收敛成「一个发射身份源 + 其它表在其上扩展」，并给这两个 client 一句点名的拒绝（含建议）。\n- 回 **B** ⇒ 我在 #11550 上记明「宽半边不做」及理由，不再立卡。\n- 回 **A** ⇒ 我会**先回来问一次边界**（要不要先实测 Redshift 的 DDL 差异、两种是否分开处理），因为那才是 A 的真实风险面。\n- 回 **「拆开裁」** ⇒ 我把 CockroachDB 和 Redshift 分成两张卡各自带证据回来。\n\n**低摩擦裁决格式**：回一个字母即可；「C，但 X」我按 C 落地并把 X 记进卡里；不回就留在箱里，⛔ 不会有人替你裁。\n\n## 相关\n\n- **#11550** —— 母卡，窄半边已派发（认 `postgres` / `sqlite` 两种规范拼写）\n- **#11389** —— 故意把 `redshift` 放进 `POSTGRES_WIRE_CLIENTS` 的那张卡（wire 层，不是发射层）"
+}

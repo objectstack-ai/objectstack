@@ -1,0 +1,36 @@
+{
+  "number": 11811,
+  "kind": "issue",
+  "title": "`lifecycle.mdx`'s `healthChecks` TypeScript example does not match `PluginHealthCheckSchema` — the real config is `checkMethod`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T17:40:05Z",
+  "updated_at": "2026-08-24T20:10:19Z",
+  "closed_at": "2026-08-24T20:10:19Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11811",
+  "body": "Found while implementing #11787 (PR for the JSON block in the same section). Out of that card's scope — #11787 measured the **JSON report sketch** and explicitly recorded that `PluginHealthCheckParsed` \"was **not** audited against its schema\". It has now been audited incidentally, and it diverges. Filed rather than fixed, because the right shape is a design question rather than a mechanical correction (see below).\n\n## What was measured\n\n`content/docs/protocol/kernel/lifecycle.mdx`, `### Custom Health Checks`, the TypeScript example immediately above the JSON block:\n\n```typescript\nexport default {\n  name: '@vendor/salesforce',\n  healthChecks: {\n    salesforce_connection: async ({ context }) => {\n      ...\n      return { status: 'healthy', latency_ms: response.duration, records_synced_last_hour: ... };\n    },\n  },\n};\n```\n\nThe real configuration type is `PluginHealthCheckSchema` (`packages/spec/src/kernel/plugin-lifecycle-advanced.zod.ts:36-84`):\n\n```ts\ninterval: z.number().int().min(1000).default(30000),\ntimeout: z.number().int().min(100).default(5000),\nfailureThreshold: z.number().int().min(1).default(3),\nsuccessThreshold: z.number().int().min(1).default(1),\ncheckMethod: z.string().optional().describe('Method name to call for health check'),\nautoRestart: z.boolean().default(false),\nmaxRestartAttempts: z.number().int().min(0).default(3),\nrestartBackoff: z.enum(['fixed', 'linear', 'exponential']).default('exponential'),\n```\n\nand its only consumer, `packages/core/src/health-monitor.ts:109-122`:\n\n```ts\nif (config.checkMethod && typeof (plugin as any)[config.checkMethod] === 'function') {\n  const checkResult = await this.raceCheckTimeout((plugin as any)[config.checkMethod](), config.timeout, ...);\n  if (checkResult === false || (checkResult && checkResult.status === 'unhealthy')) {\n    status = 'unhealthy'; ... checks.push({ name: config.checkMethod, status: 'failed', message });\n  } else {\n    checks.push({ name: config.checkMethod, status: 'passed' });\n  }\n}\n```\n\n| aspect | doc example | real config + consumer |\n|---|---|---|\n| declaration | `healthChecks`, a **map** of named async functions on the plugin default export | a single `checkMethod` **string** naming a method on the plugin object |\n| call signature | `async ({ context }) => ...` | `plugin[checkMethod]()` — **called with no arguments**; nothing supplies a `context` |\n| named checks | one entry per key (`salesforce_connection`) | exactly one check per plugin, named after `checkMethod` (or `'plugin-loaded'` when none is configured) |\n| return value | `{ status: 'healthy', latency_ms, records_synced_last_hour }` | only `false` and `{ status: 'unhealthy' }` are read; `'healthy'`, `latency_ms` and every other key are **ignored** |\n\n`healthChecks` as an author-writable field: **0** occurrences. The 5 hits in `packages/` are `PluginHealthMonitor`'s own private `Map<string, PluginHealthCheckParsed>` (`health-monitor.ts:19,35,51,301`) plus one example reading that private map (`packages/core/examples/phase2-integration.ts:151`) — none of them a declared plugin field. Positive control in the same sweep: `checkMethod` = 8 hits, spanning the schema field, the consumer, and two test files (`plugin-lifecycle-advanced.test.ts:52`, `health-monitor.test.ts:108`), so the zero is a reading rather than a dead probe.\n\n## Why this is filed and not fixed\n\nThe `<Callout>` above the section already says these checks are \"**not yet** exposed as a dedicated HTTP endpoint **or as a declarative plugin field**\" — so the example is flagged as aspirational, and a reader who reads the callout is not being told a lie about `healthChecks` existing.\n\nThat is also exactly why the correction is not mechanical. Two readings, and they teach opposite things:\n\n- **A — rewrite the example against `checkMethod`.** The page then shows a shape a plugin author can actually write today: a `healthCheck()` method on the plugin plus the `PluginHealthCheckSchema` config that names it. Costs the per-check naming the current example illustrates (the real model supports exactly one check per plugin).\n- **B — keep `healthChecks` as the declared intent and mark it explicitly unimplemented.** Defensible if the map-of-named-checks shape is the direction the model is meant to grow toward — the callout's \"not yet\" reads that way. Then the fix is a sharper \"not implemented\" marker on the block, not a rewrite.\n\nAnswering that needs someone who knows whether `healthChecks` is planned or abandoned, which is above the pay grade of a docs-accuracy pass.\n\n## Not asserting more than was checked\n\nOnly the TypeScript example, `PluginHealthCheckSchema` and `health-monitor.ts` were compared. The JSON report block in the same section is #11787's subject and is being fixed there. No other page was examined, and `raceCheckTimeout`'s behaviour was read only as far as \"the check is invoked with no arguments\".\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015ahemw8RcTgqtxrj15PEZx)_"
+}

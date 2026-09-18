@@ -1,0 +1,35 @@
+{
+  "number": 11150,
+  "kind": "issue",
+  "title": "[finding] A matching-rule gate cannot detect its own regression on a clean tree — `--self-test` is the only instrument, and nothing says so",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T21:25:35Z",
+  "updated_at": "2026-08-25T01:57:34Z",
+  "closed_at": "2026-08-25T01:57:34Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11150",
+  "body": "Measured while building `check:auth-mount-ledger` (#10534 follow-up 4, PR #11149). Filed unassigned — recording, not claiming.\n\n## The measurement\n\nPR #11149's ablation **E** mutated the new gate's `reconcile` to credit mounts by **substring** instead of exact `METHOD /full/wire/path` equality — reintroducing, deliberately, the exact defect #10534's own census fell into (`/admin/sso/register` scored as accounted-for on the strength of `/admin/sso/register-saml`).\n\nResult:\n\n```\nproduction run, clean tree  ->  exit 0   (GREEN)\n--self-test                 ->  exit 1   \"a strict-prefix mount was CREDITED to its longer sibling\"\n```\n\n**The gate's own real run could not see that its matching rule had been broken.** On a clean tree there is no unaccounted mount to mis-credit, so a looser rule produces an identical green. Only the self-test, which supplies the adversarial input, reddens.\n\n## Why this generalises past one gate\n\nThe property is not about `check:auth-mount-ledger`. It follows from the shape of any gate whose **defect class is the matching rule itself** rather than the population it scans:\n\n- a gate that counts things detects a wrong count on the real tree;\n- a gate that **decides whether two strings correspond** only exhibits a loosened rule when an input exists that the loose and strict rules classify differently — and a clean tree, by definition, contains no such input.\n\nSo for this family, `--self-test` is not a convenience or a CI nicety. **It is the only instrument watching the rule.** The production verdict is structurally incapable of covering it.\n\n## The consequence worth writing down\n\nA future seat optimising CI time, or \"simplifying\" a self-test that looks redundant beside a green production run, would be **removing the only coverage of the rule** — and every signal available to them would say the gate still works. The production run would stay green through the entire regression.\n\nThis is the same shape as two things this repo has already ruled on, from the other direction:\n\n- the **const-hoist evasion** (2026-08-21) — an instrument made to read green with no change to the fact it measures;\n- #10534's own leg 1 reading \"5 undocumented\" when the truth was 6 — a **matching rule too loose**, whose output looked like a clean measurement.\n\nHere the instrument and the fact come apart in the third way: the instrument is correct, the fact is unobservable to it, and the only thing that closes the gap is a test nobody is required to keep.\n\n## Candidate population — NOT yet measured\n\n`check:auth-mount-ledger` is one instance and it states the property in its own header. The question this card exists to answer is **which other gates are in the family**. Named as candidates by PR #11149's report, unverified:\n\n- `check:route-envelope`\n- the other error-code / vocabulary gates that classify by pattern (`check:dispatcher-error-vocabulary`, `check-error-code-casing`)\n\n⚠️ That list is a **starting point, not a census**. `check-error-code-casing` is a suggestive case rather than a confirmed one: #10658 records it printing `✓ no lowercase error codes in 4346 scanned file(s)` while two ObjectStack-authored lowercase codes shipped, because a literal reached through an `||` fallback matched none of its four recognizers. That is the same \"matching rule too loose, production run green\" signature — but whether its self-test would have caught it is exactly the thing this card would have to measure rather than assume.\n\n## Possible directions (not a recommendation — this wants grading)\n\n1. **Enumerate the family**, then require `--self-test` in CI for every member, so removing one is a visible act rather than an invisible one.\n2. **A convention pin**: for gates in this family, assert that the self-test contains at least one case the production run cannot produce (i.e. the self-test's adversarial inputs are not a subset of what a clean tree offers). Mechanically checkable in principle; the classifier for \"in the family\" is the hard part.\n3. **Documentation only** — state the property in the gate-authoring guidance and rely on authors reading it. Cheapest; and this repo has repeatedly measured that a boundary living only in prose is a boundary that erodes (#10366's \"development convenience\" comment being the day's clearest example).\n\n## Refs\n\nPR #11149 (where E was measured) · #10534 (the census whose leg 1 fell into this class) · #10658 (`check-error-code-casing`'s partial read reported as complete) · the 2026-08-21 const-hoist ruling"
+}

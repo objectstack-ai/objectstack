@@ -1,0 +1,34 @@
+{
+  "number": 11635,
+  "kind": "issue",
+  "title": "driver-sql: boolean aggregands need a lowering cast on PG (+ a MySQL min/max presentation check) — the ruled `false`/`true` + arithmetic answers are unproducible on the PG face",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T10:04:58Z",
+  "updated_at": "2026-08-25T03:27:16Z",
+  "closed_at": "2026-08-25T03:25:33Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11635",
+  "body": "Cross-seat transfer from the `domain:spec` seat (`session_01Rxnd8cyFnoU8V5y21PaTsy`), filed while closing out #11249 per that card's pre-recorded disposition. Named reader: the `domain:engine` executor seat — this is the driver half that the ruled contract answers now require. `domain:*` deliberately not set (single producer — triage routes).\n\n## The ruling this card implements\n\n#11249 ruled (maintainer 2026-08-23, verbatim 「10950 不考虑存量，其他接受你的建议」, recorded in comment 5386670755): **`min`/`max` over a boolean aggregand answer `false`/`true` in JSON — order statistics return a member of the input domain; SQL drivers convert at the driver boundary.** `sum`/`avg` arithmetic answers (`3` / `0.5` on the 3-true/3-false fixture) are the settled #11065 family shape (per #11152's retriage split), reaffirmed by measurement: three of four working faces already answer exactly these.\n\n## The gap (measured, two independent instruments)\n\n- **PG 16.13 throws SQLSTATE `42883`** on `sum`/`avg`/`min`/`max` over a real `boolean` column — `avg(boolean)` etc. do not exist, and the lowering emits a bare `avg(\"flag\")` with no cast (#11152 report comment 5388279412; raw psql shows `avg(flag::int)=0.5` works). #11455 / PR #11545 fixed only the ERROR ENVELOPE for this failure and deliberately pinned no arithmetic answer — the cast is explicitly not delivered anywhere.\n- **MySQL 8.0.46** answers `min=0` / `max=1` over `tinyint(1)` (engine-lane three-dialect table, #11152 comment 5390277311) — needs verification that the driver's boolean read-presentation (`presentAggregateReadValues`, measured converting on the SQLite face) covers the MySQL path too, and a fix if it does not.\n\n## Why cast, not refuse\n\nRuling B requires `min`/`max` to ANSWER `false`/`true` — a face that refuses cannot satisfy the ruled contract. Producing the ruled answers on PG is declared=enforced restoration of an already-ruled contract, not a new capability.\n\n## Executable acceptance criterion\n\nThrough `SqlDriver.aggregate()` on live PG, over the `AGGREGATION_ROWS` fixture plus a `flag` boolean column (3 true / 3 false, 6 rows, column declared `type: 'boolean'`): `sum(flag)=3`, `avg(flag)=0.5`, `min(flag)=false`, `max(flag)=true` (JSON booleans), `count`/`count_distinct` unchanged; MySQL answers the same through the driver boundary.\n\n## Sequencing\n\n- Gates the PG leg of #11152 (boolean conformance cases) — that card's `Blocked-by:` points here.\n- Must land before #11456's harness conversion runs the aggregation standard on live PG (else it lands a red).\n- The mongodb face is NOT this card — #11151, frozen under the #5499 ruling."
+}

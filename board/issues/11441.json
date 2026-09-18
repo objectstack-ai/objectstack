@@ -1,0 +1,34 @@
+{
+  "number": 11441,
+  "kind": "issue",
+  "title": "finding: #11341's bare-`...process.env` worklist is two files short, and one of them spawns a real `os serve`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T19:36:59Z",
+  "updated_at": "2026-08-24T18:22:47Z",
+  "closed_at": "2026-08-24T18:22:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11441",
+  "body": "Surfaced while implementing #11352 (crypto posture selected from `VITEST`). Filed rather than folded in: #11352's diff is `packages/services/**` + `scripts/**`, and the `packages/cli/test` harness half is #11341's declared surface.\n\nUnassigned and `finding`-labelled — this is a correction to an existing card's measurement, not a grade.\n\n## What #11341 enumerated, and what the tree holds today\n\n#11341 measured 15 files under `packages/cli/test/` that build a spawned CLI child with a bare `...process.env` (plus `serve-process-child-env.e2e.test.ts`, its deliberate pin leg). Re-derived on `origin/main` @ `cccbe51bf7`, **two more exist that the list does not name**:\n\n```\npackages/cli/test/serve-app-anchored-optional-import.e2e.test.ts:160\npackages/cli/test/serve-host-fallback-base.e2e.test.ts:187\n```\n\nBoth arrived after #11341 was measured (they are #11185's and #11157's fixtures). Every other file matching `...process.env` under that directory today matches a **comment** saying \"`childEnv`, not a bare `...process.env`\" — prose, not code. The full derivation, distinguishing code from prose:\n\n```\ngit grep -n '\\.\\.\\.process\\.env' -- 'packages/cli/test/*.ts'\n```\n\n## Why one of them matters more than the other\n\n#11341's own assessment is that the 15 are latent rather than active: *\"They spawn `compile`, `init`, `migrate`, `login`, `generate`, `qa`, `validate`, `hook` — commands that never mount better-auth\"*, and it names `serve-app-runtime-hooks` as *\"the closest call: it is one of the `runServe()` importers, so its `os serve` boot is covered\"*.\n\n`serve-app-anchored-optional-import.e2e.test.ts` is **not** covered that way. It spawns a real `os serve` from its own hand-rolled `runServeFrom()` — deliberately, and its header says why (*\"that helper always runs the child WITH `cwd` set\"*) — so its serve boot never passes through `childEnv()`:\n\n```ts\nconst child = spawn(TSX, [CLI, 'serve', configArg, '--port', port], {\n  cwd,\n  env: {\n    ...process.env,\n    NO_COLOR: '1',\n    OS_DATABASE_URL: ':memory:',\n    …\n```\n\nThat child receives the vitest worker's `TEST=true` and the whole `VITEST*` family, in a process that mounts the full serve stack — better-auth included. It is the exact shape #11341 exists to prevent, and it is the one file in the directory that has it *and* boots a server.\n\nIt is still not an active false green today, for a narrower reason than \"it does not mount better-auth\": the file asserts optional-service resolution and asserts nothing about origin validation or crypto posture, so nothing it checks can be softened into a pass. The gap is that its assertions are one edit away from being security-relevant, and nothing would say a word.\n\n## Why this is filed rather than swept here\n\nThe sweep and the gate are both #11341's, and #11341 already argues (correctly) that sweeping without the gate leaves the next file free to reintroduce the shape. Adding two names to a worklist inside an unrelated PR would make the same mistake in the other direction — the worklist would be right and the mechanism still absent.\n\nWhat this card asks for is narrow: whoever takes #11341 should derive the list at that moment rather than reuse the enumeration in its body, because the enumeration has already drifted twice in one day. A gate makes that automatic; a sweep does not.\n\n## Related\n\n- #11341 — parent; the harness half and the two ways to close it.\n- #11352 — the product half: `LocalCryptoProvider` no longer lets a runner variable pick its posture, and `pnpm check:runner-env-posture` keeps product source clear of the class. That removes the crypto consequence of this leak, not the leak.\n- #11267 / PR #11340 — where `childEnv()` came from.\n"
+}

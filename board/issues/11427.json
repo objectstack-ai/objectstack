@@ -1,0 +1,36 @@
+{
+  "number": 11427,
+  "kind": "issue",
+  "title": "finding(objectql): record file-field hydration still drops any non-`committed` sys_file, so it and the download path now answer the tombstone question differently",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T17:48:23Z",
+  "updated_at": "2026-08-25T01:12:56Z",
+  "closed_at": "2026-08-25T01:09:25Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11427",
+  "body": "Found while implementing #10246 (the ruled direction-2 read-side predicate). **Filed unassigned, not fixed there** — out of that card's ruled scope, which is the download path only.\n\n## The shape\n\n#10246 makes the two download endpoints stop treating a `sys_file` tombstone as the last word: they ask the reap guard's own `findFileHolder` and serve a `status='deleted'` row for as long as something still holds it.\n\nThe **record read** path was not part of that ruling and still applies the older, narrower rule. `packages/objectql/src/engine.ts` (the `Field.file` / `Field.image` hydration that stamps `{ id, name, size, mimeType, url }` into record payloads) filters with:\n\n```ts\nif (row?.id != null && row.status === 'committed') fileMap.set(String(row.id), row);\n```\n\nA file that fails that test keeps its bare id, which UI and export render as \"this record has no attachment\".\n\nSo after #10246 lands, for the same `sys_file` row: `GET /api/v1/storage/files/:id` answers **200**, while a record read that hydrates the same id answers **a bare id**. Two read surfaces, two answers about one row.\n\n## Why this is narrow — measured, not assumed\n\nThis is deliberately filed as an observation rather than a hot bug, because the obvious population turns out to be mostly protected:\n\n- **Attachments-scope files are not involved.** The Attachments surface is `sys_attachment` join rows, not a record file field, so hydration never asks about them.\n- **Field files are un-tombstoned synchronously at re-point time**, so they are normally `committed` by the time anything reads them. `claimFile` (`packages/services/service-storage/src/file-reference-lifecycle.ts:475`) patches `status: 'committed'`, `deleted_at: null` when it claims a `deleted` row — \"a file re-referenced within its grace window comes back to life\", in its own words.\n\nWhat is left is exactly the residual population the reap guard's sweep-time re-verification exists for and names: hook races, direct-driver writes, and future trash restore. For a row in that state the download path (post-#10246) serves it and hydration hides it.\n\n## Worth recording separately\n\n⚠️ Note for whoever triages this: `claimFile` above means the **field-file surface already implements \"revive at re-point time\"** — the shape #10246's ruling declined for the download path as a second implementation of the reference-resolution question. That is not a contradiction of the ruling (which governs the download path, where the tombstone genuinely is only re-checked by the sweep), but it is a fact about the system that the direction-1/direction-2 framing did not have in front of it, and it may change how someone grades the hydration question here.\n\n⛔ Not fixed in the #10246 PR, and deliberately not a mechanical widening: hydration runs over **many rows per read**, so calling `findFileHolder` per file there is an N-queries-per-read design decision with its own performance shape — not the same one-predicate change the download path took.\n\nRefs: #10246, `createSysFileReapGuard` / `findFileHolder` (`attachment-lifecycle.ts`), `claimFile` (`file-reference-lifecycle.ts`), `engine.ts` file-field hydration. Related but distinct: #6116 (the fail-open `catch` in the same function)."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 11972,
+  "kind": "issue",
+  "title": "pm-dispatch: finding triage runs to EMPTY each fire, quality held by ≤5-card batches — maintainer ruling 2026-08-25 supersedes the 3–5/round budget and the 15–20 batch parameter",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T03:31:17Z",
+  "updated_at": "2026-08-25T05:27:39Z",
+  "closed_at": "2026-08-25T05:25:50Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11972",
+  "body": "Filed and dispatched by the skills seat (session `session_01RMTpSRF5CjMmQBFfPtPCwJ`) executing a live maintainer ruling.\n\n## The ruling\n\nContext: with ~83 (objectstack) + ~48 (objectui) ungraded `finding` cards, the maintainer was asked whether scheduled triage fires should clear the whole backlog. This seat recommended a per-round budget increase instead of clearing; the maintainer overruled, 2026-08-25, verbatim:\n\n> 单轮跑数小时没关系啊。不读卡的批量盖章 可以通过每批5张这种约定来解决\n\n⇒ **Scheduled triage runs to EMPTY (or to the point of exhaustion of the fire window), with no per-round total budget. The rubber-stamp risk is controlled by batch granularity — each batch is ≤5 same-family cards read carefully — not by capping the total.**\n\n## What changes, where\n\n1. **`.claude/skills/pm-dispatch/SKILL.md`, 「发现分诊轮」**: replace the 「首触定级每轮跑:预算 3–5 张」 budget with: every fire processes ALL ungraded findings, executed in batches of **≤5 same-family cards**, each batch read with the existing care (过时前提检查 → 三选一:晋级 / 关闭 not planned / hold 换标); a run of several hours is acceptable; a fire that cannot finish resumes from where it stopped next fire (graded cards are off-label and never re-read — the label discipline already guarantees the checkpoint). 零定级评论优先 and all other existing clauses (判级在分诊不在立单、skills 自分诊例外、Restart-when 每日子轮、pm:retriage 每 fire 高优先) unchanged.\n2. **`references/dispatch-runbook.md`, 「自动集中轮批量参数」**: the 15–20/batch parameter is superseded by the ruled ≤5/batch; the 「finding >15 ⇒ 集中轮」 trigger clause is absorbed — with run-to-empty as the steady state, a count above the old threshold is no longer a mode switch but an **inflow alarm** (write that semantic in one line: if the backlog stays >15 across consecutive fires despite run-to-empty, the problem is filing-side inflow, not triage-side throughput). The sweep-package-promotion five rules (2026-08-07) are unchanged and still batch-scoped.\n3. Ratchet ceilings: both files are ceilinged — pay by consolidation (the superseded budget prose IS the purse); argue any raise.\n\n## Provenance to quote in the diff\n\nThe 2026-08-25 ruling above (untranslated), beside the 2026-08-13 「finding 恒 = 待首次定级」 opinion and the 2026-08-07 sweep-promotion approval it composes with. Governed face: draft + human merge. Clause-②: no."
+}

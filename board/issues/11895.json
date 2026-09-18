@@ -1,0 +1,33 @@
+{
+  "number": 11895,
+  "kind": "pull_request",
+  "title": "fix(scripts): correct v11 to v16 in check-org-identifier self-test fixtures",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T23:21:45Z",
+  "updated_at": "2026-08-25T00:08:18Z",
+  "closed_at": "2026-08-25T00:08:17Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T00:08:17Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11895",
+  "body": "Fixes #9872\n\n## Scope\n\nPer the [2026-08-24 re-triage verdict](https://github.com/objectstack-ai/objectstack/issues/9872#issuecomment-5389636776), this card's current spec is narrowed to the **devx-owned residue only**: the four self-test fixture strings in `scripts/check-org-identifier.mjs` that still cite `v11` for the `#3290` `session.tenantId` removal, which actually shipped in **v16** (there is no `v11.mdx`; the removal is documented at `content/docs/releases/v16.mdx`).\n\nThe services-owned residue (`audit-writers.test.ts:1653`) was already fixed via #11502 / PR #11543. The 11 (+2 later-found) `CHANGELOG.md` `v11` hits are **explicitly out of scope, no card** — published changelogs are append-only history, and the #9734 ruling (2026-08-22) authorized exactly one such edit and forbade a blanket sweep.\n\n## Change\n\nFour sites in `scripts/check-org-identifier.mjs`'s own `--self-test` fixture corpus, all comment text inside self-test *input* strings:\n\n- `:600` — `/* session.tenantId was removed in v11 */` → `v16`\n- `:604` — `// the deprecated session.tenantId alias was removed in v11` → `v16`\n- `:606` — JSDoc-style block comment, same text → `v16`\n- `:644` — `// sess.tenantId was removed in v11 (#3290)` → `v16`\n\nThe same file already said `v16` in two other places (header comment and `## LIVE or LATENT` section), so the inconsistency was internal to this one file.\n\n## Verification that the edit is behaviourally inert (Zone 2)\n\nThe 2026-08-20 triage note asserted these sites are behaviourally inert (\"the detector never reads version tokens; expected counts stay 0\") and this dispatch required re-verifying that from the detector's own code before editing, not inheriting the note.\n\nRead `findOffenders()` (scripts/check-org-identifier.mjs:526-557) and its two rules:\n\n- **TEXT rule**: `PATTERN.test(code[i])` where `PATTERN = /\\bsession\\s*\\??\\.\\s*tenantId\\b/` and `code` is `maskComments(text)` output — comments are blanked before this rule ever sees them.\n- **BINDING rule**: an AST walk (`collectBindings` / `collectBoundReads`) that only scores a `.tenantId` property-access **read** off an identifier shown to be session-provenanced. Comments are parser trivia and never enter this walk at all.\n\nNeither rule inspects digits, version tokens, or anything besides the `session`/`tenantId` shape. All four `v11` occurrences sit inside comment text (a trailing block comment, a whole-line `//` comment, a JSDoc block, and an inline `//` comment inside a function body) — masked for the TEXT rule and invisible to the BINDING rule either way. So the digit swap cannot change which lines land in `findOffenders`'s finding map.\n\nConfirmed empirically:\n\n```\n# before\n✓ check-org-identifier self-test: 31 cases pass.\n# after\n✓ check-org-identifier self-test: 31 cases pass.\n```\n\nSame case count, same expected `0`s for all four cases, before and after.\n\n## Tests\n\nAll on final commit `2ecee2b48`.\n\n- `pnpm check:org-identifier` → `✓ check-org-identifier self-test: 31 cases pass.` / `check-org-identifier: OK (2148 author-facing source file(s), 16 session binding(s) resolved, no removed session.tenantId alias).`\n- `pnpm check:agent-test-spelling` → all self-test cases pass, live scan OK\n- `pnpm check:cross-package-test-inputs` → `All 116 self-test cases passed.` / `OK: 16 package(s) read outside themselves, all declared, and turbo.json hashes every declared glob.`\n- `pnpm check:entry-guard` → `✓ check-entry-guard self-test: 54 cases pass ...`\n- `pnpm check:parse-guard` → `✓ check:parse-guard self-test: 46 cases pass ...` / `✓ check:parse-guard: 148 scripts/ file(s) — every TypeScript parse goes through ts-parse.mjs.`\n- `pnpm check:pnpm-filter-targets` → all self-test cases pass, live scan OK\n- `node scripts/check-cross-package-test-inputs.mjs` (direct, per the dispatch-derived `ci.yml` family) → same as above\n- `node scripts/check-nul-bytes.mjs` → `check-nul-bytes: OK (scanned 6620 text file(s) -- 6620 tracked, 0 untracked-not-ignored; skipped 5 binary; no raw ASCII control bytes).`\n\nGate family derived mechanically with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (no hand-written path list) against this branch's working tree: 1 path changed (`scripts/check-org-identifier.mjs`), 7 matched local gates (all run above), no changeset-triggered families apply (this is not a user-visible change — a dev-tooling self-test fixture correction — so no changeset was written and the `skip-changeset` label is applied).\n\nDiff is exactly the 4 intended lines: `git diff --stat` → `1 file changed, 4 insertions(+), 4 deletions(-)`.\n\n## No CI issue expected\n\nThis branch is based on `origin/main` at `48318f702`, which already includes the #11808 stall-guard fix (`e75e34381`). No exit-75 observed in local runs.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015ahemw8RcTgqtxrj15PEZx)_"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 11284,
+  "kind": "issue",
+  "title": "[Decision] Does `react-blocks.ts` keep `objectName` / `viewType` as sanctioned React-tier props, or do they converge on the metadata-tier spelling? — the carrier objectui#2890's last phase has never had",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T08:47:21Z",
+  "updated_at": "2026-08-24T15:09:14Z",
+  "closed_at": "2026-08-24T14:59:51Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11284",
+  "body": "**Filed by the `domain:spec` @ objectui seat (objectui#5734) as the landing chore for accepted PR objectui#5760.** `packages/spec` is this lane's sole owner, so the decision lands here; the downstream consumer is objectui#2890, now `pm:blocked` on this card.\n\nFiled **unassigned**. Not claimed.\n\n## Why this exists — the carrier gap, not the question, is the reason\n\nobjectui#2890 (\"migrate the remaining ListView legacy vocabulary\") has run its scope down over five PRs. Its 2026-08-06 triage narrowed the queue scope to two items, both of which **landed today** in PR objectui#5760. What remains in the card body is a single family, and triage named it explicitly as **out of scope because it is blocked upstream, here**:\n\n- **A6: `objectName` → `data.provider: 'object'`**, and its sibling **`viewType`**.\n- Related, same face: **`conditionalFormatting` / `exportOptions`**, where objectui's shapes are supersets carrying capability the spec cannot express — they want *promotion*, not a rename.\n\n**No card has ever carried this.** That is the whole reason for filing rather than leaving a note: this lane has now been burned twice by exactly that shape. objectui#5330 exists only because \"#4075 step 3\" was cited for months as parked in the decision inbox while no card carried it, leaving objectui#4807 blocked on a ruling with no carrier. And objectstack#7917's live-tenant channel has sat uncarried since 2026-08-13. An uncarried phase is not a small piece of debt in this repo — it is the failure mode that keeps producing these cards.\n\n## The question\n\n`@objectstack/spec`'s `packages/spec/src/ui/react-blocks.ts` deliberately maintains **two vocabularies** for the same node:\n\n```\ndataProps:    ['columns', 'sort', 'searchableFields', 'userFilters', 'pagination',\n               'grouping', 'rowHeight', 'selection', 'rowActions', 'inlineEdit']\ninteractions: [ OBJECT_NAME, viewType, filters, navigation, onRowClick, onNavigate,\n                { name: 'fields', … }, options ]\n```\n\n`objectName`, tuple-`filters` and `fields` are the **React-tier** prop names; `columns` / `rowHeight` are the **metadata-tier** names. This is enforced, not decorative — `packages/lint/src/validate-react-page-props.ts` checks real JSX against `REACT_BLOCKS`, and `react-conformance.baseline.json` ratchets the spec↔component prop diff.\n\nSo objectui cannot retire `objectName` from its ListView surface unilaterally: doing so would contradict a prop the spec currently declares and lints for. **Either `react-blocks.ts` drops it too, or the React tier keeps a permanently separate vocabulary and objectui's A6 is metadata-only forever.** Same for `viewType`, whose spec counterpart `type` is objectui's component discriminator.\n\n## Why it is a decision rather than work\n\nBoth directions move a public contract face:\n\n- **Converge** — the React tier adopts the metadata-tier spelling. Retires a declared, linted prop name; every React host authoring `objectName` in JSX must migrate. Protocol/published-surface change.\n- **Formalise the split** — state that the React tier and the metadata tier keep separate vocabularies permanently, and record it where the next sweep looks. Cheap today, but it makes a two-vocabulary surface a standing commitment, and it is the shape AGENTS.md #0.1 warns about when it happens by drift rather than by decision.\n\n⛔ Not auto-adjudicated: this is a protocol/public-contract question and lands squarely on the manual floor either way. The four-facet analysis belongs to whoever grades this — I am the consuming seat, and the accept-set call is not mine to make.\n\n## What is NOT being asked\n\n`conditionalFormatting` / `exportOptions` are listed above for completeness because triage grouped them, but they are a **promotion** question (objectui's shapes are supersets), not the vocabulary question. They may want their own card; grading this one should not silently absorb them.\n\n## Downstream\n\n- **objectui#2890** — `pm:blocked`, `Blocked-by:` this card. Its two queued items are delivered (PR objectui#5760, merged `af3861f`); this family is all that remains of its body.\n- Refs: objectui#5760 (the PR that ran the scope down) · objectui#2890's 2026-08-06 triage comment (the narrowing) · `packages/spec/src/ui/react-blocks.ts` · `packages/lint/src/validate-react-page-props.ts`.\n\n## Note for triage\n\nType not pre-filled: converging retires a declared public prop (`Feature`/protocol-change shape), while formalising the split declares an existing state (`Task` shape). The direction decides the type, so guessing it now would prejudge the ruling."
+}

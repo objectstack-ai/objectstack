@@ -1,0 +1,36 @@
+{
+  "number": 11703,
+  "kind": "issue",
+  "title": "The `clone_permission_set` action copies only 2 of the 6 definition facets, so a clone silently drops system permissions, RLS and tab permissions",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T13:02:42Z",
+  "updated_at": "2026-08-24T15:50:55Z",
+  "closed_at": "2026-08-24T15:50:55Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11703",
+  "body": "Found while implementing #11513 (PR #11702). ⛔ Deliberately **not** fixed there — that PR's ruled scope is the save-door lock, and this is a pre-existing defect in a neighbouring action.\n\n## What\n\n`packages/plugins/plugin-security/src/objects/sys-permission-set.object.ts`, the `clone_permission_set` action, declares these `params`:\n\n```\n{ name: 'label',              type: 'text',      required: true }\n{ name: 'name',               type: 'text',      required: true }\n{ field: 'description',        defaultFromRow: true }\n{ field: 'object_permissions', defaultFromRow: true }\n{ field: 'field_permissions',  defaultFromRow: true }\n```\n\nThe definition a `sys_permission_set` row actually carries is six facets, per `permissionSetRowFields()`:\n`object_permissions`, `field_permissions`, **`system_permissions`**, **`row_level_security`**, **`tab_permissions`**, **`admin_scope`**.\n\nThe action POSTs its param values to `/api/v1/data/sys_permission_set`, so the four unlisted columns are simply absent from the payload. `permissionSetBodyFromRow()` then reads them through `parseMaybeJson(undefined, …)` and fills the empty default — `systemPermissions: []`, `rowLevelSecurity: []`, `tabPermissions: {}`, no `adminScope`.\n\nSo cloning a set that grants, say, `setup.access` produces a clone that grants nothing of the sort, with **no error and no warning**: the clone is created, the success toast fires, and the missing half is only discoverable by diffing the two records.\n\n## Why it matters more now than it did last week\n\nBefore the #11513 ruling, Clone was one convenience among several ways to get a customized set. The maintainer ruling of 2026-08-24 (「同意 第一步(创业阶段,Salesforce 式)」) makes cloning the **only** sanctioned way to customize a package-declared set — the save door now refuses the in-place edit and its refusal message tells the admin to clone. An admin following that instruction on a set with system permissions or row-level security gets a clone that is quietly missing them, having been sent there by the platform's own error message.\n\n## Not simply \"add the other four\"\n\nThree of the four are mechanical omissions and one is a judgement call, which is why this is filed rather than patched:\n\n- `system_permissions`, `row_level_security`, `tab_permissions` — the clone should plainly carry them; the row already stores them in the same JSON-string shape the two listed columns use.\n- `admin_scope` — ADR-0090 D12 delegated-admin scope. Copying a delegated-admin authority onto a new org-owned set on an admin's behalf is a privilege decision, not a field copy, and it may well be right to leave it off deliberately. Whoever takes this should rule on it rather than sweep it in with the other three.\n\nThere is also a UI-side question this repo cannot answer alone: `defaultFromRow` params surface as editable fields in the clone dialog, and five JSON blobs in a dialog is a different design from two. It may want a non-editable carry-over rather than five more inputs.\n\n## Repro sketch\n\nClone any set whose `system_permissions` is non-empty (`member_default` in the showcase app), then read the clone's `system_permissions` — it is `[]`.\n\n## Not measured\n\nNo test currently pins what a clone carries. `packaged-permission-set-lock.test.ts` (PR #11702) pins the *server* half of the clone path — org-owned row, no `package_id`, base untouched — driving the data door directly with whatever payload the caller sends; it deliberately does not assert what the *action definition* chooses to send, because that was out of its ruled scope.\n\nRelated: #11513 (the ruling that makes clone the sanctioned path), PR #11702 (the server-side lock)."
+}

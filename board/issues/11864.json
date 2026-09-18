@@ -1,0 +1,34 @@
+{
+  "number": 11864,
+  "kind": "pull_request",
+  "title": "feat(scripts): corpus-wide route-spelling detector for published prose, wired advisory",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T21:51:27Z",
+  "updated_at": "2026-08-24T22:41:32Z",
+  "closed_at": "2026-08-24T22:41:31Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-24T22:41:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11864",
+  "body": "Fixes #11050\n\n## What this adds\n\n`scripts/check-doc-route-spelling.mjs` — a root-level gate (the `check-doc-authoring.mjs` model; a package test would need `content/docs/**` and `skills/**` as declared turbo inputs) that extracts every `/api/v1` wire-path literal from the published corpora (`content/docs/**` minus `releases/`, plus `skills/**` — the #11050 ruling's initial set) and judges each against the two route ledgers. A literal is **flagged only when it matches a ledger row's shape while differing from its spelling** — the drift class #9180 step ② exposed: two published sites kept teaching the retired plural, and the hand sweep that found them found a third spelling (`/metadata/objects/...`) invisible to a grep for the plural. #10178's pin (see `packages/rest/src/meta-state-route-doc-spelling.test.ts`) stays as the derived two-file anchor for that one route; this is the corpus-wide generalization it deliberately was not.\n\nWired into `Lint &amp; Repo Gates` as a step (an unenrolled new job would be an advisory check-run with no signal — the #5617 shape), invoked as `node` per the #9465 fence on root `package.json`.\n\n## Zone 2 answer — the ledgers do expose enough structure\n\nBoth ledgers carry `route: 'VERB /path/:param'` rows; the runtime ledger's `absolute: true` and `* /x/**` wildcard rows are honored (absolute rows unprefixed, wildcard rows become family prefixes that exempt their subtrees, since their real tables live elsewhere — better-auth's, the cloud repo's, metadata-declared endpoints). Parsed textually so the gate has zero dependencies; parse floors make an under-parse (quoting migration, moved file) fail naming the ledger instead of scanning a smaller authority.\n\n## Measurement first (triage ruling), and the population is clean\n\nEnumerated before wiring, at `a6eca9223`: **585 `/api/v1` literals across 442 files** (content/docs 521, skills 64) against **172 ledger rows + 4 wildcard families** → 326 exact, 179 family-covered, 40 surface mentions, 40 unmatched (recorded, not judged — real routes outside the two ledgers, generic pattern teaching, deliberate refusal examples), **0 flagged**. The gate ships green.\n\n**Advisory, per the triage ruling** — the lint.yml step runs `--advisory`: findings print loudly and exit 0; the self-test, dead/empty roots, ledger parse floors and per-root literal floors (#4932) stay hard failures in every mode. Strengthening later is deleting the `--advisory` flag, nothing else.\n\n## Constraints respected (both maintainer rulings, by construction)\n\n- **The plural tolerance is not narrowed and not misread**: the gate judges what docs *teach*, never what the runtime *answers*; its failure text says so and points at `route-spelling-allow` for pages that must show a non-canonical spelling on purpose (migration guides, refusal examples). The dispatch()-side plural stays exactly as the 2026-08-17 re-weigh left it.\n- **Not the `META_URL_TO_SINGULAR` fold**: the gate never touches it; the header names the distinction the runtime ledger row calls the specific error to avoid.\n- Value-level wrongness at parameter positions (`/meta/viewes` teaching a 400, plural object names under `/data/:object`) is a pinned **non-goal** — parameter values are not the ledgers' vocabulary.\n\n## Non-vacuity — fail-before / pass-after on the real corpus, from committed state\n\nMutating `content/docs/protocol/objectql/state-machine.mdx` (mutation proven on disk: singular anchor 1→0, plural 0→1, blob `4b69171d`→`b35236e9`; restores byte-identical back to `4b69171d`, porcelain clean, under `trap … EXIT INT TERM`):\n\n- plural spelling → enforce exit **1** naming the file and the canonical row; `--advisory` exit 0 with the findings printed;\n- `metadata/objects` third spelling → exit **1**, naming **both** differing segments against the canonical row;\n- restore → exit 0, population clean.\n\nThe first round of this verification caught a real matcher defect: the lenient \"prose placeholder matches row literal\" rule let the param-spelled plural ride the same-arity `:type/:section/:name/published` row into an exact verdict. The rule is now strict (a placeholder never matches a row literal), and the regression is pinned in the self-test with that decoy row. Cost measured on the real corpus: 7 literals moved from lenient-exact to honest unmatched, zero new flags.\n\n## Verification at `bf9fc922` (HEAD of this PR; the gate union was derived and run at this commit)\n\n- `node scripts/pm/dispatch-gates.mjs` (no paths — tool derives the changeset itself) → 20 matched families, all run locally, **all exit 0**, including `check:required-contexts`, `check:aggregator-roster`, `check:step-collectors`, `check:workflow-status-functions`, `check:type-check-coverage` and `check:type-check-debt` (the last after building the packages closure, exactly as its refusal text prescribes; its surplus note is pre-existing ledger bookkeeping, untouched by this diff).\n- `node scripts/check-doc-route-spelling.mjs --self-test` → green (its own printed verdict line: \"… all hold.\").\n- `pnpm check:nul-bytes` → \"OK (scanned 6599 text file(s) …)\".\n- Changeset: none — `scripts/**` + `.github/workflows/**` only, nothing published changes; `skip-changeset` label applied.\n\n## lint.yml co-tenancy note\n\nPR #11716 also touches `.github/workflows/lint.yml` (an 18-line insertion in the spec API-surface job region, ~line 3594). This step lands with the doc/corpus gates near line 990 — disjoint regions; no conflict observed at branch time.\n\n## Out of scope, filed\n\n- #11863 — the population sweep surfaced `trigger-api`'s `POST /api/v1/automation/hooks/:flowName/:hookId` host-server mount taught in a published skill and carried by **no** route ledger (the #3636/#7526 unledgered-mount class). Recorded there, untouched here.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015ahemw8RcTgqtxrj15PEZx)_"
+}

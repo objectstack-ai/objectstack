@@ -1,0 +1,36 @@
+{
+  "number": 9482,
+  "kind": "issue",
+  "title": "tests(identity): pin the unpinned admin-lifecycle clauses of identity-auth.admin-lifecycle-operations — coverage gaps from QA run #9401",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T03:58:33Z",
+  "updated_at": "2026-08-24T23:54:58Z",
+  "closed_at": "2026-08-24T23:54:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9482",
+  "body": "QA-source: #9401 · identity-auth.admin-lifecycle-operations · C0–C7, C9\n\nThe Tier-1 pinned sweep (#9401) found this item's pin (`admin-identity-audit-trail`, 3/3 green) covers exactly one clause (C8, audit-log shapes). Security-priority per the maintainer's 2026-08-18 approval of the QA landing plan.\n\n## Unpinned clauses to cover with real tests\n\nFrom the run record's gap list: ban persistence/reversal · password rotation · explicit-password-wins · set-role flipping gate outcomes · revoke-user-sessions mid-flight · owner_id FK clear on user removal · impersonation attribution + console visibility · **non-admin refusal of every `/admin/` route** (both sides, server-asserted).\n\nThe last clause is the highest-value single test: a route-walking probe that asserts every admin surface refuses a non-admin principal is exactly the shape that catches a silently unguarded new route.\n\nAcceptance: tests land in the package owning the admin surface (likely `plugin-auth` or `packages/qa/dogfood` — triage to confirm lane); the item's `automated.ref` is extended so the next Tier-1 run scores it honestly.\n\n---\n\n## Status after PR #9664 (2026-08-18)\n\nPR #9664 landed as **`Part of`, not `Fixes`** — it pins C1, C2 and C9's refusal half, and re-scopes the item's `automated.ref` honestly. It deliberately does **not** close this card.\n\n| clause | state |\n|---|---|\n| C1, C2, C9 (refusal half) | ✅ pinned by #9664 |\n| C8 | ✅ already pinned |\n| C7 — console impersonation indicator | manual by construction (screenshot oracle) |\n| C0, C3, C4, C5, C6, C9's allowed half | ✅ pinned by PR #11899 — see below |\n\n## Unblocked 2026-08-24 — and the `Blocked-by:` line is removed, not satisfied\n\nThe `Blocked-by: #9652` line that stood here is **deleted**. What this card actually waited on was the *decision* about which `/admin/` routes admit a platform admin, and that decision is settled: **#9968** ruled B (2026-08-20, reaffirmed 08-22 — the `sys_user.set_user_role` action retired via PR #11530, the vendor route left mounted and vendor-gated) and **#9969** closed `not_planned` (the seven consumer-less routes stay 403 by design, re-implement-on-demand).\n\n⚠️ **#9652 itself is still OPEN** — measured directly, twice, not inferred: `state: open`, `state_reason: null`, labels `[domain:services, pm:blocked, pm:blocking]`. Its remaining content is the vendor-predicate fix (its options 1/2/3), which is `domain:services` work and was never this card's dependency.\n\n⇒ Leaving `Blocked-by: #9652` would have pointed the unlock scan and the half-state sweep at an open card and let them legitimately re-park a card whose work is done and whose PR is open. Removing the line is the honest repair; ⛔ pointing it at the two closed sub-issues instead would fire the unlock scan for no reason.\n\n**Correction owed, on the record.** This seat's claim comment (`5401835392`) stated that \"#9652 closed completed today\". That was **wrong**, and it was wrong because I repeated it from the skills seat's release comment (`5396675454`) instead of reading the card. Taking another seat's assertion as a reading is the same error this lane made earlier today with an actor field, and the same rule applies: **when a claim decides what you do next, read the primary source.** The dev on this card did read it — twice, through two different APIs — and reported the disagreement rather than proceeding quietly around it.\n\nThe decision content that comment conveyed was nonetheless accurate and is what made this card dispatchable; only the coordination card's state was misreported.\n"
+}

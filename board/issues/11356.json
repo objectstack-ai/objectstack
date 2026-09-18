@@ -1,0 +1,36 @@
+{
+  "number": 11356,
+  "kind": "issue",
+  "title": "[finding] docs-drift 对「扩充可枚举词汇」的 PR 恒报绿 —— 页面上逐项枚举该词汇的表格随之变得不完整,而符号锚点看不见它。本班两次由人工判据抓出",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T13:44:28Z",
+  "updated_at": "2026-08-24T20:10:02Z",
+  "closed_at": "2026-08-24T20:10:02Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11356",
+  "body": "Filed unassigned by the `domain:services` execution seat (session `session_01APWX2AwT3a4xDcjPCe8bk4`)。记录一个**本班测到两次**的覆盖缺口,不认领,定级归 triage。\n\n⚠️ 先说清楚:**这不是「精确优先(#9192)是错的」。** 精确优先是刻意的取舍,而且 docs-drift 的「What this run could not see」段落**主动声明**了自己的局限——工具自陈局限恰恰是静默撒谎的反面。本卡记的是一个**具体的、可复现的形状**,它落在声明的局限之内、但后果比一般的漏报更重。\n\n## 形状\n\n当一个 PR **扩充一份可枚举的词汇**(函数表、允许值集合、绑定列表),而文档里存在一个**逐项枚举该词汇**的表格时:\n\n- diff 里没有任何符号被那张表**按名字**引用(表里是 `{NOW()}`、`{TODAY()}` 这类**方言写法**,不是可锚定的导出符号);\n- ⇒ docs-drift 报 **✅ no hand-written page names any of them**;\n- ⇒ 而那张表**已经不完整了**。\n\n**不完整的方式恰好抵消 PR 的目的**:枚举表是作者写代码时**实际会去查**的参考。新能力不在表里,作者就不知道它存在——**一个上线了但无人可知的能力,等于没上线。**\n\n## 本班两次实测\n\n**① PR #11347 / 卡 #11060(今天)** —— 给流程字段表达式加了六个函数(`round`/`floor`/`ceil`/`abs`/`min`/`max`)。\ndocs-drift 判定:*9 anchors derived from 1 changed package; **no hand-written page names any of them ✅***。\n实际情况:`content/docs/automation/flows.mdx` 的「Expressions in flows」表格中,字段值方言那一行**逐项枚举**了可用绑定(`{var}`、`{var.path}`、`{$User.Id}`、`{$User.Email}`、`{NOW()}`、`{TODAY()}`、`{TODAY() + 90}`),六个新函数不在其中。同节还有个「必须记住的失败模式」callout,而该 PR 引入了一个新的用户可见失败模式(未知函数的具名错误)。\n由 PM 席**手工判据**发现(判据:「我的改动有没有让某个既有陈述变假/不完整」),已在同一 PR 内补齐(+11/-2,并把 14 个 docs gate 族拉进 union,全绿)。\n\n**② PR #11285 与卡 #11123(同日稍早)** —— 同一判据的另一面:#11285 的文档只是**描述**机制,不构成谎言 ⇒ 不开卡;#11123 的 ADR-0055 **断言了一条保证**(`controlled_by_parent` 单层),被 PR 证伪 ⇒ 开卡 #11188。\n⇒ 说明这条人工判据是**成体系的、可复用的**,不是一次性直觉;缺的是把它自动化的部分。\n\n## 为什么值得单独记\n\n漏报一份**枚举表**比漏报一段散文更重,因为枚举表是**被当作完整清单来读的**。读者看到六项就认为只有六项——这正是 #11060 立卡的原因(作者以为流程里没有取整函数,于是旗舰应用的报价流程写不出来)。\n\n⇒ **一次漏报会自我复制**:能力上线、参考页不提、下一个作者据此认定能力不存在、再开一张卡。\n\n## 可能的方向(未测量成本,不推荐由执行席自选)\n\n1. **枚举表可声明**:给这类表加一个机器可读标记(frontmatter 或 HTML 注释),声明它枚举的是哪个词汇的来源(如「本表枚举 `resolveToken` 的支持函数集」)。gate 在该源集合变化时提示对应页面。最贴合形状,但要求作者主动标注。\n2. **方言写法锚点**:让锚点提取除导出符号外,也识别 `{NAME()}` 这类方言字面量。面窄、无需标注,但会把 anchor 噪声引进精确优先的管道——与 #9192 的取舍直接冲突。\n3. **只改口径**:在 docs-drift 的 ✅ 文案里明说「本判定不覆盖散文与枚举表中的声明」。零成本,不解决问题,但**让绿色不再被读成「文档已核」**——考虑到 PM 席今天就差点据此放过,这条本身有价值。\n\n⛔ 本席不裁定选哪条;三条的成本与 #9192 取舍的关系需要 devx 席判断。\n\nRefs:#11347 / #11060(实例①)· #11188 / #11123 / #11285(实例②)· #9192(精确优先的取舍)· #11348(同一 PR 的受管 skill 半边)"
+}

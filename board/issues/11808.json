@@ -1,0 +1,36 @@
+{
+  "number": 11808,
+  "kind": "issue",
+  "title": "CI: run-with-stall-guard kills a HEALTHY solo tail task — turbo grouped log order flushes nothing while one long task runs, and cli:test now outgrows the 10-minute silence budget",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:blocking",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T17:19:58Z",
+  "updated_at": "2026-08-24T22:41:32Z",
+  "closed_at": "2026-08-24T22:41:32Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11808",
+  "body": "Found while running the patch round on PR #11785 (issue #11635): `Test Core (1/6)` failed twice, identically, with exit 75 — and the diff is not the cause. Filed unassigned; the remedy choice (see options) is a PM/maintainer call because it changes CI mechanism for every shard.\n\n## The occurrence (run 32750890397, job 97507407281, both attempts)\n\nThe stall guard's own banner, from the job log:\n\n```\n⛔ STALL: no test output for 10.0 minutes (limit: 10m).\n   frozen since : 2026-08-24T16:31:40.939Z\n   last line    : ::endgroup::\n```\n\nThat `::endgroup::` is `@objectstack/cli:build` finishing. From that moment `@objectstack/cli:test` was the ONLY task still running on the shard — and the step printed zero bytes until the guard killed the process group at 16:41:42 and exited 75 (`STALL_EXIT_CODE`, `scripts/run-with-stall-guard.mjs`).\n\n**The suite underneath was healthy.** Turbo on CI uses grouped log order — a task's output is flushed only when the task ENDS — so when the kill forced the flush, the buffered `@objectstack/cli:test` group came out full of passing tests with internal timestamps running 16:32:12 → 16:40:50, i.e. continuous activity until 52 seconds before the kill, zero `✗`, no vitest failure summary (killed mid-run → pnpm `ELIFECYCLE`, turbo `62 successful, 63 total`). The guard's SIGUSR2 forensics agree: only pnpm + turbo were in the signalled group, both \"event loop responsive … awaiting something\" — turbo waiting on its running child.\n\nControl: the same task on the same merged tree in a worktree — `pnpm exec turbo run test --filter=@objectstack/cli` — passes completely: **173 files, 1981 tests, exit 0**, wall 11m50s.\n\n## The mechanism — two defects colliding\n\n1. **The guard measures FLUSHES, not liveness.** `run-with-stall-guard.mjs` watches step output; under turbo's grouped log order a running task emits nothing until it ends. A shard whose tail is one task longer than `--stall-minutes` is therefore killed *by construction*, healthy or not. (#4250 was real stalls — frozen suites; this is the guard's instrument reading a healthy run as one. #4250's triage line \"every stall so far passed on a plain rerun\" no longer holds: this shape reproduces deterministically, and did, twice.)\n2. **`@objectstack/cli:test` has outgrown the budget.** `scripts/test-shard-timings.json` (measuredAt 2026-08-24 file says 2026-08-21) records cli at **392.11s**; the failing run shows it alive past **601s** when killed, and it measures **~710s** locally. The suite has grown ~50%+ since the ledger was cut (recent e2e additions run 13-30s each).\n\nWhy PR #11785 hits it deterministically while others don't: on a driver-sql PR the affected-set sharding puts `@objectstack/cli` (the heaviest affected package) on a shard with four small packages; everything else finishes in ~3 minutes and cli:test runs alone past the 10-minute silence line. **Any PR whose affected set composes a shard this way now lands a guaranteed red** — the failure will look like \"Test Core (1/6) failed twice, not a flake\" on innocent diffs.\n\n## Remedy directions (not chosen here — each changes CI behaviour for every shard)\n\n- Run the shard's turbo with `--log-order=stream` so the guard sees real liveness (restores the pre-grouped behaviour the guard was written against; costs interleaved logs).\n- Or teach the guard a second liveness probe (e.g. child process CPU ticks / task-level progress) instead of raw output bytes — its forensic sampler already reads `cpuΔ`.\n- Or raise `--stall-minutes` above the heaviest single package's runtime — weakest option: it re-opens the #4250 wait it was built to close, and decays again as suites grow.\n- Independent of the choice: refresh `scripts/test-shard-timings.json` — cli at 392s is ~50% under its real runtime, which also skews shard balancing.\n\n## Refs\n\n- Failing run: https://github.com/objectstack-ai/objectstack/actions/runs/32750890397/job/97507407281 (attempt 1 and the 16:41 re-run both exit 75 the same way)\n- Guard: `scripts/run-with-stall-guard.mjs` (exit 75 = declared stall); wiring comment in `.github/workflows/ci.yml` Test Core job\n- #4250 (closed) — the real-stall family this guard was built for; #10032 — adjacent but distinct (zero captured output of a *failing* task)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VK8rFDtg8eREaxBGX99Csn)_"
+}

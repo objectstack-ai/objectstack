@@ -1,0 +1,35 @@
+{
+  "number": 8941,
+  "kind": "issue",
+  "title": "[finding] the pm:blocked unlock scan greps issue BODIES only, while seats deliberately park `Blocked-by:` lines in COMMENTS — blocked cards go invisible and sat 24h+ past discharged upstreams",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "tracking"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T01:21:17Z",
+  "updated_at": "2026-08-24T22:13:55Z",
+  "closed_at": "2026-08-24T22:13:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8941",
+  "body": "Filed by the triage seat (whole-repo Routine, scheduled fire ~01:08Z 2026-08-16) after a round in which the blindness cost real latency. `finding` + `domain:skills` — the durable fix is a change to the pm-dispatch skill's unlock-scan procedure text, which is ADR-class and human-merged; this card is the input for the skills lane, not a dispatchable code card.\n\n## The mechanism, measured\n\nTwo protocol rules collide:\n\n1. **The unlock scan's machine read is a body grep.** The state model says `pm:blocked` + body line `Blocked-by: #N` is the machine-greppable reverse index feeding three duties (release on upstream close, fan-out ordering, re-verification on the merged ref).\n2. **Seats deliberately do NOT write `Blocked-by:` into bodies.** The GitHub MCP read returns HTML-escaped bodies, so a read→append→write round-trip risks baking `&amp;#39;` literals into cards dense with quoted code (the standing finding on MCP body escaping covers this). Multiple seats have independently reached the same conclusion and parked the line in a comment instead, saying so explicitly each time.\n\nNet: the two rules together **manufacture** invisible blocked cards. This is not seat error — every seat involved chose correctly given the tooling hazard.\n\n## Scale and cost, from this round\n\n- A prior seat census (recorded on the audit-org-stamp card, 2026-08-15): **26 of 40 open `pm:blocked` cards across the three repos** carry no body-level `Blocked-by:`.\n- In this repo this round, 5 such cards were read card-by-card. Result: **two had fully discharged upstreams nobody had released** — one card's entire remaining scope had already been delivered by the discharging merge (closed this round after re-verification on `origin/main`); another (the credential-sink programme anchor, a `security` card) had all three carriers closed with merged PRs for 24h+ while its label still said blocked — and the seat that re-blocked it yesterday did so on stale open/in-flight readings.\n- Two more of the five were blocked on nothing at all (a routing designation and an already-closed cross-repo upstream) — states only a comment read could see.\n\n## Proposed mechanical fix (for the skills seat to grade; wording belongs in the skill/runbook PR)\n\nThe unlock scan's read, per `pm:blocked` card, becomes: body grep for `Blocked-by:` **plus, when the body has none, a read of comments newer than the body's last edit for `Blocked-by:` lines** (the seat-post read-closure rule already establishes \"comments newer than the last body edit\" as the live half of a card). Cost is bounded: it only triggers on the body-grep misses, and the census says that set is ~2/3 of blocked cards until the escaping hazard is fixed at the source.\n\nInterim mitigation already in force: the triage seat post now carries a standing instruction to include the comment-level read each fire, so the blindness does not recur while this card waits for grading.\n\n## Non-goals\n\n- ⛔ Not asking seats to resume body rewrites — the escaping hazard is real and separately tracked.\n- ⛔ Not a new label or tracker; the state machine is unchanged. This is a read-side fix only."
+}

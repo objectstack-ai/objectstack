@@ -1,0 +1,32 @@
+{
+  "number": 11873,
+  "kind": "issue",
+  "title": "`ObjectMasterDetailFormPropsSchema.formType` accepts any string — the spec half of objectui#5939, where the renderer honours exactly `simple | tabbed`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui-tw",
+    "id": 314596056,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T22:32:18Z",
+  "updated_at": "2026-08-25T03:55:12Z",
+  "closed_at": "2026-08-25T03:54:53Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11873",
+  "body": "Cross-repo half of **objectui#5939**, filed from that card's implementation so whoever takes this does not have to re-derive the measurement. Filed unassigned for triage.\n\n## Fact\n\n`ObjectMasterDetailFormPropsSchema.formType` accepts any string:\n\n```ts\nObjectMasterDetailFormPropsSchema.safeParse({ objectName: 'po', details: [], formType: 'wizzard' }).success\n// → true\n```\n\nwhile its sibling `ObjectFormPropsSchema.formType` rejects an out-of-vocabulary value (its options are `simple` / `tabbed` / `wizard` / `split` / `drawer` / `modal`). Both blocks funnel into the same objectui renderer, which switches on those variant names, so a value outside them matches **no** branch: the parent half falls through to a flat field list and the authored sections silently disappear, with no diagnostic anywhere.\n\nMeasured consequence, and the reason objectui filed it rather than shrugging: in objectui#3840's binding-reach probe the generic sample for a `string` input is `'x'`, so `object-master-detail-form` skipped the section loop entirely and read **green**, while `object-form` (enum sample `'simple'`) painted an error card on identical malformed input. A value outside a prop's vocabulary routes *around* the block instead of exercising it — here, around a real crash, for as long as anyone had looked.\n\n## The measurement, so it is not re-derived\n\nobjectui#5939 tightened the objectui registry declaration to **exactly `simple | tabbed`**, measured rather than copied from the sibling's six. Per parent `formType`, mounting the block with two parent sections and one detail collection and driving its single Save bar:\n\n| value | branch reached (`ObjectForm.tsx`) | outcome for the PARENT half |\n|---|---|---|\n| `simple` | `:1134` SimpleObjectForm sections path | honoured; saves through the atomic batch |\n| `tabbed` | `:236` TabbedForm | presentation honoured, rendered inline |\n| `wizard` | `:260` WizardForm | only the current step's fields mount; the master-detail Save bar acts as `Next` |\n| `split` | `:287` SplitForm | renders inline, but persists via `dataSource.create` |\n| `drawer` | `:316` DrawerForm | parent half goes into a **portal dialog** outside the master-detail container — the Save bar has no form to submit |\n| `modal` | `:346` ModalForm | same portal shape |\n\nobjectui already stated the same two independently in two places, which is the corroboration the enum was derived against: `MasterDetailFormSchema.formType?: 'simple' | 'tabbed'`, and the coercion `formType === 'tabbed' ? 'tabbed' : 'simple'` that `ObjectForm` applies when it routes a `subforms` schema into the block.\n\n(objectui#6176 records that `tabbed` is presentationally honoured but escapes the atomic batch. That is a renderer defect and does not change the vocabulary this spec key should carry.)\n\n## Why this repo's half is the load-bearing one\n\nPer objectui#5155's standing maintainer ruling, **rejection lives at the zod/publish boundary**. The objectui `enum` fixes the authoring surface — the manifest, the JSX-page compiler, the save gate (`sdui-parser` now reports `invalid-enum` at severity `error`) and what a probe samples — and it does **not** by itself make an out-of-vocabulary value rejected. `os validate` / `os build` / `os lint` and publish-time validation read this schema, so until it narrows, a published app can still carry `formType: 'wizzard'` and render a silently sectionless parent form.\n\n## Proposed change\n\nNarrow `ObjectMasterDetailFormPropsSchema.formType` to `simple | tabbed`. It is a **narrowing of an authorable surface**, so it needs the usual treatment for that in this repo (liveness check for existing authored values, and whatever the removal route requires) rather than an unannounced tightening. objectui found **zero** out-of-vocabulary `formType` values authored anywhere in its own repo — fixtures, examples, catalog entries and tests — across all of `simple`/`tabbed`/`wizard`/`split`/`drawer`/`modal`; the equivalent census here has not been run.\n\nRelated: objectui#5939 (the objectui half, with the full measurement) · objectui#3840 (where it surfaced, and the probe that read green) · objectui#5155 (why the objectui enum is not by itself a rejection) · objectui#6176 (`tabbed`'s atomic-batch leak)."
+}

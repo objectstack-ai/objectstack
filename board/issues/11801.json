@@ -1,0 +1,36 @@
+{
+  "number": 11801,
+  "kind": "issue",
+  "title": "`check-step-collectors` cannot see `.claude/hooks/*.selftest.sh` collectors — a second self-test family it is structurally blind to",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T16:57:24Z",
+  "updated_at": "2026-08-24T19:01:19Z",
+  "closed_at": "2026-08-24T19:01:19Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11801",
+  "body": "Found while wiring #11514 (PR #11799). Filing rather than widening the gate in that PR: its declared surface is `.github/workflows/lint.yml` alone, and this is a `scripts/` change.\n\n## Measured\n\n`check-step-collectors.mjs` decides what to judge from two regexes:\n\n```js\n/** A repo script path carrying `--self-test` somewhere after it on the same command. */\nconst SELF_TEST_TARGET = /(?:^|\\s)((?:\\.\\/)?(?:scripts|packages)\\/[\\w./-]+\\.(?:mjs|mts|cjs|js|sh|ts))(?=\\s)[^\\n]*?\\s--self-test\\b/;\n```\n\nA step is only considered once `selfTestTargets(step.run).length >= 2`, so its population is *`scripts/`|`packages/` paths carrying a `--self-test` flag*. The matrices in `.claude/hooks/` are neither: they live under `.claude/`, and they are invoked as bare executables (`.claude/hooks/guard-shared-stash.selftest.sh`), with no flag.\n\nConfirmed on the PR #11799 tree, which adds a real third collector to `lint.yml`:\n\n```\n✓ check-step-collectors: 329 `run:` steps across 26 workflow(s); 2 step(s) run 2+ independent self-tests, all of them through a collector.\n```\n\nStill `2`, with three collectors in the file.\n\n## Why this is the gate's own defect class\n\n#10814 exists because a `run:` block is `bash -e`, so a bare sequence of independent self-tests aborts at the first failure and leaves the rest unrun — neither green nor red. The new step runs two independent hermetic matrices and is written as a tolerate-and-collect block for exactly that reason; the measurement is in PR #11799 (with the first matrix mutated red, the second still runs). But nothing enforces it. Someone \"simplifying\" that block into\n\n```bash\nfor t in \"${selftests[@]}\"; do \"$t\"; done\n```\n\nrestores the #10814 defect verbatim, and every gate in the repo stays green. The step therefore carries a ⛔ comment asking reviewers not to do that — prose enforcement, which is the state #10814 was filed to leave behind.\n\nThat the gate's own header says its sweep found \"exactly two\" matches is not a defence: it was true when written and it is what makes the blind spot invisible now — a count that stays right while its subject grows.\n\n## Options\n\n1. Widen `SELF_TEST_TARGET`'s path alternation to include `.claude/` and make the `--self-test` flag optional for a path matching `*.selftest.sh` (self-testing is in the filename there). Note `driveBlock`'s `SCRIPT_TOKEN` stubbing needs the same widening, or a `.claude/` collector reaches it and throws `no repo script path in command`.\n2. Key the population on \"≥2 independent self-tests\" in a spelling-independent way — a path ending `.selftest.sh`, or a `--self-test` flag, either counting.\n3. Accept the blind spot and record it. Not recommended: this is the gate whose whole argument is that a static shape cannot vouch for itself.\n\nOption 1 or 2 should keep the gate's `--self-test` harness driving the real block, since a collector that swallows its exit code is worse than the masking it replaces.\n\n## Note on `--self-test` reach\n\nThe `.claude/hooks/` matrices are not the only family outside this gate's population — `scripts/bump-objectui.selftest.sh` uses the same `*.selftest.sh` naming and is likewise unmatched by the `--self-test` flag requirement. Whether that one is run anywhere is a separate question and is not asserted here."
+}

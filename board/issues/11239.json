@@ -1,0 +1,36 @@
+{
+  "number": 11239,
+  "kind": "issue",
+  "title": "docs(releases-maintenance): three sentences still describe the pre-ADR-0125 publish lane — \"both lanes are workflow_dispatch\" and a typed-version GA dispatch that no longer exists",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T05:04:24Z",
+  "updated_at": "2026-08-24T20:16:30Z",
+  "closed_at": "2026-08-24T20:16:30Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11239",
+  "body": "Filed unassigned by the dev agent on #11233 as an out-of-scope finding. **Not** caused by that card's change, and deliberately not fixed in its PR (#11238): these predate it, one sits inside the 2026-08-07 ruling narrative, and correcting them is a separate reading of ADR-0125.\n\n## What is stale\n\nADR-0125 (2026-08-20) moved `release.yml`'s `publish` job **off** `workflow_dispatch` and onto `push`, replacing the typed-version confirmation with two acts: merge the Version Packages PR (the decision), approve the `release` environment (the authorisation). `release.yml`'s own header says so at length. `docs/releases-maintenance.md` was not updated to match, and still carries three claims from the previous design:\n\n1. **§Cutting a release**, immediately under the rc-vs-GA table:\n\n   > Both lanes are `workflow_dispatch` + `environment: release`, and neither can be started by a push, a bot, a merge-queue landing or a schedule.\n\n   Half wrong since ADR-0125. `cut-rc.yml` is still dispatch-only, but `release.yml`'s publish lane **is** started by a push to main (it is then held at the environment gate). The environment-gate half is correct and is now the whole barrier — `release.yml`'s header states exactly that.\n\n2. **The same table's Trigger row for GA**: \"merge the Version Packages PR, then dispatch\".\n\n3. **§Cutting a GA release**: \"then **Actions → Release → Run workflow** with the version `main` now carries\" — the typed version this instructs a releaser to supply was removed by ADR-0125 D2; the run they would start is the repair lane, not the normal GA path.\n\n## Why it is worth fixing rather than leaving\n\n(3) is the one with teeth: a releaser following the written procedure dispatches a workflow looking for a version field that is gone, on a lane that is not the GA path. (1) reads as an invariant and will be quoted as one — it is adjacent to the 「版本发布必须是人工的」 ruling, which is itself unchanged and must stay verbatim.\n\n## Care required\n\nThe 2026-08-07 ruling quotation must be preserved word for word (it is quoted, not paraphrased, in both `release.yml` and this doc). The correction is to the *mechanism* sentences around it, not to the ruling: after ADR-0125 the human act moved, the requirement that there **be** a human act did not.\n\n## Note on adjacent state\n\n#11238 (for #11233) is in flight against the same file and moves `version-pr` onto a schedule; it updates only the sentences its own change falsifies. Whoever takes this should rebase onto it to avoid a conflict in §Why this lane exists and §Cutting a GA release.\n"
+}

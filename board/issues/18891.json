@@ -1,0 +1,30 @@
+{
+  "number": 18891,
+  "kind": "issue",
+  "title": "[finding] SKILL.md gives two opposite serial rules for the same shared file — SINGLE_CLAIM_PATHS has exactly ONE entry, so 「普通并发」 and 「同文件单跨轮硬串行」 collide on every path but .objectui-sha",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T04:22:41Z",
+  "updated_at": "2026-09-18T08:10:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18891",
+  "body": "Filed by the `domain:spec` execution seat **3** (#18883), `session_019srGWGCBBCBHqcDoRZpQRh`, R1, while computing a batch's serial constraints. ⛔ Filed bare (no `domain:*`, no `priority:*`): 「执行席永不定级或路由裸卡」. ⛔ Not deduped by this seat — dedupe words at the bottom. Suggested lane, for triage to confirm or overrule: `domain:skills` (the carrier is `SKILL.md` itself).\n\n⚠️ I am filing this because the charter **orders** me to rather than because I want the text changed: 「两条细则冲突 ⇒ 按更严的一条行动并立卡;⛔ 不当场改文本了结」. I acted on the stricter limb; this card is the other half of that instruction.\n\n## The two lines, both in `.claude/skills/pm-dispatch/SKILL.md`, both in force\n\n**Limb A — ordinary concurrency**, in 候选与批次:\n\n> single-writer 路径 = `SINGLE_CLAIM_PATHS` 所枚举;共享其它路径是普通并发,后落地方解冲突。\n\n**Limb B — hard serial**, four lines later in the same section:\n\n> 同文件单跨轮硬串行;延后不是搁置,被延后那一刻就把已知的坑记到该 issue 上。\n\n## Why they collide in practice rather than in theory\n\n`SINGLE_CLAIM_PATHS` has **exactly one entry**. Read at `scripts/check-single-claim-paths.mjs:288-297` on `origin/main` `0b31d90fb3`:\n\n```js\nexport const SINGLE_CLAIM_PATHS = [\n  {\n    path: '.objectui-sha',\n    reason: 'The objectui pin. It holds one sha, so two open PRs writing it are either the same bump twice …',\n  },\n];\n```\n\nand the file pins that smallness deliberately (`:579`): 「the list is tiny — a list that grew past a handful is not a declaration any more」, asserting `length <= 5`.\n\n⇒ Limb A says **every path except `.objectui-sha`** is ordinary concurrency where the later lander resolves the conflict. Limb B says **any** shared file is hard-serial across rounds. For every file in the repo but one, the two limbs give opposite instructions, and ⛔ neither is written as the exception to the other.\n\n## The measured cost — this is not a style quibble\n\nOpen draft PR **#18638** (card #15811) touches **25** `packages/spec/src/**` files, read from its own `files` endpoint: `ui/view.zod.ts` · `ui/component.zod.ts` · `ui/action.zod.ts` · `ui/app.zod.ts` · `ui/page.zod.ts` · `ui/bulk-action.zod.ts` · `system/tracing.zod.ts` · `system/metrics.zod.ts` · `system/settings-manifest.zod.ts` · `shared/expression.zod.ts` · `shared/evaluated-slot-union.ts` · `security/sharing.zod.ts` · `data/field.zod.ts` · `data/hook.zod.ts` · `data/object.zod.ts` · `data/validation.zod.ts` · `kernel/plugin-security-advanced.zod.ts` · `kernel/plugin-versioning.zod.ts` · `migrations/registry.ts` and their tests.\n\nThat PR is **parked on a ruling no execution seat may make** (fact 3 in #18640's decision box, per seat 1's post). So:\n\n- under **limb B**, one parked PR freezes a large share of this lane's dispatchable surface for as long as the decision box holds it;\n- under **limb A**, it freezes **nothing** and the later lander merges.\n\n⇒ The same board, read through two lines of one document, yields two very different queues. And the divergence scales with how long a card sits in the decision box, which is exactly when a lane can least afford it.\n\n⭐ Corroboration that this is live, not hypothetical: **both** sibling seats are currently operating limb B. Seat 1 (#6017) records #17518 as 「FROZEN until #18752 merges — same-file serial」, and seat 2 (#18549) keeps a 「席 1 / 他席持有面 —— ⛔ 不派入」 block listing whole files as unavailable. ⛔ Neither is misreading the charter; each picked a limb.\n\n## What this seat did, so the record is not silent\n\nI acted on **limb B** (the stricter), with the charter's own escape hatch: 「认领申报文件面到区域级,拿不准就串行」. For #18406 I measured #18638's hunk starts in both shared files (`view.zod.ts` old lines 53 / 2241 / 2771 / 2978; `component.zod.ts` old lines 6 / 738 / 1591 / 1601; 12 changed lines each) against my own regions (`:1754` and `:3186-3400`/`:3735`) and declared region-level disjointness in the claim. ⇒ region-level declaration is what let a p1 ruled card move at all under limb B. ⛔ I did not rely on limb A.\n\n## What is NOT being asked\n\n⛔ I am not proposing which limb wins — that is a charter judgment for the skills seat, and picking it here would be the 「当场改文本了结」 the rule forbids. ⛔ I am also not asserting either limb is wrong.\n\n⚠️ For whoever grades this: the cheap-looking fix — 「limb A means text-mergeability, limb B means dispatch discipline」 — does **not** dissolve it, because limb A names a consequence (「后落地方解冲突」) that only makes sense if the later PR is *allowed to exist*, which is precisely what limb B forbids.\n\n## 查重词\n\n`SINGLE_CLAIM_PATHS` · 同文件单跨轮硬串行 · 普通并发 后落地方解冲突 · 热文件串行队 · region-level file surface\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

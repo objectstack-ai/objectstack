@@ -1,0 +1,32 @@
+{
+  "number": 10556,
+  "kind": "issue",
+  "title": "Pay down the optional-error sink ledger — 13 paid, 2 remain and both are DESIGN CALLS (was: \"15 sink types\")",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T03:12:25Z",
+  "updated_at": "2026-08-24T22:42:37Z",
+  "closed_at": "2026-08-24T22:42:11Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 23,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10556",
+  "body": "Filed by the #9754 dev while landing PR #10555. Not a claim; unassigned.\n\n#9754 ruled that a sink type declaring an optional `error` must declare a **non-optional** `warn`, so a durability report always has somewhere to land. PR #10555 lands the checker (`pnpm check:optional-error-sink`), repairs the two sinks the card names — `SweepLogger` (plugin-email) and `ProjectionLogger` (plugin-security) — and records the rest in a shrink-only ledger: `scripts/optional-error-sink-contract.baseline.json`.\n\n**This card is that ledger's paydown, as ONE task rather than fifteen.** Every entry names the file it lives in and why it was not repaired in #10555; the checker prints the whole population as a census on every run, and it fails on a stale entry, so a repair must delete its row in the same PR.\n\n## The 15, grouped by what closing them costs\n\n**Thirteen are a one-line repair** — drop the `?` from `warn` and re-check the package's call sites:\n\n- `packages/cloud-connection/src/cloud-connection-plugin.ts` (`logger@PluginContext`)\n- `packages/metadata-protocol/src/migrations/partial-index-probe.ts` (`IndexMigrationLogger`)\n- `packages/plugins/plugin-approvals/src/approval-service.ts` (`logger@ApprovalServiceOptions`)\n- `packages/plugins/plugin-approvals/src/lifecycle-hooks.ts` (`MinimalLogger`)\n- `packages/plugins/plugin-audit/src/auth-event-audit.ts` (`AuthEventAuditLogger`)\n- `packages/plugins/plugin-audit/src/read-audit.ts` (`ReadAuditLogger`)\n- `packages/plugins/plugin-auth/src/member-role-canonical.ts` (`LoggerLike`)\n- `packages/plugins/plugin-auth/src/reconcile-membership.ts` (`logger@ReconcileMembershipDeps`)\n- `packages/plugins/plugin-email/src/attachment-reclaim.ts` (`ReclaimLogger`)\n- `packages/plugins/plugin-reports/src/report-service.ts` (`logger@ReportServiceOptions`)\n- `packages/plugins/plugin-sharing/src/bulk-recompute.ts` (`MinimalLogger`)\n- `packages/plugins/plugin-webhooks/src/auto-enqueuer.ts` (`OptionalLogger`)\n- `packages/services/service-knowledge/src/knowledge-service.ts` (`KnowledgeLogger`)\n\n⚠️ The two `plugin-audit` entries were held back in #10555 only because `packages/plugins/plugin-audit` was open PR #10450's file surface — they are otherwise mechanical, and they are the sinks #9754's body calls the sharpest instances.\n\n**Two are a DESIGN call, not a `?` deletion, and each is worth its own decision:**\n\n1. `packages/plugins/plugin-security/src/security-plugin.ts` — the plugin's own logger field is declared `{ info?; warn?; error? }` and **initialised `= {}`**. Until a host injects a sink, every report through that field goes nowhere at all. Requiring `warn` forces the question: what should the default be — a `console`-backed sink, or a sink that is silent *by declaration*?\n2. `packages/services/service-settings/src/settings-service.types.ts` — `SettingsDiagnosticsLogger` is `{ error? }` and nothing else: the **only** `no-fallback` sink left in the tree, and the shape where a call site cannot be written correctly at all. Its own doc explains the one-member surface is what keeps `Logger`, `ctx.logger`, `console.error` and a one-line spy all assignable — a required `warn` breaks the spy. Highest-priority entry, and the one that needs a judgement about how much assignability that surface is worth.\n\n## Two adjacent facts recorded here so they are not re-derived\n\n- `examples/app-showcase/src/system/server/recalc-endpoint.ts` holds a 16th red sink. The checker deliberately scans `packages/**` only (those are the contracts plugins and services publish); widening the scan is a decision, and this is its cost.\n- `packages/plugins/plugin-security` excludes `**/*.test.ts` from its tsconfig (it carries a TEST_DEBT ledger entry), so a `@ts-expect-error` in that package's tests evaluates never. #10555 hit this and moved its compile-time pin to plugin-email. Not part of this paydown; noted because the next author writing a type pin in that package will hit the same wall."
+}

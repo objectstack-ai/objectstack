@@ -1,0 +1,35 @@
+{
+  "number": 11733,
+  "kind": "issue",
+  "title": "An operator-run command to migrate a stale column to json when a field went multi-value (ruled C on #11700)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-24T14:19:01Z",
+  "updated_at": "2026-08-25T01:36:38Z",
+  "closed_at": "2026-08-25T01:36:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11733",
+  "body": "Filed by the `domain:engine` seat (session `session_01VK8rFDtg8eREaxBGX99Csn`) as the execution half of the **#11700** ruling.\n\n## The ruling this card executes\n\nMaintainer, 2026-08-24, live PM chat. ⛔ Quoted verbatim, not translated:\n\n> 「11700 11693 不需要考虑历史数据，其他按照你的建议继续」\n\n**Ruled: C** — the platform **warns** and ships an **explicit, operator-run** migration command. ⛔ It is **never** run automatically at boot. Option **A** (unattended auto-migration) is rejected: on the four facets it was the only route that has the platform altering a customer's production table structure with nobody watching. **B** (warn only) survives solely as C's degenerate form if this command is never shipped — which is what this card exists to prevent.\n\n⚠️ **Amendment, from the ruling's own words — historical data is OUT of scope.** The `#11700` analysis carried a confidence gap flagging that no route repairs rows corrupted *before* detection landed. That rider is **struck**: rows already corrupted are the customer's to repair, as the reporting customer already did. ⛔ Do not add backfill or row-repair to this command, and ⛔ do not file a card for it.\n\n## What to build\n\nA command an operator runs deliberately, on their own schedule, having taken their own backup. The shape the ruling names:\n\n- **the migration itself** — the dialect-correct statement for moving a stale `varchar`/`text` column to `json` when its field declares `multiple: true`;\n- **a dry run** — show exactly what would run, and against what, without running it;\n- **rollback notes** — what the operator does if it goes wrong;\n- **docs** — so the finding's message can point at something real.\n\n⚠️ **The SQL is already written and, more importantly, already measured.** PR #11720 (the detection half) emits the remedy statement per dialect, and its suite **executes** that statement against live Postgres 16.13 and MySQL 8.0.46 over four row states, asserting the finding then clears. ⛔ Do not re-derive it — reuse it, and read the two corrections that were forced by measurement rather than preference:\n\n- `to_json(col)` turns a legacy single value into a JSON **scalar** under a now-multi-value field (`Array.isArray === false`), so `json_build_array` is used instead, which makes Postgres agree with MySQL's `JSON_ARRAY`;\n- `json_build_array(NULL)` is `[null]` — a one-element array — so an explicit `IS NULL` arm exists. It was added **after** the version without it was run on the live server and observed to give every NULL row a value.\n\n**Dialect scope, measured**: the corruption occurs on Postgres and MySQL and **does not** on SQLite (which reads back a real array). SQLite is excluded.\n\n## Before dispatching, re-verify rather than assume\n\n- The detection half must have landed: check that PR #11720 is merged and that `manual_column_type_change` is emitted on `origin/main`\n  (`git grep -n \"manual_column_type_change\" origin/main -- packages/drivers/driver-sql/src/schema-drift.ts`).\n- ⚠️ Confirm where the command belongs. The drift **finding** lives in `packages/drivers/driver-sql`, but an operator-facing command plausibly lives in `packages/cli` next to the other `os migrate` surfaces — which is **another seat's lane**. If it lands there, this becomes a cross-lane card and goes to that queue, ⛔ not into a driver-sql PR. Establish the landing point before writing code; it may change this card's `domain:*`.\n- ⛔ The reconciler must still **not** execute this op automatically. #11720 ships `manual_column_type_change` with no reconciler arm by design; this command is a separate, deliberate path the operator invokes. A change that quietly gives the op an arm would convert C back into A, which was rejected.\n\n## Related\n\n- **#11700** — the decision card (ruled C); closes once this card exists\n- **#11535** — the customer's original corruption report; flips `pm:blocked` pointing here once the detection half lands\n- **#11720** — the detection half, carrying the measured remedy SQL\n- **#11721** — the drift category vocabulary has no report-only state (the op currently borrows `needs_confirm`)"
+}

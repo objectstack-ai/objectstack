@@ -1,0 +1,36 @@
+{
+  "number": 11743,
+  "kind": "pull_request",
+  "title": "feat(spec): declare cloud-connection:panel / marketplace:installed-list in ComponentPropsMap — undeclared keys refused (#11575)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ui",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T14:47:53Z",
+  "updated_at": "2026-08-24T21:55:35Z",
+  "closed_at": "2026-08-24T21:55:33Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-08-24T21:55:33Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11743",
+  "body": "Fixes #11575\n\nTwo console-registered widget types on `@objectstack/cloud-connection`'s published Setup pages — `cloud-connection:panel` and `marketplace:installed-list` — had no `ComponentPropsMap` row: the #8691/#8744 silent no-op class (any authored key in their `properties` bag rode through every validator in silence, because the #5068 gate's dispatch skips unmapped types).\n\n## What landed\n\n- **`packages/spec/src/ui/component.zod.ts`** — one `ComponentPropsMap` row per type, via the existing `emptyProps` factory (strict, empty accept set). Key sets measured from the renderers' ACTUAL read points at the pinned `.objectui-sha` (`190fbd01d0`), never from the registrations' declared-input claims:\n  - objectui `packages/app-shell/src/console/cloud-connection/CloudConnectionPanel.tsx` — the registration lambda renders the component bare and discards the schema node; the component function takes no parameters. Accepted key set: EMPTY.\n  - objectui `packages/app-shell/src/console/marketplace/InstalledListWidget.tsx` — same shape: registration lambda discards the schema node, component takes no parameters. Accepted key set: EMPTY.\n  - The registrations' declared `inputs: []` happen to agree with the measurement here (unlike #8691/#8744, where they diverged); the rows record the measurement, not the claim. Per the card, no keys were invented to fill a row — an empty strict row is the measured outcome.\n- **`packages/cloud-connection/src/canonical-expression-envelopes.test.ts`** — the two `exemptUnmappedTypes` entries and the emptiness pins deleted, exactly as the gate's exact-set assert demands in the same PR; the exemption machinery stays for future unmapped types.\n- **Pins** — spec-side (`component.test.ts`: rows defined, empty bag accepted, any key refused naming the surface) and lint-side dispatch pins (`validate-component-props.test.ts`, #11575 suite).\n- **ADR-0087** — semantic migration entry `ui-cloud-connection-widgets-unknown-keys-refused` under protocol major 18 + regenerated registry; changeset `@objectstack/spec: minor` with BREAKING prose and the registered disposition marker (#8744 precedent).\n\n## Verification (all at merged head `b60e520de`, after `git merge origin/main`)\n\n- `pnpm --filter @objectstack/spec test` — 420 files / 11225 tests passed; `typecheck` OK (test layer held at 55 files / 263 errors in the shrink-only debt ledger, unchanged).\n- `pnpm --filter @objectstack/lint test` — 81 files / 2274 tests passed; `typecheck` OK.\n- `pnpm --filter @objectstack/cloud-connection test` — 26 files / 281 tests passed (includes the edited envelope gate: door 3 now reads both bags; the exact-set assert holds with zero exemptions — which also proves the suite consumed the rebuilt spec dist, since against the old dist it reds).\n- `pnpm --filter @objectstack/spec check:generated` — \"All 14 generated artifacts are up to date\" (only the migration registry needed regenerating; no new exports, so api-surface / docs / authorable-surface are unchanged — the map rows are BFS-unreachable from metadata roots by design, per the file's own header measurement).\n- Gate families derived by `node scripts/pm/dispatch-gates.mjs` (no hand-built path list; the derivation's stderr named this repo and my HEAD, change set 7 paths vs merge base). All path-derived and convention-triggered families green, with two declared deviations:\n  - `check:dev-prereqs` — red on \"workspace is not built\" (37/67 package dists absent in this fresh worktree): a build-state precondition, not a diff finding; every package my diff touches is built; CI builds fresh.\n  - `check:type-check-debt` — NARROWED (declared): the re-measure population is the DEBT ledger in `scripts/check-type-check-coverage.mjs`; the only DEBT entry among my touched packages is `@objectstack/cloud-connection`, re-measured with the gate's own measurement (`tsc --noEmit` in the package): 13 errors = the recorded 13, and none of them are in the file this PR edits. spec and lint are typecheck-covered (not DEBT) and their full typechecks ran green. The full-farm re-measure is CI's.\n- Ratchet families re-run at the merged head b60e520de: `check:type-check-coverage`, `check:query-options-erasure`, `check:engine-double-contract`, `check:where-matcher`, `check:cross-package-test-inputs` — all green.\n\n## Reverse verification (ablation — both legs rebuilt, both proven on disk)\n\nFix committed first. **RED leg:** the two map rows deleted (anchored greps on the exact row text 1/1 to 0/0 = mutation proof on disk), spec rebuilt, `scripts/ablation-dist-preflight.mjs` proved the compiled row markers ABSENT from all 209 built files — then the three suites went red in exactly the new pins: spec 3 (the whole #11575 describe), lint 2 (the loud dispatch pins), cloud-connection 2 (the exact-set asserts). **GREEN leg:** restore from HEAD (greps 0/0 to 1/1, porcelain clean), rebuilt, preflight proved the markers PRESENT in `dist/ui/index.js` and `.mjs`, all three suites exit 0. Both leg scripts carried trap-based restores. Note: the lint suite's third pin (empty bag stays silent) is green in both states by design — its value is guarding the accept face, not the row's existence.\n\nClause-②: this PR changes accept behaviour on a published face (silently-accepted authored keys become validated refusals) — draft; the contract-review chain runs before enqueue.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Rxnd8cyFnoU8V5y21PaTsy)_"
+}

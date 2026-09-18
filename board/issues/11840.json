@@ -1,0 +1,35 @@
+{
+  "number": 11840,
+  "kind": "pull_request",
+  "title": "fix(plugin-reports): infer export columns from every row, not the first 50",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T20:13:25Z",
+  "updated_at": "2026-08-24T20:46:04Z",
+  "closed_at": "2026-08-24T20:46:03Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": "2026-08-24T20:46:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11840",
+  "body": "Fixes #11774\n\n## The defect\n\n`pickFields()` in `packages/plugins/plugin-reports/src/report-service.ts` inferred an export's columns from `rows.slice(0, 50)`, while the projection those columns drive was applied to **all** rows. With no explicit `query.fields`, any key whose first occurrence fell at row 51 or later was absent from the header **and** dropped from every row that carried it.\n\nThe export gave no signal: well-formed CSV, uniform arity across rows, nothing marking a column as inferred rather than declared. A recipient of a scheduled report attachment could not tell. And the sampled prefix is not a random sample — it is the query's first page in its own `orderBy`, so for a report sorted by status or created date it correlated with exactly the sparse column it dropped. Sparse columns are the normal shape of report output: an optional field, a formula only some records satisfy, a lookup that resolves for a subset.\n\nBoth affected renderers are fixed — `renderCsv` (which is also `renderReport`'s `default:` branch) and `renderHtmlTable`. `renderJson` emits rows as-is and was never affected.\n\n## Route taken, and why\n\nTwo routes restore the same stated contract (\"the export carries every field present in the result set\"). I took **scan every row**, not *project from the saved report's declared column set*:\n\n- `ReportQuery.fields` is **optional** in `packages/spec/src/contracts/report-service.ts`. For a saved report that declares none there is no declared column set to project from, so that route would have to either make `fields` required or derive columns from the object's schema through a new `ReportEngine` capability — **a new declared surface either way**, which this card does not carry (triage's premise-first stop). Route rejected on that ground rather than on cost.\n- `renderReport` is exported from the package and takes `(rows, format, fields?)` with no access to a saved report at all, so the declared-set route cannot reach that surface even in principle.\n\n### Cost, measured\n\nThe card names the real concern: scanning every row is O(rows × keys) **on the export path**. Measured (`node`, same shapes, 100 iters, the sparse key on the last row):\n\n| rows × keys | sample-50 | full scan | delta | `renderCsv` body pass | scan as % of the render it feeds |\n|---|---|---|---|---|---|\n| 1 000 × 20 | 0.111 ms | 0.841 ms | +0.73 ms | 2.515 ms | 29.0 % |\n| 5 000 × 20 | 0.052 ms | 4.228 ms | +4.18 ms | 12.870 ms | 32.5 % |\n| 5 000 × 50 | 0.120 ms | 12.763 ms | +12.64 ms | 36.675 ms | 34.5 % |\n| 50 000 × 50 | 0.110 ms | 129.808 ms | +129.70 ms | 432.651 ms | 30.0 % |\n\nThe cost is bounded twice over. The row array reaching the renderer is already capped by `Math.min(query.limit ?? 1000, maxRows)` (`maxRows` defaults to 5000), and both renderers already make an O(rows × cols) pass over that same array. Inference is a **stable ~30 % of the render it feeds** across every shape measured — a fraction of work the export path already does unconditionally, not a new order of magnitude. At the service's own default cap that is +4.2 ms.\n\nFirst-seen column order is preserved and late-appearing columns append, so **an export that was already correct is byte-identical**.\n\n## Pin\n\nWritten test-first, with the expected failure signature predicted in writing before the first run — and the run matched it exactly (`3 failed | 76 passed`, `AssertionError: expected [ 'id', 'status' ] to include 'escalation_note'` on all three).\n\nFixture: 60 rows sharing `id` + `status`, with **only row 55** carrying `escalation_note` — a key first appearing past the old sample boundary. Three tests, covering both renderers and the end-to-end service path:\n\n- `renderReport(..., 'csv')` — the named late column reaches the header, and `'breached SLA'` arrives in row 55 **under that column's index**, and nowhere else.\n- `renderReport(..., 'html_table')` — the same two facts against parsed `<th>` / `<td>` cells.\n- `ReportService.run()` over a saved report declaring **no** `query.fields` — the scheduled-attachment path end to end.\n\nIdentities are pinned, not counts: each asserts the **named** column and its **value**, plus `toEqual(['id', 'status', 'escalation_note'])` for order. That mattered in practice — the order assertion caught a bug in the test's own `<th>` extraction (`<th[^>]*>` also matches `<thead>`), which a `toContain`-only pin would have hidden. `toHaveLength(3)` would have missed it too.\n\nThe pre-existing `'auto-detects fields from first 50 rows when none specified'` asserted `toMatch(/a|b/)` — an alternation that passes either way. It is renamed and strengthened to `toEqual(['a', 'b'])`; it was never part of the red.\n\n## Verification\n\n`Test Files 5 passed (5)` · `Tests 79 passed (79)` — `pnpm --filter @objectstack/plugin-reports test`, at `0a163296c7`.\n`tsc --noEmit` clean, exit 0 — `pnpm --filter @objectstack/plugin-reports typecheck`.\n\nGates derived at `0a163296c7` on a clean tree via `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (no path arguments). 17 of 18 green with exit codes captured before any pipe. The 18th, `check:type-check-debt`, **refused to measure** on this worktree (its documented unbuilt-closure refusal — \"41 workspace dependencies ... have no built type entry point on disk\"); it is recorded as NOT MEASURED, not as a pass. See the report comment on #11774 for the full per-gate verdict lines and the narrowing evidence.\n\n## Contract review\n\nClause ② assessed against the diff, not inherited: **NO**. The whole source diff is one hunk inside the module-private `pickFields` (referenced nowhere outside the file); the file's exported symbol list is byte-identical base vs head (7 exports, same signatures); `src/index.ts` and `packages/spec/` are untouched. Nothing here accepts or rejects — `pickFields` has no refusal path, no error code, no schema — so no accept/reject surface moves and no public surface widens. What changes is that the export now carries columns it was already contractually required to carry.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01APWX2AwT3a4xDcjPCe8bk4)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01APWX2AwT3a4xDcjPCe8bk4)_"
+}

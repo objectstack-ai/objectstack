@@ -1,0 +1,33 @@
+{
+  "number": 11711,
+  "kind": "issue",
+  "title": "[finding] docs-audit: a UNICODE identifier character still mints a silent phantom row — `\\w` is ASCII-only, so the new key lookbehind does not reach `éroute:`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T13:44:18Z",
+  "updated_at": "2026-08-24T15:45:40Z",
+  "closed_at": "2026-08-24T15:45:26Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11711",
+  "body": "Filed unassigned by the `os-dev` seat implementing #11630 (session `session_015ahemw8RcTgqtxrj15PEZx`). **Recording, not fixing.** Like #11630 and #11542 before it, this moves a MEASURED POPULATION, which the header of `--bridge-coverage` attaches a before/after standard to. **No live instance on today's tree.**\n\n## What\n\n#11630 widened `declLead`'s key anchor in `scripts/docs-audit/affected-docs.mjs` from a word boundary to a negative lookbehind excluding word characters, `$` and `.`. That closed `$route:` (identifier continuation) and `cond ? obj.route : x` (member access).\n\nThe residue is the character class itself: **`\\w` is ASCII-only** (`[A-Za-z0-9_]`). A Unicode identifier character is not in `\\w`, so it is admitted by the new lookbehind exactly as it was by the word boundary:\n\n```ts\nexport const L = [\n  { éroute: 'GET /api/v1/gone', family: 'metadata', disposition: 'sdk' },\n  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },\n];\n```\n\n⇒ `rows 2 · routesDeclared 2 · clientsDeclared 1 · declined 0 · outsideCode 0 · brokenScan 0`\n\nA file declaring **one** `route:` produces **two** rows. `éroute` is a legal JS identifier, so this is the same defect class as #11630's `$route:`, one character set further out. Measured on the #11630 branch through `parseLedgerSource` driven by `--self-test`, i.e. **after** the lookbehind lands.\n\n## Why it is silent\n\nSilent for the reason #10683 / #10793 / #11542 / #11630 were: the partial-read verdict keys on the gap between `rows` and `routesDeclared`, and all eight scans read the same spelling, so both terms move together and no verdict fires. `outsideCode` cannot see it either — the lead genuinely IS in code position.\n\n## Why #11630 did not fold it in\n\nClosing it means a `\\p{L}`-class lookbehind under the `u` flag. The eight lead scans **compose** `declLead`'s output with other regex sources at their call sites (`/'([^']+)'/.source`, `/([\"`])([^\\n]{0,120})/.source`, a bare `\"'\"`), and the `u` flag changes escape semantics for the whole composed pattern — so this is a change to all eight call sites' compiled behaviour, not a one-line character-class edit. It needs its own before/after priced against the header of `--bridge-coverage`, at row identity.\n\n⚠️ The exact regex is deliberately NOT spelled out on this card. GitHub's body sanitizer strips the less-than + bang digraph out of an issue or PR body — inside a code span and inside a fenced block alike — and silently leaves a **different, valid-looking** regex behind; #11630's first revision carried the corrupted form in two places. Read the verbatim spelling from `declLead`'s docblock and the `--self-test` boundary comment in `scripts/docs-audit/affected-docs.mjs`, which the sanitizer cannot reach.\n\n## Measured, so the \"no live instance\" claim is a reading and not a blind scan\n\nAcross the seven live route ledgers there are **499** `route:` / `client:` lead occurrences and **every one is preceded by a space** — 0 preceded by any non-word character of any kind, Unicode included. Positive control: the same tally reports `$`, `.` and a word character correctly the moment a fixture carries them.\n\n## Pinned, so a card that closes it MOVES a pin\n\n`--self-test` on the #11630 branch pins today's behaviour as *deliberately unmoved*:\n\n```\n'a UNICODE-prefixed lead still mints a phantom row — residue, deliberately unmoved'\n```\n\n## Direction, not a prescription\n\n1. **Widen the class to `\\p{L}`-aware under the `u` flag**, in the one place, and price the composed-call-site change at all eight sites.\n2. **Leave it.** No live instance, and a Unicode-prefixed key in a route ledger is a shape no author has written.\n3. The framing #11630's card raised as its option 3 and did not take, still worth naming rather than assuming away: is a **key allowlist** (`route` / `client` and nothing else, matched whole) the right end state for all eight scans, rather than a widening chain of negative lookbehinds? That would retire this family rather than shrink it once more, and it subsumes this card.\n\nRefs: #11630, #11634, #11542, #11494, #10901, #10793, #10683, #10500.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 11938,
+  "kind": "issue",
+  "title": "`pnpm test` is OOM-killed at turbo's default concurrency on a 4-CPU/15 GB container — exit 137, 16 of 91 tasks never run",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T01:41:37Z",
+  "updated_at": "2026-08-25T03:48:06Z",
+  "closed_at": "2026-08-25T03:48:06Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11938",
+  "body": "Found while taking the machine-lane baseline for the QA wave (#9296, round #9298). Filed as a finding, not fixed — R0 lands no code.\n\n## Summary\n\n`pnpm test` (i.e. `turbo run test` with no `--concurrency`) is **killed by the kernel cgroup OOM killer** on this container. It does not report a failing test — it dies. Reproduced twice; each run was killed at a **different** package, which is the signature of a resource kill rather than a package defect.\n\n`turbo.json` declares no `concurrency`, so turbo defaults to **10** parallel tasks. This box is **4 CPU / ~15 GB**. Ten concurrent `test` tasks, each forking its own vitest worker pool, exceeds the memory allowance.\n\n## Environment\n\n- framework sha: `1f6d04703df8f518c80d0fbaa8b19262068e405d` (tip of `main` at run time)\n- `.objectui-sha`: `190fbd01d0615e2e168faf9e08b8ad7844bc039d`\n- node v22.22.2, pnpm 10.31.0, linux x64, `nproc=4`, 15 GB RAM\n- fresh `git worktree add --detach` + a single `pnpm install`; deps prebuilt; run serialized under the shared verify lock (no other seat's gate running)\n\n## Reproduction\n\n```bash\npnpm test\n```\n\n**Run 1** — exit **137**, 7m48s:\n\n```\n@objectstack/service-storage#test:  ERROR  command (…/packages/services/service-storage) pnpm run test exited (137)\n\n Tasks:    75 successful, 91 total\nCached:    45 cached, 91 total\n  Time:    7m47.442s\nFailed:    @objectstack/service-storage#test\n\n ERROR  run failed: command  exited (137)\n```\n\n**Run 2** — exit **137**, 6m57s, killed at a *different* package:\n\n```\n@objectstack/metadata-protocol#test:  ERROR  command (…/packages/metadata-protocol) pnpm run test exited (137)\n\n Tasks:    75 cached, 91 total\n  Time:    6m57.19s\nFailed:    @objectstack/metadata-protocol#test\n```\n\nRun 1 carried `NODE_OPTIONS=--max-old-space-size=4096`; **run 2 was run plain, with no `NODE_OPTIONS` at all**, and died the same way. The heap flag is not the cause.\n\nKernel confirmation (`dmesg`), two events, one per run:\n\n```\nMemory cgroup out of memory: Killed process 28332 (node) total-vm:45803420kB, anon-rss:820896kB, …\n```\n\n## No test actually failed\n\nThis is the part that matters for reading the gate. Across both runs, **zero vitest summaries reported a failing test**:\n\n| | run 1 | run 2 |\n|---|---|---|\n| vitest summaries emitted | 31 | 31 |\n| tests passed | 8 914 | 8 914 |\n| tests failed | **0** | **0** |\n| turbo tasks successful | 75 / 91 | 75 / 91 |\n\nThe eight packages that logged `ELIFECYCLE Test failed` (`objectql`, `spec`, `driver-sql`, `plugin-sharing`, `metadata-protocol`, `service-analytics`, `plugin-audit`, `service-storage` in run 1) emitted **no vitest failure summary** — they were torn down by the kill, not reddened by an assertion. Read naively, the gate looks like eight broken packages; it is one OOM.\n\n**16 of 91 tasks never ran at all.** A run that ends this way covers an unknown subset of the repo, so it cannot be reported as a pass *or* as a product failure.\n\n## What does work\n\nCutting the fan-out completes the suite:\n\n```\npnpm exec turbo run test --continue --concurrency=2\n Tasks:    135 successful, 136 total\n  Time:    30m38.998s\n```\n\nPeak memory during that run stayed around 7.6 GB used, versus the OOM at default fan-out.\n\n## Relationship to prior art\n\nSame *class* as #9311 (closed, fixed) — a `pnpm test` at default concurrency that reds for reasons unrelated to the code under test — but a **different mechanism**: #9311 was two default-vitest-timeout cases losing a CPU race, and was correctly fixed by giving those cases real timeouts. This one is memory, not time, and no per-test timeout can address it. #9311 explicitly left the broader question open:\n\n> Separately worth a maintainer decision: whether `turbo.json` should pin a `concurrency` proportional to available CPUs, so the whole suite stops depending on runner size.\n\nThis issue is that question arriving with a measurement behind it. See also #4845 (closed) for the precedent that this repo's memory ceiling is a real constraint, not a theoretical one.\n\n## Suggested direction (not implemented here)\n\nDecide whether `pnpm test` should be runnable on a small box at all, and if so how:\n\n- pin `concurrency` in `turbo.json` (or in the `test` script) proportional to `nproc`, so the suite stops depending on runner size; or\n- leave the default and document `--concurrency=2` as the supported invocation on constrained runners, so agents and contributors stop reading an OOM as eight broken packages.\n\nThe first option is a repo-wide behaviour change and is a maintainer call, which is why nothing is changed here.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015ahemw8RcTgqtxrj15PEZx)_"
+}

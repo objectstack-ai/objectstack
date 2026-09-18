@@ -1,0 +1,36 @@
+{
+  "number": 11889,
+  "kind": "issue",
+  "title": "state-machine.md: doc rows for H29/H30/H31 — docs-only PR after #11874 merges, paid by consolidation at 43/43",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "finding",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T23:02:09Z",
+  "updated_at": "2026-08-25T01:51:26Z",
+  "closed_at": "2026-08-25T01:51:26Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11889",
+  "body": "Blocked-by: #11747\n\nFollow-up split out of #11179 (ruled option B on its report's open question 2, ACCEPT comment on that card) — the seat-facing reference rows for the three invariants PR #11884 lands in `scripts/pm/check-half-states.mjs`:\n\n1. The general pm-state ONE-OF (H29): the six-member vocabulary is mutually exclusive intent; every transition is a replace, never an add.\n2. The `pm:queue` rot horizon (H30): 3 days, derived from the 2026-08-24 live distribution — the queue is the one state where waiting is not a state.\n3. The contract-review dual-carrier postcondition (H31): hung in one stroke, cleared in one stroke, card and PR both, read-back each way.\n\n## Why blocked, and the payment plan\n\n`references/state-machine.md` sits at line-ratchet ceiling **43/43**, and every currently-consolidatable line is inside PR #11874's hunks (the `pm:blocked` section it rewrites). Landing these rows before that merge would force exactly the textual conflict #11179's dispatch avoided. Once #11874 (and #11884) are on `main`: one docs-only PR, rows paid by consolidation from the then-uncontested purse, ceiling raise only if the arithmetic is argued. The file already names `check-half-states.mjs` as the enforcement authority, so nothing is un-enforced in the meantime — this card is about the seat-facing reference catching up, not about the mechanism.\n\nRefs: #11179 (the ruling and inventory) · PR #11884 (H29/H30/H31) · #11747 / PR #11874 (the in-flight hunks this waits on)."
+}

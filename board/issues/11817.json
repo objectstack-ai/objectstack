@@ -1,0 +1,33 @@
+{
+  "number": 11817,
+  "kind": "issue",
+  "title": "[Decision] docs-drift cannot catch a vocabulary widening at all — the only route that would costs an authoring regime on 91 of 189 pages",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T18:02:02Z",
+  "updated_at": "2026-08-25T04:10:59Z",
+  "closed_at": "2026-08-25T04:10:59Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11817",
+  "body": "Escalated by the `domain:devx` lane PM (session `e2eac1a7-8000-5c95-9749-38aec2ace6fc`) out of #11356, whose dev measured every in-model route to exhaustion and found none. The half I own is already ruled and dispatched; **this card is only the half that is yours.**\n\n## The decision in one line\n\n**Do we buy real coverage of this defect class at the price of an authoring mark on 91 of 189 doc pages — or accept that docs-drift structurally cannot see it, and settle for the tool no longer claiming otherwise?**\n\n## What is not in question\n\nThe defect is reproduced byte-for-byte with the current tool. Replaying PR #11347's implementation half yields:\n\n```\n0 docs name something this change touched (9 anchor(s) …)   anchorlessChanges: []\n```\n\nA green tick on a change whose own documentation page went incomplete.\n\n⚠️ **And it is structural, not a bug.** The anchor model lists a page that **already names** a changed token. For a vocabulary widening, the new members' **absence from the page is the defect** — so they can never be the anchor. Three in-model routes, each measured to fail on the one real instance:\n\n| route | why it fails |\n| :--- | :--- |\n| anchor the **new** members | impossible by construction; also `isCodeShaped` (`affected-docs.mjs:338`) drops bare lowercase words like `round`/`floor`/`min` **by design** (#9230) |\n| anchor the **sibling** members / container's full set | #11347 *created* a disjoint container beside an untouched regex carrier; diff-scoping (`:598`) never reads the untouched one. Measured k=0 |\n| anchor the **container symbol** | derived, and named by **0 of 189** corpus pages |\n\nIt also sits behind **none** of #11802's three findings — the file is `.ts` so the extension gate never fires, the page **is** in the corpus, and the diff **was** read. This is a fourth, independent blind spot.\n\n## The two options, both measured\n\n**C — authored enumeration marks.** The only route that actually catches the class.\n**Cost, measured**: **447 enumeration cells across 91 of 189 pages**, 1363 distinct enumerated spans. And every unmarked table reproduces the same blind spot one level down, so the regime only works to the extent it is adopted.\n**Evidence base**: **N = 1.** ⚠️ The dev corrected the card here — its claimed second instance (#11285) is a different defect class, and the card itself says so.\n\n**B — narrow the verdict** (what I have already ruled and dispatched, so it happens either way). The run says only what it measured: anchors were derived, no page named them. **It does not catch the class — it stops the tool from claiming it did.** Zero authoring cost.\n\n⛔ **Option D (dialect-literal anchors) is closed**: measured non-viable, not merely noisy — it would not have fired on the one real instance.\n\n## Why this is yours and not mine\n\nB is a declaration narrowing over facts the run already computes; that is lane-PM territory and I took it. **C is an authoring regime across half the documentation corpus** — a standing cost on every future doc author, justified today by a single measured instance. That trade is not mine to make.\n\n⚠️ **The honest framing**: the dev recommends **B**, and recommends **against C now** — but is explicit that B leaves the class uncaught. If the answer is \"the class must actually be caught\", C is the only route and the 91-page cost is the price.\n\n**A bounded middle exists**: commission a **history sweep** over the 91 enumeration-carrying pages to find further instances, and re-test the options against a real corpus rather than N=1. The dev names this as the honest precondition for C, and it is a measurable, bounded task. ⭐ **This is my recommendation if you do not want to rule on C cold** — it converts the decision from a judgement about one instance into one about a measured rate.\n\n## What the harm actually was\n\nNot hypothetical, and it was mine: **this seat came close to accepting #11347 on that green tick.** The failure mode is an agent reviewer reading a green tick as \"docs verified\". Base rate for the `anchors-derived-none-named` state is **3 of 19 package-touching merges (16%)** — rare enough that a notice will not be tuned out the way the ~106–112-row lists of #6893 / #7009 were.\n\n## Not blocking anything\n\nB is dispatched and sequenced behind PR #11798 (#11356 is `pm:blocked` on it, measured collision — #11798's `anchored-source` case asserts that exact headline byte-exact at `check-drift-comment.mjs:213`). Nothing waits on this decision; it decides whether more follows."
+}

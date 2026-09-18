@@ -1,0 +1,35 @@
+{
+  "number": 11683,
+  "kind": "issue",
+  "title": "rest: the record-share routes classify refusals by `message.startsWith(CODE)` and interpolate `error.message` into a hand-built 500 — a declared `status`/`code` is ignored and the sandbox wrapper reaches the client",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T12:03:53Z",
+  "updated_at": "2026-08-25T00:22:21Z",
+  "closed_at": "2026-08-25T00:22:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11683",
+  "body": "Filed unassigned while implementing #11588 (the sandbox debug wrapper on the bulk write routes). Out of scope there: #11588's table names six routes and this is a **third** branch again, with a different defect on top of the shared one.\n\n## Measured\n\n`packages/rest/src/rest-server.ts`, the record-share family — `GET`/`POST /api/v1/data/:object/:id/shares` and `DELETE …/shares/:shareId`. All three catches are:\n\n```ts\n} catch (error: any) {\n    if (respondSharingError(res, error)) return;\n    logError('[REST] Grant share error:', error);\n    respondError(res, 500, 'SHARE_GRANT_FAILED', String(error?.message ?? error).slice(0, 500));\n}\n```\n\nand `respondSharingError` is:\n\n```ts\nconst msg = String(error?.message ?? error ?? '');\nconst map: Array<[ErrorCode, number]> = [\n    ['VALIDATION_FAILED', 400], ['PERMISSION_DENIED', 403], ['NOT_FOUND', 404],\n    ['CONFLICT', 409], ['SHARING_NOT_ENABLED', 422],\n];\nfor (const [code, status] of map) {\n    if (msg.startsWith(code)) { respondError(res, status, code, msg.replace(...)); return true; }\n}\nreturn false;\n```\n\nTwo independent problems, both on the same read of `error.message`:\n\n1. **A declared `status` / `code` is ignored entirely.** These routes touch neither `classifyDataError`'s unwrap door nor `resolveErrorResponse`'s declared-status passthrough. A producer that throws `Object.assign(new Error(msg), { code: 'RECORD_LOCKED', status: 409 })` — the ADR-0112 envelope every other `/data` face honours — is answered `500 SHARE_GRANT_FAILED`, because `'RECORD_LOCKED'` is not one of the five prefixes. This is the same \"classification is a property of the message's wording\" shape #5352/#5367 paid off on `/analytics/dataset/query`, still standing here.\n\n2. **The sandbox debug wrapper reaches the client**, which is #11588's defect on a branch #11588 did not fix. A sandboxed hook refusal arrives with `.message` = `hook '<name>' threw: Error: <business text>` and `.innerMessage` = the business text. `msg.startsWith(CODE)` never matches (the wrapper is the prefix), so it falls to the `500` arm and the wrapper is interpolated verbatim.\n\n## Why it was not fixed in #11588\n\n#11588's dispatch fenced the card to the six routes its table measured, and this family is not among them. It is also a larger repair than the message read: the right answer is almost certainly to route these three catches through `handleRouteError` like every other `/data` route, which changes their status/code answers, not just their prose — a behaviour change that deserves its own card and its own pins.\n\n## Not established here\n\n- Whether any producer in the sharing service currently throws a declared `code`/`status` envelope, or whether all of them still use the `CODE: message` string convention these prefixes were written for. If the latter, problem 1 is latent rather than live — but the convention is the thing #5367 removed elsewhere.\n- Severity not judged.\n\nRegion: `packages/rest/src/rest-server.ts`, `respondSharingError` and the three share-route catches only."
+}

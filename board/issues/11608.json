@@ -1,0 +1,35 @@
+{
+  "number": 11608,
+  "kind": "issue",
+  "title": "lint: `validate-translation-references` has no `flows` leg — an authored key naming a flow, screen node or field that does not exist warns nobody",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T08:16:29Z",
+  "updated_at": "2026-08-24T15:33:59Z",
+  "closed_at": "2026-08-24T15:33:59Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11608",
+  "body": "Filed unassigned by the `domain:cli` seat while implementing #11485 (item 3 of that card: *\"decide whether reference-validation for `flows` belongs here or as its own card\"*). The decision, with the evidence below, is **its own card** — `packages/lint` is outside #11485's declared file surface, and the work is not a rider on it.\n\n## Measured\n\n`packages/lint/src/validate-translation-references.ts` walks `objects`, `globalActions`, `apps` and `dashboards`; an unrecognised top-level namespace is skipped, never reported (its own header says so, about the object-first `AppTranslationBundle` shape). `flows` is one of those unrecognised namespaces, so every level of the group goes unchecked.\n\nProbe against the rule's own entry point (`validateTranslationReferences`), one bundle naming three things that do not exist:\n\n```ts\nflows:      { no_such_flow: { label: 'x', screens: { no_such_node: { title: 'y',\n              fields: { no_such_field: { label: 'z' } } } } } },\ndashboards: { no_such_dashboard: { label: 'x' } },\nobjects:    { no_such_object: { label: 'x' } },\n```\n\n```\nfindings: 2\n - translation-target-unknown  …zh-CN.objects.no_such_object\n - translation-target-unknown  …zh-CN.dashboards.no_such_dashboard\nflows-related findings: 0\n```\n\nThe sibling namespaces each report their orphan. The flow, the screen node id and the field name produce nothing.\n\n## Why it matters\n\nThis is the same failure the rule exists for, one namespace over: the key parses (the schema declares the group), ships, and silently resolves to nothing, so the wizard renders its source-locale string while every other label on the screen is translated. All three levels are exact-match identifiers with a small enumerable universe, so they are resolvable exactly the way `dashboards` → `widgets` already is:\n\n| level | key | declared by |\n|:---|:---|:---|\n| flow | `Flow.name` | `flow.zod.ts` |\n| screen | `FlowNode.id` | `flow.zod.ts` (`type: 'screen'` nodes) |\n| field | `ScreenFieldConfig.name` | `builtin-node-config.zod.ts` |\n\n## Shape of the fix\n\nA `flows` leg mirroring the `dashboards` → `widgets` leg (~50 lines there), plus a universe collector for the three nesting levels, the `suggest()` / `listNames()` tables each level needs, and tests. Severity `warning`, like every other finding in this rule (ADR-0072 D1 — an orphan key is inert, not broken).\n\n## Ordering\n\nNo dependency in either direction with #11485. That card never authors bundle keys — `os i18n extract` derives every key it writes from live metadata, so a scaffolded key resolves by construction. This rule is about **hand-authored** keys, and it becomes worth having precisely once authors have flows keys to hand-edit, which #11485 is what makes possible. So: downstream in value, independent in code.\n\nRefs: #11485 · #11287 (declared the `flows` group and its resolver) · #7646."
+}

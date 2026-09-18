@@ -1,0 +1,34 @@
+{
+  "number": 11987,
+  "kind": "pull_request",
+  "title": "review-checklist: add the git-first spot-check row, paid by in-place compression",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T03:49:48Z",
+  "updated_at": "2026-08-25T05:25:27Z",
+  "closed_at": "2026-08-25T05:25:25Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T05:25:25Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11987",
+  "body": "Closes #11872\n\nAdds the git-first spot-check row to `.claude/skills/pm-dispatch/references/review-checklist.md`, the review half of the read-order rule whose instruction half already landed in `.claude/agents/os-dev.md` and `dispatch-runbook.md`. One file, net 0 lines.\n\n## The row\n\n> **报告 `tests`/证据里有 git 本可回答的 API 读吗?**(dev 契约的读序是 git → REST → MCP/GraphQL)判据:MCP `list_issues`/`search_issues` 一类 GraphQL 读,或重跑派发词已下发的去重读数 —— fetch 之后本地 git 就答得了文件内容、diff、提交史与分支态。⛔ 不因此判 REWORK,ACCEPT 照给,但把这条记进 ACCEPT 评论:复核不记它,退化就没有任何地方看得见。\n\nFlag, not a verdict: the report stays acceptable and the ACCEPT still goes out — what the row buys is that the pattern becomes visible at review, which the evidence reading alone does not deliver.\n\n## The ceiling, and how the row was paid for\n\n**The card says 82/82; the file on `origin/main` is at 84/84.** The re-pin that landed the 120-byte max-line rule moved this ceiling as part of its wholesale re-wrap, after the card was written. The constraint is unchanged — headroom 0, shrink-only, maintainer-only to raise — so the card's instruction stands exactly as written; only the number is stale. **The ceiling in `scripts/pm/check-skill-line-ratchet.mjs` is untouched by this PR.**\n\nTwo payments, both in place:\n\n**1. The two closing-keyword rows merge into one — 8 lines → 5.** Real compression: both rows carried the parser facts and the same pointer at the platform-readings table. Every check survives, in the same chronological order:\n\n| substance | before | after |\n| --- | --- | --- |\n| pre-ready scan of the body's closing-keyword shape | row 1 | 「翻 ready 前扫正文」 |\n| ⛔ never put a closing keyword beside another open card's number | row 1 | kept verbatim in intent |\n| the negation sentence written to prevent a misclose IS the misclose | row 1 | kept |\n| half-state patroller only walks open PRs ⇒ this scan is the last human gate before merge | row 1 | kept |\n| post-merge read of each related card's `closed_by_pull_requests` | row 2 | 「合并后读每张相关卡的 `closed_by_pull_requests`」 |\n| confirm the right card closed **and** that no other card was closed with it | row 2 | kept |\n| parser ignores negation | both rows | stated once |\n| body and commit message parsed separately + pointer to the readings table | both rows | stated once |\n| a misclosed card hides as `completed` from every open-only filter; this read is the only mechanical catch | row 2 | kept |\n\n**2. The CI-convergence row re-wrapped at the corpus's own 120-byte width — 8 lines → 7.** No word changed. Proved the way the re-wrap that introduced the rule proved itself:\n\n```\nCI row byte-identical after whitespace normalization: true | normalized bytes: 688 vs 688\ninline code spans identical in sequence: true\nlines: 8 -> 7\n```\n\nLedger: −3 −1 +4 = **0**. `check-skill-line-ratchet` reads `review-checklist.md is 84 lines (ceiling 84; headroom 0)` — same ceiling, same headroom, one more check on the list.\n\n## Verification\n\nGate family derived from the real change set, not recalled: `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (9 families). Union run **after the final commit, at `6f7dfe58d`** — every one green, exit code captured before any pipe:\n\n| gate | verdict line |\n| --- | --- |\n| `check:pm-skill-ratchet` | `✓ check-skill-line-ratchet: …review-checklist.md is 84 lines (ceiling 84; headroom 0).` + `✓ self-test: 71 cases pass.` |\n| `check:pm-skill-id-lint` | `✓ check-skill-id-lint: 22 file(s) clean (pattern /#[0-9]{3,}/g).` |\n| `check:skill-frame-sync` | `✓ check-skill-frame-sync self-test: 12 cases pass, plus 5 dispatch-gates declaration cases.` |\n| `check:doc-authoring` | `✓ doc authoring guard: 389 files clean` · `✓ 38 published skill files clean` |\n| `check:required-contexts` | `✓ check-required-contexts --self-test: 150 assertions` (both legs exit 0) |\n| `check:pm-governed-merges` | `✓ check-governed-merges --self-test: 129 assertions` |\n| `check:agent-test-spelling` | `✓ check-agent-test-spelling --self-test: all cases pass` |\n| `check:doc-formula-expressions` | `✓ …: 22 record-scoped formula example(s) across 421 files / 1448 TS blocks judged clean` |\n| `check:nul-bytes` | `check-nul-bytes: OK (scanned 6658 text file(s) … no raw ASCII control bytes).` |\n\nPlus a self-scan of the edited file for control bytes (`grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]'`) — no match.\n\n**Declared narrowing — the repo-wide `pnpm lint`:** not run, and empty by construction rather than skipped. Its governed population is read from eslint's own config, not guessed: none of the 7 config blocks in `eslint.config.mjs` carries a `files` pattern that matches markdown, so the one path in this diff is outside what `eslint .` judges. With no type-aware linting reaching a `.md` file, this diff cannot move a verdict on any untouched file either. CI runs the full farm regardless.\n\n**Changeset:** none. `.claude/`-only, internal agent tooling, publishes nothing; the `skip-changeset` label carries that declaration in this repo.\n\nDraft on purpose: `.claude/skills/**` is a governed surface, so this one merges by a human.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01RMTpSRF5CjMmQBFfPtPCwJ)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RMTpSRF5CjMmQBFfPtPCwJ)_"
+}

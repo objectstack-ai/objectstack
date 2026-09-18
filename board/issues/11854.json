@@ -1,0 +1,33 @@
+{
+  "number": 11854,
+  "kind": "pull_request",
+  "title": "fix(tooling): see entry guards written inside template interpolations",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T21:18:44Z",
+  "updated_at": "2026-08-24T22:41:32Z",
+  "closed_at": "2026-08-24T22:41:31Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-24T22:41:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11854",
+  "body": "Fixes #11838\n\n## What\n\n`scripts/check-entry-guard.mjs` could not see an entry guard written inside a template literal: `codeOnly()` masks `comment || literal`, and `scanSource` reports an interpolation's bytes as the enclosing template's literal content. That is the documented contract and right for the mask's other callers, but it made the percent-encoding guard spelling — the one `invoked-as.mjs`'s own header singles out as going inert with **no symlink at all** — prose as far as the gate is concerned. Measured on this tree at `644ad5043` (and re-measured at branch base `a1c804bc9`): 0 findings for the template spelling, 1 for the plain one.\n\n## How — the landed downstream shape, ported, not re-derived\n\nPorted from objectui's `main` at/after `0c25598` (objectui PR objectstack-ai/objectui#6133, part of objectstack-ai/objectui#6092), then adapted to this repo's callers:\n\n- **`scripts/js-comment-mask.mjs`** — `scanSource` returns a third array, `interpolation`, marking the bytes a `${...}` interpolation contributes as code. `comment` and `literal` are **unchanged**, so every existing caller keeps the mask it had. Both load-bearing exclusions are ported with their tests:\n  - the `${` and its closing `}` stay masked, so a caller counting brackets stays balanced — including a **nested** interpolation's delimiters, which is the case that desynced the downstream statement slicer badly enough to report four genuinely-guarded files as running on import;\n  - a nested template's body inside the interpolation stays masked (snapshot of `literal` taken before the blanket flush), because those bytes really are content.\n- **`scripts/check-entry-guard.mjs`** — `codeOnly()` subtracts the interpolation span: `comment[i] || (literal[i] && !interpolation[i])`. No other caller of the mask is touched.\n- Self-tests: 12 new interpolation-view cases in the mask (35 total), 2 new pins in the gate (54 total) — the template-written guard is seen; a `process.argv[1]` in a template BODY outside any interpolation is still not a guard.\n\nThis repo's gate has no `KNOWN_HAND_TYPED_GUARDS` baseline (upstream was swept first); none was imported.\n\n## Evidence (all commands at `9baa4f055` unless stated; verdicts quoted from each gate's own output)\n\n**Fail-before / pass-after** — driving `scanFile` on the card's exact inputs: template spelling `0 -> 1` findings across the change; plain spelling `1 -> 1`.\n\n**Additivity proven, not asserted** — swept the corpus gate's own file list (`collectSources()`, 5,028 files): `comment` and `literal` byte-identical between the base (`a1c804bc9`) and new implementations — 0 mismatches in either array, with a positive control (a single flipped byte is detected by the same comparator). The new array is non-vacuous: 2,751 files carry interpolation-flagged bytes (418,043 bytes).\n\n**Corpus gate (first-class judge, exists only in this repo)** — `✓ comment-mask corpus sweep [scripts/js-comment-mask.mjs]: 5028 files, 0 disagree, 0 unparseable, 36.1s (comparator self-test: 12 cases pass).`\n\n**Full-tree gate verdict invariance** — `node scripts/check-entry-guard.mjs` and `--list` output byte-identical before/after (diff empty; 148 files, 105 exporters, 10 known-unsafe unchanged), so no previously-reported file changed verdict.\n\n**Ablations** (from the committed state, mutation proven on disk by anchor counts, `node --check` on each mutant, byte-identical restore by sha, trap-guarded):\n- reverting `codeOnly` to `comment || literal` → gate self-test RED exactly on the new pin (`the percent-encoding guard is seen THROUGH the template it is written in`, 1 of 54);\n- removing the delimiter-zeroing pass → mask self-test RED on `a NESTED interpolation contributes NO unbalanced brace to the code view` (1 of 35) — the nested case is the discriminating one, since simple delimiters are never marked by the interior pass; the failure detail shows the leaked inner brace, the exact measured desync shape.\n\n**Compatibility pin preserved** — `run-with-stall-guard.mjs`'s spawned-child payload (`process.argv[1]` inside a plain string at `:607`) stays masked: strings are `literal`-only, never `interpolation`; pinned by the existing STRING-payload case plus the new `a STRING quoted inside an interpolation is not code` case.\n\n**Derived gate union at `9baa4f055`** (`node scripts/pm/dispatch-gates.mjs`, no hand-fed paths, 8 matched families) — all green: `js-comment-mask --self-test` (35), `check:entry-guard` (54 + full tree), comment-mask corpus (5028/0/0), `check:parse-guard` (147 files), `check:agent-test-spelling`, `check:cross-package-test-inputs` (116 self-test + 16 packages OK), `check:pnpm-filter-targets` (134/167 resolved), `check-nul-bytes` (6,598 files clean).\n\n## Changeset\n\nNone — CI-internal gate tooling only, releases nothing; `skip-changeset` applies (lint.yml's own prescription for this class of PR).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015ahemw8RcTgqtxrj15PEZx)_"
+}

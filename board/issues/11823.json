@@ -1,0 +1,36 @@
+{
+  "number": 11823,
+  "kind": "issue",
+  "title": "`lifecycle.mdx` names two of the three health-check entry names — the exception path's `\"health-check\"` is missing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T18:51:23Z",
+  "updated_at": "2026-08-24T21:36:49Z",
+  "closed_at": "2026-08-24T21:36:49Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11823",
+  "body": "Found while implementing #11811 (the sibling TypeScript example in the same\nsection). Out of that card's scope — its dispatch ruled the `PluginHealthReport`\nblock byte-frozen, since PR #11812 had just corrected it field by field, so this\nis filed rather than fixed.\n\n## What was measured\n\n`content/docs/protocol/kernel/lifecycle.mdx:745`, in the paragraph below the\n`PluginHealthReport` JSON block, makes an enumeration that presents itself as\nexhaustive:\n\n> Each entry is named after the plugin's configured `checkMethod`, or\n> `\"plugin-loaded\"` when a plugin configures none.\n\n`packages/core/src/health-monitor.ts` pushes a check entry from **three** places,\nnot two:\n\n| # | source | entry `name` | when |\n|---|---|---|---|\n| 1 | `:119` / `:121` | `config.checkMethod` | the custom check returned |\n| 2 | `:125` | `'plugin-loaded'` | no `checkMethod` configured, or it does not resolve to a function |\n| 3 | `:173` | `'health-check'` | the check **threw** — including a `timeout` overrun, which `raceCheckTimeout` surfaces as a throw |\n\nThe doc covers 1 and 2. The third is the literal `'health-check'` at `:173`,\ninside the `catch (error)` at `:166`:\n\n```ts\nchecks.push({\n  name: 'health-check',\n  status: 'failed',\n  message: message\n});\n```\n\nIt is not a variant spelling of either documented name — it is a fixed string\nthat matches neither the configured `checkMethod` nor `'plugin-loaded'`.\n\n## Why it is worth a card\n\nThe exception path is the one a reader is most likely to be staring at a report\nfrom: it is what a timeout and any throwing check produce. Its entry is also the\nonly one accompanied by the report's `status: 'failed'` (set at `:167` with **no**\n`failureThreshold` accumulation, unlike returned failures, which pass through\n`degraded` first at `:150-164`). So the reader debugging the most alarming report\nthe monitor emits finds an entry name the page says cannot occur.\n\nThe paragraph is accurate about everything else it claims, and this is one\nmissing row rather than a wrong one — hence `finding` rather than a defect\nreport.\n\n## Not asserting more than was checked\n\nOnly the `checks[].name` enumeration in that one paragraph was compared against\n`health-monitor.ts`. The rest of the paragraph (the `passed | failed | warning`\nvocabulary, `metrics.uptime` in milliseconds, the absent `version` field, the\nunset schema fields) was verified correct in PR #11812 and is not in question\nhere. No other page was examined.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 11351,
+  "kind": "issue",
+  "title": "[finding] The eight `*/scripts` `UNCHECKED_SOURCE_DEBT` entries are graduation candidates once #10868 lands — and their notes still say \"3 x TS2883\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T13:34:27Z",
+  "updated_at": "2026-08-24T17:16:09Z",
+  "closed_at": "2026-08-24T17:16:09Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11351",
+  "body": "Recorded while working #10868; deliberately not repaired there, because the repair edits `scripts/check-type-check-coverage.mjs` and that widens the PR's gate surface beyond the card's.\n\n## What is stale\n\n`UNCHECKED_SOURCE_DEBT` in `scripts/check-type-check-coverage.mjs` carries eight entries whose `note` records the TS2883 count each directory measures, e.g.\n\n```\n'packages/plugins/plugin-audit/scripts': '`i18n-extract.config.ts`, 3 x TS2883. See #10868.',\n```\n\n#10868's PR annotates all nine `scripts/i18n-extract.config.ts` `default` exports, and every one of those directories now measures **0** errors (compiled with the package's own config, `rootDir` neutralised, dependency closure built). The counts in those notes are prose the gate does not read — the header says so explicitly — so nothing goes red, and that is exactly the failure mode AGENTS.md warns about for the other direction: a note that no longer describes the directory reads as fact to the next author.\n\n## Why it is worth a card rather than a one-line note edit\n\nThe entries exist because the directories sit in **no tsc program**, which #10868 did not change — so they do not graduate by themselves. But the header names the supported repair and it is now unblocked for all nine:\n\n> The repair is the supported one this repo already has a precedent for -- a sibling `tsconfig.scripts.json` NAMED in the `typecheck` script (`packages/spec`, #5475) -- and then the entry goes, which RECONCILED forces anyway.\n\nWith the errors at zero, adding `tsconfig.scripts.json` to each of the nine packages and naming it in that package's `typecheck` script would put the directory under CI for real and let eight ledger entries go — a shrink, not a raise. `packages/services/service-storage` is the ninth config's package; it is not in the ledger (it declares no `typecheck` script at all) and would need that first.\n\nBefore doing it, re-measure: some of these packages may surface *other* errors in `scripts/` once the directory is really compiled, and the census's method (own config, `rootDir` neutralised, built closure) only ever read `i18n-extract.config.ts`.\n\n## Two sub-parts, either of which is worth doing alone\n\n1. Rewrite the eight notes so they describe what the directory measures now (0 errors; the entry survives only because the directory is outside every tsc program).\n2. Graduate the directories: `tsconfig.scripts.json` per package, named in `typecheck`, entries deleted in the same PR.\n\nDoing (2) makes (1) moot. Doing neither leaves eight notes claiming errors that are no longer there.\n\nRelated: #10868 (the repair that zeroed the counts), #5475 (the `packages/spec` precedent the header cites)."
+}

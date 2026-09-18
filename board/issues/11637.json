@@ -1,0 +1,35 @@
+{
+  "number": 11637,
+  "kind": "issue",
+  "title": "`RestApiConfigSchema` constrains `api.version` with a regex the REST server never runs — the seam casts instead of parsing, so `api.version: ''` is accepted and mounts the whole API at `/api//`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T10:11:35Z",
+  "updated_at": "2026-08-25T05:42:07Z",
+  "closed_at": "2026-08-25T05:42:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11637",
+  "body": "Found while implementing #11546 (openapi `info.version`). Filed, not fixed — #11546's declared surface is the openapi `info` construction in `packages/rest/src/rest-server.ts`, and this is a contract-enforcement question with its own gate family.\n\n> **Corrected after filing.** The first version of this issue said `PluginRestApiSchema.version` is a bare `z.string()`, so `''` is schema-valid. **Both halves were wrong** and the correction inverts the mechanism, so the whole body is restated rather than patched. There is no `PluginRestApiSchema` in the repo; the symbol I meant is `RestApiPluginConfigSchema` (`packages/spec/src/api/plugin-rest-api.zod.ts:625`), and it governs nothing on this path. The schema that *does* govern this field **forbids** `''`. The defect is that nothing enforces it. Thanks to the PM seat for catching the dangling symbol.\n\n## What was measured\n\nOn `origin/main` @ `e3f056fc`.\n\nThe governing schema, `packages/spec/src/api/rest-server.zod.ts:48-52`:\n\n```ts\nexport const RestApiConfigSchema = lazySchema(() => z.object({\n  version: z.string().regex(/^[a-zA-Z0-9_\\-\\.]+$/).default('v1').describe('API version (e.g., v1, v2, 2024-01)'),\n```\n\nThe `+` quantifier means `''` does not match: **this schema rejects an empty version**, and `.default('v1')` only fires on `undefined`.\n\nThat it is the governing schema is a chain, each link measured:\n\n- `packages/rest/src/rest-api-plugin.ts:68` — `RestApiPluginConfig.api?: RestServerConfig` (a hand-written TS interface, not zod-derived)\n- `packages/spec/src/api/rest-server.zod.ts:485` — `api: RestApiConfigSchema.optional()`\n- `packages/spec/src/api/rest-server.zod.ts:164` — `RestApiConfig = z.input<typeof RestApiConfigSchema>`, which is what the server casts to\n\n## The defect: declared, never enforced\n\nNothing parses a deployment's config against that schema. Every hop is a cast:\n\n```ts\n// packages/rest/src/rest-api-plugin.ts:388\nrestServer = new RestServer(server, protocol, config.api as any, /* … */);\n\n// packages/rest/src/rest-server.ts:2916\nconst api = (config.api ?? {}) as Partial<RestApiConfig>;\n```\n\nand the guard that remains is `??`, which only substitutes `null`/`undefined`:\n\n```ts\n// packages/rest/src/rest-server.ts:2924\nversion: api.version ?? 'v1',\n```\n\nThree independent confirmations that no parse happens on any deployment path:\n\n1. `createRestApiPlugin` declares **no `configSchema`**, so `packages/core/src/security/plugin-config-validator.ts` — which does `plugin.configSchema.parse(config)` when one is declared — never runs for this plugin. (`git grep configSchema packages/rest/src/rest-api-plugin.ts` → zero hits.)\n2. The repo's **only** `RestApiConfigSchema.parse` call is `RestApiConfigSchema.parse({})` in `packages/core/src/qa/http-adapter.ts:43`, a QA helper deriving default conventions from an empty object — not deployment config.\n3. `RestApiPluginConfigSchema`, the sibling that *does* declare a bare `z.string()` for its own `version`, is referenced nowhere outside its own file, its own test, and `packages/spec/api-surface/api.json`. It is not the type of anything on this path, so its permissiveness is not what lets `''` through either.\n\nSo the regex is a declared constraint that never executes.\n\n## Observed consequence\n\nDriving a real `RestServer` with `api: { version: '' }`:\n\n- `getApiBasePath()` returns `\"/api/\"` (from `api.apiPath ?? \\`${api.basePath}/${api.version}\\``)\n- every route mounts under it — the openapi route registers at the literal path `\"/api//openapi.json\"`, with the doubled slash, and the same applies to `/data`, `/meta`, `/discovery` and the rest of the surface, since they all share this one base\n\nA configuration the spec **rejects** is accepted by the server and produces a deployment whose every route carries a doubled slash. Which URLs that actually answers depends on the HTTP adapter's path normalization rather than on anything this repo declares.\n\nThe empty string is only the most visible instance. The regex also forbids `/`, whitespace and every other character outside `[a-zA-Z0-9_\\-\\.]`, and none of those are refused either — `version: 'v1/beta'` would splice a path segment into the mount for every route.\n\n## Not prejudged\n\nThe root fix is to make this seam parse rather than cast, but where that belongs is a real call:\n\n- **Parse in `normalizeConfig()`** — replace the cast with `RestApiConfigSchema.parse(config.api ?? {})`. Declared = enforced at the point of use, and the `??` defaults become redundant because the schema's own `.default()` supplies them. Risk: any deployment currently booting on a config the schema rejects would start failing at boot — which is the point, but it is a behaviour change that wants measuring first.\n- **Declare `configSchema` on the REST plugin** — let the kernel's existing `plugin-config-validator` do it, which is the mechanism already built for this and would cover the plugin's other config too.\n- **Both** — the plugin validator for the authoring path, the server parse as the invariant for programmatic construction.\n\nWorth measuring before choosing: whether any in-repo example, test or deployment currently passes an `api` config the schema would reject, since that set is exactly what would start failing.\n\n## Scope note\n\n#11546 does not address this and does not depend on it. That card removed a `|| enriched.info.version` fallback whose only trigger was this same unvalidated falsy value; it deliberately serves the configured value as written so a misconfigured deployment stays visible rather than being papered over at one of the two faces. Fixing this one would make that fallback's trigger unreachable through the authoring path, which is the correct order — the fallback should not be the thing enforcing the contract."
+}

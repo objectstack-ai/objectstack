@@ -1,0 +1,33 @@
+{
+  "number": 11953,
+  "kind": "pull_request",
+  "title": "docs(service-sms): name the derived always-on rule that replaced the retired slice(0, 6) pin",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T02:51:06Z",
+  "updated_at": "2026-08-25T03:16:07Z",
+  "closed_at": "2026-08-25T03:16:06Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T03:16:06Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11953",
+  "body": "Fixes #11594\n\n## What was stale\n\n`packages/services/service-sms/src/sms-plugin.ts`, in the `optionalDependencies` doc comment, said:\n\n> `sms` is the entry this card was filed about: it sits at index 6 of `PLATFORM_ALWAYS_ON_CAPABILITIES`, one past **the pinned `slice(0, 6)`**, so before this declaration its correct position relative to `settings` was held by nothing at all.\n\nThat is present tense about a pin that no longer exists. #11046 (commit `68e8b4b5`, PR #11416) replaced the spec-side literal with a derived rule, and #11415 did the same at `packages/cli/test/serve-defaults.test.ts`. Verified on `origin/main` before editing: `packages/spec/src/kernel/platform-capabilities.test.ts` now pins `BIND_TARGETS = ['queue', 'job', 'cache', 'settings']` and the predicate \"every entry that is not a bind target must be mounted after all of them\"; neither remaining home spells `slice(0, 6)` as a live assertion.\n\n## Why this is not a tense fix\n\nUnder the rule that replaced the slice, `sms` is **held by** the pin rather than sitting one past it — so the sentence's claim about `sms`'s position is the part that went false, not merely its verb. The reword therefore:\n\n- puts the slice in the past (`the slice(0, 6) prefix that was pinned there at the time`),\n- **names the derived rule** that replaced it — every always-on entry that is not a bind target (`queue`/`job`/`cache`/`settings`) is mounted after all of them,\n- states that `sms` is now held **by** that pin, and so is whatever is added next,\n- keeps the scope honest: that pin covers slate ORDER only, so this `optionalDependencies` declaration is still what orders the plugins, and `serve-settings-ordering.pin.test.ts` — already named in the paragraph below — is what keeps that honest.\n\nThe historical narrative (the window in which `getNamespace('sms')` answers from manifest defaults) is preserved unchanged.\n\n## Scope\n\nComment-only. One file, `packages/services/service-sms/src/sms-plugin.ts`, +14/-7, all inside one block comment. No behaviour, no exported surface, no contract accept/reject movement, no changeset (prose-only diff — `skip-changeset`).\n\n## Verification — union re-run at `4aa067039d` (the final commit), tree clean\n\nGate set derived, not recalled: `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (answered about `objectstack-ai/objectstack` at `3689991d2e`, 1 path, three-dot semantics). Every exit code captured before any pipe; each gate's own verdict line quoted.\n\n| Gate | Its own verdict line |\n| --- | --- |\n| `pnpm check:cross-package-test-inputs` | `All 109 self-test cases passed.` / `OK: 16 package(s) read outside themselves, all declared, and turbo.json hashes every declared glob.` |\n| `pnpm check:published-files` | `✓ check:published-files — 69 publishable package(s) of 78 workspace member(s) declare a files whitelist …` |\n| `pnpm check:slot-lookup` | `✓ slot-lookup ratchet holds: 107 unswept site(s) in 25 file(s), none new, and every file in the population parsed.` · `baseline key set verified against 3689991: no files added.` (via `scripts/pm/os-verify-lock.sh -c`, `VERDICT command-exit 0 · held the lock 52s · waited 0s`) |\n| `pnpm check:test-source-alias` | `check-test-source-alias OK — 72 packages with tests scanned …` |\n| `pnpm check:type-source-resolution` | `check-type-source-resolution OK — 93 tsc program(s) across 77 packages scanned …` |\n| `node scripts/check-ci-filter-parity.mjs` | `OK: all 96 declared cross-package glob(s) (81 unique) are covered by core or crosspkg …` |\n| `node scripts/check-cross-package-test-inputs.mjs` | `OK: 16 package(s) read outside themselves, all declared …` |\n| `node scripts/check-plugin-teardown-shape.mjs` | `✓ check:plugin-teardown-shape: 63 Plugin implementation(s) across 4645 source(s) under packages/**; … baseline fully burned down.` |\n| `node scripts/docs-audit/check-affected-docs.mjs` | `✓ affected-docs self-test: 437 cases pass.` |\n| `node scripts/docs-audit/check-drift-comment.mjs` | `✓ check-drift-comment: 56 cases pass across 5 fixture diff(s).` |\n| `pnpm check:nul-bytes` (always applies to any edit) | `check-nul-bytes: OK (scanned 6654 text file(s) … no raw ASCII control bytes).` |\n\nPlus a syntactic proof that a block-comment edit did not break the block: parsing the file with the repo's own `typescript` reports **0 syntactic diagnostics**, and the reworded JSDoc still attaches to the `optionalDependencies` member (checked via `jsDoc` on that member, not by eye).\n\n**Deliberately narrowed:** no package build/test run — the diff is inside a comment, so it cannot move type or runtime behaviour, and the derived gate set named no test or typecheck family for it. Repo-wide `pnpm lint` is CI's run, not this PR's. The rest of the farm runs on this PR in CI exactly once.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01APWX2AwT3a4xDcjPCe8bk4)_"
+}

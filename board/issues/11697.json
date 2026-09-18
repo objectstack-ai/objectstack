@@ -1,0 +1,34 @@
+{
+  "number": 11697,
+  "kind": "issue",
+  "title": "SCIM spec parity: field-level pass between `SCIMGroupSchema` and stable @better-auth/scim's group wire shape (leg 3 of #11632)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T12:45:39Z",
+  "updated_at": "2026-08-24T18:24:15Z",
+  "closed_at": "2026-08-24T18:24:15Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11697",
+  "body": "Cut out of the **#11632** SCIM epic by its owning `domain:services` seat and filed **for the spec seat**, because the epic says so in its own scope text:\n\n> **spec**: field-level parity pass between `SCIMGroupSchema` and stable's group wire shape (unmeasured so far); **`packages/spec` work goes to the spec seat per single-owner rule.**\n\n⛔ **The services lane has zero `packages/spec` ownership.** This card is filed, not taken. No `pm:queue` — grading is triage's field.\n\n## The ruled direction this works within\n\nMaintainer, 2026-08-24, live PM chat on #3653 (「os#3653 立项迁移」). The epic records the consequence: #3653's **question A is answered `implement`** — *\"the `SCIMGroup` family becomes true through this migration, not through retirement.\"*\n\n⇒ This is a parity pass, not a retirement question. That part is settled.\n\n## What is actually unmeasured — and what is not\n\nThe epic marks the field-level diff **\"unmeasured so far\"**, and it still is. But two things around it *have* been measured since the epic was written, by the repaired parity gate (**PR #11429**, merged 2026-08-23, fixes #11380) running against published `@better-auth/scim@1.7.1`:\n\n| | models |\n|---|---|\n| **gained on stable** | `scimConnectionBinding`, `scimIdentityTombstone`, `scimProjectionGrant`, `scimSubject`, `scimUser` |\n| **lost on stable** | `scimGroupRole`, `scimGroupRoleGrant` |\n| **kept** | **`scimGroup`, `scimGroupMember`** |\n\n⭐ **`scimGroup` and `scimGroupMember` are in the KEPT column** — they exist on both the pinned `1.7.0-rc.1` and stable. So this card is genuinely a **field-level** question (do the columns agree?), not a model-existence one. Whoever takes it does not need to establish that the models survive; that is measured.\n\n⚠️ Read the model names as what the **gate** reports, not as spec identifiers. Mapping them onto `SCIMGroupSchema`'s shape is part of this card's work.\n\n## Sequencing — this is FIRST, and it does not wait\n\nThe epic's Discipline section says **\"spec first\"**. Concretely:\n\n- ⛔ It does **not** wait on **#11693** (the `sys_scim_provider` disposition). That decision is about a different object; `scimProvider` is in neither the kept nor the group family here.\n- Its prerequisite is already on `main`: PR #11429's constructor fix landed **independently** (not absorbed), so the gate that will report parity failures actually reaches its diff instead of dying in collection.\n- The legs that consume the parity result carry the `Blocked-by:` pointing here, per the epic's contract-first chain — not the reverse.\n\n## Not measured\n\n- **The field-level diff itself.** That is this card's deliverable. Nothing in this repo has compared `SCIMGroupSchema`'s fields against stable's group wire shape.\n- Whether the parity result forces any authorable-surface movement in `packages/spec`. Unknown until the diff exists, and it is the spec seat's call either way.\n\n## One standing operational note that rides the whole migration\n\n⚠️ Not this card's work, but it governs the window: **SCIM-enabled deployments must not let the IdP push groups until the migration lands**, and on migration day every SCIM-enabled deployment's IdP must **reissue its token** (unsalted SHA-256 → keyed HMAC; digests are not portable on any path). That is an operational action with a human owner, tracked on the epic.\n\nRefs: #11632 (the epic, leg 3) · #3653 (decision anchor + the seven-model measurements) · #11380 / PR #11429 (the gate repair that produced the model diff above) · #11693 (the `sys_scim_provider` disposition — parallel, not a prerequisite) · ADR-0071"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 11511,
+  "kind": "issue",
+  "title": "[finding] Two gates import their shared glob helper and their shared declaration table OUT OF a gate script, which costs check:ci-filter-parity a 595-pair derivation lead",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T01:52:13Z",
+  "updated_at": "2026-08-24T23:20:35Z",
+  "closed_at": "2026-08-24T23:20:35Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11511",
+  "body": "Measured while landing #11190 step 1 (the import-following widening of `scripts/pm/dispatch-gates.mjs`). Filed unassigned; not fixed there — the card's scope was the derivation, not the scripts it reads.\n\n## What the sweep found\n\n`scripts/check-cross-package-test-inputs.mjs` is a gate **and** a library. Two other gate scripts import from it:\n\n- `scripts/check-examples-live-imports.mjs` imports `globToRegExp` — a pure string utility;\n- `scripts/check-ci-filter-parity.mjs` imports `CROSS_PACKAGE_TEST_INPUTS` — the declaration table itself, which is genuinely that gate's population (it checks CI's filters against exactly those globs).\n\nSince #11190, the derivation follows a gate script's first-party imports one level — but deliberately **not** into a module that is itself a discovered gate file. Measured reason: admitting that class takes the sweep from +893 to +4907 (gate, file) pairs, and 3065 of the difference is `check:examples-live-imports` inheriting the whole cross-package declaration table because it imports one string helper. The gate reads `examples/`; the table describes `packages/**`. That is a fabricated lead in the column a dispatch prompt pastes, and it is refused for the same reason #9626 and #9964 refused theirs.\n\n## The cost, and why it is worth a card\n\nThe refusal is right about the fabricated half and wrong about the honest half. `check:ci-filter-parity` really does read `CROSS_PACKAGE_TEST_INPUTS`, so it should derive for a card that edits the declaration table — and it now cannot, because the table lives in a gate. Measured: **595 (gate, file) pairs** the derivation would have named.\n\n## The fix, which is the same shape as the consolidation already queued\n\nMove the shared halves out of the gate into a plain module that no workflow invokes — the `scripts/i18n-bundle-surface.mjs` shape — and let both the gate and its two importers read them from there:\n\n- `globToRegExp` / `matchesAny` (pure predicates), and\n- `CROSS_PACKAGE_TEST_INPUTS` (the declaration table).\n\nThen `check:ci-filter-parity` derives through the follow with no rule change, and `check:examples-live-imports` inherits only the helper module's population, which is nothing — the honest half restored without the fabricated half. #11510 (the enumerator consolidation) needs the same module shape for the same reason, so the two are worth doing with one design.\n\n⚠️ Note when doing it: importing that gate for its exports used to run the whole gate as a side effect; #10610 fixed that, and any new shared module should be inert on import by the same rule `check:entry-guard` enforces.\n\n## Related\n\n#11190 (the derivation change that measured this), #11510 (step 2, same module shape), #10610 (import side effect, fixed), #11199 (the adjacent double-discovery of this same gate).\n"
+}

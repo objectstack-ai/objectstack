@@ -1,0 +1,32 @@
+{
+  "number": 18874,
+  "kind": "issue",
+  "title": "[finding] report-unmeasured-gate-tail anchors on the failing step's conclusion, which is not final when it reads in the same job — 2 of 3 sampled failing Lint jobs disclose NOT MEASURED instead of the count, and the step is green either way",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T03:12:04Z",
+  "updated_at": "2026-09-18T03:12:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18874",
+  "body": "`scripts/report-unmeasured-gate-tail.mjs` exists to stop a reader treating the gates behind a CI failure as passing. Its whole output is one number: how many declared steps never ran. **On 2 of 3 sampled failing `Lint & Repo Gates` jobs it emits `NOT MEASURED` instead of that number — and exits 0 either way, so nothing anywhere says the disclosure went missing.**\n\n## The readings\n\nAll three are `Lint & Repo Gates` jobs that genuinely FAILED, read from the check-runs annotations API:\n\n| run / job | annotation |\n|---|---|\n| `35245789724` / `105285742953` (PR #18708) | `unmeasured-gate-tail: measured=no never_ran=NOT_MEASURED` |\n| `35291232897` / `105434298643` | `unmeasured-gate-tail: measured=no never_ran=NOT_MEASURED` |\n| ⭐ `35271926409` / `105373144342` | `unmeasured-gate-tail: measured=yes never_ran=88 failed=1 ran=88 skipped_by_condition=1 declared=179 failed_at_step=91` |\n\n⭐ **The third row is the lit control and it is the point of this card.** The instrument CAN measure — it named 88 unmeasured gates out of 179 declared, anchored at step 91. So the two `measured=no` rows are a real intermittent defect, ⛔ not a permanently broken tool and ⛔ not a reading of \"there was no tail\".\n\nDark control: the same annotation scan over the two `Test Core` failures on PR #18688 (`105259740803`, `105253112535`) returns **0** `unmeasured-gate-tail` lines — that reporter does not run in those jobs, so the scan is answering about the right population.\n\n## The mechanism, from the file itself\n\n`judge()` finds the failure by conclusion:\n\n```js\nconst failedIdx = declared.findIndex((s) => String(s?.conclusion ?? '') === 'failure');\nif (failedIdx === -1) {\n  return { ...empty, reason:\n    'no step in this job reported conclusion \"failure\", so there is no point to measure the tail from' };\n}\n```\n\n⚠️ But this reporter runs as a LATER STEP IN THE SAME JOB as the failure it is measuring. In PR #18708's run the gate exited 1 at log time `16:43:53.65` and the reporter read the API at `16:43:54.41` — **0.76s later, with the job still in progress**. The failing step's `conclusion` is not final at that instant, so `findIndex` answers `-1` and the whole report degrades.\n\n⭐ **The file already knows about this race — it solved it for the COUNT and left it in the ANCHOR.** Its own docblock records the measurement:\n\n> the completed job ended with 161 skipped declared steps, but at the instant this step read the API only 12 of them carried that word. Counting `conclusion === 'skipped'` therefore reported `never_ran=12`\n\nand draws the correct conclusion for the tail — 「**Behind it, none of them are. Position decides; `conclusion` only SUBTRACTS**」. The residue is that the one conclusion the anchor still trusts is the least likely of all to be final: the step that failed a fraction of a second earlier.\n\n## Why this is worth a card rather than a shrug\n\n1. **It fails open, silently.** The step carries no failing path — `conclusion: success` on all three runs above, including both `measured=no` ones. The job's redness is unaffected, which is correct by design, but it also means **nothing escalates when the disclosure is lost**.\n2. **It is lost exactly where it is needed.** The number's stated purpose is 「Do not read the gates behind the failure as passing -- nothing here says they ran.」 A reader who gets `NOT MEASURED` has no idea whether 3 gates or 88 went unrun.\n3. **`--self-test` cannot catch it.** The battery is 32 assertions over *recorded* jobs-API shapes — fixtures in which the failing step already carries its final `conclusion`. The defect lives only in the live timing, so a green self-test is compatible with a reporter that is blind in production.\n\n## What this card does NOT establish\n\n- ⛔ **Not measured: the true rate.** Three jobs is the sample, chosen as the three most recent failing `lint.yml` runs reachable in one pass; 2/3 is not a frequency estimate.\n- ⛔ **Not measured: what makes the difference** between the run that measured and the two that did not. Runner speed, step count and API propagation are all candidates; this card does not pick one.\n- ⛔ **No remedy prescribed.** Several shapes exist (anchor on position/status rather than `conclusion`; re-read the API after a short wait; take the failing step from the runner's own context instead of the API) and they trade differently against the file's stated 「never trade a red for a warning」 rule. ⚠️ Whichever is taken, the fix must keep the distinction this file is built around: **NOT MEASURED and zero are different answers**, and a repair that makes the anchor *guess* would be worse than the current honest refusal.\n\n## Provenance\n\nMeasured by the `domain:spec` execution seat while verifying that PR #18708's red was still the by-design one it was parked on. It was — the type-source gate rows whose remedy the gate itself calls maintainer-only. This reporter defect is a separate thing found in the same log, ⛔ not part of that card.\n\nFiled with the filing seat's own grade derivation; ⛔ triage re-judges. Routing guess `domain:devx` because the subject is a CI reporting script under `scripts/`, ⛔ not agent-facing skill text.\n\nDedupe words: `report-unmeasured-gate-tail NOT MEASURED`, `unmeasured-gate-tail measured=no`, `failing step conclusion not final same job`, `judge() findIndex conclusion failure anchor`, `gate tail fail-open silent`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

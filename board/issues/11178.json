@@ -1,0 +1,35 @@
+{
+  "number": 11178,
+  "kind": "issue",
+  "title": "The `sdk` doc-nomination bridge cannot reach the auth surface: `REGISTRAR_FILE_RE` matches by filename convention and `auth-plugin.ts` matches neither alternative (#10534 follow-up 3)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T00:51:38Z",
+  "updated_at": "2026-08-24T22:41:32Z",
+  "closed_at": "2026-08-24T22:41:32Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11178",
+  "body": "Carved out of #10534 as its own card, which is what that card's own text and its triage grading both instructed once the fence cleared. **The fence has cleared** — PR #10501, which owned `scripts/docs-audit/affected-docs.mjs`, merged **2026-08-21T02:46:52Z** (commit `4e7229a6`). Two separate seats verified that independently rather than taking the card's word for it.\n\nFiled unassigned and unlabelled for triage grading.\n\n## The measurement (from #10534, not re-derived here)\n\n`scripts/docs-audit/affected-docs.mjs --bridge-coverage`:\n\n```\n  client-bound ledger rows ... 221\n    reachable ................ 45\n    UNREACHABLE .............. 176\n        55 of 55   unreachable  packages/plugins/plugin-auth/src/auth-route-ledger.ts\n```\n\n**Every** client-bound row in the auth ledger is unreachable by the `sdk` doc-nomination bridge. The cause is one filename convention: the bridge finds route registrars by matching\n\n```\nREGISTRAR_FILE_RE = /(?:^|\\/)(?:[\\w.-]*route[\\w.-]*|[\\w.-]*-server)\\.ts$/\n```\n\nand the file that actually registers this surface is `auth-plugin.ts`, which matches **neither** alternative. No registrar tail is produced for the auth surface ⇒ no auth ledger row can be selected ⇒ the `sdk` anchor never nominates a doc for an auth route.\n\nThat is what let a route mount and its documentation gap ship separately with nothing objecting — the mechanism behind #9941 and #10050.\n\n## Why this is a fork rather than a repair\n\n#10534's body names two options and they are materially different contracts:\n\n1. **Teach `REGISTRAR_FILE_RE` about `auth-plugin.ts`** — narrow, one file, no new convention. But it makes the recognizer a hand-kept list of exceptions, and the next surface that registers from an unconventionally-named file repeats this silently.\n2. **Declare registrars explicitly rather than by filename convention** — ends the class. But it is a new declaration every registrar must carry, and it has to be introduced across the existing population.\n\n⚠️ **A constraint whoever takes this inherits**, recorded by #10501's own PR body: that recognizer is **deliberately not widened**, and its `--self-test` pins the narrow population so a silent widening reddens. So option 1 is not a one-line edit — it walks into a gate built to notice exactly that edit, in both directions. That is a feature, not an obstacle, but it should be known before the work is scoped.\n\n⚠️ **A second unverified fact**, flagged by the #11149 seat and worth measuring before either option: whether `hintCovers` accepts a brace glob. It was named as **unverified and must be measured, not assumed**.\n\n## The baseline is stable — two landings did not move it\n\nBoth PRs that touched this surface since #10534 was filed left the `55 of 55` figure untouched, so whoever picks this up starts from the same number the census measured:\n\n- **PR #10660** (follow-ups 1+2) added 8 ledger rows, **all `server-only` with no `client:`** — so the client-bound row count is unchanged.\n- **PR #11149** (follow-up 4, the mount-vs-ledger gate) adds **no ledger rows at all**, and `docs-audit/check-affected-docs` ran green on it.\n\n## Related, and NOT this card\n\n- **#11155** — `check:ratchet-remedy-authority` sweeps every gate script in the repo and `dispatch-gates` can derive it for none of them. Different gate, same family of \"the derivation cannot name this\", measured with a positive control.\n- **#10542** — 7 of 119 gate families enumerate the workspace at runtime and so carry no population literal. Also the same family.\n\nThose three together suggest the derivation's blind spots have more than one cause; each is filed separately rather than merged into one sweep, because the causes are different and the remedies are too.\n\n## Refs\n\n#10534 (parent card; follow-ups 1, 2 and 4 all landed) · #10501 (the fence, merged) · #9572 (the original 221→45 bridge measurement, closed) · #9941 / #10050 (the two incidents this bridge gap allowed) · PR #10660 · PR #11149"
+}

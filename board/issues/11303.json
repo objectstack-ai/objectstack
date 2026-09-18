@@ -1,0 +1,35 @@
+{
+  "number": 11303,
+  "kind": "issue",
+  "title": "[finding] sys_inbox_message/sys_notification/sys_email 等平台表从不写 organization_id(存量与新增行 100% null)——请确认多组织语义是否设计如此",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T09:37:39Z",
+  "updated_at": "2026-08-24T14:43:04Z",
+  "closed_at": "2026-08-24T14:43:04Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11303",
+  "body": "## 一句话(人话摘要)\n\n应用项目实测发现:**`sys_inbox_message` / `sys_notification`(及回执、投递)/ `sys_email` 等平台表从不写 `organization_id`——存量与当天新增行 100% 为 null**。请平台确认这是**设计如此**(这些对象按用户域而非组织域)还是缺口;若是设计如此,多组织隔离语义如何界定。项目侧按约定**不动这些表的数据**,只报备等口径。\n\n## 环境\n\n- 平台:`@objectstack/*@17.0.0`(GA,锁版);数据库 PostgreSQL 16(容器部署)\n- 项目:os-project-titanwind-ehr 试运行实例;`sys_organization` 现有 1 个组织\n\n## 实测观察(2026-08-23,只读 SQL 盘点)\n\n| 表 | 总行数 | organization_id 为 null |\n|---|---:|---:|\n| `sys_inbox_message` | 383 | **383(100%)** |\n| `sys_notification_receipt` | 383 | 383(100%) |\n| `sys_notification` | 205 | 205(100%) |\n| `sys_notification_delivery` | 205 | 205(100%) |\n| `sys_email` | 96 | 96(100%) |\n| `sys_audit_log` | 4485 | 1510(34%) |\n| `sys_activity` | 3469 | 916(26%) |\n\n关键佐证:\n\n1. **新增行同样不带**:`sys_inbox_message` 按日分布,2026-08-23 当天新增 3 行全部 null——不是存量残留,是持续行为;\n2. **对照组**:同库 `sys_approval_request`(32 行)/ `sys_approval_approver`(1 行)`organization_id` **均有值、0 null**——审批对象有组织戳而消息/邮件对象恒无,疑似口径不一;\n3. 业务对象侧(应用命名空间各表)在组织上下文修复后新增行均正确带组织,17.1.0 起无组织写会被拒——`sys_*` 似豁免于该约束。\n\n## 想请平台回答的问题\n\n1. 上述消息/邮件/日志类平台对象**不写组织是否设计如此**(按 user 域路由,不参与组织隔离)?\n2. 若是设计:多组织实例下,站内信/通知中心的可见性边界以什么为准?`sys_audit_log`/`sys_activity` 的部分行有组织、部分为 null(34%/26%),这种混合态是预期吗(参考:#8245 处理过首会话窗口的 NULL tenant audit 行)?\n3. 若属缺口:应用项目是否应回填?我们默认**不碰平台表数据**,等平台给口径或修复。\n\n## 由来\n\n应用项目升级门禁盘点(项目侧 issue steedos-labs/os-project-titanwind-ehr#1750)中顺带发现;业务表的存量 null 组织行(853 行)已在项目侧按批复回填完毕,与本单无关,本单只涉及 `sys_*` 平台表。\n"
+}

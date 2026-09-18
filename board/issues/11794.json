@@ -1,0 +1,34 @@
+{
+  "number": 11794,
+  "kind": "issue",
+  "title": "driver-sql: `richtext` is emitted as varchar(255) while its `markdown`/`html` siblings get TEXT — a rich-text body is capped at 255 characters",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T16:43:31Z",
+  "updated_at": "2026-08-25T05:46:10Z",
+  "closed_at": "2026-08-25T05:41:15Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11794",
+  "body": "Found while building the field-type agreement pin for #11565. Filed unassigned; deliberately **not** fixed there — that card is a MySQL diagnostic and this is an emission-rule defect on every dialect.\n\n## What\n\n`createColumn`'s text-family case in `packages/drivers/driver-sql/src/sql-driver.ts` lists `text` / `textarea` / `html` / `markdown`. **`richtext` is not in it.** It is also not in `JSON_COLUMN_TYPES`, so it falls through to the catch-all and is emitted as `table.string(name)` — knex's `varchar(255)`.\n\nThe spec groups all three together as \"Rich Content\" (`field.zod.ts`: `'markdown', 'html', 'richtext'`) and puts all of them in `STRING_VALUE_TYPES`. Two of the three get an unbounded TEXT column. The third gets 255 characters.\n\nThe same fall-through catches three more `STRING_VALUE_TYPES` members whose values are routinely long: `code` (a code-editor field), `signature` and `qrcode` (both plausibly data URIs).\n\n## Evidence\n\nMeasured, not inferred — this is what the `FieldType.options` agreement pin added in #11565 compares against a really-created table, column by column:\n\n```\nrichtext   STRING_VALUE: true   STRUCTURED_JSON: false   ->  varchar(255)\ncode       STRING_VALUE: true   STRUCTURED_JSON: false   ->  varchar(255)\nsignature  STRING_VALUE: true   STRUCTURED_JSON: false   ->  varchar(255)\nqrcode     STRING_VALUE: true   STRUCTURED_JSON: false   ->  varchar(255)\nmarkdown   STRING_VALUE: true   STRUCTURED_JSON: false   ->  text\nhtml       STRING_VALUE: true   STRUCTURED_JSON: false   ->  text\n```\n\n## Why it matters\n\n`varchar(255)` is not a soft cap on either enforcing dialect. This is the exact write-side failure #11431 documents for the string family: a legal value is refused by MySQL with `ER_DATA_TOO_LONG` under `STRICT_TRANS_TABLES`, and by Postgres with `22001 value too long for type character varying(255)`. A rich-text body over 255 characters is an ordinary authored value, and nothing in the metadata declares that bound — the author declared `richtext`, not a length.\n\nIt is also a self-inflicted drift report: `schema-drift.ts` treats `varchar(field.maxLength)` as the expected physical shape of a bounded field, and these fields declare no bound.\n\n## Not prescribing a remedy\n\nThe obvious reading is that `richtext` belongs in the text-family case beside `markdown` and `html` (with the same #11374 keyed-and-bounded rule). Whether `code` / `signature` / `qrcode` belong there too, or whether the whole switch should be driven off the spec's `STRING_VALUE_TYPES` value class rather than a hand-maintained case list, is the design question — the hand-maintained list is what let one member of a three-member spec group diverge silently.\n\n## Scope note for whoever picks this up\n\nLands in the same `createColumn` switch as #11431 (string family / `maxLength`) and #11374 (keyed text). Same file, adjacent branches — worth serialising against those rather than running in parallel. Not blocked by either: this branch is independent of both.\n\nThe agreement pin from #11565 (`sql-driver-11565-row-byte-budget.test.ts`, \"agrees with createColumn about every FieldType the spec declares\") will need its expectation updated in the same PR — it currently pins the present behaviour, including this one.\n"
+}

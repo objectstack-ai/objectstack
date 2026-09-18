@@ -1,0 +1,36 @@
+{
+  "number": 11412,
+  "kind": "issue",
+  "title": "finding: under vitest a linked workspace package's `import()` is re-anchored at the vitest root, so an in-process test cannot measure which package a bare specifier resolves from — and its anti-vacuity control is vacuous too",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T16:07:11Z",
+  "updated_at": "2026-08-24T16:51:01Z",
+  "closed_at": "2026-08-24T16:51:01Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11412",
+  "body": "Filed unassigned from the `domain:cli` lane while implementing #11157 (PR #11405). Recording only — **not graded here**, and no `domain:*` applied.\n\n## The mechanism\n\n`@objectstack/types` is a **linked workspace package**, so Vite processes it as *source* rather than externalising it, and rewrites the `import()` written inside `packages/types/dist/node.mjs` to use its own resolver — which resolves from the **vitest root**, i.e. the package under test.\n\nMeasured while implementing #11157:\n\n> `createHostImporter(appRoot)('chalk')` with **no caller base at all** **RESOLVES** under vitest and **THROWS** under Node.\n\nNode ESM anchors a bare specifier at the module that physically contains the `import()`. Vite does not preserve that anchor for a linked workspace dep. **Under vitest the two bases are the same base.**\n\n## Why this is worse than an ordinary false green\n\nAny in-process assertion about *which* base is in use is green **both before and after** a change to that base — and so is the anti-vacuity control written beside it. **The vacuity check is itself vacuous.** A dev doing everything right — writing the pin, then ablating to prove it fails without the fix — gets a green ablation and concludes the pin is sound.\n\nThat is a different failure from #7849 (a *stale* dist deciding verdicts) and from #8249 / #8180 (the *type* axis resolving through dist). Those are wrong-or-outdated answers. This one **erases the question**.\n\n## The measured instance\n\n`packages/cli/src/commands/serve-config-plugin-host-resolution.test.ts` carries a `chalk` assertion that reads as a statement about the fallback resolution base. Under #11157's ablation — the fix removed, everything else identical — it **stayed green**, while the pins that spawn a real Node child went red. So that assertion was never measuring the base; it is a behaviour statement that happens to hold.\n\n⚠️ Not a defect introduced by #11157, and not left silent by it: PR #11405 records the measurement in the headers of both affected test files and moves its own resolution pins into a spawned Node process, with a `CONTROL` case that asserts the no-base importer fails **and** names `packages/types` as the origin it failed from. This card is about the **class**, not that file.\n\n## Not measured here\n\n- **How many other in-process tests make a claim of this shape.** The repo has many tests asserting resolution behaviour; which of them are vacuous under vitest for this reason is uncounted, and counting it is the substance of whatever this card becomes.\n- Whether the same collapse applies to workspace deps that are **not** linked (i.e. resolved through `dist` via `exports`) — #11392's ablation C suggests those behave differently again: there a stale `dist` produced a false green that a rebuild corrected, which means the base was preserved and only the *content* was old.\n- Whether a vitest config option (`server.deps.external`, `resolve.alias`) would restore the Node anchor for these packages, and at what cost to the source-resolution invariant that `check:test-source-alias` exists to enforce — those two goals may be in tension, which is exactly why this is filed rather than fixed.\n\n## Why it matters beyond one file\n\nThe repo's anti-vacuity discipline rests on \"show the pin failing without the behaviour it pins\". This mechanism makes that demonstration **produce the wrong answer** for one specific class of claim, and produce it silently, in the direction of false confidence. A recorded platform fact would let the next author reach for a spawned child immediately instead of discovering it by ablation.\n\nRouting note for triage: the mechanism is vitest/Vite configuration and test infrastructure; the measured instance is in `packages/cli`.\n\nRelated: #11157 / PR #11405 (where it was measured) · #7849 (stale dist decides verdicts — different failure) · #8249 · #8180 · #11392 (a dist false green that a rebuild *did* correct, i.e. the contrasting case)"
+}

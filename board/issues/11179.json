@@ -1,0 +1,35 @@
+{
+  "number": 11179,
+  "kind": "issue",
+  "title": "finding(pm): pm:queue 半态「已判未转」——两条可机判的 H 规则,加 #11086 的一条输入",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T00:56:27Z",
+  "updated_at": "2026-08-25T00:54:48Z",
+  "closed_at": "2026-08-25T00:54:48Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11179",
+  "body": "**Finding,只记录不认领**(维护者 2026-08-23 口头采纳立卡建议;记录席位 session `757f0dc0-5dae-51d7-9053-c15c57ebfe3b`)。\n\n## 事故\n\n另一 PM 席位把 #10534 / #10746 / #10556 挂在 `pm:queue` 长期不处理。维护者点破后,该席位自查结论:**技能原文清楚,是执行没跟上**,至少四处违规——\n\n| 技能原文 | 实际做的 |\n|:---|:---|\n| 「挂 needs-user-decision、退出活动队列」 | 贴了分析,留在 pm:queue |\n| 「状态转换同笔……永不留挂」 | 正是留挂 |\n| 前提刷新:「零命中/变形的就地改写或撤卡」 | 只加注解,没改也没撤 |\n| `pm:queue` 定义「无可问之事」 | #10556 带两个未决设计问题入队 |\n\n外加 #10534 咬到的鲜度门:「录前重读晚于正文最后编辑的评论,有修正的先调和正文」没执行。\n\n## 判读\n\n四条违规同一签名:**判断做了(有分析产出),状态写入没做(纯开销的那半)**。长上下文席位注意力衰减最先丢的就是两段式义务的后半段——这不是\"技能写得不清楚\",是散文规则在长会话里的可预测衰减。本仓已有的结论一贯如此:活下来的规则都是有门的规则(worktree/stash hooks、`check-half-states.mjs`、各 ratchet)。\n\n## 提案:进 `scripts/pm/check-half-states.mjs` 的两条新 H 规则\n\n1. **矛盾态**:卡同时挂 `pm:queue` 与 `needs-user-decision`(或等价未决标记)= 红。`pm:queue` 的定义就是「无可问之事」,共现即违反定义,机器可判。\n2. **腐烂告警**:`pm:queue` 卡零活动超过 N 天 = 点名,不判对错,只逼出一次显式转换(派发 / 转 needs-user-decision / 撤卡 / 改写)。\n\n第三条(鲜度门)机判不了意图但可判事实:**结论型评论时间戳早于卡正文最后编辑时间戳** → 提示需重新调和;可作 warning 级,不作 red。\n\n## 不做的事\n\n不往 `.claude/skills/pm-dispatch/SKILL.md` 加散文(682/682 零余量,且散文正是刚失效的手段)。「散文规则 → 机器门」的整体审视喂进已裁决待触发的 #11086 全文重构轮,本卡只落上面可机判的规则。"
+}

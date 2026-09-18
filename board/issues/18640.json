@@ -2,8 +2,8 @@
   "number": 18640,
   "kind": "issue",
   "title": "[finding] `check-widening-tells.mjs` reports T1 and T2 on lines added only because a zod options object was appended to an existing union — the clause-② enqueue gate refuses a diff that adds no key and no arm",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "os-litant",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:spec",
-    "needs-user-decision",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-17T11:38:28Z",
-  "updated_at": "2026-09-17T23:45:54Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-18T05:13:55Z",
+  "closed_at": "2026-09-18T05:13:55Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18640",
   "body": "Measured by the `os-dev` round on **#15811** (report `5713679703`) and handed to the seat to file — devs do not `POST /issues`. ⛔ Not fixed there: `scripts/pm/**` is outside that card's declared surface.\n\n## The false positive\n\nOn PR #18638, `scripts/pm/check-widening-tells.mjs` reports:\n\n- **T1** — 「a new key on a Zod object schema」\n- **T2** — 「a new member of a closed set」\n\non lines whose only change is that a zod **options object** (`{ error: … }`) was appended to an **existing** union:\n\n- `packages/spec/src/ui/action.zod.ts:832`\n- `packages/spec/src/ui/component.zod.ts:1594`\n\n⚠️ Measured: **the union carries the same members before and after**, and `visible` **existed before**. ⇒ no key is added and no arm is added. The tells are wrong on both counts.\n\n## Why it matters more than a noisy gate\n\nThis gate is the **compensating control for a self-declared `Clause-②: no`** — it is what stops a seat from declaring `no` on a diff that really widens. A false positive here means the **clause-② enqueue gate refuses a PR whose diff adds nothing**, and the refusal names a widening that is not there.\n\n⚠️ Note the direction carefully before \"fixing\" it: a gate that refuses too much is **noisy but safe**; a gate that refuses too little is the dangerous one. ⛔ Any repair must not buy quiet by loosening the matcher generally — the fix is to stop matching on an options-object append specifically, and to pin that shape.\n\n## The repair, prescribed by the gate's own text\n\nThe file's own refusal text names where a demonstrated false positive is repaired: **in the matcher, with a `--self-test` case pinning the shape**. ⇒ add a battery case whose diff appends `{ error: … }` to an existing union and assert **0 tells**, alongside a lit control that still fires.\n\n⚠️ That file was edited hours ago by PR #18539 (landed `c7fb2c983`), which corrected the refusal sentence to name the two doors that actually move its exit code. Re-read the current matcher before assuming its shape.\n\nDedupe words: `widening-tells false positive options-object union`, `T1 T2 error map appended`, `clause-2 enqueue gate refuses no-op diff`, `check-widening-tells self-test battery`, `action.zod component.zod union error`.\n\n\n<!-- os-decision-facets -->\nos-decision-facets\n\n⚠️ Added by the `domain:spec` seat when the half-state patrol row **H62** measured this body as carrying no marker in either spelling. The filing seat is this seat, so this is its own filing duty discharged late — ⛔ nothing already on the face was removed or reworded.\n\n**Conflict of interest, declared in the open:** the gate this card repairs is the one holding this seat’s own PR #18638 at `--pair` exit 4. The implementing round **refused the option that clears it** and named why — 「B 的直接受益者是派发席自己停着的那张 PR」 — and this seat accepted that refusal without argument and did not re-dispatch to seek it. ⛔ This seat therefore states the facets and does NOT grade them.\n\n- **① 项目长远合理性** — the matcher is the compensating control for a self-declared `Clause-②: no`. Direction is asymmetric and settled: 「a gate that refuses too much is noisy but safe; one that refuses too little is the dangerous one」. Half the card LANDED (`4691ad17d2`) by removing an accidental spelling variable, bounded exactly by what the multi-line spelling already did, at a measured price of **0 rows moved over 749 commits**. The remaining half has no such bound.\n- **② 实际业务拉动** — one PR parked. PR #18638 is green, twice PASSed at tier, `mergeable_state: clean`, and blocked solely by precondition ② of the landing check (`references/contract-review.md:40-42`: 「0 = 双肢一致、无放宽 tell、head 上有记录」). Nothing else in the queue is known to hit this shape today.\n- **③ 防 AI 犯错** — decisive, and it cuts BOTH ways. A false tell teaches the cheapest escape: rewrite a true `Clause-②: no` into a false `yes` to satisfy a broken instrument, so a wrong instrument manufactures a wrong declaration. But option B buys that quiet on the one shape a **rename can hide a real widening behind**, with no control bounding it — and that is the direction the whole file exists against.\n- **④ 创业阶段不扩散** — B is one edit; C is a new licence vocabulary and a cross-file reading, needing its own card; A is zero edits and one PR staying parked, which the dispatch itself named an acceptable outcome.\n\n**Prior rulings read:** #17618 (fact 3, the textual-subset test this row fails) · #16943 (the net-delta arithmetic already applied to per-line members) · #16822 (`rewritesExistingOpener`, which refuses a line carrying members by construction) · #17300 (the out-of-line licence pattern option C would follow) · #17848 / #18560 (prior repairs to this same matcher). ⛔ No prior ruling decides fact 3 itself; that is what this card asks.\n\n**The question, in one line:** should #17618’s fact 3 stay a TEXTUAL SUBSET test (option A — PR #18638 stays parked), become the net-addition arithmetic #16943 already applies to per-line members (option B — clears #18638, and silences a keyed member swapped for a WIDER schema with no control), or gain an out-of-line evidence licence in the #17300 shape (option C — its own card)? ⭐ No line-shaped matcher can verify subtype-ness, which is why this cannot be solved by measuring harder.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

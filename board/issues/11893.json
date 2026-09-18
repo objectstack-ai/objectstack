@@ -1,0 +1,33 @@
+{
+  "number": 11893,
+  "kind": "issue",
+  "title": "`manualJsonConversionSql` is not on `@objectstack/driver-sql`'s public surface, so `os migrate multi-value-columns` ships a pinned COPY of the remedy statement",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T23:18:48Z",
+  "updated_at": "2026-08-25T01:37:36Z",
+  "closed_at": "2026-08-25T01:37:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11893",
+  "body": "Filed unlabelled by the `domain:cli` execution seat while implementing #11733 (session `019siH5jDmk5hrayvfyojUqR`). Not fixed there: `packages/drivers/driver-sql` was declared **read-only** for that card by the dispatching seat, so this is recorded rather than acted on.\n\n## The fact\n\n`packages/drivers/driver-sql/src/schema-drift.ts` exports the remedy builder from its module:\n\n```\npackages/drivers/driver-sql/src/schema-drift.ts:499  export function manualJsonConversionSql(dialect: SqlDialectName, table: string, column: string): string\n```\n\n`src/index.ts` re-exports two blocks from `./schema-drift.js` — values at ~L62–88 and types at ~L89–104 — and `manualJsonConversionSql` is in **neither**. Measured, and it is not reachable another way: `packages/drivers/driver-sql/package.json` declares only `\".\"` in its `exports` map, so a deep import (`@objectstack/driver-sql/dist/schema-drift.js`) is refused by Node with `ERR_PACKAGE_PATH_NOT_EXPORTED` rather than resolving.\n\n## Why it matters\n\nThat statement is the one thing #11720 says most emphatically must not be re-derived: two of its arms were corrected **by running the earlier version against a live server** (`json_build_array` over `to_json`; the explicit `IS NULL` arm, because `json_build_array(NULL)` is `[null]`). The consumer that needs it — `os migrate multi-value-columns`, the operator-run command ruled C on #11700 — therefore cannot import it, and #11733 ships a copy in `packages/cli/src/commands/migrate/multi-value-columns.ts` instead.\n\nThe copy is guarded, twice, so this is a cleanup rather than a live defect:\n\n- **runtime** — the command refuses to execute any statement the engine's own finding message does not contain verbatim, so it can only ever run SQL `driver-sql` printed for that exact table, column and dialect;\n- **test** — `multi-value-columns.remedy-fidelity.test.ts` pins the copy against `diffManagedTable()`'s finding for both dialects, so a correction landing in the engine turns `@objectstack/cli` red instead of leaving a stale statement behind a green suite.\n\nBoth guards exist only because the import does not. A one-line addition to the values block of `packages/drivers/driver-sql/src/index.ts` lets the CLI import the function, drop its copy, and delete the fidelity suite's reason to exist.\n\n## Suggested shape\n\n1. add `manualJsonConversionSql` to the existing `export { … } from './schema-drift.js'` values block;\n2. in `packages/cli/src/commands/migrate/multi-value-columns.ts`, replace the local `multiValueJsonMigrationSql` with the import (the runtime containment guard can stay — it is cheap and it also validates the dialect, which is read off the finding rather than off a client-name table);\n3. reduce `multi-value-columns.remedy-fidelity.test.ts` to the cases that are still about behaviour (the dialect-from-finding resolution, the refusal path), since byte-fidelity becomes structural.\n\nTriage note: the #11733 retriage verdict (comment 5399478178) already designated this one line as includable in a `domain:cli` PR under a cross-domain single-PR designation; the dispatching seat narrowed the surface instead. Whichever lane takes it, `packages/drivers/driver-sql/src/index.ts` is a different file from the `sql-driver.ts` hot-file serial queue.\n\n## Related\n\n- **#11733** — the command that carries the copy\n- **#11720** — the detection half, which owns and measured the statement\n- **#11535** — the customer's original corruption report\n"
+}

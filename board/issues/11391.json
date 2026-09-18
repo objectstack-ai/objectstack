@@ -1,0 +1,35 @@
+{
+  "number": 11391,
+  "kind": "issue",
+  "title": "The first-party SDK's `meta.saveItem` sends no query string at all, so the `?force=true` the destructive 409 prescribes is unreachable through `@objectstack/client` on either REST door",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-23T15:23:01Z",
+  "updated_at": "2026-08-25T00:21:00Z",
+  "closed_at": "2026-08-25T00:21:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11391",
+  "body": "Measured while implementing #11095 (threading `?force` on the compound-name `PUT /meta/:type/:a/:b`). Separate surface, filed rather than folded — it needs a contract decision of its own and #11095's ruling does not reach it.\n\n## What was measured\n\n`saveMetaItem`'s Phase 3a-destructive gate raises `409 DESTRUCTIVE_CHANGE` and ends the message with `— re-submit with ?force=true to proceed.` After #11095 that clause is TRUE of both REST `PUT` doors: each reads `?force` off the query string and threads it.\n\nIt is still unreachable from the **first-party SDK**. `@objectstack/client` declares `meta.saveItem` twice — the unscoped client and the environment-scoped one — and neither builds a query string at all:\n\n- `packages/client/src/index.ts:703` — `saveItem: async (type, name, item)` → `PUT ${route}/${type}/${name}`, body only.\n- `packages/client/src/index.ts:5151` — the scoped twin → `PUT /meta/${type}/${name}`, body only.\n\nMeasured on `origin/main` @ `11038529`: `grep -c force packages/client/src/index.ts` is 9, and **not one of those hits is on a metadata save** — they are `environments.delete({ force })` (`?force=1`), unrelated prose, and the word \"enforced\". The sibling `getItem` on the same object *does* compose a query string (`if (options?.packageId) params.set('package', …)`), so this is an absent option on one method rather than a client that cannot send query parameters.\n\nSo an SDK caller refused with the destructive 409 is told to re-submit with a parameter their client offers no way to set. The remedy is reachable only by dropping to raw `fetch`.\n\n## Why this is not #11095\n\n#11095 was about two ROUTES that did not read a parameter callers could send. This is one CLIENT that cannot send a parameter both routes now read — a different layer, a different fix, and a different decision. It also predates #11095 on the single-segment door: the clause has been unactionable for SDK callers there the whole time, so this is not a regression that card introduced.\n\nIt is equally absent on **both** doors, so it is not a twin divergence either, and #7019's \"twin doors must not diverge\" argument — the load-bearing one for #11095's compound-name half — says nothing about it.\n\n## Why it is a contract question rather than an obvious fix\n\nAdding `force` to `meta.saveItem` widens the published SDK surface, which is the same tier of decision #11095 was escalated for. Candidate shapes, none of them free:\n\n- **A — an options bag**: `saveItem(type, name, item, { force?: boolean })`. Matches `getItem`'s existing `options?.packageId` shape on the same object, and leaves room for the twin's other two unexposed query parameters (`?package`, `?mode=draft`), which are in exactly the same position. Widest, and the one that makes the whole door's surface reachable.\n- **B — `force` alone**, narrowest, on the argument that only this parameter is named by a refusal the caller is expected to act on. Leaves `?package` / `?mode` unreachable and invites a second card.\n- **C — decline, and change the message instead**: give the SDK-facing faces a remedy that names something an SDK caller can do. Zero widening, but the two REST doors would then be prescribing different things to HTTP callers and SDK callers for one refusal, which is close to the shape #11095 just removed.\n\nWorth measuring before choosing, and not measured here: whether Studio and the CLI go through `meta.saveItem` or through raw HTTP for metadata saves. If the real destructive-edit surfaces already bypass the SDK, option C's cost is much lower than it looks, and option A is speculative surface.\n\n## Where the repair would land\n\n`packages/client/src/index.ts` (both `saveItem` declarations, which must stay in step — they are the same method on two clients), plus whatever pins `client.test.ts` holds on the URL those methods build.\n\nRelated: #11095 (the routes, fixed), #11015 (the face-aware remedy clause), #10886 (the sole-carrier verdict on this message).\n\nMeasured on `origin/main` at `11038529`."
+}

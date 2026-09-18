@@ -1,0 +1,34 @@
+{
+  "number": 11919,
+  "kind": "pull_request",
+  "title": "fix(qa): correct rootDir comment that opens \"No rootDir\" above one that sets it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T01:08:16Z",
+  "updated_at": "2026-08-25T02:23:21Z",
+  "closed_at": "2026-08-25T02:23:19Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T02:23:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11919",
+  "body": "Fixes #11476\n\n## History (full clone, not the finder's shallow one)\n\n`git log --follow` on `packages/qa/dogfood/tsconfig.json` shows three touches:\n\n1. `10c2b854f` (2026-07-20, #3349, docs-only PR) — file **created** with\n   `\"rootDir\": \".\"` and no comment.\n2. `cc3555e78` (2026-08-11, #7526/#7584) — **the same commit** both (a) added\n   the seven-line comment and (b) changed `rootDir` from `\".\"` to `\"../../..\"`.\n   `git log -S` on the literal string `rootDir` on this path finds only these\n   two commits (positive control: the same search technique reliably finds\n   real hits — confirmed against `#7526` elsewhere in history — so the result\n   here isn't a broken search).\n3. `d41d99047` (2026-08-23, #11474, this same PM session) — dropped the dead\n   `src/**/*` include glob and explicitly left `rootDir`/its comment\n   \"deliberately untouched\", per #10899's scope fence on this file.\n\nSo `rootDir` was **not** added after the comment was written — the comment's\nopening sentence was wrong from the moment it was introduced, in the same diff\nthat set the value it denies two lines below. There is no earlier form of\nthis file where \"no `rootDir`\" was true.\n\n## Why disposition 1, not 2\n\nRemoving `rootDir` (disposition 2) would need evidence the file was *meant*\nto have none. There isn't any — the opposite, if anything: `rootDir` has been\npresent since the file's creation (as `\".\"`, TS's own default), and the\ncommit that broadened it to `\"../../..\"` did so on purpose, to admit the\nsibling-package ledger imports the parity gate needs (below). Nothing in the\nhistory argues for removing it, so per triage's default this stays\ndisposition 1: fix the wording, keep the declaration.\n\n## The comment's own argument still checks out\n\nVerified the premise the comment relies on rather than inheriting it: the one\nfile in the package importing outside it,\n`test/route-ledger-live-mount-parity.dogfood.test.ts`, resolves all five of\nits relative imports (`../../../runtime/src/route-ledger.js`,\n`../../../rest/src/rest-route-ledger.js`, and three more) to `packages/**` —\nthree `../` segments up from `packages/qa/dogfood/test/`, i.e. inside the\n`../../..` (repo root) bound. No import anywhere in the package goes deeper.\nSo the declared `rootDir` never actually constrains anything here, exactly as\nthe comment's body (correctly) argues — only its opening sentence contradicted\nthe line beneath it.\n\n## The fix\n\nOne-sentence correction; the rest of the comment is untouched content-wise\n(only re-wrapped for line width by the change in opening-sentence length):\n\n```diff\n-    // No `rootDir`. This project emits nothing (`noEmit`), so `rootDir` never\n-    // shaped an output layout here — its only effect was to forbid importing a\n+    // `rootDir` is set to the repo root — wide enough to be a no-op. This\n+    // project emits nothing (`noEmit`), so `rootDir` never shaped an output\n+    // layout here — its only effect was to forbid importing a sibling\n     ... (unchanged: parity-gate / five-ledgers reasoning, verbatim)\n```\n\nNo behaviour change: `tsc --showConfig -p packages/qa/dogfood/tsconfig.json`\nis byte-identical before/after this edit (`compilerOptions`, `include`,\n`exclude`, `files` all unchanged — JSONC comments are stripped before\nparsing), and `pnpm --filter @objectstack/dogfood typecheck` passes clean.\n\n## Scope\n\nComment text only, in this one file — no other tidying, per #10899's standing\nfence on this file.\n\n## Gates\n\nNo changeset: comment-only edit inside a `tsconfig.json`, nothing publishable\nchanges. `skip-changeset` label applied.\n\nLocal gates (`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`\nagainst `packages/qa/dogfood/tsconfig.json`), all green at `7b93b7521`:\n\n- `pnpm --filter @objectstack/dogfood typecheck` — clean, 0 errors\n- `pnpm check:published-files` — self-test (21+12+4 cases) + live, pass\n- `pnpm check:slot-lookup` — ratchet holds, 0 new sites\n- `pnpm check:test-source-alias` — self-test + live, 72 packages scanned, pass\n- `pnpm check:type-source-resolution` — self-test + live, 77 packages scanned, pass\n- `node scripts/check-plugin-teardown-shape.mjs` — 0 known-unreached, pass\n- `node scripts/docs-audit/check-affected-docs.mjs` — pass\n- `node scripts/docs-audit/check-drift-comment.mjs` — 56 cases pass\n- `pnpm --filter @objectstack/spec run check:empty-state` — all classified, pass\n- `pnpm --filter @objectstack/spec run check:liveness` — pass (one pre-existing,\n  unrelated warning: an unregistered dogfood proof tag in\n  `admin-platform-admin-standing.dogfood.test.ts`, a different file this PR\n  never touches)\n- `pnpm --filter @objectstack/spec run check:strictness-ledger` — pass\n- `pnpm --filter @objectstack/spec run check:variant-docs` — 18 unions governed/exempt, pass\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015ahemw8RcTgqtxrj15PEZx)_"
+}

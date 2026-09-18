@@ -1,0 +1,36 @@
+{
+  "number": 9872,
+  "kind": "issue",
+  "title": "[finding] ~10 comments date the #3290 `session.tenantId` removal to \"v11\", but it shipped in v16 — and there is no v11 release page at all",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T06:00:17Z",
+  "updated_at": "2026-08-25T00:08:18Z",
+  "closed_at": "2026-08-25T00:08:18Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9872",
+  "body": "Found while working #9809 (narrowing `check-org-identifier`'s stated reason for excluding test files). Reported, not fixed — out of scope for that card, which is about the gate's exclusion, not this factual error. Unassigned. Not a claim.\n\nMeasured on `83f8267f5`.\n\n## The contradiction\n\nProduction comments, tests, and the gate script consistently say the `ctx.session.tenantId` alias was removed in **v11**:\n\n```\nscripts/check-org-identifier.mjs:11        #3290 REMOVED it ... (v11 major)\npackages/objectql/src/engine.ts:2909       was removed here in v11 (#3290)\npackages/objectql/src/plugin.ts:945        alias was removed in v11, #3290\npackages/runtime/src/domains/actions.ts:323  was removed in v11 (#3290)\npackages/objectql/src/engine.test.ts:538   removed in v11 (#3290)\npackages/runtime/src/http-dispatcher.test.ts:3966\npackages/runtime/src/action-session-shape-contract.test.ts:88\nskills/objectstack-ui/SKILL.md:1934        removed in v11 (#3290)\n```\n\nOne file disagrees:\n\n```\nskills/objectstack-data/references/data-hooks.md:627   removed in v16 (#3290)\n```\n\n## Which is right: v16\n\nThree independent reasons, all checkable:\n\n1. `content/docs/releases/` is the authority on which major shipped a removal, and **the only page that mentions #3290 is `v16.mdx`** (line 132: \"#3290 then **removed** the deprecated `tenantId` alias from the hook `ctx.session` ...\").\n2. That page's **Upgrade checklist → 16.0.0** lists the migration as a v16 step: \"rename `ctx.session.tenantId` / `ctx.user.tenantId` to `organizationId` in every `*.hook.ts` / `*.action.ts` body\".\n3. **There is no `v11.mdx`.** The release pages are `v9, v12, v13, v14, v15, v16, v17` — so \"v11\" names a major that has no release page in the tree at all.\n\nSo the majority spelling is the wrong one: a single mis-dated comment appears to have been copied outward, and `data-hooks.md` is the one site that has it right.\n\n## Why it is worth fixing rather than ignoring\n\nThese comments are the migration note an author or AI lands on when they hit the removed name — several of them sit directly above the blessed-name replacement. Pointing a reader at the wrong major sends them to a release page that does not exist, and `check-org-identifier`'s own header is one of the sites, so the gate that teaches the migration mis-dates it.\n\nNote the fix is to the **comments**, not to `content/docs/releases/` — the release notes are already correct and are not to be edited in a code PR.\n\n## Suggested shape\n\nMechanical: retarget every \"v11\" in a `#3290` / `session.tenantId` context to \"v16\". Worth one pass so the tree is self-consistent, rather than one file at a time. Whether the repo also wants a guard against a removal being dated to a major with no release page is a separate judgement, not proposed here.\n\n## Related\n\n- #9809 — the card this was found under (`check-org-identifier`'s test exclusion).\n- #3280 / #3290 — the rename and the removal.\n"
+}

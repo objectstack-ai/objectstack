@@ -1,0 +1,36 @@
+{
+  "number": 11752,
+  "kind": "issue",
+  "title": "Gate the metadata-lifecycle overlay-whitelist table against DEFAULT_METADATA_TYPE_REGISTRY — both directions, and by AST not regex",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T15:12:32Z",
+  "updated_at": "2026-08-24T16:25:58Z",
+  "closed_at": "2026-08-24T16:25:58Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11752",
+  "body": "Follow-up to #11664 / #11750. Filed by the devx PM seat; the #11750 dev raised it and was instructed not to build it in a docs-only PR.\n\n## What\n\nAdd a gate that asserts the \"Overlay whitelist (shared-DB tenancy invariant)\" table in `content/docs/concepts/metadata-lifecycle.mdx` against `DEFAULT_METADATA_TYPE_REGISTRY` (`packages/spec/src/kernel/metadata-plugin.zod.ts`).\n\n## Why this one is worth a gate\n\nThe section declares the registry to be the single machine-readable source — \"The whitelist lives in **one** place: `MetadataTypeRegistryEntry.allowOrgOverride`\" — and the table drifted from it anyway, on **four** types, undetected long enough to be caught by a human fact-checking a promo video (#11664, video-studio #4):\n\n| Type | Table said | Registry says |\n| :--- | :---: | :---: |\n| `flow` | ✅ | ❌ (rolled back #6283) |\n| `permission` | ✅ | ❌ (rolled back #6483) |\n| `position` | ✅ | ❌ (same rollback) |\n| `translation` | **absent** | ✅ |\n\nNothing mechanical was watching a comparison that is entirely mechanical. #11750 corrected the table; it did not stop the next drift.\n\n## Two constraints, both established by measurement on #11750 — treat as binding\n\n**1. The gate MUST check both directions.** `translation` was a false negative *by omission* — a type the registry marks `allowOrgOverride: true` that the table simply did not list. A table→registry gate (\"every row I see agrees with the registry\") passes on a table missing a whole row. Three of the four defects were findable from the table side; the fourth was findable only from the registry side. A one-directional gate would have shipped 3/4 and reported clean.\n\n**2. The gate MUST read the registry by AST, not regex.** This is not a style preference — a same-line regex silently under-reads *this exact file*. Measured on `origin/main` @ `2a6122bd9`:\n\n- `grep -cE \"^  \\{ type: '\"` over the registry literal → **26**\n- AST parse → **27**\n\nThe missed entry is `datasource`, whose object literal opens `{` on its own line so `type:` and `allowOrgOverride:` land on separate lines. A regex-built gate would have been born with one type invisible to it — and invisible in the direction that matters, since the missing entry would never be reported as an omission from the table.\n\nTwo more shapes a regex gets wrong here, both present in the file today:\n- `grep -c 'allowOrgOverride: true'` = **6**, but only **5** are entries; the sixth is prose inside a code comment at `:789`.\n- 33 lines match `allowOrgOverride: false` inside the registry region; only **22** are entries. The other 11 are comments discussing the flags.\n\nThe #11750 dev already wrote a throwaway AST comparator end-to-end and demonstrated it firing in both directions (`exit 1 / VERDICT: 4 DIVERGENCE(S)` before, `exit 0 / VERDICT: CONSISTENT` after), so the hard part is done and is known to work — this card is about making it a permanent, wired gate rather than re-deriving it.\n\n## Non-vacuity requirement\n\nStandard for this repo, and there is a ready-made positive control: the pre-#11750 revision of `metadata-lifecycle.mdx` is a file the gate must reject with **4** divergences. Prove the gate red on it and green on `main` after #11750 lands. Do not accept a green reading on a gate that has not been shown able to go red.\n\n## Scope notes\n\n- The table is **hand-maintained** — verified on #11750: no generator writes the page, no `DO NOT EDIT` marker, no existing gate compares it to the registry. So the gate is the new thing, not a fix to a generator.\n- Do **not** flip any registry flag to make things agree. `scripts/adr-anchors/packages__spec__src__kernel__metadata-plugin.zod.ts.json` states that a flag flip here is an ADR-0005 whitelist change requiring the ADR revised, not a file edit. The registry is the authority; the table is what gets corrected.\n- Sibling pages already carry the same facts correctly (`content/docs/permissions/authorization.mdx:236`, `content/docs/automation/jobs.mdx:42`). Whether the gate should also cover those is an open question, not a requirement — decide it on evidence, and say which way you went and why.\n- Wire it into the derived-gate family the way its neighbours are wired, and confirm the wiring by a **live** `node scripts/pm/dispatch-gates.mjs` derivation rather than by assuming the glob covers it."
+}

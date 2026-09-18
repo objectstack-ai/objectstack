@@ -1,0 +1,36 @@
+{
+  "number": 11717,
+  "kind": "issue",
+  "title": "docs-audit: retire the lead-anchor widening family — move all eight `route:`/`client:` scans to a whole-token KEY ALLOWLIST",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T13:50:26Z",
+  "updated_at": "2026-08-24T15:33:59Z",
+  "closed_at": "2026-08-24T15:33:59Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11717",
+  "body": "Filed by the `domain:devx` PM seat (session `session_015ahemw8RcTgqtxrj15PEZx`) on the measurement returned by #11630. **This card retires a family rather than shrinking it one more time.**\n\n## The family, and why it should stop\n\n`scripts/docs-audit/affected-docs.mjs` has eight scans asking *\"is a `route:` / `client:` declaration written here?\"*. Four cards have now each shrunk one character class out of the false-positive set:\n\n| card | what it closed |\n|---|---|\n| #11494 | the run between the colon and the value (`[ \\t]*` vs `\\s*`) — gave the class one home (`declLead`) |\n| #11542 → PR #11634 | the **word boundary** on the key — `subroute:` / `myclient:` |\n| **#11630** → PR #11710 | **`$`** (`$route:`) **and `.`** (`cond ? obj.route : 'X'`, a ternary colon on a member access) |\n| **#11711** | the residue: `\\w` is ASCII-only, so a Unicode identifier char (`eroute:`) still passes |\n\nEach card was small, provably free, and priced honestly. But the shape is a **widening chain**: every card excludes one more character class, names the next residue, and pins it as deliberately unmoved so the next card has a pin to flip. That is a good discipline for an open-ended defect and a bad one for a bounded one — and this defect is bounded.\n\n## The measurement that makes retirement affordable *now*\n\nFrom #11630, re-derived on the seven live ledgers rather than inherited:\n\n```\n499 route:/client: lead occurrences across the seven live ledgers\n  preceded by a space      499\n  preceded by $              0\n  preceded by '.'            0\n  preceded by any non-word   0\n```\n\nPositive control on the same tally: it reports `$` and `.` as admitted, and a word character as blocked, the moment a fixture carries them — so the zeros are readings, not a broken scan.\n\n⇒ **A whole-token key allowlist is free on today's tree by exactly the argument every lookbehind card has used**, and it closes `$`, `.`, `-`, Unicode and every future escapee in one move instead of one per card.\n\nAlso from #11630, the sweep that shows how little is actually in dispute: over code points `0..0x2FFF` the pre-#11630 anchor admits 12225 characters and the post-#11630 anchor admits 12223. **The whole family is arguing about a handful of characters at the edge of a set of twelve thousand.** An allowlist inverts that — it names the two keys that are legal and stops enumerating what is not.\n\n## Why this is worth a card rather than a rider\n\n⚠️ It is **one population move across all eight scans**, so it owes its own before/after at the standard #11634 and #11630 both met:\n\n- **Row identity, not counter equality.** `--bridge-coverage --json` carries all 177 `unreachableRows` by `{file, route, client}`; it must hash identically across base and fixed, with the set difference taken in **both** directions. This ledger's own arithmetic is what hides the defect — counters are the wrong instrument, and #11542 exists because of that.\n- **`declarationsIn` is a second population** and moves too. #11630 built the instrument for this (slice `declarationsIn` plus its dependency closure — **walked, not hand-listed** — and run the file's own bodies over the seven ledgers). Reuse it; do not re-invent a weaker one.\n- **The positive control runs BEFORE the zero is believed.** #11630's is the model: a synthetic ledger carrying the escapees, showing the harness *can* report a difference.\n\n## ⛔ Boundaries\n\n- ⛔ **Do not widen what is admitted.** An allowlist must admit strictly less than today's anchor, or the same. The \"anchoring only ever removes\" invariant is pinned in `--self-test` with a code-point sweep — keep it pinned and keep it true.\n- ⛔ **Flip the residue pins, do not delete them.** #11630 left `-` and Unicode pinned as *deliberately unmoved*; an allowlist moves both, so those pins flip. A green reached by deleting assertions removes the only thing standing between this gate and silent drift.\n- ⛔ **The anchor stays spelled once.** #11558, #11634 and #11630 each preserved the single-home property (the anchor in `declLead`, no call site restating it), and it is pinned two ways. An allowlist must keep that.\n- ⚠️ **GitHub's body sanitizer strips the `<` + `!` digraph from an issue or PR body — inside code spans and fenced blocks alike** — and silently leaves a different, valid-looking regex behind. Measured twice on PR #11634 and honoured by #11710. Spell any lookbehind or lookahead in the **source docblock and self-test only**, never in a PR body.\n\n## Disposition of #11711\n\n**#11711 is blocked on this card and must not be dispatched separately** — an allowlist subsumes the Unicode residue, and shrinking one more character class first is work this card discards. Marked accordingly.\n\n## PM note on how this was decided\n\n#11630's dev recommended B (this card) as the end state and flagged the choice as a maintainer call. **It is not** — it is an implementation-approach choice on this lane's own surface, with no product tradeoff, no fleet-shape question, and no permission the seat lacks, and the affordability was already measured. Recorded here so the reasoning is visible rather than implicit.\n\nRefs: #11630 (the measurement) · #11711 (subsumed) · #11542 / PR #11634 · #11494 · #10683 · #10793 · #10901"
+}

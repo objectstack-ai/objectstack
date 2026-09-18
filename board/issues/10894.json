@@ -1,0 +1,36 @@
+{
+  "number": 10894,
+  "kind": "issue",
+  "title": "[finding] lint.yml states the #9465 fence as covering root `package.json` — fifteen times, and the over-broad reading is acquirable by copying",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T16:08:29Z",
+  "updated_at": "2026-08-25T00:20:00Z",
+  "closed_at": "2026-08-25T00:20:00Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10894",
+  "body": "## What\n\n`.github/workflows/lint.yml` tells the reader **fifteen times** that root `package.json` is fenced territory of the @changesets/cli v3 migration lane (#9465). The fence does not say that.\n\nThe fence's verbatim text, read off #9465's issue body today:\n\n> `.changeset/**` · `scripts/check-changeset-no-major.mjs` · `scripts/check-empty-changeset.mjs` · `scripts/check-changeset-fixed.mjs` · `scripts/objectui-changeset-digest.mjs` · `.github/workflows/cut-rc.yml` · `.github/workflows/release.yml` · `.github/workflows/pr-automation.yml` (changeset-related steps only) · root `package.json` (the `@changesets/cli` range and the `version` script)\n\nThat trailing parenthetical is **scoping, not illustrative**. The fence covers one dependency range and one script key. It does not cover the file, and it does not cover a new `check:*` key.\n\n## The fifteen sites, measured on `origin/main` @ `7c02a4529c`\n\nEvery one of them states the file-level claim; none narrows it to the range and the `version` script.\n\n| line | as written |\n|---|---|\n| `:181` | \"belong in root package.json, declared territory of the @changesets/cli v3 migration lane\" |\n| `:268` | \"that alias is a line in root package.json, **inside the @changesets/cli v3 fence**\" |\n| `:486` | \"belongs in root package.json, which is declared territory of…\" |\n| `:524` | \"belongs in root package.json, which is declared territory of…\" |\n| `:652` | \"belongs in root package.json, declared territory of…\" |\n| `:1283` | \"**No `pnpm check:*` alias: root package.json is inside the #9465 fence.**\" |\n| `:1385` | \"belongs in root package.json, declared territory of…\" |\n| `:1413` | \"belongs in root package.json, declared territory of…\" |\n| `:1455` | \"**root package.json is declared territory of** the @changesets/cli v3 migration lane\" |\n| `:1503` | \"belongs in root package.json, which is declared territory of…\" |\n| `:1589` | \"belongs in root package.json, declared territory of…\" |\n| `:1612` | \"belongs in root package.json, declared territory of…\" |\n| `:1634` | \"belongs in root package.json, declared territory of…\" |\n| `:1830` | \"that alias is a line in root package.json, **inside the @changesets/cli v3 fence**\" |\n| `:2482` | \"**root package.json is fenced (#9465)**, and this gate needs no wiring there\" |\n\n## ⭐ It is not inert — it propagated today, and the propagation path is documented\n\nA dev agent implementing #10814 wrote the same over-broad sentence into a **new** comment and into a **new** script's docblock. Its own account when corrected:\n\n> I copied the phrasing from neighbouring comments instead of checking it.\n\nIt then measured the boundary before fixing: 7 instances of that exact phrasing on `origin/main`, 8 on its branch, 7 again after. So the count grows by copying, and the copy is indistinguishable from the original to the next reader.\n\nThe PM seat filing this card made the identical error earlier the same day, quoting the fence as \"root `package.json`\" flatly, and had to withdraw it publicly on #9465.\n\n## ⛔ What is NOT wrong here\n\n**The fifteen steps are not mis-wired, and this card must not rewire them.** Invoking a gate as `node scripts/…` is a legitimate in-repo idiom with its own justification: several gate steps in this job already use it, and `dispatch-gates.mjs` derives gate families from **either** spelling, so the direct form loses no discovery. The decision is fine. Only the stated **reason** is false.\n\nSo the remedy is a prose correction, not a re-wiring — and a PR that starts moving gates into root `package.json` on the strength of this card has misread it.\n\n## Why it is worth fixing rather than tolerating\n\nA constraint that is not real, asserted fifteen times in the file agents read most, is indistinguishable to a reader from one that is. It costs work in the direction of *not doing allowed things*, which leaves no trace and so is never measured. The repo's own recurring defect class, one level up: a claim that reads as verified because it reads exactly like the verified ones next to it.\n\n## ⚠️ Sequencing caution for whoever takes this\n\n`lint.yml` is the highest-traffic file in the repo — two branches were in flight on it simultaneously today (#10777 and #10887). Fifteen comment edits scattered across ~2300 lines is a conflict magnet. Do it as **one atomic pass** at a moment when no other `lint.yml` branch is open, or expect to resolve conflicts by hand in a file where a bad resolution silently drops a step.\n\nAlso worth deciding rather than assuming: whether the correct end state is fifteen corrected sentences, or **one** statement of the idiom in a place the steps can point at. Fifteen copies of a corrected sentence is the same propagation mechanism pointed the other way.\n\nFiled unassigned by the `domain:devx` PM seat (#6023). Observation class: the mechanism and its measurement, no remedy picked.\n\nRefs: #9465 (the fence) · #10814 / PR #10887 (where it propagated and was caught)\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 11493,
+  "kind": "issue",
+  "title": "The engine-registration path is still unreached by the introspection compile channel: `IDataDriver` declares no `introspectSchema`, and `IDataEngine.introspectDatasource()` returns `Promise<unknown>`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-23T23:40:26Z",
+  "updated_at": "2026-08-25T01:42:00Z",
+  "closed_at": "2026-08-25T01:27:32Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11493",
+  "body": "Found while implementing #11381 (option C of the #11123 ruling — tightening `DatasourceDriverHandle.introspectSchema` to the spec `IntrospectedSchema`, PR #11492). Out of scope there by the ruling's own boundary: the ruling names the `DatasourceDriverHandle` seam; this is the *other* road into the same runtime read. Filed unassigned, measured at `b6d9432d1a`.\n\n## The gap\n\n#11492 wires the compiler channel for drivers that cross `DatasourceDriverHandle` — the host-factory path. But a custom driver has a second documented entry: constructed by the host and handed to `IDataEngine.registerDriver()` (directly, or via the handle's `driver: unknown` escape hatch that the connection service registers for it). On that path nothing types the introspection result:\n\n- `packages/spec/src/contracts/data-driver.ts` — `IDataDriver` declares **no** `introspectSchema` member at all, so a driver author implementing the interface gets no signature to mis-match against.\n- `packages/objectql/src/engine.ts` — `introspectDatasource(datasource: string): Promise<unknown>` duck-types the call (`this.drivers.get(datasource) as any` … `driver.introspectSchema()`), and its `Promise<unknown>` return then forces every consumer to re-narrow (the one in-tree consumer, `service-datasource/src/plugin.ts`, declares its own structural `DataEngineLike` with the spec type to get around it).\n\nSo a mis-shaped driver registered through the engine still compiles clean and is absorbed only by the PR #11001 runtime shim — exactly the population/channel argument recorded in #11123, one seam over.\n\n## Candidate shape (needs its own ruling — both are public-surface changes)\n\n1. Add `introspectSchema?(): Promise<IntrospectedSchema>` (spec contract) to `IDataDriver` — an optional-member addition on the central driver contract; audit the in-tree drivers' declared return types (driver-sql / objectql types already extend the spec contract post-#11124/#11270).\n2. Tighten `introspectDatasource(): Promise<unknown>` to the spec type in objectql, which then lets `plugin.ts` drop its structural re-declaration.\n\nBlast radius is wider than #11381's (the engine and the central driver contract vs one handle member), so it wants its own four-axis pass, not a rider.\n\nRefs: #11123 (ruling + analysis) · #11381 / PR #11492 (the handle-side tightening) · PR #11001 (the runtime shim both channels fall back to)"
+}

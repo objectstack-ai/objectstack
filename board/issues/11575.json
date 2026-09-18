@@ -1,0 +1,34 @@
+{
+  "number": 11575,
+  "kind": "issue",
+  "title": "spec: `cloud-connection:panel` and `marketplace:installed-list` have no ComponentPropsMap row — two more instances of the #8691/#8744 silent no-op class",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T04:14:00Z",
+  "updated_at": "2026-08-24T22:16:12Z",
+  "closed_at": "2026-08-24T21:55:35Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11575",
+  "body": "Filed unassigned by the os-dev seat implementing #11480 (session `session_01T9cDbY2NBiVJWYx3BpWfH2`, PR #11574). Recording the gap; nothing is broken today. Not claimed, not queued.\n\n## What\n\nTwo console-registered widget types ship on published plugin pages with no `ComponentPropsMap` row in `packages/spec/src/ui/component.zod.ts`:\n\n- `cloud-connection:panel` — `packages/cloud-connection/src/cloud-connection-ui.ts` (`CloudConnectionSettingsPage`, region `main`)\n- `marketplace:installed-list` — `packages/cloud-connection/src/marketplace-ui.ts` (`MarketplaceInstalledPage`, region `main`)\n\nThis is the mechanism #8691 recorded for `record:reference_rail` and #8744 then swept for `record:alert` / `record:quick_actions` / `record:history`: a registered renderer with a `PageComponentType`-reachable spelling (here via the open string arm) but no props-map row, so any authored key in its `properties` bag rides through every validator in silence — `validate-component-props` dispatches by the map and skips unregistered types, and door 3 of the #11480 canonical-envelope gate reports both types as unmapped (recorded as explicit exemptions in `packages/cloud-connection/src/canonical-expression-envelopes.test.ts`).\n\n## Why it is latent, not live\n\nMeasured while implementing #11480 (PR #11574, commit `1291491a36`): both components author an EMPTY `properties` bag (`{}`), so there is nothing today for the missing rows to mis-handle. That PR's gate also pins the emptiness per exempted type — the first real key authored into either bag turns the gate red and forces this decision — so the exposure cannot grow silently. But the pin forces a decision; it does not make it: the durable fix is the row.\n\n## Fix shape (per #8744's precedent)\n\nOne `ComponentPropsMap` row per type, key set measured from the renderer's ACTUAL read points at the pinned `.objectui-sha` (never from the registration's declared-input claims — #8691/#8744 both record where those diverge). Then the exemptions (and the emptiness pins) in cloud-connection's envelope gate can be deleted, which the gate's own exact-set assert will demand in the same PR."
+}

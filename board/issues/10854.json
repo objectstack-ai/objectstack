@@ -1,0 +1,35 @@
+{
+  "number": 10854,
+  "kind": "issue",
+  "title": "[finding] Three files still tell authors the input-radius detector cannot resolve a `findUp` walk — it now can, and in two of them that sentence is the reason a seed may not change",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T13:59:23Z",
+  "updated_at": "2026-08-25T00:08:18Z",
+  "closed_at": "2026-08-25T00:08:18Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10854",
+  "body": "Observation-class finding, measured while implementing #10029 direction B (PR #10852). **No gate is red today.** Filed unassigned, no `pm:queue`.\n\nThis is the **same class as #10163** (closed by PR #10690), recurring with different content — and the mechanism named in that card's adjudication is exactly what produced it: *\"禁令会腐烂,因为它描述的东西被扩宽了,而陈述它的散文没有跟着改\"* — a prohibition rots because the thing it describes was widened while the prose stating it was not.\n\n## Measured\n\nPR #10852 teaches `scripts/check-cross-package-test-inputs.mjs` the **`findUp` anchor seeds**: a walk up from `process.cwd()` keyed on this package's own manifest `name` now resolves to the package root, and one keyed on `pnpm-workspace.yaml` resolves to the repo root. Both are on the published `RECOGNISED_PATH_SPELLINGS` list and each is pinned by a `--self-test` case.\n\nThree files still tell authors the opposite, and in **two of them that sentence is the stated reason for a code decision** — load-bearing prose that no longer describes the gate.\n\n| file | line | what it says | status after PR #10852 |\n|---|---|---|---|\n| `packages/cli/src/commands/serve-multi-node-cap-advisory.pin.test.ts` | 70-72 | *\"The spellings that genuinely produce no flag are the ones the detector cannot resolve at all: a template-literal path, a `findUp` walk from `process.cwd()`, segments arriving out of a variable or an array.\"* | **false for the anchor forms.** The other two examples stay correct. |\n| `packages/plugins/plugin-auth/src/rate-limit-storage-isolation.test.ts` | 61-62 | *\"A `findUp` walk from `process.cwd()` is not a spelling it resolves — `process.cwd()` appears nowhere in that detector\"* | **false**, and the second clause was **already** false on `origin/main@37ba31a4b8` before that PR: `process.cwd` occurs once in the detector (in prose). Counter-checked on the same tree: `__dirname` 9, `import.meta.dirname` 7. |\n| `packages/plugins/plugin-auth/src/managed-extension-fields.test.ts` | 318-321 | *\"Deriving the root any other way — the `findUp` walk from `process.cwd()` that `member-role-canonical.test.ts` uses — makes this radius INVISIBLE to that gate\"* | **false.** A `findUp`-seeded reseed now resolves to the repo root and the escape stays visible **and named**. |\n\n## Why the third row is the one that matters\n\nThat sentence is the stated mechanism behind a standing ⛔ prohibition — `managed-extension-fields.test.ts` may not be reseeded, because doing so was said to make plugin-auth's `packages/**/*.object.ts` radius invisible. The **prohibition itself is not being challenged here** and PR #10852 left the file untouched; what changed is that its *stated reason* is now wrong, so the next author who re-derives it from the prose gets a false answer in the dangerous direction (*\"the gate can't see this either way, so the seed doesn't matter\"*).\n\nWhether the prohibition should be restated on a different reason, relaxed, or kept verbatim is a **triage judgment, not a mechanical edit** — which is the main reason this is filed rather than fixed in place. The others: `managed-extension-fields.test.ts` is plugin-auth's single hot surface and was explicitly reserved by #10029's claim, and editing two `packages/**` test files pulls in a verification surface (the plugin-auth and cli test farms) that a `scripts/**`-only PR does not have.\n\n## Population\n\nScanned repo-wide on `37ba31a4b8`: `findUp` occurs in 10 places across 6 files. Six are the live implementations and their bindings (all in `plugin-auth`); the other four are the prose above, minus one line already corrected inside the detector by PR #10852 (`globHolderVerdict()`'s docblock, which told the next reader to ablate that limb by reseeding from `process.cwd()` — that sentence now says **bare** `process.cwd()` and has a `--self-test` case pinning the bare form is still unresolved).\n\n## Backlinks\n\n#10029 (the card, direction B) · PR #10852 (where it was measured) · #10163 and PR #10690 (the same class, previous round) · #7802 (the blind spot the gate exists for) · #10161 (direction A).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

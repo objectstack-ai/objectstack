@@ -1,0 +1,33 @@
+{
+  "number": 18864,
+  "kind": "pull_request",
+  "title": "docs(scripts): keep the plain-Node manifest reading, drop its dead objectui citation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T01:58:06Z",
+  "updated_at": "2026-09-18T02:53:56Z",
+  "closed_at": "2026-09-18T02:53:55Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": "2026-09-18T02:53:55Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/18864",
+  "body": "Fixes #18627\n\nClause-②: no\n\n`scripts/gen-sdui-manifest-node.mjs` was the last site still citing the dead objectui number for the 2026-08-29 \"the browser-only manifest claim is expired\" measurement. PR #18608 had already dropped that citation from the two sibling gate scripts and left a number-free tombstone in each; this header was the survivor — and it is the header both corrected sites now send readers to for the readings, so a reader following the corrected trail landed on the one uncorrected number.\n\n## What changed\n\nProse only: one docblock paragraph in one dev-only script. No behaviour, no export, no generated artefact.\n\n- **The fact stays.** Plain Node enumerates the registry: measured false 2026-08-29, re-measured 2026-08-30 against published `@object-ui/*` 17.6.0, 57 configs, 0 lazy stubs, no Playwright, no objectui build.\n- **The number goes, and the readings replace it.** The paragraph now carries the independent reproduction from the review of PR #18608 — the 17 published `@object-ui/*` 17.6.0 packages installed from npm, `sdui-parser` bundled, this generator run under plain Node, `sha256 49211fee7792` / `git hash-object 78f870e42fe9`, `cmp` byte-identical to the tracked artefact.\n- **A number-free tombstone**, in the form PR #18608 established in the sibling file: do not put an objectui issue number back on that measurement — the citation this paragraph carried answers 404 on both the issue and the PR endpoint, while seven neighbouring objectui numbers answer 200 as controls on the same endpoint and token, so the zero is that number, not the channel — and the readings above stand without one.\n\n`git grep 'objectui#6741'` over the whole tree: **0** hits. The remaining `#6741` hits are objectstack#6741, the live ADR-governance ruling — a different repository's number, untouched.\n\n## DARK reading: the generator's behaviour is untouched (must read 0, and does)\n\nBoth runs enumerate the same npm install (the second reuses the first via `--modules-root`), so the header is the only variable.\n\n| run | artefact `sha256` | `git hash-object` | bytes / components |\n|---|---|---|---|\n| pre-edit, at this branch's base `be7aeb8275` | `49211fee7792cf51…` | `78f870e42fe9fec1…` | 66910 / 57 |\n| post-edit, at `49be1bcc90` | `49211fee7792cf51…` | `78f870e42fe9fec1…` | 66910 / 57 |\n| tracked `sdui.manifest.json` | `49211fee7792cf51…` | `78f870e42fe9fec1…` | 66910 / 57 |\n\n`cmp` pre-edit vs post-edit :: exit 0. `cmp` post-edit vs tracked :: exit 0. `node scripts/check-sdui-manifest.mjs` :: exit 0 (artefact, record and pin still agree).\n\nThe only tracked file either run moved is `scripts/sdui-manifest.record.json`, and only its `generatedAt` stamp (`2026-09-08` → the run's own date). It was restored with `git checkout HEAD -- …` and the restoration is proven by an empty `git diff HEAD`, so this PR does not touch it.\n\n## Gates\n\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --ran …` :: **26 derived families, 26 run, 0 NOT-MEASURED, 0 UNRUN** — every one recorded as `command :: exit 0`, each exit code captured before any pipe. One run beyond the derived union: `node scripts/check-sdui-manifest.mjs`.\n- Repo-wide lint, **not narrowed**: `node --stack-size=4000 node_modules/eslint/bin/eslint.js . --no-inline-config --format json` :: exit 0 in 68s — **6847 files linted, 0 errors, 0 warnings**, this file among them. Taken at `49be1bcc90`, the final commit.\n- No package is in the diff, so there is no dependency-closure build and no package `test` / `typecheck` owed here. The file is a repo-root dev script that ships in no package's `files[]`.\n- `skip-changeset`: nothing published moves — a comment paragraph in a repo-root dev script, in no package tarball.\n\n## Acceptance notes\n\n- **The other citation in this same header, `#12924`, also answers 404** — objectstack `issues/12924` and `pulls/12924` both 404, with 10 of the 20 neighbouring numbers 12915–12935 answering 200 on the same endpoint and token, so the zero is that number. ⛔ Deliberately not touched: the card fences this round to the objectui citation. It is also already a known, patrolled case — the H40 row in `scripts/pm/check-half-states.mjs` records `#13398 #13399 #13178 #12924 #13456 — HTTP 404 — do not resolve` as suppressed cards — and `#12924` is cited well beyond this file (`.github/workflows/lint.yml`, `.github/workflows/ci.yml`, `packages/lint/src/sdui-jsx-baseline.json`, `packages/lint/src/validate-jsx-pages.production-witness.test.ts`). Named here for the filing seat; devs do not POST issues.\n- The mechanism question on this file's producer — card #17735, M1 point at the pin's built tree / M2 retire in favour of the browser dump / M3 keep the skew and add a detector — is untouched and stays open; nothing here anticipates it, because the citation is dead whichever mechanism wins. #17735 is not addressed by this PR.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JbZnqu8bt6YqfJsr9vaFb3)_"
+}

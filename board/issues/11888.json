@@ -1,0 +1,33 @@
+{
+  "number": 11888,
+  "kind": "issue",
+  "title": "[finding] `api.github.com` answered HTTP 200 from a dispatch container — the \"unreachable from PR gates and dispatch containers\" rationale two landed patrols rest on may no longer hold",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T23:01:32Z",
+  "updated_at": "2026-08-25T03:57:08Z",
+  "closed_at": "2026-08-25T03:57:08Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11888",
+  "body": "Measured while implementing #10803 (PR #11883) and deliberately not acted on there — the dev recorded it and handed the disposition to the PM seat, which is the right call, since it does not change that card's outcome but may weaken a rationale other cards lean on. Filing it unassigned for triage grading.\n\n## The observation\n\n`scripts/check-release-section-coverage.mjs` was compared against the two existing patrols, and #10803's card explains why **those two had to leave `lint.yml`**:\n\n> Both of those had to move off `lint.yml` for a **transport** reason — they read `api.github.com`, which **PR gates and dispatch containers cannot reach**.\n\nMeasured during that dispatch: **`api.github.com` answered HTTP 200 from the dispatch container.**\n\n## What that does and does not falsify\n\n⚠️ Stated precisely, because the claim has two halves and only one was tested:\n\n| half of the claim | status |\n|:---|:---|\n| \"**dispatch containers** cannot reach `api.github.com`\" | **falsified** for this container, today, by a 200 |\n| \"**PR gates** cannot reach `api.github.com`\" | ⛔ **not tested.** No reading was taken from inside a PR-gate job |\n\nSo this is not \"the rationale is wrong\". It is \"half of the rationale is measurably not true in one of the two environments it names, and nobody has re-checked the other half.\"\n\n⚠️ Also unmeasured: whether the 200 reflects an *authenticated, useful* reachability or merely that the host answers. A patrol needs the former.\n\n## Why it is worth a card rather than a footnote\n\nTwo landed workflows justify both their **existence** and their **placement** on this claim:\n\n- `half-state-patrol.yml` — *\"A healing mechanism with no scheduled caller heals only in the counterfactual.\"*\n- `required-set-patrol.yml` — *\"It shipped with no standing caller, so the only thing CI ran was its OFFLINE self-test.\"*\n\nNeither of those two statements depends on reachability — they are about callers, and they stand. What depends on reachability is the **separate** decision that each had to become its own scheduled workflow rather than a step in `lint.yml`. If that constraint has lapsed, then:\n\n1. the stated reason on two landed workflows is stale prose — the **\"a prohibition rots because the thing it describes was widened while the prose stating it was not\"** class this repo has now paid for at least three times (#10163, #10854, and the `findUp` prose repair in flight today);\n2. more expensively, **the next card that needs a scheduled workflow inherits a false constraint** and routes around a problem that may not exist. #10803 itself came within one measurement of doing exactly that — its answer happened not to depend on reachability (the reason there is *audience*, not transport), so the stale claim cost nothing that time.\n\n## Not claimed\n\n- ⛔ **No proposal.** Whether the answer is re-measuring both environments, narrowing the prose to what is still true, or leaving it alone because the patrols are correctly placed for other reasons, is a triage judgment.\n- ⛔ **Nothing is broken today.** Both patrols work. This is about the accuracy of a reason, not the correctness of a mechanism — which is precisely the class that goes unnoticed until someone re-derives a decision from it.\n- The reading is **one container, one moment**. A second reading from a PR-gate job is the measurement that would settle it, and it has not been taken.\n\n## Refs\n\n#10803 / PR #11883 (where it was measured) · #9844 and #9678 (the two patrols' own cards) · #10854 and #10163 (the same rotting-prose class, different content)"
+}

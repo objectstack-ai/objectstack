@@ -1,0 +1,35 @@
+{
+  "number": 11734,
+  "kind": "pull_request",
+  "title": "fix(lint): lintLivenessProperties skips malformed collection items instead of throwing",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T14:20:40Z",
+  "updated_at": "2026-08-24T15:42:02Z",
+  "closed_at": "2026-08-24T15:42:00Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-08-24T15:42:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11734",
+  "body": "Fixes #11385\n\n## The contradiction\n\n`lintLivenessProperties`'s docblock states its contract plainly: \"Advisory\nonly — returns findings, never throws.\" Three of its four walks did not hold\nit — each read `item.name` (or `item.object`) straight off every collection\nelement with no check that the element is actually a record:\n\n- the flat `TYPE_COLLECTIONS` loop (covers every OTHER governed type: flow,\n  action, agent, tool, skill, dataset, permission, hook, page, view, webhook,\n  datasource, app, book, job, email_template, mapping, dashboard)\n- the `object` walk\n- the `field` walk nested under it\n\nA `null` element in any of those collections threw `TypeError: Cannot read\nproperties of null (reading 'name')` instead of being skipped — reachable via\nthe exported `stack: AnyRec` signature on an unparsed or hand-built stack,\nwhich the docblock's \"never throws\" promise invites a caller to hand this\nfunction without validating first. The translation bundle walk already\nguards its two levels this way (`isRecord(bundle)` / `isRecord(data)`,\n#11383); these three did not.\n\n## The fix\n\nOne `if (!isRecord(item)) continue;` guard in each of the three walks,\nmirroring the existing idiom from the translation bundle walk and using the\n`isRecord` helper already defined in the file. No new helper, no behavior\nchange for well-formed input — a malformed element is now skipped and the\nwalk continues over the rest of the collection, exactly like the translation\nwalk already does.\n\n## Measurement\n\nThe card's own reachability note asked only about the flat loop; it flagged\nthe object/field walk above it as \"the same one-line question\" without\nmeasuring it. Measured on `origin/main` before this fix, all three throw:\n\n```\nlintLivenessProperties({ agents: [null] })                                    -> throws TypeError\nlintLivenessProperties({ objects: [null] })                                   -> throws TypeError\nlintLivenessProperties({ objects: [{ name: 'w', fields: [null] }] })          -> throws TypeError\n```\n\nSo the object/field walk needed the same guard as the flat loop — this PR\nguards all three, not just the one the card's suggested shape named.\n\n## Tests\n\nThree new regression tests in `lint-liveness-properties.test.ts`, one per\nguarded walk, each pairing the malformed element with a real still-warning\nledger row from the shipped ledgers (not a synthetic one) so the assertion\nproves two things at once: no throw, and the walk kept going past the bad\nelement instead of aborting silently —\n\n- flat loop: `agents: [null, { name: 'ag1', memory: { kind: 'buffer' } }]` →\n  still warns on `memory` (real `experimental` row)\n- object walk: `objects: [null, { name: 'widget', externalSharingModel: 'read' }]`\n  → still warns on `externalSharingModel` (real `planned` row)\n- field walk: a `null` field entry alongside a real `field.relatedListFilter`\n  (real `planned` row)\n\n**Reverse verification**: ran these three tests against the unguarded\n`origin/main` source first (before writing the guards) — all three failed\nwith the TypeError above, not the assertion they were written for. Added the\nthree guards, reran — all three pass.\n\n## Verification\n\n- `pnpm --filter '@objectstack/lint^...' build` (dependency closure), then\n  `pnpm --filter @objectstack/lint build` — clean.\n- `pnpm --filter @objectstack/lint test -- --maxWorkers=2` — **2274/2274\n  passed** (81 files), including the 3 new regression tests.\n- `pnpm --filter @objectstack/lint typecheck` — clean.\n- Scoped ESLint (`eslint packages/lint/src/lint-liveness-properties.ts\n  packages/lint/src/lint-liveness-properties.test.ts --no-inline-config\n  --format json`) — 2 files linted (matches this diff exactly), 0\n  errors/warnings. Repo-wide `pnpm lint` is CI's to run; the collapse to\n  these 2 files is sound because this repo's single `eslint.config.mjs`\n  never enables type-aware linting for any file (`no parserOptions.project,\n  no typed @typescript-eslint rules` — the file's own header, `eslint.config.mjs:326-328`),\n  so no untouched file's lint verdict can move from this diff.\n- Local gate list derived via `node scripts/pm/dispatch-gates.mjs --repo\n  objectstack-ai/objectstack` from this worktree — every path-derived and\n  convention-triggered local gate it named ran green: `check:changeset-gate-\n  self-tests`, `check:cross-package-test-inputs`, `check:objectui-changeset`,\n  `check:published-files`, `check:slot-lookup`, `check:test-source-alias`,\n  `check:type-source-resolution`, `check-adr-0087-registration`,\n  `check-changeset-no-major`, `check-empty-changeset`,\n  `check-plugin-teardown-shape`, `check-affected-docs`,\n  `check:query-options-erasure`, `check:engine-double-contract`,\n  `check:where-matcher`, `release-rehearsal-clone --self-test`. (Two path-\n  derived entries — `check:cross-package-test-inputs` and\n  `check-cross-package-test-inputs.mjs` — are the same script; ran once.)\n  `check:type-check-debt`'s `--re-measure` ratchet needs the full\n  `./packages/*` + `./packages/*/*` closure built; not run locally given the\n  shared-container resource discipline (this diff adds no cross-package\n  import and no new type surface outside the touched file, so it is very\n  unlikely to move that ratchet) — flagged for CI to confirm.\n- Changeset added: `.changeset/liveness-lint-null-collection-item-guard.md`\n  (`@objectstack/lint`, patch).\n\n## Scope\n\nTouches only `packages/lint/src/lint-liveness-properties.ts`, its test file,\nand the changeset. No other file in the package or repo is touched.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Rxnd8cyFnoU8V5y21PaTsy)_"
+}

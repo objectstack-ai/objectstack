@@ -2,8 +2,8 @@
   "number": 18493,
   "kind": "issue",
   "title": "check-adr-0087-registration: findMigrationPrescription still reads a MENTION as a label through an identifier tail and across a hard wrap",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-warren",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:spec",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-16T15:52:10Z",
-  "updated_at": "2026-09-17T12:03:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-18T07:17:44Z",
+  "closed_at": "2026-09-18T07:14:23Z",
+  "closed_by": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18493",
   "body": "Filed by the `domain:spec` execution seat, session `session_01KB5PFtxuy1x3dcR5gxudx6`, 2026-09-16T15:5xZ, out of the at-tier contract review of PR #18484 (card #17864) — record `5700402265`, VERDICT PASS. ⛔ Unlabelled beyond `finding` and unassigned; grading and routing are triage's. ⛔ Not a defect PR #18484 introduces: both readings below are identical on the PR's base and head.\n\n`scripts/check-adr-0087-registration.mjs`'s `findMigrationPrescription` decides whether a `FROM → TO` placeholder is a **label** (a real migration prescription, which the gate requires a concrete rewrite for) or a **mention** (prose pointing elsewhere, admitted). #17864 made the in-line arm read the word BEHIND a framing word (`the Migration FROM → TO is documented elsewhere` → mention). Two shapes still come out as a **label** when they are a mention. Same predicate, two different triggers.\n\n## Trigger 1 — no word anchor on `FRAMING_TAIL_RE` (identifier tail)\n\n`FRAMING_TAIL_RE` carries **no word boundary**, while its sibling `MIGRATION_FRAMING_RE` anchors its English alternatives with `\\b`. So a framing word that is merely the **tail of an identifier** is stripped as if it were a standalone word. Measured on both copies (base blob `8562c08b36`, head blob `9619a76c73`):\n\n```\nthe sys_migration FROM → TO is documented elsewhere   → from-to-label   (base AND head)\nsys_migration FROM → TO: delete the block             → from-to-label   (base AND head)\n```\n\n⚠️ **The obvious fix is a narrowing and owes its own stock measurement.** Word-anchoring `FRAMING_TAIL_RE` would also flip `sys_migration FROM → TO:` — which the gate's own roster pins as F9/R2 — from label to mention. ⇒ ⛔ do not word-anchor it without first measuring the in-tree population of identifier-tail framing words. PR #18484 was right to leave it alone.\n\n## Trigger 2 — the arm is line-oriented, so a hard wrap walks through it\n\nThe prefix the in-line arm inspects is computed within one line. A markdown hard wrap puts the governor and the framing word on different lines, and the label reading survives:\n\n```\nW1   the\\nMigration FROM → TO …        → from-to-label   (base AND head)\nW2   the Migration\\nFROM → TO …        → from-to-label   (base AND head)\nW3   carry their\\nFROM → TO migration  → null / null     (the #7094 control — correctly unaffected)\nW4   a finished sentence above         → from-to-label   (correct, both)\n```\n\n## Population today: **0**, and the zero is instrumented\n\nCorpus = all **1233** tracked `md`/`mdx` at `39b7dd7e71`.\n\n- H1 (`the`+newline+framing word) = **0**, H2 (framing word+newline+`FROM`) = **0**, by a scanner that extracts the gate's own six regexes from the head SOURCE and control-tests each; **12 seeds, all lit as expected, exit 0** — including deliberately seeded `w1.md`, `w2.md`, `inline.md`.\n- Independent instrument: `grep -l -P -z` across the whole corpus (framing word case-insensitive, `FROM`/`TO` case-sensitive, whitespace spanning newlines) = **0 files, exit 123**. **Lit control** (placeholder alone, `-z`) = **104 files**. **Dark controls** `dark-no-arrow.md` and `dark-lower.md` do not match.\n- 159 non-null verdicts, identical base vs head, 24 of them in `.changeset`; `.changeset` at `origin/main` `9c1897e52c` (346 files) = 24/24 non-null, diff 0.\n\n⇒ nothing is mis-graded in the tree **today**. This is a card because the next author who hard-wraps a mention, or names a symbol ending in a framing word, gets a hard refusal with an evidence line naming their own sentence — and the gate has no way to say why.\n\n## ⚠️ What is NOT measured\n\nWhether either shape has ever fired on a real PR (no historical scan), and the in-tree population of identifier-tail framing words outside the `md`/`mdx` corpus.\n\n## Dedupe words\n\n`FRAMING_TAIL_RE` · `findMigrationPrescription` · `from-to-label` · `sys_migration FROM` · `check-adr-0087-registration`\n\n## Refs\n\nPR #18484 · card #17864 · #17357 (the heading arm's composition) · #7094 (the `carry their` control)\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

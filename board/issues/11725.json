@@ -1,0 +1,35 @@
+{
+  "number": 11725,
+  "kind": "issue",
+  "title": "[probe] Can a package-declared permission set ever enter trash? — the one path the #11513 save-door lock does not cover",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T14:06:39Z",
+  "updated_at": "2026-08-25T05:42:07Z",
+  "closed_at": "2026-08-25T05:42:07Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11725",
+  "body": "Split out of **#11513** at closure so a named residual does not die in a closed card's comments. Filed unassigned, **no `pm:queue`** — grading is triage's field.\n\n⛔ **This may be a no-op card, and that is a legitimate outcome.** It is a probe, not a known defect.\n\n## The residual\n\nPR #11702 (merged `e170b0ae`) locks the save door: an `insert` or `update` targeting a package-declared permission set is refused with `NOT_OVERRIDABLE`/403 **before** the metadata write. Its author named one leg the lock does **not** cover, rather than leaving it to be discovered:\n\n> the **`restore`** leg of the write-through still re-authors a restored record's body into metadata without the lock. It runs *after* the record is already back, where a throw would strand the caller with a healthy-looking row and no way to hear about it — the reason its neighbours catch rather than throw. Reaching it needs a trashed record for a package-declared name, **which the delete path does not produce (it resets instead)**.\n\nThe contract reviewer accepted this as a **residual, not a defect**, and suggested exactly one cheap follow-up — which is this card.\n\n## The probe, and the only question it has to answer\n\n**Can a record whose name is package-declared enter trash at all?**\n\n- **If no** — the `restore` leg is unreachable for this class, the residual is closed by construction, and the right outcome is to **record that measurement and close this card**. Ideally with a pin so a future change to the delete path cannot silently open the leg.\n- **If yes** — then there is a real second door into the silent-overlay state that #11513 exists to close, and it needs its own scoping (⚠️ noting the author's reason the lock is not simply copied there: a throw *after* the record is restored strands the caller with a healthy-looking row and no signal, which is why the neighbouring paths catch rather than throw — so \"add the same refusal\" is not obviously the answer).\n\n## Why it is worth the probe rather than an assumption\n\nThe delete path \"resets instead of trashing\" for packaged sets is documented behaviour, and documented behaviour is what the #11513 family has repeatedly found to be **true in one place and not another** — `customized` was forced `false` on exactly the shape it needed to describe, and `managed_by` turned out measurably wrong in *both* directions as a provenance proxy. So: measure, do not transcribe.\n\n⚠️ A zero-hit here needs a **positive control** — establish that the instrument can see a record entering trash at all (on some other object) before concluding that a packaged set cannot.\n\n## Not measured\n\nEverything above. Nothing has been run for this card; it exists to be run.\n\nRefs: #11513 (the ruling and the save-door lock) · PR #11702 (`e170b0ae`, where the residual is stated in the PR body and the module header) · #11703 (the sanctioned clone path's completeness fix)"
+}

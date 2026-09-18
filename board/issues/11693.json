@@ -1,0 +1,32 @@
+{
+  "number": 11693,
+  "kind": "issue",
+  "title": "[Decision] `sys_scim_provider`'s disposition under the stable @better-auth/scim migration — the upstream model it mirrors no longer exists",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T12:19:36Z",
+  "updated_at": "2026-08-25T03:49:27Z",
+  "closed_at": "2026-08-25T03:49:27Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11693",
+  "body": "Cut out of the **#11632** SCIM epic by its owning `domain:services` seat, because the epic's own scope item 1 calls this *\"decided INSIDE this epic\"* and several other legs are scoped by which way it goes — most directly the Setup surface's backend seam.\n\n⛔ **Filed as a decision, not a task.** It is deliberately not a card someone starts and discovers is a fork three hours in. ⛔ This seat does not rule it and does not rank the options below.\n\n## The measurement that changes the shape of the question\n\nThe SCIM parity gate was repaired by **PR #11429** (merged 2026-08-23, fixes #11380) so it reaches its model diff on the stable line instead of dying in collection. Its output against published `@better-auth/scim@1.7.1` includes:\n\n> `expected [ 'user', 'session', 'account', …(9) ] to include 'scimProvider'`\n\n⭐ **The upstream `scimProvider` model does not exist on stable.**\n\nThat matters because it removes an option that the epic's framing left open. This is no longer a free three-way choice between equally-available shapes: whatever `sys_scim_provider` becomes, **it cannot remain a mirror of an upstream model**, because on the version being migrated to there is nothing upstream to mirror.\n\nFull stable-line model diff the repaired gate now prints:\n\n| | models |\n|---|---|\n| **gained** | `scimConnectionBinding`, `scimIdentityTombstone`, `scimProjectionGrant`, `scimSubject`, `scimUser` |\n| **lost** | `scimGroupRole`, `scimGroupRoleGrant` |\n| **kept** | `scimGroup`, `scimGroupMember` |\n\n## The options as the epic framed them, with what the measurement does to each\n\n| | option | what the measurement means for it |\n|---|---|---|\n| **A** | **Retire** `sys_scim_provider` | The upstream model is gone, so nothing is lost by mirroring nothing. Cost lands on whatever currently reads the platform object — that consumer census has **not** been run and belongs with whoever takes this. |\n| **B** | **Facade** — keep the platform object, back it with something else on stable | Now strictly a *new* mapping rather than a pass-through, since there is no `scimProvider` to pass through to. The cost the epic assumed (a thin bridge) is not the cost that exists. |\n| **C** | **Managed-catalog adoption** | The managed-connection trio (`scimManagedConnection` / `scimManagedCredential` / `scimManagedConnectionEvent`) is **conditional on configuring `managedConnections`** — measured on PR #11429: **7 models without it, 10 with**. The auth manager does not currently pass it. So C is also a decision to configure that, not only to adopt a catalog. |\n\n## Not measured\n\n- **Which in-repo and downstream consumers read `sys_scim_provider` today.** No census was run. Option A's real cost is exactly that number, and it should be measured before A is chosen — not after.\n- Whether any shipped deployment has SCIM enabled at all, which sets how much any of this is worth.\n\n## Why it blocks\n\n**#11632**'s remaining legs stay uncut until this is ruled. The Setup surface leg in particular cannot be scoped without it, and cutting the legs first would cut them along the wrong seam.\n\n⚠️ Unrelated to this decision but riding the same migration, and **not a dev card**: every SCIM-enabled deployment's IdP must reissue its token on migration day (unsalted SHA-256 → keyed HMAC; digests are not portable on any path). That is a scheduled operational action with a human owner.\n\nRefs: #11632 (the epic) · #3653 (decision anchor + the seven-model measurements) · #11380 / PR #11429 (the gate repair that produced the diff above) · ADR-0071"
+}

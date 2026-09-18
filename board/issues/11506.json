@@ -1,0 +1,36 @@
+{
+  "number": 11506,
+  "kind": "issue",
+  "title": "finding: the unreferenced-recipe direction of check:platform-checklist is now well-defined and still unchecked — the reason it was deferred has expired",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T01:34:23Z",
+  "updated_at": "2026-08-24T21:11:40Z",
+  "closed_at": "2026-08-24T21:11:40Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11506",
+  "body": "Observation from the #10593 gap-2 work (the area-qualified `use`). Filed unassigned; recording that a deferral's stated reason has expired, not claiming the work.\n\n## The deferral, and why it was made\n\n`scripts/check-platform-checklist.mjs` resolves `fixtures.provisioning.use` to a real recipe, but deliberately does **not** check the reverse direction — a recipe that no item references. Unlike the trap vocabulary beside it, which is bidirectional (every trap used is documented, every trap documented is used), the recipe check is one-way.\n\nThe reason was recorded in the gate and in `docs/qa/platform-checklist/README.md`, and it was a good one at the time:\n\n> Cross-area reuse has no spelling yet, so a recipe whose only consumer lives in another area is referenced from that item's `knownGaps` prose — invisible to the check. Redding the unreferenced direction would answer the cross-area question by accident, in the direction of \"recipes are area-local\", and that is a convention decision rather than a mechanical one.\n\nIn other words: flagging an unreferenced recipe could not distinguish *dead text* from *a recipe whose only consumer sat in another area and could not say so*.\n\n## What changed\n\nThe maintainer ruled option A on 2026-08-22 (#10593 gap 2): `provisioning.use` accepts `<area>:<recipe>`, and a cross-area consumer opts in by key like any other. `records-forms.crud-roundtrip` is the worked instance and now carries `search:qa-contributor-bound-member`.\n\nThat removes the ambiguity the deferral rested on. **Every legitimate consumer of a recipe can now express itself as a `use`**, in any area. So a recipe with no `use` pointing at it is no longer \"possibly referenced from prose we cannot see\" — it is dead text, unambiguously, and the check could say so.\n\n## Why this is filed rather than done\n\nDeliberately not folded into the gap-2 PR, on the dispatch's explicit instruction (\"do not add unreferenced-recipe flagging in this PR, either way\"). It is also a genuinely separate change:\n\n- It is the **first** direction of this gate that can red on a file nobody edited — a recipe goes unreferenced when its last consumer is retired, which is an edit in a different area file.\n- It needs a decision on retired items: an item with `status: \"retired\"` still carries its `fixtures.provisioning`, so \"referenced\" has to mean referenced-by-an-active-item or referenced-at-all, and those differ the moment a recipe's only consumer is retired.\n- It wants a spelling for a deliberately-kept recipe (a `$`-annotation, a waiver field, or \"retire the recipe with the item\").\n\n## Interaction worth noting\n\n#10885 (recipes carry no `revision`/`history`) is the third axis of the same convention and is `pm:on-hold`. If recipes gain a lifecycle of their own there, \"unreferenced\" probably wants to be expressed through it — a retired recipe rather than a flagged one — so sequencing this after #10885 may be cheaper than deciding a bespoke answer here.\n\n## Current state\n\nAll four recipes are referenced today, so this direction would land green: `qa-scratch-authz` (3 items), `qa-media-constraints` (1), `qa-flow-status-doors` (1), `qa-contributor-bound-member` (2, one of them cross-area). Nothing is broken. The cost is that the gate's own comment now documents a deferral whose reason no longer holds, which is how a deliberate gap turns into an unexamined one.\n\n⚠️ Note for whoever picks this up: `check:platform-checklist` is **not** CI-wired (maintainer decision, `.github/workflows/lint.yml`), and it is currently **red on `main`** for an unrelated reason (#11421). Neither is caused by this; both shape how you would verify a change here.\n"
+}

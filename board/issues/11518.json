@@ -1,0 +1,35 @@
+{
+  "number": 11518,
+  "kind": "issue",
+  "title": "`buildExistingByName`'s UNSCOPED page cap truncates once a name can have more than one row — and a truncated page reads as \"absent\", which inserts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T02:14:43Z",
+  "updated_at": "2026-08-25T03:52:17Z",
+  "closed_at": "2026-08-25T03:52:17Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11518",
+  "body": "Found while implementing #11451 (batching the curated half of `bootstrapSystemCapabilities`). Not in that card's scope — it is a defect in the batched read that #10946 introduced and #11096 extended, affecting callers that are already on `main`.\n\n## The shape\n\n`packages/plugins/plugin-security/src/seed-name-lookup.ts`, `readNamePage`:\n\n```ts\nlimit: organizationId ? names.length * 2 : names.length,\n```\n\n`names.length` is exactly right only while **one row can exist per name**. #10103 already found and repaired this for the SCOPED arm — the comment right above the line says so: \"`names.length` was exactly right while one row existed per name. Once the catalog is per organization the driver returns this organization's rows AND any organization-less ones, so that cap TRUNCATES — and a truncated page reads as 'absent', which inserts.\"\n\nThe **unscoped** arm has the same exposure and did not get the same repair. Since #8461 / ADR-0120 D1 the identity tables are unique per ORGANIZATION, not per installation — `sys-capability.organization-unique.test.ts`, `sys-permission-set.organization-unique.test.ts`, `sys-position.organization-unique.test.ts` — and ADR-0066 D1 explicitly supports admins EXTENDing the registry inside their own organization. So one name legitimately carries a row per organization plus the platform's, and an unscoped page of N names can match far more than N rows.\n\nTwo callers on `main` read unscoped:\n\n- `bootstrap-declared-capabilities.ts:416` — `sys_capability`, no `organizationId` (deliberately: \"this seeder's read, its insert and its update are all organization-less today\");\n- `permission-set-projection.ts:1176` — `sys_permission_set`, no `organizationId`.\n\n## Why the equivalence claimed for the unscoped arm does not cover this\n\n`bootstrap-declared-capabilities.ts` argues the unscoped lookup is \"EXACTLY the question the per-item read asked — `resolveOwnOrganizationRow` returns the first row when no organization is given, which is what `tryFind(…, 1)[0]` returned.\" That is true of **which row** is chosen and false of **whether the row is seen at all**. The per-item read was `limit: 1` per name and could not truncate; the batched read is `limit: N` for N names and truncates as soon as any name carries a second row. The rows that fall off are the highest `id`s under #4363's `ORDER BY id ASC` tie-breaker, so whole names can vanish from the page.\n\n`absent` then sends the caller to its insert branch. On a table whose unique key still admits the write (the name is free in the bucket being written), that is a duplicate; where the key refuses it, it is a collision warning about a row that was never actually in the way.\n\n## Measured\n\nNot a reading-only claim. On the `sys_capability` double in `bootstrap-system-capabilities.test.ts` — which models the three shipped-driver behaviours deliberately (`limit` orders by `id` ascending, `null` is `IS NULL`, `insert` enforces `(COALESCE(organization_id, '__global__'), name)`) — a fixture of the 8 curated platform rows plus 2 organization rows for one shared name makes an unscoped `buildExistingByName` over those 8 names return `absent` for two names **whose platform rows are present in the same fixture**. The test is `#11451 — the batched curated read must carry its predicate, not filter afterwards › WITHOUT the predicate the page also TRUNCATES, and a truncated page reads as \"absent\"`, added on the #11451 branch as the measurement that rejects the card's option 1.\n\n## Not fixed here\n\n#11451 sidesteps it rather than repairing it: the curated read it adds carries an equality predicate (`managed_by: 'platform'` + `organization_id: null`) INSIDE the query, which makes its own result a provable singleton per name, so its page cap is exact. That does nothing for the two callers above.\n\nThe repair is a design step of its own, because the honest bound is unbounded — rows-per-name is bounded only by the number of organizations, so no constant multiplier is correct. The shape that fits this module's existing posture is **truncation detection**: read with a generous cap and, when the page comes back full, treat it as \"could not answer\" and degrade to the per-item read, which is exactly what `readNamePage` already does for a driver that cannot do `$in`. That changes existing callers' behaviour in the truncating case (from a silent wrong answer to a loud slow one), so it wants deciding rather than doing.\n\nRefs #10946 · #11096 · #10103 (the same repair, scoped arm only) · #8461 / ADR-0120 D1 (what made a second row per name reachable) · #11451 (where this was found)"
+}

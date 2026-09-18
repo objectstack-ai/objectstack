@@ -1,0 +1,32 @@
+{
+  "number": 11784,
+  "kind": "issue",
+  "title": "driver-sql: a `redshift` datasource gets the pg wire hook but no connect-timeout bound — `DIALECT_CONNECT_TIMEOUT` has no entry for it, so the 10s dialect bound silently degrades to the 15s pool backstop",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T16:26:46Z",
+  "updated_at": "2026-08-24T20:12:30Z",
+  "closed_at": "2026-08-24T20:10:02Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11784",
+  "body": "## Summary\n\n`SqlDriver` answers three separate questions about a knex `client` name, from\nthree separate tables in `packages/drivers/driver-sql/src/sql-driver.ts`:\n\n| question | table |\n| --- | --- |\n| whose SQL do I emit? | the dialect-identity sets behind `isPostgres` / `isSqlite` / `isMysql` |\n| which npm package parses the wire format? | `POSTGRES_WIRE_CLIENTS` |\n| how do I spell \"bound ONE connection attempt\"? | `DIALECT_CONNECT_TIMEOUT` |\n\n`redshift` is a **member of the second and absent from the third**. It is in\n`POSTGRES_WIRE_CLIENTS` deliberately (#11389 put it there: it speaks the pg wire\nprotocol with the same type OIDs and therefore needs the calendar-day parser\npin), and it reaches the server through the `pg` driver, which honours\n`connectionTimeoutMillis` — but `DIALECT_CONNECT_TIMEOUT` carries no `redshift`\nrow, so `withConnectBound`'s injection is skipped for it.\n\n## Why it is not cosmetic\n\n`DEFAULT_CONNECT_TIMEOUT_MS` (10s) is documented in that method's own header as\n\"the effective bound\", with the 15s `pool.createTimeoutMillis` a \"strictly\nlooser backstop, reached only by a dialect that has no connect-timeout knob\n(SQLite) or ignores the one we set\". A `redshift` host is neither of those: it\nhas the knob and would honour it. It just never gets it, so it silently falls\nthrough to the looser backstop — the exact failure shape framework#3769 was\nfiled against (an endpoint that accepts the TCP connection and never completes\nthe handshake makes every query WAIT rather than fail).\n\nNothing errors and nothing is logged; the bound is simply 50% looser than the\ndriver's own docblock says it is, for one client name.\n\n## Where measured\n\n`packages/drivers/driver-sql/src/sql-driver.ts` — `DIALECT_CONNECT_TIMEOUT` and\n`withConnectBound`. Found while working #11550 (converging the dialect-identity\nliterals), and deliberately **not** fixed there: that card's dispatch was scoped\nto teaching the getters knex's canonical spellings, and adding a `redshift` row\nhere is a behaviour change for redshift hosts rather than a mechanical repair.\n\n⚠️ Note for whoever takes this: `redshift`'s absence from this table is\ncurrently **load-bearing as documentation**. The comment inside\n`withConnectBound` cites it by name as the reason its early return may not skip\nthe session pins below it (\"a `return` placed at this point silently opted it\nout of a fix it needs\"). Adding the row invalidates that example, so the comment\nneeds rewriting in the same change — otherwise the next reader loses the\nmeasurement that explains why the two lists are not one list.\n\n## Not the same question as #11756\n\n#11756 asks whether `redshift` / `cockroachdb` should be treated as Postgres for\nSQL **emission**. This is independent of that answer: the connect-timeout knob\nis a property of the npm driver doing the connecting, not of which DDL dialect\ngets compiled, and `redshift` already has wire recognition today regardless of\nhow #11756 lands."
+}

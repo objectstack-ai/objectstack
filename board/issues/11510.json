@@ -1,0 +1,36 @@
+{
+  "number": 11510,
+  "kind": "issue",
+  "title": "Step 2: consolidate the thirteen private pnpm-workspace.yaml parsers behind one shared enumerator — now unblocked, and the enumerator must NOT be a gate itself",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T01:51:49Z",
+  "updated_at": "2026-08-24T18:04:51Z",
+  "closed_at": "2026-08-24T18:04:51Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11510",
+  "body": "Step 2 of #11190, filed rather than built: that card's step 1 (teach `scripts/pm/dispatch-gates.mjs` to follow first-party imports) landed on its own branch, and #11190's own words are why the order matters — \"doing 2 without 1 is a regression with no red gate\".\n\n## What is left to do\n\nRe-measured on today's tree (140 discovered families), not recalled: **15 discovered families across 13 distinct scripts** read `pnpm-workspace.yaml`, each with its own block parser:\n\n```\nscripts/check-changeset-fixed.mjs            scripts/check-published-readme-exports.mjs\nscripts/check-cross-package-test-inputs.mjs  scripts/check-test-source-alias.mjs\nscripts/check-dev-prereqs.mjs                scripts/check-type-check-coverage.mjs\nscripts/check-osv-exemptions.mjs             scripts/check-type-source-resolution.mjs\nscripts/check-override-consistency.mjs       scripts/pnpm-filter-targets.mjs\nscripts/check-prerelease-pin-watch.mjs       scripts/release-github-releases.mjs\nscripts/check-published-files.mjs\n```\n\n(#10542 measured twelve when the farm was 119; #11190 measured fifteen at 137. The figure to use is the one you measure on the day.)\n\n`scripts/i18n-bundle-surface.mjs` is the shape the shared module should take. Two of those scripts once carried byte-identical 11-entry `WORKSPACE_PARENT_DIRS` arrays with the same blind spot in both, which is the drift a single declaration site retires.\n\n## The constraint step 1 imposes on this work — read before designing the module\n\nThe follow that unblocks this is deliberately narrow, and two of its rules decide where the enumerator may live:\n\n1. **The shared module must not be a discovered gate file of its own.** The follow refuses an import into a module that is itself resolved from some workflow's `check:` invocation, because such a module's population already reaches the tree through its own family and attributing it to every importer was measured at +3065 fabricated (gate, file) pairs for a single caller. So: a plain module (the `i18n-bundle-surface.mjs` / `regen-artifacts.mjs` shape), never a module that some workflow also invokes directly.\n2. **The import must be static, relative, and land inside `scripts/`.** Bare specifiers, dynamic `import()`, and first-party modules outside `scripts/` are all refused (each with a measurement in `firstPartyImportTargets`' docblock).\n3. **One level only.** A declaration in a module the enumerator itself imports does not reach the gates. Keep the declaration in the module the gates import directly.\n\n## How to know it worked\n\nSweep the same way step 1 did — the (gate, file) pair count and the per-family matched counts, before and after — and confirm **no family loses coverage**. The three declarations #11190 names as at risk are the ready-made regression check: `check:test-source-alias` and `check:type-source-resolution` (their `WORKSPACE_PARENT_GLOBS` arrays, #9955 / PR #10540) and `check:published-files` (PR #11189). All three name real cards today; if any of them goes back to naming nothing, the consolidation has deleted the declaration it was meant to centralise.\n\n## Related\n\n#11190 (the parent finding and step 1), #10542 (the original observation), #10540 / #9955 (the declarations at risk), #10114 (the merged precedent for declaring a population).\n"
+}

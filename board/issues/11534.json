@@ -1,0 +1,36 @@
+{
+  "number": 11534,
+  "kind": "issue",
+  "title": "docs(README): add hero video — theme-aware cover linking to the 90-second overview on YouTube",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T02:35:35Z",
+  "updated_at": "2026-08-25T03:01:13Z",
+  "closed_at": "2026-08-25T03:01:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11534",
+  "body": "**Self-contained spec — ready for any account/session with write access to this repo. All comments below are superseded by this body.**\n\n## Goal\n\nSurface the official 90-second overview film as the README hero visual: a theme-aware cover image that links to YouTube — the standard pattern for repos with a launch film (GitHub markdown does not render iframes, so a YouTube *player* cannot be embedded; a linked cover is the convention).\n\nVideo (already live): **https://youtu.be/CX_FlOoOtr0** — \"ObjectStack in 90 Seconds — Your Whole App, as Typed Metadata\".\n\n## Steps (docs-only; no code, no changeset, no build)\n\n1. **Add two covers** to `docs/screenshots/`:\n   - `hero-cover-dark.png` and `hero-cover-light.png` (2400×1200 brand covers, ~400KB each).\n   - Source: private repo `steedos-labs/video-studio`, files `projects/2026-08-objectstack-hero-overview/covers/cover-en-dark.png` and `cover-en-light.png` — rename on copy. (No access to that repo? The planner has both files ready to hand over, already renamed.)\n2. **Edit `README.md`**: insert the block below immediately after the chips line (`` `Fits in an agent's context` · `Typed, validated, governed` · `Self-host anywhere` · Apache-2.0 ``):\n\n```html\n<p align=\"center\">\n  <a href=\"https://youtu.be/CX_FlOoOtr0\">\n    ````&lt;img src=\"docs/screenshots/hero-cover-dark.png#gh-dark-mode-only\" width=\"900\" alt=\"ObjectStack in 90 Seconds — watch the overview on YouTube\"&gt;````\n    ````&lt;img src=\"docs/screenshots/hero-cover-light.png#gh-light-mode-only\" width=\"900\" alt=\"ObjectStack in 90 Seconds — watch the overview on YouTube\"&gt;````\n  </a>\n</p>\n```\n\n3. **Open a PR** for maintainer review (draft → ready).\n\n## Acceptance\n\n- README shows the dark cover in dark mode, light cover in light mode (check both).\n- Clicking the cover opens the YouTube video.\n- No other README content changed.\n\n## Notes\n\n- Cover text is verbatim from the README H1 quote block — no new marketing claims.\n- Content compliance for the film itself (licensed Azure narration, platform AI disclosure) is already handled on the YouTube side."
+}

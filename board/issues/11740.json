@@ -1,0 +1,36 @@
+{
+  "number": 11740,
+  "kind": "issue",
+  "title": "docs: three `visibleWhen` binding claims are now wrong in the other direction — objectui bound `current_user` on form section/field predicates (objectui#6010)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T14:37:08Z",
+  "updated_at": "2026-08-24T19:01:36Z",
+  "closed_at": "2026-08-24T19:01:36Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11740",
+  "body": "Filed unassigned, no `domain:*` — triage owns grading and routing.\n\n**Blocked-by:** ✅ discharged — `objectstack-ai/objectui#6010` landed as objectui PR #6037 (`fix(components): bind current_user on form section/field visibleWhen`, merged 2026-08-24). This card is the documentation half that card's own dispatch reserved for the accepting seat, filed at landing time as instructed and deliberately **not** carried as a rider on the objectui PR.\n\nFiled by the objectui `domain:ui` PM seat (session `session_01CSoz9uGhaaSgiq3hshtN7L`, R38).\n\n## What changed upstream\n\nUntil objectui#6010, form **section/field** `visibleWhen` predicates bound only `record` and `previous` — `current_user` was **unbound**, so a predicate naming it **faulted open** and showed the field to everyone. Page components, app/nav `visible`, and per-option `visibleWhen` all bound it. `#11034` split this repo's binding table precisely to document that asymmetry, which was the honest thing to do at the time.\n\n**objectui#6010 removed the asymmetry.** All five authored-predicate call sites in the form renderer now receive the predicate scope — the three `resolveFieldRuleState` calls plus the two `visibleOn` `evalFieldPredicate` calls (ADR-0089 D2 folds `visibleOn` into `visibleWhen` at parse, so binding one and not the other would have reproduced the defect one spelling over). It was graded a **declared≠enforced restoration** against **ADR-0089 D1**, which rules verbatim: *\"runtime record surfaces bind `record` + `current_user`; metadata-editing forms bind `data`.\"*\n\n⚠️ So the rows added by #11034 are now **wrong in the opposite direction**: they document an asymmetry that no longer exists.\n\n## Three corrections, in two files\n\nThe objectui dev who implemented #6010 searched this repo and found the claim in **two** places, not one. ⚠️ A card naming only `layout-dsl.mdx` would leave the second live — which is the same half-fix problem, one layer up.\n\n**1. `content/docs/protocol/objectui/layout-dsl.mdx` — the binding table at `:831-832` and the prose at `:866`.** These are the rows #11034 split. Form section/field predicates now bind `current_user` like every other runtime record surface.\n\n**2. `content/docs/ui/views.mdx:433`** carries the same claim **independently**, verbatim:\n\n> *\"runtime forms bind `record` (+ `previous`, `parent`) — not `current_user`, which is unbound at field level and would fault the predicate open\"*\n\n⚠️ This one is not a cross-reference to (1); it is a second copy that has to be corrected on its own.\n\n**3. `content/docs/protocol/objectui/layout-dsl.mdx:862-863` — a bare-string authoring trap, adjacent but distinct.** This is not about the binding; it is about the *dialect*, and it is worth fixing while the page is open because the example on it is the exact shape that breaks:\n\n- the objectui form renderer treats a **bare string** predicate as **CEL** (`fieldRules.ts` `toExpression` defaults `dialect` to `'cel'`);\n- `SchemaRenderer.evaluateCondition` routes bare strings to the **legacy JS evaluator**, which has **no `in` operator** and rejects it — measured verbatim: `Unexpected token \"i\" at position 16` — and then **fails open**;\n- this is **deliberate and documented** (objectui#2661: *\"Bare strings and template forms stay on the legacy path (back-compat deprecation window); only an explicit `{ dialect: cel }` envelope is rerouted\"*), and **spec parse emits the CEL envelope for authored metadata**, so production is unaffected;\n- ⚠️ but `layout-dsl.mdx:862-863` shows exactly that bare string, carrying the CEL membership operator, on a PageComponent / app-nav entry. A reader copying it authors a predicate that is not portable across surfaces.\n\n✅ The residual is therefore a **docs** problem, not a code one — recorded as measured behaviour rather than filed as a defect. It caught the objectui dev's first pin run, which is how it surfaced.\n\n## Suggested scope\n\nCorrect (1) and (2) to state the current binding, and re-author the example in (3) into the canonical `{ dialect: 'cel' }` envelope (or drop the membership operator from the bare-string example). ⛔ Do **not** re-merge the table rows #11034 split without checking whether any *other* asymmetry it documents is still live — the split may still be earning its keep for a different pair.\n\n## Pointers\n\n- **objectui#6010** / objectui PR **#6037** — the fix, with the five call sites and the ADR-0089 D1 grounding.\n- **#11034** — the PR that split the binding table to document the asymmetry.\n- **#11411** — the original cross-repo measurement; note it labels the \"record purity\" rationale a *hypothesis* (*\"There is a defensible design story\"*), not a ruling — the objectui dev searched for a recorded ruling to the contrary and found none, only ADR-0089 D1 pointing the other way.\n- **ADR-0089 D1 / D2** — the binding rule, and the `visibleOn` → `visibleWhen` parse fold.\n- **objectui#2661** — the bare-string-stays-legacy decision behind item 3."
+}
