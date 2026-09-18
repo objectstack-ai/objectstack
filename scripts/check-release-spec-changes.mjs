@@ -42,6 +42,20 @@
  * plus the one command that regenerates the section. A release is held only by
  * a failure whose remedy is printed with it.
  *
+ * ## Both export claims in the artifact, not just the section's
+ *
+ * `aggregate.added`/`removed` are filled by the same one-release api-surface
+ * diff, under a record keyed by protocol MAJOR — and until #18978 this gate did
+ * not look at them at all. Published unlabelled, one minor's slice reads as the
+ * whole major-boundary delta: the `@objectstack/spec@17.4.0` Release asset
+ * carried 225 added / 51 removed, every entry `since: 17`, beside
+ * `perMajor[16 → 17].added: 0`. So the aggregate's claim is recomputed from the
+ * same two tarballs and must carry a `surfaceScope` naming the version pair it
+ * really spans. An aggregate that claims NOTHING (empty arrays, no scope — the
+ * committed registry-only projection) is left alone: this gate refuses wrong
+ * claims, and turning "must not lie" into "must speak" is a publish requirement
+ * rather than a refusal.
+ *
  * ## The one thing it deliberately does NOT require
  *
  * A previous tarball that ships no `api-surface` snapshot (before protocol 15)
@@ -49,7 +63,9 @@
  * the section loudly in that case rather than emitting an empty one, and this
  * gate derives the same condition from the same artifacts and accepts the
  * absence — but it REFUSES a section that is present when it could not have
- * been computed, which is the shape that would lie.
+ * been computed, which is the shape that would lie. The aggregate half needs
+ * strictly less (a snapshot and a version, never the previous manifest), so it
+ * is still checked on the shape where no section is owed.
  */
 
 import fs from 'node:fs';
@@ -148,24 +164,131 @@ function listNames(names) {
  * tarballs, in BOTH directions — a section that omits a real removal and one
  * that invents a removal are different defects and read differently.
  */
-function compareArray(label, claimed, actual, problems) {
+function compareArray(path, claimed, actual, problems) {
+  const kind = path.slice(path.indexOf('.') + 1);
   const claimedSet = new Set(claimed);
   const actualSet = new Set(actual);
   const invented = [...claimedSet].filter((n) => !actualSet.has(n)).sort();
   const missed = [...actualSet].filter((n) => !claimedSet.has(n)).sort();
   if (invented.length > 0) {
     problems.push(
-      `release.${label}: ${invented.length} export(s) the section CLAIMS but the two tarballs do not show as ${label}:`,
+      `${path}: ${invented.length} export(s) the artifact CLAIMS but the two tarballs do not show as ${kind}:`,
       ...listNames(invented),
     );
   }
   if (missed.length > 0) {
     problems.push(
-      `release.${label}: ${missed.length} export(s) the two tarballs show as ${label} and the section OMITS:`,
+      `${path}: ${missed.length} export(s) the two tarballs show as ${kind} and the artifact OMITS:`,
       ...listNames(missed),
     );
   }
   return invented.length === 0 && missed.length === 0;
+}
+
+/**
+ * The aggregate record's own export-surface claim, checked against the same two
+ * tarballs — the half `release.*` was gated for and this one was not (#18978).
+ *
+ * `aggregate.added`/`removed` are filled by a ONE-RELEASE api-surface diff while
+ * the record is keyed by protocol MAJOR (`from: 10, to: 17`). Published
+ * unlabelled, one minor's slice reads as the whole major-boundary delta — and it
+ * did: the `@objectstack/spec@17.4.0` Release asset carried 225 added / 51
+ * removed, every entry `since: 17`, beside `perMajor[16 → 17].added: 0`. So two
+ * things are refused here, in both directions: arrays that disagree with the two
+ * tarballs, and arrays that carry no `surfaceScope` naming the version pair they
+ * really span.
+ *
+ * ⚠️ An aggregate diff is computable from strictly less than a release section:
+ * it needs the previous tarball's export snapshot and version, and NOT its
+ * `spec-changes.json`. So this runs on the pre-#2897 shape too, where the
+ * release section is legitimately absent.
+ */
+/** One line naming what the aggregate record claims about the export surface. */
+function aggregateSummary(aggregate) {
+  const added = (aggregate?.added ?? []).length;
+  const removed = (aggregate?.removed ?? []).length;
+  const scope = aggregate?.surfaceScope;
+  if (added + removed === 0 && !scope) {
+    return 'aggregate claims no export diff (registry-only projection).';
+  }
+  return (
+    `aggregate export diff ${scope ? `${scope.fromVersion} → ${scope.toVersion}` : '(UNSCOPED)'} ` +
+    `verified: ${added} added, ${removed} removed.`
+  );
+}
+
+function verifyAggregateSurface(ctx, problems) {
+  const { aggregate, previousSurface, previousVersion, publishedSurface, publishedVersion } = ctx;
+  if (!aggregate) {
+    problems.push(
+      `the artifact's ${MANIFEST} has no aggregate record — ADR-0087 D4 requires it, and its export ` +
+        'claim cannot be checked.',
+    );
+    return false;
+  }
+  const claimedAdded = (aggregate.added ?? []).map((e) => e.surface);
+  const claimedRemoved = (aggregate.removed ?? []).map((e) => e.surface);
+  const scope = aggregate.surfaceScope;
+  const claims = claimedAdded.length + claimedRemoved.length;
+
+  // ⛔ Deliberately NOT checked: an aggregate that makes no export claim at all.
+  // Empty arrays with no `surfaceScope` is the committed registry-only
+  // projection — honest, because it claims nothing — so requiring the published
+  // artifact to FILL them would be a new publish requirement rather than a
+  // refusal of a wrong claim, and that call is not this gate's to make. What is
+  // refused below is a claim that is unlabelled, mislabelled or untrue.
+  if (claims === 0 && !scope) return true;
+
+  // Nothing to diff against ⇒ nothing may be claimed. Same call as the release
+  // section's: a claim that could not have been derived is the shape that lies.
+  if (!previousSurface || !previousVersion || !publishedSurface) {
+    const missing = [
+      previousSurface ? null : 'the previous tarball ships no api-surface snapshot',
+      previousVersion ? null : 'the previous tarball ships no readable package.json',
+      publishedSurface ? null : 'the artifact about to publish ships no api-surface snapshot',
+    ].filter(Boolean);
+    if (claims > 0 || scope) {
+      problems.push(
+        `aggregate: the record claims ${claimedAdded.length} added / ${claimedRemoved.length} removed ` +
+          `export(s)${scope ? ' and a surfaceScope' : ''}, but ${missing.join(' and ')} — so no export ` +
+          'diff could have been computed. A claim that could not be derived is exactly what this gate refuses.',
+      );
+      return false;
+    }
+    return true;
+  }
+
+  let ok = true;
+  if (claims > 0 && !scope) {
+    ok = false;
+    problems.push(
+      `aggregate.surfaceScope is absent while aggregate.added/removed carry ${claims} export(s). Those ` +
+        `arrays are a ONE-RELEASE diff, so under the ${aggregate.from} → ${aggregate.to} record they read ` +
+        `as the whole major-boundary delta. Expected { fromVersion: ${JSON.stringify(previousVersion)}, ` +
+        `toVersion: ${JSON.stringify(publishedVersion)} }.`,
+    );
+  }
+  if (scope) {
+    if (scope.fromVersion !== previousVersion) {
+      ok = false;
+      problems.push(
+        `aggregate.surfaceScope.fromVersion is ${JSON.stringify(scope.fromVersion)} but the previous tarball ` +
+          `is ${JSON.stringify(previousVersion)} — the export diff was taken against a different release.`,
+      );
+    }
+    if (scope.toVersion !== publishedVersion) {
+      ok = false;
+      problems.push(
+        `aggregate.surfaceScope.toVersion is ${JSON.stringify(scope.toVersion)} but this artifact is ` +
+          `${JSON.stringify(publishedVersion)} — the scope describes a release this tarball is not.`,
+      );
+    }
+  }
+  const actualAdded = [...publishedSurface].filter((n) => !previousSurface.has(n));
+  const actualRemoved = [...previousSurface].filter((n) => !publishedSurface.has(n));
+  ok = compareArray('aggregate.added', claimedAdded, actualAdded, problems) && ok;
+  ok = compareArray('aggregate.removed', claimedRemoved, actualRemoved, problems) && ok;
+  return ok;
 }
 
 /**
@@ -204,6 +327,18 @@ export function verifyRelease(previousDir, publishedDir) {
   const computable = Boolean(previousSurface && previousIds && previousVersion);
   const section = publishedManifest.release;
 
+  // Read once, used by both halves: the release section needs a previous
+  // `spec-changes.json` and the aggregate's export claim does not, so the two
+  // are checked against the same snapshots but gated on different inputs.
+  const publishedSurface = readSurface(publishedDir);
+  const aggregateCtx = {
+    aggregate: publishedManifest.aggregate,
+    previousSurface,
+    previousVersion,
+    publishedSurface,
+    publishedVersion,
+  };
+
   if (!computable) {
     // The one legitimate absence. Naming which input is missing keeps "we could
     // not compute it" distinguishable from "nothing changed".
@@ -213,15 +348,18 @@ export function verifyRelease(previousDir, publishedDir) {
       previousVersion ? null : 'a readable package.json',
     ].filter(Boolean);
     if (section) {
-      return {
-        ok: false,
-        problems: [
-          `the artifact carries a release section, but the previous tarball ships ${missing.join(' and ')} — ` +
-            'so no delta could have been computed from it. A section that could not be derived is exactly the ' +
-            'wrong-data case this gate exists to refuse.',
-        ],
-        summary: null,
-      };
+      problems.push(
+        `the artifact carries a release section, but the previous tarball ships ${missing.join(' and ')} — ` +
+          'so no delta could have been computed from it. A section that could not be derived is exactly the ' +
+          'wrong-data case this gate exists to refuse.',
+      );
+    }
+    // The aggregate's export claim survives an absent previous `spec-changes.json`,
+    // so it is still checked on the shape where no release section is owed.
+    const aggregateOk = verifyAggregateSurface(aggregateCtx, problems);
+    if (section || !aggregateOk) {
+      problems.push(REGENERATE_HINT);
+      return { ok: false, problems, summary: null };
     }
     return {
       ok: true,
@@ -263,7 +401,6 @@ export function verifyRelease(previousDir, publishedDir) {
     );
   }
 
-  const publishedSurface = readSurface(publishedDir);
   if (!publishedSurface) {
     return {
       ok: false,
@@ -280,8 +417,11 @@ export function verifyRelease(previousDir, publishedDir) {
   const actualRemoved = [...previousSurface].filter((n) => !publishedSurface.has(n));
   const claimedAdded = (section.added ?? []).map((e) => e.surface);
   const claimedRemoved = (section.removed ?? []).map((e) => e.surface);
-  ok = compareArray('added', claimedAdded, actualAdded, problems) && ok;
-  ok = compareArray('removed', claimedRemoved, actualRemoved, problems) && ok;
+  ok = compareArray('release.added', claimedAdded, actualAdded, problems) && ok;
+  ok = compareArray('release.removed', claimedRemoved, actualRemoved, problems) && ok;
+
+  // The aggregate record's own export claim, against the same two snapshots.
+  ok = verifyAggregateSurface(aggregateCtx, problems) && ok;
 
   // The registry half: entries NEW in this release are the ids the published
   // projection carries and the previous one did not.
@@ -294,14 +434,14 @@ export function verifyRelease(previousDir, publishedDir) {
     const priorMigrations = new Set(previousIds.migrationIds);
     ok =
       compareArray(
-        'converted',
+        'release.converted',
         (section.converted ?? []).map((c) => c.conversionId),
         publishedIds.conversionIds.filter((id) => !priorConversions.has(id)),
         problems,
       ) && ok;
     ok =
       compareArray(
-        'migrated',
+        'release.migrated',
         (section.migrated ?? []).map((m) => m.migrationId),
         publishedIds.migrationIds.filter((id) => !priorMigrations.has(id)),
         problems,
@@ -316,7 +456,8 @@ export function verifyRelease(previousDir, publishedDir) {
     summary: ok
       ? `release ${section.fromVersion} → ${section.toVersion} verified against both tarballs: ` +
         `${claimedAdded.length} added, ${claimedRemoved.length} removed, ` +
-        `${(section.converted ?? []).length} converted, ${(section.migrated ?? []).length} migrated.`
+        `${(section.converted ?? []).length} converted, ${(section.migrated ?? []).length} migrated. ` +
+        aggregateSummary(publishedManifest.aggregate)
       : null,
   };
 }
@@ -339,8 +480,16 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'R9 — the published artifact ships no spec-changes.json → RED': 1,
   'R10 — the published artifact ships no api-surface → RED': 1,
   'R11 — an empty export snapshot is not a silent pass → RED': 1,
+  'an unscoped EMPTY aggregate is the registry-only projection → GREEN': 1,
+  'a scoped aggregate matching both tarballs → GREEN': 1,
+  'R12 — a filled aggregate export diff with NO surfaceScope → RED': 1,
+  'R13 — aggregate.surfaceScope.fromVersion naming another release → RED': 1,
+  'R14 — aggregate.surfaceScope.toVersion disagreeing with the artifact → RED': 1,
+  'R15 — an export the aggregate invents in added → RED, naming it': 1,
+  'R16 — a real removal the scoped aggregate omits → RED, naming it': 1,
+  'R17 — an aggregate export claim the previous tarball could not produce → RED': 1,
 });
-const SELF_TEST_BATTERY_FLOOR = 15;
+const SELF_TEST_BATTERY_FLOOR = 23;
 
 function writeTree(root, files) {
   for (const [rel, content] of Object.entries(files)) {
@@ -374,7 +523,7 @@ function selfTest() {
   };
 
   const shard = (entry, exports) => ({ description: 'test shard', entry, exports });
-  const manifest = (extra = {}) => ({
+  const manifest = (extra = {}, aggregateExtra = {}) => ({
     protocolVersion: '17.0.0',
     supportFloor: 10,
     aggregate: {
@@ -384,8 +533,16 @@ function selfTest() {
       converted: [{ surface: 's', to: 't', conversionId: 'conv-old', toMajor: 17 }],
       migrated: [{ surface: 's', replacement: 'r', migrationId: 'mig-old', toMajor: 17, rationale: 'why' }],
       removed: [],
+      ...aggregateExtra,
     },
     perMajor: [],
+    ...extra,
+  });
+  /** The aggregate export claim that IS true of PREV → NEXT below. */
+  const aggregateSurface = (extra = {}) => ({
+    added: [{ surface: './ai: NewThing (const)', since: 17 }],
+    removed: [{ surface: './ai: OldThing (const)', removedIn: 17 }],
+    surfaceScope: { fromVersion: '17.3.0', toVersion: '17.4.0' },
     ...extra,
   });
   const release = (extra = {}) => ({
@@ -403,10 +560,10 @@ function selfTest() {
     'api-surface/ai.json': shard('./ai', ['Kept (const)', 'OldThing (const)']),
     'spec-changes.json': manifest(),
   };
-  const NEXT = (releaseSection = release(), extra = {}) => ({
+  const NEXT = (releaseSection = release(), extra = {}, aggregateExtra = {}) => ({
     'package.json': { name: '@objectstack/spec', version: '17.4.0' },
     'api-surface/ai.json': shard('./ai', ['Kept (const)', 'NewThing (const)']),
-    'spec-changes.json': manifest(releaseSection === null ? {} : { release: releaseSection }),
+    'spec-changes.json': manifest(releaseSection === null ? {} : { release: releaseSection }, aggregateExtra),
     ...extra,
   });
 
@@ -584,6 +741,83 @@ function selfTest() {
     './ai: Kept (const)',
   );
 
+  // ── The aggregate record's own export claim (#18978) ──────────────────
+  // The preserved-truth control comes FIRST: every battery above runs against
+  // an aggregate with empty, unscoped arrays, so if this half refused that
+  // shape they would all have gone red and the roster would read as a rewrite
+  // of the gate rather than an addition to it.
+  check(
+    'an unscoped EMPTY aggregate is the registry-only projection → GREEN',
+    { prev: PREV, next: NEXT() },
+    true,
+    'aggregate claims no export diff',
+  );
+
+  check(
+    'a scoped aggregate matching both tarballs → GREEN',
+    { prev: PREV, next: NEXT(release(), {}, aggregateSurface()) },
+    true,
+    'aggregate export diff 17.3.0 → 17.4.0 verified: 1 added, 1 removed',
+  );
+
+  check(
+    'R12 — a filled aggregate export diff with NO surfaceScope → RED',
+    { prev: PREV, next: NEXT(release(), {}, aggregateSurface({ surfaceScope: undefined })) },
+    false,
+    'aggregate.surfaceScope is absent',
+  );
+
+  check(
+    'R13 — aggregate.surfaceScope.fromVersion naming another release → RED',
+    {
+      prev: PREV,
+      next: NEXT(release(), {}, aggregateSurface({ surfaceScope: { fromVersion: '17.2.0', toVersion: '17.4.0' } })),
+    },
+    false,
+    'taken against a different release',
+  );
+
+  check(
+    'R14 — aggregate.surfaceScope.toVersion disagreeing with the artifact → RED',
+    {
+      prev: PREV,
+      next: NEXT(release(), {}, aggregateSurface({ surfaceScope: { fromVersion: '17.3.0', toVersion: '17.9.0' } })),
+    },
+    false,
+    'describes a release this tarball is not',
+  );
+
+  check(
+    'R15 — an export the aggregate invents in added → RED, naming it',
+    {
+      prev: PREV,
+      next: NEXT(
+        release(),
+        {},
+        aggregateSurface({ added: [{ surface: './ai: Phantom (const)', since: 17 }] }),
+      ),
+    },
+    false,
+    './ai: Phantom (const)',
+  );
+
+  check(
+    'R16 — a real removal the scoped aggregate omits → RED, naming it',
+    { prev: PREV, next: NEXT(release(), {}, aggregateSurface({ removed: [] })) },
+    false,
+    './ai: OldThing (const)',
+  );
+
+  check(
+    'R17 — an aggregate export claim the previous tarball could not produce → RED',
+    {
+      prev: { 'package.json': { name: '@objectstack/spec', version: '17.3.0' }, 'spec-changes.json': manifest() },
+      next: NEXT(null, {}, aggregateSurface()),
+    },
+    false,
+    'no export diff could have been computed',
+  );
+
   // ── Floor: what ran must be what is declared ──────────────────────────
   const floorFailure = (message) => {
     console.error(`✗ self-test floor: ${message}`);
@@ -667,7 +901,10 @@ function main() {
 
   const verdict = verifyRelease(previous, published);
   if (!verdict.ok) {
-    console.error('✗ the per-release section of spec-changes.json disagrees with the two tarballs (ADR-0087 D4).');
+    console.error(
+      "✗ spec-changes.json's export claims disagree with the two tarballs (ADR-0087 D4) — the per-release " +
+        'section, the aggregate record, or both. Each line below names which.',
+    );
     console.error('  A wrong change file is worse than none — a consumer gates its upgrade on this data.\n');
     for (const line of verdict.problems) console.error(`  ${line}`);
     process.exit(1);

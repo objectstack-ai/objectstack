@@ -7,18 +7,23 @@
  *
  * `EvaluatedExpressionInputSchema` carries its own `error` map, so a slot
  * declared with it answers the published `EVALUATED_EXPRESSION_SOURCE_REQUIRED`
- * sentence for both refused spellings. Five of the 36 evaluated positions are
+ * sentence for both refused spellings. Three of the 34 evaluated positions are
  * not declared with it alone — they wrap it in a union with something else:
  *
  * - `z.boolean()` beside it on `ui/action.zod.ts` `ActionConditionInputSchema`
  *   (which mounts `Action.visible` and `Action.disabled`) and on
- *   `ui/component.zod.ts` `RecordAlertProps.visible`;
- * - a structured object beside it on `system/metrics.zod.ts`
- *   `ServiceLevelIndicator.successCriteria`;
- * - a structured filter beside it on `system/tracing.zod.ts`
- *   `TraceSamplingConfig.composite[].condition`.
+ *   `ui/component.zod.ts` `RecordAlertProps.visible`.
  *
- * On those five the OUTER union folds every branch into one top-level
+ * [#18118] It was five of 36. The other two — a structured object beside it on
+ * `system/metrics.zod.ts` `ServiceLevelIndicator.successCriteria`, a structured
+ * filter beside it on `system/tracing.zod.ts`
+ * `TraceSamplingConfig.composite[].condition` — are gone: their expression arms
+ * were RETIRED under ADR-0049 enforce-or-remove because nothing evaluated
+ * either, so those two slots are no longer evaluated positions and no longer
+ * unions. Each now hangs its own retirement prescription on the surviving arm's
+ * `error` map, module-local, the way this helper is package-internal.
+ *
+ * On those three the OUTER union folds every branch into one top-level
  * `invalid_union` whose own message is the literal `"Invalid input"`, and the
  * inner union's sentence never reaches the author — measured on #15811, where
  * the four positions refused correctly and said nothing useful about why. The
@@ -39,7 +44,7 @@
  * ## ⛔ Package-internal — NOT a public export
  *
  * Reachable only from inside `@objectstack/spec`, and deliberately absent from
- * `shared/index.ts` and from the root barrel: it is machinery five declaring
+ * `shared/index.ts` and from the root barrel: it is machinery three declaring
  * sites need, not a contract anyone should author against (the #4001 pitfall —
  * do not export internals only these modules need). `api-surface/` and
  * `export-origins/` must not move for it, which is also what keeps #15811 a

@@ -404,8 +404,8 @@ Trace sampling configuration
 | **type** | `Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| 'probability' \| 'composite' \| 'custom'>` | ✅ | Sampling strategy |
 | **ratio** | `number` | optional | Sample ratio (0-1) |
 | **rateLimit** | `number` | optional | Traces per second |
-| **parentBased** | `{ whenParentSampled?: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; whenParentNotSampled?: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; root?: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; rootRatio?: number }` | optional |  |
-| **composite** | `{ strategy: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; ratio?: number; condition?: Record<string, any> \| string \| object }[]` | optional |  |
+| **parentBased** | `{ whenParentSampled: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; whenParentNotSampled: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; root: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; rootRatio: number }` | optional |  |
+| **composite** | `{ strategy: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; ratio?: number; condition?: Record<string, any> }[]` | optional |  |
 | **rules** | `{ name: string; match?: object; decision: Enum<'drop' \| 'record_only' \| 'record_and_sample'>; rate?: number }[]` | optional (default: `[]`) |  |
 | **customSamplerId** | `string` | optional | Custom sampler identifier |
 
@@ -424,7 +424,7 @@ Trace sampling configuration
 | :--- | :--- | :--- | :--- |
 | **strategy** | `Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>` | ✅ | Strategy type |
 | **ratio** | `number` | optional |  |
-| **condition** | `Record<string, any> \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Condition for this strategy — a structured filter object, or a CEL predicate an engine evaluates. ⚠️ The two are told apart by the `dialect` key: a structured filter must NOT carry one, and an object that does is judged as an expression — so it needs a dialect this platform evaluates and a non-blank `source` (`{ dialect: 'cel', source: 'record.amount > 10' }`). `{ dialect: 'cel', ast: … }` with no `source` is refused here. |
+| **condition** | `Record<string, any>` | optional | Condition for this strategy — a structured filter object of match criteria, carrying no `dialect` key. ⚠️ A CEL predicate is NOT accepted here: that arm was removed in 17.5.0 because nothing evaluated it, and an object carrying a `dialect` key is refused as an expression attempt. |
 
 ### Nested Shape: `TraceSamplingConfig.rules[number]`
 
@@ -462,13 +462,13 @@ Tracing configuration
 | **name** | `string` | ✅ | Configuration name (snake_case, max 64 chars) |
 | **label** | `string` | ✅ | Display label |
 | **enabled** | `boolean` | optional (default: `true`) |  |
-| **sampling** | `{ type: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; ratio?: number; rateLimit?: number; parentBased?: object; … }` | optional | Trace sampling configuration |
-| **propagation** | `{ formats?: Enum<'w3c' \| 'b3' \| 'b3_multi' \| 'jaeger' \| 'xray' \| 'ottrace' \| 'custom'>[]; extract?: boolean; inject?: boolean; headers?: object; … }` | optional (default: `{"formats":["w3c"],"extract":true,"inject":true}`) | Trace context propagation |
+| **sampling** | `{ type: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; ratio?: number; rateLimit?: number; parentBased?: object; … }` | optional (default: `{"type":"always_on","rules":[]}`) | Trace sampling configuration |
+| **propagation** | `{ formats: Enum<'w3c' \| 'b3' \| 'b3_multi' \| 'jaeger' \| 'xray' \| 'ottrace' \| 'custom'>[]; extract: boolean; inject: boolean; headers?: object; … }` | optional (default: `{"formats":["w3c"],"extract":true,"inject":true}`) | Trace context propagation |
 | **openTelemetry** | `{ sdkVersion?: string; exporter: object; resource: object; instrumentation?: object; … }` | optional | OpenTelemetry compatibility configuration |
-| **spanLimits** | `{ maxAttributes?: integer; maxEvents?: integer; maxLinks?: integer; maxAttributeValueLength?: integer }` | optional |  |
+| **spanLimits** | `{ maxAttributes: integer; maxEvents: integer; maxLinks: integer; maxAttributeValueLength: integer }` | optional |  |
 | **traceIdGenerator** | `Enum<'random' \| 'uuid' \| 'custom'>` | optional (default: `"random"`) |  |
 | **customTraceIdGeneratorId** | `string` | optional | Custom generator identifier |
-| **performance** | `{ asyncExport?: boolean; exportIntervalMs?: integer }` | optional |  |
+| **performance** | `{ asyncExport: boolean; exportIntervalMs: integer }` | optional |  |
 
 ### Nested Shape: `TracingConfig.sampling`
 
@@ -477,8 +477,8 @@ Tracing configuration
 | **type** | `Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>` | ✅ | Sampling strategy |
 | **ratio** | `number` | optional | Sample ratio (0-1) |
 | **rateLimit** | `number` | optional | Traces per second |
-| **parentBased** | `{ whenParentSampled?: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; whenParentNotSampled?: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; root?: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; rootRatio?: number }` | optional |  |
-| **composite** | `{ strategy: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; ratio?: number; condition?: Record<string, any> \| string \| object }[]` | optional |  |
+| **parentBased** | `{ whenParentSampled: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; whenParentNotSampled: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; root: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; rootRatio: number }` | optional |  |
+| **composite** | `{ strategy: Enum<'always_on' \| 'always_off' \| 'trace_id_ratio' \| 'rate_limiting' \| 'parent_based' \| …>; ratio?: number; condition?: Record<string, any> }[]` | optional |  |
 | **rules** | `{ name: string; match?: object; decision: Enum<'drop' \| 'record_only' \| 'record_and_sample'>; rate?: number }[]` | optional (default: `[]`) |  |
 | **customSamplerId** | `string` | optional | Custom sampler identifier |
 
@@ -489,7 +489,7 @@ Tracing configuration
 | **sdkVersion** | `string` | optional | OTel SDK version |
 | **exporter** | `{ type: Enum<'otlp_http' \| 'otlp_grpc' \| 'jaeger' \| 'zipkin' \| 'console' \| 'datadog' \| …>; endpoint?: string; protocol?: string; headers?: Record<string, string>; … }` | ✅ | Exporter configuration |
 | **resource** | `{ serviceName: string; serviceVersion?: string; serviceInstanceId?: string; serviceNamespace?: string; … }` | ✅ | Resource attributes |
-| **instrumentation** | `{ autoInstrumentation?: boolean; libraries?: string[]; disabledLibraries?: string[] }` | optional |  |
+| **instrumentation** | `{ autoInstrumentation: boolean; libraries?: string[]; disabledLibraries?: string[] }` | optional |  |
 | **semanticConventionsVersion** | `string` | optional | Semantic conventions version |
 
 ### Nested Shape: `TracingConfig.performance`

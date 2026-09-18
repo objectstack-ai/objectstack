@@ -101,6 +101,7 @@ import type { FlowNodeParsed, FlowEdgeParsed } from '@objectstack/spec/automatio
 // hand-written notion of "blank" here — that drift is what #15662 built the
 // shared refusal to prevent.
 import { EvaluatedExpressionInputSchema, EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec/shared';
+import { referenceCarrierOf } from '@objectstack/spec/data';
 
 import { collectFlowVariableNames, shadowedFieldReads, shadowedFieldMessage } from './flow-variable-scope.js';
 import { injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
@@ -377,8 +378,22 @@ function masterDetailCount(obj: AnyRec): number {
     // rejected alias — `field.zod.ts:331` maps it to `reference` in the strict
     // error map, so a field spelling it does not parse (#5017). See the
     // `## Scope` table on this module for why a consumer must not re-admit it.
-    const ref = def.reference;
-    if (typeof ref === 'string' && ref.trim() !== '') n += 1;
+    //
+    // [#18550] Read through the ONE arbiter. ABSENCE is unchanged and still
+    // uncounted — `undefined` / `null` / `''` answer `undefined`, and the
+    // `.trim()` test below still drops a whitespace-only carrier, which names
+    // no object either. UNREADABILITY used to be uncounted too, and that is
+    // the silence: an object-valued carrier made a declared `master_detail`
+    // invisible to this count, so `parent` was judged unbound (or two masters
+    // read as one) from metadata that does declare a relationship.
+    // ⭐ The literal `.reference` read STAYS here, in the argument, and only
+    // the SHAPE judgment moves out — the form `validate-security-posture.ts`
+    // and `data-model-rules.ts` already use, and for their stated reason: the
+    // #5017 receiver meta-test reads this rule's SOURCE to prove it reads
+    // `reference` and never an alias, and a read folded inside a helper call
+    // would disarm that scan silently.
+    const ref = referenceCarrierOf({ reference: def.reference }, 'validate-expressions masterDetailCount');
+    if (ref !== undefined && ref.trim() !== '') n += 1;
   }
   return n;
 }
