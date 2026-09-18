@@ -12,12 +12,21 @@
  *     against. If `HookApi` ever declares a member or a return the checked
  *     contract cannot satisfy, this file stops compiling.
  *
- *     ⚠️ NOT MEASURED HERE, by construction: that the CLASS `ScopedContext`
+ *     ⚠️ NOT PINNED HERE, by construction: that the CLASS `ScopedContext`
  *     satisfies `HookApi`. `packages/spec` must not depend on
  *     `packages/objectql` (only objectql can execute a dispatch, and spec is
  *     the contract both sides read), so the class-vs-type leg belongs in
  *     objectql beside `hook-input-shape-contract.test.ts`, which is where the
- *     engine's other spec-contract pins live.
+ *     engine's other spec-contract pins live. It has been MEASURED once — this
+ *     card's contract review ran an objectql scratch probe with negative
+ *     controls and both `ScopedContext extends HookApi` and
+ *     `ObjectRepository extends HookObjectApi` hold — but a measurement taken
+ *     once is not a pin, and the standing pin is still owed.
+ *
+ *     ⛔ The assignability leg below is NOT a substitute for it: it runs the
+ *     other direction. `IScopedObjectRepository` declares no `delete`, so
+ *     "`HookApi` is a usable `IScopedContext`" cannot stand in for "the object
+ *     the engine builds is a usable `HookApi`".
  *
  *  2. **The option bags drift from the engine's accepted vocabulary.** Every
  *     shape is derived by `Omit`/`Pick` from the `Engine*Options` schemas the
@@ -42,12 +51,15 @@ import {
   EngineUpdateOptionsSchema,
 } from './data-engine.zod';
 import type {
+  EngineTransactionInfo,
+  EngineTransactionOptions,
   HookApi,
   HookCountQuery,
   HookDeleteOptions,
   HookObjectApi,
   HookQuery,
   HookUpdateOptions,
+  IScopedContext as ReExportedScopedContext,
 } from './hook-api';
 import type { IScopedContext, IScopedObjectRepository } from '../contracts/scoped-context';
 
@@ -167,6 +179,27 @@ describe('HookApi — the published hook ctx.api face', () => {
         returning: true,
       };
       expect([ok, wrong].length).toBe(2);
+    });
+  });
+
+  describe('nameability — every type this face references structurally is reachable here', () => {
+    // These three names are imported FROM './hook-api', not from the contracts
+    // files that declare them, so deleting a re-export line does not merely
+    // widen the surface: it stops this file compiling and `check:test-typecheck`
+    // goes red. That is the whole pin — a consumer importing only
+    // `@objectstack/spec/data` and emitting declarations answers TS2883 without
+    // them, and `check:entry-nameability` cannot see it (it probes the call
+    // surface of VALUE exports; `HookApi` is a type).
+    it('the transaction signature\'s two types, and the type ctx.api already carries', () => {
+      const infoIsReachable: Assignable<EngineTransactionInfo, EngineTransactionInfo> = true;
+      const optsIsReachable: Assignable<EngineTransactionOptions, EngineTransactionOptions> = true;
+      // Same declaration, reached through both entries — one declaration, two
+      // paths, which is what `check:dual-source-exports` asks about.
+      const oneDeclaration: Assignable<ReExportedScopedContext, IScopedContext> = true;
+      const andBack: Assignable<IScopedContext, ReExportedScopedContext> = true;
+      expect([infoIsReachable, optsIsReachable, oneDeclaration, andBack]).toEqual([
+        true, true, true, true,
+      ]);
     });
   });
 

@@ -55,9 +55,18 @@
  * ruling's explicit instruction for `filter`, and the SAME measurement carries
  * `top`: both are alias spellings of a canonical key, both throw on a value
  * disagreement, neither adds any expressive power. Authors spell `where` and
- * `limit`. ⚠️ REVIEW POINT — the ruling names `filter`; extending it to `top`
- * is this file's reading of the same rule, and is the one place a reviewer
- * should decide whether the type should be wider than the ruling's letter.
+ * `limit`.
+ *
+ * DECIDED at contract review, not left open: `top` stays omitted. The ruling
+ * names `filter` only, so the question was whether this type may be narrower
+ * than the ruling's letter — and the measurement says it is not narrower at
+ * all. `ENGINE_FIND_OPTION_KEYS` itself has no `top`: the alias is folded and
+ * DELETED before the legal-key check runs, which is why objectql's own drift
+ * pin skips it. So `HookQuery` carries the engine's accepted set verbatim, and
+ * re-adding `top` would put the published face out of step with the engine
+ * while re-opening for `{ limit, top }` exactly the coin toss the ruling closed
+ * for `{ where, filter }`. It is also the reversible direction: adding a key
+ * later is additive, removing one is breaking.
  *
  * ## What else is deliberately off the bags, each with its reason
  *
@@ -144,7 +153,27 @@ export type HookQuery = Omit<EngineQueryOptions, 'context' | 'top' | 'cursor' | 
  */
 export type HookCountQuery = Omit<EngineCountOptions, 'context'>;
 
-/** A record payload a hook write carries. */
+/**
+ * A record payload a hook write carries.
+ *
+ * DECIDED at contract review: this stays `Record` of `string` to `unknown`,
+ * and is NOT widened to the `any`-valued or `object`-valued form.
+ *
+ * What the narrow form costs, measured: a payload whose type is an INTERFACE is
+ * refused — `TS2345: Index signature for type 'string' is missing in type 'X'`
+ * — because TypeScript grants an implicit index signature to a type alias and
+ * not to an interface. The engine and `IScopedObjectRepository` both accept it,
+ * so this is the one shape in this file that sits narrower than the seam.
+ *
+ * Kept anyway, for three reasons. It fails LOUDLY and at the authoring site,
+ * never silently at the driver. The remedy is one word at the call site —
+ * declare the payload as a `type` rather than an `interface`, or spread it
+ * (`insert({ ...record })`, which is what a hook writing from `ctx.input`
+ * already does, and which compiles today). And it is the REVERSIBLE direction:
+ * widening later is additive, while narrowing later would break every consumer
+ * that had annotated a value as `HookDoc` and indexed it — the same structural
+ * argument that settled `top` above.
+ */
 export type HookDoc = Record<string, unknown>;
 
 /**
@@ -276,3 +305,48 @@ export interface HookApi {
     opts?: EngineTransactionOptions,
   ): Promise<T>;
 }
+
+/**
+ * [BLOCKING finding of this card's contract review] The types this entry's own
+ * public declarations reference STRUCTURALLY, re-exported so they are nameable
+ * from the entry that publishes them.
+ *
+ * The governing text is the maintainer ruling of 2026-08-23 on #11350, recorded
+ * in `packages/spec/scripts/check-entry-nameability.ts` and chartered
+ * 2026-08-25 on #11709: a type that appears structurally in an entry's public
+ * declarations must be nameable from that same entry.
+ *
+ * Measured in the consumer shape this card exists to serve — a program that
+ * imports ONLY `@objectstack/spec/data` and emits declarations:
+ *
+ * ```
+ * export const inTx = (api: HookApi) =>
+ *   api.transaction(async (tx, info) => ({ tx, info }));
+ *
+ * error TS2883: The inferred type of 'inTx' cannot be named without a
+ * reference to 'EngineTransactionInfo'. This is likely not portable.
+ * ```
+ *
+ * The second position — `transaction`'s `opts` — answers the same way for
+ * `EngineTransactionOptions`, and `HookContext.api` has answered it for
+ * `IScopedContext` since #5945, which is why that third name is here too: it is
+ * the SAME defect in the SAME entry, its remedy is this same one-line form, it
+ * lands in this file rather than in any file another card holds, and it adds no
+ * gate beyond the three this diff already regenerates. Leaving it would publish
+ * a hook seam that still cannot be written from one entry — the exact gap this
+ * card was opened to close.
+ *
+ * ⛔ `check:entry-nameability` is NOT the instrument that answers this. By its
+ * own docblock it probes the CALL surface of VALUE exports that have a call
+ * signature; `HookApi` is a type, so no probe of that gate ever reaches
+ * `api.transaction(...)`. It runs green here and is blind to this by
+ * construction — the reachable radius is value exports, and these three names
+ * are a known target outside it. The instrument that answers is a consumer
+ * program with `declaration` emit, which is what the excerpt above is.
+ *
+ * Type-only re-exports: they add three names to this entry and no runtime byte,
+ * and each is ONE declaration reachable from two entries rather than two
+ * declarations sharing a name, which is what `check:dual-source-exports` asks.
+ */
+export type { EngineTransactionInfo, EngineTransactionOptions } from '../contracts/objectql-engine';
+export type { IScopedContext } from '../contracts/scoped-context';
