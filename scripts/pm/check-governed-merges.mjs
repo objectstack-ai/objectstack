@@ -3394,6 +3394,12 @@ async function selfTest() {
   // register governs, and what that gate requires the prose to say.
   assert('the-declared-form-is-neither-an-exact-nor-a-glob-value', !GOVERNED_SURFACES.some((s) => ROOT_FILE_WATCH_HINTS.includes(s.exact) || ROOT_FILE_WATCH_HINTS.includes(s.glob)));
 
+  // ── subject → PR (both GitHub spellings; the trailing parenthetical wins) ─
+  assert('squash-subject', pullNumberFromSubject('fix(api): envelope the error paths (#9456)') === 9456);
+  assert('merge-subject', pullNumberFromSubject('Merge pull request #123 from x/y') === 123);
+  assert('mid-title-issue-citation-is-not-the-pr', pullNumberFromSubject('docs: checklist names the renamed check run (#9420) (#9490)') === 9490);
+  assert('no-pr-in-subject', pullNumberFromSubject('chore: direct push') === null);
+
   // ── the two landing tiers (#19133, ruled 2026-09-18) ─────────────────────
   //
   // Membership is pinned above and unchanged; what this battery pins is the
@@ -3434,12 +3440,6 @@ async function selfTest() {
   const allLifted = applyGeneratedExceptions(testVerdict([liftPath]), lifted);
   assert('and-null-once-every-hit-is-lifted', allLifted.governed === false && allLifted.tier === null, JSON.stringify(allLifted.tier));
   assert('the-tier-words-name-the-landing-each-waits-for', /GOVERNED_APPROVERS/.test(GOVERNED_TIERS.H.landing) && /Contract review/.test(GOVERNED_TIERS.S.landing) && /--pair/.test(GOVERNED_TIERS.S.landing));
-
-  // ── subject → PR (both GitHub spellings; the trailing parenthetical wins) ─
-  assert('squash-subject', pullNumberFromSubject('fix(api): envelope the error paths (#9456)') === 9456);
-  assert('merge-subject', pullNumberFromSubject('Merge pull request #123 from x/y') === 123);
-  assert('mid-title-issue-citation-is-not-the-pr', pullNumberFromSubject('docs: checklist names the renamed check run (#9420) (#9490)') === 9490);
-  assert('no-pr-in-subject', pullNumberFromSubject('chore: direct push') === null);
 
   // ── --since parsing ───────────────────────────────────────────────────────
   battery('since parsing');
@@ -4765,13 +4765,13 @@ async function selfTest() {
   const liftedHead = renderTestVerdict(liftedTest).split('\n')[0];
   assert(
     '⭐ the-test-head-no-longer-reports-a-post-lift-zero-as-if-nothing-had-hit-the-register',
-    liftedHead === 'governed-surface predicate: 0 of 4 path(s) hit the register after 1 generated-artifact lift(s) (5 surfaces, repo-agnostic).',
+    liftedHead === 'governed-surface predicate: 0 of 4 path(s) hit the register after 1 generated-artifact lift(s) (6 surfaces, repo-agnostic).',
     liftedHead,
   );
   const plainHead = renderTestVerdict(testVerdict(['packages/spec/src/ui/view.zod.ts'])).split('\n')[0];
   assert(
     'and-a-verdict-with-no-lift-keeps-its-head-line-byte-for-byte',
-    plainHead === 'governed-surface predicate: 0 of 1 path(s) hit the register (5 surfaces, repo-agnostic).',
+    plainHead === 'governed-surface predicate: 0 of 1 path(s) hit the register (6 surfaces, repo-agnostic).',
     plainHead,
   );
 

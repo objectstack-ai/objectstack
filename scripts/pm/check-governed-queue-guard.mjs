@@ -447,7 +447,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'decomposition, and the multi-PR group trap': 6,
   'the verdict table, both events': 10,
   'the pull_request leg is an EARLY WARNING and never reddens': 5,
-  'the replay fixtures: the three incidents this guard descends from': 9,
+  'the replay fixtures: the three incidents this guard descends from': 11,
   '⭐ the ordering guarantee, measured with a spy that THROWS': 7,
   'the words a reader acts on (requirement (e))': 26,
   '⭐ #14063 END TO END: what the dependency install actually buys': 9,
@@ -2214,10 +2214,14 @@ export async function selfTest() {
   // The same authorized approval, on a commit that is no longer the head. Under
   // the retired sha pin this exact fixture was the REFUSAL case.
   const authorizedPassOnOlder = (login = GOVERNED_APPROVERS[0]) => authorizedApprovalVerdict([approvedAt(login, OLD)], HEAD);
-  const run = (event, rows, approvals = new Map()) => {
+  const run = (event, rows, approvals = new Map(), records = new Map()) => {
     const { governed, unattributed } = decomposeGovernedWork(rows);
-    return guardVerdict({ event, governed, unattributed, approvals, apiCalls: governed.length });
+    return guardVerdict({ event, governed, unattributed, approvals, records, apiCalls: governed.length });
   };
+  // The record reading a Tier S entry gets when the thread was READ and held
+  // nothing — the incident shape (#19133): "no record" is a refusal of its own
+  // kind, distinct from "the thread could not be read".
+  const absentRecord = (pr) => new Map([[pr, { state: 'absent', read: { pr: 0, card: 0 }, readSummary: '0 on the PR and 0 on its card', cardNote: 'replay fixture, no card thread searched' }]]);
 
   // ── the register is READ, never restated (#9840) ──────────────────────────
   //
@@ -2440,8 +2444,18 @@ export async function selfTest() {
   battery('the replay fixtures: the three incidents this guard descends from');
   for (const replay of REPLAYS) {
     const rows = [row(replay.pr, replay.files, 'e'.repeat(40), replay.subject)];
-    const queued = run('merge_group', rows, new Map([[replay.pr, authorizedApprovalVerdict([], HEAD)]]));
-    assert(`replay-REFUSES-at-the-queue: ${replay.name}`, queued.exitCode === EXIT_REFUSED_UNAPPROVED, JSON.stringify(queued.conclusion));
+    // #19133: two of the three incidents are `.claude/**` and therefore Tier S
+    // today, so the queue judges them on the record leg too. Each incident's
+    // thread carried no record — the reading is ABSENT, and the refusal is the
+    // same "unapproved" the incident deserved. A Tier S entry with NO reading
+    // at all refuses as UNREADABLE instead: "could not find out" never clears.
+    const tier = governedTierFor(replay.files);
+    const queued = run('merge_group', rows, new Map([[replay.pr, authorizedApprovalVerdict([], HEAD)]]), tier === TIER_S ? absentRecord(replay.pr) : new Map());
+    assert(`replay-REFUSES-at-the-queue: ${replay.name}`, queued.exitCode === EXIT_REFUSED_UNAPPROVED, JSON.stringify([queued.conclusion, tier]));
+    if (tier === TIER_S) {
+      const unread = run('merge_group', rows, new Map([[replay.pr, authorizedApprovalVerdict([], HEAD)]]));
+      assert(`replay-is-Tier-S-and-with-NO-record-reading-refuses-UNREADABLE-never-clears: ${replay.name}`, unread.exitCode === EXIT_REFUSED_UNREADABLE, JSON.stringify(unread.conclusion));
+    }
     const early = run('pull_request', rows, new Map([[replay.pr, approvalVerdict([])]]));
     assert(`replay-only-WARNS-on-the-pr: ${replay.name}`, early.conclusion === 'warned' && early.exitCode === EXIT_CLEAR);
     const text = renderGuardVerdict(queued);
@@ -3677,7 +3691,7 @@ export async function selfTest() {
 
   // The words a reader acts on — requirement (e) reaches the new leg too.
   const tierRefusalText = renderGuardVerdict(tierAbsent);
-  assert('the-refusal-names-the-tier-on-the-entry-so-a-reader-knows-why-a-record-would-help', /landing tier: REFERENCES/.test(tierRefusalText));
+  assert('the-refusal-names-the-tier-on-the-entry-so-a-reader-knows-why-a-record-would-help', /landing tier: S/.test(tierRefusalText), tierRefusalText);
   assert('and-offers-the-record-as-a-THIRD-remedy-naming-the-three-facts-it-must-carry', /3\. Or — ONLY for a pull request whose governed paths all lie under/.test(tierRefusalText) && /Reviewed-by:/.test(tierRefusalText) && /Served-tier:/.test(tierRefusalText));
   assert('⛔ and-a-RULES-layer-refusal-is-offered-no-such-remedy-the-control-for-the-line-above', !/3\. Or — ONLY for a pull request/.test(renderGuardVerdict(rulesDismissed)));
   assert('the-below-tier-refusal-names-the-reading-it-actually-got', /does not stand/.test(renderGuardVerdict(tierBelow)) && /a-lesser-tier/.test(renderGuardVerdict(tierBelow)));
