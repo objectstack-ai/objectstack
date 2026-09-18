@@ -2501,7 +2501,7 @@ declare const agentForm: {
         description?: string | undefined;
         visibleWhen?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -2509,7 +2509,7 @@ declare const agentForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -2518,7 +2518,7 @@ declare const agentForm: {
         } | undefined;
         visibleOn?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -2526,7 +2526,7 @@ declare const agentForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -2549,7 +2549,7 @@ declare const agentForm: {
         description?: string | undefined;
         visibleWhen?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -2557,7 +2557,7 @@ declare const agentForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -2566,7 +2566,7 @@ declare const agentForm: {
         } | undefined;
         visibleOn?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -2574,7 +2574,7 @@ declare const agentForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -2716,7 +2716,7 @@ declare const skillForm: {
         description?: string | undefined;
         visibleWhen?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -2724,7 +2724,7 @@ declare const skillForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -2733,7 +2733,7 @@ declare const skillForm: {
         } | undefined;
         visibleOn?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -2741,7 +2741,7 @@ declare const skillForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -2764,7 +2764,7 @@ declare const skillForm: {
         description?: string | undefined;
         visibleWhen?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -2772,7 +2772,7 @@ declare const skillForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -2781,7 +2781,7 @@ declare const skillForm: {
         } | undefined;
         visibleOn?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -2789,7 +2789,7 @@ declare const skillForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -2916,7 +2916,7 @@ declare const toolForm: {
         description?: string | undefined;
         visibleWhen?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -2924,7 +2924,7 @@ declare const toolForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -2933,7 +2933,7 @@ declare const toolForm: {
         } | undefined;
         visibleOn?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -2941,7 +2941,7 @@ declare const toolForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -2964,7 +2964,7 @@ declare const toolForm: {
         description?: string | undefined;
         visibleWhen?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -2972,7 +2972,7 @@ declare const toolForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -2981,7 +2981,7 @@ declare const toolForm: {
         } | undefined;
         visibleOn?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -2989,7 +2989,7 @@ declare const toolForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;

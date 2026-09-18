@@ -193,13 +193,47 @@
  *   1  judged, finding: a card this PR closes records no claim on this branch.
  *   2  NOT MEASURED — the run was handed no usable context (no `PR_NUMBER` and
  *      no queue ref, an empty repo slug or token, a head ref this gate cannot
- *      read), or the queue leg could not read its pull request. A usage,
- *      wiring or transport failure, never a verdict about any PR.
+ *      read), or the queue leg could not read its pull request. A usage or
+ *      wiring failure, never a verdict about any PR.
+ *   3  PREREQUISITE NOT MET — a request to GitHub failed at the TRANSPORT (401,
+ *      403, 429, 5xx, or a network error), so the board was not read and
+ *      NOTHING was judged. The fleet's prerequisite code, spelled
+ *      `EXIT_PREREQUISITE_NOT_MET` and imported rather than re-declared.
  *
  * A gate that cannot read its input has verified nothing, and exiting 0 there
  * reads as "no violations". The inverse matters as much: a mis-wired gate must
  * not read as an accusation, because it would be red on every PR at once for
- * something no author did.
+ * something no author did. Neither 2 nor 3 emits an `::error::` annotation for
+ * that reason — the exit code is what makes the job red, and an annotation
+ * would name an author who caused none of it.
+ *
+ * ## Transport failure and UNDETERMINED are DIFFERENT answers
+ *
+ * Both used to be exit 0 plus a warning, and the difference is the whole of
+ * this gate's honesty:
+ *
+ *   - UNDETERMINED is about ONE target. Its thread ran past the page cap, or
+ *     its number does not resolve (a 404). The rest of the run still stands, so
+ *     the target is named, warned about and counted, and the run keeps its
+ *     verdict on every other target. ⛔ Never clean, ⛔ never an accusation.
+ *   - PREREQUISITE NOT MET is about the RUN. A 401, 403, 429, 5xx or network
+ *     error says this process cannot read GitHub at all, so there is no reading
+ *     to report about anything. Folding that into UNDETERMINED is what made an
+ *     unrouted container read exit 0 with a warning nobody sees in a
+ *     derived-gate sweep, which records exit codes.
+ *
+ * The boundary is drawn on a TYPED error, never on message text: `githubApi`
+ * throws `GitHubApiError` carrying the status (or the network flag), and
+ * `isBoardNotRead` reads that. A plain `Error` from anywhere else — a fake
+ * transport in the self-test, a bug — is NOT a transport failure and keeps its
+ * old per-target UNDETERMINED reading, so no untyped throw can silently promote
+ * itself to a whole-board refusal.
+ *
+ * ⚠️ The residual, stated rather than discovered: a token that can see nothing
+ * in this repository gets 404 on every path, so every target reads UNDETERMINED
+ * and the run exits 0. That is the same shape as a board of numbers that do not
+ * resolve, and no status distinguishes them. What this gate CAN tell apart is
+ * what it does tell apart.
  *
  * ## The remedy is read LIVE, which the body-scoped siblings cannot say
  *
@@ -211,6 +245,17 @@
  * (dropping the closing keyword) needs a fresh event, which the `edited`
  * activity type supplies.
  *
+ * ## The route to GitHub, and why a bypassed one used to read as green
+ *
+ * In an agent container api.github.com is reachable only through the session
+ * proxy, and node's `fetch` does not read the proxy variables. An unrouted run
+ * therefore arrived without its credential, GitHub answered 401, and this file
+ * folded that into a per-target UNDETERMINED behind EXIT 0 — a gate that judged
+ * nothing while its exit code said clean. So a judging run re-execs itself ONCE
+ * through the shared proxy plan before its first read; see the route section
+ * further down. On an Actions runner there is no proxy in the environment, the
+ * plan never re-arms, and nothing about this gate changes there.
+ *
  * ## Why the paths above are unquoted, and the fixtures fictional
  *
  * The dispatch-gates derivation resolves a check family to its script file and
@@ -221,16 +266,27 @@
  * two real inputs the self-test reads.
  */
 
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
+import { maskCommentsAndLiterals } from './js-comment-mask.mjs';
 
 // Imported, never restated. The closing-keyword grammar and the claim
 // predicate both have exactly one home in this tree, and this gate is their
-// second consumer rather than a second spelling.
-import { claimGovernance, closingKeywordTargets, h46ClaimNamesBranch } from './pm/check-half-states.mjs';
+// second consumer rather than a second spelling. The proxy-rearm PLAN joins
+// them for the same reason: one spelling of "go through the proxy" for every
+// instrument in this tree, so this gate and the sweeps can never disagree
+// about whether this container's fetch reaches GitHub at all. Only the guard
+// VARIABLE below is this file's own, and the block above `rearmThroughProxy`
+// says why.
+import { claimGovernance, closingKeywordTargets, EXIT_PREREQUISITE_NOT_MET, h46ClaimNamesBranch, PROXY_FLAG, PROXY_REARM_GUARD, proxyRearmPlan } from './pm/check-half-states.mjs';
 import { pullNumberFromQueueRef } from './pm/check-governed-queue-guard.mjs';
+
+/** This file, resolved once, so the re-exec below hands off to THIS script and not to an argv guess. */
+const SELF_PATH = fileURLToPath(import.meta.url);
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -255,13 +311,15 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'UNDETERMINED is its own answer: never clean, never an accusation.': 9,
   'Wiring absent: never clean, never an accusation.': 12,
   'The merge-queue leg, asserted rather than assumed.': 9,
+  'The route to GitHub. A bypassed proxy reads as a dead credential, so both': 9,
+  'A transport failure SPEAKS, and is held apart from UNDETERMINED. Both used': 16,
   'The wiring itself. A gate whose workflow step is deleted or whose': 10,
   'The predicate sources this gate reuses must still be there to reuse.': 3,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 10;
+const SELF_TEST_BATTERY_FLOOR = 12;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -354,6 +412,77 @@ const PREDICATE_SOURCES = ['scripts/pm/check-half-states.mjs', 'scripts/pm/check
 export const EXIT_CLEAN = 0;
 export const EXIT_UNCLAIMED = 1;
 export const EXIT_NOT_WIRED = 2;
+// 3 is EXIT_PREREQUISITE_NOT_MET, imported from the half-state module rather
+// than re-declared here: the fleet spells the "this run could not read the
+// board" refusal once, and a second 3 in this file would be a second spelling
+// of a code CI and every reader already know.
+
+/**
+ * A request that reached this gate's transport and failed THERE.
+ *
+ * Typed, because the boundary between "the board was not read" and "one number
+ * could not be read" is decided on the status, and ⛔ never on message text: a
+ * plain `Error` from a fake transport or from a bug must keep its per-target
+ * reading rather than promote itself to a whole-board refusal.
+ */
+export class GitHubApiError extends Error {
+  constructor(message, { status = null, path = '', networkError = false } = {}) {
+    super(message);
+    this.name = 'GitHubApiError';
+    this.status = status;
+    this.path = path;
+    this.networkError = networkError;
+  }
+}
+
+/**
+ * Is this throw about the BOARD (this run cannot read GitHub at all) rather
+ * than about one number?
+ *
+ * 404 is the one status that carries information about the resource the path
+ * NAMES — the number does not resolve for this token — so it stays a per-target
+ * UNDETERMINED. Everything else that reached the transport is about the run: a
+ * missing or rejected credential (401/403), a rate limit (403/429), GitHub
+ * itself (5xx), or no connection at all.
+ */
+export function isBoardNotRead(error) {
+  if (!(error instanceof GitHubApiError)) return false;
+  if (error.networkError) return true;
+  return error.status !== 404;
+}
+
+/**
+ * The whole-board refusal: `{ exit, lines }`, pure over its input, so the
+ * self-test drives both legs with no network at all.
+ *
+ * ⛔ No `::error::` annotation. The exit code is what makes the job red; an
+ * annotation would put this on a pull request author who caused none of it —
+ * the same reason NOT MEASURED carries none.
+ */
+export function boardNotReadRefusal(error, { env = {}, execArgv = [], flagSupported = true } = {}) {
+  const plan = proxyRearmPlan({ env: proxyPlanEnv(env), execArgv, flagSupported });
+  return {
+    exit: EXIT_PREREQUISITE_NOT_MET,
+    lines: [
+      '❌ check:closing-target-claim: PREREQUISITE NOT MET — the board was not read.',
+      `   ${error?.message ?? String(error)} — ⛔ not a verdict.`,
+      ...(plan.rearm || plan.hint ? [`   Route: ${plan.reason}.`] : []),
+      '   ⛔ NOTHING was judged. No closing target of this PR was held against any claim, so this run',
+      '   says nothing about whether any PR closes a card that never claimed its branch, and no author',
+      `   caused it. It exits ${EXIT_PREREQUISITE_NOT_MET} rather than 0 so a failed read can never pass for a clean PR —`,
+      '   an exit code is the only thing a derived-gate sweep records.',
+      '',
+      '   ⚠️ This is NOT the per-target UNDETERMINED. A thread walked past its page cap, or a number',
+      '   that does not resolve, is ONE target this run could not judge while the rest of the run still',
+      '   stands. A transport failure is the run having no reading at all.',
+      '',
+      '   Fix:  in an agent container a 401 or 403 is usually the ROUTE and not the token — the network',
+      `         is reachable only through the session proxy, so re-run with \`node ${PROXY_FLAG} …\` (or`,
+      '         NODE_USE_ENV_PROXY=1). A 429, a 5xx or a network error is GitHub or the network itself:',
+      '         re-run the job.',
+    ],
+  };
+}
 
 /** A comment thread is walked at most this far; past it the thread is UNDETERMINED, never unclaimed. */
 export const MAX_COMMENT_PAGES = 10;
@@ -561,15 +690,21 @@ async function listIssueComments(api, repo, number) {
 /**
  * Resolve every closing target of this PR's body to exactly one verdict.
  *
- * `api` returns parsed JSON or throws; `apiOrNull` turns a throw into a
- * declared UNDETERMINED rather than an unhandled rejection, because a transport
- * hiccup is not something a PR author did.
+ * `api` returns parsed JSON or throws. A throw that `isBoardNotRead` calls a
+ * TRANSPORT failure propagates OUT of this function, because there is then no
+ * reading to report about any target; every other throw becomes a declared
+ * per-target UNDETERMINED rather than an unhandled rejection, because one
+ * unreadable number is not something a PR author did either.
+ *
+ * ⛔ The two are not the same answer and must not share a bucket — sharing one
+ * is exactly what made an unrouted run exit 0 with a warning.
  */
 export async function collect(ctx, api) {
   const apiOrNull = async (path) => {
     try {
       return await api(path);
-    } catch {
+    } catch (error) {
+      if (isBoardNotRead(error)) throw error;
       return null;
     }
   };
@@ -600,7 +735,8 @@ export async function collect(ctx, api) {
       const walked = await listIssueComments(api, ctx.repo, number);
       rows = walked.rows;
       complete = walked.complete;
-    } catch {
+    } catch (error) {
+      if (isBoardNotRead(error)) throw error;
       targets.push({ number, keyword, verdict: TARGET_UNDETERMINED, why: 'its comment thread could not be read' });
       continue;
     }
@@ -656,17 +792,109 @@ export async function collect(ctx, api) {
   return { ...ctx, body, head, targets };
 }
 
+/**
+ * The live transport. Every failure it can produce leaves as a `GitHubApiError`
+ * so the boundary below is decided on a STATUS and never on message text.
+ */
 const githubApi = (token) => async (path) => {
-  const response = await fetch(`https://api.github.com${path}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-    },
-  });
-  if (!response.ok) throw new Error(`GitHub API ${response.status} for ${path}`);
+  let response;
+  try {
+    response = await fetch(`https://api.github.com${path}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+    });
+  } catch (error) {
+    // No response at all: DNS, TLS, a refused connection, an aborted socket.
+    // `fetch` reports every one of them as the same opaque TypeError, so the
+    // cause is what carries anything a reader can act on.
+    throw new GitHubApiError(
+      `GitHub API unreachable for ${path}: ${error?.cause?.code ?? error?.cause?.message ?? error?.message ?? error}`,
+      { path, networkError: true },
+    );
+  }
+  if (!response.ok) throw new GitHubApiError(`GitHub API ${response.status} for ${path}`, { status: response.status, path });
   return response.json();
 };
+
+// ---------------------------------------------------------------------------
+// The route to GitHub — why this gate re-execs itself once.
+//
+// Every judging run reads comment threads over the network, and in an agent
+// container that network is reachable only through the session proxy, which is
+// also where the credential is injected. Node's `fetch` does not read the proxy
+// variables, so an unrouted run left WITHOUT its credential and GitHub answered
+// 401 — and this file turned that answer into a per-target UNDETERMINED behind
+// exit 0. A seat pre-running this gate therefore read a green exit code for a
+// run that judged nothing, which is the one reading a derived-gate sweep
+// records (it reads exit codes, not prose).
+//
+// The switch is read at process START, which is the whole reason this is a
+// re-exec rather than an assignment.
+//
+// The DECISION is imported, not restated. What is local is the guard VARIABLE,
+// deliberately: sharing a sibling's guard would let that sibling's re-exec
+// suppress this one's — a grandchild is spawned without the flag in its argv,
+// so it needs the re-exec even though the guard the parent set says one already
+// happened.
+//
+// ⭐ On a GitHub Actions runner there is no proxy in the environment, so the
+// plan never re-arms and this gate behaves there exactly as it did before.
+// ---------------------------------------------------------------------------
+
+/** This file's OWN re-exec guard — deliberately not any sibling's. */
+export const OWN_PROXY_REARM_GUARD = 'OS_CLOSING_TARGET_CLAIM_PROXY_REARMED';
+
+/**
+ * The environment the imported plan is asked about: this file's own guard,
+ * presented under the name the plan reads. Pure, so the self-test drives every
+ * branch offline — and the branch worth pinning is a SIBLING's guard being set,
+ * which must NOT stop this run from re-arming.
+ */
+export function proxyPlanEnv(env) {
+  return { ...env, [PROXY_REARM_GUARD]: env[OWN_PROXY_REARM_GUARD] };
+}
+
+/**
+ * Hand this run off through the proxy, or `null` to carry on in-process.
+ *
+ * A returned number is the child's exit status, forwarded VERBATIM: the exit
+ * codes above are this gate's contract with CI, so the hand-off has to be
+ * invisible in them.
+ *
+ * Everything printed here goes to STDERR. The clean verdict is this script's
+ * only stdout, and a status line there would land inside whatever reads it.
+ *
+ * @param {string[]} args  this run's own argv tail, forwarded unchanged
+ */
+function rearmThroughProxy(args) {
+  const plan = proxyRearmPlan({
+    env: proxyPlanEnv(process.env),
+    execArgv: process.execArgv,
+    flagSupported: process.allowedNodeEnvironmentFlags.has(PROXY_FLAG),
+  });
+  if (plan.hint) {
+    console.error(`ℹ️  ${plan.reason}. A refusal below may be about the route, not this container.`);
+    return null;
+  }
+  if (!plan.rearm) return null;
+  console.error(`ℹ️  re-exec with ${plan.flag}: ${plan.reason}.`);
+  // The env proxy agent is experimental and says so once per run. Nobody can
+  // act on that notice, so silence it where the node in use can.
+  const quiet = process.allowedNodeEnvironmentFlags.has('--disable-warning') ? ['--disable-warning=UNDICI-EHPA'] : [];
+  const child = spawnSync(process.execPath, [plan.flag, ...quiet, SELF_PATH, ...args], {
+    stdio: 'inherit',
+    env: { ...process.env, [OWN_PROXY_REARM_GUARD]: '1' },
+  });
+  if (typeof child.status === 'number') return child.status;
+  console.error(
+    `⚠️  could not re-exec with ${plan.flag} (${child.error?.message ?? 'no exit status'}); `
+      + 'continuing in-process — every request will bypass the proxy.',
+  );
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // Self-test — the verdict layer, the exit-code contract, the collection policy
@@ -936,6 +1164,71 @@ async function selfTest() {
   const queueBroken = judge(await collect(queueCtx, fakeApi({}).api));
   t('a queue ref whose pull request cannot be read is NOT MEASURED, never clean and never a finding', queueBroken.exit, EXIT_NOT_WIRED);
 
+  // --- The route to GitHub. A bypassed proxy reads as a dead credential, so both
+  // legs are pinned rather than one: the Actions-runner leg must stay untouched
+  // (no proxy in the environment, no re-exec, no behaviour change at all), and a
+  // container must re-arm EXACTLY once. The fixture proxy names no tree in any
+  // repo, per this file's header rule on quoted literals.
+  battery('The route to GitHub. A bypassed proxy reads as a dead credential, so both');
+  const proxied = { HTTPS_PROXY: 'http://127.0.0.1:41733' };
+  t('the Actions-runner leg: no proxy in the env, so no re-exec and nothing changes in CI', proxyRearmPlan({ env: proxyPlanEnv({}) }).rearm, false);
+  t('an agent container re-arms, which is the whole of the route fix', proxyRearmPlan({ env: proxyPlanEnv(proxied), flagSupported: true }).rearm, true);
+  t("...exactly once — this run's OWN guard is what stops the loop", proxyRearmPlan({ env: proxyPlanEnv({ ...proxied, [OWN_PROXY_REARM_GUARD]: '1' }), flagSupported: true }).rearm, false);
+  t("...and a SIBLING instrument's guard does NOT suppress it", proxyRearmPlan({ env: proxyPlanEnv({ ...proxied, [PROXY_REARM_GUARD]: '1' }), flagSupported: true }).rearm, true);
+  t("this file's guard is not the imported one, which is what makes that hold", OWN_PROXY_REARM_GUARD === PROXY_REARM_GUARD, false);
+  t('a run already routed through the proxy does not re-arm again', proxyRearmPlan({ env: proxyPlanEnv(proxied), execArgv: [PROXY_FLAG], flagSupported: true }).rearm, false);
+  const unsupportedFlag = proxyRearmPlan({ env: proxyPlanEnv(proxied), flagSupported: false });
+  t('a node that cannot take the flag SAYS so rather than bypassing silently', [unsupportedFlag.rearm, unsupportedFlag.hint], [false, true]);
+  const ownSource = maskCommentsAndLiterals(readFileSync(SELF_PATH, 'utf8'));
+  t('structural: the plan is imported, not restated here', /\bproxyRearmPlan\b/.test(ownSource) && !/function\s+proxyRearmPlan\b/.test(ownSource), true);
+  // Both halves, because the sibling's ablation found the ordering alone
+  // vacuous: with the CALL deleted, the last occurrence is the DECLARATION,
+  // which sits above the collection and satisfied the comparison with no
+  // hand-off left in the file at all.
+  const rearmSites = ownSource.split('rearmThroughProxy(').length - 1;
+  t('structural: the hand-off is CALLED exactly once, and decided BEFORE the first network read', [rearmSites, ownSource.lastIndexOf('rearmThroughProxy(') < ownSource.lastIndexOf('await collect(')], [2, true]);
+
+  // --- A transport failure SPEAKS, and is held apart from UNDETERMINED. Both used
+  // to be exit 0 plus a warning, which is how an unrouted container read this
+  // gate as green while it judged nothing. The boundary is a typed status, so
+  // every leg here is driven offline over constructed errors.
+  battery('A transport failure SPEAKS, and is held apart from UNDETERMINED. Both used');
+  const thrownBy = async (routes) => {
+    try {
+      await collect(ctxOf({ body: 'Closes #15845', targets: undefined }), fakeApi(routes).api);
+      return null;
+    } catch (error) {
+      return error;
+    }
+  };
+  const apiError = (status) => new GitHubApiError(`GitHub API ${status} for /repos/o/r/issues/15845/comments`, { status, path: '/repos/o/r/issues/15845/comments' });
+  const netError = new GitHubApiError('GitHub API unreachable for /repos/o/r/issues/15845/comments: ECONNREFUSED', { path: '/repos/o/r/issues/15845/comments', networkError: true });
+
+  t('a 401 leaves `collect` rather than becoming one target\'s shrug', (await thrownBy({ '/repos/o/r/issues/15845/comments': apiError(401) }))?.status, 401);
+  t('…a 403 too, which is both a permission answer and a rate limit', isBoardNotRead(apiError(403)), true);
+  t('…a 429 too', isBoardNotRead(apiError(429)), true);
+  t('…and a 5xx, which is GitHub and never this PR', isBoardNotRead(apiError(503)), true);
+  t('…and a network error, which has no status at all', isBoardNotRead(netError), true);
+  t('⛔ a 404 is NOT a board failure — it is what "that number does not resolve" looks like', isBoardNotRead(apiError(404)), false);
+  t('⛔ an untyped throw is not one either, so no bug can promote itself to a refusal', isBoardNotRead(new Error('boom')), false);
+
+  const refusal = boardNotReadRefusal(apiError(401), { env: {} });
+  t('the refusal carries the fleet phrase, so it greps with its siblings', text(refusal).includes('PREREQUISITE NOT MET — the board was not read'), true);
+  t('…quotes the error it refused on', text(refusal).includes('GitHub API 401'), true);
+  t('…says out loud that it is ⛔ not a verdict', text(refusal).includes('⛔ not a verdict'), true);
+  t('…and exits the fleet code, which is none of this gate\'s three verdict codes', [refusal.exit, [EXIT_CLEAN, EXIT_UNCLAIMED, EXIT_NOT_WIRED].includes(refusal.exit)], [EXIT_PREREQUISITE_NOT_MET, false]);
+  t('…with ⛔ no ::error:: annotation, because no author caused it', text(refusal).includes('::error::'), false);
+  t('…and ⛔ no ✓, because nothing was judged', text(refusal).includes('✓'), false);
+  t('in a container the refusal names the ROUTE, which is the actual remedy for a 401 there', text(boardNotReadRefusal(apiError(401), { env: proxied, flagSupported: true })).includes(PROXY_FLAG), true);
+
+  // The other side of the boundary, pinned on the same fake transport: a walk
+  // that ran past its cap is still ONE target's answer at exit 0.
+  const cappedPage = Array.from({ length: 100 }, () => ({ body: 'not a claim' }));
+  const truncated = await run('Closes #15845', { '/repos/o/r/issues/15845/comments': cappedPage });
+  t('a truncated walk is STILL exit 0 with an UNDETERMINED warning, ⛔ not a refusal', [truncated.verdict.exit, text(truncated.verdict).includes('::warning::UNDETERMINED')], [EXIT_CLEAN, true]);
+  const notFound = await run('Closes #15845', { '/repos/o/r/issues/15845/comments': apiError(404) });
+  t('a number that does not resolve is STILL exit 0 with an UNDETERMINED warning', [notFound.verdict.exit, text(notFound.verdict).includes('::warning::UNDETERMINED')], [EXIT_CLEAN, true]);
+
   // --- The wiring itself. A gate whose workflow step is deleted or whose
   // trigger loses a leg is not a weaker gate, it is a silent one.
   battery('The wiring itself. A gate whose workflow step is deleted or whose');
@@ -991,7 +1284,30 @@ if (isEntrypoint(import.meta.url)) {
     }
   } else {
     const ctx = readPrContext(process.env);
-    const collected = ctx === null || ctx.wired === false ? ctx : await collect(ctx, githubApi(ctx.token));
+    // Only a run with a usable context reaches the network, so only that run
+    // needs the route. Re-execing a NOT WIRED run would spend a process to
+    // reprint the identical wiring verdict.
+    if (ctx !== null && ctx.wired !== false) {
+      const handed = rearmThroughProxy(process.argv.slice(2));
+      if (handed !== null) process.exit(handed);
+    }
+    let collected;
+    try {
+      collected = ctx === null || ctx.wired === false ? ctx : await collect(ctx, githubApi(ctx.token));
+    } catch (error) {
+      // Only a transport failure is refused here. Anything else is a BUG in
+      // this gate and stays an unhandled rejection, where it is visible as one
+      // — turning it into exit 3 would file the gate's own defect under
+      // "GitHub was unreachable".
+      if (!isBoardNotRead(error)) throw error;
+      const refusal = boardNotReadRefusal(error, {
+        env: process.env,
+        execArgv: process.execArgv,
+        flagSupported: process.allowedNodeEnvironmentFlags.has(PROXY_FLAG),
+      });
+      for (const line of refusal.lines) console.error(line);
+      process.exit(refusal.exit);
+    }
     const result = judge(collected);
     const emit = result.exit === EXIT_CLEAN ? console.log : console.error;
     for (const line of result.lines) emit(line);

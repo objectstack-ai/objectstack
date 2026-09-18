@@ -214,16 +214,47 @@ describe('requiresFeature lowering', () => {
     expect(() => ActionParamSchema.parse({ name: 'x', requiresFeature: 'phoneNumbr' })).toThrow();
   });
 
-  it('rejects composition with an AST-only visible loudly (ADR-0078)', () => {
-    const result = ActionParamSchema.safeParse({
+  it('rejects an AST-only visible loudly (ADR-0078) — at the SLOT since #15811, not at the lowering', () => {
+    // ADR-0078's promise ("rejects an AST-only or non-CEL `visible` loudly") is
+    // unchanged; what moved is WHICH rule refuses, and it moved earlier. The
+    // lowering only ever ran when `requiresFeature` was present, so an AST-only
+    // `visible` WITHOUT one parsed clean (measured on #15811). The slot now
+    // composes `EvaluatedExpressionInputSchema`, so the refusal is the
+    // evaluated-slot rule at `visible`, with or without the flag.
+    const withFlag = ActionParamSchema.safeParse({
       name: 'x',
       visible: { dialect: 'cel', ast: { kind: 'literal' } },
       requiresFeature: 'admin',
     });
+    expect(withFlag.success).toBe(false);
+    expect(withFlag.success ? [] : withFlag.error.issues.map((i) => i.path.join('.')))
+      .toContain('visible');
+
+    const withoutFlag = ActionParamSchema.safeParse({
+      name: 'x',
+      visible: { dialect: 'cel', ast: { kind: 'literal' } },
+    });
+    expect(withoutFlag.success).toBe(false);
+    expect(withoutFlag.success ? [] : withoutFlag.error.issues.map((i) => i.path.join('.')))
+      .toContain('visible');
+  });
+
+  it('a blank-`source` visible no longer reaches the lowering at all (#17631\u2019s shape, closed at the door)', () => {
+    // The lowering used to compose a feature gate AROUND a blank source and
+    // produce `(   ) && features.admin == true` — a predicate that can never
+    // parse, built by the guard that exists to reject exactly that. The slot
+    // refuses the blank `source` before the lowering sees it.
+    const result = ActionParamSchema.safeParse({
+      name: 'x',
+      visible: { dialect: 'cel', source: '   ' },
+      requiresFeature: 'admin',
+    });
     expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues.some((i) => i.path.includes('requiresFeature'))).toBe(true);
-    }
+    // A blank `source` INSIDE an envelope is the one shape the envelope arm
+    // refuses without aborting, so it surfaces at `visible.source` rather than
+    // as an `invalid_union` at `visible` — see `evaluatedExpressionInputRefusal`.
+    expect(result.success ? [] : result.error.issues.map((i) => i.path.join('.')))
+      .toContain('visible.source');
   });
 
   it('leaves sugar-free inputs untouched', () => {

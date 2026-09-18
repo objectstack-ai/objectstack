@@ -1,7 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { ExpressionInputSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
+import { evaluatedExpressionUnionRefusal } from '../shared/evaluated-slot-union';
 
 /**
  * Tracing Protocol - Distributed Tracing & Observability
@@ -295,6 +296,24 @@ export const SamplingStrategyType = z.enum([
 export type SamplingStrategyType = z.input<typeof SamplingStrategyType>;
 
 /**
+ * Why the structured-filter arm of `TraceSamplingConfig.composite[].condition`
+ * refused an object (#15811).
+ *
+ * Module-local on purpose: it is ONE arm's rule at ONE slot, not a published
+ * contract, so it stays off `api-surface/` — the same reason
+ * `evaluatedExpressionUnionRefusal` is package-internal. It is deliberately
+ * NOT `EVALUATED_EXPRESSION_SOURCE_REQUIRED`: this arm does not refuse for a
+ * missing `source`, it refuses because the object is not a structured filter
+ * at all, and an arm that borrows the other arm's sentence is how
+ * `{ dialect: 'js', source: 'x' }` came to be blamed on `source`.
+ */
+const STRUCTURED_FILTER_DIALECT_REFUSED =
+  'A structured sampling filter must not carry a `dialect` key: an object that does is an '
+  + 'expression attempt, and it is judged by this slot\'s expression arm — which needs a dialect '
+  + 'this platform evaluates and a non-blank `source`. Drop the `dialect` key to author a '
+  + 'structured filter, or write `{ dialect: \'cel\', source: \'…\' }`.';
+
+/**
  * Trace Sampling Configuration Schema
  */
 export const TraceSamplingConfigSchema = lazySchema(() => z.object({
@@ -345,9 +364,35 @@ export const TraceSamplingConfigSchema = lazySchema(() => z.object({
     strategy: SamplingStrategyType.describe('Strategy type'),
     ratio: z.number().min(0).max(1).optional(),
     condition: z.union([
-      z.record(z.string(), z.unknown()),
-      ExpressionInputSchema,
-    ]).optional().describe('Condition for this strategy — structured filter or CEL predicate'),
+      // ⚠️ The structured-filter arm must refuse an EXPRESSION-shaped object or
+      // it swallows the one this union's other arm exists to judge: a bare
+      // `z.record(z.string(), z.unknown())` accepts `{ dialect: 'cel', ast }`
+      // as an ordinary record, so #15811's narrowing was inert here until this
+      // arm learned to decline. An object carrying `dialect` is an expression
+      // attempt and belongs to the arm below, whatever it got wrong.
+      //
+      // ⚠️ `abort: true` is about the MESSAGE and never the accept set — the
+      // refused set is identical either way, measured. zod 4.4 reports the one
+      // arm that did not abort, else `invalid_union` at the slot. Left
+      // non-aborting this arm was the survivor for every expression-shaped
+      // refusal here, and it answered for all of them: a blank `source` — the
+      // one shape the expression arm refuses WITHOUT aborting — collided with
+      // it, so the slot published a bare `Invalid input` while the real
+      // sentence sat nested out of sight, and `{ dialect: 'js', source: 'x' }`
+      // was refused with a sentence about `source` that misnames its fault.
+      // Aborting hands each refusal back to the arm or map that owns it, and
+      // the slot answers exactly what every other evaluated slot answers: one
+      // `custom` issue at `source` for a blank `source`, one `invalid_union`
+      // carrying the published sentence for an `ast`-only envelope or a blank
+      // bare string.
+      z.record(z.string(), z.unknown())
+        .refine((value) => !('dialect' in value), {
+          message: STRUCTURED_FILTER_DIALECT_REFUSED,
+          abort: true,
+        }),
+      EvaluatedExpressionInputSchema,
+    ], { error: (issue) => evaluatedExpressionUnionRefusal(issue.input) })
+      .optional().describe('Condition for this strategy — a structured filter object, or a CEL predicate an engine evaluates. ⚠️ The two are told apart by the `dialect` key: a structured filter must NOT carry one, and an object that does is judged as an expression — so it needs a dialect this platform evaluates and a non-blank `source` (`{ dialect: \'cel\', source: \'record.amount > 10\' }`). `{ dialect: \'cel\', ast: … }` with no `source` is refused here.'),
   })).optional(),
 
   /**

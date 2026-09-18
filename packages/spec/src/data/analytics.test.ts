@@ -11,6 +11,8 @@ import {
   AnalyticsQuerySchema,
 } from './analytics.zod';
 import { DateGranularity } from './query.zod';
+import { ObjectStackDefinitionSchema } from '../stack.zod';
+import { applyConversions, collectConversionNotices } from '../conversions/apply';
 
 describe('AggregationMetricType', () => {
   it('should accept all valid metric types', () => {
@@ -253,52 +255,133 @@ describe('DimensionSchema', () => {
 });
 
 describe('CubeJoinSchema', () => {
-  it('should accept valid join with default relationship', () => {
-    const join = CubeJoinSchema.parse({
-      name: 'orders',
-      sql: '{CUBE}.user_id = {orders}.user_id',
-    });
+  // #18612 (ADR-0049 enforce-or-remove, maintainer-ruled batch #154): `sql` and
+  // `relationship` are REMOVED. `name` is the whole contract, and the ON clause
+  // is derived from the declared relationship between the two cubes' objects.
+  it('accepts a join that declares only the object it reaches', () => {
+    const join = CubeJoinSchema.parse({ name: 'orders' });
 
     expect(join.name).toBe('orders');
-    expect(join.relationship).toBe('many_to_one');
+    expect(join).not.toHaveProperty('relationship');
+    expect(join).not.toHaveProperty('sql');
   });
 
-  it('should accept join with explicit relationship', () => {
-    const join = CubeJoinSchema.parse({
-      name: 'line_items',
-      relationship: 'one_to_many',
-      sql: '{CUBE}.id = {line_items}.order_id',
-    });
+  it('refuses an authored ON clause, and the refusal says the clause is DERIVED', () => {
+    const r = CubeJoinSchema.safeParse({ name: 'orders', sql: '{CUBE}.user_id = {orders}.user_id' });
 
-    expect(join.relationship).toBe('one_to_many');
+    expect(r.success).toBe(false);
+    const issues = JSON.stringify(r.error?.issues ?? []);
+    expect(issues).toContain('unrecognized_keys');
+    expect(issues).toMatch(/`joins\.<alias>\.sql`.*removed.*DERIVED from the declared relationship/s);
   });
 
-  it('should accept all valid relationships', () => {
-    for (const rel of ['one_to_one', 'one_to_many', 'many_to_one']) {
-      expect(() => CubeJoinSchema.parse({
-        name: 'target',
-        relationship: rel,
-        sql: '{CUBE}.id = {target}.id',
-      })).not.toThrow();
-    }
+  it('refuses an authored cardinality, and the refusal says it never had an effect', () => {
+    const r = CubeJoinSchema.safeParse({ name: 'line_items', relationship: 'one_to_many' });
+
+    expect(r.success).toBe(false);
+    const issues = JSON.stringify(r.error?.issues ?? []);
+    expect(issues).toMatch(/`joins\.<alias>\.relationship`.*removed.*never had an effect/s);
   });
 
-  it('should reject join with invalid relationship', () => {
-    expect(() => CubeJoinSchema.parse({
-      name: 'target',
-      relationship: 'many_to_many',
-      sql: '{CUBE}.id = {target}.id',
-    })).toThrow();
+  it('refuses the `on` spelling with the derivation rather than a rename to `sql`', () => {
+    const r = CubeJoinSchema.safeParse({ name: 'orders', on: '{CUBE}.id = {orders}.id' });
+
+    expect(r.success).toBe(false);
+    const issues = JSON.stringify(r.error?.issues ?? []);
+    expect(issues).toContain('DERIVED from the declared relationship');
+    expect(issues).not.toContain('→ `sql`');
   });
 
   it('should reject join without required fields', () => {
-    expect(() => CubeJoinSchema.parse({
-      name: 'orders',
-    })).toThrow();
+    expect(() => CubeJoinSchema.parse({})).toThrow();
+  });
+});
 
-    expect(() => CubeJoinSchema.parse({
-      sql: '{CUBE}.id = {orders}.id',
-    })).toThrow();
+/**
+ * [#18612] The retirement is measured against METADATA AT REST, not only
+ * against sources.
+ *
+ * `sql` was REQUIRED and `relationship` carried `.default('many_to_one')`, so
+ * every cube artifact ever written from the old schema's own parse output
+ * carries BOTH keys — and the boot door re-parses stored metadata through
+ * `ObjectStackDefinitionSchema` (`analyticsCubes: z.array(CubeSchema)`). Without
+ * the ADR-0087 D2 conversion `cube-join-sql-and-relationship-removed` that
+ * artifact stops booting with no remedy short of hand-editing JSON (#12772's
+ * shape). The conversion is `retiredFromLoadPath`, so the AUTHORING funnel still
+ * teaches the tombstone; the data-at-rest seams pin `includeRetired: true`.
+ */
+describe('a persisted cube heals at the door (#18612, ADR-0087 D2)', () => {
+  /** What `CubeSchema.parse` itself emitted before this retirement. */
+  const persisted = () => ({
+    analyticsCubes: [{
+      name: 'showcase_delivery',
+      sql: 'showcase_task',
+      measures: { count: { name: 'count', label: 'Tasks', type: 'count', sql: '*' } },
+      dimensions: { status: { name: 'status', label: 'Status', type: 'string', sql: 'status' } },
+      joins: {
+        project: {
+          name: 'showcase_project',
+          relationship: 'many_to_one',
+          sql: '${showcase_task}.project = ${showcase_project}.id',
+        },
+      },
+    }],
+  });
+
+  it('is REFUSED at the boot door before the conversion and ACCEPTED after it', () => {
+    const before = ObjectStackDefinitionSchema.safeParse(persisted());
+    expect(before.success).toBe(false);
+    expect(JSON.stringify(before.error?.issues ?? [])).toContain('unrecognized_keys');
+
+    const healed = applyConversions(persisted(), { includeRetired: true });
+    const after = ObjectStackDefinitionSchema.safeParse(healed);
+    expect(
+      after.success,
+      `expected the converted artifact to parse; got ${JSON.stringify(after.error?.issues ?? [])}`,
+    ).toBe(true);
+    expect((healed as { analyticsCubes: Array<{ joins: unknown }> }).analyticsCubes[0]!.joins)
+      .toEqual({ project: { name: 'showcase_project' } });
+  });
+
+  it('LIT CONTROL — a shape that was always wrong is refused on BOTH sides', () => {
+    // `relationshipp` is the near-miss #4001 batch D closed. The conversion
+    // strips two NAMED keys, so this one survives it and the door still refuses
+    // — which is what makes the leg above a reading and not a tautology.
+    const bad = () => {
+      const s = persisted();
+      s.analyticsCubes[0]!.joins = { project: { name: 'showcase_project', relationshipp: 'many_to_one' } } as never;
+      return s;
+    };
+    expect(ObjectStackDefinitionSchema.safeParse(bad()).success).toBe(false);
+    const healed = applyConversions(bad(), { includeRetired: true });
+    expect(ObjectStackDefinitionSchema.safeParse(healed).success).toBe(false);
+  });
+
+  it('emits one notice per stripped site, and the notice NAMES the cube that lost the key', () => {
+    const twoCubes = {
+      analyticsCubes: [
+        persisted().analyticsCubes[0]!,
+        {
+          name: 'billing_revenue',
+          sql: 'showcase_invoice',
+          measures: { amount: { name: 'amount', label: 'Amount', type: 'sum', sql: 'amount' } },
+          dimensions: { issued_on: { name: 'issued_on', label: 'Issued', type: 'time', sql: 'issued_on' } },
+          joins: {
+            account: { name: 'showcase_account', relationship: 'many_to_one' },
+            // Already canonical: the control that produces NO notice.
+            owner: { name: 'sys_user' },
+          },
+        },
+      ],
+    };
+    const { notices } = collectConversionNotices(twoCubes, { includeRetired: true });
+    const mine = notices.filter((n) => n.conversionId === 'cube-join-sql-and-relationship-removed');
+    expect(mine.map((n) => n.path)).toEqual([
+      'analyticsCubes[0](showcase_delivery).joins.project.sql',
+      'analyticsCubes[0](showcase_delivery).joins.project.relationship',
+      'analyticsCubes[1](billing_revenue).joins.account.relationship',
+    ]);
+    expect(mine.every((n) => n.to === '(removed)')).toBe(true);
   });
 });
 
@@ -339,8 +422,6 @@ describe('CubeSchema', () => {
       joins: {
         users: {
           name: 'users',
-          relationship: 'many_to_one',
-          sql: '{CUBE}.user_id = {users}.id',
         },
       },
       refreshKey: {

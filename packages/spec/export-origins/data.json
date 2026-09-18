@@ -719,6 +719,7 @@
     "discriminateDefaultValueShape": "src/data/default-value-shape.ts#discriminateDefaultValueShape (function)",
     "driverConfigJsonSchema": "src/data/driver/common.zod.ts#driverConfigJsonSchema (function)",
     "driverHasLocalDefault": "src/data/driver/config-registry.zod.ts#driverHasLocalDefault (function)",
+    "driverSupportsTransactions": "src/data/driver.zod.ts#driverSupportsTransactions (function)",
     "effectiveOperationsArray": "src/data/api-derivation.ts#effectiveOperationsArray (function)",
     "emptyGroupValueFor": "src/data/aggregation-policy.ts#emptyGroupValueFor (function)",
     "fieldForm": "src/data/field.form.ts#fieldForm (const)",
