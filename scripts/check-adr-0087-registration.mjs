@@ -445,6 +445,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'F1-F9 (#17864): a framing word between the governor and the placeholder is': 9,
   'L1-L13 (#18494): a NOUN-PHRASE label is a label, read from the RIGHT': 13,
   'P51-P60: the HARD-WRAPPED mention, and the floors that keep the cure from': 11,
+  'X1-X11 (#18493): a framing word inside an IDENTIFIER is not framing': 11,
+  'SS1-SS8 (#18494 + #18493): the two directions of ONE predicate, pinned': 8,
   'P62-P68: the framed region closes at the same or a SHALLOWER heading, not': 7,
   'U1-U12 (#8299): unit pins on the runtime-interface-only primitives': 13,
   'S1-S5: the `--audit-stock` classifier (#6350)': 7,
@@ -1409,7 +1411,7 @@ const LABEL_COLON_RE = /^[`*)]{0,2}[:：]/;
  * prefix no end-anchored predicate can read.
  */
 const FRAMING_TAIL_RE =
-  /(?:迁移|改写|改名|升级|migrat(?:e|es|ed|ing|ion|ions)|rename[sd]?|rewrit(?:e|es|ten|ing)|upgrade[sd]?)$/i;
+  /(?:迁移|改写|改名|升级|(?<![A-Za-z0-9_])(?:migrat(?:e|es|ed|ing|ion|ions)|rename[sd]?|rewrit(?:e|es|ten|ing)|upgrade[sd]?))$/i;
 
 /**
  * The prefix with its framing word taken off -- and the SPACE that word sat behind
@@ -1437,18 +1439,38 @@ const FRAMING_TAIL_RE =
  * that is an accident. No stock occurrence stacks two framing words; a repeated
  * strip is a wider claim and would need its own measurement.
  *
- * ⚠️ The pattern is not word-anchored (`MIGRATION_FRAMING_RE` is; this one is not),
- * so it strips a framing word out of an IDENTIFIER: `sys_migration FROM → TO`
- * strips to `sys_`. That reading is UNCHANGED by the right-trim and cannot be
- * changed by it -- with no whitespace before the framing word there is no
- * whitespace left behind to trim -- so the repair keys on the SPACE and reaches
- * exactly the shape where the framing word is a word of its own. The identifier
- * shape is a SEPARATE false positive, stated rather than hidden and out of this
- * repair's reach: `the sys_migration FROM → TO is documented elsewhere` is governed
- * by `the` and still reads as a label, because what the strip exposes is `_` rather
- * than the letter that was there. Word-anchoring this pattern changes WHICH
- * prefixes are stripped at all, which is a wider claim than transparency and needs
- * its own measurement over the changeset stock before it is believed.
+ * ⚠️ The English alternatives are WORD-ANCHORED, for the reason
+ * `MIGRATION_FRAMING_RE` states one rule over: without it the token matches inside
+ * an IDENTIFIER, and an identifier is not framing. `the sys_migration FROM → TO is
+ * documented elsewhere` stripped to `the sys_`, exposed `_` rather than the letter
+ * that was really there, and read as a LABEL although `the` plainly governs it
+ * (#18493) -- this docblock said so before the anchor existed, and the shape was
+ * out of the right-trim's reach because there is no whitespace before a framing
+ * word buried in an identifier. A lookbehind rather than a consuming boundary,
+ * because the match is fed to `String.replace` and a consumed delimiter would be
+ * deleted with the word.
+ *
+ * ⚠️ Word-anchoring changes WHICH prefixes are stripped, so it is a wider claim
+ * than transparency and carries its own measurement: 429 changesets and 1322
+ * tracked md/mdx at `625db0e85`, ZERO verdict deltas. The one shape it moves in
+ * isolation is `sys_migration FROM → TO:` -- the F9 floor -- which stops being a
+ * label by an accident of the strip and stays one by `LABEL_COLON_RE`, the colon
+ * that actually closes it. The two directions of this predicate are COUPLED there,
+ * and the SS battery in the self-test pins both at once so neither can be traded
+ * for the other.
+ *
+ * ⚠️ The Chinese alternatives stay unanchored, exactly as
+ * `MIGRATION_FRAMING_RE` leaves them: a word boundary is an ASCII notion, and CJK
+ * text is written without the delimiters it reads.
+ *
+ * ⚠️ The class is `\b`'s, deliberately, and what that leaves is stated rather
+ * than hidden: a framing word after a HYPHEN or a DOT (`the auto-migration FROM
+ * → TO is documented elsewhere`, `the config.migration ...`) is still stripped,
+ * because `\b` reads both as boundaries too. Measured over the same tree, the
+ * population of EVERY in-line framing tail -- of any delimiter -- is 0, so no
+ * reading here separates the two classes; and reaching further would widen what
+ * the gate ADMITS on a shape nothing has measured, which is the one direction this
+ * predicate does not buy on an argument.
  *
  * @param {string} prefix the text left of the placeholder, already right-trimmed
  */
@@ -1691,13 +1713,20 @@ function labelPositioned(line, col, prev, after = '') {
   // with it (`withoutFramingTail`). Asked of the bare strip, the question met a
   // trailing space, answered "nothing governs this", and read every governed
   // MENTION carrying a framing word as a label.
-  if (prefix !== '') return !GOVERNING_WORD_RE.test(withoutFramingTail(prefix));
-  // The placeholder OPENS its line -- bare or merely indented, so a wrapped list
-  // item counts. There is no character to its left, so the governing word, if there
-  // is one, is the last word of the line above; and only a line that is prose the
-  // sentence can run on from is asked (#7094).
+  const bare = withoutFramingTail(prefix);
+  if (bare !== '') return !GOVERNING_WORD_RE.test(bare);
+  // Nothing on THIS line governs the placeholder: either it opens the line -- bare
+  // or merely indented, so a wrapped list item counts -- or everything left of it
+  // was a framing word, which by the transparency above is not there at all
+  // (#18493 W1: `the` ending the line above, `Migration FROM → TO` opening the one
+  // below). Either way the governing word, if there is one, is the last word of the
+  // line above; and only a line that is prose the sentence can run on from is asked
+  // (#7094).
   if (prev === undefined || STRUCTURAL_LINE_RE.test(prev)) return true;
-  return !WRAPPED_GOVERNOR_RE.test(prev.replace(/\s+$/, ''));
+  // Transparent across the wrap exactly as it is within the line and in the heading
+  // arm (#18493 W2): a framing word ENDING the line above frames the placeholder
+  // below it, so the closed class is asked of the word behind it.
+  return !WRAPPED_GOVERNOR_RE.test(withoutFramingTail(prev.replace(/\s+$/, '')));
 }
 
 /**
@@ -6615,6 +6644,122 @@ function selfTest() {
   assert(
     findMigrationPrescription('**Migration (FROM → TO).** Replace each legacy value with the primitive\n\nit is NOT a parse error: `stripLegacyApiMethods` strips it with a\nFROM→TO warning (canonicalize-and-warn)\n')?.line === '**Migration (FROM → TO).** Replace each legacy value with the primitive',
     'P61: a body holding a real label AND a wrapped mention keeps the LABEL as its evidence -- `apimethod-enum-shrink.md`, declared-breaking, the stock\'s own control for this arm',
+  );
+
+  // --- X1-X11 (#18493): a framing word inside an IDENTIFIER is not framing, and
+  // --- prose WRAPS between the governor and the placeholder.
+  //
+  // Both are the #17864 transparency rule failing to compose, in the FALSE-POSITIVE
+  // direction where a mention is read as a label and the author is refused a
+  // rewrite they do not owe. `FRAMING_TAIL_RE` carried no word anchor, so
+  // `the sys_migration FROM → TO is documented elsewhere` stripped `migration`
+  // out of the identifier, exposed `_` instead of the `n` that was really there and
+  // answered "nothing governs this"; and the in-line arm is computed within ONE
+  // line, so a markdown hard wrap put the governor out of its reach in both
+  // directions (governor above, framed placeholder below -- and framing word above,
+  // placeholder below).
+  //
+  // X1/X4/X5/X10 are the RED set under reverse verification (drop the word anchor
+  // for X1, the empty-strip fall-through for X4, the wrap-side strip for X5/X10).
+  // X2/X7/X8/X9 are the floors that keep the cure from being the disease: every one
+  // of them is a LABEL that this widening must not admit.
+  battery('X1-X11 (#18493): a framing word inside an IDENTIFIER is not framing');
+  assert(
+    !hasMigrationPrescription('the sys_migration FROM → TO is documented elsewhere\n'),
+    'X1: THE #18493 TRIGGER 1 -- `the` governs the placeholder across an identifier that merely ENDS in a framing word',
+  );
+  assert(
+    findMigrationPrescription('sys_migration FROM → TO: delete the block\n')?.branch === 'from-to-label',
+    'X2: POSITIVE CONTROL and the F9 FLOOR -- the same identifier with a colon closing the placeholder is a label, now for the reason it always was one',
+  );
+  assert(
+    !hasMigrationPrescription('the onUpgrade FROM → TO is documented elsewhere\n'),
+    'X3: ...and a camelCase identifier ending in one, which no right-trim could ever have reached',
+  );
+  assert(
+    !hasMigrationPrescription('the\nMigration FROM → TO is documented elsewhere\n'),
+    'X4: THE #18493 TRIGGER 2, W1 -- the governor ends the line ABOVE and the framing word opens the one below',
+  );
+  assert(
+    !hasMigrationPrescription('the Migration\nFROM → TO is documented elsewhere\n'),
+    'X5: ...and W2, the same sentence wrapped one word later -- the framing word is transparent across the wrap as it is within the line',
+  );
+  assert(
+    !hasMigrationPrescription('The checklist requires breaking changesets to carry their\nFROM → TO migration.\n'),
+    'X6: THE #7094 CONTROL -- unaffected, and it must stay that way: the wrap arm it shares is the one being composed with',
+  );
+  assert(
+    findMigrationPrescription('prose that wraps at eighty columns and ends the line here\nFROM → TO: delete the block\n')?.branch === 'from-to-label',
+    'X7: FLOOR, W4 -- a wrapped LABEL under a line that governs nothing is still a label (P52 unmoved)',
+  );
+  assert(
+    findMigrationPrescription('## Migration\nFROM → TO: delete the block\n')?.branch === 'from-to-label',
+    'X8: FLOOR -- a HEADING does not wrap, so the strip on the line above is never asked (P55 unmoved)',
+  );
+  assert(
+    findMigrationPrescription('Migration FROM → TO: delete the block\n')?.branch === 'from-to-label',
+    'X9: FLOOR -- a framing word that is the WHOLE prefix with no line above it still opens a label (F2 unmoved through the new fall-through)',
+  );
+  assert(
+    !hasMigrationPrescription('这次改动只是把发布说明搜了个地方，真正的\n迁移 FROM → TO 落在部署方自己的代理配置上。\n'),
+    'X10: the Chinese spelling of W1 -- the attributive particle ends the line above and the framing word opens the one below (P57 framed)',
+  );
+  assert(
+    findMigrationPrescription('- a bullet that ended cleanly\n\n  FROM → TO: delete the block\n')?.branch === 'from-to-label',
+    'X11: FLOOR -- an INDENTED label under a blank line is still a label; indentation is not the test (P59 unmoved)',
+  );
+
+  // --- SS1-SS8 (#18494 + #18493): the two directions of ONE predicate, pinned
+  // --- AGAINST each other so neither can be traded for the other.
+  //
+  // These two cards are the SAME decision failing in OPPOSITE directions, and the
+  // repairs are coupled rather than adjacent: word-anchoring `FRAMING_TAIL_RE`
+  // (#18493) is what stops `sys_migration` being stripped, and it takes the F9
+  // label with it unless `LABEL_COLON_RE` (#18494) is holding that label up for the
+  // reason it is actually a label. Tune either one alone and the other direction
+  // re-opens.
+  //
+  // So they are pinned as MINIMAL PAIRS, in ONE battery, with one floor over both:
+  // each pair differs in exactly one character or one line break and asserts
+  // OPPOSITE verdicts. A future tuning that buys one direction with the other reds
+  // a pair rather than passing a battery that only pins the half it just moved, and
+  // deleting half the pairs to make that go away drops the battery under its floor.
+  battery('SS1-SS8 (#18494 + #18493): the two directions of ONE predicate, pinned');
+  // PAIR 1 -- the colon, and nothing else: noun-phrase LABEL vs governed MENTION.
+  assert(
+    findMigrationPrescription('Schema Migration FROM → TO: delete the block\n')?.branch === 'from-to-label',
+    'SS1: the colon closes the placeholder, so the noun phrase is a LABEL (#18494 direction)',
+  );
+  assert(
+    !hasMigrationPrescription('Schema Migration FROM → TO is documented elsewhere\n'),
+    'SS2: PAIRED WITH SS1 -- the same noun phrase with no colon is prose, and prose about a convention is a MENTION',
+  );
+  // PAIR 2 -- the identifier, and nothing else: the F9 label survives the anchor.
+  assert(
+    findMigrationPrescription('sys_migration FROM → TO: delete the block\n')?.branch === 'from-to-label',
+    'SS3: an identifier before a colon-closed placeholder is a LABEL -- held by the colon, not by a strip accident',
+  );
+  assert(
+    !hasMigrationPrescription('the sys_migration FROM → TO is documented elsewhere\n'),
+    'SS4: PAIRED WITH SS3 -- add the governor and drop the colon, and the identical identifier is a MENTION (#18493 direction)',
+  );
+  // PAIR 3 -- the line break, and nothing else.
+  assert(
+    !hasMigrationPrescription('the Migration\nFROM → TO is documented elsewhere\n'),
+    'SS5: a wrap does not manufacture a label out of a governed framed mention',
+  );
+  assert(
+    findMigrationPrescription('the sentence ended here.\nFROM → TO: delete the block\n')?.branch === 'from-to-label',
+    'SS6: PAIRED WITH SS5 -- and does not take one away where the line above governs nothing',
+  );
+  // PAIR 4 -- the whole point, end to end: what each direction COSTS if traded.
+  assert(
+    findMigrationPrescription('**Required migration FROM → TO:** delete the block\n')?.branch === 'from-to-label',
+    'SS7: trading this away re-admits a published break with no prescription and no ledger entry (the #18494 cost)',
+  );
+  assert(
+    !hasMigrationPrescription('the sys_migration FROM → TO guide lives in the release notes\n'),
+    'SS8: PAIRED WITH SS7 -- trading THIS away hard-blocks a PR for a rewrite it does not owe, with an evidence line naming the author\'s own sentence (the #18493 cost)',
   );
 
   // --- P62-P68: the framed region closes at the same or a SHALLOWER heading, not
