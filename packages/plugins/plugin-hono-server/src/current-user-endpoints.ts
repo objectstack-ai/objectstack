@@ -457,18 +457,35 @@ export interface ApiExposureSchemaLike {
  * materializing a `false` entry would flip the client's `check('edit')` from
  * "undefined → default-allow" to "explicit false → deny" — a scope-exceeding
  * behavior change. A modify-all caller is folded to `true` anyway, so seeding is
- * harmless there. Unrestricted objects are skipped (they carry no annotation).
+ * harmless there.
+ *
+ * [#18931] A schema is skipped only when it needs NO annotation, which is the
+ * predicate {@link annotateEffectiveApiOperations} itself applies: unrestricted
+ * AND the export axis leaves `export` in place. Resolving WITHOUT the export
+ * slot made this pass disagree with annotate's — an unrestricted object whose
+ * `export` the axis withholds got no entry, annotate (which iterates existing
+ * entries only) never saw it, and `/me/permissions` stayed silent for exactly
+ * the population #8681 created: a wildcard-only admin holding no `allowExport`.
+ * The client's `apiOperations` is then `undefined`, its default-allow path
+ * renders an Export button, and the click is refused `403 EXPORT_NOT_PERMITTED`.
  */
 export function seedSuperUserRestrictedObjects(
     objects: Record<string, any>,
     allSchemas: readonly ApiExposureSchemaLike[],
 ): void {
     if (objects?.['*']?.modifyAllRecords !== true) return;
+    // [#18931] The export slot annotate will read for an entry seeded here. A
+    // seeded entry carries no `allowExport` of its own and `foldWildcardSuperUser`
+    // does not add one, so annotate's `acc.allowExport ?? wildExport` resolves to
+    // exactly this wildcard bit — the two passes cannot diverge again.
+    const userExportAllowed = objects['*']?.allowExport === true;
     for (const schema of allSchemas) {
         const name = schema?.name;
         if (!name || name === '*' || objects[name]) continue;
-        const eff = resolveEffectiveApiMethods(schema.enable ?? undefined);
-        if (eff.mode === 'unrestricted') continue; // only restricting objects
+        const eff = resolveEffectiveApiMethods(schema.enable ?? undefined, { userExportAllowed });
+        // Same skip predicate as annotate: there is nothing to say about an
+        // unrestricted object that keeps its full operation closure.
+        if (eff.mode === 'unrestricted' && userExportAllowed) continue;
         objects[name] = { allowCreate: false, allowRead: false, allowEdit: false, allowDelete: false };
     }
 }
@@ -479,10 +496,14 @@ export function seedSuperUserRestrictedObjects(
  *
  * This is the single "effective" channel the frontend consumes — it renders the
  * operations the server hands down here, never the raw `apiMethods` whitelist.
- * Only objects whose whitelist actually tightens exposure are annotated (a
- * `deny-all` object gets an empty array; an unrestricted object gets nothing, so
- * the client keeps its default-allow behavior). Runs AFTER fold + clamp so the
- * annotation sits alongside the final CRUD affordances.
+ * An object is annotated whenever its effective set is narrower than the
+ * client's default-allow assumption (a `deny-all` object gets an empty array;
+ * [#3544] an unrestricted object gets one too whenever the export axis withholds
+ * `export`). Only an unrestricted object that keeps its full closure gets
+ * nothing, because for it default-allow is already the right answer. Runs AFTER
+ * fold + clamp so the annotation sits alongside the final CRUD affordances, and
+ * {@link seedSuperUserRestrictedObjects} applies the same predicate so a
+ * wildcard-only principal has an entry here to annotate ([#18931]).
  */
 export function annotateEffectiveApiOperations(
     objects: Record<string, any>,
