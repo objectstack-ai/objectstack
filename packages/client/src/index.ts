@@ -171,7 +171,13 @@ import type { InstalledPackage } from '@objectstack/spec/kernel';
 import type { ResolvedBook } from '@objectstack/spec/system';
 import type { ConnectorDescriptor } from '@objectstack/spec/integration';
 import type { ExplainDecision } from '@objectstack/spec/security';
-import type { InvitationStatus } from '@objectstack/spec/identity';
+// [#18728] The identity wires are RELAYED from the spec, not re-declared here
+// (maintainer ruling C, batch #158 item 4). `Invitation` / `Member` /
+// `Organization` are `z.input` of the three published schemas; the schemas
+// themselves are imported as VALUES by `identity-wire-relay.test.ts`, which
+// parses the measured wire bodies through them and pins the refusal of a body
+// missing a required field.
+import type { Invitation, InvitationStatus, Member, Organization } from '@objectstack/spec/identity';
 import { Logger, createLogger } from '@objectstack/core/logger';
 import { RealtimeAPI } from './realtime-api';
 
@@ -1190,11 +1196,28 @@ export interface AuthSetInitialPasswordResult {
 
 /**
  * The columns every organization answer of the `organizations.*` family
- * carries — exactly better-auth's organization schema (`id`, `name`, `slug`,
- * `logo`, `metadata`, `createdAt`), served BARE (no `{ success, data }`
- * envelope). The adapter's output transform walks that schema and nothing
- * else, so `sys_organization`'s `updated_at` and every other ObjectStack column
- * stay off the wire — measured against a real server on a real SQL driver.
+ * carries, served BARE (no `{ success, data }` envelope).
+ *
+ * ⭐ **This IS `@objectstack/spec/identity`'s `Organization`** — relayed, not
+ * transcribed (#18728, maintainer ruling C batch #158 item 4). The two
+ * divergences that used to make the published schema unable to parse a served
+ * body are closed at their own ends:
+ *
+ *  - **`metadata` is DECODED.** plugin-auth's data adapter decodes
+ *    `sys_organization.metadata` from its stored JSON text into an object on
+ *    every route that reads the row back (`setActive`, `get`, `delete`,
+ *    `list`), and omits the key when the column is unset — so the object the
+ *    spec declares is what arrives. Previously only the two write echoes
+ *    decoded it; see `organization-metadata-decode.ts` in plugin-auth for why
+ *    the seam is the adapter's read verbs and why it must not touch the write
+ *    ones.
+ *  - **`updatedAt` is OPTIONAL in the spec**, which is the ruling's own
+ *    fallback A: the wire is better-auth's own serializer and its documented
+ *    organization shape declares no `updatedAt`, so the schema aligns to the
+ *    documented wire. In practice the key is ABSENT on every route of this
+ *    family — the vendor's `transformOutput` emits declared fields only, so
+ *    `sys_organization.updated_at` never reaches it even though the column
+ *    exists. Read it as "may be absent", and expect absent.
  *
  * ⚠️ **`createdAt` is an ISO-8601 string, never `Date`** (maintainer ruling on
  * #12104): the adapter is declared `supportsDates: false`, better-auth revives
@@ -1202,35 +1225,23 @@ export interface AuthSetInitialPasswordResult {
  * ISO string back on the wire — measured `"createdAt":"2026-09-07T09:27:01.545Z"`.
  * There is no revival layer in this SDK; `new Date(x)` is the caller's step.
  *
- * ⚠️ **`metadata` arrives as the stored JSON TEXT, not an object**, on every
- * route that reads the row back (`setActive`, `get`, `delete`, `list`): better-auth
- * stores it `JSON.stringify`-ed in a text column and only the two write routes
- * decode it — see {@link OrganizationEchoWire}. `JSON.parse(metadata)` is the
- * caller's step here. `null` (SQL) or absent (a store that does not
- * materialise an unset column) when never set; same for `logo`.
- *
- * `@objectstack/spec/identity`'s `Organization` is NOT relayed: it declares
- * `updatedAt` required and `metadata` as an object, and neither is what this
- * wire carries.
+ * ⚠️ `logo` is `null` (SQL) or absent (a store that does not materialise an
+ * unset column) when never set — the `.nullish()` arm PR #18718 landed.
  */
-export interface OrganizationWire {
-    id: string;
-    name: string;
-    slug: string;
-    /** `null` (SQL) or absent (document store) when unset. */
-    logo?: string | null;
-    /** ISO-8601. */
-    createdAt: string;
-    /** The stored JSON text (`'{"plan":"pro"}'`), undecoded; `null`/absent when unset. */
-    metadata?: string | null;
-}
+export type OrganizationWire = Organization;
 
 /**
  * The organization as the two WRITE routes echo it back — `create` and
- * `update` — which are the only two that decode `metadata` before answering
- * (`JSON.parse` in the create handler, `parseJSON` in the update adapter).
- * An unset `metadata` is ABSENT here (the handlers fold it to `undefined`),
- * never `null`. Every other column is {@link OrganizationWire}'s.
+ * `update`. An unset `metadata` is ABSENT here (the handlers fold it to
+ * `undefined`), never `null`.
+ *
+ * ⭐ Since #18728 this is the SAME shape as {@link OrganizationWire}: the read
+ * routes decode `metadata` too and omit it when unset, so the two used to
+ * differ only in that one member and no longer differ at all. The name is kept
+ * — it is published SDK surface, and it still records WHICH routes these are
+ * (the write echoes decode in better-auth's own organization adapter,
+ * `JSON.parse` on create and `parseJSON` on update, independently of the
+ * producer fix on the read side).
  */
 export interface OrganizationEchoWire extends Omit<OrganizationWire, 'metadata'> {
     /** Decoded object; absent when unset. */
@@ -1239,23 +1250,24 @@ export interface OrganizationEchoWire extends Omit<OrganizationWire, 'metadata'>
 
 /**
  * A membership row as better-auth serves it — its own member schema, nothing
- * of ObjectStack's `sys_member` beyond it (no `updatedAt`). `role` is one of
- * the closed ADR-0108 vocabulary (`owner` / `admin` / `delegated_admin` /
- * `member`), typed `string` because the wire mirrors the vendor's column, not
- * because the set is open; the platform refuses a multi-role
- * (`'admin,member'`) at the door with `400 VALIDATION_FAILED`.
+ * of ObjectStack's `sys_member` beyond it.
  *
- * `@objectstack/spec/identity`'s `Member` is not relayed: it declares
- * `updatedAt` required and the wire never carries it.
+ * ⭐ **This IS `@objectstack/spec/identity`'s `Member`** — relayed, not
+ * transcribed (#18728, ruling C's fallback A). `updatedAt` is optional in the
+ * spec and absent on this wire, for two reasons that stack: better-auth's
+ * `member` model declares no such field, and `sys_member` provisions no
+ * `updated_at` column to serve from either (it is `managedBy: 'better-auth'`,
+ * so the audit family is not injected).
+ *
+ * `role` is one of the closed ADR-0108 vocabulary (`owner` / `admin` /
+ * `delegated_admin` / `member`), typed `string` because the wire mirrors the
+ * vendor's column, not because the set is open; the platform refuses a
+ * multi-role (`'admin,member'`) at the door with `400 VALIDATION_FAILED`.
+ *
+ * ⚠️ `createdAt` is an ISO-8601 string, never `Date` — see
+ * {@link OrganizationWire}.
  */
-export interface OrganizationMemberWire {
-    id: string;
-    organizationId: string;
-    userId: string;
-    role: string;
-    /** ISO-8601. */
-    createdAt: string;
-}
+export type OrganizationMemberWire = Member;
 
 /**
  * The four-column user projection better-auth hand-picks onto a member on the
@@ -1331,31 +1343,32 @@ export interface OrganizationFullTeamWire extends Omit<OrganizationTeamWire, 'up
  * An invitation row as better-auth serves it: its invitation schema plus the
  * two `additionalFields` ObjectStack declares on it (`businessUnitId`,
  * `positions` — the ADR-0105 D8 placement intent), which arrive `null` on
- * SQL and absent on a document store when unset. No `updatedAt`, so
- * `@objectstack/spec/identity`'s `Invitation` is not relayed; its
- * {@link InvitationStatus} vocabulary is (#7781), narrowed per route by the
- * `Status` parameter where the handler pins it.
+ * SQL and absent on a document store when unset.
+ *
+ * ⭐ **`@objectstack/spec/identity`'s `Invitation` IS relayed** — every column
+ * the spec declares comes from it (#18728, ruling C's fallback A), with
+ * `status` narrowed per route by the `Status` parameter where the handler pins
+ * it and the three platform-side members added on top. A served body parses
+ * through `InvitationSchema` clean: the schema is a plain (non-strict) object,
+ * so the three extra keys are stripped rather than refused.
+ *
+ * `updatedAt` is optional in the spec and absent on this wire for the same two
+ * stacking reasons as {@link OrganizationMemberWire}: better-auth's
+ * `invitation` model declares no such field, and `sys_invitation` provisions no
+ * `updated_at` column.
  *
  * `teamId` is the comma-joined list of team ids the invitee joins on accept,
  * `null` when none (the handler writes the `null` explicitly).
  */
-export interface OrganizationInvitationWire<Status extends InvitationStatus = InvitationStatus> {
-    id: string;
-    organizationId: string;
-    email: string;
-    role: string;
-    status: Status;
-    teamId: string | null;
-    inviterId: string;
-    /** ISO-8601. */
-    expiresAt: string;
-    /** ISO-8601. */
-    createdAt: string;
-    /** ADR-0105 D8 placement: `null` (SQL) or absent when the invitation carries none. */
-    businessUnitId?: string | null;
-    /** ADR-0105 D8 placement: `null` (SQL) or absent when the invitation carries none. */
-    positions?: string[] | null;
-}
+export type OrganizationInvitationWire<Status extends InvitationStatus = InvitationStatus> =
+    Omit<Invitation, 'status'> & {
+        status: Status;
+        teamId: string | null;
+        /** ADR-0105 D8 placement: `null` (SQL) or absent when the invitation carries none. */
+        businessUnitId?: string | null;
+        /** ADR-0105 D8 placement: `null` (SQL) or absent when the invitation carries none. */
+        positions?: string[] | null;
+    };
 
 /** What `POST /organization/accept-invitation` answers. */
 export interface OrganizationInvitationAcceptResult {
