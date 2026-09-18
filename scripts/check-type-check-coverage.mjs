@@ -533,10 +533,14 @@ import {
   workspaceEnumeratorFloorFailures,
   workspacePackageDirs,
 } from './workspace-enumerator.mjs';
-// `typecheck`-script -> tsconfig program set. Shared with
-// `check-type-source-resolution.mjs` since #11490, which needs the identical
-// answer to decide its POPULATION: two copies of this predicate drift, and the
-// symptom of drift is a green gate on either side.
+// `typecheck`-script -> tsconfig program set. It moved into its own module in
+// #11490, when `check-type-source-resolution.mjs` needed the identical answer
+// to decide its POPULATION; that gate was retired under the maintainer ruling
+// of 2026-09-18 on #18373, so this file is the only consumer left. ⛔ Folding
+// the predicate back in here is a separate decision, not a consequence of that
+// retirement -- it floors its own cases in its own battery (PR #15327), which
+// this file deliberately does not re-pin. Two copies of this predicate drift,
+// and the symptom of drift is a green gate on either side.
 import {
   configsNamedByTypecheck,
   typecheckScriptChain,
@@ -933,9 +937,12 @@ const EXEMPT = {
 // So it took the #5286 sibling route (`tsconfig.test.json` named by the
 // `typecheck` script), which puts the same 10 files in front of tsc while
 // leaving `tsconfig.json` -- the only config that gate reads -- untouched. The
-// general lesson, which is this ledger's to carry: the two remedies are
+// general lesson, which is this ledger's to carry: the two edits were
 // interchangeable only where the excluded tests import nothing the src layer
-// does not, and that is a property to MEASURE per package, never to assume.
+// does not, and that was a property to MEASURE per package, never to assume.
+// ⛔ Nobody has to weigh them any more -- the exclusion edit is no longer an
+// offered route (#18953); the sibling config is the whole prescription, and
+// this paragraph is the record of why, not a second option.
 //
 // `@objectstack/rest` GRADUATED from this ledger (#12542; entry: 155 raw,
 // re-measured 37 raw across 13 files under the sibling program). It is worth a
@@ -983,10 +990,13 @@ const EXEMPT = {
 // an exclusion go red the way trigger-record-change did, 4 stay green
 // (`objectql`, `lint`, `formula`, `verify`), and the 19th (`cli`) has no
 // exclusion to drop at all -- its tests are hidden by an `include` that never
-// reaches them. So that package was the majority case, not the exception, and
-// the graduation message no longer offers the exclusion route without its
-// precondition. Re-measure before relying on the split: it moves with every
-// import a test file gains.
+// reaches them. So that package was the majority case, not the exception --
+// and that is the measurement the graduation message was withdrawn on: it no
+// longer offers the exclusion route AT ALL (maintainer ruling of 2026-09-18 on
+// #18953), once the gate that decided the precondition had itself been retired
+// (#18373). ⛔ The 14/4 split above is kept here as a READING, never as a route
+// to pick from: it was taken at e47d5ef61, it moves with every import a test
+// file gains, and nothing measures it any more.
 //
 // ── #14062: three plugin entries GRADUATED, and what replaced them ───────────
 //
@@ -1090,14 +1100,16 @@ const EXEMPT = {
 // what WOULD happen, not about an existing dead pin, exactly as `cli`'s
 // graduation recorded for its own 115 files.
 //
-// ⚠️ ROUTE (b) WAS AVAILABLE HERE and was still not taken. The #11491 note
-// above names `verify` as one of the 4 entries whose exclusion could be dropped
-// with `check:type-source-resolution` staying green, and that split was
-// re-measured on 2026-09-04 under a trap-restored mutation and still holds for
-// this package (exit 0; 124 programs across 78 packages). It was declined on
-// module semantics: `tsconfig.json` inherits NodeNext from the repo root and
-// would hold the test layer to a resolver vitest never runs it under. Onboard
-// by WIRING, not by widening the build config.
+// ⚠️ DROPPING THE EXCLUSION WAS AVAILABLE HERE and was still not taken. The
+// #11491 note above names `verify` as one of the 4 entries whose exclusion
+// could be dropped with `check:type-source-resolution` staying green, and that
+// split was re-measured on 2026-09-04 under a trap-restored mutation and still
+// held for this package (exit 0; 124 programs across 78 packages). It was
+// declined on module semantics: `tsconfig.json` inherits NodeNext from the repo
+// root and would hold the test layer to a resolver vitest never runs it under.
+// Onboard by WIRING, not by widening the build config -- which is now the only
+// route the graduation message prescribes at all (#18953), so this record is
+// history and ⛔ not a second option anybody still has to weigh.
 const TEST_DEBT = {
 // ── #14710: `@objectstack/cli` GRADUATED, and it was not paid down ─────────
 //
@@ -4478,11 +4490,32 @@ function ratchetRemedyCarriesAuthority(message) {
 //
 // So the fix is not more words. It is the branch: `m.ledger` is already on
 // every measurement, and each ledger's remedy prints only where it is the
-// remedy. Neither is dropped -- both are still offered, in the branch that
-// owns them. Within TEST_DEBT there IS a real choice of route, so that one
-// keeps both and names the PRECONDITION plus the command that decides it: a
-// message the reader has to open a gate's source to act on has not fixed
-// anything.
+// remedy. Neither LEDGER is dropped -- each still gets the remedy that is its
+// own, in the branch that owns it.
+//
+// ── Within TEST_DEBT the exclusion route came OUT (#18953) ──────────────────
+//
+// TEST_DEBT used to print a SECOND route beside the sibling config: drop the
+// `**/*.test.ts` entry from `exclude` (or widen `include` to reach the test
+// tree). Whether that route was available for a given package was decided by
+// `check:type-source-resolution` -- and that gate was RETIRED under the
+// maintainer ruling of 2026-09-18 on #18373, leaving an official route whose
+// precondition nothing measured any more. What it had measured is the second
+// bullet above: RED for 14 of the 18 entries that had an exclusion to drop. A
+// remedy that is wrong 14 times out of 18, with nothing left to say so, is not
+// a remedy, so the maintainer ruling of 2026-09-18 on #18953 (decision batch
+// #159 item 4, letter ②, maintainer verbatim 「同意」) withdrew it: the printed
+// prescription names (a) alone, and the docs that restated the route drop it
+// with the same edit.
+//
+// ⛔ The other way out was REJECTED in that same ruling, so the way back in is
+// closed from both sides: having THIS gate measure the precondition itself
+// rebuilds half of a gate the maintainer had just retired. An author who
+// widens `include` to the test tree anyway does so on their own judgement --
+// ⛔ not on this gate's advice, which now says nothing about that edit in
+// either direction. The self-test pins the withdrawal as ANTI-content, the way
+// every other branch here is pinned, because the state a well-meaning re-merge
+// returns to is the one that printed both.
 //
 // ⛔ This changes no verdict and no number. Graduation candidates were, and
 // remain, a NOTE -- never a failure.
@@ -4507,15 +4540,9 @@ function graduationRemedy({ ledger, isRoot = false }) {
       `Onboard it: put the hidden test files in front of tsc, and delete the TEST_DEBT entry in the same ` +
       `PR. ⛔ Adding a \`typecheck\` script is NOT the remedy here -- this ledger is "src checks, tests ` +
       `are hidden", so the package already has one.\n` +
-      `    (a) The #5286 sibling route: add a \`tsconfig.test.json\` that reaches the ` +
-      `tests and NAME it in the \`typecheck\` script. Always available -- it leaves \`tsconfig.json\` alone.\n` +
-      `    (b) Drop the \`**/*.test.ts\` entry from \`exclude\` in \`tsconfig.json\` (or widen \`include\` to ` +
-      `reach the test tree). Available ONLY while \`pnpm check:type-source-resolution\` still passes with ` +
-      `the tests re-admitted: that gate reads \`tsconfig.json\` and nothing else, the re-admitted tests ` +
-      `import workspace packages this package's src program never held, and its registry is ⛔ SHRINK-ONLY ` +
-      `-- registering the new ones is not the way out. Measured red on 14 of the 18 entries that have an ` +
-      `exclusion to drop, so assume (b) is unavailable until that gate says otherwise. Run it before you ` +
-      `commit; nothing in this gate's own verdict will tell you.`
+      `    (a) The #5286 sibling route, and the ONLY route this gate prescribes: add a ` +
+      `\`tsconfig.test.json\` that reaches the tests and NAME it in the \`typecheck\` script. Always ` +
+      `available -- it leaves \`tsconfig.json\` alone.`
     );
   }
   if (ledger === 'DEBT') {
@@ -5620,9 +5647,11 @@ function selfTest() {
   // The observation half is where the :267 blind spot lived: `excludesTests`
   // read only `tsconfig.json`, so a sibling test config was invisible however
   // it was wired. `configsNamedByTypecheck` and `typecheckScriptChain` now
-  // decide it, and since #11490 they live in `scripts/typecheck-configs.mjs`
-  // because `check-type-source-resolution.mjs` needs the same answer for its
-  // population. Their cases moved WITH them -- one rule, one home, one battery
+  // decide it, and since #11490 they live in `scripts/typecheck-configs.mjs`,
+  // where they moved because `check-type-source-resolution.mjs` needed the same
+  // answer for its population -- that gate was retired on 2026-09-18 (#18373),
+  // leaving this file its only consumer. Their cases moved WITH them -- one
+  // rule, one home, one battery
   // -- and are folded in here so this gate still fails when the predicate it
   // depends on breaks.
   //
@@ -6398,13 +6427,17 @@ function selfTest() {
         + 'that remedy is a no-op on every one of them -- the misfire #11491 was filed on.',
     },
     {
-      label: 'TEST_DEBT graduation names the gate that DECIDES whether the exclusion route is available',
+      label: 'TEST_DEBT graduation prescribes the sibling config ALONE -- the exclusion route is withdrawn',
       message: testDebtGrad,
-      present: ['check:type-source-resolution', 'SHRINK-ONLY', 'tsconfig.test.json'],
-      absent: [],
-      why: 'the exclusion route reds that gate on 14 of the 18 entries that have an exclusion, and this '
-        + 'gate never runs it. A message the author has to read a second gate\'s SOURCE to act on is the '
-        + 'half of #11491 that a correct-but-terse rewrite would leave unfixed.',
+      present: ['tsconfig.test.json', 'the ONLY route this gate prescribes'],
+      absent: ['exclude', 'widen', 'check:type-source-resolution', 'SHRINK-ONLY'],
+      why: 'the exclusion route read red on 14 of the 18 entries that had an exclusion, and the gate that '
+        + 'decided the precondition per package was retired (2026-09-18, #18373), so nothing measured it. '
+        + 'The maintainer ruling of 2026-09-18 on #18953 withdrew the route rather than leave an official '
+        + 'path that is wrong 14 times out of 18: the remedy names (a) alone. These are ANTI-content '
+        + 'needles on purpose -- a presence-only assertion would sit green through exactly the '
+        + 're-merge that hands the route back, and the retired gate\'s NAME is only one of the spellings '
+        + 'it could come back under, which is why `exclude` and `widen` are named beside it.',
     },
     {
       label: 'the workspace root graduates through `typecheck:root`, never through `typecheck`',
@@ -6419,9 +6452,12 @@ function selfTest() {
       label: 'an unrecognised ledger inherits NEITHER remedy',
       message: gradNote({ ledger: 'FUTURE_DEBT' }),
       present: ['FUTURE_DEBT'],
-      absent: [ADD_SCRIPT, 'drop the test exclusion', 'check:type-source-resolution'],
+      absent: [ADD_SCRIPT, 'drop the test exclusion', 'tsconfig.test.json'],
       why: 'a third ledger silently receiving DEBT\'s advice is how this message was wrong for TEST_DEBT '
-        + 'for its whole life. Saying less is the only safe default.',
+        + 'for its whole life. Saying less is the only safe default. ⚠️ The TEST_DEBT needle here is '
+        + '`tsconfig.test.json` and NOT the retired gate\'s name: that name left the message when #18953 '
+        + 'withdrew the exclusion route, and an anti-content needle naming a string no branch can emit '
+        + 'proves nothing about inheritance.',
     },
   ];
   for (const c of gradCases) {
@@ -6433,8 +6469,8 @@ function selfTest() {
     for (const needle of c.absent) {
       if (c.message.includes(needle))
         failures.push(
-          `#11491 graduation remedy — ${c.label}: message STILL contains ${needle}, which is the other `
-            + `ledger's remedy. ${c.why}`,
+          `#11491 graduation remedy — ${c.label}: message STILL contains ${needle}, which this case pins `
+            + `as ABSENT -- another ledger's remedy, or a route this one no longer offers. ${c.why}`,
         );
     }
   }

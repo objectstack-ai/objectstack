@@ -18,7 +18,7 @@ Zod validation inside `packages/spec` and the runtime is the **product**, not a 
 
 | verdict | rows |
 |:--|--:|
-| `keep` | 133 |
+| `keep` | 132 |
 | `retire` | 58 |
 | `report-only` | 16 |
 | `keep (session hook; see Method)` | 5 |
@@ -26,8 +26,9 @@ Zod validation inside `packages/spec` and the runtime is the **product**, not a 
 | `keep (with its hook)` | 5 |
 | `keep (ruled)` | 2 |
 | `retire (ruled)` | 1 |
-| **retire (all spellings)** | **59** |
-| **keep (all spellings)** | **150** |
+| `retire · maintainer ruling 2026-09-18 on #18373` | 1 |
+| **retire (all spellings)** | **60** |
+| **keep (all spellings)** | **149** |
 | **report-only** | **16** |
 
 | class | rows |
@@ -212,7 +213,7 @@ Zod validation inside `packages/spec` and the runtime is the **product**, not a 
 | `scripts/check-tier-file-adoption.mjs` | correctness | a package adopting a nightly tier reads the tier file · origin no card in header · landed 2026-09-10 | required · whole-repo (Lint & Repo Gates) | unmeasured (landed 2026-09-10; <7 days of window coverage) | `keep` |
 | `scripts/check-turbo-task-graph.mjs` | correctness | turbo.json package tasks name real packages and scripts · origin #12046 · landed 2026-08-25 | required · whole-repo (Lint & Repo Gates) | 0 in window | `keep` |
 | `scripts/check-type-check-coverage.mjs` | correctness | every package is type-check covered or in the shrink-only DEBT ledger · origin #4311 · landed 2026-07-31 | required · whole-repo (TypeScript Type Check ← debt lane); required · whole-repo (TypeScript Type Check ← source lane) | 20 PRs / 11 days (2026-08-21..09-03; `--re-measure` debt-ledger lane) | `keep` |
-| `scripts/check-type-source-resolution.mjs` | correctness | a package's types resolve from source, not stale dist · origin #7849 · landed 2026-08-12 | required · whole-repo (Lint & Repo Gates) | 3 PRs / 3 days (2026-08-20..2026-09-16); 1 self excluded | `keep` |
+| `scripts/check-type-source-resolution.mjs` | correctness | a package's types resolve from source, not stale dist · origin #7849 · landed 2026-08-12 | required · whole-repo (Lint & Repo Gates) | 3 PRs / 3 days (2026-08-20..2026-09-16); 1 self excluded | `retire · maintainer ruling 2026-09-18 on #18373` |
 | `scripts/check-undeclared-dep-imports.mjs` | contract | published `src/**` imports only declared workspace deps · origin #10062 · landed 2026-08-28 | required · whole-repo (Lint & Repo Gates) | 0 in window | `keep` |
 | `scripts/check-vendor-export-contract.mjs` | contract | a consumer-resolved vendor version exports what we import · origin #10909 · landed 2026-09-07 | required · whole-repo (Lint & Repo Gates); advisory (Validate Package Depen) | 0 in window | `keep` |
 | `scripts/check-vendor-version-stamps.mjs` | process | none (prose version stamps about a pinned vendor stay equal to the pin) · docs · origin #10073 · landed 2026-08-31 | required · whole-repo (Lint & Repo Gates) | 0 in window | `retire` |

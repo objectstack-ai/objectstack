@@ -24,7 +24,9 @@
  * strictness ledger's numbers split out of the ledger's prose).
  *
  * Deliberately NOT sharded: `spec-changes.json` (keyed by version, low
- * conflict) and `api-surface-signatures.json` (1.3KB).
+ * conflict). `api-surface-signatures.json` used to be the second name here at
+ * 1.3KB; it was retired at #16045 for `api-surface-declarations/`, which is
+ * sharded per entry point because it is 12 MiB rather than 1.3KB.
  *
  * ## What sharding must not change
  *

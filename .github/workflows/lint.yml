@@ -943,6 +943,18 @@ jobs:
       - name: A declared gate population reaches the tree
         run: pnpm check:declared-population-live
 
+      # ADR-0087 D4's per-release correctness gate (#17080). The REAL run needs
+      # two published tarballs and npm, so it lives in the release lane and
+      # cannot run on a PR; what runs here is its `--self-test`, which is
+      # therefore the only thing standing between an edit to that gate and the
+      # next release trusting it. Its batteries drive the same `verifyRelease()`
+      # the release lane calls, over synthetic tarball trees: a section matching
+      # both artifacts, one omitting a real export, one inventing an export, a
+      # from/to version pointing at another release, and the two absences that
+      # are legitimate. Fixture-only, no spawns; well under a second.
+      - name: Per-release spec-changes gate self-test
+        run: pnpm check:release-spec-changes
+
       # PM bare-root worklist self-test (#10840). The step above proves the
       # dispatch derivation still WORKS; this one proves the recorded triage of
       # the gates that derivation structurally cannot see is still true of the
@@ -4160,32 +4172,6 @@ jobs:
       - name: Ref'd-timer probe containment
         run: pnpm check:refd-timer-probe
 
-      # The TYPE axis of the same invariant (#8180). The gate above reads
-      # `vitest.config.*` and nothing else, so the identical exposure on the
-      # type axis was unguarded repo-wide — and its symptom is likewise a GREEN
-      # `typecheck`. Measured on `packages/qa/downstream-contract` (#8021):
-      # identical checkout, identical stale `dist`, a narrowing injected into
-      # `packages/spec/src` in SOURCE only — without a `paths` block
-      # `tsc --noEmit` exited 0 and clean; with one it reported the `TS2322` the
-      # frozen fixture should always have produced. The comment beside the
-      # type-check-debt step below documents the same mechanism as expected
-      # state ("tsc resolves workspace imports through each dependency's built
-      # `dist/*.d.ts`"), and turbo's `typecheck` dependsOn `^build` does not
-      # reach it for the same reason it does not reach the runtime axis.
-      # NOT a port of the gate above: tsc's `paths` algorithm is exact-key-wins
-      # then longest-prefix (Vite's is first-match-wins), type-only imports
-      # COUNT here, and `tsconfig.json` is JSONC that inherits through
-      # `extends`. The trap is also different and worse — `@objectstack/spec*`,
-      # star not after a separator, folds every namespace onto one target and
-      # type-checks GREEN against the wrong module instead of crashing.
-      # The registry is measured (51 of 76 packages on the day it landed),
-      # shrink-only and audited in BOTH directions. It finds no new offender
-      # today: it is a ratchet, so the remediation list is finite and cannot
-      # grow behind anyone's back. Static scan of sources and tsconfigs; no
-      # build needed (~1.2s), so it belongs in this job.
-      - name: Type-source resolution gate
-        run: pnpm check:type-source-resolution
-
       # #4248 packaging-hygiene guard. Without a `files` whitelist npm packs the
       # whole package directory, and 20 of the 49 publishable packages declared
       # none — so consumers installed TypeScript sources, unit tests and build
@@ -5187,11 +5173,16 @@ jobs:
 
       # The authorable KEY surface — what a metadata author may write, which for
       # this platform is the third-party API. `api-surface/` records exported
-      # names and `api-surface-signatures.json` hashes factory types as TypeScript
-      # PRINTS them (a reference, never structurally expanded), so neither sees a
-      # key added to or removed from a schema. #3883 removed three authorable keys
-      # with every witness green; #3733 did it by accident. ADR-0059 §5 deferred
-      # this gate until a narrowing actually slipped both — it has.
+      # names only, so it does not see a key added to or removed from a schema;
+      # the shape sibling that used to sit beside it (`api-surface-signatures.json`,
+      # retired at #16045) hashed factory types as TypeScript PRINTS them — a
+      # reference, never structurally expanded — so it did not see one either.
+      # #3883 removed three authorable keys with every witness green; #3733 did it
+      # by accident. ADR-0059 §5 deferred this gate until a narrowing actually
+      # slipped both — it has. `check:api-surface-declarations` (consumer-gates
+      # lane) now records the declaration TEXT of every export, which DOES move on
+      # such a key; this gate stays the authority on the AUTHORABLE key set, which
+      # is a different question from the declared TypeScript shape.
       #
       # ⚠ ORDER: this step must stay ABOVE the `check:docs` step below. Its
       # `--check` run of scripts/build-schemas.ts writes the gitignored
@@ -6112,6 +6103,29 @@ jobs:
 
       - name: Check @objectstack/spec public API surface
         run: pnpm --filter @objectstack/spec run check:api-surface
+
+      # [#16045] The SHAPE half of the same surface, and the step the card above
+      # exists for: `api-surface/` pins 5336 `name (kind)` rows and a signature
+      # change, a renamed interface field and a dropped union member move NONE of
+      # them, so 99.5% of the pinned surface could not go red on a breaking shape
+      # change to a ratified public type. The declaration-text snapshot records
+      # what the packed `.d.ts` actually declares for every export, per entry
+      # point. Ruled at #16045 (director batch #60, maintainer 「同意」): text and
+      # ⛔ NOT a hash, because a red hash gets accepted rather than investigated
+      # and a readable diff is what makes contract review a guard.
+      #
+      # WHY THIS LANE. It resolves each entry point through the `exports` map to
+      # the BUILT `.d.ts` — the declarations a consumer installs — so it is
+      # build-dependent and sits after the two build steps above with its family
+      # (`check:api-surface`, `check:published-readme-exports`). A missing or
+      # stale dist is a HARD REFUSAL in both of the script's modes, never a skip:
+      # a build-dependent gate that silently reads nothing reports "not measured"
+      # as if it were "measured and clean" (#4690).
+      #
+      # It adds no required context: a step in an existing lane, so no open PR
+      # waits on a check whose name no head has ever reported (#9325).
+      - name: Check @objectstack/spec declaration text (the shape half)
+        run: pnpm --filter @objectstack/spec run check:api-surface-declarations
 
       # [#11350] Consumer-shaped declaration-emit pin against the BUILT root
       # entry (an un-annotated `export default defineStack(...)` must compile

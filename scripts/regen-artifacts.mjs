@@ -149,12 +149,18 @@ export const REGEN_ARTIFACTS = Object.freeze([
   // `readsDist`: every path that would regenerate these refuses unless the
   // build is newer than the sources it claims to describe.
   { path: 'packages/spec/api-surface/**', gen: 'gen:api-surface', check: 'check:api-surface', readsDist: true },
-  // Deliberately NOT sharded (#5837): 1.3KB, one line per `defineX` factory —
-  // never the conflict surface its neighbour was.
+  // The SHAPE half of the same surface (#16045): the declaration TEXT of every
+  // export, per entry point. It replaced `api-surface-signatures.json`, a 27-row
+  // `sha256` sibling that was deliberately unsharded because it was 1.3KB — this
+  // one is 12 MiB across 17 shards, so it is sharded for exactly the reason its
+  // `api-surface/` neighbour is: the merge queue rebuilds server-side with no
+  // custom driver, and two PRs that share a generated file evict the second.
+  // `readsDist` for the same reason as the row above, sharpened by size: on a
+  // stale dist it writes declaration text describing a build nobody made.
   {
-    path: 'packages/spec/api-surface-signatures.json',
-    gen: 'gen:api-surface',
-    check: 'check:api-surface',
+    path: 'packages/spec/api-surface-declarations/**',
+    gen: 'gen:api-surface-declarations',
+    check: 'check:api-surface-declarations',
     readsDist: true,
   },
   // The #4796 declaration-origin baseline: which source declaration each entry

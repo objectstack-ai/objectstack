@@ -128,6 +128,67 @@
 # origin/main, so `git merge-base HEAD origin/main` is origin/main's own tip and
 # every file reads as "the branch edited it".
 #
+# ## The RERUN every conflict exit prescribes — and the base it reads (#18895)
+#
+# That warning had one hole, and it was in the INSTRUCTION rather than in the
+# code: every conflict exit below tells the operator to resolve the conflict and
+# rerun this script "to redo the generated-artifact half", and there was no tree
+# state in which that rerun could perform step 2.
+#
+#   while the conflict is being resolved the tree is DIRTY, and the preamble
+#   refuses a dirty tree;
+#
+#   once the resolution is committed the tree is clean — and HEAD now contains
+#   origin/main, which is exactly the condition the warning above describes. So
+#   `main_edited` came out EMPTY, every regen path read as branch-edited, step 2
+#   took nothing, and the run exited 0 over whichever side the driver had
+#   already dropped.
+#
+# MEASURED before the record below existed, on synthetic fixtures carrying one
+# conflict plus one regen path the driver deferred with exit 0 (i.e. one side
+# silently dropped), once per conflict-exit branch — all four behave identically,
+# because the dead end is in this preamble and not in any branch's text:
+#
+#   branch taken                       rerun on a dirty tree   rerun once committed
+#   class 1 only (non-generated)       exit 1, "not clean"     exit 0, 0 × TAKING, side still dropped
+#   class 2 only (MIXED regen)         exit 1, "not clean"     exit 0, 0 × TAKING, side still dropped
+#   class 1 + class 2                  exit 1, "not clean"     exit 0, 0 × TAKING, side still dropped
+#   class 3 present (NOT_DRIVER_MANAGED)  exit 1, "not clean"  exit 0, 0 × TAKING, side still dropped
+#
+# and, as the control on every one of those runs, a by-hand step 2 against the
+# PRE-MERGE base restores the dropped side — so the repair was always available
+# and only the base was wrong. ⚠️ One asymmetry worth recording: the class-2-only
+# branch did not say "rerun this script" at all, it said "continue with step 4",
+# which reaches the same place by OMITTING step 2 instead of by prescribing an
+# inert one. All four now carry the same instruction.
+#
+# ⛔ The remedy is NOT a `--base` flag, and what follows is not one: nothing is
+# supplied by the operator and nothing is guessed. The run that STARTS the merge
+# writes down the three shas it has just read anyway — the base, its own
+# pre-merge tip, and the origin/main tip it is about to merge — into
+# `$GIT_DIR/os-regen-merge-base`, and the rerun READS them back. A base it cannot
+# read is a base it REFUSES to invent: the refusal is loud, non-zero, and prints
+# the by-hand step 2 for the merge commit in front of it. The no-`--base` ruling
+# above is about a SECOND base an operator chooses; this is the SAME base, at the
+# only moment it can still be read.
+#
+# The record is this script's own. ⛔ The driver's `$GIT_DIR/os-regen-pending`
+# marker is NOT it and is neither written nor read here — that file belongs to
+# `git-merge-regen.mjs` and `check-regen-pending.mjs`, it records artifacts owed a
+# regeneration rather than a merge's geometry, and `pre-commit` clears it on its
+# own schedule. Both live in `$GIT_DIR` for the same reason: in a linked worktree
+# that resolves to `.git/worktrees/<name>`, so parallel agents never read each
+# other's merge.
+#
+# ⚠️ THREE states, because two of them are indistinguishable from the tree alone.
+# A clean completion, and a rerun nobody ever performed, leave a tree that reads
+# identically: clean, HEAD containing origin/main, step 2 provably inert. The
+# first must exit 0 as it always did; the second must refuse. So a completed run
+# does not DELETE its record, it marks it `done` — and the absence of a record in
+# that tree state is precisely what the refusal fires on. A record whose branch
+# tip is not an ancestor of HEAD is STALE (reset, rebased, or another run's) and
+# is refused with its contents printed, ⛔ never used.
+#
 # ## Step 2 writes the WORKTREE, never the INDEX — and step 4 reads the index
 #
 # `git checkout <ref> -- <path>` writes the index as well as the tree. That is
@@ -456,6 +517,212 @@ report_ndm_conflict() {
   rm -f "$rn_ours" "$rn_theirs"
 }
 
+# --- the recorded pre-merge base ---------------------------------------------
+#
+# See "The RERUN every conflict exit prescribes" in the header for the measured
+# defect this closes, for why this is not the `--base` flag that ruling refuses,
+# and for why a completed run marks its record `done` instead of deleting it.
+#
+# The file is one `key=value` per line so the refusals can print it verbatim: an
+# operator who has just been told a base is stale needs to SEE the base.
+RR_RECORD_NAME='os-regen-merge-base'
+
+# Newline-delimited set membership, the same `case`-glob trick step 2 already uses
+# for `branch_edited`/`main_edited` — no process per path, and a path can never
+# contain a newline (git quotes those).
+RR_NL='
+'
+
+# `--absolute-git-dir` rather than `--git-dir`: it is absolute from any cwd, and
+# in a linked worktree it answers `.git/worktrees/<name>`, which is what makes the
+# record per-worktree (`git-merge-regen.mjs`'s `gitDir()` says the same of its own
+# marker, and its self-test pins the linked-worktree half).
+rr_record_path() {
+  printf '%s/%s\n' "$(git rev-parse --absolute-git-dir)" "$RR_RECORD_NAME"
+}
+
+# One field, by exact key. `awk` rather than `grep … | head -1`: under
+# `set -o pipefail` a reader that closes the pipe early can fail the whole
+# substitution, and `index($0, k "=") == 1` anchors the key at column 1 so a
+# `main_tip=` row can never answer for `tip=`.
+rr_field() {
+  awk -v k="$1" 'index($0, k "=") == 1 { print substr($0, length(k) + 2); exit }' "$2"
+}
+
+# Read the record into globals, and decide whether it is USABLE. Unreadable and
+# absent are different answers: absent is the ordinary first run, unreadable is a
+# refusal. ⛔ A record naming an object this repository does not have answers no
+# question — it is not a base, it is a string.
+rr_read_record() {
+  rr_record="$(rr_record_path)"
+  rr_have_record=no
+  rr_record_ok=no
+  rr_rec_phase=''
+  rr_rec_base=''
+  rr_rec_branch_tip=''
+  rr_rec_main_tip=''
+  rr_rec_conflicted="$RR_NL$RR_NL"
+  if [ ! -f "$rr_record" ]; then
+    return 0
+  fi
+  rr_have_record=yes
+  rr_rec_phase="$(rr_field phase "$rr_record")"
+  rr_rec_base="$(rr_field base "$rr_record")"
+  rr_rec_branch_tip="$(rr_field branch_tip "$rr_record")"
+  rr_rec_main_tip="$(rr_field main_tip "$rr_record")"
+  # Repeated key, so this one is read as a SET rather than by `rr_field`.
+  rr_rec_conflicted="$RR_NL$(awk 'index($0, "conflicted=") == 1 { print substr($0, 12) }' "$rr_record")$RR_NL"
+  case "$rr_rec_phase" in
+    pending | done) ;;
+    *) return 0 ;;
+  esac
+  for rr_sha in "$rr_rec_base" "$rr_rec_branch_tip" "$rr_rec_main_tip"; do
+    if [ -z "$rr_sha" ]; then
+      return 0
+    fi
+    if ! git rev-parse --verify --quiet "$rr_sha^{commit}" >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+  rr_record_ok=yes
+}
+
+rr_print_record() {
+  echo "  record: $rr_record" >&2
+  if [ -f "$rr_record" ]; then
+    sed 's/^/    /' "$rr_record" >&2
+  else
+    echo "    (absent — no run has recorded a base for this worktree)" >&2
+  fi
+}
+
+# $1 phase, $2 base, $3 pre-merge branch tip, $4 the main tip being merged, and
+# optionally $5 = the newline-delimited paths step 1 left CONFLICTED. That last
+# one is what keeps the rerun from reverting the very resolution it asked for: a
+# conflicted path is one git could NOT resolve silently, so no side was dropped
+# there and step 2 has no business choosing one.
+rr_write_record() {
+  {
+    printf 'version=1\n'
+    printf 'phase=%s\n' "$1"
+    printf 'base=%s\n' "$2"
+    printf 'branch_tip=%s\n' "$3"
+    printf 'main_tip=%s\n' "$4"
+    printf 'branch=%s\n' "$(git rev-parse --abbrev-ref HEAD)"
+    printf 'written=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    if [ "$#" -ge 5 ] && [ -n "$5" ]; then
+      printf '%s\n' "$5" | awk 'length($0) > 0 { print "conflicted=" $0 }'
+    fi
+  } > "$(rr_record_path)"
+}
+
+# Which of five states is this invocation in? Echoes exactly ONE word and reads
+# only the globals above plus git, so the whole decision has a single call site —
+# which is what the self-test's falsifiability leg mutates to reproduce #18895 on
+# demand.
+#
+# ⚠️ `--is-ancestor` is the containment question, asked directly rather than by
+# comparing `git merge-base` output to a tip. Its failure direction on a truncated
+# history is the safe one: a missing ancestor object answers "not contained",
+# which routes to `plain` — today's behaviour — and never to a repair on a base
+# this script cannot prove.
+rr_classify() {
+  if [ "$rr_have_record" = yes ]; then
+    if [ "$rr_record_ok" != yes ]; then
+      echo stale
+      return 0
+    fi
+    if ! git merge-base --is-ancestor "$rr_rec_branch_tip" HEAD 2>/dev/null; then
+      echo stale
+      return 0
+    fi
+    if git merge-base --is-ancestor "$rr_rec_main_tip" HEAD 2>/dev/null; then
+      # The recorded merge is IN this HEAD, so step 1 is behind us either way.
+      if [ "$rr_rec_phase" != done ]; then
+        echo rerun
+      elif [ "$(git rev-parse origin/main)" = "$rr_rec_main_tip" ]; then
+        echo settled
+      else
+        # Already discharged, and main has moved on: an ordinary next sync.
+        echo plain
+      fi
+      return 0
+    fi
+    # Recorded, but that merge never landed — a previous run died at or before
+    # step 1. Today's path is the correct one and it overwrites the record.
+    echo plain
+    return 0
+  fi
+  if git merge-base --is-ancestor origin/main HEAD 2>/dev/null; then
+    echo orphan
+    return 0
+  fi
+  echo plain
+}
+
+rr_refuse_stale() {
+  echo "✗ a recorded merge base is present and it does NOT describe this HEAD — refusing to use it." >&2
+  rr_print_record
+  echo "  Either a field is unreadable, or the recorded branch tip is not an ancestor of HEAD, so" >&2
+  echo "  the merge this record was written for is not the one in this tree — the branch was reset" >&2
+  echo "  or rebased under it, or the record belongs to another run." >&2
+  echo "  ⛔ A base that does not match is worse than none: step 2 would take main's side of paths" >&2
+  echo "     this merge never touched, which is a revert wearing a repair's message." >&2
+  echo "  Delete it and start the sequence again from a clean pre-merge tree:" >&2
+  echo "    rm -f $rr_record" >&2
+  exit 1
+}
+
+# The state the old conflict messages sent operators into, now named out loud.
+rr_refuse_orphan() {
+  echo "✗ HEAD already contains origin/main and NO pre-merge base is recorded — refusing to run" >&2
+  echo "  step 2 against a base that is knowably wrong." >&2
+  echo "  In this tree \`git merge-base HEAD origin/main\` is origin/main's OWN TIP, so every" >&2
+  echo "  generated path reads as \"the branch edited it\", the set main moved comes out EMPTY," >&2
+  echo "  step 2 takes NOTHING, and the run would exit 0 over whichever side the merge driver" >&2
+  echo "  silently dropped. ⛔ That exit 0 is the defect, not the all-clear." >&2
+  rr_print_record
+  if rr_head2="$(git rev-parse --verify --quiet HEAD^2)"; then
+    rr_head1="$(git rev-parse HEAD^1)"
+    echo "  HEAD is a MERGE COMMIT, so both sides are still readable from it: its first parent is" >&2
+    echo "  the pre-merge branch tip and its second is the main tip that was merged. Perform step 2" >&2
+    echo "  by hand against that base — ⛔ never against \`git merge-base HEAD origin/main\`:" >&2
+    echo "    base=\$(git merge-base $rr_head1 $rr_head2)" >&2
+    echo "    git diff --name-only \"\$base\" $rr_head2 -- <the os-regen patterns, printed above>   # main moved these" >&2
+    echo "    git diff --name-only \"\$base\" $rr_head1 -- <the same patterns>                      # the branch moved these" >&2
+    echo "    git restore --source=$rr_head2 -- <every path in BOTH lists>   # tree only, ⛔ never --staged" >&2
+    echo "  then commit that as its own commit and continue with step 4." >&2
+  else
+    echo "  HEAD is not a merge commit, so this script cannot read the two sides off it either." >&2
+    echo "  Find the merge that brought origin/main in (\`git log --merges -1 --format=%H\`), then" >&2
+    echo "  perform step 2 by hand against \`git merge-base <its first parent> <its second parent>\`." >&2
+  fi
+  echo "  If instead nothing was merged and nothing is owed — origin/main was already contained in" >&2
+  echo "  this branch — then this refusal IS the whole outcome: no merge to make, no step 2 to redo." >&2
+  exit 1
+}
+
+# The ONE closing instruction every conflict exit shares. ⛔ Four copies is how
+# they drifted: before #18895 three of them said "rerun this script" and the
+# fourth said "continue with step 4", and all four sent the operator into a tree
+# where step 2 could not run. One function, one text, four call sites.
+rr_rerun_instruction() {
+  echo "  Then COMMIT the resolution — that finishes the merge — and rerun this script. It reads" >&2
+  echo "  back the pre-merge base it recorded at" >&2
+  echo "    $rr_record" >&2
+  echo "  skips step 1 (already in HEAD) and redoes step 2 against THAT base, restoring main's" >&2
+  echo "  side of every generated path both sides moved — the sides the driver dropped with exit 0." >&2
+  echo "  ⛔ Do not go to step 4 first: regenerating on top of a dropped side re-derives the" >&2
+  echo "     branch's content over a base main never reached, and nothing downstream reports it." >&2
+  echo "  ⛔ Do not delete that record: without it the rerun REFUSES rather than guess a base." >&2
+}
+
+rr_report_settled() {
+  echo "→ step 2 is already discharged for the merge in HEAD — nothing to merge and nothing to redo."
+  echo "   recorded base $(git rev-parse --short "$rr_rec_base") · pre-merge tip $(git rev-parse --short "$rr_rec_branch_tip") · main $(git rev-parse --short "$rr_rec_main_tip")"
+  echo "   record: $rr_record"
+}
+
 # --- the sequence ------------------------------------------------------------
 
 mode_run() {
@@ -483,14 +750,56 @@ mode_run() {
   echo "→ fetching origin/main"
   git fetch origin main
 
-  # Captured BEFORE step 1, on purpose — see the header. After the merge both
-  # readings answer a different question, and both answer it plausibly.
-  branch_tip="$(git rev-parse HEAD)"
-  if ! merge_base="$(git merge-base HEAD origin/main)"; then
-    echo "✗ no merge base with origin/main — refusing to guess which side is yours" >&2
-    exit 1
+  # Is this a first run, or the RERUN every conflict exit below prescribes? Once
+  # the resolution is committed those two trees read identically, so the answer
+  # cannot come from the tree — it comes from the record the starting run wrote.
+  # ⛔ ONE call site for the whole decision, on purpose: it is the line the
+  # self-test mutates to reproduce #18895 on demand.
+  rr_read_record
+  rr_mode="$(rr_classify)"
+  case "$rr_mode" in
+    stale) rr_refuse_stale ;;
+    orphan) rr_refuse_orphan ;;
+    settled)
+      rr_report_settled
+      exit 0
+      ;;
+  esac
+
+  if [ "$rr_mode" = rerun ]; then
+    # ⛔ The base is NOT re-derived here, and that is the whole point: after the
+    # merge every reading of it answers origin/main's own tip (see the header).
+    # These three shas are the ones the starting run read BEFORE step 1.
+    merge_base="$rr_rec_base"
+    branch_tip="$rr_rec_branch_tip"
+    main_side="$rr_rec_main_tip"
+    echo "→ RERUN: the merge committed in HEAD is the one this worktree recorded, so the base"
+    echo "        below is the PRE-MERGE one, read back rather than re-derived."
+    echo "   recorded base $(git rev-parse --short "$merge_base") · pre-merge tip $(git rev-parse --short "$branch_tip") · main $(git rev-parse --short "$main_side")"
+    echo "   record: $rr_record"
+    if [ "$(git rev-parse origin/main)" != "$main_side" ]; then
+      echo "   ⚠ origin/main has ADVANCED since that record. This rerun redoes step 2 for the"
+      echo "     RECORDED merge only, pinned to $(git rev-parse --short "$main_side") — ⛔ it does not pull the newer"
+      echo "     commits in. Run this script again afterwards to sync them."
+    fi
+  else
+    # Captured BEFORE step 1, on purpose — see the header. After the merge both
+    # readings answer a different question, and both answer it plausibly.
+    branch_tip="$(git rev-parse HEAD)"
+    if ! merge_base="$(git merge-base HEAD origin/main)"; then
+      echo "✗ no merge base with origin/main — refusing to guess which side is yours" >&2
+      exit 1
+    fi
+    # Pinned to a sha the moment it is read: `origin/main` is a SHARED ref in this
+    # repo (AGENTS.md Multi-agent discipline), so a sibling's fetch can advance it
+    # between this line and step 2, and step 2 would then restore content this
+    # merge never brought in.
+    main_side="$(git rev-parse origin/main)"
+    # ⛔ Not this run's set: a leftover record's conflict list must not steer a
+    # merge it was not written for. This run records its own below.
+    rr_rec_conflicted="$RR_NL$RR_NL"
+    echo "→ branch tip $(git rev-parse --short "$branch_tip") · merge base $(git rev-parse --short "$merge_base")"
   fi
-  echo "→ branch tip $(git rev-parse --short "$branch_tip") · merge base $(git rev-parse --short "$merge_base")"
 
   # The single authoritative list, read at run time.
   #
@@ -592,13 +901,28 @@ mode_run() {
   done < <(git diff --name-only "$merge_base" "$branch_tip" -- "${regen_paths[@]}")
   main_edited="$NL$(git diff --name-only "$merge_base" origin/main -- "${regen_paths[@]}")$NL"
 
-  echo "→ step 1: git merge origin/main"
+  if [ "$rr_mode" != rerun ]; then
+    # Written BEFORE step 1 so a conflict exit LEAVES IT BEHIND: the rerun those
+    # messages prescribe has no other honest way to learn this base, and the
+    # refusals above are what happens when it is missing or stale.
+    rr_write_record pending "$merge_base" "$branch_tip" "$main_side"
+    echo "→ recorded this merge's pre-merge base at $rr_record"
+    echo "        — the rerun the conflict messages prescribe reads it back; ⛔ it never guesses one."
+  fi
+
+  if [ "$rr_mode" = rerun ]; then
+    echo "→ step 1: ALREADY IN HEAD, skipped. The merge you committed when you resolved the"
+    echo "        conflict IS step 1 — ⛔ redoing it here would merge whatever origin/main has"
+    echo "        become since, against a base that no longer describes it."
+  else
+    echo "→ step 1: git merge origin/main"
+  fi
   # Captured rather than left to inherit the terminal, so a conflict can be
   # classified below AND the driver's own notice (printed on stderr, for any
   # os-regen path it declined to defer) is still shown to the operator instead
-  # of scrolling past unread.
+  # of scrolling past unread. On the rerun path nothing runs and it stays empty.
   merge_log="$(mktemp "${TMPDIR:-/tmp}/os-regen-merge-log.XXXXXX")"
-  if ! git merge --no-edit origin/main >"$merge_log" 2>&1; then
+  if [ "$rr_mode" != rerun ] && ! git merge --no-edit origin/main >"$merge_log" 2>&1; then
     cat "$merge_log" >&2
     rm -f "$merge_log"
 
@@ -629,6 +953,16 @@ mode_run() {
     NL='
 '
     TAB="$(printf '\t')"
+
+    # Hand the rerun the paths the operator is about to resolve BY HAND. Without
+    # this the rerun's step 2 would take main's side of a MIXED path they just
+    # hand-merged — reverting the resolution the message below asks for, which is
+    # the #18895 repair introducing the hazard #18895 is about, one file over.
+    rr_conflicted_list=''
+    for c in "${all_conflicts[@]+"${all_conflicts[@]}"}"; do
+      rr_conflicted_list="$rr_conflicted_list$c$NL"
+    done
+    rr_write_record pending "$merge_base" "$branch_tip" "$main_side" "$rr_conflicted_list"
     regen_set="$NL"
     for c in "${regen_conflicts[@]+"${regen_conflicts[@]}"}"; do regen_set="$regen_set$c$NL"; done
 
@@ -696,15 +1030,16 @@ mode_run() {
     if [ "${#ndm_conflicts[@]}" -eq 0 ]; then
       if [ "${#regen_conflicts[@]}" -eq 0 ]; then
         echo "✗ merge stopped on conflicts in NON-generated files — resolve those by hand" >&2
-        echo "  (semantic merge, both intents stack), then rerun this script to redo the" >&2
-        echo "  generated-artifact half. ⛔ Do not resolve generated files textually." >&2
+        echo "  (semantic merge, both intents stack). ⛔ Do not resolve generated files textually." >&2
+        rr_rerun_instruction
       elif [ "${#non_regen_conflicts[@]}" -eq 0 ]; then
         echo "✗ merge stopped on conflicts in GENERATED files the driver declined to defer" >&2
         echo "  (MIXED — a generated half plus hand-written prose; see its notice above)." >&2
         echo "  Hand-resolve the prose; the anchor numbers do not matter here — take" >&2
-        echo "  either side of them, then run the regeneration command the driver printed" >&2
-        echo "  above, then continue with step 4:" >&2
+        echo "  either side of them. The regeneration command the driver printed above belongs to" >&2
+        echo "  step 4's chain, ⛔ not before the rerun:" >&2
         printf '    %s\n' "${regen_conflicts[@]}" >&2
+        rr_rerun_instruction
       else
         echo "✗ merge stopped on conflicts in BOTH non-generated and generated files:" >&2
         echo "  non-generated (resolve by hand — semantic merge, both intents stack):" >&2
@@ -714,7 +1049,8 @@ mode_run() {
         echo "  take either side of them, then run the regeneration command the driver" >&2
         echo "  printed above:" >&2
         printf '    %s\n' "${regen_conflicts[@]}" >&2
-        echo "  Resolve both, then rerun this script to redo the generated-artifact half." >&2
+        echo "  Resolve BOTH classes, each by its own rule above." >&2
+        rr_rerun_instruction
       fi
     else
       echo "✗ merge stopped on conflicts, and some are in files a generator writes which" >&2
@@ -734,15 +1070,15 @@ mode_run() {
         echo "  printed above:" >&2
         printf '    %s\n' "${regen_conflicts[@]}" >&2
       fi
-      echo "  Resolve every class above by ITS OWN rule, then rerun this script to redo" >&2
-      echo "  the generated-artifact half." >&2
+      echo "  Resolve every class above by ITS OWN rule." >&2
+      rr_rerun_instruction
     fi
     exit 1
   fi
   cat "$merge_log"
   rm -f "$merge_log"
 
-  echo "→ step 2: taking origin/main's side of the generated artifacts main moved"
+  echo "→ step 2: taking origin/main's side ($(git rev-parse --short "$main_side")) of the generated artifacts main moved"
   # ⚠️ bash 3.2 expands `"${arr[@]}"` of an EMPTY array as an unbound variable
   # under `set -u` (fixed only in 4.4), and "the branch edited no generated
   # artifact" is the ordinary case. `${arr[@]+"${arr[@]}"}` is the 3.2-safe
@@ -752,6 +1088,20 @@ mode_run() {
     for edited in "${branch_edited[@]}"; do
       case "$main_edited" in
         *"$NL$edited$NL"*)
+          case "$rr_rec_conflicted" in
+            *"$RR_NL$edited$RR_NL"*)
+              # It CONFLICTED in the recorded merge, so nothing was dropped here:
+              # git put both sides in front of the operator and they resolved it.
+              excludes+=(":(exclude)$edited")
+              echo "   ⚠ KEEPING your resolution of $edited (it CONFLICTED in the recorded merge)"
+              echo "     — a path git could not merge silently is a path where NO side was dropped:"
+              echo "       both were put in front of you and you merged them by hand. Step 2 chooses"
+              echo "       a side only where the DRIVER chose one for you without saying so, so"
+              echo "       ⛔ taking main's side here would revert the resolution this script asked"
+              echo "       you for. Step 4 regenerates it as usual."
+              continue
+              ;;
+          esac
           # Both sides moved it: the driver ran and dropped one side. Taking
           # main's side is the point of this step — but say so per path, loudly.
           echo "   ⚠ TAKING main's side of $edited (both sides changed it)"
@@ -775,7 +1125,7 @@ mode_run() {
   fi
   for p in "${regen_paths[@]}"; do
     # a pattern may match nothing on this branch — that is fine
-    git restore --source=origin/main -- "$p" ${excludes[@]+"${excludes[@]}"} 2>/dev/null || true
+    git restore --source="$main_side" -- "$p" ${excludes[@]+"${excludes[@]}"} 2>/dev/null || true
   done
 
   echo "→ step 3: committing the merge BEFORE any regeneration"
@@ -804,6 +1154,14 @@ mode_run() {
     echo "  these first; ⛔ \`git diff\` and \`git diff HEAD\` read clean right over it." >&2
     exit 1
   fi
+
+  # Step 2 is discharged and committed, so the record's job is done. ⛔ It is
+  # MARKED rather than deleted: a deleted record leaves a tree indistinguishable
+  # from the one the orphan refusal exists to catch (clean, HEAD containing
+  # origin/main, step 2 inert), and that refusal would then fire on a completed
+  # run. Marked, the next plain invocation in this same state reports "already
+  # discharged" and exits 0, exactly as it did before any of this existed.
+  rr_write_record done "$merge_base" "$branch_tip" "$main_side"
 
   cat <<'EOF'
 → step 4 (yours, in this order — the script stops here on purpose):
@@ -1129,6 +1487,103 @@ st_marked_file() {
   } > "$1"
 }
 
+# Build a fixture in $1 whose ONE merge both CONFLICTS on a routed path and
+# SILENTLY DROPS main's side of another — the #18895 arrangement, and the only one
+# in which the rerun every conflict exit prescribes has work to do. Leaves the cwd
+# in the clone, on `feature`, pre-merge.
+#
+#   gen/mixed.txt     both sides — MIXED, the driver text-merges and it CONFLICTS,
+#                     so the operator resolves it BY HAND and sees both sides
+#   gen/deferred.txt  both sides — the driver DEFERS: exit 0, keeps ours, says
+#                     nothing. Main's side is dropped, and step 2 against the
+#                     PRE-MERGE base is the only thing that puts it back
+#
+# ⚠️ `st_fixture`'s driver is `true`, so nothing it builds can conflict; this one
+# has to take BOTH of the real driver's measured shapes inside a single run, which
+# is why it is a script keyed on the path rather than a constant.
+st_fixture_rerun() {
+  fx="$1"
+  rm -rf "$fx"
+  mkdir -p "$fx"
+
+  cat > "$fx/driver.sh" <<'DRIVER'
+#!/usr/bin/env bash
+set -uo pipefail
+ancestor="$1"; ours="$2"; theirs="$3"; path="$4"
+case "$path" in
+  *mixed*)
+    git merge-file "$ours" "$ancestor" "$theirs"
+    rc=$?
+    if [ "$rc" -eq 0 ]; then
+      exit 0
+    fi
+    printf '  driver: %s NOT deferred — text-merged instead, and it CONFLICTS.\n' "$path" >&2
+    exit "$rc"
+    ;;
+  *)
+    # The DEFERRAL: exit 0, keep ours, say nothing. Main's side is gone here and
+    # no diffstat, `git diff` or `git status` reports it (see the header).
+    exit 0
+    ;;
+esac
+DRIVER
+  chmod +x "$fx/driver.sh"
+
+  git init -q --bare -b main "$fx/origin.git"
+  git clone -q "$fx/origin.git" "$fx/work" 2>/dev/null
+  cd "$fx/work"
+  git config user.email selftest@example.invalid
+  git config user.name os-regen-merge-selftest
+  git config commit.gpgsign false
+  git config merge.os-regen.name 'os-regen (fixture: conflicts on MIXED, defers the rest)'
+  git config merge.os-regen.driver "bash $fx/driver.sh %O %A %B %P"
+
+  mkdir -p gen src
+  printf 'gen/**   merge=os-regen\n' > .gitattributes
+  st_write_ndm_ledger ''
+  printf 'deferred v0\n' > gen/deferred.txt
+  printf 'hand-written prose: original\n' > gen/mixed.txt
+  printf 'source v1\n' > src/app.txt
+  git add -A
+  git commit -qm seed
+  git push -q origin main
+
+  git checkout -q -b feature
+  printf 'deferred v1-BRANCH\n' > gen/deferred.txt
+  printf 'hand-written prose: BRANCH\n' > gen/mixed.txt
+  git add -A
+  git commit -qm 'feature: move both routed paths'
+
+  git worktree add -q "$fx/mainwt" main
+  (
+    cd "$fx/mainwt"
+    git config user.email selftest@example.invalid
+    git config user.name os-regen-merge-selftest
+    git config commit.gpgsign false
+    printf 'deferred v1-MAIN\n' > gen/deferred.txt
+    printf 'hand-written prose: MAIN\n' > gen/mixed.txt
+    git add -A
+    git commit -qm 'main: move both routed paths differently'
+    git push -q origin main
+  )
+  cd "$fx/work"
+  git worktree remove "$fx/mainwt"
+  git fetch -q origin main
+}
+
+# What the conflict message asks the operator to do: resolve every conflict by
+# hand, then COMMIT — which finishes the merge and makes the tree clean.
+st_resolve_and_commit() {
+  st_conflicted=''
+  while IFS= read -r st_conflicted; do
+    if [[ -n "$st_conflicted" ]]; then
+      printf 'RESOLVED: both intents stack\n' > "$st_conflicted"
+      git add "$st_conflicted"
+    fi
+  done < <(git diff --name-only --diff-filter=U)
+  git commit -q --no-edit
+}
+
 mode_self_test() {
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/os-regen-merge-selftest.XXXXXX")"
   trap 'rm -rf "$tmp"' EXIT INT TERM
@@ -1176,12 +1631,19 @@ mode_self_test() {
   # fail would be worse than no pin, so the scan says what it really checks.
   # Comment lines are excluded: the header quotes the banned spelling to explain
   # it, and a scan that cannot tell prose from code would red on its own docs.
-  st_case 'step 2 uses the non-staging spelling' \
+  # The side is a PINNED SHA (`$main_side`), not the moving `origin/main` ref: the
+  # rerun path restores the main tip its record names, and even on the plain path
+  # a sibling's fetch can advance that shared ref mid-run. So the pin is on the
+  # non-staging VERB plus that variable, and both staging spellings are absences.
+  st_case 'step 2 uses the non-staging spelling, against the pinned side' \
     "$(sed -n '1,/^# --- self-test/p' "$SELF" | grep -v '^[[:space:]]*#' \
-       | grep -c 'git restore --source=origin/main' || true)" 1
+       | grep -c 'git restore --source="$main_side" --' || true)" 1
   st_case 'and never the staging one' \
     "$(sed -n '1,/^# --- self-test/p' "$SELF" | grep -v '^[[:space:]]*#' \
        | grep -c 'git checkout origin/main --' || true)" 0
+  st_case 'nor the staging one against the pinned side' \
+    "$(sed -n '1,/^# --- self-test/p' "$SELF" | grep -v '^[[:space:]]*#' \
+       | grep -c 'git checkout "$main_side" --' || true)" 0
 
   # Behaviour that IS observable: after a run, a regeneration on top is a lone
   # unstaged `M` — the state where a bare `git commit` commits nothing at all.
@@ -1485,6 +1947,155 @@ mode_self_test() {
     "$(printf '%s' "$out" | grep -c 'could NOT read NOT_DRIVER_MANAGED' || true)" 1
   st_case 'and makes no class-3 claim it cannot support' \
     "$(printf '%s' "$out" | grep -c 'GENERATED IN MARKED REGIONS' || true)" 0
+  cd "$here"
+
+  # --- 10. THE RERUN every conflict exit prescribes (#18895). Until the record
+  #         existed there was no tree state in which it could perform step 2: while
+  #         the resolution is in flight the tree is dirty and the preamble refuses
+  #         it, and once it is committed HEAD contains origin/main, so the derived
+  #         base is origin/main's own tip, the set main moved is EMPTY, step 2
+  #         takes nothing and the run exits 0 over a side the driver dropped.
+  #
+  #         Both halves of one merge are in the fixture on purpose. The CONFLICTED
+  #         path and the DEFERRED path pull step 2 in opposite directions, and a
+  #         fixture carrying only one of them would pass with the other's rule
+  #         deleted.
+  st_fixture_rerun "$tmp/l"
+  out="$(bash "$SELF" 2>&1)" && rc=0 || rc=$?
+  st_case 'step 1 stops on the MIXED conflict' "$rc" 1
+  st_case 'and the exit prescribes the rerun by name' \
+    "$(printf '%s' "$out" | grep -c 'rerun this script' || true)" 1
+  st_case 'and names the record that rerun will read' \
+    "$(printf '%s' "$out" | grep -c 'os-regen-merge-base' || true)" 2
+  st_case "main's side of the DEFERRED path is dropped, with no marker anywhere" \
+    "$(grep -c 'deferred v1-MAIN' gen/deferred.txt || true)" 0
+  st_case 'and nothing in the diffstat or status says so' \
+    "$(git status --porcelain -- gen/deferred.txt | wc -l | tr -d ' ')" 0
+  st_record="$(rr_record_path)"
+  st_case 'the run recorded a base BEFORE step 1, so the conflict exit left it behind' \
+    "$([ -f "$st_record" ] && echo present || echo absent)" present
+  st_case 'and recorded it as pending' "$(rr_field phase "$st_record")" pending
+  # THE WHOLE POINT: the recorded base is the PRE-MERGE one. The defect is that
+  # `git merge-base HEAD origin/main` answers origin/main's own tip after the
+  # merge, so a base equal to that tip is the broken reading, not a base.
+  st_case 'and the recorded base is NOT origin/main s own tip' \
+    "$([ "$(rr_field base "$st_record")" = "$(git rev-parse origin/main)" ] \
+       && echo 'origin/main tip' || echo 'the pre-merge base')" 'the pre-merge base'
+  st_case 'and it recorded the path the operator must resolve by hand' \
+    "$(grep -c '^conflicted=gen/mixed[.]txt$' "$st_record" || true)" 1
+  st_case 'and NOT the path the driver deferred — that one is step 2 s to repair' \
+    "$(grep -c '^conflicted=gen/deferred[.]txt$' "$st_record" || true)" 0
+
+  # HALF ONE of the dead end, reasserted here: the rerun refused mid-resolution.
+  printf 'RESOLVED: both intents stack\n' > gen/mixed.txt
+  git add gen/mixed.txt
+  out="$(bash "$SELF" 2>&1)" && rc=0 || rc=$?
+  st_case 'a rerun while the resolution is uncommitted is still refused' "$rc" 1
+  st_case 'and still says the tree is not clean' \
+    "$(printf '%s' "$out" | grep -c 'working tree not clean' || true)" 1
+
+  # HALF TWO: committed, which is exactly what the message asked for.
+  git commit -q --no-edit
+  # ⛔ FIRST, with the record moved aside: this same tree must REFUSE rather than
+  #    run inert, because "clean, HEAD contains origin/main, no record" is the one
+  #    state where step 2 is provably unable to work.
+  mv "$st_record" "$st_record.saved"
+  out="$(bash "$SELF" 2>&1)" && rc=0 || rc=$?
+  st_case 'the same tree WITHOUT a record is refused, not run inert' "$rc" 1
+  st_case 'and says no pre-merge base is recorded' \
+    "$(printf '%s' "$out" | grep -c 'NO pre-merge base is recorded' || true)" 1
+  st_case 'and names the inert-step-2 mechanism rather than just failing' \
+    "$(printf '%s' "$out" | grep -c 'step 2 takes NOTHING' || true)" 1
+  # HEAD is the operator's merge commit, so both sides are still readable off it —
+  # the refusal computes the by-hand step 2 instead of leaving it as an exercise.
+  st_case 'and prescribes the by-hand step 2 off the merge commit s own parents' \
+    "$(printf '%s' "$out" | grep -c "base=\$(git merge-base $(git rev-parse HEAD^1) $(git rev-parse HEAD^2))" || true)" 1
+  mv "$st_record.saved" "$st_record"
+
+  out="$(bash "$SELF" 2>&1)" && rc=0 || rc=$?
+  st_case 'the prescribed rerun, on the committed resolution, SUCCEEDS' "$rc" 0
+  st_case 'and says it is reading a recorded base rather than deriving one' \
+    "$(printf '%s' "$out" | grep -c '^→ RERUN:' || true)" 1
+  st_case 'and skips step 1 instead of merging again' \
+    "$(printf '%s' "$out" | grep -c 'step 1: ALREADY IN HEAD' || true)" 1
+  st_case "and TAKES main's side of the deferred path — the repair itself" \
+    "$(printf '%s' "$out" | grep -c "TAKING main.s side of gen/deferred.txt" || true)" 1
+  st_case "so main's dropped side is back in the worktree" \
+    "$(grep -c 'deferred v1-MAIN' gen/deferred.txt || true)" 1
+  st_case 'and step 3 COMMITTED that repair' \
+    "$(git show HEAD:gen/deferred.txt | grep -c 'deferred v1-MAIN' || true)" 1
+  # THE OPPOSITE HALF, and the one a naive repair gets wrong: a CONFLICTED path is
+  # one where git dropped nothing — both sides were put in front of the operator.
+  # Taking main's side there reverts the resolution this script just asked for.
+  st_case 'the hand resolution is KEPT rather than reverted to main s side' \
+    "$(printf '%s' "$out" | grep -c 'KEEPING your resolution of gen/mixed.txt' || true)" 1
+  st_case 'and it survives in the commit' \
+    "$(git show HEAD:gen/mixed.txt | grep -c 'RESOLVED: both intents stack' || true)" 1
+  st_case 'and step 2 did NOT take main s side of it' \
+    "$(printf '%s' "$out" | grep -c "TAKING main.s side of gen/mixed.txt" || true)" 0
+  st_case 'the record is discharged once step 2 is committed' \
+    "$(rr_field phase "$st_record")" done
+
+  # IDEMPOTENCE: a second plain run in the settled tree behaves as it always did —
+  # exit 0, nothing done. ⛔ This is why a completed run MARKS its record instead of
+  # deleting it: deleted, this tree would be indistinguishable from the refused one
+  # two legs above, and the refusal would fire on a finished merge.
+  out="$(bash "$SELF" 2>&1)" && rc=0 || rc=$?
+  st_case 'a second run in the settled tree exits 0, as it always did' "$rc" 0
+  st_case 'and says step 2 is already discharged rather than redoing it' \
+    "$(printf '%s' "$out" | grep -c 'already discharged' || true)" 1
+  st_case 'and takes no side at all' \
+    "$(printf '%s' "$out" | grep -c "TAKING main.s side" || true)" 0
+
+  # A STALE record is refused with its contents printed, ⛔ never used: a base that
+  # does not describe this HEAD would take main's side of paths the merge never
+  # touched, which is a revert wearing a repair's message.
+  st_unreached="$(git commit-tree "$(git rev-parse 'HEAD^{tree}')" -p HEAD -m 'a commit this branch never reached')"
+  sed "s/^branch_tip=.*/branch_tip=$st_unreached/" "$st_record" > "$st_record.tmp"
+  mv "$st_record.tmp" "$st_record"
+  out="$(bash "$SELF" 2>&1)" && rc=0 || rc=$?
+  st_case 'a record whose branch tip is not an ancestor of HEAD is refused' "$rc" 1
+  st_case 'and the refusal PRINTS the record it declines to use' \
+    "$(printf '%s' "$out" | grep -c "branch_tip=$st_unreached" || true)" 1
+  # A record naming an object this repository does not have is the same answer.
+  sed 's/^base=.*/base=deadbeefdeadbeefdeadbeefdeadbeefdeadbeef/' "$st_record" > "$st_record.tmp"
+  mv "$st_record.tmp" "$st_record"
+  out="$(bash "$SELF" 2>&1)" && rc=0 || rc=$?
+  st_case 'so is a record naming a commit this repository does not have' "$rc" 1
+  cd "$here"
+
+  # --- 10b. THE DISCRIMINATING MUTATION for case 10 — #18895 itself, reproduced on
+  #          demand. Neutralise the ONE line that decides whether this invocation is
+  #          the rerun, and the script falls back to deriving the base from the
+  #          tree, which in this tree is origin/main's own tip. That is the old
+  #          code's whole behaviour, so every reading below is the card's. Same
+  #          perl/\Q..\E literal replacement 6b, 8b and 9b use.
+  st_case 'the classifier has exactly ONE call site to mutate' \
+    "$(sed -n '1,/^# --- self-test/p' "$SELF" | grep -c 'rr_mode="$(rr_classify)"' || true)" 1
+  mutated_rerun="$tmp/mutated-rerun-os-regen-merge.sh"
+  MUT_ANCHOR='  rr_mode="$(rr_classify)"' \
+  MUT_INSERT='  rr_mode=plain' \
+    perl -0777 -pe 's/\Q$ENV{MUT_ANCHOR}\E/$ENV{MUT_INSERT}/' "$SELF" > "$mutated_rerun"
+  st_case 'the rerun mutation actually changed the script text' \
+    "$(diff -q "$SELF" "$mutated_rerun" >/dev/null 2>&1; echo $?)" 1
+  st_case 'and the mutated script still parses' \
+    "$(bash -n "$mutated_rerun" >/dev/null 2>&1; echo $?)" 0
+  st_case 'and the call site really is gone (falsifiability check)' \
+    "$(sed -n '1,/^# --- self-test/p' "$mutated_rerun" | grep -c 'rr_mode="$(rr_classify)"' || true)" 0
+  st_fixture_rerun "$tmp/l-mutated"
+  mut_out="$(bash "$mutated_rerun" 2>&1)" && mut_rc=0 || mut_rc=$?
+  st_case 'mutated: step 1 still stops on the same conflict' "$mut_rc" 1
+  st_resolve_and_commit
+  mut_out="$(bash "$mutated_rerun" 2>&1)" && mut_rc=0 || mut_rc=$?
+  st_case 'mutated: the prescribed rerun exits 0 — the card reproduced' "$mut_rc" 0
+  st_case 'mutated: and step 2 took NOTHING' \
+    "$(printf '%s' "$mut_out" | grep -c "TAKING main.s side" || true)" 0
+  st_case 'mutated: every regen path read as branch-edited instead' \
+    "$(printf '%s' "$mut_out" | grep -c "KEEPING the branch.s bytes" || true)" 2
+  st_case "mutated: so main's dropped side STAYS dropped in the worktree" \
+    "$(grep -c 'deferred v1-MAIN' gen/deferred.txt || true)" 0
+  st_case 'mutated: and in the commit — exit 0, and a side silently gone' \
+    "$(git show HEAD:gen/deferred.txt | grep -c 'deferred v1-MAIN' || true)" 0
   cd "$here"
 
   if [ "$st_fail" -ne 0 ]; then

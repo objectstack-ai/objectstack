@@ -913,11 +913,19 @@ jobs:
       - name: Backfill spec-changes.json on the GitHub Release (ADR-0087 D4)
         # Ordering is load-bearing: `gh release upload` needs the Release the
         # step above creates.
+        #
+        # `--prepare` regenerates the manifest against the previously published
+        # tarball exactly as the publish lane does, so the asset this repair
+        # uploads carries the same per-release section the npm artifact does.
+        # It cannot repair the npm artifact itself — that tarball is immutable —
+        # and this lane never publishes one.
         if: steps.audit.outputs.releases-missing == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_VERSION: ${{ steps.audit.outputs.version }}
-        run: bash scripts/release-spec-changes.sh
+        run: |
+          bash scripts/release-spec-changes.sh --prepare
+          bash scripts/release-spec-changes.sh --attach
 
   # ══════════════════════════════════════════════════════════════════════════
   # HUMAN LANE — the ONLY job in this repository that publishes.
@@ -1223,6 +1231,35 @@ jobs:
           echo "::warning::hotcrm@${HOTCRM_REF} is incompatible with the about-to-publish @objectstack/spec. ADVISORY ONLY — the publish continues. HOTCRM_REF is pre-v17; ship a migrated hotcrm release, bump it, and set BLOCKING=1 in .github/workflows/release.yml to re-arm this gate."
 
       # ──────────────────────────────────────────────────────────────────────
+      # ADR-0087 D4 — the per-release section, and the gate that proves it.
+      #
+      # Both steps run BEFORE `changeset publish`, and that ordering is the
+      # whole design. The section has to be in the tree when the tarball is
+      # packed (a consumer's tooling reads `node_modules`, not a Release page),
+      # and a delta that disagrees with the artifacts must stop the release
+      # while stopping it is still free — after `changeset publish` the tarball
+      # is immutable and the only remaining repair is another version.
+      #
+      # `--no-git-checks` is what `changeset publish` passes to `pnpm publish`
+      # (its own source), so the working-tree edit `--prepare` makes does not
+      # block the publish. The committed copy is untouched: it stays the
+      # registry-only projection `check:spec-changes` gates on every PR.
+      # ──────────────────────────────────────────────────────────────────────
+      - name: Generate the per-release spec-changes section (ADR-0087 D4)
+        env:
+          RELEASE_VERSION: ${{ steps.guards.outputs.version }}
+        run: bash scripts/release-spec-changes.sh --prepare
+
+      - name: Correctness gate — the delta must match both tarballs
+        # ⛔ A failure here fails the release, by design (#17080): a wrong change
+        # file is worse than none, because a consumer stops looking once it has
+        # one. The gate names the disagreeing exports and the direction of each
+        # disagreement, so a held release arrives with its own diagnosis.
+        env:
+          RELEASE_VERSION: ${{ steps.guards.outputs.version }}
+        run: bash scripts/release-spec-changes.sh --verify
+
+      # ──────────────────────────────────────────────────────────────────────
       # The publish itself. `pnpm run release` = build + build-console +
       # scripts/release-publish.sh, which is `changeset publish` followed by ONE
       # atomic `git push origin --tags` (#2191: the action's concurrent per-tag
@@ -1312,7 +1349,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_VERSION: ${{ steps.guards.outputs.version }}
-        run: bash scripts/release-spec-changes.sh
+        # Uploads the file the two steps above generated and verified — the
+        # Release asset and the npm artifact are the same bytes by construction,
+        # not by two runs agreeing.
+        run: bash scripts/release-spec-changes.sh --attach
 
   # ══════════════════════════════════════════════════════════════════════════
   # Runtime image — fed by either lane. Building an image for a version that is

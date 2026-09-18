@@ -63,6 +63,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, statSync } 
 import { tmpdir } from 'node:os';
 import { join, resolve, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { maskComments } from '../../../scripts/js-comment-mask.mjs';
 import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
@@ -227,10 +228,17 @@ describe('no new command has grown a stdout write above its --json guard', () =>
   const WRITES_TO_STDOUT =
     /\b(?:console\.log|printHeader|printStep|printInfo|printSuccess|printWarning|printError)\(/;
 
+  // ⛔ Every read below is MASKED. This scan is the exact shape that has already
+  // reported a change that never happened: it decides by LINE POSITION — `run()`
+  // above the first `flags.json` read — and a raw read cannot tell a docblock
+  // quoting `printSuccess(` from a call to it. A comment is enough to invent an
+  // offender here, and enough to hide one by pushing the guard's line above a
+  // write's. `maskComments` blanks spans in place, so the indices stay the
+  // file's own (#18520).
   function offenders(): string[] {
     const found: string[] = [];
     for (const abs of commandFiles(COMMANDS_DIR)) {
-      const lines = readFileSync(abs, 'utf-8').split('\n');
+      const lines = maskComments(readFileSync(abs, 'utf-8')).split('\n');
       if (!lines.some((l) => /\bjson:\s*Flags\.boolean\(/.test(l))) continue;
       const runIdx = lines.findIndex((l) => /async run\s*\(/.test(l));
       if (runIdx < 0) continue;
@@ -250,7 +258,7 @@ describe('no new command has grown a stdout write above its --json guard', () =>
     // moved or renamed the commands directory would otherwise report "no
     // offenders" from an empty sweep.
     const withJson = commandFiles(COMMANDS_DIR).filter((abs) =>
-      /\bjson:\s*Flags\.boolean\(/.test(readFileSync(abs, 'utf-8')),
+      /\bjson:\s*Flags\.boolean\(/.test(maskComments(readFileSync(abs, 'utf-8'))),
     );
     expect(withJson.length).toBeGreaterThan(10);
   });

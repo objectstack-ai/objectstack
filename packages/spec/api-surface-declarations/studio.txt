@@ -1,0 +1,860 @@
+# @objectstack/spec — the .d.ts DECLARATION TEXT of every export of `./studio`.
+#
+# The SHAPE half of the ADR-0059 public-API pin, and the readable counterpart of
+# api-surface/studio.json's breadth half. That file pins each export by
+# `name (kind)`, which a signature change, a renamed interface field and a dropped
+# union member all leave untouched. This file pins the declaration text, so each of
+# those moves a line here. Text and NOT a hash, deliberately: a diff a reviewer can
+# read is what makes contract review a guard rather than a rubber stamp.
+#
+# Verbatim from the PACKED `.d.ts` reached through this package's `exports` map — the
+# declarations a consumer installs, never `src/`. A declaration's leading TSDoc is
+# excluded: documentation drift is `check:docs`'s axis, not this one.
+#
+# entry: ./studio
+# exported names: 74
+# declarations: 74
+#
+# GENERATED — ⛔ never hand-edited. Regenerate after a real build:
+#   pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec gen:api-surface-declarations
+# Gated by `check:api-surface-declarations`; a hand edit is a red gate, not a change.
+
+// ── ActionContribution (type) ──
+type ActionContribution = z.input<typeof ActionContributionSchema>;
+
+// ── ActionContributionLocation (type) ──
+type ActionContributionLocation = z.input<typeof ActionContributionLocationSchema>;
+
+// ── ActionContributionLocationSchema (const) ──
+declare const ActionContributionLocationSchema: z.ZodEnum<{
+    toolbar: "toolbar";
+    contextMenu: "contextMenu";
+    commandPalette: "commandPalette";
+}>;
+
+// ── ActionContributionSchema (const) ──
+declare const ActionContributionSchema: z.ZodObject<{
+    id: z.ZodString;
+    label: z.ZodString;
+    icon: z.ZodOptional<z.ZodString>;
+    location: z.ZodEnum<{
+        toolbar: "toolbar";
+        contextMenu: "contextMenu";
+        commandPalette: "commandPalette";
+    }>;
+    metadataTypes: z.ZodDefault<z.ZodArray<z.ZodString>>;
+}, z.core.$strict>;
+
+// ── BUILT_IN_NODE_DESCRIPTORS (const) ──
+declare const BUILT_IN_NODE_DESCRIPTORS: FlowNodeRenderDescriptor[];
+
+// ── CommandContribution (type) ──
+type CommandContribution = z.input<typeof CommandContributionSchema>;
+
+// ── CommandContributionSchema (const) ──
+declare const CommandContributionSchema: z.ZodObject<{
+    id: z.ZodString;
+    label: z.ZodString;
+    shortcut: z.ZodOptional<z.ZodString>;
+    icon: z.ZodOptional<z.ZodString>;
+}, z.core.$strict>;
+
+// ── ERDiagramConfig (type) ──
+type ERDiagramConfig = z.input<typeof ERDiagramConfigSchema>;
+
+// ── ERDiagramConfigSchema (const) ──
+declare const ERDiagramConfigSchema: z.ZodObject<{
+    enabled: z.ZodDefault<z.ZodBoolean>;
+    layout: z.ZodDefault<z.ZodEnum<{
+        grid: "grid";
+        force: "force";
+        hierarchy: "hierarchy";
+        circular: "circular";
+    }>>;
+    nodeDisplay: z.ZodDefault<z.ZodObject<{
+        showFields: z.ZodDefault<z.ZodBoolean>;
+        maxFieldsVisible: z.ZodDefault<z.ZodNumber>;
+        showFieldTypes: z.ZodDefault<z.ZodBoolean>;
+        showRequiredIndicator: z.ZodDefault<z.ZodBoolean>;
+        showRecordCount: z.ZodDefault<z.ZodBoolean>;
+        showIcon: z.ZodDefault<z.ZodBoolean>;
+        showDescription: z.ZodDefault<z.ZodBoolean>;
+    }, z.core.$strict>>;
+    showMinimap: z.ZodDefault<z.ZodBoolean>;
+    zoomControls: z.ZodDefault<z.ZodBoolean>;
+    minZoom: z.ZodDefault<z.ZodNumber>;
+    maxZoom: z.ZodDefault<z.ZodNumber>;
+    showEdgeLabels: z.ZodDefault<z.ZodBoolean>;
+    highlightOnHover: z.ZodDefault<z.ZodBoolean>;
+    clickToNavigate: z.ZodDefault<z.ZodBoolean>;
+    dragToConnect: z.ZodDefault<z.ZodBoolean>;
+    hideOrphans: z.ZodDefault<z.ZodBoolean>;
+    autoFit: z.ZodDefault<z.ZodBoolean>;
+    exportFormats: z.ZodDefault<z.ZodArray<z.ZodEnum<{
+        json: "json";
+        png: "png";
+        svg: "svg";
+    }>>>;
+}, z.core.$strict>;
+
+// ── ERLayoutAlgorithm (type) ──
+type ERLayoutAlgorithm = z.input<typeof ERLayoutAlgorithmSchema>;
+
+// ── ERLayoutAlgorithmSchema (const) ──
+declare const ERLayoutAlgorithmSchema: z.ZodEnum<{
+    grid: "grid";
+    force: "force";
+    hierarchy: "hierarchy";
+    circular: "circular";
+}>;
+
+// ── ERNodeDisplay (type) ──
+type ERNodeDisplay = z.input<typeof ERNodeDisplaySchema>;
+
+// ── ERNodeDisplaySchema (const) ──
+declare const ERNodeDisplaySchema: z.ZodObject<{
+    showFields: z.ZodDefault<z.ZodBoolean>;
+    maxFieldsVisible: z.ZodDefault<z.ZodNumber>;
+    showFieldTypes: z.ZodDefault<z.ZodBoolean>;
+    showRequiredIndicator: z.ZodDefault<z.ZodBoolean>;
+    showRecordCount: z.ZodDefault<z.ZodBoolean>;
+    showIcon: z.ZodDefault<z.ZodBoolean>;
+    showDescription: z.ZodDefault<z.ZodBoolean>;
+}, z.core.$strict>;
+
+// ── FieldEditorConfig (type) ──
+type FieldEditorConfig = z.input<typeof FieldEditorConfigSchema>;
+
+// ── FieldEditorConfigSchema (const) ──
+declare const FieldEditorConfigSchema: z.ZodObject<{
+    inlineEditing: z.ZodDefault<z.ZodBoolean>;
+    dragReorder: z.ZodDefault<z.ZodBoolean>;
+    showFieldGroups: z.ZodDefault<z.ZodBoolean>;
+    showPropertyPanel: z.ZodDefault<z.ZodBoolean>;
+    propertySections: z.ZodDefault<z.ZodArray<z.ZodObject<{
+        key: z.ZodString;
+        label: z.ZodString;
+        icon: z.ZodOptional<z.ZodString>;
+        defaultExpanded: z.ZodDefault<z.ZodBoolean>;
+        order: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>>;
+    fieldGroups: z.ZodDefault<z.ZodArray<z.ZodObject<{
+        key: z.ZodString;
+        label: z.ZodString;
+        icon: z.ZodOptional<z.ZodString>;
+        defaultExpanded: z.ZodDefault<z.ZodBoolean>;
+        order: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>>;
+    paginationThreshold: z.ZodDefault<z.ZodNumber>;
+    batchOperations: z.ZodDefault<z.ZodBoolean>;
+    showUsageStats: z.ZodDefault<z.ZodBoolean>;
+}, z.core.$strict>;
+
+// ── FieldGroup (type) ──
+type FieldGroup = z.input<typeof FieldGroupSchema>;
+
+// ── FieldGroupSchema (const) ──
+declare const FieldGroupSchema: z.ZodObject<{
+    key: z.ZodString;
+    label: z.ZodString;
+    icon: z.ZodOptional<z.ZodString>;
+    defaultExpanded: z.ZodDefault<z.ZodBoolean>;
+    order: z.ZodDefault<z.ZodNumber>;
+}, z.core.$strict>;
+
+// ── FieldPropertySection (type) ──
+type FieldPropertySection = z.input<typeof FieldPropertySectionSchema>;
+
+// ── FieldPropertySectionSchema (const) ──
+declare const FieldPropertySectionSchema: z.ZodObject<{
+    key: z.ZodString;
+    label: z.ZodString;
+    icon: z.ZodOptional<z.ZodString>;
+    defaultExpanded: z.ZodDefault<z.ZodBoolean>;
+    order: z.ZodDefault<z.ZodNumber>;
+}, z.core.$strict>;
+
+// ── FlowBuilderConfig (type) ──
+type FlowBuilderConfig = z.input<typeof FlowBuilderConfigSchema>;
+
+// ── FlowBuilderConfigSchema (const) ──
+declare const FlowBuilderConfigSchema: z.ZodObject<{
+    snap: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        gridSize: z.ZodDefault<z.ZodNumber>;
+        showGrid: z.ZodDefault<z.ZodBoolean>;
+    }, z.core.$strict>>;
+    zoom: z.ZodDefault<z.ZodObject<{
+        min: z.ZodDefault<z.ZodNumber>;
+        max: z.ZodDefault<z.ZodNumber>;
+        default: z.ZodDefault<z.ZodNumber>;
+        step: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>;
+    layoutAlgorithm: z.ZodDefault<z.ZodEnum<{
+        force: "force";
+        dagre: "dagre";
+        elk: "elk";
+        manual: "manual";
+    }>>;
+    layoutDirection: z.ZodDefault<z.ZodEnum<{
+        TB: "TB";
+        BT: "BT";
+        LR: "LR";
+        RL: "RL";
+    }>>;
+    nodeDescriptors: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        action: z.ZodString;
+        shape: z.ZodEnum<{
+            rounded_rect: "rounded_rect";
+            circle: "circle";
+            diamond: "diamond";
+            parallelogram: "parallelogram";
+            hexagon: "hexagon";
+            diamond_thick: "diamond_thick";
+            attached_circle: "attached_circle";
+            screen_rect: "screen_rect";
+        }>;
+        icon: z.ZodString;
+        defaultLabel: z.ZodString;
+        defaultWidth: z.ZodDefault<z.ZodNumber>;
+        defaultHeight: z.ZodDefault<z.ZodNumber>;
+        fillColor: z.ZodDefault<z.ZodString>;
+        borderColor: z.ZodDefault<z.ZodString>;
+        allowBoundaryEvents: z.ZodDefault<z.ZodBoolean>;
+        paletteCategory: z.ZodEnum<{
+            data: "data";
+            event: "event";
+            gateway: "gateway";
+            activity: "activity";
+            subflow: "subflow";
+        }>;
+    }, z.core.$strict>>>;
+    showMinimap: z.ZodDefault<z.ZodBoolean>;
+    showPropertyPanel: z.ZodDefault<z.ZodBoolean>;
+    showPalette: z.ZodDefault<z.ZodBoolean>;
+    undoLimit: z.ZodDefault<z.ZodNumber>;
+    animateExecution: z.ZodDefault<z.ZodBoolean>;
+    connectionValidation: z.ZodDefault<z.ZodBoolean>;
+}, z.core.$strict>;
+
+// ── FlowCanvasEdge (type) ──
+type FlowCanvasEdge = z.input<typeof FlowCanvasEdgeSchema>;
+
+// ── FlowCanvasEdgeSchema (const) ──
+declare const FlowCanvasEdgeSchema: z.ZodObject<{
+    edgeId: z.ZodString;
+    style: z.ZodDefault<z.ZodEnum<{
+        bold: "bold";
+        solid: "solid";
+        dashed: "dashed";
+        dotted: "dotted";
+        back: "back";
+    }>>;
+    color: z.ZodDefault<z.ZodString>;
+    labelPosition: z.ZodDefault<z.ZodNumber>;
+    waypoints: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        x: z.ZodNumber;
+        y: z.ZodNumber;
+    }, z.core.$strict>>>;
+    animated: z.ZodDefault<z.ZodBoolean>;
+}, z.core.$strict>;
+
+// ── FlowCanvasEdgeStyle (type) ──
+type FlowCanvasEdgeStyle = z.input<typeof FlowCanvasEdgeStyleSchema>;
+
+// ── FlowCanvasEdgeStyleSchema (const) ──
+declare const FlowCanvasEdgeStyleSchema: z.ZodEnum<{
+    bold: "bold";
+    solid: "solid";
+    dashed: "dashed";
+    dotted: "dotted";
+    back: "back";
+}>;
+
+// ── FlowCanvasNode (type) ──
+type FlowCanvasNode = z.input<typeof FlowCanvasNodeSchema>;
+
+// ── FlowCanvasNodeSchema (const) ──
+declare const FlowCanvasNodeSchema: z.ZodObject<{
+    nodeId: z.ZodString;
+    x: z.ZodNumber;
+    y: z.ZodNumber;
+    width: z.ZodOptional<z.ZodNumber>;
+    height: z.ZodOptional<z.ZodNumber>;
+    collapsed: z.ZodDefault<z.ZodBoolean>;
+    fillColor: z.ZodOptional<z.ZodString>;
+    borderColor: z.ZodOptional<z.ZodString>;
+    annotation: z.ZodOptional<z.ZodString>;
+}, z.core.$strict>;
+
+// ── FlowLayoutAlgorithm (type) ──
+type FlowLayoutAlgorithm = z.input<typeof FlowLayoutAlgorithmSchema>;
+
+// ── FlowLayoutAlgorithmSchema (const) ──
+declare const FlowLayoutAlgorithmSchema: z.ZodEnum<{
+    force: "force";
+    dagre: "dagre";
+    elk: "elk";
+    manual: "manual";
+}>;
+
+// ── FlowLayoutDirection (type) ──
+type FlowLayoutDirection = z.input<typeof FlowLayoutDirectionSchema>;
+
+// ── FlowLayoutDirectionSchema (const) ──
+declare const FlowLayoutDirectionSchema: z.ZodEnum<{
+    TB: "TB";
+    BT: "BT";
+    LR: "LR";
+    RL: "RL";
+}>;
+
+// ── FlowNodeRenderDescriptor (type) ──
+type FlowNodeRenderDescriptor = z.input<typeof FlowNodeRenderDescriptorSchema>;
+
+// ── FlowNodeRenderDescriptorSchema (const) ──
+declare const FlowNodeRenderDescriptorSchema: z.ZodObject<{
+    action: z.ZodString;
+    shape: z.ZodEnum<{
+        rounded_rect: "rounded_rect";
+        circle: "circle";
+        diamond: "diamond";
+        parallelogram: "parallelogram";
+        hexagon: "hexagon";
+        diamond_thick: "diamond_thick";
+        attached_circle: "attached_circle";
+        screen_rect: "screen_rect";
+    }>;
+    icon: z.ZodString;
+    defaultLabel: z.ZodString;
+    defaultWidth: z.ZodDefault<z.ZodNumber>;
+    defaultHeight: z.ZodDefault<z.ZodNumber>;
+    fillColor: z.ZodDefault<z.ZodString>;
+    borderColor: z.ZodDefault<z.ZodString>;
+    allowBoundaryEvents: z.ZodDefault<z.ZodBoolean>;
+    paletteCategory: z.ZodEnum<{
+        data: "data";
+        event: "event";
+        gateway: "gateway";
+        activity: "activity";
+        subflow: "subflow";
+    }>;
+}, z.core.$strict>;
+
+// ── FlowNodeShape (type) ──
+type FlowNodeShape = z.input<typeof FlowNodeShapeSchema>;
+
+// ── FlowNodeShapeSchema (const) ──
+declare const FlowNodeShapeSchema: z.ZodEnum<{
+    rounded_rect: "rounded_rect";
+    circle: "circle";
+    diamond: "diamond";
+    parallelogram: "parallelogram";
+    hexagon: "hexagon";
+    diamond_thick: "diamond_thick";
+    attached_circle: "attached_circle";
+    screen_rect: "screen_rect";
+}>;
+
+// ── MetadataIconContribution (type) ──
+type MetadataIconContribution = z.input<typeof MetadataIconContributionSchema>;
+
+// ── MetadataIconContributionSchema (const) ──
+declare const MetadataIconContributionSchema: z.ZodObject<{
+    metadataType: z.ZodString;
+    label: z.ZodString;
+    icon: z.ZodString;
+}, z.core.$strict>;
+
+// ── MetadataViewerContribution (type) ──
+type MetadataViewerContribution = z.input<typeof MetadataViewerContributionSchema>;
+
+// ── MetadataViewerContributionSchema (const) ──
+declare const MetadataViewerContributionSchema: z.ZodObject<{
+    id: z.ZodString;
+    metadataTypes: z.ZodArray<z.ZodString>;
+    label: z.ZodString;
+    priority: z.ZodDefault<z.ZodNumber>;
+    modes: z.ZodDefault<z.ZodArray<z.ZodEnum<{
+        code: "code";
+        history: "history";
+        preview: "preview";
+        design: "design";
+        data: "data";
+    }>>>;
+}, z.core.$strict>;
+
+// ── ObjectDesignerConfig (type) ──
+type ObjectDesignerConfig = z.input<typeof ObjectDesignerConfigSchema>;
+
+// ── ObjectDesignerConfigSchema (const) ──
+declare const ObjectDesignerConfigSchema: z.ZodObject<{
+    defaultView: z.ZodDefault<z.ZodEnum<{
+        "field-editor": "field-editor";
+        "relationship-mapper": "relationship-mapper";
+        "er-diagram": "er-diagram";
+        "object-manager": "object-manager";
+    }>>;
+    fieldEditor: z.ZodDefault<z.ZodObject<{
+        inlineEditing: z.ZodDefault<z.ZodBoolean>;
+        dragReorder: z.ZodDefault<z.ZodBoolean>;
+        showFieldGroups: z.ZodDefault<z.ZodBoolean>;
+        showPropertyPanel: z.ZodDefault<z.ZodBoolean>;
+        propertySections: z.ZodDefault<z.ZodArray<z.ZodObject<{
+            key: z.ZodString;
+            label: z.ZodString;
+            icon: z.ZodOptional<z.ZodString>;
+            defaultExpanded: z.ZodDefault<z.ZodBoolean>;
+            order: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>>>;
+        fieldGroups: z.ZodDefault<z.ZodArray<z.ZodObject<{
+            key: z.ZodString;
+            label: z.ZodString;
+            icon: z.ZodOptional<z.ZodString>;
+            defaultExpanded: z.ZodDefault<z.ZodBoolean>;
+            order: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>>>;
+        paginationThreshold: z.ZodDefault<z.ZodNumber>;
+        batchOperations: z.ZodDefault<z.ZodBoolean>;
+        showUsageStats: z.ZodDefault<z.ZodBoolean>;
+    }, z.core.$strict>>;
+    relationshipMapper: z.ZodDefault<z.ZodObject<{
+        visualCreation: z.ZodDefault<z.ZodBoolean>;
+        showReverseRelationships: z.ZodDefault<z.ZodBoolean>;
+        showCascadeWarnings: z.ZodDefault<z.ZodBoolean>;
+        displayConfig: z.ZodDefault<z.ZodArray<z.ZodObject<{
+            type: z.ZodEnum<{
+                lookup: "lookup";
+                master_detail: "master_detail";
+                tree: "tree";
+            }>;
+            lineStyle: z.ZodDefault<z.ZodEnum<{
+                solid: "solid";
+                dashed: "dashed";
+                dotted: "dotted";
+            }>>;
+            color: z.ZodDefault<z.ZodString>;
+            highlightColor: z.ZodDefault<z.ZodString>;
+            cardinalityLabel: z.ZodDefault<z.ZodString>;
+        }, z.core.$strict>>>;
+    }, z.core.$strict>>;
+    erDiagram: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        layout: z.ZodDefault<z.ZodEnum<{
+            grid: "grid";
+            force: "force";
+            hierarchy: "hierarchy";
+            circular: "circular";
+        }>>;
+        nodeDisplay: z.ZodDefault<z.ZodObject<{
+            showFields: z.ZodDefault<z.ZodBoolean>;
+            maxFieldsVisible: z.ZodDefault<z.ZodNumber>;
+            showFieldTypes: z.ZodDefault<z.ZodBoolean>;
+            showRequiredIndicator: z.ZodDefault<z.ZodBoolean>;
+            showRecordCount: z.ZodDefault<z.ZodBoolean>;
+            showIcon: z.ZodDefault<z.ZodBoolean>;
+            showDescription: z.ZodDefault<z.ZodBoolean>;
+        }, z.core.$strict>>;
+        showMinimap: z.ZodDefault<z.ZodBoolean>;
+        zoomControls: z.ZodDefault<z.ZodBoolean>;
+        minZoom: z.ZodDefault<z.ZodNumber>;
+        maxZoom: z.ZodDefault<z.ZodNumber>;
+        showEdgeLabels: z.ZodDefault<z.ZodBoolean>;
+        highlightOnHover: z.ZodDefault<z.ZodBoolean>;
+        clickToNavigate: z.ZodDefault<z.ZodBoolean>;
+        dragToConnect: z.ZodDefault<z.ZodBoolean>;
+        hideOrphans: z.ZodDefault<z.ZodBoolean>;
+        autoFit: z.ZodDefault<z.ZodBoolean>;
+        exportFormats: z.ZodDefault<z.ZodArray<z.ZodEnum<{
+            json: "json";
+            png: "png";
+            svg: "svg";
+        }>>>;
+    }, z.core.$strict>>;
+    objectManager: z.ZodDefault<z.ZodObject<{
+        defaultDisplayMode: z.ZodDefault<z.ZodEnum<{
+            tree: "tree";
+            table: "table";
+            cards: "cards";
+        }>>;
+        defaultSortField: z.ZodDefault<z.ZodEnum<{
+            name: "name";
+            label: "label";
+            fieldCount: "fieldCount";
+            updatedAt: "updatedAt";
+        }>>;
+        defaultSortDirection: z.ZodDefault<z.ZodEnum<{
+            asc: "asc";
+            desc: "desc";
+        }>>;
+        defaultFilter: z.ZodDefault<z.ZodObject<{
+            package: z.ZodOptional<z.ZodString>;
+            tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            includeSystem: z.ZodDefault<z.ZodBoolean>;
+            includeAbstract: z.ZodDefault<z.ZodBoolean>;
+            hasFieldType: z.ZodOptional<z.ZodString>;
+            hasRelationships: z.ZodOptional<z.ZodBoolean>;
+            searchQuery: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
+        showFieldCount: z.ZodDefault<z.ZodBoolean>;
+        showRelationshipCount: z.ZodDefault<z.ZodBoolean>;
+        showQuickPreview: z.ZodDefault<z.ZodBoolean>;
+        enableComparison: z.ZodDefault<z.ZodBoolean>;
+        showERDiagramToggle: z.ZodDefault<z.ZodBoolean>;
+        showCreateAction: z.ZodDefault<z.ZodBoolean>;
+        showStatsSummary: z.ZodDefault<z.ZodBoolean>;
+    }, z.core.$strict>>;
+    objectPreview: z.ZodDefault<z.ZodObject<{
+        tabs: z.ZodDefault<z.ZodArray<z.ZodObject<{
+            key: z.ZodString;
+            label: z.ZodString;
+            icon: z.ZodOptional<z.ZodString>;
+            enabled: z.ZodDefault<z.ZodBoolean>;
+            order: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>>>;
+        defaultTab: z.ZodDefault<z.ZodString>;
+        showHeader: z.ZodDefault<z.ZodBoolean>;
+        showBreadcrumbs: z.ZodDefault<z.ZodBoolean>;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+
+// ── ObjectDesignerDefaultView (type) ──
+type ObjectDesignerDefaultView = z.input<typeof ObjectDesignerDefaultViewSchema>;
+
+// ── ObjectDesignerDefaultViewSchema (const) ──
+declare const ObjectDesignerDefaultViewSchema: z.ZodEnum<{
+    "field-editor": "field-editor";
+    "relationship-mapper": "relationship-mapper";
+    "er-diagram": "er-diagram";
+    "object-manager": "object-manager";
+}>;
+
+// ── ObjectFilter (type) ──
+type ObjectFilter = z.input<typeof ObjectFilterSchema>;
+
+// ── ObjectFilterSchema (const) ──
+declare const ObjectFilterSchema: z.ZodObject<{
+    package: z.ZodOptional<z.ZodString>;
+    tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    includeSystem: z.ZodDefault<z.ZodBoolean>;
+    includeAbstract: z.ZodDefault<z.ZodBoolean>;
+    hasFieldType: z.ZodOptional<z.ZodString>;
+    hasRelationships: z.ZodOptional<z.ZodBoolean>;
+    searchQuery: z.ZodOptional<z.ZodString>;
+}, z.core.$strict>;
+
+// ── ObjectListDisplayMode (type) ──
+type ObjectListDisplayMode = z.input<typeof ObjectListDisplayModeSchema>;
+
+// ── ObjectListDisplayModeSchema (const) ──
+declare const ObjectListDisplayModeSchema: z.ZodEnum<{
+    tree: "tree";
+    table: "table";
+    cards: "cards";
+}>;
+
+// ── ObjectManagerConfig (type) ──
+type ObjectManagerConfig = z.input<typeof ObjectManagerConfigSchema>;
+
+// ── ObjectManagerConfigSchema (const) ──
+declare const ObjectManagerConfigSchema: z.ZodObject<{
+    defaultDisplayMode: z.ZodDefault<z.ZodEnum<{
+        tree: "tree";
+        table: "table";
+        cards: "cards";
+    }>>;
+    defaultSortField: z.ZodDefault<z.ZodEnum<{
+        name: "name";
+        label: "label";
+        fieldCount: "fieldCount";
+        updatedAt: "updatedAt";
+    }>>;
+    defaultSortDirection: z.ZodDefault<z.ZodEnum<{
+        asc: "asc";
+        desc: "desc";
+    }>>;
+    defaultFilter: z.ZodDefault<z.ZodObject<{
+        package: z.ZodOptional<z.ZodString>;
+        tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        includeSystem: z.ZodDefault<z.ZodBoolean>;
+        includeAbstract: z.ZodDefault<z.ZodBoolean>;
+        hasFieldType: z.ZodOptional<z.ZodString>;
+        hasRelationships: z.ZodOptional<z.ZodBoolean>;
+        searchQuery: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>;
+    showFieldCount: z.ZodDefault<z.ZodBoolean>;
+    showRelationshipCount: z.ZodDefault<z.ZodBoolean>;
+    showQuickPreview: z.ZodDefault<z.ZodBoolean>;
+    enableComparison: z.ZodDefault<z.ZodBoolean>;
+    showERDiagramToggle: z.ZodDefault<z.ZodBoolean>;
+    showCreateAction: z.ZodDefault<z.ZodBoolean>;
+    showStatsSummary: z.ZodDefault<z.ZodBoolean>;
+}, z.core.$strict>;
+
+// ── ObjectPreviewConfig (type) ──
+type ObjectPreviewConfig = z.input<typeof ObjectPreviewConfigSchema>;
+
+// ── ObjectPreviewConfigSchema (const) ──
+declare const ObjectPreviewConfigSchema: z.ZodObject<{
+    tabs: z.ZodDefault<z.ZodArray<z.ZodObject<{
+        key: z.ZodString;
+        label: z.ZodString;
+        icon: z.ZodOptional<z.ZodString>;
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        order: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>>;
+    defaultTab: z.ZodDefault<z.ZodString>;
+    showHeader: z.ZodDefault<z.ZodBoolean>;
+    showBreadcrumbs: z.ZodDefault<z.ZodBoolean>;
+}, z.core.$strict>;
+
+// ── ObjectPreviewTab (type) ──
+type ObjectPreviewTab = z.input<typeof ObjectPreviewTabSchema>;
+
+// ── ObjectPreviewTabSchema (const) ──
+declare const ObjectPreviewTabSchema: z.ZodObject<{
+    key: z.ZodString;
+    label: z.ZodString;
+    icon: z.ZodOptional<z.ZodString>;
+    enabled: z.ZodDefault<z.ZodBoolean>;
+    order: z.ZodDefault<z.ZodNumber>;
+}, z.core.$strict>;
+
+// ── ObjectSortField (type) ──
+type ObjectSortField = z.input<typeof ObjectSortFieldSchema>;
+
+// ── ObjectSortFieldSchema (const) ──
+declare const ObjectSortFieldSchema: z.ZodEnum<{
+    name: "name";
+    label: "label";
+    fieldCount: "fieldCount";
+    updatedAt: "updatedAt";
+}>;
+
+// ── PanelContribution (type) ──
+type PanelContribution = z.input<typeof PanelContributionSchema>;
+
+// ── PanelContributionSchema (const) ──
+declare const PanelContributionSchema: z.ZodObject<{
+    id: z.ZodString;
+    label: z.ZodString;
+    icon: z.ZodOptional<z.ZodString>;
+    location: z.ZodDefault<z.ZodEnum<{
+        bottom: "bottom";
+        right: "right";
+        modal: "modal";
+    }>>;
+}, z.core.$strict>;
+
+// ── PanelLocation (type) ──
+type PanelLocation = z.input<typeof PanelLocationSchema>;
+
+// ── PanelLocationSchema (const) ──
+declare const PanelLocationSchema: z.ZodEnum<{
+    bottom: "bottom";
+    right: "right";
+    modal: "modal";
+}>;
+
+// ── RelationshipDisplay (type) ──
+type RelationshipDisplay = z.input<typeof RelationshipDisplaySchema>;
+
+// ── RelationshipDisplaySchema (const) ──
+declare const RelationshipDisplaySchema: z.ZodObject<{
+    type: z.ZodEnum<{
+        lookup: "lookup";
+        master_detail: "master_detail";
+        tree: "tree";
+    }>;
+    lineStyle: z.ZodDefault<z.ZodEnum<{
+        solid: "solid";
+        dashed: "dashed";
+        dotted: "dotted";
+    }>>;
+    color: z.ZodDefault<z.ZodString>;
+    highlightColor: z.ZodDefault<z.ZodString>;
+    cardinalityLabel: z.ZodDefault<z.ZodString>;
+}, z.core.$strict>;
+
+// ── RelationshipMapperConfig (type) ──
+type RelationshipMapperConfig = z.input<typeof RelationshipMapperConfigSchema>;
+
+// ── RelationshipMapperConfigSchema (const) ──
+declare const RelationshipMapperConfigSchema: z.ZodObject<{
+    visualCreation: z.ZodDefault<z.ZodBoolean>;
+    showReverseRelationships: z.ZodDefault<z.ZodBoolean>;
+    showCascadeWarnings: z.ZodDefault<z.ZodBoolean>;
+    displayConfig: z.ZodDefault<z.ZodArray<z.ZodObject<{
+        type: z.ZodEnum<{
+            lookup: "lookup";
+            master_detail: "master_detail";
+            tree: "tree";
+        }>;
+        lineStyle: z.ZodDefault<z.ZodEnum<{
+            solid: "solid";
+            dashed: "dashed";
+            dotted: "dotted";
+        }>>;
+        color: z.ZodDefault<z.ZodString>;
+        highlightColor: z.ZodDefault<z.ZodString>;
+        cardinalityLabel: z.ZodDefault<z.ZodString>;
+    }, z.core.$strict>>>;
+}, z.core.$strict>;
+
+// ── SidebarGroupContribution (type) ──
+type SidebarGroupContribution = z.input<typeof SidebarGroupContributionSchema>;
+
+// ── SidebarGroupContributionSchema (const) ──
+declare const SidebarGroupContributionSchema: z.ZodObject<{
+    key: z.ZodString;
+    label: z.ZodString;
+    icon: z.ZodOptional<z.ZodString>;
+    metadataTypes: z.ZodArray<z.ZodString>;
+    order: z.ZodDefault<z.ZodNumber>;
+}, z.core.$strict>;
+
+// ── StudioPluginContributions (type) ──
+type StudioPluginContributions = z.input<typeof StudioPluginContributionsSchema>;
+
+// ── StudioPluginContributionsSchema (const) ──
+declare const StudioPluginContributionsSchema: z.ZodObject<{
+    metadataViewers: z.ZodDefault<z.ZodArray<z.ZodObject<{
+        id: z.ZodString;
+        metadataTypes: z.ZodArray<z.ZodString>;
+        label: z.ZodString;
+        priority: z.ZodDefault<z.ZodNumber>;
+        modes: z.ZodDefault<z.ZodArray<z.ZodEnum<{
+            code: "code";
+            history: "history";
+            preview: "preview";
+            design: "design";
+            data: "data";
+        }>>>;
+    }, z.core.$strict>>>;
+    sidebarGroups: z.ZodDefault<z.ZodArray<z.ZodObject<{
+        key: z.ZodString;
+        label: z.ZodString;
+        icon: z.ZodOptional<z.ZodString>;
+        metadataTypes: z.ZodArray<z.ZodString>;
+        order: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>>;
+    actions: z.ZodDefault<z.ZodArray<z.ZodObject<{
+        id: z.ZodString;
+        label: z.ZodString;
+        icon: z.ZodOptional<z.ZodString>;
+        location: z.ZodEnum<{
+            toolbar: "toolbar";
+            contextMenu: "contextMenu";
+            commandPalette: "commandPalette";
+        }>;
+        metadataTypes: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    }, z.core.$strict>>>;
+    metadataIcons: z.ZodDefault<z.ZodArray<z.ZodObject<{
+        metadataType: z.ZodString;
+        label: z.ZodString;
+        icon: z.ZodString;
+    }, z.core.$strict>>>;
+    panels: z.ZodDefault<z.ZodArray<z.ZodObject<{
+        id: z.ZodString;
+        label: z.ZodString;
+        icon: z.ZodOptional<z.ZodString>;
+        location: z.ZodDefault<z.ZodEnum<{
+            bottom: "bottom";
+            right: "right";
+            modal: "modal";
+        }>>;
+    }, z.core.$strict>>>;
+    commands: z.ZodDefault<z.ZodArray<z.ZodObject<{
+        id: z.ZodString;
+        label: z.ZodString;
+        shortcut: z.ZodOptional<z.ZodString>;
+        icon: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>>;
+}, z.core.$strict>;
+
+// ── StudioPluginManifest (type) ──
+type StudioPluginManifest = z.input<typeof StudioPluginManifestSchema>;
+
+// ── StudioPluginManifestSchema (const) ──
+declare const StudioPluginManifestSchema: z.ZodObject<{
+    id: z.ZodString;
+    name: z.ZodString;
+    version: z.ZodDefault<z.ZodString>;
+    description: z.ZodOptional<z.ZodString>;
+    author: z.ZodOptional<z.ZodString>;
+    contributes: z.ZodDefault<z.ZodObject<{
+        metadataViewers: z.ZodDefault<z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            metadataTypes: z.ZodArray<z.ZodString>;
+            label: z.ZodString;
+            priority: z.ZodDefault<z.ZodNumber>;
+            modes: z.ZodDefault<z.ZodArray<z.ZodEnum<{
+                code: "code";
+                history: "history";
+                preview: "preview";
+                design: "design";
+                data: "data";
+            }>>>;
+        }, z.core.$strict>>>;
+        sidebarGroups: z.ZodDefault<z.ZodArray<z.ZodObject<{
+            key: z.ZodString;
+            label: z.ZodString;
+            icon: z.ZodOptional<z.ZodString>;
+            metadataTypes: z.ZodArray<z.ZodString>;
+            order: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>>>;
+        actions: z.ZodDefault<z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            label: z.ZodString;
+            icon: z.ZodOptional<z.ZodString>;
+            location: z.ZodEnum<{
+                toolbar: "toolbar";
+                contextMenu: "contextMenu";
+                commandPalette: "commandPalette";
+            }>;
+            metadataTypes: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        }, z.core.$strict>>>;
+        metadataIcons: z.ZodDefault<z.ZodArray<z.ZodObject<{
+            metadataType: z.ZodString;
+            label: z.ZodString;
+            icon: z.ZodString;
+        }, z.core.$strict>>>;
+        panels: z.ZodDefault<z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            label: z.ZodString;
+            icon: z.ZodOptional<z.ZodString>;
+            location: z.ZodDefault<z.ZodEnum<{
+                bottom: "bottom";
+                right: "right";
+                modal: "modal";
+            }>>;
+        }, z.core.$strict>>>;
+        commands: z.ZodDefault<z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            label: z.ZodString;
+            shortcut: z.ZodOptional<z.ZodString>;
+            icon: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>>;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+
+// ── ViewMode (type) ──
+type ViewMode = z.input<typeof ViewModeSchema>;
+
+// ── ViewModeSchema (const) ──
+declare const ViewModeSchema: z.ZodEnum<{
+    code: "code";
+    history: "history";
+    preview: "preview";
+    design: "design";
+    data: "data";
+}>;
+
+// ── defineFlowBuilderConfig (function) ──
+declare function defineFlowBuilderConfig(input: z.input<typeof FlowBuilderConfigSchema>): FlowBuilderConfigParsed;
+
+// ── defineObjectDesignerConfig (function) ──
+declare function defineObjectDesignerConfig(input: z.input<typeof ObjectDesignerConfigSchema>): ObjectDesignerConfigParsed;
+
+// ── defineStudioPlugin (function) ──
+declare function defineStudioPlugin(input: z.input<typeof StudioPluginManifestSchema>): StudioPluginManifestParsed;

@@ -150,9 +150,10 @@ carries the **active locale** so requests send a matching `Accept-Language`, and
 translations are fetched through `@objectstack/client`:
 
 ```tsx
+import type { ObjectStackClient } from '@objectstack/client';
 import { ObjectStackProvider, useObjectStackLocale } from '@objectstack/client-react';
 
-function App({ client, language }) {
+function App({ client, language }: { client: ObjectStackClient; language: string }) {
   return (
     <ObjectStackProvider client={client} locale={language}>
       <Screen />
