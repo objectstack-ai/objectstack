@@ -37,11 +37,12 @@
  *     rather than externalise.
  *
  * Nothing in the tree asserted the invariant in either direction. There is no
- * `import/no-extraneous-dependencies` rule in `eslint.config.mjs`, and the two
- * gates that look adjacent answer a DIFFERENT question:
- * `check:type-source-resolution` and `check:test-source-alias` decide WHICH
- * copy of a dependency's types is resolved, never WHETHER the dependency is
- * declared.
+ * `import/no-extraneous-dependencies` rule in `eslint.config.mjs`, and the gate
+ * that looks adjacent answers a DIFFERENT question: `check:test-source-alias`
+ * decides WHICH copy of a dependency's types is resolved, never WHETHER the
+ * dependency is declared. (Its type-axis sibling `check:type-source-resolution`
+ * answered the same different question until it was retired on 2026-09-18 —
+ * #18373.)
  *
  * ## What counts as DECLARED
  *
