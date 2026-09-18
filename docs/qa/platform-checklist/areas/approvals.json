@@ -1177,7 +1177,7 @@
       "title": "Every approver type resolves the slate it declares — department includes all descendants, deprecated role warns and resolves, and a slate with no concrete person takes the declared onEmptyApprovers fork, never a fake approval",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": ["dev admin (authors the scratch flows; org owner)", "Ada Auditor / Mei Phone (real logins since #9308 — directory rows the graph legs resolve to)"],
@@ -1204,7 +1204,7 @@
         "manager leg: the submitter's manager_id resolves; user leg: the literal id resolves",
         "role leg: author {type:'role', value:'owner'} (it still parses for the deprecation window); read the boot/trigger log for the ADR-0090 D3 deprecation warn naming the canonical spelling, and assert the slate equals what {type:'org_membership_level', value:'owner'} resolves on the same org",
         "queue leg: a stored flow carrying {type:'queue'} (author it directly through the metadata channel if the designer refuses — the designer withholding it IS the xEnumDeprecated contract) — trigger: the slot resolves to nobody, the request opens carrying only the literal queue:<value> slot, and the log carries the #3508 'not implemented — the slot resolves to nobody' warn",
-        "empty-slate forks, one scratch flow per policy over an UNSTAFFED position: onEmptyApprovers absent/admin_rescue → the request still opens (decidable only via the #3424 privileged override) and the loud 'resolved to no concrete approver' warn lands; 'fail' → the run fails with NO_APPROVERS and no request row; 'auto_approve' → NO request row, the run continues down the approve edge with output.autoApproved=true and the auto-approve warn lands",
+        "empty-slate forks, one scratch flow per policy over an UNSTAFFED position: onEmptyApprovers absent/admin_rescue → the request still opens (decidable only via the #3424 privileged override) and the loud 'resolved to no concrete approver' warn lands; 'fail' → the run fails with NO_APPROVERS and no request row; 'auto_approve' → NO request row, the run continues down the approve edge with output.autoApproved=true and the auto-approve warn lands; 'fallback' (fallbackApprovers naming a STAFFED target, e.g. org_membership_level 'owner') → the request opens on the fallback slate — pending_approvers holds the fallback's resolved ids, no literal slot — and the 'opening on the declared fallbackApprovers' warn lands; a fallback that itself resolves to nobody degrades to admin_rescue with its own 'resolved to nobody either' warn",
         "throughout: read the trigger-time log — every graph expansion to nobody must carry the #3807 'expanded to nobody' warn naming type and value"
       ],
       "acceptance": [
@@ -1233,9 +1233,9 @@
           "evidence": "the warn line + the two equal slates"
         },
         {
-          "clause": "the empty-slate fork honors the declared policy: admin_rescue (the default) opens the request + warns loudly (decidable only via the privileged override); 'fail' kills the node with NO_APPROVERS and opens nothing; 'auto_approve' opens nothing and resumes down the approve edge with output.autoApproved=true — 'empty' meaning no CONCRETE person, so a slate of only type:value literals takes the fork too",
+          "clause": "the empty-slate fork honors the declared policy: admin_rescue (the default) opens the request + warns loudly (decidable only via the privileged override); 'fail' kills the node with NO_APPROVERS and opens nothing; 'auto_approve' opens nothing and resumes down the approve edge with output.autoApproved=true; 'fallback' opens the request on the declared fallbackApprovers (resolved by the same resolver as approvers) and warns that the fallback fired — a fallback that resolves to nobody too degrades to admin_rescue — 'empty' meaning no CONCRETE person, so a slate of only type:value literals takes the fork too",
           "oracle": "api",
-          "verify": "per policy: request-row presence/absence, run outcome, and the matching warn/error text ('resolved to no concrete approver…'); the admin_rescue request's pending_approvers holds only the literal slot",
+          "verify": "per policy: request-row presence/absence, run outcome, and the matching warn/error text ('resolved to no concrete approver…'); the admin_rescue request's pending_approvers holds only the literal slot; the fallback request's pending_approvers holds the fallback slate, never the abandoned literal slot",
           "evidence": "per-policy request/run reads + log lines"
         },
         {
@@ -1253,14 +1253,15 @@
       ],
       "traps": ["seed-data-thin", "wrong-persona"],
       "source": [
-        "packages/spec/src/automation/approval.zod.ts#ApproverType (ApproverType, 10 members incl. deprecated role + dead queue), (DEPRECATED_APPROVER_TYPES role→org_membership_level + canonicalApproverType), (NON_AUTHORABLE_APPROVER_TYPES), (onEmptyApprovers admin_rescue|fail|auto_approve, default admin_rescue)",
-        "packages/plugins/plugin-approvals/src/approval-service.ts#expandApprovers (expandApprovers — per-spec group tagging; expression resolved outside the flat contract), (resolveApproverSpec — role warn, per-type branches, queue warn, #3807 expanded-to-nobody warn, literal type:value fallback), (expandBusinessUnitUsers — active-descendant BFS + membership union), (the empty-slate fork: 'empty' = no concrete person, NO_APPROVERS / autoApproved / admin_rescue warn)",
+        "packages/spec/src/automation/approval.zod.ts#ApproverType (ApproverType, 10 members incl. deprecated role + dead queue), (DEPRECATED_APPROVER_TYPES role→org_membership_level + canonicalApproverType), (NON_AUTHORABLE_APPROVER_TYPES), (onEmptyApprovers admin_rescue|fail|auto_approve|fallback, default admin_rescue), (fallbackApprovers — same shape as approvers, required iff 'fallback' and refused under any other policy: checkFallbackApproversPairing)",
+        "packages/plugins/plugin-approvals/src/approval-service.ts#expandApprovers (expandApprovers — per-spec group tagging; expression resolved outside the flat contract), (resolveApproverSpec — role warn, per-type branches, queue warn, #3807 expanded-to-nobody warn, literal type:value fallback), (expandBusinessUnitUsers — active-descendant BFS + membership union), (the empty-slate fork: 'empty' = no concrete person, NO_APPROVERS / autoApproved / fallbackApprovers re-expansion / admin_rescue warn)",
         "examples/app-showcase/src/automation/flows/approver-bindings.flow.ts (the #3508 DESIGNER specimen — draft, empty values, its docblock is the evidence the runtime legs need scratch flows)",
         "examples/app-showcase/src/data/seed/index.ts (BU tree seeded; membership is a runtime admin action by design)",
         "#3424 (privileged override — the admin_rescue escape hatch), #3447 P2, #3508, #3807, ADR-0090 D3"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-30", "change": "initial — the approver-type matrix had no item: siblings cover position (seeded flows) and org_membership_level/expression (dynamic-approval) but department-with-descendants, team, field fan-out, manager, literal user, the role deprecation window, the dead queue slot and all three onEmptyApprovers forks were untested. One register correction: approver-bindings.flow.ts is a draft designer specimen (empty values, status draft by documented design), not a runnable user/manager/field fixture — every uncovered leg needs a scratch active flow, recorded in knownGaps", "ref": "#sweep-2026-08-30" }
+        { "revision": 1, "date": "2026-08-30", "change": "initial — the approver-type matrix had no item: siblings cover position (seeded flows) and org_membership_level/expression (dynamic-approval) but department-with-descendants, team, field fan-out, manager, literal user, the role deprecation window, the dead queue slot and all three onEmptyApprovers forks were untested. One register correction: approver-bindings.flow.ts is a draft designer specimen (empty values, status draft by documented design), not a runnable user/manager/field fixture — every uncovered leg needs a scratch active flow, recorded in knownGaps", "ref": "#sweep-2026-08-30" },
+        { "revision": 2, "date": "2026-09-17", "change": "the empty-slate fork gained a fourth policy — onEmptyApprovers: 'fallback' + fallbackApprovers (PR #18525, #17931): the request opens on the declared fallback slate, resolved by the same resolver as approvers, and a fallback that resolves to nobody degrades to admin_rescue. Added that leg to the steps, the fork clause and its verify, and the two source citations; the three existing legs are unchanged", "ref": "#18527" }
       ]
     },
     {
