@@ -771,6 +771,81 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             } else {
                 pkg = registry.installPackage(manifest, body.settings);
             }
+            // [#18058] HONOUR `enableOnInstall`, which this door declared and
+            // ignored. `PackageInstallRequestSchema` has carried
+            // `enableOnInstall: z.boolean().default(true)` since it was written,
+            // the first-party SDK SENDS it (`client.packages.install(m, {
+            // enableOnInstall: false })`, pinned in `client.test.ts`), and NO
+            // server-side handler read the key — an author switched it off and
+            // the runtime installed the package enabled anyway, silently. That
+            // is «declared ≠ enforced» on a published option, the exact shape
+            // Prime Directive #10 refuses.
+            //
+            // Only `false` moves the REGISTRY: the declared default is `true`
+            // and `installPackage` already lands a package enabled, so the true
+            // case needs no flip. The disable goes through the SAME call
+            // `PATCH /packages/:id/disable` uses.
+            //
+            // ⚠️ Read from the WRAPPED body alone. `manifest !== body` is this
+            // handler's own test for which of the two declared body forms
+            // arrived (`PackageInstallBodySchema`); in the BARE form the key
+            // would be a manifest key, which `ManifestSchema`'s strict close
+            // refuses by name — honouring it there would enforce something no
+            // schema declares. So a bare body always installs at the default.
+            const wrapped = manifest !== body;
+            const installDisabled = wrapped && body?.enableOnInstall === false;
+            if (installDisabled) {
+                const disabled = registry.disablePackage(pkgId);
+                if (disabled) pkg = disabled;
+            }
+            // ⭐ The DURABLE half, and it follows THE ROW THIS DOOR RETURNED —
+            // never the request's intent. Written unconditionally rather than
+            // only on the overwrite path: "was this id installed a moment ago"
+            // is not the question — "does the durable record agree with the row
+            // this door just returned" is, and that is one call either way.
+            //
+            // Both directions of that disagreement are silent durability
+            // defects of the kind Prime Directive #10 and the degradation-log
+            // rules name — correct on the wire, wrong after a restart — and
+            // persisting the REQUEST closes only the first:
+            //
+            //   ① answered `enabled: true`, disk still says disabled. `POST
+            //     /packages` is a CREATE an already-installed id reaches
+            //     through `overwrite`, and `DELETE /packages/:id` never clears
+            //     this record either, so the id may already be listed from an
+            //     earlier install. The next boot re-installs it DISABLED.
+            //   ② answered `enabled: false`, disk cleared. `installPackage`
+            //     lands an id that is in the boot-seeded
+            //     `initialDisabledPackageIds` DISABLED WHATEVER THE REQUEST
+            //     SAYS, so a flag-absent install of a package an operator
+            //     disabled before a restart returns `enabled: false` while the
+            //     request's own intent (`true`, the declared default) erases
+            //     the disable from disk. The next boot brings it back ENABLED.
+            //
+            // `pkg.enabled` is the one value that cannot be out of step with
+            // either, because it IS the row being served. It is read AFTER the
+            // flip above, and on both install arms it is the registry's own
+            // `InstalledPackage` (the protocol service returns `{ package }`
+            // straight out of `registry.installPackage`), so `=== false` is
+            // `!pkg.enabled` on every reachable row — the spelling only keeps a
+            // degenerate rowless return from writing a disable nobody asked for.
+            //
+            // ⛔ Deliberately NOT "enable first, so the declared default wins":
+            // that would make a flag-absent install RE-ENABLE a package an
+            // operator disabled in an earlier boot, which is a new behaviour no
+            // ruling authorises. What a seeded id does with `enableOnInstall:
+            // true` is therefore unchanged; what is fixed is that memory and
+            // disk no longer disagree about it.
+            //
+            // Same best-effort try/catch as `PATCH /packages/:id/enable` below:
+            // the in-memory install already succeeded, so a state-file failure
+            // must not turn a 201 into a 500.
+            const rowDisabled = pkg?.enabled === false;
+            try {
+                setPackageDisabled(_context?.environmentId, pkgId, rowDisabled);
+            } catch (err) {
+                console.warn('[handlePackages] failed to persist enableOnInstall', { id: pkgId, disabled: rowDisabled, error: (err as Error)?.message });
+            }
             const res = deps.success(pkg);
             res.status = 201;
             return { handled: true, response: res };
