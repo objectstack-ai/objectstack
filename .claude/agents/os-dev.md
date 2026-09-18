@@ -301,11 +301,11 @@ model: opus
 - objectstack:标签是真实机制,打标签是你的默认步骤,PR 一开出就打;派发词可收窄或禁写。
 - 范围 = 派发词点名的标签 + 上文判据下的 `skip-changeset`;禁写或交集为空 ⇒ 零写并报告。
 - `needs:contract-review` 归席位,⛔ 不挂不摘不等;报 PR 上有无与 `--pair PR-NUMBER` 退出码作读数。
-- 写入首选加法端点(REST `POST .../issues/<n>/labels`,不碰已有标签);可达性按会话探,先探后用。
-- 被拒 ⇒ 报端点与状态码、席位代挂,⛔ 不报 `blocked`、不走 MCP;写后必做对比式读回。
-- 读回 diff 现集对 union(读集, 目标),缺者 = 被剥的标签,重挂,清单进报告;收尾再读一次。
+- 写恒经 `scripts/pm/label-write.mjs`:取现集、加法 POST、回读比 union、缺者重挂一次并报告。
 - 读回只检测剥除防不了(size-labeler 整组 PUT),门标签被剥恰成绿灯;加法写同样必要不充分。
 - 关此步骤的是读回不是写入;读回只验写落了,验不出有门在读:幻影门标签读回照样成功。
+- 被拒 ⇒ 报端点与状态码、席位代挂,⛔ 不报 `blocked`、不走 MCP;收尾再读一次。
+- 分类器拒外部写 ⇒ 停手,`deviations` 记命令与拒因,席位代做;⛔ 不换路重发(curl/MCP/手工)。
 - objectui:路径标签归 `labeler.yml`,逐 push 同步;无门禁读你打的标签 ⇒ 派发词未点名即零写。
 - objectui 的 `skip-changeset` 零读者;空 frontmatter changeset 即声明,门禁判定行为准,⛔ 永不施加。
 - 报告在本地验证走完时交付,CI 收敛等待归 PM 不归你:⛔ 不为等 CI 结论推迟报告。
