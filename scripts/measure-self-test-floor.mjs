@@ -1557,7 +1557,17 @@ const AWAITED_BLOCK_GATE = [
  *   2. the same line inside a fixture TEMPLATE                -- MASKED
  *   3. an async IIFE returned MID-LINE, from a nested arrow   -- LINE-START
  *   4. an `await (async () => {` at statement level           -- not a RETURN
- *   5. a returned block inside an `if` branch                 -- DEPTH 0
+ *   5. a one-line guarded return, MID-LINE at depth 0         -- LINE-START
+ *   6. a returned block inside an `if` BRANCH, line-anchored  -- DEPTH 0
+ *
+ * Decoys 5 and 6 are what make each rule load-bearing ON ITS OWN, and they were
+ * added because the first fixture could not tell them apart: with only decoy 3,
+ * which is mid-line AND nested, deleting the LINE-START rule moved no verdict
+ * at all -- the depth rule covered for it, and an ablation of a real rule came
+ * back green. Decoy 5 is mid-line at depth 0, so only LINE-START excludes it;
+ * decoy 6 begins its line, so only DEPTH does. Both are branches that a
+ * normally-passing run never enters, which is why neither is the block whose
+ * statements run after the handshake.
  *
  * Then the real one. READ, never spawned.
  */
@@ -1574,6 +1584,7 @@ const INNER_ANCHOR_DECOY_GATE = [
   '`;',
   '  const held = () => { return (async () => { return FIXTURE.length; })(); };',
   '  await (async () => { void held; })();',
+  '  if (FIXTURE.length < 0) return (async () => { return 0; })();',
   '  if (FIXTURE.length < 1) {',
   '    return (async () => {',
   "      console.error('the fixture text went missing');",
@@ -1592,8 +1603,15 @@ const INNER_ANCHOR_DECOY_GATE = [
   '',
 ].join('\n');
 
-/** The decoy text the five decoys and the real block share, line-anchored. */
+/** The decoy text the six decoys and the real block share, line-anchored. */
 const INNER_ANCHOR_TEXT = 'return (async () => {';
+
+/**
+ * The block an UNANCHORED, DEPTH-BLIND reading takes -- kept here as the thing
+ * the controls measure against, never as a second implementation:
+ * `returnedBlockAnchor` does not use it.
+ */
+const NAIVE_INNER_ANCHOR = /return\s*\(\s*async\s*\(\s*\)\s*=>\s*\{/;
 
 /**
  * The SLOW gate, reduced: a self-test that outlasts the budget it is probed
@@ -2075,17 +2093,47 @@ export function runControls() {
   const literalBlock = INNER_ANCHOR_DECOY_GATE.indexOf(INNER_ANCHOR_TEXT, commentBlock + 1);
   const midLineBlock = INNER_ANCHOR_DECOY_GATE.indexOf('{ return (async () => { return FIXTURE.length');
   const awaitedBlock = INNER_ANCHOR_DECOY_GATE.indexOf('await (async () => { void held');
+  const guardedLine = INNER_ANCHOR_DECOY_GATE.indexOf('if (FIXTURE.length < 0) return (async');
+  const guardedBlock = INNER_ANCHOR_DECOY_GATE.indexOf(INNER_ANCHOR_TEXT, guardedLine);
   const branchBlock = INNER_ANCHOR_DECOY_GATE.indexOf(`    ${INNER_ANCHOR_TEXT}`);
   const realBlock = INNER_ANCHOR_DECOY_GATE.lastIndexOf(`\n  ${INNER_ANCHOR_TEXT}`) + 1;
   say(commentBlock >= 0 && literalBlock > commentBlock && midLineBlock > literalBlock
-    && awaitedBlock > midLineBlock && branchBlock > awaitedBlock && realBlock > branchBlock,
-    'CONTROL FIXTURE INVALID: the five second-point decoys no longer all stand AHEAD of the real returned block, so an anchor taking the first text that reads like one would reach it anyway and every verdict below passes for the wrong reason');
+    && awaitedBlock > midLineBlock && guardedBlock > awaitedBlock && branchBlock > guardedBlock
+    && realBlock > branchBlock,
+    'CONTROL FIXTURE INVALID: the six second-point decoys no longer all stand AHEAD of the real returned block, so an anchor taking the first text that reads like one would reach it anyway and every verdict below passes for the wrong reason');
   say(innerFlags.comment[commentBlock] === 1,
     'CONTROL FIXTURE INVALID: the first second-point decoy is not COMMENT content, so it no longer reads the comment half of the mask');
   say(innerFlags.literal[literalBlock] === 1,
     'CONTROL FIXTURE INVALID: the second second-point decoy is not LITERAL content, so it no longer reads the half whose failure makes the copy a SyntaxError and earns a false HELD');
   say(innerFlags.comment[midLineBlock] === 0 && innerFlags.literal[midLineBlock] === 0,
     'CONTROL FIXTURE INVALID: the MID-LINE decoy is masked away, so it reads the mask a second time instead of the LINE-START rule it is there for');
+  // ⛔ ... and the two decoys that ISOLATE the two rules. Without them an
+  // ablation of either one comes back green: each covers for the other on a decoy
+  // that is both mid-line and nested, and a rule nothing measures is a rule the
+  // next author deletes.
+  say(innerFlags.comment[guardedBlock] === 0 && innerFlags.literal[guardedBlock] === 0
+    && !/^[ \t]*return/.test(INNER_ANCHOR_DECOY_GATE.slice(guardedLine, guardedBlock + 1).split('\n').pop() ?? ''),
+    'CONTROL FIXTURE INVALID: the one-line GUARDED return is masked away or no longer mid-line, so the LINE-START rule has nothing isolating it and deleting that rule moves no verdict');
+  // Depth is read the way the anchor reads it: over the MASKED body, from the
+  // definition's own `{`. Counted over raw text it would be a different number
+  // -- every brace in the fixture template and the comments is still there.
+  const innerBody = definitionSpan(innerMasked, 'selfTest');
+  const depthAt = (end) => {
+    let depth = 0;
+    for (let i = innerBody.at; i < end; i += 1) {
+      if (innerMasked[i] === '{') depth += 1;
+      else if (innerMasked[i] === '}') depth -= 1;
+    }
+    return depth;
+  };
+  say(innerBody !== null && depthAt(guardedBlock) === 0,
+    'CONTROL FIXTURE INVALID: the one-line guarded return is no longer at the self-test body\'s own depth, so the DEPTH rule would exclude it too and the LINE-START rule is again unmeasured');
+  say(depthAt(branchBlock) === 1
+    && INNER_ANCHOR_DECOY_GATE[branchBlock - 1] === '\n'
+    && /^[ \t]*return/.test(INNER_ANCHOR_DECOY_GATE.slice(branchBlock, branchBlock + 30)),
+    'CONTROL FIXTURE INVALID: the `if` BRANCH decoy is no longer a line-anchored return one level deep, so the DEPTH rule has nothing isolating it and deleting that rule moves no verdict');
+  say(innerMasked.search(NAIVE_INNER_ANCHOR) < guardedBlock && innerMasked.search(NAIVE_INNER_ANCHOR) < realBlock,
+    'CONTROL FIXTURE INVALID: an unanchored, depth-blind reading no longer lands on a DECOY ahead of the real block, so neither rule is what the anchor verdict below is reading');
   say(returnedBlockAnchor(innerMasked, 'selfTest') === INNER_ANCHOR_DECOY_GATE.indexOf('{', realBlock) + 1,
     `INNER ANCHOR CONTROL FAILED: the second injection point did not land on the block the self-test RETURNS at its own statement level (got ${returnedBlockAnchor(innerMasked, 'selfTest')}, want ${INNER_ANCHOR_DECOY_GATE.indexOf('{', realBlock) + 1}); a comment, a fixture template, a mid-line IIFE, an awaited block or an \`if\` branch was preferred over it`);
   say(injectEarlyReturn(INNER_ANCHOR_DECOY_GATE, 'selfTest', { point: 'inner' })
