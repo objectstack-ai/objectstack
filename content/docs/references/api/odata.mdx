@@ -57,13 +57,13 @@ GET /api/odata/customers?
 **Programmatic Use**
 ```typescript
 const query: ODataQuery = {
-  select: ['name', 'email'],
-  filter: "country eq 'US' and revenue gt 100000",
-  orderby: 'revenue desc',
-  top: 10,
-  skip: 20,
-  expand: ['orders'],
-  count: true
+  $select: ['name', 'email'],
+  $filter: "country eq 'US' and revenue gt 100000",
+  $orderby: 'revenue desc',
+  $top: 10,
+  $skip: 20,
+  $expand: ['orders'],
+  $count: true
 }
 ```
 
