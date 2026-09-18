@@ -632,13 +632,10 @@ describe('ScheduleTrigger — switched ON under `single` (#17396)', () => {
     });
 });
 
-describe('ScheduleTrigger — switched ON under a wall (#17396)', () => {
-    withScheduledWorkOn('group');
+describe('ScheduleTrigger — switched ON under `isolated` (#17396)', () => {
+    withScheduledWorkOn('isolated');
 
-    it('`group` is walled: an undeclared flow is refused there too', () => {
-        // Ruled explicitly — 「group 默认也关」 for the default, and `group`
-        // behaves as walled while the question of which organization a
-        // group-wide sweep's inserts belong to is unanswered.
+    it('an undeclared flow is refused', () => {
         const job = fakeJobService();
         const trigger = new ScheduleTrigger(() => job.service, silentLogger());
         expect(() =>
@@ -652,5 +649,86 @@ describe('ScheduleTrigger — switched ON under a wall (#17396)', () => {
         const trigger = new ScheduleTrigger(() => job.service, silentLogger());
         trigger.start(binding(), async () => {});
         expect(job.jobs.size).toBe(1);
+    });
+});
+
+/**
+ * [#18378, ruling A′] ⚠️ RETIRED PIN, replaced rather than deleted.
+ *
+ * This block used to be `ScheduleTrigger — switched ON under a wall` with
+ * `withScheduledWorkOn('group')` and a case named "`group` is walled: an
+ * undeclared flow is refused there too". Its reason was explicit and is quoted
+ * here so the reversal is legible rather than looking like an erosion: `group`
+ * behaved as walled *while the question of which organization a group-wide
+ * sweep's inserts belong to was unanswered*. That question is answered now —
+ * the swept record's own — so the condition the old pin rested on is gone.
+ *
+ * The `isolated` half above is that pin, kept whole: nothing about `isolated`
+ * was reopened, and the refusal it asserts is byte-identical.
+ */
+describe('ScheduleTrigger — switched ON under `group` (#18378)', () => {
+    withScheduledWorkOn('group');
+
+    it('an undeclared flow BINDS — it is not refused, and the job is armed', async () => {
+        const job = fakeJobService();
+        const trigger = new ScheduleTrigger(() => job.service, silentLogger());
+        expect(() =>
+            trigger.start(binding({ organization: undefined, config: {} }), async () => {}),
+        ).not.toThrow();
+        await flush();
+        expect(job.jobs.size).toBe(1);
+    });
+
+    it('…and its run carries NO organization — a cron flow has no record to derive one from', async () => {
+        // The half that keeps A′ apart from the rejected option A. `group`
+        // binding without a declaration does NOT mean the run acquires an
+        // organization from somewhere: a plain `schedule` flow sweeps nothing,
+        // so there is nothing to derive, and the key is OMITTED. The write that
+        // needs one is refused downstream by the tenancy guard, which is the
+        // loud failure A′ chose over a bootstrap-organization fallback.
+        const job = fakeJobService();
+        const trigger = new ScheduleTrigger(() => job.service, silentLogger());
+        const seen: AutomationContext[] = [];
+
+        trigger.start(binding({ organization: undefined, config: {} }), async (ctx) => void seen.push(ctx));
+        await flush();
+        await job.fire('flow-schedule:nightly_health_sweep');
+
+        expect(seen).toHaveLength(1);
+        // Same `in` spelling as the `single` pin above, and for the same
+        // reason: a present-but-undefined key is a different thing to every
+        // consumer that asks `in`.
+        expect('tenantId' in seen[0], 'no tenantId key at all').toBe(false);
+    });
+
+    it('⛔ and it still never invents one — no bootstrap organization, no first row', async () => {
+        // The rejected arm of the card, pinned NEGATIVELY so a later edit that
+        // "helpfully" adds a fallback fails here by name.
+        const job = fakeJobService();
+        const trigger = new ScheduleTrigger(() => job.service, silentLogger());
+        const seen: AutomationContext[] = [];
+        const orgLessBinding = binding({ organization: undefined, config: {} });
+
+        expect(resolveBindingOrganization(orgLessBinding)).toBeNull();
+        trigger.start(orgLessBinding, async (ctx) => void seen.push(ctx));
+        await flush();
+        await job.fire('flow-schedule:nightly_health_sweep');
+
+        expect(seen[0]?.tenantId).toBeUndefined();
+    });
+
+    it('a DECLARED flow under `group` still acts as its declaration', async () => {
+        // `group` removes the REQUIREMENT, not the capability — the same
+        // sentence the `single` block records, and the reason the declaration
+        // outranks per-record ownership everywhere below.
+        const job = fakeJobService();
+        const trigger = new ScheduleTrigger(() => job.service, silentLogger());
+        const seen: AutomationContext[] = [];
+
+        trigger.start(binding(), async (ctx) => void seen.push(ctx));
+        await flush();
+        await job.fire('flow-schedule:nightly_health_sweep');
+
+        expect(seen[0]?.tenantId).toBe('org_2mtx1w9d0k4bqf7v');
     });
 });

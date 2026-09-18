@@ -2,10 +2,45 @@
   "extends": "../../../tsconfig.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": "./src",
+    // [#18378] Widened from `./src` as a CONSEQUENCE of the `paths` rule
+    // below — the same move `packages/plugins/plugin-approvals` records for
+    // #10101 and `packages/rest` for #9960, and for the same mechanical
+    // reason: redirecting `@objectstack/metadata-core` to source puts
+    // `packages/metadata-core/src/**` into this program, and `rootDir` is
+    // enforced over every program file even under `--noEmit` (TS6059).
+    // `../..` is the directory that genuinely contains every file in the
+    // program. Emit is unaffected: this package builds with tsup and
+    // `typecheck` passes `--noEmit`.
+    //
+    // ⚠️ MEASURED before taking this route, because it is not always
+    // available: `tsc --noEmit` here reports **0** TS6059 with both lines in
+    // place. That measurement is the precondition the gate's failure text
+    // names — where it does NOT hold (`service-automation` measured 647
+    // TS6059 for its own case) `paths` is ruled out and the dependency has to
+    // be reached another way.
+    "rootDir": "../..",
     "types": [
       "node"
-    ]
+    ],
+    // [#18378] Resolve the shared record→organization resolver to SOURCE for
+    // `tsc --noEmit`, so this package's typecheck is a verdict about the
+    // checkout rather than about `metadata-core/dist` build state
+    // (`pnpm check:type-source-resolution`). The time-relative sweep reads
+    // per-record acting organizations through its WALL face, and the precedence
+    // that implements (`tenancy.enabled: false` ⇒ nothing, then a declared
+    // `tenancy.tenantField`, then the kernel's `organization_id`) is exactly
+    // what the `group` pins hold.
+    //
+    // ⛔ NOT an entry in that gate's registry. Widening it is maintainer-only:
+    // this package's `@objectstack/types` row was admitted by maintainer
+    // ruling on #17396 and its docblock says in as many words that the row is
+    // a signature and not a door. `paths` is the self-serve route, and the
+    // measurement above is what makes it available.
+    "paths": {
+      "@objectstack/metadata-core": [
+        "../../metadata-core/src/index.ts"
+      ]
+    }
   },
   "include": [
     "src/**/*"
