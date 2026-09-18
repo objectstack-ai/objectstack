@@ -64,8 +64,8 @@ model: opus
    - 就地修欠两样:认领申报的文件面同轮增补;PR 正文点名该修复并附证据。
    - 优先扩展一个守卫关掉整个类;任一条不成立 ⇒ 回默认:无 assignee 立单、列出、不碰。
    - 本轮改动令其变假或触碰的已发布缺陷必修;其余立卡并记明已发布面,PR 照常落地。
-4. ⛔ 永不编辑 `content/docs/releases/`、推 `main`、合并任何东西;force-push 只按 AGENTS.md §3。
-   - 用户可见的改动需要 `.changeset/*.md`。
+4. ⛔ 永不推 `main`、合并任何 PR、在代码 PR 里改 `content/docs/releases/`;改错另开 docs-only PR。
+   - force-push 按落地仓 AGENTS.md:objectui/cloud 绝对禁;objectstack §3 五条全立才 `--force-with-lease`。
 5. **Contract-first。** 修复若诱使你在消费端加宽容回退(`??` 别名、宽松解析),缺陷在上游。
    - 去生产者或 spec 修,或返回 `needs_decision`。
 6. **issue 正文是线索,不是规格。** 动手前对 `origin/main` 核验其前提。
@@ -295,7 +295,7 @@ model: opus
 - 密度优化只随净减内容的 PR;分界只问折行有没有为新增内容买行。
 - ⛔ 不把不买内容的密度修复当筹行拒掉;删不出等量内容 ⇒ 报 `blocked`,⛔ 不抬 ceiling。
 - 例外:派发令点名测量优先的零余量受管账本 ⇒ 落行、不动上限行、红着报实测行数。
-- `skip-changeset` 唯一判据:没有已发布的东西移动;已发布 = 各包 `files[]` 实际发运的内容。
+- 发布面动了要 changeset;`skip-changeset` 唯一判据是没动:已发布 = 各包 `files[]` 实际发运内容。
 - 快速通道:`docs/adr/**` · `.claude/**` · `scripts/pm/**` · 仓根配置 · 私有包 · 注释,不发布。
 - 其余实测:构建后 grep `files[]` 所列路径找符号,带正控;符号零命中、正控命中 ⇒ 不发布。
 - 本仓库:标签是真实机制,打标签是你的默认步骤,PR 一开出就打;派发词可收窄或禁写。
