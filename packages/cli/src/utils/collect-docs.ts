@@ -916,13 +916,24 @@ function bodyDocsOf(packages: unknown, index: number): DocItem[] {
  * The ONE rule the per-package split cannot enforce inside a single package:
  * a doc name declared by two different owners.
  *
- * Doc uniqueness is logical — the metadata registry key carries no package
- * coordinate — so two owners declaring one name means one silently overwrites
- * the other at registration. `lintDocs` catches the collision WITHIN a set; the
- * moment the lint runs per package (the ruling's clause 2) nothing else is
- * looking across them, and ADR-0130 D1 makes the cross-set case reachable on
- * purpose: N packages of one artifact may share one namespace, so their
- * prefixes do not keep them apart.
+ * This rule PRESERVES a refusal, it does not add one. Before the split every
+ * doc reached `lintDocs` in ONE flattened array — the composed top level is the
+ * concat of every package's docs — so two owners declaring one name were two
+ * entries in one set and `docs/duplicate-name` already fired. Splitting the set
+ * per package (the ruling's clause 2) would have dropped that refusal silently,
+ * and ADR-0130 D1 makes the case reachable on purpose: N packages of one
+ * artifact may share one namespace, so their prefixes do not keep them apart.
+ *
+ * ⚠️ The REASON is authoring hygiene, and ⛔ deliberately not "one silently
+ * overwrites the other at registration". That sentence is this module's older
+ * framing and ADR-0048 retired it: packaged items are stored under a composite
+ * `<packageId>:<name>` key and resolution is package-scoped, so two distinct
+ * packages coexist on one bare name by construction (§3.3, §3.4 — "the
+ * cross-package throw is retired"). What survives there is exactly what this
+ * is: an authoring-time hygiene lint. ⚠️ That `os build` refuses the shape at
+ * all is a standing disagreement with ADR-0048 §3.4 which PREDATES this card
+ * and is filed rather than changed here — ⛔ relaxing a refusal that shipped is
+ * not a rider on a widening.
  */
 function lintDocNamesAcrossOwners(
   sets: ReadonlyArray<{ label: string; docs: readonly DocItem[] }>,
@@ -944,7 +955,7 @@ function lintDocNamesAcrossOwners(
     issues.push({
       severity: 'error',
       rule: 'docs/duplicate-name',
-      message: `Doc name "${name}" is declared by ${labels.join(' and ')}. Doc names are one flat namespace across the whole artifact (the metadata registry key carries no package coordinate), so one of these silently overwrites the other at registration — rename one.`,
+      message: `Doc name "${name}" is declared by ${labels.join(' and ')}. One artifact may not ship one doc name twice — rename one. Doc names are namespace-prefixed for authoring hygiene, and ADR-0130 D1 lets packages of one artifact SHARE a namespace, so the prefix does not keep these apart.`,
       path: `docs/${name}`,
     });
   }
