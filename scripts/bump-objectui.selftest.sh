@@ -84,7 +84,10 @@ case_begin() { CASE="$1"; echo "  • ${CASE}"; }
 # case 5 failed on the refusal's wording instead. (⚠️ `bump-objectui.sh` itself
 # is NOT at fault and is not to be touched for this: it swallows no stderr, and
 # its `WALK_RC` branch already separates a verdict from a no-answer and refuses
-# to offer `--unshallow` for a crash. See #18354 for what IS carded.) The
+# to offer `--unshallow` for a crash. What WAS at fault was this file, and it
+# is fixed below: `check_walkable` keeps the child's stderr and
+# `walk_answered` forks on the same 2-or-3 criterion, so a probe that never
+# answered is no longer reported as a verdict about the objectui range.) The
 # derivation lives in `first-party-closure.mjs`, shared with the JS sites.
 #
 # ⚠️ THE BASENAME IS SPELLED ALONE AND THE DIRECTORY IS INTERPOLATED ONTO IT —
@@ -291,6 +294,51 @@ run_bump() {
 
 log_has() { grep -qF -- "$1" "$LOG"; }
 
+# --- the walkability probe, and the ONE criterion for reading its exit -------
+#
+# THE PROBE'S STDERR IS THE ONLY DIAGNOSTIC IT EMITS. `--check-walkable`
+# derives nothing and prints nothing on stdout — the digest's own self-test
+# asserts that emptiness — so everything it has to say arrives on stderr: a
+# real verdict's explanation, and equally a crash's `ERR_MODULE_NOT_FOUND`.
+# Both call sites below used to send stderr to the bit bucket along with
+# stdout, which threw the only clue away before anyone could read it.
+#
+# ⭐ AND A NON-ZERO EXIT IS NOT AUTOMATICALLY A VERDICT ABOUT THE RANGE.
+# `bump-objectui.sh` already forks on exactly this, and the criterion is taken
+# from there rather than re-invented, so the two cannot drift into two
+# different ideas of what "the range does not walk" means: 2 and 3 are the
+# probe's two VERDICTS (2 = an endpoint is missing, 3 = the endpoints are here
+# but the history stops inside the range); any other non-zero exit means it
+# never reached one — no node, a missing module, a syntax error, a killed
+# process. Reporting that as "the range does not walk" is a confident, wrong
+# diagnosis pointing at another subsystem, and it has cost a round already
+# (#16421): a new import made the digest die, the wording sent that dev to
+# investigate shallow clones and `fetch --unshallow`, and the real cause was a
+# copy manifest three directories away. Their report calls it the longest part
+# of the round.
+WALK_ERR=""
+check_walkable() {
+  local oui="$1" from="$2" to="$3" rc=0
+  WALK_ERR="${TMPROOT}/walk-$$-${RANDOM}.err"
+  node "$DIGEST_SCRIPT" --objectui-root "$oui" --from "$from" --to "$to" \
+    --check-walkable >/dev/null 2>"$WALK_ERR" || rc=$?
+  return "$rc"
+}
+
+# True for the probe's two verdicts, false for every "it never answered" exit.
+walk_answered() { [[ "$1" -eq 2 || "$1" -eq 3 ]]; }
+
+# Replay the child's stderr BEFORE the `bad` that reports it, so the failure
+# carries its evidence instead of only pointing somewhere.
+walk_replay_stderr() {
+  echo "      ↳ the walkability probe's own stderr:" >&2
+  if [[ -s "$WALK_ERR" ]]; then
+    sed 's#^#      | #' "$WALK_ERR" >&2
+  else
+    echo "      | (nothing — the probe wrote no stderr at all)" >&2
+  fi
+}
+
 # --- case 1: unreadable commit object ⇒ refusal, pin file untouched ----------
 case_1() {
   case_begin 'unreadable commit object ⇒ refuses, .objectui-sha byte-identical'
@@ -421,10 +469,14 @@ case_5() {
   new_framework_with_digest "$fw" "$old_sha"
 
   local walk_rc=0
-  node "$DIGEST_SCRIPT" --objectui-root "$oui" --from "$old_sha" --to "$new_sha" \
-    --check-walkable >/dev/null 2>&1 || walk_rc=$?
+  check_walkable "$oui" "$old_sha" "$new_sha" || walk_rc=$?
   if [[ "$walk_rc" -ne 0 ]]; then
-    bad "fixture: the range does not walk BEFORE breaking the blob (rc=${walk_rc}) — not this card's state"
+    walk_replay_stderr
+    if walk_answered "$walk_rc"; then
+      bad "fixture: the range does not walk BEFORE breaking the blob (rc=${walk_rc}) — not this card's state"
+    else
+      bad "fixture: the walkability probe never ANSWERED before the blob was broken (exit ${walk_rc}; its verdicts are 2 and 3) — this says nothing about the objectui range; read the probe's stderr above"
+    fi
     return 0
   fi
 
@@ -433,12 +485,16 @@ case_5() {
   # Re-assert walkability AFTER breaking the blob — the whole point of this
   # case is that the commit/tree walk stays green while the blob read fails.
   walk_rc=0
-  node "$DIGEST_SCRIPT" --objectui-root "$oui" --from "$old_sha" --to "$new_sha" \
-    --check-walkable >/dev/null 2>&1 || walk_rc=$?
+  check_walkable "$oui" "$old_sha" "$new_sha" || walk_rc=$?
   if [[ "$walk_rc" -eq 0 ]]; then
     ok 'fixture: --check-walkable still exits 0 after the blob is deleted (walk is commits/trees, not blobs)'
   else
-    bad "fixture: --check-walkable now exits ${walk_rc} — the blob deletion broke the WALK, not just the blob read"
+    walk_replay_stderr
+    if walk_answered "$walk_rc"; then
+      bad "fixture: --check-walkable now exits ${walk_rc} — the blob deletion broke the WALK, not just the blob read"
+    else
+      bad "fixture: the walkability probe never ANSWERED after the blob deletion (exit ${walk_rc}; its verdicts are 2 and 3) — the WALK is UNMEASURED here, not broken; read the probe's stderr above"
+    fi
     return 0
   fi
 
