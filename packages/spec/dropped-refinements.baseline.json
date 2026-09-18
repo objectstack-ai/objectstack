@@ -4,7 +4,7 @@
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 200,
     "droppedRefinementSites": 551,
-    "refinementSitesThatDidProject": 369,
+    "refinementSitesThatDidProject": 357,
     "refinementSitesWithNoJsonFormToCompare": 9
   },
   "entries": {

@@ -174,6 +174,12 @@ function emitDependentRequired(
  * trade the rule this arm adds for the key-type rule the node already stated.
  * An identical rule already present is left alone rather than duplicated, so
  * the arm is idempotent the way `emitNonBlankString` is.
+ *
+ * An EMPTY key list emits nothing, and the reason is stronger than "it would
+ * ban nothing": `enum` is specified as a non-empty array, so `{ not: { enum:
+ * [] } }` is an INVALID SCHEMA rather than a vacuous one — ajv refuses it with
+ * "enum must have non-empty array", which would take the whole published file
+ * down with it instead of leaving a keyword nobody reads.
  */
 function emitBannedKeys(jsonSchema: JsonObject, keys: readonly string[]): void {
   if (keys.length === 0) return;

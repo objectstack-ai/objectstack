@@ -528,7 +528,11 @@ describe('banned-keys: one key list, read twice', () => {
     expect(node.allOf).toEqual([{ propertyNames: { not: { enum: ['dialect'] } } }]);
   });
 
-  it('drops an empty key list rather than publishing a rule that bans nothing', () => {
+  it('drops an empty key list \u2014 `enum: []` is an INVALID schema, not a vacuous one', () => {
+    // ⛔ Not "it would ban nothing": `enum` is specified as a non-empty array,
+    // so `{ not: { enum: [] } }` fails validator schema-compilation outright
+    // (ajv: "enum must have non-empty array") and would take the whole
+    // published file down rather than sit there unread.
     const node: Record<string, unknown> = { type: 'object' };
     emitProjectableRefinement(node, { pattern: 'banned-keys', keys: [] });
     expect(node).toEqual({ type: 'object' });
@@ -582,13 +586,21 @@ describe('banned-keys: one key list, read twice', () => {
 });
 
 describe("the LIVE seam: the card's own worked instance stops saying yes", () => {
-  /** The published structured-filter arm of `TraceSamplingConfig.composite[].condition`. */
-  const structuredFilterArm = (): Record<string, unknown> => {
-    const node = publish(TraceSamplingConfigSchema, 'input');
+  /**
+   * The published `TraceSamplingConfig.composite[].condition` node.
+   *
+   * ⭐ It is the node ITSELF, not a union arm. #18118 retired this slot's CEL
+   * expression arm (PR #19084), so the union collapsed to the structured-filter
+   * record it always had beside it — which is why the ban lands directly on
+   * `condition` and is still conjoined through `allOf`: a record states its own
+   * `propertyNames: { type: 'string' }`, and that key-TYPE rule is not the one
+   * this arm adds.
+   */
+  const conditionNode = (): Record<string, unknown> => {
+    const node = publish(TraceSamplingConfigSchema);
     const composite = (node.properties as Record<string, Record<string, unknown>>).composite;
     const item = composite.items as Record<string, Record<string, Record<string, unknown>>>;
-    const condition = item.properties.condition as unknown as Record<string, unknown>;
-    return (condition.anyOf as Record<string, unknown>[])[0];
+    return item.properties.condition as unknown as Record<string, unknown>;
   };
 
   /** A `TraceSamplingConfig` that parses, with only `condition` varying. */
@@ -599,27 +611,29 @@ describe("the LIVE seam: the card's own worked instance stops saying yes", () =>
     }).success;
 
   it('states the ban, and keeps the record shape it always stated', () => {
-    const arm = structuredFilterArm();
-    expect(arm.type).toBe('object');
-    expect(arm.propertyNames).toEqual({ type: 'string' });
-    expect(arm.allOf).toEqual([{ propertyNames: { not: { enum: ['dialect'] } } }]);
+    const node = conditionNode();
+    expect(node.type).toBe('object');
+    expect(node.propertyNames).toEqual({ type: 'string' });
+    expect(node.allOf).toEqual([{ propertyNames: { not: { enum: ['dialect'] } } }]);
   });
 
   it("the card's own specimen — `{ dialect: 'cel' }` — is refused by BOTH sides now", () => {
     const doc = JSON.parse('{"dialect":"cel"}') as Record<string, unknown>;
     expect(parses(doc)).toBe(false);
-    expect(bannedKeysSatisfied(structuredFilterArm(), doc)).toBe(false);
+    expect(bannedKeysSatisfied(conditionNode(), doc)).toBe(false);
   });
 
-  it('⛔ no document this arm ACCEPTS is refused by the emitted keywords', () => {
-    const arm = structuredFilterArm();
-    const rule = bannedKeys(['dialect']);
+  it('⛔ the runtime and the emitted keywords agree on every document in the corpus', () => {
+    const node = conditionNode();
     const corpus: Array<Record<string, unknown>> = [
       {},
       { amount: { $gt: 1 } },
-      { 'account.name': { $eq: 'acme' } },
+      { service: 'api', attributes: { 'http.route': '/v1/orders' } },
       { dialect: 'cel' },
       { dialect: null },
+      // Since #18118 retired the expression arm, a healthy CEL envelope is
+      // refused at this slot too — so the two sides agree here as well, where
+      // before the retirement the union's other arm accepted it.
       { dialect: 'cel', source: 'record.amount > 10' },
     ];
     for (const doc of corpus) {
@@ -627,37 +641,23 @@ describe("the LIVE seam: the card's own worked instance stops saying yes", () =>
       // Equality, not implication: this arm is exact, so a one-sided pin would
       // pass a projection that had stopped narrowing at all.
       expect(
-        bannedKeysSatisfied(arm, asJson),
+        bannedKeysSatisfied(node, asJson),
         `disagreement on ${JSON.stringify(asJson)}`,
-      ).toBe(rule(asJson));
+      ).toBe(parses(asJson));
     }
-  });
-
-  it('⛔ and the EXPRESSION the runtime still accepts is still accepted by the file', () => {
-    // The union's other arm is what carries a dialect-bearing document, so
-    // narrowing the structured-filter arm refuses nothing the runtime accepts.
-    const doc = { dialect: 'cel', source: 'record.amount > 10' };
-    expect(parses(doc)).toBe(true);
-    const node = publish(TraceSamplingConfigSchema, 'input');
-    const composite = (node.properties as Record<string, Record<string, unknown>>).composite;
-    const item = composite.items as Record<string, Record<string, Record<string, unknown>>>;
-    const condition = item.properties.condition as unknown as Record<string, unknown>;
-    const envelope = (condition.anyOf as Record<string, unknown>[])[1];
-    const objectArm = (envelope.anyOf as Record<string, unknown>[])[1];
-    expect(objectArm.required).toEqual(['dialect', 'source']);
   });
 
   it('LIT CONTROL — a structured filter with no `dialect` is accepted by both', () => {
     const doc = JSON.parse('{"amount":{"$gt":10}}') as Record<string, unknown>;
     expect(parses(doc)).toBe(true);
-    expect(bannedKeysSatisfied(structuredFilterArm(), doc)).toBe(true);
+    expect(bannedKeysSatisfied(conditionNode(), doc)).toBe(true);
   });
 
   it('its ledger row is gone because the site now reads `projected`, naming the arm', () => {
     const census = collectDroppedRefinements('system/TraceSamplingConfig', TraceSamplingConfigSchema);
-    const site = census.projected.find((s) => s.path === 'composite.element.condition.options[0]');
+    const site = census.projected.find((s) => s.path === 'composite.element.condition');
     expect(site?.declaredPatterns).toEqual(['banned-keys']);
-    expect(census.dropped.map((s) => s.path)).not.toContain('composite.element.condition.options[0]');
+    expect(census.dropped).toEqual([]);
   });
 });
 
