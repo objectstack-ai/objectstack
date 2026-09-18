@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { ExpressionInputSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
@@ -290,7 +290,7 @@ export const HookSchema = lazySchema(() => strictObject(
    * 
    * @example "record.status == 'closed' && record.amount > 1000"
    */
-  condition: ExpressionInputSchema.optional().describe('Predicate (CEL); hook runs only when TRUE. e.g. P`record.status == "closed" && record.amount > 1000`'),
+  condition: EvaluatedExpressionInputSchema.optional().describe('Predicate (CEL); hook runs only when TRUE. e.g. P`record.status == "closed" && record.amount > 1000`'),
 
   /**
    * Human-readable description

@@ -152,7 +152,7 @@ Compatibility level between versions
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Routing predicate (CEL). |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | ✅ | Routing predicate (CEL). |
 | **version** | `string` | ✅ | Version to use when condition matches |
 | **priority** | `integer` | optional (default: `100`) | Rule priority |
 

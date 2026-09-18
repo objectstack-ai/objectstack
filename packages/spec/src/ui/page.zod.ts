@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
-import { ExpressionInputSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { normalizeVisibleWhen } from '../shared/visibility';
 import { VISIBILITY_ONLY_STRICT_OPTIONS } from '../shared/editability-boundary';
 import { SortItemSchema } from '../shared/enums.zod';
@@ -387,9 +387,9 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    * the record **ROW** instead. Same key name, two bindings; see that key's own
    * describe in `component.zod.ts` rather than assuming this one carries over.
    */
-  visibleWhen: ExpressionInputSchema.optional().describe("Visibility predicate (CEL) — component rendered only when TRUE. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user` — one object, three spellings), and page state as `page.<var>`. The shipping renderer additionally mounts `features`, `os.user` and binds `data` to the data-source ADAPTER here — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). ⚠️ `data` is surface-dependent: on a `page:tabs` item `visibleWhen` it is the record ROW instead. e.g. \"page.selectedProjectId != ''\""),
+  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Visibility predicate (CEL) — component rendered only when TRUE. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user` — one object, three spellings), and page state as `page.<var>`. The shipping renderer additionally mounts `features`, `os.user` and binds `data` to the data-source ADAPTER here — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). ⚠️ `data` is surface-dependent: on a `page:tabs` item `visibleWhen` it is the record ROW instead. e.g. \"page.selectedProjectId != ''\""),
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
-  visibility: ExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
+  visibility: EvaluatedExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
 
   /** Per-element data binding, overrides page-level object context */
   dataSource: ElementDataSourceSchema.optional().describe('Per-element data binding for multi-object pages'),

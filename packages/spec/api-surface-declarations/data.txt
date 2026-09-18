@@ -774,7 +774,7 @@ declare const ConditionalValidationSchema: z.ZodObject<{
     type: z.ZodLiteral<"conditional">;
     when: z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
         dialect: "cel" | "cron" | "template";
-        source?: string | undefined;
+        source: string;
         ast?: unknown;
         meta?: {
             rationale?: string | undefined;
@@ -786,12 +786,12 @@ declare const ConditionalValidationSchema: z.ZodObject<{
             cron: "cron";
             template: "template";
         }>;
-        source: z.ZodOptional<z.ZodString>;
         ast: z.ZodOptional<z.ZodUnknown>;
         meta: z.ZodOptional<z.ZodObject<{
             rationale: z.ZodOptional<z.ZodString>;
             generatedBy: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;
+        source: z.ZodString;
     }, z.core.$strip>]>;
     then: z.ZodType<BaseValidationRuleShape, BaseValidationRuleShape, z.core.$ZodTypeInternals<BaseValidationRuleShape, BaseValidationRuleShape>>;
     otherwise: z.ZodOptional<z.ZodType<BaseValidationRuleShape, BaseValidationRuleShape, z.core.$ZodTypeInternals<BaseValidationRuleShape, BaseValidationRuleShape>>>;
@@ -869,7 +869,7 @@ declare const CrossFieldValidationSchema: z.ZodObject<{
     type: z.ZodLiteral<"cross_field">;
     condition: z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
         dialect: "cel" | "cron" | "template";
-        source?: string | undefined;
+        source: string;
         ast?: unknown;
         meta?: {
             rationale?: string | undefined;
@@ -881,12 +881,12 @@ declare const CrossFieldValidationSchema: z.ZodObject<{
             cron: "cron";
             template: "template";
         }>;
-        source: z.ZodOptional<z.ZodString>;
         ast: z.ZodOptional<z.ZodUnknown>;
         meta: z.ZodOptional<z.ZodObject<{
             rationale: z.ZodOptional<z.ZodString>;
             generatedBy: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;
+        source: z.ZodString;
     }, z.core.$strip>]>;
     fields: z.ZodArray<z.ZodString>;
     _lock: z.ZodOptional<z.ZodEnum<{
@@ -6455,7 +6455,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -6470,7 +6470,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -6479,7 +6479,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -6503,7 +6503,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -6527,7 +6527,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -6573,7 +6573,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -6582,7 +6582,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -6645,7 +6645,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -6660,7 +6660,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -6669,7 +6669,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -6693,7 +6693,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -6717,7 +6717,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -6763,7 +6763,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -6772,7 +6772,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -6835,7 +6835,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -6850,7 +6850,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -6859,7 +6859,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -6883,7 +6883,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -6907,7 +6907,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -6953,7 +6953,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -6962,7 +6962,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -7025,7 +7025,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -7040,7 +7040,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7049,7 +7049,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7073,7 +7073,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7097,7 +7097,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7143,7 +7143,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -7152,7 +7152,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -7215,7 +7215,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -7230,7 +7230,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7239,7 +7239,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7263,7 +7263,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7287,7 +7287,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7333,7 +7333,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -7342,7 +7342,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -7405,7 +7405,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -7420,7 +7420,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7429,7 +7429,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7453,7 +7453,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7477,7 +7477,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7523,7 +7523,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -7532,7 +7532,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -7595,7 +7595,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -7610,7 +7610,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7619,7 +7619,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7643,7 +7643,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7667,7 +7667,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7713,7 +7713,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -7722,7 +7722,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -7785,7 +7785,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -7800,7 +7800,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7809,7 +7809,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7833,7 +7833,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7857,7 +7857,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7903,7 +7903,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -7912,7 +7912,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -7975,7 +7975,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -7990,7 +7990,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7999,7 +7999,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8023,7 +8023,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8047,7 +8047,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8093,7 +8093,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -8102,7 +8102,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -8165,7 +8165,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -8180,7 +8180,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8189,7 +8189,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8213,7 +8213,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8237,7 +8237,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8283,7 +8283,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -8292,7 +8292,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -8355,7 +8355,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -8370,7 +8370,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8379,7 +8379,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8403,7 +8403,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8427,7 +8427,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8473,7 +8473,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -8482,7 +8482,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -8545,7 +8545,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -8560,7 +8560,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8569,7 +8569,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8593,7 +8593,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8617,7 +8617,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8663,7 +8663,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -8672,7 +8672,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -8735,7 +8735,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -8750,7 +8750,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8759,7 +8759,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8783,7 +8783,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8807,7 +8807,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8853,7 +8853,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -8862,7 +8862,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -8925,7 +8925,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -8940,7 +8940,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8949,7 +8949,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8973,7 +8973,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8997,7 +8997,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9043,7 +9043,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -9052,7 +9052,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -9115,7 +9115,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -9130,7 +9130,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9139,7 +9139,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9163,7 +9163,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9187,7 +9187,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9233,7 +9233,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -9242,7 +9242,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -9305,7 +9305,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -9320,7 +9320,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9329,7 +9329,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9353,7 +9353,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9377,7 +9377,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9423,7 +9423,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -9432,7 +9432,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -9495,7 +9495,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -9510,7 +9510,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9519,7 +9519,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9543,7 +9543,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9567,7 +9567,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9613,7 +9613,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -9622,7 +9622,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -9708,7 +9708,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -9723,7 +9723,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9732,7 +9732,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9756,7 +9756,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9780,7 +9780,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9826,7 +9826,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -9835,7 +9835,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -9898,7 +9898,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -9913,7 +9913,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9922,7 +9922,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9946,7 +9946,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9970,7 +9970,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10016,7 +10016,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -10025,7 +10025,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -10088,7 +10088,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -10103,7 +10103,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10112,7 +10112,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10136,7 +10136,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10160,7 +10160,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10206,7 +10206,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -10215,7 +10215,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -10278,7 +10278,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -10293,7 +10293,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10302,7 +10302,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10326,7 +10326,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10350,7 +10350,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10396,7 +10396,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -10405,7 +10405,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -10474,7 +10474,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -10489,7 +10489,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10498,7 +10498,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10522,7 +10522,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10546,7 +10546,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10592,7 +10592,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -10601,7 +10601,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -10682,7 +10682,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -10697,7 +10697,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10706,7 +10706,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10730,7 +10730,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10754,7 +10754,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10800,7 +10800,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -10809,7 +10809,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -10887,7 +10887,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -10902,7 +10902,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10911,7 +10911,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10935,7 +10935,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10959,7 +10959,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11005,7 +11005,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -11014,7 +11014,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -11092,7 +11092,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -11107,7 +11107,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11116,7 +11116,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11140,7 +11140,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11164,7 +11164,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11210,7 +11210,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -11219,7 +11219,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -11282,7 +11282,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -11297,7 +11297,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11306,7 +11306,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11330,7 +11330,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11354,7 +11354,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11400,7 +11400,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -11409,7 +11409,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -11472,7 +11472,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -11487,7 +11487,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11496,7 +11496,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11520,7 +11520,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11544,7 +11544,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11590,7 +11590,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -11599,7 +11599,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -11662,7 +11662,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -11677,7 +11677,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11686,7 +11686,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11710,7 +11710,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11734,7 +11734,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11780,7 +11780,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -11789,7 +11789,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -11852,7 +11852,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -11867,7 +11867,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11876,7 +11876,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11900,7 +11900,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11924,7 +11924,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11970,7 +11970,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -11979,7 +11979,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -12042,7 +12042,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -12057,7 +12057,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12066,7 +12066,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12090,7 +12090,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12114,7 +12114,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12160,7 +12160,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -12169,7 +12169,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -12232,7 +12232,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -12247,7 +12247,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12256,7 +12256,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12280,7 +12280,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12304,7 +12304,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12350,7 +12350,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -12359,7 +12359,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -12422,7 +12422,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -12437,7 +12437,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12446,7 +12446,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12470,7 +12470,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12494,7 +12494,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12540,7 +12540,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -12549,7 +12549,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -12612,7 +12612,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -12627,7 +12627,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12636,7 +12636,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12660,7 +12660,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12684,7 +12684,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12730,7 +12730,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -12739,7 +12739,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -12802,7 +12802,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -12817,7 +12817,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12826,7 +12826,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12850,7 +12850,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12874,7 +12874,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12920,7 +12920,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -12929,7 +12929,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -12992,7 +12992,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -13007,7 +13007,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -13016,7 +13016,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -13040,7 +13040,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -13064,7 +13064,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -13110,7 +13110,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -13119,7 +13119,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -13182,7 +13182,7 @@ declare const Field: {
             default?: boolean | undefined;
             visibleWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -13197,7 +13197,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -13206,7 +13206,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -13230,7 +13230,7 @@ declare const Field: {
         readonly deleteBehavior?: "set_null" | "cascade" | "restrict" | undefined;
         readonly expression?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -13254,7 +13254,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -13300,7 +13300,7 @@ declare const Field: {
             autofill?: boolean | undefined;
             readonlyWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -13309,7 +13309,7 @@ declare const Field: {
             } | undefined;
             requiredWhen?: string | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -13598,7 +13598,7 @@ declare const FieldSchema: z.ZodObject<{
         default: z.ZodOptional<z.ZodBoolean>;
         visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -13610,12 +13610,12 @@ declare const FieldSchema: z.ZodObject<{
                 cron: "cron";
                 template: "template";
             }>;
-            source: z.ZodOptional<z.ZodString>;
             ast: z.ZodOptional<z.ZodUnknown>;
             meta: z.ZodOptional<z.ZodObject<{
                 rationale: z.ZodOptional<z.ZodString>;
                 generatedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
+            source: z.ZodString;
         }, z.core.$strip>]>>;
     }, z.core.$strict>>>;
     reference: z.ZodOptional<z.ZodString>;
@@ -13664,7 +13664,7 @@ declare const FieldSchema: z.ZodObject<{
         autofill: z.ZodOptional<z.ZodBoolean>;
         readonlyWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -13676,16 +13676,16 @@ declare const FieldSchema: z.ZodObject<{
                 cron: "cron";
                 template: "template";
             }>;
-            source: z.ZodOptional<z.ZodString>;
             ast: z.ZodOptional<z.ZodUnknown>;
             meta: z.ZodOptional<z.ZodObject<{
                 rationale: z.ZodOptional<z.ZodString>;
                 generatedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
+            source: z.ZodString;
         }, z.core.$strip>]>>;
         requiredWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -13697,12 +13697,12 @@ declare const FieldSchema: z.ZodObject<{
                 cron: "cron";
                 template: "template";
             }>;
-            source: z.ZodOptional<z.ZodString>;
             ast: z.ZodOptional<z.ZodUnknown>;
             meta: z.ZodOptional<z.ZodObject<{
                 rationale: z.ZodOptional<z.ZodString>;
                 generatedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
+            source: z.ZodString;
         }, z.core.$strip>]>>;
     }, z.core.$strict>>>;
     inlineAmountField: z.ZodOptional<z.ZodString>;
@@ -13741,7 +13741,7 @@ declare const FieldSchema: z.ZodObject<{
     allowCreate: z.ZodOptional<z.ZodBoolean>;
     expression: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
         dialect: "cel" | "cron" | "template";
-        source?: string | undefined;
+        source: string;
         ast?: unknown;
         meta?: {
             rationale?: string | undefined;
@@ -13753,12 +13753,12 @@ declare const FieldSchema: z.ZodObject<{
             cron: "cron";
             template: "template";
         }>;
-        source: z.ZodOptional<z.ZodString>;
         ast: z.ZodOptional<z.ZodUnknown>;
         meta: z.ZodOptional<z.ZodObject<{
             rationale: z.ZodOptional<z.ZodString>;
             generatedBy: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;
+        source: z.ZodString;
     }, z.core.$strip>]>>;
     returnType: z.ZodOptional<z.ZodEnum<{
         number: "number";
@@ -13794,7 +13794,7 @@ declare const FieldSchema: z.ZodObject<{
     group: z.ZodOptional<z.ZodString>;
     visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
         dialect: "cel" | "cron" | "template";
-        source?: string | undefined;
+        source: string;
         ast?: unknown;
         meta?: {
             rationale?: string | undefined;
@@ -13806,16 +13806,16 @@ declare const FieldSchema: z.ZodObject<{
             cron: "cron";
             template: "template";
         }>;
-        source: z.ZodOptional<z.ZodString>;
         ast: z.ZodOptional<z.ZodUnknown>;
         meta: z.ZodOptional<z.ZodObject<{
             rationale: z.ZodOptional<z.ZodString>;
             generatedBy: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;
+        source: z.ZodString;
     }, z.core.$strip>]>>;
     readonlyWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
         dialect: "cel" | "cron" | "template";
-        source?: string | undefined;
+        source: string;
         ast?: unknown;
         meta?: {
             rationale?: string | undefined;
@@ -13827,16 +13827,16 @@ declare const FieldSchema: z.ZodObject<{
             cron: "cron";
             template: "template";
         }>;
-        source: z.ZodOptional<z.ZodString>;
         ast: z.ZodOptional<z.ZodUnknown>;
         meta: z.ZodOptional<z.ZodObject<{
             rationale: z.ZodOptional<z.ZodString>;
             generatedBy: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;
+        source: z.ZodString;
     }, z.core.$strip>]>>;
     requiredWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
         dialect: "cel" | "cron" | "template";
-        source?: string | undefined;
+        source: string;
         ast?: unknown;
         meta?: {
             rationale?: string | undefined;
@@ -13848,12 +13848,12 @@ declare const FieldSchema: z.ZodObject<{
             cron: "cron";
             template: "template";
         }>;
-        source: z.ZodOptional<z.ZodString>;
         ast: z.ZodOptional<z.ZodUnknown>;
         meta: z.ZodOptional<z.ZodObject<{
             rationale: z.ZodOptional<z.ZodString>;
             generatedBy: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;
+        source: z.ZodString;
     }, z.core.$strip>]>>;
     conditionalRequired: z.ZodOptional<z.ZodNever>;
     widget: z.ZodOptional<z.ZodString>;
@@ -14447,7 +14447,7 @@ declare const HookSchema: z.ZodObject<{
     async: z.ZodDefault<z.ZodBoolean>;
     condition: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
         dialect: "cel" | "cron" | "template";
-        source?: string | undefined;
+        source: string;
         ast?: unknown;
         meta?: {
             rationale?: string | undefined;
@@ -14459,12 +14459,12 @@ declare const HookSchema: z.ZodObject<{
             cron: "cron";
             template: "template";
         }>;
-        source: z.ZodOptional<z.ZodString>;
         ast: z.ZodOptional<z.ZodUnknown>;
         meta: z.ZodOptional<z.ZodObject<{
             rationale: z.ZodOptional<z.ZodString>;
             generatedBy: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;
+        source: z.ZodString;
     }, z.core.$strip>]>>;
     description: z.ZodOptional<z.ZodString>;
     retryPolicy: z.ZodOptional<z.ZodObject<{
@@ -14601,7 +14601,7 @@ declare const InlineGridColumnSchema: z.ZodObject<{
     autofill: z.ZodOptional<z.ZodBoolean>;
     readonlyWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
         dialect: "cel" | "cron" | "template";
-        source?: string | undefined;
+        source: string;
         ast?: unknown;
         meta?: {
             rationale?: string | undefined;
@@ -14613,16 +14613,16 @@ declare const InlineGridColumnSchema: z.ZodObject<{
             cron: "cron";
             template: "template";
         }>;
-        source: z.ZodOptional<z.ZodString>;
         ast: z.ZodOptional<z.ZodUnknown>;
         meta: z.ZodOptional<z.ZodObject<{
             rationale: z.ZodOptional<z.ZodString>;
             generatedBy: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;
+        source: z.ZodString;
     }, z.core.$strip>]>>;
     requiredWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
         dialect: "cel" | "cron" | "template";
-        source?: string | undefined;
+        source: string;
         ast?: unknown;
         meta?: {
             rationale?: string | undefined;
@@ -14634,12 +14634,12 @@ declare const InlineGridColumnSchema: z.ZodObject<{
             cron: "cron";
             template: "template";
         }>;
-        source: z.ZodOptional<z.ZodString>;
         ast: z.ZodOptional<z.ZodUnknown>;
         meta: z.ZodOptional<z.ZodObject<{
             rationale: z.ZodOptional<z.ZodString>;
             generatedBy: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;
+        source: z.ZodString;
     }, z.core.$strip>]>>;
 }, z.core.$strict>;
 
@@ -15596,7 +15596,7 @@ declare const ObjectExtensionSchema: z.ZodObject<{
             default: z.ZodOptional<z.ZodBoolean>;
             visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -15608,12 +15608,12 @@ declare const ObjectExtensionSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
         }, z.core.$strict>>>;
         reference: z.ZodOptional<z.ZodString>;
@@ -15662,7 +15662,7 @@ declare const ObjectExtensionSchema: z.ZodObject<{
             autofill: z.ZodOptional<z.ZodBoolean>;
             readonlyWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -15674,16 +15674,16 @@ declare const ObjectExtensionSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
             requiredWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -15695,12 +15695,12 @@ declare const ObjectExtensionSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
         }, z.core.$strict>>>;
         inlineAmountField: z.ZodOptional<z.ZodString>;
@@ -15739,7 +15739,7 @@ declare const ObjectExtensionSchema: z.ZodObject<{
         allowCreate: z.ZodOptional<z.ZodBoolean>;
         expression: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -15751,12 +15751,12 @@ declare const ObjectExtensionSchema: z.ZodObject<{
                 cron: "cron";
                 template: "template";
             }>;
-            source: z.ZodOptional<z.ZodString>;
             ast: z.ZodOptional<z.ZodUnknown>;
             meta: z.ZodOptional<z.ZodObject<{
                 rationale: z.ZodOptional<z.ZodString>;
                 generatedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
+            source: z.ZodString;
         }, z.core.$strip>]>>;
         returnType: z.ZodOptional<z.ZodEnum<{
             number: "number";
@@ -15792,7 +15792,7 @@ declare const ObjectExtensionSchema: z.ZodObject<{
         group: z.ZodOptional<z.ZodString>;
         visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -15804,16 +15804,16 @@ declare const ObjectExtensionSchema: z.ZodObject<{
                 cron: "cron";
                 template: "template";
             }>;
-            source: z.ZodOptional<z.ZodString>;
             ast: z.ZodOptional<z.ZodUnknown>;
             meta: z.ZodOptional<z.ZodObject<{
                 rationale: z.ZodOptional<z.ZodString>;
                 generatedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
+            source: z.ZodString;
         }, z.core.$strip>]>>;
         readonlyWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -15825,16 +15825,16 @@ declare const ObjectExtensionSchema: z.ZodObject<{
                 cron: "cron";
                 template: "template";
             }>;
-            source: z.ZodOptional<z.ZodString>;
             ast: z.ZodOptional<z.ZodUnknown>;
             meta: z.ZodOptional<z.ZodObject<{
                 rationale: z.ZodOptional<z.ZodString>;
                 generatedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
+            source: z.ZodString;
         }, z.core.$strip>]>>;
         requiredWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -15846,12 +15846,12 @@ declare const ObjectExtensionSchema: z.ZodObject<{
                 cron: "cron";
                 template: "template";
             }>;
-            source: z.ZodOptional<z.ZodString>;
             ast: z.ZodOptional<z.ZodUnknown>;
             meta: z.ZodOptional<z.ZodObject<{
                 rationale: z.ZodOptional<z.ZodString>;
                 generatedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
+            source: z.ZodString;
         }, z.core.$strip>]>>;
         conditionalRequired: z.ZodOptional<z.ZodNever>;
         widget: z.ZodOptional<z.ZodString>;
@@ -15921,7 +15921,7 @@ declare const ObjectFieldGroupSchema: z.ZodObject<{
     description: z.ZodOptional<z.ZodString>;
     visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
         dialect: "cel" | "cron" | "template";
-        source?: string | undefined;
+        source: string;
         ast?: unknown;
         meta?: {
             rationale?: string | undefined;
@@ -15933,12 +15933,12 @@ declare const ObjectFieldGroupSchema: z.ZodObject<{
             cron: "cron";
             template: "template";
         }>;
-        source: z.ZodOptional<z.ZodString>;
         ast: z.ZodOptional<z.ZodUnknown>;
         meta: z.ZodOptional<z.ZodObject<{
             rationale: z.ZodOptional<z.ZodString>;
             generatedBy: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;
+        source: z.ZodString;
     }, z.core.$strip>]>>;
     collapse: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
         none: "none";
@@ -16024,7 +16024,7 @@ declare const ObjectSchema: z.ZodObject<{
             enabled: z.ZodOptional<z.ZodBoolean>;
             visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -16036,16 +16036,16 @@ declare const ObjectSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
             disabledWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -16057,19 +16057,19 @@ declare const ObjectSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
         }, z.core.$strict>]>>;
         import: z.ZodOptional<z.ZodUnion<readonly [z.ZodBoolean, z.ZodObject<{
             enabled: z.ZodOptional<z.ZodBoolean>;
             visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -16081,16 +16081,16 @@ declare const ObjectSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
             disabledWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -16102,19 +16102,19 @@ declare const ObjectSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
         }, z.core.$strict>]>>;
         edit: z.ZodOptional<z.ZodUnion<readonly [z.ZodBoolean, z.ZodObject<{
             enabled: z.ZodOptional<z.ZodBoolean>;
             visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -16126,16 +16126,16 @@ declare const ObjectSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
             disabledWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -16147,19 +16147,19 @@ declare const ObjectSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
         }, z.core.$strict>]>>;
         delete: z.ZodOptional<z.ZodUnion<readonly [z.ZodBoolean, z.ZodObject<{
             enabled: z.ZodOptional<z.ZodBoolean>;
             visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -16171,16 +16171,16 @@ declare const ObjectSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
             disabledWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -16192,12 +16192,12 @@ declare const ObjectSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
         }, z.core.$strict>]>>;
         exportCsv: z.ZodOptional<z.ZodBoolean>;
@@ -16322,7 +16322,7 @@ declare const ObjectSchema: z.ZodObject<{
             default: z.ZodOptional<z.ZodBoolean>;
             visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -16334,12 +16334,12 @@ declare const ObjectSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
         }, z.core.$strict>>>;
         reference: z.ZodOptional<z.ZodString>;
@@ -16388,7 +16388,7 @@ declare const ObjectSchema: z.ZodObject<{
             autofill: z.ZodOptional<z.ZodBoolean>;
             readonlyWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -16400,16 +16400,16 @@ declare const ObjectSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
             requiredWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -16421,12 +16421,12 @@ declare const ObjectSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
         }, z.core.$strict>>>;
         inlineAmountField: z.ZodOptional<z.ZodString>;
@@ -16465,7 +16465,7 @@ declare const ObjectSchema: z.ZodObject<{
         allowCreate: z.ZodOptional<z.ZodBoolean>;
         expression: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -16477,12 +16477,12 @@ declare const ObjectSchema: z.ZodObject<{
                 cron: "cron";
                 template: "template";
             }>;
-            source: z.ZodOptional<z.ZodString>;
             ast: z.ZodOptional<z.ZodUnknown>;
             meta: z.ZodOptional<z.ZodObject<{
                 rationale: z.ZodOptional<z.ZodString>;
                 generatedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
+            source: z.ZodString;
         }, z.core.$strip>]>>;
         returnType: z.ZodOptional<z.ZodEnum<{
             number: "number";
@@ -16518,7 +16518,7 @@ declare const ObjectSchema: z.ZodObject<{
         group: z.ZodOptional<z.ZodString>;
         visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -16530,16 +16530,16 @@ declare const ObjectSchema: z.ZodObject<{
                 cron: "cron";
                 template: "template";
             }>;
-            source: z.ZodOptional<z.ZodString>;
             ast: z.ZodOptional<z.ZodUnknown>;
             meta: z.ZodOptional<z.ZodObject<{
                 rationale: z.ZodOptional<z.ZodString>;
                 generatedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
+            source: z.ZodString;
         }, z.core.$strip>]>>;
         readonlyWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -16551,16 +16551,16 @@ declare const ObjectSchema: z.ZodObject<{
                 cron: "cron";
                 template: "template";
             }>;
-            source: z.ZodOptional<z.ZodString>;
             ast: z.ZodOptional<z.ZodUnknown>;
             meta: z.ZodOptional<z.ZodObject<{
                 rationale: z.ZodOptional<z.ZodString>;
                 generatedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
+            source: z.ZodString;
         }, z.core.$strip>]>>;
         requiredWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -16572,12 +16572,12 @@ declare const ObjectSchema: z.ZodObject<{
                 cron: "cron";
                 template: "template";
             }>;
-            source: z.ZodOptional<z.ZodString>;
             ast: z.ZodOptional<z.ZodUnknown>;
             meta: z.ZodOptional<z.ZodObject<{
                 rationale: z.ZodOptional<z.ZodString>;
                 generatedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
+            source: z.ZodString;
         }, z.core.$strip>]>>;
         conditionalRequired: z.ZodOptional<z.ZodNever>;
         widget: z.ZodOptional<z.ZodString>;
@@ -16617,7 +16617,7 @@ declare const ObjectSchema: z.ZodObject<{
         description: z.ZodOptional<z.ZodString>;
         visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -16629,12 +16629,12 @@ declare const ObjectSchema: z.ZodObject<{
                 cron: "cron";
                 template: "template";
             }>;
-            source: z.ZodOptional<z.ZodString>;
             ast: z.ZodOptional<z.ZodUnknown>;
             meta: z.ZodOptional<z.ZodObject<{
                 rationale: z.ZodOptional<z.ZodString>;
                 generatedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
+            source: z.ZodString;
         }, z.core.$strip>]>>;
         collapse: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
             none: "none";
@@ -16941,7 +16941,7 @@ declare const ObjectSchema: z.ZodObject<{
             confirmLabel: z.ZodOptional<z.ZodString>;
             visible: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -16953,12 +16953,12 @@ declare const ObjectSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
             requiredPermissions: z.ZodOptional<z.ZodArray<z.ZodString>>;
             maxRecords: z.ZodOptional<z.ZodNumber>;
@@ -17377,7 +17377,7 @@ declare const ObjectSchema: z.ZodObject<{
         conditionalFormatting: z.ZodOptional<z.ZodArray<z.ZodObject<{
             condition: z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -17389,12 +17389,12 @@ declare const ObjectSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>;
             style: z.ZodRecord<z.ZodString, z.ZodString>;
         }, z.core.$strict>>>;
@@ -17691,7 +17691,7 @@ declare const ObjectSchema: z.ZodObject<{
                 value: z.ZodString;
                 visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -17703,12 +17703,12 @@ declare const ObjectSchema: z.ZodObject<{
                         cron: "cron";
                         template: "template";
                     }>;
-                    source: z.ZodOptional<z.ZodString>;
                     ast: z.ZodOptional<z.ZodUnknown>;
                     meta: z.ZodOptional<z.ZodObject<{
                         rationale: z.ZodOptional<z.ZodString>;
                         generatedBy: z.ZodOptional<z.ZodString>;
                     }, z.core.$strip>>;
+                    source: z.ZodString;
                 }, z.core.$strip>]>>;
             }, z.core.$strict>>>;
             placeholder: z.ZodOptional<z.ZodString>;
@@ -17722,7 +17722,7 @@ declare const ObjectSchema: z.ZodObject<{
             carryOver: z.ZodOptional<z.ZodBoolean>;
             visible: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -17734,12 +17734,12 @@ declare const ObjectSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
             requiresFeature: z.ZodOptional<z.ZodEnum<{
                 organization: "organization";
@@ -17772,7 +17772,7 @@ declare const ObjectSchema: z.ZodObject<{
                 value: string;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -17780,7 +17780,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -17799,7 +17799,7 @@ declare const ObjectSchema: z.ZodObject<{
             carryOver?: boolean | undefined;
             visible?: {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -17807,7 +17807,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -17833,7 +17833,7 @@ declare const ObjectSchema: z.ZodObject<{
                 value: string;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -17841,7 +17841,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -17860,7 +17860,7 @@ declare const ObjectSchema: z.ZodObject<{
             carryOver?: boolean | undefined;
             visible?: {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -17868,7 +17868,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -17999,7 +17999,7 @@ declare const ObjectSchema: z.ZodObject<{
         }, z.core.$strict>>;
         visible: z.ZodOptional<z.ZodUnion<readonly [z.ZodBoolean, z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -18011,12 +18011,12 @@ declare const ObjectSchema: z.ZodObject<{
                 cron: "cron";
                 template: "template";
             }>;
-            source: z.ZodOptional<z.ZodString>;
             ast: z.ZodOptional<z.ZodUnknown>;
             meta: z.ZodOptional<z.ZodObject<{
                 rationale: z.ZodOptional<z.ZodString>;
                 generatedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
+            source: z.ZodString;
         }, z.core.$strip>]>]>>;
         requiresFeature: z.ZodOptional<z.ZodEnum<{
             organization: "organization";
@@ -18033,7 +18033,7 @@ declare const ObjectSchema: z.ZodObject<{
         }>>;
         disabled: z.ZodOptional<z.ZodUnion<readonly [z.ZodBoolean, z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -18045,12 +18045,12 @@ declare const ObjectSchema: z.ZodObject<{
                 cron: "cron";
                 template: "template";
             }>;
-            source: z.ZodOptional<z.ZodString>;
             ast: z.ZodOptional<z.ZodUnknown>;
             meta: z.ZodOptional<z.ZodObject<{
                 rationale: z.ZodOptional<z.ZodString>;
                 generatedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
+            source: z.ZodString;
         }, z.core.$strip>]>]>>;
         requiredPermissions: z.ZodOptional<z.ZodArray<z.ZodString>>;
         shortcut: z.ZodOptional<z.ZodNever>;
@@ -18176,7 +18176,7 @@ declare const ObjectSchema: z.ZodObject<{
                 value: string;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18184,7 +18184,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18203,7 +18203,7 @@ declare const ObjectSchema: z.ZodObject<{
             carryOver?: boolean | undefined;
             visible?: {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -18211,7 +18211,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -18260,7 +18260,7 @@ declare const ObjectSchema: z.ZodObject<{
         } | undefined;
         visible?: boolean | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -18268,7 +18268,7 @@ declare const ObjectSchema: z.ZodObject<{
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -18278,7 +18278,7 @@ declare const ObjectSchema: z.ZodObject<{
         requiresFeature?: "organization" | "admin" | "twoFactor" | "multiOrgEnabled" | "degradedTenancy" | "oidcProvider" | "sso" | "ssoEnforced" | "deviceAuthorization" | "phoneNumber" | "phoneNumberOtp" | undefined;
         disabled?: boolean | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -18286,7 +18286,7 @@ declare const ObjectSchema: z.ZodObject<{
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -18387,7 +18387,7 @@ declare const ObjectSchema: z.ZodObject<{
                 value: string;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18395,7 +18395,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18414,7 +18414,7 @@ declare const ObjectSchema: z.ZodObject<{
             carryOver?: boolean | undefined;
             visible?: {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -18422,7 +18422,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -18471,7 +18471,7 @@ declare const ObjectSchema: z.ZodObject<{
         } | undefined;
         visible?: boolean | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -18479,7 +18479,7 @@ declare const ObjectSchema: z.ZodObject<{
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -18489,7 +18489,7 @@ declare const ObjectSchema: z.ZodObject<{
         requiresFeature?: "organization" | "admin" | "twoFactor" | "multiOrgEnabled" | "degradedTenancy" | "oidcProvider" | "sso" | "ssoEnforced" | "deviceAuthorization" | "phoneNumber" | "phoneNumberOtp" | undefined;
         disabled?: boolean | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -18497,7 +18497,7 @@ declare const ObjectSchema: z.ZodObject<{
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -18606,7 +18606,7 @@ declare const ObjectSchema: z.ZodObject<{
                 default?: boolean | undefined;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18614,7 +18614,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18651,7 +18651,7 @@ declare const ObjectSchema: z.ZodObject<{
                 autofill?: boolean | undefined;
                 readonlyWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18659,7 +18659,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18668,7 +18668,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
                 requiredWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18676,7 +18676,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18710,7 +18710,7 @@ declare const ObjectSchema: z.ZodObject<{
             allowCreate?: boolean | undefined;
             expression?: {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -18718,7 +18718,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -18745,7 +18745,7 @@ declare const ObjectSchema: z.ZodObject<{
             group?: string | undefined;
             visibleWhen?: {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -18753,7 +18753,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -18762,7 +18762,7 @@ declare const ObjectSchema: z.ZodObject<{
             } | undefined;
             readonlyWhen?: {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -18770,7 +18770,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -18779,7 +18779,7 @@ declare const ObjectSchema: z.ZodObject<{
             } | undefined;
             requiredWhen?: {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -18787,7 +18787,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -18826,7 +18826,7 @@ declare const ObjectSchema: z.ZodObject<{
                 enabled?: boolean | undefined;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18834,7 +18834,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18843,7 +18843,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
                 disabledWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18851,7 +18851,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18863,7 +18863,7 @@ declare const ObjectSchema: z.ZodObject<{
                 enabled?: boolean | undefined;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18871,7 +18871,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18880,7 +18880,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
                 disabledWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18888,7 +18888,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18900,7 +18900,7 @@ declare const ObjectSchema: z.ZodObject<{
                 enabled?: boolean | undefined;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18908,7 +18908,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18917,7 +18917,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
                 disabledWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18925,7 +18925,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18937,7 +18937,7 @@ declare const ObjectSchema: z.ZodObject<{
                 enabled?: boolean | undefined;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18945,7 +18945,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18954,7 +18954,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
                 disabledWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18962,7 +18962,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -18999,7 +18999,7 @@ declare const ObjectSchema: z.ZodObject<{
             description?: string | undefined;
             visibleWhen?: {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -19007,7 +19007,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -19192,7 +19192,7 @@ declare const ObjectSchema: z.ZodObject<{
                 confirmLabel?: string | undefined;
                 visible?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -19200,7 +19200,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -19427,7 +19427,7 @@ declare const ObjectSchema: z.ZodObject<{
             conditionalFormatting?: {
                 condition: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -19435,7 +19435,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -19552,7 +19552,7 @@ declare const ObjectSchema: z.ZodObject<{
                     value: string;
                     visibleWhen?: {
                         dialect: "cel" | "cron" | "template";
-                        source?: string | undefined;
+                        source: string;
                         ast?: unknown;
                         meta?: {
                             rationale?: string | undefined;
@@ -19560,7 +19560,7 @@ declare const ObjectSchema: z.ZodObject<{
                         } | undefined;
                     } | {
                         dialect: "cel" | "cron" | "template";
-                        source?: string | undefined;
+                        source: string;
                         ast?: unknown;
                         meta?: {
                             rationale?: string | undefined;
@@ -19579,7 +19579,7 @@ declare const ObjectSchema: z.ZodObject<{
                 carryOver?: boolean | undefined;
                 visible?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -19587,7 +19587,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -19636,7 +19636,7 @@ declare const ObjectSchema: z.ZodObject<{
             } | undefined;
             visible?: boolean | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -19644,7 +19644,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -19654,7 +19654,7 @@ declare const ObjectSchema: z.ZodObject<{
             requiresFeature?: "organization" | "admin" | "twoFactor" | "multiOrgEnabled" | "degradedTenancy" | "oidcProvider" | "sso" | "ssoEnforced" | "deviceAuthorization" | "phoneNumber" | "phoneNumberOtp" | undefined;
             disabled?: boolean | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -19662,7 +19662,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -19761,7 +19761,7 @@ declare const ObjectSchema: z.ZodObject<{
                 default?: boolean | undefined;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -19769,7 +19769,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -19806,7 +19806,7 @@ declare const ObjectSchema: z.ZodObject<{
                 autofill?: boolean | undefined;
                 readonlyWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -19814,7 +19814,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -19823,7 +19823,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
                 requiredWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -19831,7 +19831,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -19865,7 +19865,7 @@ declare const ObjectSchema: z.ZodObject<{
             allowCreate?: boolean | undefined;
             expression?: {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -19873,7 +19873,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -19900,7 +19900,7 @@ declare const ObjectSchema: z.ZodObject<{
             group?: string | undefined;
             visibleWhen?: {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -19908,7 +19908,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -19917,7 +19917,7 @@ declare const ObjectSchema: z.ZodObject<{
             } | undefined;
             readonlyWhen?: {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -19925,7 +19925,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -19934,7 +19934,7 @@ declare const ObjectSchema: z.ZodObject<{
             } | undefined;
             requiredWhen?: {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -19942,7 +19942,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -19981,7 +19981,7 @@ declare const ObjectSchema: z.ZodObject<{
                 enabled?: boolean | undefined;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -19989,7 +19989,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -19998,7 +19998,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
                 disabledWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -20006,7 +20006,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -20018,7 +20018,7 @@ declare const ObjectSchema: z.ZodObject<{
                 enabled?: boolean | undefined;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -20026,7 +20026,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -20035,7 +20035,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
                 disabledWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -20043,7 +20043,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -20055,7 +20055,7 @@ declare const ObjectSchema: z.ZodObject<{
                 enabled?: boolean | undefined;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -20063,7 +20063,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -20072,7 +20072,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
                 disabledWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -20080,7 +20080,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -20092,7 +20092,7 @@ declare const ObjectSchema: z.ZodObject<{
                 enabled?: boolean | undefined;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -20100,7 +20100,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -20109,7 +20109,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
                 disabledWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -20117,7 +20117,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -20154,7 +20154,7 @@ declare const ObjectSchema: z.ZodObject<{
             description?: string | undefined;
             visibleWhen?: {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -20162,7 +20162,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -20347,7 +20347,7 @@ declare const ObjectSchema: z.ZodObject<{
                 confirmLabel?: string | undefined;
                 visible?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -20355,7 +20355,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -20582,7 +20582,7 @@ declare const ObjectSchema: z.ZodObject<{
             conditionalFormatting?: {
                 condition: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -20590,7 +20590,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -20707,7 +20707,7 @@ declare const ObjectSchema: z.ZodObject<{
                     value: string;
                     visibleWhen?: {
                         dialect: "cel" | "cron" | "template";
-                        source?: string | undefined;
+                        source: string;
                         ast?: unknown;
                         meta?: {
                             rationale?: string | undefined;
@@ -20715,7 +20715,7 @@ declare const ObjectSchema: z.ZodObject<{
                         } | undefined;
                     } | {
                         dialect: "cel" | "cron" | "template";
-                        source?: string | undefined;
+                        source: string;
                         ast?: unknown;
                         meta?: {
                             rationale?: string | undefined;
@@ -20734,7 +20734,7 @@ declare const ObjectSchema: z.ZodObject<{
                 carryOver?: boolean | undefined;
                 visible?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -20742,7 +20742,7 @@ declare const ObjectSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -20791,7 +20791,7 @@ declare const ObjectSchema: z.ZodObject<{
             } | undefined;
             visible?: boolean | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -20799,7 +20799,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -20809,7 +20809,7 @@ declare const ObjectSchema: z.ZodObject<{
             requiresFeature?: "organization" | "admin" | "twoFactor" | "multiOrgEnabled" | "degradedTenancy" | "oidcProvider" | "sso" | "ssoEnforced" | "deviceAuthorization" | "phoneNumber" | "phoneNumberOtp" | undefined;
             disabled?: boolean | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -20817,7 +20817,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -21458,7 +21458,7 @@ declare const RowCrudActionOverrideSchema: z.ZodObject<{
     enabled: z.ZodOptional<z.ZodBoolean>;
     visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
         dialect: "cel" | "cron" | "template";
-        source?: string | undefined;
+        source: string;
         ast?: unknown;
         meta?: {
             rationale?: string | undefined;
@@ -21470,16 +21470,16 @@ declare const RowCrudActionOverrideSchema: z.ZodObject<{
             cron: "cron";
             template: "template";
         }>;
-        source: z.ZodOptional<z.ZodString>;
         ast: z.ZodOptional<z.ZodUnknown>;
         meta: z.ZodOptional<z.ZodObject<{
             rationale: z.ZodOptional<z.ZodString>;
             generatedBy: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;
+        source: z.ZodString;
     }, z.core.$strip>]>>;
     disabledWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
         dialect: "cel" | "cron" | "template";
-        source?: string | undefined;
+        source: string;
         ast?: unknown;
         meta?: {
             rationale?: string | undefined;
@@ -21491,19 +21491,19 @@ declare const RowCrudActionOverrideSchema: z.ZodObject<{
             cron: "cron";
             template: "template";
         }>;
-        source: z.ZodOptional<z.ZodString>;
         ast: z.ZodOptional<z.ZodUnknown>;
         meta: z.ZodOptional<z.ZodObject<{
             rationale: z.ZodOptional<z.ZodString>;
             generatedBy: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;
+        source: z.ZodString;
     }, z.core.$strip>]>>;
 }, z.core.$strict>;
 
 // ── RowCrudPredicates (interface) ──
 interface RowCrudPredicates {
-    visibleWhen?: Expression | ExpressionInput;
-    disabledWhen?: Expression | ExpressionInput;
+    visibleWhen?: EvaluatedExpression | EvaluatedExpressionInput;
+    disabledWhen?: EvaluatedExpression | EvaluatedExpressionInput;
 }
 
 // ── SCALAR_FILTER_HEAD_TYPES (const) ──
@@ -21739,7 +21739,7 @@ declare const ScriptValidationSchema: z.ZodObject<{
     type: z.ZodLiteral<"script">;
     condition: z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
         dialect: "cel" | "cron" | "template";
-        source?: string | undefined;
+        source: string;
         ast?: unknown;
         meta?: {
             rationale?: string | undefined;
@@ -21751,12 +21751,12 @@ declare const ScriptValidationSchema: z.ZodObject<{
             cron: "cron";
             template: "template";
         }>;
-        source: z.ZodOptional<z.ZodString>;
         ast: z.ZodOptional<z.ZodUnknown>;
         meta: z.ZodOptional<z.ZodObject<{
             rationale: z.ZodOptional<z.ZodString>;
             generatedBy: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;
+        source: z.ZodString;
     }, z.core.$strip>]>;
     _lock: z.ZodOptional<z.ZodEnum<{
         none: "none";
@@ -22147,7 +22147,7 @@ declare const SelectOptionSchema: z.ZodObject<{
     default: z.ZodOptional<z.ZodBoolean>;
     visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
         dialect: "cel" | "cron" | "template";
-        source?: string | undefined;
+        source: string;
         ast?: unknown;
         meta?: {
             rationale?: string | undefined;
@@ -22159,12 +22159,12 @@ declare const SelectOptionSchema: z.ZodObject<{
             cron: "cron";
             template: "template";
         }>;
-        source: z.ZodOptional<z.ZodString>;
         ast: z.ZodOptional<z.ZodUnknown>;
         meta: z.ZodOptional<z.ZodObject<{
             rationale: z.ZodOptional<z.ZodString>;
             generatedBy: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;
+        source: z.ZodString;
     }, z.core.$strip>]>>;
 }, z.core.$strict>;
 
@@ -22946,7 +22946,7 @@ declare const fieldForm: {
         description?: string | undefined;
         visibleWhen?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -22954,7 +22954,7 @@ declare const fieldForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -22963,7 +22963,7 @@ declare const fieldForm: {
         } | undefined;
         visibleOn?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -22971,7 +22971,7 @@ declare const fieldForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -22994,7 +22994,7 @@ declare const fieldForm: {
         description?: string | undefined;
         visibleWhen?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -23002,7 +23002,7 @@ declare const fieldForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -23011,7 +23011,7 @@ declare const fieldForm: {
         } | undefined;
         visibleOn?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -23019,7 +23019,7 @@ declare const fieldForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -23191,7 +23191,7 @@ declare const hookForm: {
         description?: string | undefined;
         visibleWhen?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -23199,7 +23199,7 @@ declare const hookForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -23208,7 +23208,7 @@ declare const hookForm: {
         } | undefined;
         visibleOn?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -23216,7 +23216,7 @@ declare const hookForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -23239,7 +23239,7 @@ declare const hookForm: {
         description?: string | undefined;
         visibleWhen?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -23247,7 +23247,7 @@ declare const hookForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -23256,7 +23256,7 @@ declare const hookForm: {
         } | undefined;
         visibleOn?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -23264,7 +23264,7 @@ declare const hookForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -23520,7 +23520,7 @@ declare const objectForm: {
         description?: string | undefined;
         visibleWhen?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -23528,7 +23528,7 @@ declare const objectForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -23537,7 +23537,7 @@ declare const objectForm: {
         } | undefined;
         visibleOn?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -23545,7 +23545,7 @@ declare const objectForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -23568,7 +23568,7 @@ declare const objectForm: {
         description?: string | undefined;
         visibleWhen?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -23576,7 +23576,7 @@ declare const objectForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -23585,7 +23585,7 @@ declare const objectForm: {
         } | undefined;
         visibleOn?: {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -23593,7 +23593,7 @@ declare const objectForm: {
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
