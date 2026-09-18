@@ -1265,9 +1265,11 @@ describe('TimeRelativeTrigger — switched ON under `single` (#17396)', () => {
  *
  * ## Why the double carries `getSchema`
  *
- * `createRecordOrganizationResolver` resolves the organization COLUMN from the
- * object's registered schema (`tenancy.organizationField`, then
- * `tenancy.tenantField`, then the default) and answers `null` without one — so
+ * `createRecordWallOrganizationResolver` resolves the organization COLUMN from
+ * the object's registered schema — the WALL precedence (`tenancy.enabled:
+ * false` ⇒ nothing, then a declared `tenancy.tenantField`, then the kernel's
+ * `organization_id`; ⛔ the stamp key `tenancy.organizationField` is NOT a limb
+ * of it) — and answers `null` without one, so
  * a double lacking `getSchema` would make every case below pass vacuously with
  * no organization resolved, which is the shape of the defect rather than the
  * fix. `TimeRelativeDataEngine` is a TYPE-level narrowing; the runtime object a
@@ -1437,6 +1439,53 @@ describe('TimeRelativeTrigger — switched ON under `group` (#18378)', () => {
 
         expect(seen).toHaveLength(1);
         expect('tenantId' in seen[0]).toBe(false);
+    });
+
+    it('a declared `tenancy.organizationField` is NOT an acting identity — the stamp key is not read here', async () => {
+        // ⭐ The discriminating pin for the wall/stamp split (#18378 round 2).
+        // This is `sys_api_key`'s shape, the ONE shipped object that declares
+        // the key: `tenancy: { enabled: false, organizationField: '…' }`, the
+        // column present on the schema AND carrying a value on the row.
+        //
+        // The STAMP resolver answers `active_organization_id` here by design —
+        // limb 0 wins over the ADR-0066 opt-out, which is exactly what the audit
+        // trail wants ("who is this row ABOUT"). A sweep asking "who does this
+        // run ACT AS" must not get that answer: the declaration says the object
+        // is deliberately unwalled (#8287), so acting as the organization it
+        // names would be an identity derived from an annotation that never meant
+        // one. Resolving NOTHING sends the run into the `walled-posture` refusal
+        // at its first tenant-scoped write, which is the honest outcome.
+        //
+        // ⛔ This pin fails the moment someone points the sweep back at
+        // `createRecordOrganizationResolver` — which is the whole point of it.
+        const job = fakeJobService();
+        const base = fakeDataEngine([
+            {
+                id: 'k1',
+                end_date: '2026-07-25T00:00:00.000Z',
+                active_organization_id: PLANT_A,
+            },
+        ]);
+        const engine = {
+            ...base.engine,
+            getSchema: (name: string) =>
+                name === 'contracts'
+                    ? {
+                          name,
+                          tenancy: { enabled: false, organizationField: 'active_organization_id' },
+                          fields: { id: {}, end_date: {}, active_organization_id: {} },
+                      }
+                    : undefined,
+        } as TimeRelativeDataEngine;
+        const trigger = new TimeRelativeTrigger(() => job.service, () => engine, silentLogger(), NOW);
+        const seen: AutomationContext[] = [];
+
+        trigger.start(orgLess(), async (ctx) => void seen.push(ctx));
+        await flush();
+        await job.fire('flow-time-relative:renewal_alert');
+
+        expect(seen).toHaveLength(1);
+        expect('tenantId' in seen[0], 'the stamp key must not become an acting organization').toBe(false);
     });
 
     it('says on the BIND line that ownership is per-record, and names the posture', async () => {

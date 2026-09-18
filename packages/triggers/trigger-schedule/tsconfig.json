@@ -26,9 +26,10 @@
     // `tsc --noEmit`, so this package's typecheck is a verdict about the
     // checkout rather than about `metadata-core/dist` build state
     // (`pnpm check:type-source-resolution`). The time-relative sweep reads
-    // per-record acting organizations through it, and the precedence it
-    // implements (`tenancy.organizationField`, then `tenancy.tenantField`,
-    // then the default column) is exactly what the `group` pins hold.
+    // per-record acting organizations through its WALL face, and the precedence
+    // that implements (`tenancy.enabled: false` ⇒ nothing, then a declared
+    // `tenancy.tenantField`, then the kernel's `organization_id`) is exactly
+    // what the `group` pins hold.
     //
     // ⛔ NOT an entry in that gate's registry. Widening it is maintainer-only:
     // this package's `@objectstack/types` row was admitted by maintainer

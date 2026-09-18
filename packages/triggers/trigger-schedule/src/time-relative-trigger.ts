@@ -17,13 +17,13 @@ import {
 } from './schedule-trigger.js';
 import { resolveScheduledWorkPolicy } from '@objectstack/types';
 import type { ScheduledRunOwnership } from '@objectstack/types';
-// [#18378] The ONE resolver for "which organization does this record belong
-// to" — the same precedence (`tenancy.organizationField`, then
-// `tenancy.tenantField`, then the default column) that every sanctioned
-// platform-row writer already shares. ⛔ Never a local column read: see
-// `organizationOfRecord`.
+// [#18378] The ONE resolver for "which organization does this record BELONG
+// to" — the WALL question (`tenancy.enabled: false` ⇒ nothing, then a declared
+// `tenancy.tenantField`, then the kernel's `organization_id`), shared with the
+// platform's own wall reading rather than re-spelled here. ⛔ Never a local
+// column read, and ⛔ never the STAMP question: see `organizationOfRecord`.
 import {
-    createRecordOrganizationResolver,
+    createRecordWallOrganizationResolver,
     type RecordOrganizationResolver,
 } from '@objectstack/metadata-core';
 import type { FlowTrigger, FlowTriggerBinding, JobServiceSurface, TriggerLogger } from './schedule-trigger.js';
@@ -281,9 +281,9 @@ export class TimeRelativeTrigger implements FlowTrigger {
     /** Whether the in-process-only dedup degradation has been said (once). */
     private claimDegradationWarned = false;
     /**
-     * [#18378] The record→organization resolver, paired with the engine it was
-     * built over so a kernel rebuild cannot be answered from the previous
-     * kernel's object registry. See {@link organizationOfRecord}.
+     * [#18378] The record→organization resolver — the WALL face — paired with
+     * the engine it was built over so a kernel rebuild cannot be answered from
+     * the previous kernel's object registry. See {@link organizationOfRecord}.
      */
     private recordOrgResolver: { engine: unknown; resolver: RecordOrganizationResolver } | null = null;
 
@@ -657,12 +657,22 @@ export class TimeRelativeTrigger implements FlowTrigger {
             // tick still summarised itself as healthy.
             //
             // ⛔ NOT a hand-rolled `record.organization_id` read. The column is
-            // whatever the OBJECT declares (`tenancy.organizationField`, then
-            // `tenancy.tenantField`, then the default), a platform-global object
-            // has none at all, and a second implementation of that precedence
-            // living in a trigger is exactly the drift `createRecordOrganizationResolver`
-            // exists to end — it is the shared resolver all three sanctioned
-            // platform-row writers already hold.
+            // whatever the OBJECT is WALLED by (`tenancy.enabled: false` ⇒ none,
+            // then a declared `tenancy.tenantField`, then the kernel's
+            // `organization_id`), a platform-global object has none at all, and a
+            // second implementation of that precedence living in a trigger is
+            // exactly the drift `createRecordWallOrganizationResolver` exists to
+            // end.
+            //
+            // ⛔ And NOT the STAMP question either. `tenancy.organizationField`
+            // answers "who is this row ABOUT" for the three sanctioned
+            // platform-row writers; it is declared on exactly one shipped object
+            // (`sys_api_key`, deliberately unwalled, #8287), and reading it here
+            // would turn "the audit trail should follow this row's organization
+            // even though nothing walls it" into an ACTING IDENTITY. A sweep over
+            // such an object resolves NOTHING and takes the `walled-posture`
+            // refusal at its first tenant-scoped write, which is the honest
+            // answer.
             const runOrganization =
                 organization ??
                 (ownership === 'per-record'
@@ -735,9 +745,17 @@ export class TimeRelativeTrigger implements FlowTrigger {
     }
 
     /**
-     * [#18378] The swept record's own organization, through the ONE shared
-     * resolver (`@objectstack/metadata-core`) rather than a column read of this
-     * trigger's own.
+     * [#18378] The swept record's own organization — the WALL question, through
+     * the shared resolver (`@objectstack/metadata-core`) rather than a column
+     * read of this trigger's own.
+     *
+     * ⛔ The WALL face, never the stamp one. "Which organization does this row
+     * belong to" is what an acting identity may be derived from;
+     * `tenancy.organizationField` answers a different question ("who is this row
+     * about") for three named platform-row writers, and this sweep is not one of
+     * them. On the one shipped object that declares it — `sys_api_key`, unwalled
+     * by design (#8287) — the wall face answers `null`, and that refusal is the
+     * correct outcome rather than a gap.
      *
      * The resolver memoizes the column per object internally; this memoizes the
      * RESOLVER per engine, because a kernel rebuild hands back a different
@@ -774,7 +792,7 @@ export class TimeRelativeTrigger implements FlowTrigger {
                         `Mount the ObjectQL engine itself (service 'objectql' or 'data'), or declare \`organization\` on the flow's start node to bind the sweep to one organization instead.`,
                 );
             }
-            this.recordOrgResolver = { engine, resolver: createRecordOrganizationResolver(engine) };
+            this.recordOrgResolver = { engine, resolver: createRecordWallOrganizationResolver(engine) };
         }
         // Read through a local: a mutable class property does not stay narrowed
         // across the assignment above, and `!` would assert away the one thing

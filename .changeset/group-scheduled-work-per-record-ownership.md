@@ -2,6 +2,7 @@
 "@objectstack/types": minor
 "@objectstack/spec": minor
 "@objectstack/trigger-schedule": minor
+"@objectstack/metadata-core": minor
 ---
 
 feat(spec,types,triggers)!: `group` runs package-authored scheduled work without a declaration, owning each run's writes per record (#18378)
@@ -81,6 +82,27 @@ acting organization"). Two things to check:
   other per-organization row, declare `organization` on its start node; the bind
   line says so, and so does the refusal at the first tick.
 
+## Which organization a record belongs to — the WALL question, not the stamp one
+
+`@objectstack/metadata-core` gains a second face on the record→organization
+resolver, and the split is the point: `resolveRecordOrganizationField` /
+`createRecordOrganizationResolver` answer **"who is this row ABOUT"** (the STAMP
+question, whose `tenancy.organizationField` limb stays pinned to the three
+sanctioned platform-row writers), while the new
+`resolveRecordWallOrganizationField` / `createRecordWallOrganizationResolver`
+answer **"what is this row WALLED by"** — `tenancy.enabled: false` ⇒ nothing,
+then a declared `tenancy.tenantField`, then the kernel's `organization_id`.
+
+The sweep uses the WALL face, because "which organization does this run act as"
+is a question about the wall. ⛔ It never reads `tenancy.organizationField`: that
+key is declared on exactly one shipped object (`sys_api_key`, deliberately
+unwalled, #8287), and reading it here would turn "the audit trail should follow
+this row's own organization even though nothing walls it" into an acting
+identity. A sweep over such an object resolves **nothing** and takes the
+`walled-posture` refusal at its first tenant-scoped write, which is the honest
+answer. Limbs 1 to 4 are one implementation shared by both faces, pinned as
+such, so the half they agree on cannot drift apart.
+
 **API:** `ScheduledWorkPolicy` gains `runOwnership: 'unscoped' | 'per-record' |
 'declared'`, and `requiresActingOrganization` narrows from "any walled posture"
 to `isolated` only. The two are deliberately separate axes: the boolean decides
@@ -91,5 +113,9 @@ deployment differently. ⚠️ That helper is module-level, NOT a package export
 is not re-exported from the package barrel, whose own note says an export whose
 only consumers live inside its own package belongs in a non-barrel module. The
 new PUBLIC surface in this change is `ScheduledRunOwnership` and the
-`runOwnership` key, both on `@objectstack/types` — and those alone are what put
-`Clause-②` at `yes`.
+`runOwnership` key on `@objectstack/types`, plus
+`resolveRecordWallOrganizationField` and
+`createRecordWallOrganizationResolver` on `@objectstack/metadata-core` — and
+those four are what put `Clause-②` at `yes`. Nothing existing is renamed or
+re-typed: both stamp-face exports keep their names, their signatures and their
+answers, limb 0 included.

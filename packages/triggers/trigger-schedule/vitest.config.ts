@@ -42,11 +42,12 @@ export default defineConfig({
         // Unaliased this resolved `metadata-core/dist`, so the `group` pins —
         // which assert that each run is stamped from its OWN swept record —
         // were a verdict about a built artifact rather than about
-        // `resolveRecordOrganizationField`'s precedence as it stands in this
-        // checkout. That precedence (`tenancy.organizationField`, then
-        // `tenancy.tenantField`, then the default column) is exactly what those
-        // pins exist to hold, so reading it from `dist` is the passing-test
-        // failure `check:test-source-alias` was built to catch.
+        // `resolveRecordWallOrganizationField`'s precedence as it stands in this
+        // checkout. That precedence (`tenancy.enabled: false` ⇒ nothing, then a
+        // declared `tenancy.tenantField`, then the kernel's `organization_id` —
+        // ⛔ the stamp key is NOT a limb of it) is exactly what those pins exist
+        // to hold, so reading it from `dist` is the passing-test failure
+        // `check:test-source-alias` was built to catch.
         //
         // ANCHORED regex for the reason the entry above states at length.
         find: /^@objectstack\/metadata-core$/,
