@@ -62,9 +62,9 @@
  *
  * The consequence for a reader: each gate keeps declaring its OWN population in
  * its OWN module body — `ROOT_DIR_WATCH_HINTS` in check-published-files.mjs,
- * `WORKSPACE_PARENT_GLOBS` in check-test-source-alias.mjs and
- * check-type-source-resolution.mjs. What is consolidated here is the PARSE,
- * never the DECLARATION. Those are two different things and the measurement
+ * `WORKSPACE_PARENT_GLOBS` in check-test-source-alias.mjs (and, until its
+ * retirement on 2026-09-18 — #18373, in check-type-source-resolution.mjs).
+ * What is consolidated here is the PARSE, never the DECLARATION. Those are two different things and the measurement
  * above is why they cannot share a module.
  *
  * ## How the divergences are settled, case by case
