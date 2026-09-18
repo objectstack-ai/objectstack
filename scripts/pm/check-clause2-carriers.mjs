@@ -409,6 +409,12 @@
  *      re-dispatch the card. It is also excluded from the MISPLACED scan: a
  *      recognised correction is this limb's designated second carrier, not a
  *      declaration written in a place the predicate does not look.
+ *      ⭐ The prohibition this exit exists for — 「the claim protocol forbids a
+ *      second `Claim:`」, three lines up — had no enforcing reader until
+ *      #18828: a seat that wrote the second line anyway was RANKED, not
+ *      refused, and the record called it a SUPERSESSION at exit 0.
+ *      `claimRepeats` / `c8SecondClaimSameSeat` downstairs are that reader, and
+ *      the correction above is the first of the two acts its remedy names.
  *   3. **It is not the checker filling anything in.** The value is the seat's
  *      own, written by the seat, in the fixed spelling. This file reads it and
  *      still writes nothing.
@@ -783,6 +789,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18719: a RETRACTED claim leaves the pool — a withdrawn claim never governs': 36,
   '#18683: the card-comment read pages to a cap — past 100 is UNJUDGED, ⛔ never a truncated pool': 27,
   '#18764: a DECORATED claim ENTERS the pool — ONE reading, and it is the sibling\'s': 24,
+  '#18828: a SECOND `Claim:` by ONE seat — the writer-side prohibition, finally READ': 52,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -794,8 +801,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // one #17915 adds, by the one #17959 adds, by the one #18042 adds, and by the
 // one #18174 adds, and by the one #18141 adds, and by the one #17919 adds, and
 // by the one #16833 adds, and by the one #18456 adds, and by the one #18719
-// adds, and by the one #18683 adds, and by the one #18764 adds.
-const SELF_TEST_BATTERY_FLOOR = 31;
+// adds, and by the one #18683 adds, and by the one #18764 adds, and by the one
+// #18828 adds.
+const SELF_TEST_BATTERY_FLOOR = 32;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1780,6 +1788,162 @@ export function claimRetractions(commentRows) {
     }
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// #18828 — a SECOND `Claim:` by ONE seat. The prohibition is on the WRITING,
+// and until this row nothing READ it.
+//
+// The rule is this file's own, in the #17366 block upstairs: 「the claim
+// protocol forbids a second `Claim:`」. It is the reason the correction key
+// exists at all and the reason that key is a DIFFERENT key — a correction never
+// enters the pool, never governs, and cannot re-dispatch the card. What the
+// reader did with a thread that carried a second claim anyway was RANK it: the
+// governing-claim selector takes the newest LIVE claim that parses a branch and
+// prints the loser as 「a SUPERSEDED claim」 — clean, green, exit 0. ⇒ a
+// writer-side prohibition with no enforcing reader, and the word the record
+// reached for («SUPERSEDED») is the word for a transition the protocol
+// DESIGNED, said about a line the protocol says must not be written.
+//
+// ⚠️ Measured before this row was written, over both boards this gate reads,
+// at 2026-09-18T00:05Z: 533 open cards in `objectstack-ai/objectstack`, 416 in
+// `objectstack-ai/objectui` (949, of which 167 carry at least one claim
+// comment). The five the filing card named — #18540 · #18677 · #18748 ·
+// #18651 · #18778 — each carry TWO live `Claim:` comments by `os-support-ai`
+// and zero corrections, and #18559 is the control: one claim plus the
+// sanctioned `Clause-②-correction: 5721425131`. ⛔ The repair of those five is
+// their author's; this file only names them.
+//
+// ## MEMBERSHIP first, and that is what makes the state REPAIRABLE
+//
+// The state is read over the LIVE claims — `claimRetractions` is the authority
+// on 「retracted」, exactly as it is for governance (#18719) — and ⛔ never over
+// the raw claim listing. Two consequences, both deliberate:
+//
+//   · a re-claim AFTER a `Release:` (or the id-naming retraction) of the first
+//     is the protocol working: the first no longer stands, one live claim is
+//     left, and the thread reads exactly as it did before this row existed;
+//   · a seat that ALREADY wrote a second claim has an act that clears the row —
+//     a `Release:` of what it holds, then one fresh claim. ⭐ That is the whole
+//     lesson of #17366 one screen up: a state whose only repair is an act no
+//     seat can perform is a green PR waiting on somebody outside the
+//     repository. A rule written over the WRITING moment instead ("there was no
+//     retraction strictly BETWEEN the two lines") would have been unrepairable
+//     by construction — nothing un-writes a comment, and the MCP tool set has
+//     no edit-a-comment call — so this row would have been a permanent red with
+//     a remedy sentence nobody could execute. ⛔ Not that.
+//
+// ## ⛔ What this row is NOT
+//
+//   1. **Not a second selector.** `CLAIM_SELECTION_RULE` and the governing
+//      claim are untouched for every shape; the pool is what it was. This is an
+//      ADDITIONAL reading of the same thread, and `claimCarrierSelection` stays
+//      a pure function of the rows it is handed with the same return shape.
+//   2. **Not a widened marker.** `CLAIM_COMMENT_MARKER` is read through
+//      `markerMatches` — the sibling's ONE reading (#18764) — so a decorated
+//      `**Claim:**` is counted here exactly as a bare one is counted there, and
+//      ⛔ this file does not grow a second reader of the marker.
+//   3. **Not a cross-seat ownership rule.** Two live claims by DIFFERENT
+//      authors are a real and separate question — the triage's p1 escalation
+//      condition — and this row is deliberately silent on it: refusing an
+//      ownership transfer between sessions is not this card's to do, and a row
+//      that answered both would make one sentence out of two states. The probe
+//      is reported in the PR body, with its population and its time.
+//   4. **Not a NOTE.** The `--pair` path answers `EXIT_PAIR_ADVERSE`. An
+//      adverse fact rendered as 0-with-a-message is the silence this file
+//      exists against, and it is what the old SUPERSEDED reading already was.
+// ---------------------------------------------------------------------------
+
+/** The rule this row is judged by, written out once and PRINTED beside it. */
+export const CLAIM_REPEAT_RULE =
+  'The claim protocol forbids a SECOND `Claim:`: a card is claimed once, and the seat that must '
+  + 'correct its own declaration writes `Clause-②-correction: <claim comment id>` — a DIFFERENT key, '
+  + 'which `CLAIM_COMMENT_MARKER` does not match, so a correction never enters the pool, never governs '
+  + 'and cannot re-dispatch the card. TWO OR MORE LIVE claim comments BY ONE AUTHOR on one thread is '
+  + 'therefore a state the protocol says cannot be written, and it is NAMED here — every comment id, '
+  + 'the author, and the repair — ⛔ never printed as a SUPERSESSION, which is the word for a '
+  + 'transition the protocol designed. MEMBERSHIP comes first: a RETRACTED claim does not stand, so a '
+  + 'fresh claim after a `Release:` of the first is the protocol working and reads exactly as it did '
+  + 'before. ⛔ Two live claims by DIFFERENT authors are not this state — that is a separate reading '
+  + 'and this row does not make it. ⛔ An unattributable row is never counted, the way `claimRetractions` '
+  + 'fails closed on one.';
+
+/** The repair, in the seat's own acts — printed with every instance of the row. */
+export const CLAIM_REPEAT_REMEDY =
+  'Repair, by the seat that holds them and ⛔ by nobody else: post `Clause-②-correction: <claim comment '
+  + 'id>` when what needs fixing is the declaration the claim carries (the #17366 exit — it corrects the '
+  + 'line without touching the claim, and nothing has to be edited), or post `Release:` and then ONE '
+  + 'fresh `Claim:` when the card really is being re-taken (the release retracts what this seat holds, so '
+  + 'the fresh claim is the only one standing). ⛔ Never a second `Claim:` under a live one, and ⛔ never '
+  + 'a `Release:` or a correction posted on another seat\'s behalf.';
+
+/**
+ * Every author holding MORE THAN ONE LIVE claim comment on this thread.
+ *
+ * A sibling pure reader beside `claimRetractions` and built on it: the same map
+ * decides membership here and for governance, so the pool and this row cannot
+ * describe two different retractions. ⛔ It resolves no state, no row and no
+ * exit code — `c8SecondClaimSameSeat` renders the verdict and `pairInputRecord`
+ * renders the reading, both from this one derivation.
+ *
+ * Ordering is the file's one recency rule (`laterOnThread`), used to ORDER the
+ * record rather than to pick a winner: `first` is the claim that stood, and
+ * every row in `repeats` is a line written under it.
+ *
+ * @param {{ id?: number|string, body?: string, created_at?: string,
+ *   user?: { login?: string } }[]|null} commentRows
+ * @returns {{ author: string, claims: object[], ids: string[], first: object,
+ *   repeats: object[] }[]} one entry per author, in thread order.
+ */
+export function claimRepeats(commentRows) {
+  const rows = Array.isArray(commentRows) ? commentRows : [];
+  const retracted = claimRetractions(rows);
+  const indexed = rows.map((row, index) => {
+    const parsed = Date.parse(row?.created_at ?? '');
+    return { row, index, stamp: Number.isFinite(parsed) ? parsed : null, author: rowAuthor(row) };
+  });
+  const byAuthor = new Map();
+  for (const claim of indexed) {
+    // The sibling's ONE reading of the marker (#18764) — ⛔ never a second one.
+    if (!markerMatches(CLAIM_COMMENT_MARKER, String(claim.row?.body ?? ''))) continue;
+    // A withdrawn claim does not stand, so it neither carries this prohibition
+    // nor receives it: ⭐ the same MEMBERSHIP-first order governance takes.
+    if (retracted.has(claim.row)) continue;
+    // Fail closed, exactly as `claimRetractions` does: a row this file cannot
+    // attribute is never counted as some seat's second anything.
+    if (claim.author === null) continue;
+    if (!byAuthor.has(claim.author)) byAuthor.set(claim.author, []);
+    byAuthor.get(claim.author).push(claim);
+  }
+  const out = [];
+  for (const [author, claims] of byAuthor) {
+    if (claims.length < 2) continue;
+    const ordered = [...claims].sort((a, b) => (laterOnThread(a, b) ? 1 : laterOnThread(b, a) ? -1 : 0));
+    out.push({
+      author,
+      claims: ordered.map((c) => c.row),
+      ids: ordered.map((c) => String(c.row?.id ?? '(no id)')),
+      first: ordered[0].row,
+      repeats: ordered.slice(1).map((c) => c.row),
+    });
+  }
+  return out;
+}
+
+/**
+ * The repeat state as ONE sentence per author — shared by the row that refuses
+ * and the input record that reports what was read, so the two cannot disagree
+ * about how many claims are involved or which ones.
+ */
+function claimRepeatSentences(groups) {
+  const when = (row) => `${String(row?.id ?? '(no id)')} at ${row?.created_at ?? '(no readable date)'}`;
+  return groups.map(
+    (g) =>
+      `\`${g.author}\` holds ${g.claims.length} LIVE claim comment(s) here — ${g.claims.map(when).join(', ')} `
+      + `— of which ${String(g.first?.id ?? '(no id)')} is the claim that stood and the other `
+      + `${g.repeats.length} (${g.repeats.map((r) => String(r?.id ?? '(no id)')).join(', ')}) `
+      + 'was written under it, un-retracted',
+  );
 }
 
 /** The key as prose, for the sentences above — declared once, beside the regex that reads it. */
@@ -4192,6 +4356,37 @@ export function locatedRecordUnjudged(pair) {
 }
 
 /**
+ * C8 — a SECOND `Claim:` by the SAME seat, named (#18828).
+ *
+ * ⭐ A VERDICT, and the file's own table decides that exactly as it decided C4's:
+ * the row is a fact about THIS pair — a line the claim protocol says must not be
+ * written, standing on the thread the declaration limb is judged over — and an
+ * adverse fact rendered as 0-with-a-message is the silence this file exists
+ * against. It is also, precisely, what the old reading WAS: `rejected: 1 … a
+ * SUPERSEDED claim`, exit 0, in the register reserved for a transition the
+ * protocol designed.
+ *
+ * ⛔ It re-blocks no legal workflow. A card claimed once reads as it always did;
+ * a re-claim after a `Release:` reads as it always did; a `Clause-②-correction:`
+ * is not a claim and never was. What it refuses is the one shape the protocol
+ * already forbade in writing, and the sentence carries the two acts that clear
+ * it — both performable by the seat that wrote the line, with the one tool every
+ * seat certainly has.
+ *
+ * ⛔ Never prescribes WHICH repair: the declaration is the seat's judgement and
+ * a checker that chose between a correction and a release would be choosing
+ * whether the card is being re-taken. It names both and writes nothing.
+ */
+export function c8SecondClaimSameSeat(pair) {
+  const groups = claimRepeats(pair?.cardComments ?? null);
+  if (groups.length === 0) return null;
+  return (
+    `card #${pair?.card} (delivering open PR #${pair?.pr}) — ${claimRepeatSentences(groups).join(' · ')}. `
+    + `${CLAIM_REPEAT_RULE} ${CLAIM_REPEAT_REMEDY} ${NEVER_WRITES}`
+  );
+}
+
+/**
  * Every FINDING row for one pair, in reporting order.
  *
  * `pairs` — the derived set this pair came from — is optional and defaults to
@@ -4224,6 +4419,15 @@ export function pairRows(pair, pairs = null) {
   // absent or unsigned record earns exactly one row, C6's, where C6 is owed.
   const servedTier = c7ServedTierBelow(pair);
   if (servedTier) rows.push({ code: 'C7', text: servedTier });
+  // ⭐ Last, and ORTHOGONAL to every row above it: C1–C7 read the gate's
+  // carriers, its declaration and the round that served the verdict, and this
+  // one reads the THREAD those readings are taken over — a line the claim
+  // protocol says must not be written, which the selector above ranks as a
+  // designed supersession at exit 0. A pair can earn it beside any other row,
+  // and it is a row rather than a note for the reason `c8SecondClaimSameSeat`
+  // states (#18828).
+  const repeatClaim = c8SecondClaimSameSeat(pair);
+  if (repeatClaim) rows.push({ code: 'C8', text: repeatClaim });
   return rows;
 }
 
@@ -5344,6 +5548,11 @@ async function gather(repo, prFilter = null, reader = NETWORK_READER, { landingR
  *     and every other claim it rejected WITH the reason — so "the two runs
  *     selected different comments" is distinguishable from "the two runs
  *     applied different rules";
+ *   · the REPEAT reading (#18828): which author, if any, holds more than one
+ *     LIVE claim comment on this thread, with every id — a fact about the rows
+ *     that were read, stated where the SUPERSEDED sentence used to be the only
+ *     trace of it. ⚠️ The verdict it earns is row C8's; ⛔ no field here
+ *     resolves one;
  *   · a BODY FINGERPRINT (bytes + `sha256:`) on each claim in the pool. ⭐ This
  *     is the field the measured 0/4/0 actually needs: the 4 was `misplaced`,
  *     which on that thread requires the governing claim to have carried NO
@@ -5429,6 +5638,7 @@ export const INPUT_RECORD_PAIR_FIELDS = Object.freeze([
   'claim.rule',
   'claim.selected',
   'claim.rejected',
+  'claim.repeat',
   'claim.clause2-line',
   'pr-body.clause2-line',
 ]);
@@ -5658,6 +5868,20 @@ export function pairInputRecord(pair) {
       `${rejected.length} claim comment(s) rejected`,
       ...rejected.map((r) => `${namedRow(r.row)} — ${r.reason}`),
     ];
+
+  // ⭐ The same derivation the C8 row renders, so the record and the verdict
+  // cannot disagree about how many claims one seat holds or which they are
+  // (#18828). ⚠️ A READING of the rows — ⛔ not the verdict, which is the row.
+  const repeats = claimRepeats(pair?.cardComments ?? null);
+  out['claim.repeat'] = !Array.isArray(pair?.cardComments)
+    ? 'UNREAD — the thread could not be read, so no repeat reading was taken'
+    : repeats.length === 0
+      ? 'none — no author holds more than one LIVE claim comment on this thread'
+      : [
+        `${repeats.length} author(s) holding more than one LIVE claim comment — the protocol forbids a `
+        + 'second `Claim:` (row C8 is the verdict; this line is what was read)',
+        ...claimRepeatSentences(repeats),
+      ];
 
   out['claim.clause2-line'] = pool.length === 0
     ? '(no carrier, so no line was read from one)'
@@ -8260,6 +8484,157 @@ export async function selfTest() {
   t('⭐ the RETRACTION path still reads the sigil-led #18373 line — narrowing it to the shared reading would unland #18719', claimRetractions(RTX_18373).has(RTX_18373.find((r) => r.id === RTX_WITHDRAWN)));
   t('⭐ …while the SHARED reading does not strip a leading sigil, so the two paths are ⛔ NOT interchangeable', markerMatches(CLAIM_COMMENT_MARKER, '🚨 Claim: PM loop round 1') === false);
 
+  // -- #18828: a SECOND `Claim:` by ONE seat, NAMED -------------------------
+  //
+  // The rule is this file's own (#17366 block, upstairs): the claim protocol
+  // forbids a second `Claim:`. What the reader did with one was RANK it —
+  // `rejected: 1 … a SUPERSEDED claim`, exit 0 — so a writer-side prohibition
+  // had no enforcing reader, and the record used the word for a transition the
+  // protocol DESIGNED about a line it says must not be written.
+  //
+  // ⭐ The pins below are per DIRECTION, and each one carries its own
+  // non-vacuity control: an assertion that some thread is silent proves nothing
+  // unless the SAME thread, with one thing changed, is named.
+  battery('#18828: a SECOND `Claim:` by ONE seat — the writer-side prohibition, finally READ');
+  const R28 = (id, at, login, lines) => ({ id, created_at: at, user: { login }, body: [].concat(lines).join('\n') });
+  const R28_SEAT = 'os-support-ai';
+  const R28_CLAIM = (id, at, login, o = {}) =>
+    R28(id, at, login, [
+      `${o.marker ?? 'Claim:'} PM loop round ${o.round ?? 1}`,
+      `Session: \`session_01DvvamiacK328idtBYJBxV3\``,
+      o.branch === null ? 'Branch: named in the PR body' : `Branch: \`${o.branch ?? 'claude/issue-4242-first'}\``,
+      'Clause-②: no',
+    ]);
+  const R28_A = R28_CLAIM(7100000001, '2026-09-18T01:00:00Z', R28_SEAT);
+  const R28_B = R28_CLAIM(7100000002, '2026-09-18T02:00:00Z', R28_SEAT, { round: 2, branch: 'claude/issue-4242-second' });
+  const R28_PAIR = (rows) => ({ pr: 18999, card: 18828, draft: true, prLabels: [], cardLabels: [], cardComments: rows });
+  const R28_CODES = (rows) => pairRows(R28_PAIR(rows)).map((r) => r.code);
+  const R28_ROW = (rows) => pairRows(R28_PAIR(rows)).find((r) => r.code === 'C8')?.text ?? '';
+  const R28_FIELD = (rows, key) => [pairInputRecord(R28_PAIR(rows))[key]].flat().join('\n');
+  const R28_IDS = (rows) => claimRepeats(rows).map((g) => g.ids.join('+')).join(' | ');
+
+  // (a) the shape the card measured five times over.
+  t('⭐ (a) two LIVE claims by ONE seat, no retraction between them — ONE named group carrying BOTH ids', R28_IDS([R28_A, R28_B]) === '7100000001+7100000002', R28_IDS([R28_A, R28_B]));
+  t('…and `--pair` earns a C8 FINDING, which is its exit 4', R28_CODES([R28_A, R28_B]).includes('C8'), R28_CODES([R28_A, R28_B]).join());
+  t('⛔ …a VERDICT and never a NOTE: the code lives in `pairRows`, and `pairNotes` does not carry it', pairNotes(R28_PAIR([R28_A, R28_B])).every((n) => n.code !== 'C8') && EXIT_PAIR_ADVERSE === 4 && EXIT_PAIR_ADVERSE !== EXIT_OK);
+  t('…the ROW names the author and BOTH comment ids', says(R28_ROW([R28_A, R28_B]), R28_SEAT) && says(R28_ROW([R28_A, R28_B]), '7100000001') && says(R28_ROW([R28_A, R28_B]), '7100000002'));
+  t('…and it names BOTH sanctioned repairs — the correction key and the `Release:`', says(R28_ROW([R28_A, R28_B]), 'Clause-②-correction') && says(R28_ROW([R28_A, R28_B]), '`Release:`'));
+  t('…and the input record READS the same two ids, beside the carrier it selected', says(R28_FIELD([R28_A, R28_B], 'claim.repeat'), '7100000001') && says(R28_FIELD([R28_A, R28_B], 'claim.repeat'), '7100000002'));
+  t('⛔ CONTROL: ONE claim by that same seat is silent — no group, no row, and the record says so', R28_IDS([R28_A]) === '' && !R28_CODES([R28_A]).includes('C8') && says(R28_FIELD([R28_A], 'claim.repeat'), 'none — no author holds'));
+  t('⛔ CONTROL: the SELECTOR did not move — the newest still governs and the older is still listed SUPERSEDED', claimCarrierSelection([R28_A, R28_B]).pool.map((r) => r.id).join() === '7100000002' && says(R28_FIELD([R28_A, R28_B], 'claim.rejected'), 'a SUPERSEDED claim'));
+  t('⛔ …and the refusal is an ADDITIONAL reading, ⛔ not a new selector: same pool, same rejected count as before', claimCarrierSelection([R28_A, R28_B]).rejected.length === 1 && claimCarrierSelection([R28_A, R28_B]).claims.length === 2 && CLAIM_SELECTION_RULE.includes('the GOVERNING claim'));
+
+  // (b) the p1 shape — REPORTED in the filing round, ⛔ not refused here.
+  const R28_OTHER = R28_CLAIM(7100000003, '2026-09-18T02:00:00Z', 'os-litant', { round: 2, branch: 'claude/issue-4242-second' });
+  t('⭐ (b) two live claims by DIFFERENT authors ⇒ ⛔ NOT this state — an ownership transfer is a separate reading', R28_IDS([R28_A, R28_OTHER]) === '' && !R28_CODES([R28_A, R28_OTHER]).includes('C8'));
+  t('…and that thread still reads exactly as it did: the newer governs, the older is SUPERSEDED, exit 0', claimCarrierSelection([R28_A, R28_OTHER]).pool.map((r) => r.id).join() === '7100000003' && says(R28_FIELD([R28_A, R28_OTHER], 'claim.rejected'), 'a SUPERSEDED claim'));
+  t('⛔ CONTROL: make those two authors ONE and the same thread is named — the author test is what decides', R28_IDS([R28_A, { ...R28_OTHER, user: { login: R28_SEAT } }]) === '7100000001+7100000003');
+  t('…and the rule PRINTED with the row says so in as many words, so a reader is not left to infer it', CLAIM_REPEAT_RULE.includes('DIFFERENT authors are not this state'));
+
+  // (c) MEMBERSHIP first — a re-claim after a release is the protocol working.
+  const R28_RELEASE = R28(7100000010, '2026-09-18T01:30:00Z', R28_SEAT, 'Release: session `session_01DvvamiacK328idtBYJBxV3`, cause: 本卡改派, 去向: `pm:queue`');
+  const R28_NAMED_RETRACTION = R28(7100000011, '2026-09-18T01:30:00Z', R28_SEAT, '撤回本席的认领 `7100000001` —— 本卡改派');
+  t('⭐ (c) a fresh claim AFTER a `Release:` of the first ⇒ silent — a retracted claim does not stand', R28_IDS([R28_A, R28_RELEASE, R28_B]) === '' && !R28_CODES([R28_A, R28_RELEASE, R28_B]).includes('C8'));
+  t('…and the first is still listed RETRACTED, with the 「⛔ NOT superseded」 wording byte-unchanged', says(R28_FIELD([R28_A, R28_RELEASE, R28_B], 'claim.rejected'), 'RETRACTED') && says(R28_FIELD([R28_A, R28_RELEASE, R28_B], 'claim.rejected'), '⛔ NOT superseded: a withdrawn claim is not a candidate for governance at all, whatever its date'));
+  t('…and the id-naming retraction channel reads the same way — ⛔ not a `Release:`-only rule', R28_IDS([R28_A, R28_NAMED_RETRACTION, R28_B]) === '');
+  t('⛔ CONTROL: drop the retraction and those same two claims are named — the release is what clears it', R28_IDS([R28_A, R28_B]) === '7100000001+7100000002');
+  t('⭐ the repair is PERFORMABLE after the fact: `Release:` then ONE fresh claim leaves exactly one standing', R28_IDS([R28_A, R28_B, R28(7100000012, '2026-09-18T03:00:00Z', R28_SEAT, 'Release: session `x`, cause: 修复本席的双认领, 去向: `pm:queue`'), R28_CLAIM(7100000013, '2026-09-18T04:00:00Z', R28_SEAT, { round: 3 })]) === '');
+
+  // (d) the sanctioned exit stays the sanctioned exit.
+  const R28_CORRECTION = R28(7100000020, '2026-09-18T02:00:00Z', R28_SEAT, [
+    'Clause-②-correction: 7100000001',
+    'Clause-②: no',
+    'Session: `session_01DvvamiacK328idtBYJBxV3`',
+  ]);
+  t('⭐ (d) a `Clause-②-correction:` as the LATER row is not a claim — silent, and the pool never saw it', R28_IDS([R28_A, R28_CORRECTION]) === '' && !R28_CODES([R28_A, R28_CORRECTION]).includes('C8') && markerMatches(CLAIM_COMMENT_MARKER, R28_CORRECTION.body) === false);
+  t('…and the #17366 exit still WORKS: the declaration is read off the correction, untouched by this row', cardDeclaration([R28_A, R28_CORRECTION]).state === 'declared' && cardDeclaration([R28_A, R28_CORRECTION]).correctionNote !== undefined);
+  t('⛔ CONTROL: write that same correction as a SECOND `Claim:` instead and it is named — which is the whole card', R28_IDS([R28_A, R28_B]) !== '' && says(R28_ROW([R28_A, R28_B]), 'never enters the pool'));
+
+  // (e) ONE reading of the marker, and it is the sibling's (#18764).
+  const R28_BOLD = R28_CLAIM(7100000030, '2026-09-18T02:00:00Z', R28_SEAT, { marker: '**Claim:**', round: 2 });
+  const R28_TICK = R28_CLAIM(7100000031, '2026-09-18T02:00:00Z', R28_SEAT, { marker: '`Claim:`', round: 2 });
+  t('⭐ (e) a DECORATED second claim (`**Claim:**`) is counted exactly as a bare one', R28_IDS([R28_A, R28_BOLD]) === '7100000001+7100000030');
+  t('…and the backticked spelling with it', R28_IDS([R28_A, R28_TICK]) === '7100000001+7100000031');
+  t('⛔ CONTROL: the raw constant REFUSES both bodies — the counting is the sibling\'s ONE reading, ⛔ not a second reader here', CLAIM_COMMENT_MARKER.test(R28_BOLD.body) === false && CLAIM_COMMENT_MARKER.test(R28_TICK.body) === false && markerMatches(CLAIM_COMMENT_MARKER, R28_BOLD.body) === true);
+  t('⛔ CONTROL: a markdown LIST ITEM is not a claim, so it is not a SECOND one either — the refusals are the sibling\'s', R28_IDS([R28_A, R28(7100000032, '2026-09-18T02:00:00Z', R28_SEAT, '- Claim: PM loop round 2\nBranch: `claude/issue-4242-second`')]) === '');
+
+  // (f) the prohibition is on the WRITING, ⛔ not on the parse.
+  const R28_UNPARSED = R28_CLAIM(7100000040, '2026-09-18T02:00:00Z', R28_SEAT, { round: 2, branch: null });
+  t('⭐ (f) a second claim whose `Branch:` parses to ZERO branches is still a second claim', R28_IDS([R28_A, R28_UNPARSED]) === '7100000001+7100000040');
+  t('…and it is named even though governance itself is unresolvable on that thread', cardDeclaration([R28_A, R28_UNPARSED]).state === 'claim-branch-unparsed' && R28_CODES([R28_A, R28_UNPARSED]).includes('C8'));
+  t('⛔ CONTROL: give that same row a parseable branch and the two are named just the same — the parse fires nothing', R28_IDS([R28_A, { ...R28_UNPARSED, body: R28_B.body }]) === '7100000001+7100000040');
+
+  // (g) one refusal per seat, ⛔ never one per pair.
+  const R28_C = R28_CLAIM(7100000050, '2026-09-18T03:00:00Z', R28_SEAT, { round: 3, branch: 'claude/issue-4242-third' });
+  t('⭐ (g) THREE claims by one seat ⇒ ONE refusal naming all three', claimRepeats([R28_A, R28_B, R28_C]).length === 1 && R28_IDS([R28_A, R28_B, R28_C]) === '7100000001+7100000002+7100000050');
+  t('…and exactly ONE C8 row on the pair — ⛔ not one per ordered pair, which would have been three', R28_CODES([R28_A, R28_B, R28_C]).filter((c) => c === 'C8').length === 1);
+  t('…with all three ids in the sentence a reader is handed', says(R28_ROW([R28_A, R28_B, R28_C]), '7100000001') && says(R28_ROW([R28_A, R28_B, R28_C]), '7100000002') && says(R28_ROW([R28_A, R28_B, R28_C]), '7100000050'));
+  t('⛔ CONTROL: retract two of the three and one standing claim is left — silent', R28_IDS([R28_A, R28_B, R28(7100000051, '2026-09-18T02:30:00Z', R28_SEAT, 'Release: session `x`, cause: y, 去向: `pm:queue`'), R28_C]) === '');
+
+  // (h) fail closed on an unattributable row — the way `claimRetractions` does.
+  const R28_NO_USER = { id: 7100000060, created_at: '2026-09-18T02:00:00Z', body: R28_B.body };
+  t('⭐ (h) an unattributable LATER row is never counted — ⛔ `null` is a refusal, never a wildcard', R28_IDS([R28_A, R28_NO_USER]) === '' && !R28_CODES([R28_A, R28_NO_USER]).includes('C8'));
+  t('…and an unattributable FIRST row is not counted either — both sides fail closed', R28_IDS([{ id: 7100000061, created_at: '2026-09-18T01:00:00Z', body: R28_A.body }, R28_B]) === '');
+  t('…and TWO unattributable rows are not ONE seat either — ⛔ `null` never groups with `null`', R28_IDS([{ id: 7100000062, created_at: '2026-09-18T01:00:00Z', body: R28_A.body }, { id: 7100000063, created_at: '2026-09-18T02:00:00Z', body: R28_B.body }]) === '');
+  t('…and the direction is STATED in the rule the row prints, so silence here is readable rather than inferred', CLAIM_REPEAT_RULE.includes('unattributable row is never counted'));
+  t('⛔ CONTROL: give that same row a login and it is named — the attribution is what was missing', R28_IDS([R28_A, { ...R28_NO_USER, user: { login: R28_SEAT } }]) === '7100000001+7100000060');
+
+  // (i) the seat's own shape: a later comment that QUOTES or DISCUSSES the word.
+  const R28_QUOTE = R28(7100000070, '2026-09-18T02:00:00Z', R28_SEAT, [
+    '⚠️ 本席上一条 `Claim:` 的申报行写错了,已另发 `Clause-②-correction:` 更正,⛔ 未再发一条认领。',
+    '      "question": "the governing-claim instrument reads a second Claim: as a SUPERSESSION",',
+  ]);
+  const R28_ROUND_REPORT = R28(7100000071, '2026-09-18T03:00:00Z', R28_SEAT, [
+    '## 轮次报告 — `domain:cli` 执行 PM 席',
+    '- 本轮认领 3 张卡;每张 Claim: 行均由本席发出。',
+  ]);
+  t('⭐ (i) a later same-author comment that QUOTES the word is not a claim — the marker is read at LINE START', R28_IDS([R28_A, R28_QUOTE]) === '' && !R28_CODES([R28_A, R28_QUOTE]).includes('C8'));
+  t('…and a round report mentioning the word mid-line is not one either', R28_IDS([R28_A, R28_ROUND_REPORT]) === '');
+  t('…both of them together with the claim still leave exactly one standing claim on the thread', claimCarrierSelection([R28_A, R28_QUOTE, R28_ROUND_REPORT]).live.length === 1);
+  t('⛔ CONTROL: move that same word to the OPENING of a line and it IS a second claim', R28_IDS([R28_A, R28(7100000072, '2026-09-18T02:00:00Z', R28_SEAT, 'Claim: 本席重新认领\nBranch: `claude/issue-4242-second`')]) === '7100000001+7100000072');
+
+  // The unread and empty halves — ⛔ never a clean reading.
+  t('⛔ an UNREAD thread names nobody and reads nothing', claimRepeats(null).length === 0 && c8SecondClaimSameSeat({ pr: 1, card: 2, cardComments: null }) === null);
+  t('…and the record SAYS unread rather than reporting a clean thread', says(R28_FIELD(null, 'claim.repeat'), 'UNREAD'));
+  t('⛔ an EMPTY thread is silent, and says the other sentence', claimRepeats([]).length === 0 && says(R28_FIELD([], 'claim.repeat'), 'none — no author holds'));
+
+  // ⭐ The LIVE census, replayed from the real rows the filing card named.
+  // Population: both boards this gate reads, at 2026-09-18T00:05Z — 533 open
+  // cards in `objectstack-ai/objectstack`, 416 in `objectstack-ai/objectui`,
+  // 167 of them carrying at least one claim comment. The five below are the
+  // measured instances on the objectstack board, all by one seat; #18559 is the
+  // same seat on the same shift doing it the sanctioned way.
+  const R28_LIVE = (id, at, head) => R28(id, at, R28_SEAT, [
+    head,
+    '',
+    'Claim: session `session_01DvvamiacK328idtBYJBxV3`',
+    'Branch: `claude/issue-18540-actions-native-error-leak`',
+    'Clause-②: no',
+  ]);
+  const R28_LIVE_CARDS = [
+    [18540, R28_LIVE(5719079496, '2026-09-17T18:09:58Z', '## 认领 — `domain:cli` 执行 PM 席'), R28_LIVE(5720020876, '2026-09-17T19:28:06Z', '## 认领(补正,取代 `5719079496` 的申报行)— `domain:cli` 执行 PM 席')],
+    [18677, R28_LIVE(5720104138, '2026-09-17T19:34:43Z', '## 认领'), R28_LIVE(5720190458, '2026-09-17T19:42:03Z', '## 认领(补正)')],
+    [18748, R28_LIVE(5720212595, '2026-09-17T19:43:49Z', '## 认领'), R28_LIVE(5720888122, '2026-09-17T20:36:49Z', '## 认领(补正)')],
+    [18651, R28_LIVE(5721424769, '2026-09-17T21:23:22Z', '## 认领'), R28_LIVE(5721997887, '2026-09-17T22:20:07Z', '## 认领(补正)')],
+    [18778, R28_LIVE(5721425530, '2026-09-17T21:23:25Z', '## 认领'), R28_LIVE(5722028692, '2026-09-17T22:23:32Z', '## 认领(补正)')],
+  ];
+  t('⭐ the five measured instances (2026-09-18T00:05Z) are ALL named — ⛔ five green readings before this row', R28_LIVE_CARDS.every(([, a, b]) => claimRepeats([a, b]).length === 1));
+  t('…each naming its own two comment ids and the one seat that wrote them', R28_LIVE_CARDS.every(([, a, b]) => R28_IDS([a, b]) === `${a.id}+${b.id}` && claimRepeats([a, b])[0]?.author === R28_SEAT), R28_LIVE_CARDS.map(([n, a, b]) => `${n}:${R28_IDS([a, b])}`).join(' '));
+  t('⛔ …and every one of them read GREEN before, as a SUPERSESSION — the measurement this row answers', R28_LIVE_CARDS.every(([, a, b]) => says(R28_FIELD([a, b], 'claim.rejected'), 'a SUPERSEDED claim')));
+  t('⛔ CONTROL #18559 — the same seat, same shift, the SANCTIONED shape: one claim plus a correction ⇒ silent', (() => {
+    const claim = R28_LIVE(5721425131, '2026-09-17T21:23:24Z', '## 认领 — `domain:cli` 执行 PM 席 #6024');
+    const correction = R28(5721779100, '2026-09-17T21:57:34Z', R28_SEAT, ['Clause-②-correction: 5721425131', 'Clause-②: no', 'Session: `session_01DvvamiacK328idtBYJBxV3`']);
+    return claimRepeats([claim, correction]).length === 0 && !R28_CODES([claim, correction]).includes('C8');
+  })());
+  t('⭐ …and that control IS the repair this row prints, which is why the row prints it', says(R28_ROW([R28_A, R28_B]), 'Clause-②-correction: <claim comment id>'));
+
+  // ONE derivation — the record and the verdict cannot disagree. ⛔ Every
+  // assertion below reads the group defensively: under an ablation the pin
+  // must FAIL, and a pin that THROWS aborts the run and names nothing.
+  t('the repeat field is DECLARED in the pair roster, so it renders on every block, filled or not', INPUT_RECORD_PAIR_FIELDS.includes('claim.repeat'));
+  t('⭐ ONE derivation: the ids the ROW names are the ids the RECORD names', (claimRepeats([R28_A, R28_B])[0]?.ids ?? []).length === 2 && (claimRepeats([R28_A, R28_B])[0]?.ids ?? []).every((id) => says(R28_ROW([R28_A, R28_B]), id) && says(R28_FIELD([R28_A, R28_B], 'claim.repeat'), id)));
+  t('⛔ the row is not in the sweep\'s NOTE family and the record carries no verdict word for it', !says(R28_FIELD([R28_A, R28_B], 'claim.repeat'), 'exit 4') && says(R28_FIELD([R28_A, R28_B], 'claim.repeat'), 'row C8 is the verdict'));
+
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -8330,7 +8705,9 @@ export async function selfTest() {
       + 'and on a refusal — with the selected carrier, its body fingerprint and the rejected '
       + 'candidates each stated, the DECORATED claim that enters the pool and governs through '
       + 'the sibling\'s one reading — the constant unwidened, and the file\'s two undecoration '
-      + 'paths pinned as the two jobs they are — and the exit register).',
+      + 'paths pinned as the two jobs they are, the SECOND `Claim:` by one seat named as the state '
+      + 'the protocol forbids writing rather than ranked as a supersession — per direction, with a '
+      + 'non-vacuity control each and the five measured instances replayed — and the exit register).',
   );
 
   selfTestReachedVerdict = true;
