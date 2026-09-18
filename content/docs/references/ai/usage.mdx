@@ -48,7 +48,7 @@ const result = AIUsageRecordSchema.parse(data);
 | **model** | `string` | ✅ |  |
 | **usage** | `{ promptTokens: integer; completionTokens: integer; totalTokens: integer }` | ✅ |  |
 | **costUsd** | `number` | ✅ | Computed cost in USD |
-| **latencyMs** | `number` | optional |  |
+| **latencyMs** | `number` | optional | Wall-clock latency in milliseconds |
 | **timestamp** | `string` | optional |  |
 
 ### Nested Shape: `AIUsageRecord.usage`
