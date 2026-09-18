@@ -27,16 +27,26 @@
  *
  * ## Why an allowance table and not a flat zero
  *
- * One call in this tree is legitimately direct:
- * `union-branch-projection.ts`'s `projectsUnderStrictMode` asks zod whether a
- * node is representable at all and DISCARDS the result — a yes/no question,
- * not a projection, so routing it through the override would answer something
- * else. It is declared below with that reason and pinned at its exact count,
- * so a SECOND call in that file fails too.
+ * Three files in this tree hold calls that are legitimately direct (four calls
+ * in all), and each is a different reason rather than one exemption repeated:
+ *
+ *   - `union-branch-projection.ts`'s `projectsUnderStrictMode` asks zod whether
+ *     a node is representable at all and DISCARDS the result — a yes/no
+ *     question, not a projection;
+ *   - `check-react-blocks-declaration-parity.ts` reads a schema's accepted KEY
+ *     set twice, for a declaration-parity gate; the override emits keywords,
+ *     never keys, and the gate publishes nothing;
+ *   - `build-react-blocks-contract.ts` renders a markdown prop table into the
+ *     governed `skills/**` catalog — a published artifact, but not a published
+ *     JSON Schema, and rewriting it is a governed-surface decision of its own.
+ *
+ * Each is pinned at its exact count, so a SECOND call in any of those files
+ * fails too, and the reason travels with the row.
  *
  * ## Why the controls are not decoration
  *
- * The scan strips comments before counting, and this tree talks about
+ * The scan masks comments and string literals before counting, and this tree
+ * talks about
  * `z.toJSONSchema` in prose constantly (`build-schemas.ts` alone twice). A
  * stripper that removed too much would make every assertion here pass over an
  * empty string. So the choke point itself is asserted to read EXACTLY one call
@@ -48,6 +58,13 @@ import { describe, expect, it } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+// ⛔ Not a private `stripComments` regex. `pnpm check:comment-mask-adoption`
+// refuses one, and its header carries the two measured failure families a
+// private copy joins — a naive regex opens a phantom comment on a `/*` inside a
+// string, a regex-blind scanner opens a phantom string on a regex literal
+// holding a quote. Both report over source they never read. This scan needs
+// literals masked too, which is what the second export is for.
+import { maskComments, maskCommentsAndLiterals } from '../../../scripts/js-comment-mask.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -72,19 +89,15 @@ function collectScriptSources(): Map<string, string> {
 }
 
 /**
- * Line and block comments removed, everything else left alone. Deliberately
- * NOT a string-literal stripper: a `z.toJSONSchema(` inside a string would be a
- * false positive, and the corpus assertion below is what proves none exists
- * today — a future one fails loudly here rather than being tolerated by a
- * cleverer regex nobody can audit.
+ * Direct `z.toJSONSchema(` calls in CODE — comments and string literals both
+ * masked. Masking literals as well as comments is not tidiness: two files here
+ * name `z.toJSONSchema()` inside text they PRINT — `openapi-self-consistency.ts`
+ * tells an author it "threw for these", `check-react-blocks-declaration-parity.ts`
+ * explains the pipe in a help paragraph. Counted as calls, those earn rows in
+ * the allowance table for prose, which is the rot the table exists to prevent.
  */
-function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
-}
-
-/** Direct `z.toJSONSchema(` calls in code, comments excluded. */
 function directCallCount(source: string): number {
-  return (stripComments(source).match(/\bz\.toJSONSchema\s*\(/g) ?? []).length;
+  return (maskCommentsAndLiterals(source).match(/\bz\.toJSONSchema\s*\(/g) ?? []).length;
 }
 
 /**
@@ -102,7 +115,17 @@ const DECLARED_DIRECT_CALLS: ReadonlyArray<{ file: string; count: number; why: s
   {
     file: 'lib/union-branch-projection.ts',
     count: 1,
-    why: "projectsUnderStrictMode asks zod whether a node is representable and DISCARDS the result; nothing it produces is published",
+    why: 'projectsUnderStrictMode asks zod whether a node is representable and DISCARDS the result; nothing it produces is published',
+  },
+  {
+    file: 'check-react-blocks-declaration-parity.ts',
+    count: 2,
+    why: "deriveNodeContractKeys() and specProps() read a schema's accepted KEY set for a declaration-parity gate; it publishes nothing, and the override emits keywords, never keys",
+  },
+  {
+    file: 'build-react-blocks-contract.ts',
+    count: 1,
+    why: 'writes a markdown prop table into the governed skills catalog, not a JSON Schema artifact — measured DIVERGENT from this projection for 1 of its 3 block schemas, filed separately; routing it rewrites a skills/** file and is its own decision',
   },
 ];
 
@@ -133,6 +156,16 @@ describe('published projection choke point', () => {
     expect(directCallCount(schemas)).toBe(0);
   });
 
+  it('DARK CONTROL: a call spelling inside an error message is not counted either', () => {
+    // This file prints `z.toJSONSchema() threw for these` to an author. Read
+    // with comments stripped but strings kept, it counts as a call and earns a
+    // row in the allowance table for prose — which is the rot the table exists
+    // to prevent.
+    const consistency = sources.get('lib/openapi-self-consistency.ts')!;
+    expect(maskComments(consistency)).toMatch(/z\.toJSONSchema\(\)/);
+    expect(directCallCount(consistency)).toBe(0);
+  });
+
   it('no producer in scripts/ reaches z.toJSONSchema directly, outside the declared calls', () => {
     const allowed = new Map(DECLARED_DIRECT_CALLS.map((row) => [row.file, row.count]));
     const offenders: string[] = [];
@@ -152,7 +185,7 @@ describe('published projection choke point', () => {
 
   it('every published producer imports the helper it is required to project through', () => {
     for (const producer of PUBLISHED_PRODUCERS) {
-      expect(stripComments(sources.get(producer)!), producer).toMatch(
+      expect(maskComments(sources.get(producer)!), producer).toMatch(
         /import\s*\{[^}]*\bprojectPublishedJsonSchema\b[^}]*\}\s*from\s*'\.{1,2}\/(lib\/)?refinement-projection'/,
       );
     }
