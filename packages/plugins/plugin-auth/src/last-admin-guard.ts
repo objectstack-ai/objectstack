@@ -129,9 +129,15 @@
  *
  *  1. **platform admin, grant-anchored** — an UNSCOPED
  *     (`organization_id = null`), in-window (ADR-0091)
- *     `sys_user_permission_set` grant of `admin_full_access`. This is the same
- *     evidence `resolveAuthzContext` derives `platform_admin` from
- *     (ADR-0068 D2 / ADR-0095 D3) — never a stored `sys_user.role` string.
+ *     `sys_user_permission_set` grant of `admin_full_access`, **under a
+ *     non-walled posture only**. This is the same evidence
+ *     `resolveAuthzContext` derives `platform_admin` from
+ *     (ADR-0068 D2 / ADR-0095 D3) — never a stored `sys_user.role` string —
+ *     and since #11663 L5 that derivation is posture-keyed, so this grade is
+ *     keyed identically. ⛔ The key is not a policy of this guard's own: the
+ *     enumeration answers the SAME question the derivation does, and one
+ *     anchor read two ways by two readers is the dual-track the migration
+ *     window existed to close.
  *  2. **organization owner / admin** — a `sys_member` row whose role carries
  *     the `owner` or `admin` grade (ADR-0108's closed vocabulary). Grade, not
  *     capability: it is read here only as "who administers this org", which is
@@ -312,7 +318,9 @@ import {
   MEMBERSHIP_ROLE_MEMBER,
   MEMBERSHIP_ROLE_OWNER,
 } from '@objectstack/spec/identity';
+import { postureEnforcesWall } from '@objectstack/spec/security';
 import { SystemObjectName, SystemUserId } from '@objectstack/spec/system';
+import { PLATFORM_OWNER_EMAIL_ENV, resolveTenancyPosture } from '@objectstack/types';
 import {
   isGrantActive,
   isRowActive,
@@ -892,7 +900,31 @@ export function registerLastAdminGuard(
     const ids = new Set<string>();
     const now = Date.now();
 
-    // 1) Platform admins — unscoped, in-window `admin_full_access` grants.
+    // 1) Platform admins — unscoped, in-window `admin_full_access` grants,
+    //    on a NON-WALLED posture only.
+    //
+    // [#11663 L5] The posture key is read from the environment with the same
+    // expression the derivation site uses — `postureEnforcesWall(
+    // resolveTenancyPosture())` at `core/src/security/resolve-authz-context.ts`
+    // §6b — because this enumeration's whole contract is to answer the SAME
+    // question that derivation answers. Under `group`/`isolated` the row stopped
+    // conferring `PLATFORM_ADMIN` when the walled half of the legacy anchor
+    // retired, so counting its holder here would leave the two readers of ONE
+    // anchor disagreeing about who administers the environment — and this guard
+    // would then permit the write that ends the last CONFIG-anchored
+    // administrator's standing, on the belief that an administrator remains.
+    // The inverse is closed by the same line: a write that revokes the now-inert
+    // row stops being refused as though it removed the last administrator.
+    //
+    // ⛔ Under `single` — the DEFAULT, what a rig that configured no tenancy at
+    // all resolves to — NOTHING changes here: the row is still that rig's anchor
+    // (Choice 4A, #11974), its zero-config first-user promotion still mints it,
+    // and #11979 is the card that disposes of it. This is a NARROWING toward the
+    // already-declared model on walled rigs, ⛔ never a relaxation of any
+    // posture's boundary.
+    //
+    // It asks the ENVIRONMENT, never the engine, so it adds no read — the same
+    // property §6b pins on its own side.
     //
     // [#6084] The set row is simulated exactly like the grant rows below it: a
     // pending write on `sys_permission_set` can DELETE this row (it drops out of
@@ -906,10 +938,13 @@ export function registerLastAdminGuard(
     // list would read as absent here and absent means ACTIVE — the guard would
     // model an environment in which no set is ever deactivated and permit the
     // one write that empties it.
-    const sets = await scan(op, SystemObjectName.PERMISSION_SET, {
-      where: { name: ADMIN_FULL_ACCESS },
-      fields: ['id', 'name', 'active'],
-    });
+    const legacyGrantAnchorRetired = postureEnforcesWall(resolveTenancyPosture());
+    const sets = legacyGrantAnchorRetired
+      ? []
+      : await scan(op, SystemObjectName.PERMISSION_SET, {
+        where: { name: ADMIN_FULL_ACCESS },
+        fields: ['id', 'name', 'active'],
+      });
     const adminSetIds: string[] = [];
     for (const rawSet of sets) {
       const set = applyPending(rawSet, pending, SystemObjectName.PERMISSION_SET);
@@ -1082,6 +1117,22 @@ export function registerLastAdminGuard(
    * read as the SAME evidence, with its own remedy — re-activate it.
    */
   const refuseIfEmptiedRatherThanFresh = async (op: GuardedOp): Promise<void> => {
+    // [#11663 L5] Both refusals below name ONE remedy — put the
+    // `admin_full_access` row back — and on a WALLED rig that remedy stopped
+    // working when the walled half of the legacy anchor retired: restoring or
+    // re-activating the row confers nothing there any more. ⛔ The refusals
+    // themselves are unchanged in every direction (this decides no verdict and
+    // no row is judged differently); what changes is that a walled operator is
+    // told the remedy that actually ends the emptiness. Saying only "restore the
+    // row" would send them round a loop that cannot terminate — the silent half
+    // of a loud migration, in the one message they get.
+    const walledRemedy = postureEnforcesWall(resolveTenancyPosture())
+      ? ` ⚠️ This deployment runs a WALLED tenancy posture, where an unscoped '${ADMIN_FULL_ACCESS}' `
+        + 'grant row is no longer an anchor for platform admin standing at all — restoring or '
+        + `re-activating that row will NOT give this environment an administrator. Declare one in `
+        + `${PLATFORM_OWNER_EMAIL_ENV} (a verified account's address, comma-separated for several) `
+        + 'instead; that is the only channel to platform admin standing under a wall.'
+      : '';
     const sets = await scan(op, SystemObjectName.PERMISSION_SET, { fields: ['id', 'name', 'active'] });
     const known = new Set<string>();
     const deactivatedAdminSetIds: string[] = [];
@@ -1117,7 +1168,7 @@ export function registerLastAdminGuard(
             'reading the resulting emptiness as "no administrator to protect" would switch this ' +
             `guard off for every other write too (${BREAK_GLASS_CITATION}). Re-activate the ` +
             `'${ADMIN_FULL_ACCESS}' permission set (set 'active' back to true) — the grants naming ` +
-            'it are still there — before writing the identity tables again.',
+            'it are still there — before writing the identity tables again.' + walledRemedy,
           words.table,
         );
       }
@@ -1164,7 +1215,7 @@ export function registerLastAdminGuard(
         'reading the resulting emptiness as "no administrator to protect" would switch this guard ' +
         `off for every other write too (${BREAK_GLASS_CITATION}). Restore the ` +
         `'${ADMIN_FULL_ACCESS}' permission set — the grants naming it are still there — before ` +
-        'writing the identity tables again.',
+        'writing the identity tables again.' + walledRemedy,
       words.table,
     );
   };
