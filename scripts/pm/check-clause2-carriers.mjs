@@ -316,11 +316,18 @@
  * PRINTS rather than going quiet, and why it is a fourth reading rather than a
  * silent pass.
  *
- * ## C6 — a cleared gate with no review of record behind it (#17302)
+ * ## C6 — a record owed on this head, and none behind it (#17302; lane-keyed by #18536)
  *
- * The tier policy names the lane seat's own default-tier review, plus the gates,
- * as the review of record for every lane but spec and skills — and until #17302
- * nothing named WHERE that review lives or what it must contain. Measured on one
+ * The lane rule (the maintainer's, restated on #18536 — 「曾经要求只有 spec 和
+ * skills 需要 fable,其他 opus 就够了,理论上其他车道不需要契约复审」) owes the
+ * contract review at `CONTRACT_REVIEW_TIER` in the spec and skills lanes on
+ * EVERY delivered round, `Clause-②: yes` or `no`, and in no other lane: there
+ * the three landing pre-checks and the gates are the whole bar, ⛔ no
+ * default-tier "self-review" record is demanded and ⛔ no at-tier subagent is
+ * spawned. A `yes` outside those two lanes is a limb hit, and limb-hit work is
+ * the spec lane's whichever seat found it — it MOVES there rather than being
+ * reviewed where it sits. Until #17302 nothing named WHERE a review of record
+ * lives or what it must contain. Measured on one
  * window by the director's leak sweep: five `Clause-②: yes` merges whose
  * carriers were hung and cleared (or never hung) with NO review-like comment on
  * the PR or its card except the dev's own `os-dev-report`. Clearing the carrier
@@ -329,12 +336,14 @@
  *
  * `references/contract-review.md` now names the record: ONE comment on the PR
  * or its card, in the shape the tier verdict already has minus the tier line —
- * 「复核记录 = 一条评论落 PR 或卡,达档与默认档同形」, 「同形 = `## Contract
+ * 「复核记录 = 一条评论落 PR 或卡,席内与子代理同形」, 「同形 = `## Contract
  * review` 题头、所审 head sha 独占码段、①②③ 逐项、独立性对、PASS/FAIL」 — and
  * makes every clear cite it (「凡清标同笔留 provenance 评论,引记录 id 与所判
  * head」, 「清标缺引记录即半态」). C6 is the machine half of that sentence: on a
  * pair in the COMPLETED state (declared `yes`, cleared on both carriers, head
- * unmoved — `gateBindingState`, unchanged) it reads the PR's thread and the
+ * unmoved — `gateBindingState`, unchanged) — and, since #18536, on a `Clause-②:
+ * no` pair whose CARD sits in a lane that owes the review on every round
+ * (`laneOwesReview`, read off the card's `domain:*` labels) — it reads the PR's thread and the
  * card's for a comment in H51's measured shape — a level-2 heading beginning
  * `## Contract review` and this head's sha as a code span, both IMPORTED from
  * `check-half-states.mjs` rather than restated — that also carries a
@@ -622,8 +631,9 @@
  *      rendering an ADVERSE verdict as 0, and this reading is not one.
  *   2  also the answer when a C3 candidate's event stream or head commit could
  *      not be read, when a `Clause-②: no` pair's changed-file listing could
- *      not be, or when a PR thread could not be — a COMPLETED pair's, which C6
- *      owes (#17302), or, on the `--pair` path, ANY pair's, whose record C7
+ *      not be, or when a PR thread could not be — a COMPLETED pair's or a
+ *      spec/skills-lane `no` pair's, which C6 owes (#17302, #18536), or, on
+ *      the `--pair` path, ANY pair's, whose record C7
  *      judges (#18174): an unread
  *      stream is not a never-hung gate, an unread diff is not a narrow one and
  *      an unread thread is not a missing record, so all are UNJUDGED rather
@@ -631,7 +641,10 @@
  *   4  they do not — or, since #16448, the declaration reads `no` while the
  *      diff carries a widening tell (row C5) — or, since #17302, the gate was
  *      cleared on both carriers and no review of record names the head (row
- *      C6) — or, since #17915 and on every pair carrying a record since #18174,
+ *      C6) — or, since #18536, the card sits in the spec or skills lane, the
+ *      declaration reads `no`, and no review of record names the head (row C6
+ *      as well: the lane owes the record on every round) — or, since #17915
+ *      and on every pair carrying a record since #18174,
  *      the record's `Served-tier:` line does not read at the declared tier (row
  *      C7). One exit code with several
  *      adverse reasons is the shape this table already had: the ROW says which,
@@ -709,6 +722,33 @@ import {
 // and a second value site here is exactly the drift that let the declared
 // tier and the served one differ unnoticed (#17915).
 import { CONTRACT_REVIEW_TIER } from './dispatch-gates.mjs';
+
+/**
+ * The lanes that OWE a review of record on EVERY round they deliver -- the
+ * maintainer's lane rule, restated on #18536 and carried into
+ * `references/contract-review.md` 「按车道」: the contract review at
+ * `CONTRACT_REVIEW_TIER` is owed in the spec and skills lanes, `Clause-②: yes`
+ * or `no`, and in no other lane. Read off the CARD's labels: `domain:*` is
+ * produced by triage and lives on the card, never on the PR. ⛔ Not a second
+ * statement of the policy -- the reference is the rule; this list is the one
+ * predicate `--pair` reads from it, and the self-test pins it at exactly two.
+ */
+export const LANES_OWING_REVIEW = Object.freeze(['domain:spec', 'domain:skills']);
+
+/**
+ * Does this pair's CARD sit in a lane that owes the review of record on every
+ * round? `null` when the card's labels could not be read -- already an UNJUDGED
+ * gap in `pairUnjudged`, so no reader here turns a missing read into 「not
+ * owed」. ⛔ Says nothing about a `yes`: a `Clause-②: yes` is a limb hit and is
+ * owed wherever it sits (limb-hit work is the spec lane's, whichever seat found
+ * it -- see `c6NoReviewOfRecord`); this predicate only widens the owed
+ * population to the `no` rounds of the two lanes.
+ */
+export function laneOwesReview(pair) {
+  const labels = pair?.cardLabels;
+  if (!Array.isArray(labels)) return null;
+  return labels.some((name) => LANES_OWING_REVIEW.includes(name));
+}
 
 // -- Why this file no longer declares that it has NO path population (#17915) --
 //
@@ -790,6 +830,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18683: the card-comment read pages to a cap — past 100 is UNJUDGED, ⛔ never a truncated pool': 27,
   '#18764: a DECORATED claim ENTERS the pool — ONE reading, and it is the sibling\'s': 24,
   '#18828: a SECOND `Claim:` by ONE seat — the writer-side prohibition, finally READ': 52,
+  '#18536: the lane-keyed owed population — spec and skills owe the record on EVERY round, other lanes owe none, a `yes` outside them is spec-lane work': 30,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -802,8 +843,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // one #18174 adds, and by the one #18141 adds, and by the one #17919 adds, and
 // by the one #16833 adds, and by the one #18456 adds, and by the one #18719
 // adds, and by the one #18683 adds, and by the one #18764 adds, and by the one
-// #18828 adds.
-const SELF_TEST_BATTERY_FLOOR = 32;
+// #18828 adds, and by the one #18536 adds.
+const SELF_TEST_BATTERY_FLOOR = 33;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -3414,15 +3455,27 @@ export function wideningUnjudged(pair, repo) {
 /**
  * Does this pair owe the review-of-record read -- its PR's own comment thread?
  *
- * ⭐ ONLY the completed state: declared `yes`, the gate bound and cleared on
- * both carriers, head unmoved since (`gateBindingState`, unchanged). That is the
- * one state in which `references/contract-review.md` says a record must already
- * exist -- 「复核记录 = 一条评论落 PR 或卡」, 「清标缺引记录即半态」 -- and it is
+ * ⭐ TWO populations, and only these. First, the completed state: declared
+ * `yes`, the gate bound and cleared on both carriers, head unmoved since
+ * (`gateBindingState`, unchanged). That is the state in which
+ * `references/contract-review.md` says a record must already exist --
+ * 「复核记录 = 一条评论落 PR 或卡」, 「清标缺引记录即半态」 -- and it is
  * exactly the state the filing sweep measured five times over: `Clause-②: yes`,
  * carriers cleared, merged, and the only review-like comment anywhere the dev's
  * own report. A pair still carrying the gate owes nothing yet (the review is
  * pending, not missing); a never-hung, half-bound or moved-after-clear pair is
  * C3's row already, and two rows for one fact is the drift this file avoids.
+ *
+ * ⭐ Second, since #18536: a `Clause-②: no` pair whose CARD sits in the spec or
+ * skills lane (`laneOwesReview`). The lane rule owes the review at tier on
+ * EVERY round those two lanes deliver, `yes` or `no` -- 「交付后复核只 spec 与
+ * skills 车道欠,每轮达档」 -- and a `no` round hangs no carrier, so there is no
+ * label to mark its review "pending": the record either names the head or the
+ * pair is not landable (it stays draft and out of the queue, the charter's safe
+ * state). The measured pair is the card's own: PRs #18530 / #18529 (cards
+ * #18010 / #18301, `domain:spec`, `Clause-②: no`) read 0 here with no record on
+ * either head while the rule text owed one. A `no` outside those lanes still
+ * owes nothing -- 「余车道零契约复核」 -- and that half is pinned unmoved.
  *
  * Exported and read by BOTH the fetch and the UNJUDGED accounting, the way
  * `needsGateHistory` and `needsWideningRead` are, so the set that owes the
@@ -3438,7 +3491,9 @@ export function wideningUnjudged(pair, repo) {
  * `pairUnjudged` accounts for as against `locatedRecordUnjudged`.
  */
 export function needsRecordRead(pair) {
-  return gateBindingState(pair).state === 'completed';
+  if (gateBindingState(pair).state === 'completed') return true;
+  const d = cardDeclaration(pair?.cardComments ?? null);
+  return d.state === 'declared' && d.value === 'no' && laneOwesReview(pair) === true;
 }
 
 /** The `Reviewed-by:` key line, exactly as C4 reads it -- one spelling, not two. */
@@ -3954,11 +4009,12 @@ export function locateReviewOfRecord(pair) {
  * The review of record C6 judges -- the locator above, under C6's population.
  *
  * ⭐ ONE extra state, `not-owed`, and it is the whole difference: C6's row is a
- * fact about a CLEARANCE (`needsRecordRead`'s completed state), so a pair that
- * never hung the gate owes no record and is never refused for lacking one.
- * That scope is the ruling's own and #18174 leaves it exactly where it was --
+ * fact about a record OWED (`needsRecordRead`: the completed state, and since
+ * #18536 the `no` rounds of the spec and skills lanes), so a pair that owes
+ * none is never refused for lacking one. #18174 left the scope where it was --
  * what that card moved is C7, which reads the locator directly because the fact
- * IT judges belongs to the record rather than to the clear.
+ * IT judges belongs to the record rather than to the clear; #18536 widened the
+ * scope by lane, and the rows read the same one comment.
  *
  * ⛔ Both rows still read ONE comment, chosen once, by one recognition: this
  * function adds a gate in front of `locateReviewOfRecord` and changes nothing
@@ -4032,32 +4088,52 @@ export function headSpanHoldsKey(pair) {
 }
 
 /**
- * C6 -- a gate cleared on both carriers with no review of record on the head.
+ * C6 -- a record owed on this head, and none behind it.
  *
- * The rule this row carries is the one #17302 landed: the default-tier lanes'
- * review of record is ONE comment on the PR or its card, in the tier verdict's
- * own shape minus the tier line, and every clear cites it. Before that text,
- * clearing the carrier was indistinguishable from never reviewing -- measured
- * five times in one window by the director's leak sweep -- and this file's own
- * `--pair` read every one of those pairs as the completed state and answered 0.
+ * The rule this row carries is the one #17302 landed and #18536 re-keyed by
+ * lane: the review of record is ONE comment on the PR or its card, in the tier
+ * verdict's own shape, and it is owed in the spec and skills lanes on every
+ * round they deliver -- a cleared `yes` cites it in the provenance comment
+ * beside the clear; a `no` round there owes it before the pair is landable.
+ * Before that text, clearing the carrier was indistinguishable from never
+ * reviewing -- measured five times in one window by the director's leak sweep
+ * -- and this file's own `--pair` read every one of those pairs as the
+ * completed state and answered 0; the lane half was measured on PRs #18530 /
+ * #18529, spec-lane `no` rounds that read 0 with no record on either head.
+ *
+ * ⭐ Three remedies, one row, chosen by where the pair SITS: a cleared `yes`
+ * inside the spec or skills lane writes the review it already performed down;
+ * a `no` round inside those lanes gets the review at tier (in-seat or by the
+ * at-tier subagent) before landing; a cleared `yes` OUTSIDE them is a limb hit
+ * on another lane's card, and the remedy is lane ROUTING -- the work is the
+ * spec lane's, whichever seat found it -- ⛔ never a default-tier self-review
+ * and ⛔ never an at-tier subagent spawned from that lane. The exit is the
+ * same 4 in all three: the pair is not landable as it stands.
  *
  * ⛔ A FINDING, and the file's exit table decides that rather than a preference:
  * the row is an adverse fact about THIS pair at its own landing moment, and an
  * adverse fact rendered as 0-with-a-message is the silence this file exists
  * against. It re-blocks no legal workflow -- under the text the record precedes
- * the clear -- and a pair cleared before the text landed owes exactly one
- * comment: the review its seat already performed, written down.
+ * the clear, and precedes the landing of a spec/skills `no` round -- and a pair
+ * cleared before the text landed owes exactly one comment: the review its seat
+ * already performed, written down.
  */
 export function c6NoReviewOfRecord(pair) {
   const v = reviewOfRecord(pair);
   if (v.state === 'not-owed' || v.state === 'unreadable' || v.state === 'found') return null;
 
   const short = String(pair?.headSha ?? '').slice(0, 10);
-  const head =
-    `card #${pair?.card} declares \`Clause-②: yes\`, its gate was bound and cleared on BOTH carriers, and its ` +
-    `open PR #${pair?.pr}${pair?.draft ? ' (draft)' : ''} still sits at the head that was cleared (\`${short}\`)`;
+  const cleared = gateBindingState(pair).state === 'completed';
+  const inLane = laneOwesReview(pair) === true;
+  const lanes = (Array.isArray(pair?.cardLabels) ? pair.cardLabels : []).filter((name) => LANES_OWING_REVIEW.includes(name));
+  const draft = pair?.draft ? ' (draft)' : '';
+  const head = cleared
+    ? `card #${pair?.card} declares \`Clause-②: yes\`, its gate was bound and cleared on BOTH carriers, and its ` +
+      `open PR #${pair?.pr}${draft} still sits at the head that was cleared (\`${short}\`)`
+    : `card #${pair?.card} declares \`Clause-②: no\` and carries ${lanes.map((l) => `\`${l}\``).join(', ')}, a lane that ` +
+      `owes the contract review on EVERY round it delivers, and its open PR #${pair?.pr}${draft} is at head \`${short}\``;
   const shape =
-    'The record is the comment `references/contract-review.md` names -- 「复核记录 = 一条评论落 PR 或卡,达档与默认档' +
+    'The record is the comment `references/contract-review.md` names -- 「复核记录 = 一条评论落 PR 或卡,席内与子代理' +
     '同形」 -- read here in H51\'s measured shape: a level-2 heading beginning `## Contract review`, this head\'s sha ' +
     'as a code span of ITS OWN (「所审 head sha 独占码段」: a span carrying the key as well is not a sha and names no ' +
     'head), and a `Reviewed-by:` line naming the reviewer. Existing tier verdicts already carry all three; a ' +
@@ -4098,6 +4174,37 @@ export function c6NoReviewOfRecord(pair) {
       `${boundary} ${NEVER_WRITES}`
     );
   }
+  if (!cleared) {
+    // #18536: a `no` round of the spec or skills lane. No carrier ever rode
+    // it, so nothing marks its review pending: the record either names the
+    // head or the pair is not landable.
+    return (
+      `${read} Under the lane rule every round the spec and skills lanes deliver gets the contract review at the ` +
+      'contract-review tier, `Clause-②: yes` or `no`, and until its record exists the PR is not landable: it stays ' +
+      `draft and out of the queue (the charter's safe state). ${shape} Remedy: the lane seat reviews at tier -- in-seat ` +
+      'when its served tier is the constant, otherwise by the at-tier review subagent it spawns -- and posts the record ' +
+      'on the PR or the card (`--template` prints it). When that subagent cannot start, the wait IS the state, and the ' +
+      `maintainer's own review is the only bypass, by their word each time. ${boundary} ${NEVER_WRITES}`
+    );
+  }
+  if (!inLane) {
+    // #18536: a cleared `yes` on a card OUTSIDE the two lanes. The `yes` is a
+    // limb hit, and limb-hit work is the spec lane's whichever seat found it
+    // -- the remedy is routing, not a review from the lane that cleared it.
+    const labels = Array.isArray(pair?.cardLabels) ? pair.cardLabels.filter((name) => name.startsWith('domain:')) : [];
+    return (
+      `${read} This is the shape the filing sweep measured five times in one window -- a cleared gate with nothing ` +
+      `behind it, indistinguishable from never reviewing -- and this pair's card sits OUTSIDE the spec and skills lanes ` +
+      `(${labels.length ? labels.map((l) => `\`${l}\``).join(', ') : 'no `domain:*` label'}), ` +
+      'so a `Clause-②: yes` there is a limb hit: limb-hit work is the spec lane\'s, whichever seat found it, and the ' +
+      `clear this pair made stands on nothing this lane can produce. ${shape} Remedy -- lane ROUTING, ⛔ not a self-review: ` +
+      're-lane the item to the spec lane (the card\'s `domain:*` becomes `domain:spec` through `pm:retriage`, or the ' +
+      'contract work is split to a spec-lane card or PR -- 「新 `packages/spec` 工作恒由 `domain:spec` 席收口」) and let ' +
+      'that lane\'s review at the contract-review tier produce the record; or, if the `yes` was a false declaration, ' +
+      'correct it with a `Clause-②-correction:` comment on the card. ⛔ This lane neither writes a default-tier record nor ' +
+      `spawns the at-tier subagent. ${boundary} ${NEVER_WRITES}`
+    );
+  }
   return (
     `${read} This is the shape the filing sweep measured five times in one window -- a cleared gate ` +
     `with nothing behind it, indistinguishable from never reviewing. ${shape} Remedy: the owning seat writes down ` +
@@ -4130,16 +4237,24 @@ export function c6NoReviewOfRecord(pair) {
 export function c6RecordNote(pair) {
   const v = locateReviewOfRecord(pair);
   if (v.state !== 'found') return null;
+  const cleared = gateBindingState(pair).state === 'completed';
+  const owed = needsRecordRead(pair);
+  const inLane = laneOwesReview(pair) === true;
   return (
     `review of record on this head: ${v.where} thread, ${v.id ? `comment ${v.id}` : 'a comment carrying no readable id'} ` +
     `(${v.at ?? 'undated'}) is a \`## Contract review\` comment naming \`${v.sha}\` and carrying a \`Reviewed-by:\` line -- ` +
-    (needsRecordRead(pair)
+    (cleared
       ? 'cite it in the provenance comment beside the clear (「凡清标同笔留 provenance 评论,引记录 id 与所判 head」). '
-      : '⛔ This pair owes no clear, so nothing is prescribed here: the record is reported because it EXISTS on this head, and what it declares is judged wherever it exists. ') +
+      : owed
+        ? 'the lane rule owes this record on every round this lane delivers, `Clause-②: no` included, and it exists -- nothing else is prescribed here. '
+        : '⛔ This pair owes no clear, so nothing is prescribed here: the record is reported because it EXISTS on this head, and what it declares is judged wherever it exists. ') +
+    (cleared && !inLane
+      ? '⚠️ This pair\'s card sits OUTSIDE the spec and skills lanes: under the lane rule a `Clause-②: yes` there is spec-lane work that moves there, so the seat landing this pair answers for which lane produced this record -- it is reported, not endorsed. '
+      : '') +
     (servedTierStands(v.served)
       ? 'Its `Served-tier:` names the tier constant' +
         (v.served.stamps ? ` on a stamp control of ${v.served.stamps.atTier}/${v.served.stamps.total}` : '') +
-        (needsRecordRead(pair)
+        (cleared
           ? ', so the strip stands on C7 as well as on this row. '
           : ', so it reads at tier on C7 as well as on this row. ')
       : 'Its `Served-tier:` does NOT stand — C7 says what it reads, and this pair is adverse. ') +
@@ -5482,11 +5597,15 @@ async function gather(repo, prFilter = null, reader = NETWORK_READER, { landingR
   // it in the same `comments` bag keyed by the PR NUMBER and no reader grows a
   // seventh method. Cached per PR, so a two-card PR (#16304) pays once.
   //
-  // Two populations, one pass:
+  // Three populations, one pass:
   //   · in BOTH modes, the COMPLETED pairs (#17302) -- the narrow window
   //     between a clear and a landing, where a cleared gate with no record
   //     behind it is precisely the board fact the filing sweep measured five
   //     times over;
+  //   · in BOTH modes, the `Clause-②: no` pairs whose card sits in the spec
+  //     or skills lane (#18536, `needsRecordRead`'s second population) -- the
+  //     lane rule owes the record on every round those lanes deliver, and a
+  //     `no` round hangs no carrier that could mark its review pending;
   //   · on the `--pair` path, EVERY pair (#18174) -- because what a record's
   //     `Served-tier:` line declares is a fact about the record, judged on
   //     whatever pair carries one, and the pair that carried the measured
@@ -6489,7 +6608,7 @@ export async function selfTest() {
   const RECORD_SESSION = 'session_01489YWhZEoHT9oXshiyywQy';
   // The review of record, in the shape measured on every 2026-09-09 specimen:
   // the `## Contract review` heading, the head as a code span, the independence
-  // pair -- the shape #17302 names for the default-tier lanes too.
+  // pair -- the shape #17302 names, and #18536 keys by lane.
   //
   // ⭐ The `Implemented-by:` value carries its token FIRST after the colon, and
   // that is load-bearing rather than tidy (#17346): this fixture is the pair
@@ -7349,6 +7468,69 @@ export async function selfTest() {
   const bothRead = bare({ prComments: [RECORD_ON_9AF9] });
   t('the locator and the gated reader choose ONE comment — same id, same head span, on the pair where both answer', JSON.stringify([locateReviewOfRecord(bothRead).id, locateReviewOfRecord(bothRead).sha]) === JSON.stringify([reviewOfRecord(bothRead).id, reviewOfRecord(bothRead).sha]));
   t('⛔ and off that population the gated reader still answers `not-owed` — C6\'s scope is unmoved by the split', reviewOfRecord(nonGated([MEASURED_RECORD])).state === 'not-owed' && locateReviewOfRecord(nonGated([MEASURED_RECORD])).state === 'found');
+
+  // -- #18536: the lane-keyed owed population -----------------------------------
+  //
+  // ★ The maintainer's lane rule, restated on #18536: the contract review at
+  // the contract-review tier is owed in the spec and skills lanes on EVERY
+  // delivered round, `yes` or `no`, and in no other lane. The measured pair is
+  // the card's own: PRs #18530 / #18529 (cards #18010 / #18301, `domain:spec`,
+  // `Clause-②: no`) read 0 here with no record on either head. What is pinned:
+  // the two-lane constant; the `no` rounds of those lanes now OWE the record
+  // (a row when absent, the note when found, UNJUDGED when unreadable); a `no`
+  // anywhere else still owes none; and a cleared `yes` outside the two lanes
+  // keeps its row and its exit while its remedy becomes lane ROUTING -- never
+  // a self-review, never an at-tier subagent spawned from that lane.
+  battery('#18536: the lane-keyed owed population — spec and skills owe the record on EVERY round, other lanes owe none, a `yes` outside them is spec-lane work');
+  const SPEC = 'domain:spec';
+  const SKILLS = 'domain:skills';
+  const CLI = 'domain:cli';
+  t('the owing lanes are exactly spec and skills — the maintainer\'s two, frozen', JSON.stringify(LANES_OWING_REVIEW) === JSON.stringify([SPEC, SKILLS]) && Object.isFrozen(LANES_OWING_REVIEW));
+  t('a `domain:spec` card owes the review', laneOwesReview(pair({ cardLabels: [SPEC] })) === true);
+  t('a `domain:skills` card owes it too', laneOwesReview(pair({ cardLabels: [SKILLS, 'priority:p2'] })) === true);
+  t('⛔ a `domain:cli` card owes none — 「余车道零契约复核」', laneOwesReview(pair({ cardLabels: [CLI] })) === false);
+  t('⛔ a card with NO `domain:*` label owes none — the existing fixtures\' assumption, pinned', laneOwesReview(pair({ cardLabels: [] })) === false);
+  t('⛔ unreadable card labels answer null, never a lane — the labels gap is already UNJUDGED', laneOwesReview(pair({ cardLabels: null })) === null && says(pairUnjudged(pair({ cardLabels: null })), 'labels'));
+  // the `no` rounds of the two lanes: the measured pair, in fixture form
+  const laneNo = (labels, rows) => pair({ pr: 18530, card: 18010, draft: true, headSha: HEAD_9AF9, cardLabels: labels, cardComments: [CLAIM('Clause-②: no')], prComments: rows });
+  t('⭐ THE MEASURED PAIR — a spec-lane `no` round OWES the review-of-record read', needsRecordRead(laneNo([SPEC], [])) === true);
+  t('…and a skills-lane `no` round owes it too', needsRecordRead(laneNo([SKILLS], [])) === true);
+  t('⛔ a cli-lane `no` round owes none — the population widened by lane, not to every `no`', needsRecordRead(laneNo([CLI], [])) === false && needsRecordRead(laneNo([], [])) === false);
+  const specNoRow = c6NoReviewOfRecord(laneNo([SPEC], []));
+  t('⭐ a spec-lane `no` round with NO record on the head is a C6 row — where it answered 0', typeof specNoRow === 'string' && pairRows(laneNo([SPEC], [])).map((r) => r.code).join(',') === 'C6');
+  t('…that names the declaration, the lane and the head, and says NO review of record', says(specNoRow, 'Clause-②: no') && says(specNoRow, SPEC) && says(specNoRow, HEAD_9AF9) && says(specNoRow, 'NO review of record'));
+  t('…and carries the lane rule — every round, `yes` or `no`, draft and out of the queue until the record exists', says(specNoRow, 'EVERY round') && says(specNoRow, '`Clause-②: yes` or `no`') && says(specNoRow, 'draft and out of the queue'));
+  t('…and the remedy is the lane\'s review at tier, in-seat or by the at-tier subagent, with the unavailable-tier state and its one bypass named', says(specNoRow, 'in-seat') && says(specNoRow, 'at-tier review subagent') && says(specNoRow, 'cannot start') && says(specNoRow, 'only bypass'));
+  t('…and it does NOT describe a clear this round never had', !says(specNoRow, 'bound and cleared') && !says(specNoRow, 'beside the clear'));
+  t('…while keeping the shape, the verdict-agnostic boundary and the never-writes clause', says(specNoRow, '## Contract review') && says(specNoRow, 'Reviewed-by:') && says(specNoRow, 'PASS half') && says(specNoRow, '自查放行'));
+  t('a skills-lane `no` round reads the same row', pairRows(laneNo([SKILLS], [])).map((r) => r.code).join(',') === 'C6' && says(c6NoReviewOfRecord(laneNo([SKILLS], [])), SKILLS));
+  t('⛔ a cli-lane `no` round with no record is silent on every row and not UNJUDGED — nothing owed, nothing missing', pairRows(laneNo([CLI], [])).length === 0 && pairUnjudged(laneNo([CLI], [])) === null && locatedRecordUnjudged(laneNo([CLI], [])) === null);
+  // the record, found: the note, and nothing prescribed that a `no` round does not owe
+  const specNoFound = laneNo([SPEC], [RECORD_ON_9AF9]);
+  t('a spec-lane `no` round WITH its record is clean — no row, and the landing check answers 0', pairRows(specNoFound).length === 0 && pairUnjudged(specNoFound) === null);
+  const specNoNote = pairNotes(specNoFound);
+  t('…and prints the C6-RECORD note naming the comment', specNoNote.map((n) => n.code).join() === 'C6-RECORD' && says(specNoNote[0]?.text, 'comment 3301'));
+  t('…that says the LANE owes this record, `no` included, and prescribes no clear-citation this round has no clear for', says(specNoNote[0]?.text, 'every round this lane delivers') && says(specNoNote[0]?.text, '`Clause-②: no` included') && !says(specNoNote[0]?.text, '凡清标同笔留') && !says(specNoNote[0]?.text, 'owes no clear'));
+  t('…and reads at tier on C7 as well', says(specNoNote[0]?.text, 'reads at tier on C7'));
+  t('an UNSIGNED record on a spec-lane `no` round is C6\'s row, not C7\'s — one fact, one row', pairRows(laneNo([SPEC], [UNSIGNED_OFF_TIER])).map((r) => r.code).join(',') === 'C6');
+  t('a below-tier record on a spec-lane `no` round is C7\'s row, not C6\'s — the record was found', pairRows(laneNo([SPEC], [SERVED(BELOW)])).map((r) => r.code).join(',') === 'C7');
+  t('⇒ C6 and C7 can never both fire on the lane population either', [laneNo([SPEC], []), laneNo([SPEC], [RECORD_ON_9AF9]), laneNo([SPEC], [UNSIGNED_OFF_TIER]), laneNo([SPEC], [SERVED(BELOW)])].every((x) => pairRows(x).filter((r) => r.code === 'C6' || r.code === 'C7').length <= 1));
+  // #4690: unread is never clean, and the gap is owned once
+  t('a spec-lane `no` round whose PR thread could not be read is UNJUDGED, never clean — and `pairUnjudged` owns that gap', c6NoReviewOfRecord(laneNo([SPEC], null)) === null && says(pairUnjudged(laneNo([SPEC], null)), 'review-of-record read') && locatedRecordUnjudged(laneNo([SPEC], null)) === null);
+  t('the sweep BUYS the thread for a spec-lane `no` round — the set that owes and the set that gets one read one predicate', needsRecordRead(laneNo([SPEC], [])) === true);
+  // the cleared `yes`, by lane: the row and its exit are unmoved; the remedy is not
+  t('a cleared `yes` INSIDE the spec lane is owed and, absent, is the row it always was — write the review down', needsRecordRead(bare({ cardLabels: [SPEC] })) === true && says(c6NoReviewOfRecord(bare({ cardLabels: [SPEC] })), 'writes down') && !says(c6NoReviewOfRecord(bare({ cardLabels: [SPEC] })), 'lane ROUTING'));
+  t('…and inside the skills lane likewise', says(c6NoReviewOfRecord(bare({ cardLabels: [SKILLS] })), 'writes down'));
+  const cliYesRow = c6NoReviewOfRecord(bare({ cardLabels: [CLI] }));
+  t('⭐ a cleared `yes` OUTSIDE the two lanes keeps its row and its exit — the `yes` is a limb hit and limb-hit work is owed', needsRecordRead(bare({ cardLabels: [CLI] })) === true && pairRows(bare({ cardLabels: [CLI] })).map((r) => r.code).join(',') === 'C6');
+  t('…but its remedy is lane ROUTING, ⛔ not a self-review — re-lane to spec, or correct a false `yes`', says(cliYesRow, 'lane ROUTING') && says(cliYesRow, 'not a self-review') && says(cliYesRow, '`domain:spec`') && says(cliYesRow, 'Clause-②-correction:') && says(cliYesRow, 'whichever seat found it'));
+  t('…and it names the card\'s lane, refuses a default-tier record and refuses the at-tier subagent from that lane', says(cliYesRow, CLI) && says(cliYesRow, 'neither writes a default-tier record nor') && says(cliYesRow, 'spawns the at-tier subagent') && !says(cliYesRow, 'writes down the review it already performed'));
+  t('…and a card with NO `domain:*` label reads the same routing remedy, saying so', says(c6NoReviewOfRecord(bare({ cardLabels: [] })), 'no `domain:*` label') && says(c6NoReviewOfRecord(bare({ cardLabels: [] })), 'lane ROUTING'));
+  t('a cleared `yes` outside the lanes WITH a record found is clean, and the note reports the record without endorsing the lane', pairRows(bare({ cardLabels: [CLI], prComments: [RECORD_ON_9AF9] })).length === 0 && says(pairNotes(bare({ cardLabels: [CLI], prComments: [RECORD_ON_9AF9] }))[0]?.text, 'reported, not endorsed'));
+  t('…while the same record inside the spec lane is cited beside the clear with no such warning', says(pairNotes(bare({ cardLabels: [SPEC], prComments: [RECORD_ON_9AF9] }))[0]?.text, '引记录 id 与所判 head') && !says(pairNotes(bare({ cardLabels: [SPEC], prComments: [RECORD_ON_9AF9] }))[0]?.text, 'not endorsed'));
+  // the populations that did NOT move
+  t('⛔ a `yes` still carrying the gate in the spec lane owes nothing yet — the review is pending, not missing', needsRecordRead(pair({ prLabels: [L], cardLabels: [L, SPEC], cardComments: [CLAIM('Clause-②: yes')] })) === false);
+  t('⛔ a never-hung `yes` in the spec lane is C3\'s row, not C6\'s — no row owns a fact twice', needsRecordRead(declaredYes({ cardLabels: [SPEC], cardEvents: [], prEvents: [] })) === false);
 
   battery('the exit register is distinct in every direction it must be');
   const codes = [EXIT_OK, EXIT_USAGE, EXIT_INCOMPLETE, EXIT_PREREQUISITE_NOT_MET, EXIT_PAIR_ADVERSE];
@@ -8707,7 +8889,9 @@ export async function selfTest() {
       + 'the sibling\'s one reading — the constant unwidened, and the file\'s two undecoration '
       + 'paths pinned as the two jobs they are, the SECOND `Claim:` by one seat named as the state '
       + 'the protocol forbids writing rather than ranked as a supersession — per direction, with a '
-      + 'non-vacuity control each and the five measured instances replayed — and the exit register).',
+      + 'non-vacuity control each and the five measured instances replayed — the lane-keyed owed population, '
+      + 'spec and skills owing the record on every round, other lanes owing none, a `yes` outside them routed to '
+      + 'the spec lane rather than self-reviewed — and the exit register).',
   );
 
   selfTestReachedVerdict = true;
