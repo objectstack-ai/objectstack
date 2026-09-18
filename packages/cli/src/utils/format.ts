@@ -9,7 +9,7 @@ import type { TenancyPosture } from '@objectstack/spec/security';
 // drift the day a suppression reason is added, and the whole point of asking
 // through the contract is that the two sides cannot disagree.
 import type { SeedSettlementSnapshot } from '@objectstack/spec/contracts';
-import type { DevLogin } from '@objectstack/spec';
+import type { DevLogin } from '@objectstack/spec/system';
 import { writeStdoutDirect } from './json-stdout.js';
 import { authoringRuleUnionStack } from './stack-collections.js';
 
