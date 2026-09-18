@@ -2,8 +2,6 @@
 
 import { z } from 'zod';
 import { DurationSeconds } from '../shared/duration.zod';
-import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
-import { evaluatedExpressionUnionRefusal } from '../shared/evaluated-slot-union';
 
 /**
  * Metrics Protocol - Performance and Operational Metrics
@@ -434,6 +432,61 @@ export type MetricAggregationConfig = z.input<typeof MetricAggregationConfigSche
 export type MetricAggregationConfigParsed = z.infer<typeof MetricAggregationConfigSchema>;
 
 /**
+ * Why `metrics.slis[].successCriteria` no longer takes a CEL predicate (#18118).
+ *
+ * The slot was `z.union([{ threshold, operator, percentile? }, <the evaluated
+ * expression schema>])`. The expression arm parsed, normalized a bare string to
+ * `{ dialect: 'cel', source }`, registered, and was served back — and NOTHING
+ * anywhere evaluated it. An author (very often an AI reading the generated
+ * reference page, ADR-0033) who wrote `successCriteria: 'p95 < 300ms'` got a
+ * green parse and no signal, indistinguishable from a predicate that ran and
+ * answered. ADR-0049 enforce-or-remove, ruled A on this card: application
+ * platforms do not carry SLI success criteria as authorable application
+ * metadata — that lives in observability infrastructure (SLO products), where
+ * it is structured rather than a free expression. So the arm is REMOVED, not
+ * wired.
+ *
+ * ⛔ No `os migrate meta` sentence: the house sentence is owed only where an
+ * ADR-0087 conversion covers the surface (`shared/retired-key.ts` module
+ * docblock). This retirement's disposition is a D3 SEMANTIC entry
+ * (`observability-cel-predicates-retired`) — no transform can turn a CEL
+ * predicate into a threshold/operator pair without inventing the numbers.
+ *
+ * ⚠️ The structured arm is UNTOUCHED, and whether it is read by anything is a
+ * separate measurement on its own card — this retirement makes no claim about
+ * it.
+ */
+const SLI_SUCCESS_CRITERIA_EXPRESSION_RETIRED =
+  '`metrics.slis[].successCriteria` no longer accepts a CEL predicate — the expression arm was '
+  + 'removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — nothing ever evaluated it, '
+  + 'so a criterion authored as an expression parsed, registered and read back while deciding '
+  + 'nothing. Delete the expression and write the structured rule instead: '
+  + '`{ threshold: 300, operator: \'lt\', percentile: 0.95 }`, which is the shape this slot has '
+  + 'always carried and the only one an SLO product can consume. A criterion the structured rule '
+  + 'cannot express belongs in your observability stack, not in application metadata.';
+
+/**
+ * The refusal for an input that is recognisably a RETIRED expression attempt.
+ *
+ * Deliberately narrow, the same discipline as `evaluatedExpressionUnionRefusal`
+ * (which this replaces here): the surviving arm is a structured object, so
+ * blaming a mistyped threshold on a retired CEL arm would send the author to
+ * the wrong key. It answers only for a string — the bare-string spelling the
+ * reference page advertised — and returns `undefined` for everything else, so
+ * zod's own message stands.
+ *
+ * ⚠️ MEASURED LIMIT, not an oversight: zod 4.4 consults this map for the
+ * top-level `invalid_type` a non-object raises, and NOT for the child issues a
+ * wrong-shaped OBJECT raises. So `successCriteria: { dialect: 'cel', source }`
+ * is refused by the structured arm's own missing-key issues (`threshold`,
+ * `operator`) rather than by this sentence. Both spellings are refused; only
+ * the string one carries the prescription. Pinned both ways in `metrics.test.ts`.
+ */
+function sliSuccessCriteriaExpressionRefusal(input: unknown): string | undefined {
+  return typeof input === 'string' ? SLI_SUCCESS_CRITERIA_EXPRESSION_RETIRED : undefined;
+}
+
+/**
  * Service Level Indicator (SLI) Schema
  */
 export const ServiceLevelIndicatorSchema = lazySchema(() => z.object({
@@ -472,17 +525,20 @@ export const ServiceLevelIndicatorSchema = lazySchema(() => z.object({
   ]).describe('SLI type'),
 
   /**
-   * Success criteria — structured threshold/operator OR a CEL predicate.
+   * Success criteria — a structured threshold rule.
+   *
+   * [#18118] The CEL arm is RETIRED — see
+   * {@link SLI_SUCCESS_CRITERIA_EXPRESSION_RETIRED} above the schema. The
+   * prescription hangs on this object's own `error` map because the KEY
+   * survives and only one of its two arms went away: `retiredKey()` and the
+   * ADR-0087 D2 strip both retire a key, neither retires an arm.
    */
-  successCriteria: z.union([
-    z.object({
-      threshold: z.number().describe('Threshold value'),
-      operator: z.enum(['lt', 'lte', 'gt', 'gte', 'eq']).describe('Comparison operator'),
-      percentile: z.number().min(0).max(1).optional().describe('Percentile (0-1)'),
-    }),
-    EvaluatedExpressionInputSchema,
-  ], { error: (issue) => evaluatedExpressionUnionRefusal(issue.input) })
-    .describe('Success criteria — structured or CEL predicate'),
+  successCriteria: z.object({
+    threshold: z.number().describe('Threshold value'),
+    operator: z.enum(['lt', 'lte', 'gt', 'gte', 'eq']).describe('Comparison operator'),
+    percentile: z.number().min(0).max(1).optional().describe('Percentile (0-1)'),
+  }, { error: (issue) => sliSuccessCriteriaExpressionRefusal(issue.input) })
+    .describe('Success criteria — a structured threshold rule. A CEL predicate is NOT accepted here: that arm was removed in 17.5.0 because nothing evaluated it.'),
 
   /**
    * Measurement window

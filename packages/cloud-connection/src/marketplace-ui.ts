@@ -13,7 +13,7 @@
  *   - no MarketplaceInstallLocalPlugin → no "Installed Apps" entry.
  *
  * The URLs still point at the console's existing marketplace routes; the
- * pages themselves migrate to plugin-carried metadata in later ADR-0009
+ * pages themselves migrate to plugin-carried metadata in later cloud ADR-0009
  * stages (Installed Apps first).
  */
 
@@ -40,7 +40,7 @@ export const MARKETPLACE_BROWSE_UI_BUNDLE = {
     ],
 };
 
-/** "Installed Apps" — owned by the local-install capability (ADR-0009 P2a:
+/** "Installed Apps" — owned by the local-install capability (cloud ADR-0009 P2a:
  *  the page itself is now metadata; the console provides only the
  *  `marketplace:installed-list` widget).
  *

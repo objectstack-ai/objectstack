@@ -58,9 +58,7 @@ import { BulkActionDefSchema } from '../ui/bulk-action.zod.js';
 import { PageTabsProps, RecordAlertProps } from '../ui/component.zod.js';
 import { PageComponentSchema } from '../ui/page.zod.js';
 import { FormFieldSchema, FormSectionSchema, ListViewSchema } from '../ui/view.zod.js';
-import { ServiceLevelIndicatorSchema } from '../system/metrics.zod.js';
 import { SettingsManifestSchema, SpecifierSchema } from '../system/settings-manifest.zod.js';
-import { TraceSamplingConfigSchema } from '../system/tracing.zod.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SPEC_SRC = join(HERE, '..');
@@ -193,10 +191,17 @@ function element(schema: unknown, ...path: string[]): z.ZodType {
 }
 
 /**
- * The 36 declaring positions, keyed the way the ADR-0058 D7 conformance ledger
+ * The 34 declaring positions, keyed the way the ADR-0058 D7 conformance ledger
  * keys them (`file:Schema.field`). Re-derived by identity on this tree, ⛔ not
- * inherited from the card: 34 declaring source lines, two of which are
+ * inherited from the card: 32 declaring source lines, two of which are
  * file-local alias consts mounting two slots each.
+ *
+ * [#18118] It was 36 over 34 lines. Two union members left with the CEL arms
+ * they mounted — `system/metrics.zod.ts:ServiceLevelIndicatorSchema.successCriteria`
+ * and `system/tracing.zod.ts:TraceSamplingConfigSchema.condition` — retired
+ * under ADR-0049 enforce-or-remove because nothing evaluated either. They are
+ * named here rather than silently absent: a position that leaves this table
+ * with no record is the #17630 failure in another costume.
  */
 const POSITIONS: ReadonlyArray<readonly [string, () => z.ZodType]> = [
   ['data/field.zod.ts:FieldSchema.expression', () => slot(FieldSchema, 'expression')],
@@ -235,15 +240,13 @@ const POSITIONS: ReadonlyArray<readonly [string, () => z.ZodType]> = [
   // The two the file-local alias `SettingsVisibilityInputSchema` mounts.
   ['system/settings-manifest.zod.ts:SpecifierSchema.visible', () => slot(SpecifierSchema, 'visible')],
   ['system/settings-manifest.zod.ts:SettingsManifestSchema.visible', () => slot(SettingsManifestSchema, 'visible')],
-  ['system/metrics.zod.ts:ServiceLevelIndicatorSchema.successCriteria', () => slot(ServiceLevelIndicatorSchema, 'successCriteria')],
-  ['system/tracing.zod.ts:TraceSamplingConfigSchema.condition', () => slot(element(TraceSamplingConfigSchema, 'composite'), 'condition')],
 ];
 
 describe('#15811 — every evaluated slot refuses the two shapes no engine can run', () => {
-  it('reaches exactly the 36 declaring positions the census enumerated', () => {
+  it('reaches exactly the 34 declaring positions the census enumerated', () => {
     // A position that stops being reachable must red here rather than fall out
     // of the table: that silent drop is the #17630 failure in another costume.
-    expect(POSITIONS.length).toBe(36);
+    expect(POSITIONS.length).toBe(34);
     for (const [key, get] of POSITIONS) {
       expect(() => get(), `unreachable: ${key}`).not.toThrow();
     }
@@ -284,7 +287,7 @@ describe('#15811 — every evaluated slot refuses the two shapes no engine can r
   });
 
   it('CONTROL — the persistence contract is NOT narrowed and still accepts both shapes', () => {
-    // This is what makes the 36 `false`s above a reading. Ruling item 2:
+    // This is what makes the 34 `false`s above a reading. Ruling item 2:
     // `ExpressionSchema` / `ExpressionInputSchema` keep `source` OR `ast`.
     for (const schema of [ExpressionSchema, ExpressionInputSchema, PredicateInputSchema]) {
       expect(schema.safeParse(AST_ONLY).success).toBe(true);
@@ -292,7 +295,7 @@ describe('#15811 — every evaluated slot refuses the two shapes no engine can r
     }
   });
 
-  it('CONTROL — a healthy predicate still parses at every one of the 36 positions', () => {
+  it('CONTROL — a healthy predicate still parses at every one of the 34 positions', () => {
     // The narrowing removes accepted shapes and adds none. The settings-manifest
     // pair speaks its own closed non-CEL grammar (#7169), so it gets the
     // predicate that grammar accepts; every other slot gets CEL.
