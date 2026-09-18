@@ -51,9 +51,9 @@ import { useQuery } from '@objectstack/client-react';
 
 function TaskList() {
   const { data, isLoading, error, refetch } = useQuery('todo_task', {
-    select: ['id', 'subject', 'priority'],
-    sort: ['-created_at'],
-    top: 20
+    fields: ['id', 'subject', 'priority'],
+    orderBy: ['-created_at'],
+    limit: 20
   });
 
   if (isLoading) return <div>Loading...</div>;
@@ -61,7 +61,7 @@ function TaskList() {
 
   return (
     <div>
-      {data?.value.map(task => (
+      {data?.records.map(task => (
         <div key={task.id}>{task.subject}</div>
       ))}
       <button onClick={refetch}>Refresh</button>
@@ -73,6 +73,7 @@ function TaskList() {
 #### Mutate Data
 
 ```tsx
+import type { FormEvent } from 'react';
 import { useMutation } from '@objectstack/client-react';
 
 function CreateTaskForm() {
@@ -82,7 +83,7 @@ function CreateTaskForm() {
     }
   });
 
-  const handleSubmit = (e) => {
+  const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     mutate({
       subject: 'New Task',
@@ -119,12 +120,12 @@ function PaginatedTaskList() {
     hasPreviousPage
   } = usePagination('todo_task', {
     pageSize: 10,
-    sort: ['-created_at']
+    orderBy: ['-created_at']
   });
 
   return (
     <div>
-      {data?.value.map(task => (
+      {data?.records.map(task => (
         <div key={task.id}>{task.subject}</div>
       ))}
       <div className="pagination">
@@ -155,7 +156,7 @@ function InfiniteTaskList() {
     isFetchingNextPage
   } = useInfiniteQuery('todo_task', {
     pageSize: 20,
-    sort: ['-created_at']
+    orderBy: ['-created_at']
   });
 
   return (
@@ -180,7 +181,7 @@ function InfiniteTaskList() {
 ```tsx
 import { useObject } from '@objectstack/client-react';
 
-function ObjectSchemaViewer({ objectName }) {
+function ObjectSchemaViewer({ objectName }: { objectName: string }) {
   const { data: schema, isLoading } = useObject(objectName);
 
   if (isLoading) return <div>Loading schema...</div>;
@@ -199,7 +200,7 @@ function ObjectSchemaViewer({ objectName }) {
 ```tsx
 import { useView } from '@objectstack/client-react';
 
-function ViewConfiguration({ objectName }) {
+function ViewConfiguration({ objectName }: { objectName: string }) {
   const { data: view, isLoading } = useView(objectName, 'list');
 
   if (isLoading) return <div>Loading view...</div>;
@@ -218,7 +219,7 @@ function ViewConfiguration({ objectName }) {
 ```tsx
 import { useFields } from '@objectstack/client-react';
 
-function FieldList({ objectName }) {
+function FieldList({ objectName }: { objectName: string }) {
   const { data: fields, isLoading } = useFields(objectName);
 
   if (isLoading) return <div>Loading fields...</div>;
@@ -269,7 +270,7 @@ interface Task {
 }
 
 const { data } = useQuery<Task>('todo_task');
-// data.value is typed as Task[]
+// data.records is typed as Task[]
 
 const { mutate } = useMutation<Task, Partial<Task>>('todo_task', 'create');
 // mutate expects Partial<Task>
@@ -280,23 +281,26 @@ const { mutate } = useMutation<Task, Partial<Task>>('todo_task', 'create');
 ### Master-Detail View
 
 ```tsx
+import { useState } from 'react';
+import { useQuery } from '@objectstack/client-react';
+
 function TaskList() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  
+
   const { data: tasks } = useQuery('todo_task', {
-    select: ['id', 'subject'],
-    sort: ['-created_at']
+    fields: ['id', 'subject'],
+    orderBy: ['-created_at']
   });
-  
+
   const { data: selectedTask } = useQuery('todo_task', {
-    filters: ['id', '=', selectedId],
+    where: { id: selectedId },
     enabled: !!selectedId // Only fetch when ID is selected
   });
-  
+
   return (
     <div className="flex">
-      <TaskListPanel tasks={tasks?.value} onSelect={setSelectedId} />
-      <TaskDetail task={selectedTask?.value?.[0]} />
+      <TaskListPanel tasks={tasks?.records} onSelect={setSelectedId} />
+      <TaskDetail task={selectedTask?.records?.[0]} />
     </div>
   );
 }
@@ -305,26 +309,31 @@ function TaskList() {
 ### Optimistic Updates
 
 ```tsx
-function TaskToggle({ taskId, completed }) {
+import { useState } from 'react';
+import { useMutation } from '@objectstack/client-react';
+
+function TaskToggle({ taskId, completed }: { taskId: string; completed: boolean }) {
+  // `useMutation` has no mutation-context hook, so the optimistic value is held
+  // locally and rolled back from `onError`.
+  const [checked, setChecked] = useState(completed);
+
   const { mutate } = useMutation('todo_task', 'update', {
-    onMutate: async (variables) => {
-      // Optimistically update UI
-      return { previousValue: completed };
-    },
-    onError: (error, variables, context) => {
-      // Revert on error
-      console.error('Update failed, reverting', context.previousValue);
-    },
-    onSuccess: () => {
-      // Refetch to ensure data consistency
-      queryClient.invalidateQueries(['todo_task']);
+    onError: (error: Error) => {
+      console.error('Update failed, reverting', error);
+      setChecked(completed);
     }
   });
-  
+
   return (
-    <Checkbox 
-      checked={completed}
-      onChange={(e) => mutate({ id: taskId, is_completed: e.target.checked })}
+    <input
+      type="checkbox"
+      checked={checked}
+      onChange={(e) => {
+        const next = e.target.checked;
+        setChecked(next);
+        // The `update` operation takes `{ id, data }`.
+        mutate({ id: taskId, data: { is_completed: next } });
+      }}
     />
   );
 }
@@ -333,22 +342,24 @@ function TaskToggle({ taskId, completed }) {
 ### Dependent Queries
 
 ```tsx
-function ProjectTasks({ projectId }) {
+import { useQuery } from '@objectstack/client-react';
+
+function ProjectTasks({ projectId }: { projectId: string }) {
   // First, get project details
   const { data: project } = useQuery('project', {
-    filters: ['id', '=', projectId]
+    where: { id: projectId }
   });
-  
+
   // Then, get tasks for this project
   const { data: tasks } = useQuery('todo_task', {
-    filters: ['project_id', '=', projectId],
+    where: { project_id: projectId },
     enabled: !!project // Only fetch when project is loaded
   });
-  
+
   return (
     <div>
-      <h2>{project?.value?.[0]?.name}</h2>
-      <TaskList tasks={tasks?.value} />
+      <h2>{project?.records?.[0]?.name}</h2>
+      <TaskList tasks={tasks?.records} />
     </div>
   );
 }
@@ -357,14 +368,15 @@ function ProjectTasks({ projectId }) {
 ### Search with Debounce
 
 ```tsx
-import { useDeferredValue } from 'react';
+import { useDeferredValue, useState } from 'react';
+import { useQuery } from '@objectstack/client-react';
 
 function TaskSearch() {
   const [searchTerm, setSearchTerm] = useState('');
   const deferredSearch = useDeferredValue(searchTerm);
   
   const { data, isLoading } = useQuery('todo_task', {
-    filters: ['subject', 'contains', deferredSearch],
+    where: { subject: { $contains: deferredSearch } },
     enabled: deferredSearch.length >= 3 // Only search with 3+ chars
   });
   
@@ -377,7 +389,7 @@ function TaskSearch() {
         placeholder="Search tasks..."
       />
       {isLoading && <Spinner />}
-      <TaskList tasks={data?.value} />
+      <TaskList tasks={data?.records} />
     </div>
   );
 }

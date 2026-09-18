@@ -111,6 +111,18 @@ const GATED: ReadonlyArray<{
   // that has cost real triage time (AGENTS.md records the trap). Flagged so the
   // failure explains itself instead of sending the next reader after a ghost.
   { check: 'check:api-surface', gen: 'gen:api-surface', artifact: 'api-surface/', readsDist: true },
+  // The SHAPE half of the same surface (#16045), and the other dist-reading gate
+  // here. `api-surface/` records that an export EXISTS under a kind; this one
+  // records its declaration TEXT, which is the only one of the two a signature
+  // change, a renamed interface field or a dropped union member can move. Same
+  // `readsDist` caveat and for a sharper reason: on a stale dist it writes
+  // declaration text for a build nobody made, and `--check` then agrees with it.
+  {
+    check: 'check:api-surface-declarations',
+    gen: 'gen:api-surface-declarations',
+    artifact: 'api-surface-declarations/',
+    readsDist: true,
+  },
   // The #4796 declaration-origin baseline. Reads `src/`, NOT the dist — so it
   // carries no `readsDist` caveat and needs no build. It sits next to
   // `check:api-surface` because they answer adjacent questions about the same

@@ -40,15 +40,14 @@ import { InMemoryDriver } from '@objectstack/driver-memory';
 
 const kernel = new ObjectKernel();
 
-kernel
-  // Register ObjectQL engine
-  .use(new ObjectQLPlugin())
-  
-  // Add database driver
-  .use(new DriverPlugin(new InMemoryDriver(), 'memory'))
-  
-  // Add your app configurations
-  // .use(new AppPlugin(appConfig));
+// Register ObjectQL engine
+await kernel.use(new ObjectQLPlugin());
+
+// Add database driver
+await kernel.use(new DriverPlugin(new InMemoryDriver(), 'memory'));
+
+// Add your app configurations
+// await kernel.use(new AppPlugin(appConfig));
 
 await kernel.bootstrap();
 ```
@@ -60,6 +59,7 @@ If you have a separate ObjectQL implementation or need custom configuration:
 ```typescript
 import { ObjectKernel, DriverPlugin } from '@objectstack/runtime';
 import { ObjectQLPlugin, ObjectQL } from '@objectstack/objectql';
+import { InMemoryDriver } from '@objectstack/driver-memory';
 
 // Create custom ObjectQL instance
 const customQL = new ObjectQL({
@@ -74,12 +74,11 @@ customQL.registerHook('beforeInsert', async (ctx) => {
 
 const kernel = new ObjectKernel();
 
-kernel
-  // Use your custom ObjectQL instance
-  .use(new ObjectQLPlugin(customQL))
-  
-  // Add driver
-  .use(new DriverPlugin(new InMemoryDriver(), 'memory'));
+// Use your custom ObjectQL instance
+await kernel.use(new ObjectQLPlugin(customQL));
+
+// Add driver
+await kernel.use(new DriverPlugin(new InMemoryDriver(), 'memory'));
 
 await kernel.bootstrap();
 
@@ -137,12 +136,13 @@ new AppPlugin(appConfig)
 Abstract interface for HTTP server capabilities. Allows plugins to work with any HTTP framework (e.g. Hono) without tight coupling.
 
 ```typescript
-import { IHttpServer, IHttpRequest, IHttpResponse } from '@objectstack/runtime';
+import type { Plugin, PluginContext } from '@objectstack/core';
+import type { IHttpServer } from '@objectstack/runtime';
 
 // In your HTTP server plugin
 class MyHttpServerPlugin implements Plugin {
   name = 'http-server';
-  
+
   async init(ctx: PluginContext) {
     const server: IHttpServer = createMyServer(); // Hono, or any framework via IHttpServer
     ctx.registerService('http-server', server);
@@ -153,10 +153,13 @@ class MyHttpServerPlugin implements Plugin {
 class MyApiPlugin implements Plugin {
   name = 'api';
   dependencies = ['http-server'];
-  
+
+  // `init` is required on every plugin, even when it registers nothing.
+  async init(_ctx: PluginContext) {}
+
   async start(ctx: PluginContext) {
     const server = ctx.getService<IHttpServer>('http-server');
-    
+
     // Register routes - works with any HTTP framework
     server.get('/api/users', async (req, res) => {
       res.json({ users: [] });
@@ -180,12 +183,13 @@ class MyApiPlugin implements Plugin {
 Abstract interface for data persistence. Allows plugins to work with any data layer (ObjectQL, Prisma, TypeORM, etc.) without tight coupling.
 
 ```typescript
-import { IDataEngine } from '@objectstack/runtime';
+import type { Plugin, PluginContext } from '@objectstack/core';
+import type { IDataEngine } from '@objectstack/runtime';
 
 // In your data plugin
 class MyDataPlugin implements Plugin {
   name = 'data';
-  
+
   async init(ctx: PluginContext) {
     const engine: IDataEngine = createMyDataEngine(); // ObjectQL, Prisma, etc.
     ctx.registerService('data-engine', engine);
@@ -196,13 +200,16 @@ class MyDataPlugin implements Plugin {
 class MyBusinessPlugin implements Plugin {
   name = 'business';
   dependencies = ['data'];
-  
+
+  // `init` is required on every plugin, even when it registers nothing.
+  async init(_ctx: PluginContext) {}
+
   async start(ctx: PluginContext) {
     const engine = ctx.getService<IDataEngine>('data-engine');
     
     // CRUD operations - works with any data layer
     const user = await engine.insert('user', { name: 'John' });
-    const users = await engine.find('user', { filter: { active: true } });
+    const users = await engine.find('user', { where: { active: true } });
     await engine.update('user', { id: user.id, name: 'Jane' });
     await engine.delete('user', { where: { id: user.id } });
   }
@@ -416,8 +423,11 @@ export class ApiPlugin implements Plugin {
 }
 
 // Usage
-kernel.use(new ApiPlugin({
-  apiKey: process.env.API_KEY,
+const apiKey = process.env.API_KEY;
+if (!apiKey) throw new Error('API_KEY is not set');
+
+await kernel.use(new ApiPlugin({
+  apiKey,
   endpoint: 'https://api.example.com',
   timeout: 10000
 }));
@@ -466,15 +476,18 @@ export class ConnectionPoolPlugin implements Plugin {
 ### Middleware Pattern
 
 ```typescript
-import { Plugin, PluginContext } from '@objectstack/core';
+import type { IHttpServer, Plugin, PluginContext } from '@objectstack/core';
 
 export class LoggingMiddleware implements Plugin {
   name = 'logging-middleware';
   dependencies = ['http-server'];
-  
+
+  // `init` is required on every plugin, even when it registers nothing.
+  async init(_ctx: PluginContext) {}
+
   async start(ctx: PluginContext) {
-    const server = ctx.getService('http-server');
-    
+    const server = ctx.getService<IHttpServer>('http-server');
+
     // Register middleware
     server.use(async (req, res, next) => {
       const start = Date.now();
@@ -500,24 +513,27 @@ export class LoggingMiddleware implements Plugin {
 ### Lazy Loading Pattern
 
 ```typescript
-import { Plugin, PluginContext } from '@objectstack/core';
+import type { Plugin, PluginContext } from '@objectstack/core';
 
 export class HeavyServicePlugin implements Plugin {
   name = 'heavy-service';
-  private instance: any = null;
-  
+
   async init(ctx: PluginContext) {
-    // Register factory instead of instance
+    // Register factory instead of instance. The cached instance is a closure
+    // variable: inside the object literal `this` is the literal itself, not
+    // the plugin.
+    let instance: unknown = null;
+
     const factory = {
-      async getInstance() {
-        if (!this.instance) {
+      async getInstance(): Promise<unknown> {
+        if (!instance) {
           ctx.logger.info('Lazy loading heavy service...');
-          this.instance = await loadHeavyService();
+          instance = await loadHeavyService();
         }
-        return this.instance;
+        return instance;
       }
     };
-    
+
     ctx.registerService('heavy-service', factory);
   }
 }
@@ -530,15 +546,18 @@ const service = await factory.getInstance(); // Loaded only when needed
 ### Health Check Pattern
 
 ```typescript
-import { Plugin, PluginContext } from '@objectstack/core';
+import type { IHttpServer, Plugin, PluginContext } from '@objectstack/core';
 
 export class HealthCheckPlugin implements Plugin {
   name = 'health-check';
   dependencies = ['http-server', 'database', 'cache'];
-  
+
+  // `init` is required on every plugin, even when it registers nothing.
+  async init(_ctx: PluginContext) {}
+
   async start(ctx: PluginContext) {
-    const server = ctx.getService('http-server');
-    
+    const server = ctx.getService<IHttpServer>('http-server');
+
     server.get('/health', async (req, res) => {
       const checks = await Promise.all([
         this.checkDatabase(ctx),
@@ -557,21 +576,21 @@ export class HealthCheckPlugin implements Plugin {
   
   private async checkDatabase(ctx: PluginContext) {
     try {
-      const db = ctx.getService('database');
+      const db = ctx.getService<{ ping(): Promise<void> }>('database');
       await db.ping();
       return { name: 'database', healthy: true };
     } catch (error) {
-      return { name: 'database', healthy: false, error: error.message };
+      return { name: 'database', healthy: false, error: (error as Error).message };
     }
   }
-  
+
   private async checkCache(ctx: PluginContext) {
     try {
-      const cache = ctx.getService('cache');
+      const cache = ctx.getService<{ ping(): Promise<void> }>('cache');
       await cache.ping();
       return { name: 'cache', healthy: true };
     } catch (error) {
-      return { name: 'cache', healthy: false, error: error.message };
+      return { name: 'cache', healthy: false, error: (error as Error).message };
     }
   }
   

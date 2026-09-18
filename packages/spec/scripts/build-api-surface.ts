@@ -9,7 +9,7 @@
  * #2023 class) — and no in-repo consumer catches it, because they all co-evolve
  * with the spec in the same commit. See ADR-0059.
  *
- * Two committed artifacts, both checked in CI:
+ * One committed artifact, checked in CI:
  *   - api-surface/<entry>.json    — one `name (kind)` row per DECLARED KIND of
  *                                    every export of ONE public entry point
  *                                    (breadth: did an export disappear?). A
@@ -22,29 +22,35 @@
  *                                    because the queue rebuilds server-side with
  *                                    no custom merge driver. The root entry `.`
  *                                    lands in `root.json`.
- *   - api-surface-signatures.json — a stable hash of each `defineX` factory's
- *                                    resolved signature. Scoped to the factories to
- *                                    stay low-noise; full per-export signatures
- *                                    would churn on every internal type tweak.
- *                                    Deliberately NOT sharded: 1.3KB, one line
- *                                    per factory, never a conflict surface.
  *
- * SCOPE — read before trusting these as a narrowing gate. Both artifacts describe
- * the TYPESCRIPT surface. The hash is of `checker.typeToString()`, which prints a
- * type REFERENCE (`z.input<typeof ActionSchema>`) and does not expand it, so
- * adding or removing a key inside a schema does not move it: #3883 narrowed
- * `defineAction`'s input by three keys and this snapshot did not change. The
- * authorable KEY surface — which for a metadata-driven platform is the real
- * third-party API — is ratcheted separately by `authorable-surface/`
- * (scripts/build-schemas.ts, #3855). Value-level narrowing (an enum losing a
- * member) is still ungated, per ADR-0059 §5's evidence gate.
+ * SCOPE — read before trusting this as a narrowing gate. It is the BREADTH half
+ * and nothing more: a row records that an export EXISTS under a kind, so a
+ * signature change, a renamed interface field and a dropped union member move no
+ * row here at all. The SHAPE half is `api-surface-declarations/<entry>.txt`
+ * (scripts/build-api-surface-declarations.ts) — the declaration TEXT of every
+ * export, which is where each of those three becomes visible. The authorable KEY
+ * surface — which for a metadata-driven platform is the real third-party API —
+ * is ratcheted separately by `authorable-surface/` (scripts/build-schemas.ts,
+ * #3855). Value-level narrowing (an enum losing a member) is still ungated, per
+ * ADR-0059 §5's evidence gate.
+ *
+ * RETIRED HERE: `api-surface-signatures.json`, a `sha256` of each `defineX`
+ * factory's `checker.typeToString()`. It was the only shape pin on this surface
+ * and it covered 27 of 5336 declared rows. It is not merely narrow, it is
+ * REFERENCE-level — `typeToString` prints `z.input<typeof ActionSchema>` without
+ * expanding it, so #3883 narrowed `defineAction`'s input by three keys and the
+ * hash did not move. The declaration-text artifact records the same 27 factory
+ * declarations (proven covered before the retirement) AND the schemas they point
+ * at, whose own expanded blocks are where such a narrowing shows up. ⛔ Do not
+ * reintroduce a digest here: an opaque bit that goes red gets accepted, which is
+ * the failure mode the text artifact exists to avoid.
  *
  *   pnpm --filter @objectstack/spec gen:api-surface     # regenerate + write
  *   pnpm --filter @objectstack/spec check:api-surface   # CI: fail on any drift
  *
- * A REMOVED export or a CHANGED factory signature is breaking (bump major). An
- * ADDED export still requires regenerating, so every change is deliberate. Reads
- * the built dist — run after `pnpm --filter @objectstack/spec build`.
+ * A REMOVED export is breaking (bump major). An ADDED export still requires
+ * regenerating, so every change is deliberate. Reads the built dist — run after
+ * `pnpm --filter @objectstack/spec build`.
  *
  * That last sentence is a PRECONDITION, and since #7122 it is enforced rather
  * than merely documented: both modes refuse to read a dist that is missing or
@@ -57,8 +63,7 @@
  * tree whose sources were re-checked-out unchanged.
  */
 import ts from 'typescript';
-import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspectDistFreshness } from './lib/dist-freshness';
@@ -71,7 +76,6 @@ import {
 
 const PKG_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
 const SURFACE_DIR = resolve(PKG_DIR, API_SURFACE_DIR_NAME);
-const SIG_SNAPSHOT = resolve(PKG_DIR, 'api-surface-signatures.json');
 const CHECK = process.argv.includes('--check');
 
 // BEFORE a single `.d.ts` is read (#7122). Order is the whole point: once
@@ -160,50 +164,18 @@ function buildSurface(): Record<string, string[]> {
   return surface;
 }
 
-/** Depth: hash of each `defineX` factory's resolved signature (from root). */
-function buildSignatures(): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const s of moduleExports(entries['.'], '.')) {
-    const name = s.getName();
-    if (!/^define[A-Z]/.test(name)) continue;
-    const resolved = unalias(s);
-    if (!(resolved.getFlags() & ts.SymbolFlags.Function)) continue;
-    const decl = resolved.valueDeclaration ?? resolved.declarations?.[0];
-    if (!decl) continue;
-    const type = checker.getTypeOfSymbolAtLocation(resolved, decl);
-    const str = checker.typeToString(type, decl, ts.TypeFormatFlags.NoTruncation | ts.TypeFormatFlags.InTypeAlias);
-    out[name] = 'sha256:' + createHash('sha256').update(str).digest('hex').slice(0, 16);
-  }
-  return Object.fromEntries(Object.keys(out).sort().map((k) => [k, out[k]]));
-}
-
 const surface = buildSurface();
-const signatures = buildSignatures();
 const surfaceTexts = apiSurfaceShardTexts(surface);
-const sigStr = JSON.stringify(signatures, null, 2) + '\n';
 
 if (!CHECK) {
   const { written, removed } = writeShards(SURFACE_DIR, surfaceTexts);
-  writeFileSync(SIG_SNAPSHOT, sigStr);
   const total = Object.values(surface).reduce((n, a) => n + a.length, 0);
-  console.log(
-    `Wrote ${API_SURFACE_DIR_NAME}/ (${Object.keys(surface).length} entries, ${total} exports) ` +
-      `and api-surface-signatures.json (${Object.keys(signatures).length} factories).`,
-  );
+  console.log(`Wrote ${API_SURFACE_DIR_NAME}/ (${Object.keys(surface).length} entries, ${total} exports).`);
   // The locality claim, printed: a PR that changed one entry point's exports
   // rewrites one shard, so two such PRs cannot conflict (#5837).
   if (written.length > 0) console.log(`  touched: ${written.map((n) => `${n}.json`).join(', ')}`);
   if (removed.length > 0) console.log(`  removed: ${removed.map((n) => `${n}.json`).join(', ')}`);
   process.exit(0);
-}
-
-function read(path: string, hint: string): string {
-  try {
-    return readFileSync(path, 'utf8');
-  } catch {
-    console.error(`No snapshot at ${path}. Run \`pnpm --filter @objectstack/spec gen:api-surface\` and commit it (${hint}).`);
-    process.exit(1);
-  }
 }
 
 let breaking = 0;
@@ -246,24 +218,14 @@ if (staleShards.length > 0 || orphanShards.length > 0) {
   }
 }
 
-// Depth check (factory signatures).
-const prevSig: Record<string, string> = JSON.parse(read(SIG_SNAPSHOT, 'depth'));
-if (JSON.stringify(prevSig, null, 2) + '\n' !== sigStr) {
-  for (const name of new Set([...Object.keys(prevSig), ...Object.keys(signatures)])) {
-    if (!(name in signatures)) { console.error(`\n  signature removed: ${name}`); breaking++; }
-    else if (!(name in prevSig)) { console.error(`\n  signature added: ${name}`); additions++; }
-    else if (prevSig[name] !== signatures[name]) { console.error(`\n  signature changed: ${name}  (${prevSig[name]} → ${signatures[name]})`); breaking++; }
-  }
-}
-
 if (breaking === 0 && additions === 0) {
-  console.log('@objectstack/spec public API surface + factory signatures unchanged ✓');
+  console.log('@objectstack/spec public API surface unchanged ✓');
   process.exit(0);
 }
 
-console.error(`\n@objectstack/spec public API changed: ${breaking} breaking (removed/narrowed), ${additions} added.`);
+console.error(`\n@objectstack/spec public API changed: ${breaking} breaking (removed), ${additions} added.`);
 if (breaking > 0) {
-  console.error('A REMOVED export or a CHANGED factory signature is a BREAKING change for third parties — bump @objectstack/spec to a new major (or restore it).');
+  console.error('A REMOVED export is a BREAKING change for third parties — bump @objectstack/spec to a new major (or restore it).');
 }
 console.error('If intentional, run `pnpm --filter @objectstack/spec gen:api-surface` and commit the updated snapshots.');
 process.exit(1);

@@ -1,0 +1,884 @@
+# @objectstack/spec — the .d.ts DECLARATION TEXT of every export of `./marketplace`.
+#
+# The SHAPE half of the ADR-0059 public-API pin, and the readable counterpart of
+# api-surface/marketplace.json's breadth half. That file pins each export by
+# `name (kind)`, which a signature change, a renamed interface field and a dropped
+# union member all leave untouched. This file pins the declaration text, so each of
+# those moves a line here. Text and NOT a hash, deliberately: a diff a reviewer can
+# read is what makes contract review a guard rather than a rubber stamp.
+#
+# Verbatim from the PACKED `.d.ts` reached through this package's `exports` map — the
+# declarations a consumer installs, never `src/`. A declaration's leading TSDoc is
+# excluded: documentation drift is `check:docs`'s axis, not this one.
+#
+# entry: ./marketplace
+# exported names: 76
+# declarations: 76
+#
+# GENERATED — ⛔ never hand-edited. Regenerate after a real build:
+#   pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec gen:api-surface-declarations
+# Gated by `check:api-surface-declarations`; a hand edit is a red gate, not a change.
+
+// ── ArtifactDownloadResponse (type) ──
+type ArtifactDownloadResponse = z.input<typeof ArtifactDownloadResponseSchema>;
+
+// ── ArtifactDownloadResponseSchema (const) ──
+declare const ArtifactDownloadResponseSchema: z.ZodObject<{
+    downloadUrl: z.ZodString;
+    sha256: z.ZodString;
+    size: z.ZodNumber;
+    format: z.ZodEnum<{
+        zip: "zip";
+        tgz: "tgz";
+    }>;
+    expiresAt: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── ArtifactReference (type) ──
+type ArtifactReference = z.input<typeof ArtifactReferenceSchema>;
+
+// ── ArtifactReferenceParsed (type) ──
+type ArtifactReferenceParsed = z.infer<typeof ArtifactReferenceSchema>;
+
+// ── ArtifactReferenceSchema (const) ──
+declare const ArtifactReferenceSchema: z.ZodObject<{
+    url: z.ZodString;
+    sha256: z.ZodString;
+    size: z.ZodNumber;
+    format: z.ZodDefault<z.ZodEnum<{
+        zip: "zip";
+        tgz: "tgz";
+    }>>;
+    uploadedAt: z.ZodString;
+}, z.core.$strip>;
+
+// ── CreatePackageRequest (type) ──
+type CreatePackageRequest = z.input<typeof CreatePackageRequestSchema>;
+
+// ── CreatePackageRequestSchema (const) ──
+declare const CreatePackageRequestSchema: z.ZodObject<{
+    manifestId: z.ZodString;
+    namespace: z.ZodOptional<z.ZodString>;
+    ownerOrgId: z.ZodString;
+    displayName: z.ZodString;
+    description: z.ZodOptional<z.ZodString>;
+    visibility: z.ZodOptional<z.ZodEnum<{
+        org: "org";
+        private: "private";
+        marketplace: "marketplace";
+    }>>;
+    category: z.ZodOptional<z.ZodString>;
+    tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    iconUrl: z.ZodOptional<z.ZodString>;
+    homepageUrl: z.ZodOptional<z.ZodString>;
+    license: z.ZodOptional<z.ZodString>;
+    publisher: z.ZodOptional<z.ZodEnum<{
+        partner: "partner";
+        private: "private";
+        objectstack: "objectstack";
+        community: "community";
+    }>>;
+    isStarter: z.ZodOptional<z.ZodBoolean>;
+    translations: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
+        displayName: z.ZodOptional<z.ZodString>;
+        description: z.ZodOptional<z.ZodString>;
+        readme: z.ZodOptional<z.ZodString>;
+        tagline: z.ZodOptional<z.ZodString>;
+        screenshotCaptions: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+    }, z.core.$strip>>>;
+    createdBy: z.ZodString;
+}, z.core.$strip>;
+
+// ── CreatePackageVersionRequest (type) ──
+type CreatePackageVersionRequest = z.input<typeof CreatePackageVersionRequestSchema>;
+
+// ── CreatePackageVersionRequestSchema (const) ──
+declare const CreatePackageVersionRequestSchema: z.ZodObject<{
+    packageId: z.ZodString;
+    version: z.ZodString;
+    manifestJson: z.ZodString;
+    releaseNotes: z.ZodOptional<z.ZodString>;
+    isPreRelease: z.ZodOptional<z.ZodBoolean>;
+    createdBy: z.ZodString;
+}, z.core.$strip>;
+
+// ── ListingStatus (type) ──
+type ListingStatus = z.input<typeof ListingStatusSchema>;
+
+// ── ListingStatusSchema (const) ──
+declare const ListingStatusSchema: z.ZodEnum<{
+    deprecated: "deprecated";
+    draft: "draft";
+    published: "published";
+    approved: "approved";
+    rejected: "rejected";
+    submitted: "submitted";
+    "in-review": "in-review";
+    suspended: "suspended";
+    unlisted: "unlisted";
+}>;
+
+// ── MarketplaceCategory (type) ──
+type MarketplaceCategory = z.input<typeof MarketplaceCategorySchema>;
+
+// ── MarketplaceCategorySchema (const) ──
+declare const MarketplaceCategorySchema: z.ZodEnum<{
+    storage: "storage";
+    automation: "automation";
+    analytics: "analytics";
+    ai: "ai";
+    other: "other";
+    integration: "integration";
+    security: "security";
+    project: "project";
+    crm: "crm";
+    erp: "erp";
+    hr: "hr";
+    finance: "finance";
+    collaboration: "collaboration";
+    "developer-tools": "developer-tools";
+    "ui-theme": "ui-theme";
+}>;
+
+// ── MarketplaceInstallRequest (type) ──
+type MarketplaceInstallRequest = z.input<typeof MarketplaceInstallRequestSchema>;
+
+// ── MarketplaceInstallRequestParsed (type) ──
+type MarketplaceInstallRequestParsed = z.infer<typeof MarketplaceInstallRequestSchema>;
+
+// ── MarketplaceInstallRequestSchema (const) ──
+declare const MarketplaceInstallRequestSchema: z.ZodObject<{
+    listingId: z.ZodString;
+    version: z.ZodOptional<z.ZodString>;
+    licenseKey: z.ZodOptional<z.ZodString>;
+    settings: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    enableOnInstall: z.ZodDefault<z.ZodBoolean>;
+    artifactRef: z.ZodOptional<z.ZodObject<{
+        url: z.ZodString;
+        sha256: z.ZodString;
+        size: z.ZodNumber;
+        format: z.ZodDefault<z.ZodEnum<{
+            zip: "zip";
+            tgz: "tgz";
+        }>>;
+        uploadedAt: z.ZodString;
+    }, z.core.$strip>>;
+    tenantId: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── MarketplaceInstallResponse (type) ──
+type MarketplaceInstallResponse = z.input<typeof MarketplaceInstallResponseSchema>;
+
+// ── MarketplaceInstallResponseSchema (const) ──
+declare const MarketplaceInstallResponseSchema: z.ZodObject<{
+    success: z.ZodBoolean;
+    packageId: z.ZodOptional<z.ZodString>;
+    version: z.ZodOptional<z.ZodString>;
+    message: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── MarketplaceListing (type) ──
+type MarketplaceListing = z.input<typeof MarketplaceListingSchema>;
+
+// ── MarketplaceListingParsed (type) ──
+type MarketplaceListingParsed = z.infer<typeof MarketplaceListingSchema>;
+
+// ── MarketplaceListingSchema (const) ──
+declare const MarketplaceListingSchema: z.ZodObject<{
+    id: z.ZodString;
+    packageId: z.ZodString;
+    packageType: z.ZodDefault<z.ZodEnum<{
+        app: "app";
+    }>>;
+    publisherId: z.ZodString;
+    status: z.ZodDefault<z.ZodEnum<{
+        deprecated: "deprecated";
+        draft: "draft";
+        published: "published";
+        approved: "approved";
+        rejected: "rejected";
+        submitted: "submitted";
+        "in-review": "in-review";
+        suspended: "suspended";
+        unlisted: "unlisted";
+    }>>;
+    name: z.ZodString;
+    tagline: z.ZodOptional<z.ZodString>;
+    description: z.ZodOptional<z.ZodString>;
+    category: z.ZodEnum<{
+        storage: "storage";
+        automation: "automation";
+        analytics: "analytics";
+        ai: "ai";
+        other: "other";
+        integration: "integration";
+        security: "security";
+        project: "project";
+        crm: "crm";
+        erp: "erp";
+        hr: "hr";
+        finance: "finance";
+        collaboration: "collaboration";
+        "developer-tools": "developer-tools";
+        "ui-theme": "ui-theme";
+    }>;
+    tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    iconUrl: z.ZodOptional<z.ZodString>;
+    screenshots: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        url: z.ZodString;
+        caption: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>>;
+    documentationUrl: z.ZodOptional<z.ZodString>;
+    supportUrl: z.ZodOptional<z.ZodString>;
+    repositoryUrl: z.ZodOptional<z.ZodString>;
+    pricing: z.ZodDefault<z.ZodEnum<{
+        subscription: "subscription";
+        free: "free";
+        freemium: "freemium";
+        paid: "paid";
+        "usage-based": "usage-based";
+        "contact-sales": "contact-sales";
+    }>>;
+    priceInCents: z.ZodOptional<z.ZodNumber>;
+    latestVersion: z.ZodString;
+    minPlatformVersion: z.ZodOptional<z.ZodString>;
+    versions: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        version: z.ZodString;
+        releaseDate: z.ZodString;
+        releaseNotes: z.ZodOptional<z.ZodString>;
+        minPlatformVersion: z.ZodOptional<z.ZodString>;
+        deprecated: z.ZodDefault<z.ZodBoolean>;
+        artifact: z.ZodOptional<z.ZodObject<{
+            url: z.ZodString;
+            sha256: z.ZodString;
+            size: z.ZodNumber;
+            format: z.ZodDefault<z.ZodEnum<{
+                zip: "zip";
+                tgz: "tgz";
+            }>>;
+            uploadedAt: z.ZodString;
+        }, z.core.$strip>>;
+    }, z.core.$strip>>>;
+    stats: z.ZodOptional<z.ZodObject<{
+        totalInstalls: z.ZodDefault<z.ZodNumber>;
+        activeInstalls: z.ZodDefault<z.ZodNumber>;
+        averageRating: z.ZodOptional<z.ZodNumber>;
+        totalRatings: z.ZodDefault<z.ZodNumber>;
+        totalReviews: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strip>>;
+    publishedAt: z.ZodOptional<z.ZodString>;
+    updatedAt: z.ZodOptional<z.ZodString>;
+    translations: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
+        displayName: z.ZodOptional<z.ZodString>;
+        description: z.ZodOptional<z.ZodString>;
+        readme: z.ZodOptional<z.ZodString>;
+        tagline: z.ZodOptional<z.ZodString>;
+        screenshotCaptions: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+    }, z.core.$strip>>>;
+}, z.core.$strip>;
+
+// ── MarketplaceSearchRequest (type) ──
+type MarketplaceSearchRequest = z.input<typeof MarketplaceSearchRequestSchema>;
+
+// ── MarketplaceSearchRequestParsed (type) ──
+type MarketplaceSearchRequestParsed = z.infer<typeof MarketplaceSearchRequestSchema>;
+
+// ── MarketplaceSearchRequestSchema (const) ──
+declare const MarketplaceSearchRequestSchema: z.ZodObject<{
+    query: z.ZodOptional<z.ZodString>;
+    category: z.ZodOptional<z.ZodEnum<{
+        storage: "storage";
+        automation: "automation";
+        analytics: "analytics";
+        ai: "ai";
+        other: "other";
+        integration: "integration";
+        security: "security";
+        project: "project";
+        crm: "crm";
+        erp: "erp";
+        hr: "hr";
+        finance: "finance";
+        collaboration: "collaboration";
+        "developer-tools": "developer-tools";
+        "ui-theme": "ui-theme";
+    }>>;
+    tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    pricing: z.ZodOptional<z.ZodEnum<{
+        subscription: "subscription";
+        free: "free";
+        freemium: "freemium";
+        paid: "paid";
+        "usage-based": "usage-based";
+        "contact-sales": "contact-sales";
+    }>>;
+    publisherVerification: z.ZodOptional<z.ZodEnum<{
+        partner: "partner";
+        pending: "pending";
+        unverified: "unverified";
+        verified: "verified";
+        trusted: "trusted";
+    }>>;
+    sortBy: z.ZodDefault<z.ZodEnum<{
+        name: "name";
+        rating: "rating";
+        updated: "updated";
+        relevance: "relevance";
+        popularity: "popularity";
+        newest: "newest";
+    }>>;
+    sortDirection: z.ZodDefault<z.ZodEnum<{
+        asc: "asc";
+        desc: "desc";
+    }>>;
+    page: z.ZodDefault<z.ZodNumber>;
+    pageSize: z.ZodDefault<z.ZodNumber>;
+    platformVersion: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── MarketplaceSearchResponse (type) ──
+type MarketplaceSearchResponse = z.input<typeof MarketplaceSearchResponseSchema>;
+
+// ── MarketplaceSearchResponseParsed (type) ──
+type MarketplaceSearchResponseParsed = z.infer<typeof MarketplaceSearchResponseSchema>;
+
+// ── MarketplaceSearchResponseSchema (const) ──
+declare const MarketplaceSearchResponseSchema: z.ZodObject<{
+    items: z.ZodArray<z.ZodObject<{
+        id: z.ZodString;
+        packageId: z.ZodString;
+        packageType: z.ZodDefault<z.ZodEnum<{
+            app: "app";
+        }>>;
+        publisherId: z.ZodString;
+        status: z.ZodDefault<z.ZodEnum<{
+            deprecated: "deprecated";
+            draft: "draft";
+            published: "published";
+            approved: "approved";
+            rejected: "rejected";
+            submitted: "submitted";
+            "in-review": "in-review";
+            suspended: "suspended";
+            unlisted: "unlisted";
+        }>>;
+        name: z.ZodString;
+        tagline: z.ZodOptional<z.ZodString>;
+        description: z.ZodOptional<z.ZodString>;
+        category: z.ZodEnum<{
+            storage: "storage";
+            automation: "automation";
+            analytics: "analytics";
+            ai: "ai";
+            other: "other";
+            integration: "integration";
+            security: "security";
+            project: "project";
+            crm: "crm";
+            erp: "erp";
+            hr: "hr";
+            finance: "finance";
+            collaboration: "collaboration";
+            "developer-tools": "developer-tools";
+            "ui-theme": "ui-theme";
+        }>;
+        tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        iconUrl: z.ZodOptional<z.ZodString>;
+        screenshots: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            url: z.ZodString;
+            caption: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>>;
+        documentationUrl: z.ZodOptional<z.ZodString>;
+        supportUrl: z.ZodOptional<z.ZodString>;
+        repositoryUrl: z.ZodOptional<z.ZodString>;
+        pricing: z.ZodDefault<z.ZodEnum<{
+            subscription: "subscription";
+            free: "free";
+            freemium: "freemium";
+            paid: "paid";
+            "usage-based": "usage-based";
+            "contact-sales": "contact-sales";
+        }>>;
+        priceInCents: z.ZodOptional<z.ZodNumber>;
+        latestVersion: z.ZodString;
+        minPlatformVersion: z.ZodOptional<z.ZodString>;
+        versions: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            version: z.ZodString;
+            releaseDate: z.ZodString;
+            releaseNotes: z.ZodOptional<z.ZodString>;
+            minPlatformVersion: z.ZodOptional<z.ZodString>;
+            deprecated: z.ZodDefault<z.ZodBoolean>;
+            artifact: z.ZodOptional<z.ZodObject<{
+                url: z.ZodString;
+                sha256: z.ZodString;
+                size: z.ZodNumber;
+                format: z.ZodDefault<z.ZodEnum<{
+                    zip: "zip";
+                    tgz: "tgz";
+                }>>;
+                uploadedAt: z.ZodString;
+            }, z.core.$strip>>;
+        }, z.core.$strip>>>;
+        stats: z.ZodOptional<z.ZodObject<{
+            totalInstalls: z.ZodDefault<z.ZodNumber>;
+            activeInstalls: z.ZodDefault<z.ZodNumber>;
+            averageRating: z.ZodOptional<z.ZodNumber>;
+            totalRatings: z.ZodDefault<z.ZodNumber>;
+            totalReviews: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strip>>;
+        publishedAt: z.ZodOptional<z.ZodString>;
+        updatedAt: z.ZodOptional<z.ZodString>;
+        translations: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
+            displayName: z.ZodOptional<z.ZodString>;
+            description: z.ZodOptional<z.ZodString>;
+            readme: z.ZodOptional<z.ZodString>;
+            tagline: z.ZodOptional<z.ZodString>;
+            screenshotCaptions: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        }, z.core.$strip>>>;
+    }, z.core.$strip>>;
+    total: z.ZodNumber;
+    page: z.ZodNumber;
+    pageSize: z.ZodNumber;
+    facets: z.ZodOptional<z.ZodObject<{
+        categories: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            category: z.ZodEnum<{
+                storage: "storage";
+                automation: "automation";
+                analytics: "analytics";
+                ai: "ai";
+                other: "other";
+                integration: "integration";
+                security: "security";
+                project: "project";
+                crm: "crm";
+                erp: "erp";
+                hr: "hr";
+                finance: "finance";
+                collaboration: "collaboration";
+                "developer-tools": "developer-tools";
+                "ui-theme": "ui-theme";
+            }>;
+            count: z.ZodNumber;
+        }, z.core.$strip>>>;
+        pricing: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            model: z.ZodEnum<{
+                subscription: "subscription";
+                free: "free";
+                freemium: "freemium";
+                paid: "paid";
+                "usage-based": "usage-based";
+                "contact-sales": "contact-sales";
+            }>;
+            count: z.ZodNumber;
+        }, z.core.$strip>>>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+
+// ── Package (type) ──
+type Package = z.input<typeof PackageSchema>;
+
+// ── PackageCategory (type) ──
+type PackageCategory = z.input<typeof PackageCategorySchema>;
+
+// ── PackageCategorySchema (const) ──
+declare const PackageCategorySchema: z.ZodString;
+
+// ── PackageDependency (type) ──
+type PackageDependency = z.input<typeof PackageDependencySchema>;
+
+// ── PackageDependencyParsed (type) ──
+type PackageDependencyParsed = z.infer<typeof PackageDependencySchema>;
+
+// ── PackageDependencySchema (const) ──
+declare const PackageDependencySchema: z.ZodObject<{
+    packageId: z.ZodString;
+    versionRange: z.ZodString;
+    optional: z.ZodDefault<z.ZodBoolean>;
+}, z.core.$strip>;
+
+// ── PackageL10nField (type) ──
+type PackageL10nField = keyof PackageTranslation;
+
+// ── PackageLocale (type) ──
+type PackageLocale = z.input<typeof PackageLocaleSchema>;
+
+// ── PackageLocaleSchema (const) ──
+declare const PackageLocaleSchema: z.ZodString;
+
+// ── PackageManifest (type) ──
+type PackageManifest = z.input<typeof PackageManifestSchema>;
+
+// ── PackageManifestParsed (type) ──
+type PackageManifestParsed = z.infer<typeof PackageManifestSchema>;
+
+// ── PackageManifestSchema (const) ──
+declare const PackageManifestSchema: z.ZodObject<{
+    id: z.ZodString;
+    version: z.ZodString;
+    name: z.ZodString;
+    description: z.ZodOptional<z.ZodString>;
+    scope: z.ZodDefault<z.ZodEnum<{
+        platform: "platform";
+        environment: "environment";
+    }>>;
+    minPlatformVersion: z.ZodOptional<z.ZodString>;
+    dependencies: z.ZodDefault<z.ZodArray<z.ZodObject<{
+        packageId: z.ZodString;
+        versionRange: z.ZodString;
+        optional: z.ZodDefault<z.ZodBoolean>;
+    }, z.core.$strip>>>;
+    metadataTypes: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    migrations: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    configurationSchema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+}, z.core.$strip>;
+
+// ── PackageParsed (type) ──
+type PackageParsed = z.infer<typeof PackageSchema>;
+
+// ── PackagePublisher (type) ──
+type PackagePublisher = z.input<typeof PackagePublisherSchema>;
+
+// ── PackagePublisherSchema (const) ──
+declare const PackagePublisherSchema: z.ZodEnum<{
+    partner: "partner";
+    private: "private";
+    objectstack: "objectstack";
+    community: "community";
+}>;
+
+// ── PackageSchema (const) ──
+declare const PackageSchema: z.ZodObject<{
+    id: z.ZodString;
+    manifestId: z.ZodString;
+    namespace: z.ZodOptional<z.ZodString>;
+    ownerOrgId: z.ZodString;
+    displayName: z.ZodString;
+    description: z.ZodOptional<z.ZodString>;
+    readme: z.ZodOptional<z.ZodString>;
+    visibility: z.ZodDefault<z.ZodEnum<{
+        org: "org";
+        private: "private";
+        marketplace: "marketplace";
+    }>>;
+    category: z.ZodOptional<z.ZodString>;
+    tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    iconUrl: z.ZodOptional<z.ZodString>;
+    homepageUrl: z.ZodOptional<z.ZodString>;
+    license: z.ZodOptional<z.ZodString>;
+    publisher: z.ZodDefault<z.ZodEnum<{
+        partner: "partner";
+        private: "private";
+        objectstack: "objectstack";
+        community: "community";
+    }>>;
+    isStarter: z.ZodDefault<z.ZodBoolean>;
+    translations: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
+        displayName: z.ZodOptional<z.ZodString>;
+        description: z.ZodOptional<z.ZodString>;
+        readme: z.ZodOptional<z.ZodString>;
+        tagline: z.ZodOptional<z.ZodString>;
+        screenshotCaptions: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+    }, z.core.$strip>>>;
+    createdAt: z.ZodString;
+    updatedAt: z.ZodString;
+    createdBy: z.ZodString;
+}, z.core.$strip>;
+
+// ── PackageSubmission (type) ──
+type PackageSubmission = z.input<typeof PackageSubmissionSchema>;
+
+// ── PackageSubmissionParsed (type) ──
+type PackageSubmissionParsed = z.infer<typeof PackageSubmissionSchema>;
+
+// ── PackageSubmissionSchema (const) ──
+declare const PackageSubmissionSchema: z.ZodObject<{
+    id: z.ZodString;
+    packageId: z.ZodString;
+    version: z.ZodString;
+    publisherId: z.ZodString;
+    status: z.ZodDefault<z.ZodEnum<{
+        pending: "pending";
+        approved: "approved";
+        rejected: "rejected";
+        "in-review": "in-review";
+        scanning: "scanning";
+        "changes-requested": "changes-requested";
+    }>>;
+    artifactUrl: z.ZodString;
+    releaseNotes: z.ZodOptional<z.ZodString>;
+    isNewListing: z.ZodDefault<z.ZodBoolean>;
+    scanResults: z.ZodOptional<z.ZodObject<{
+        passed: z.ZodBoolean;
+        securityScore: z.ZodOptional<z.ZodNumber>;
+        compatibilityCheck: z.ZodOptional<z.ZodBoolean>;
+        issues: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            severity: z.ZodEnum<{
+                medium: "medium";
+                info: "info";
+                critical: "critical";
+                low: "low";
+                high: "high";
+            }>;
+            message: z.ZodString;
+            file: z.ZodOptional<z.ZodString>;
+            line: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>>;
+    }, z.core.$strip>>;
+    reviewerNotes: z.ZodOptional<z.ZodString>;
+    submittedAt: z.ZodOptional<z.ZodString>;
+    reviewedAt: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── PackageTranslation (type) ──
+type PackageTranslation = z.input<typeof PackageTranslationSchema>;
+
+// ── PackageTranslationSchema (const) ──
+declare const PackageTranslationSchema: z.ZodObject<{
+    displayName: z.ZodOptional<z.ZodString>;
+    description: z.ZodOptional<z.ZodString>;
+    readme: z.ZodOptional<z.ZodString>;
+    tagline: z.ZodOptional<z.ZodString>;
+    screenshotCaptions: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+}, z.core.$strip>;
+
+// ── PackageTranslations (type) ──
+type PackageTranslations = z.input<typeof PackageTranslationsSchema>;
+
+// ── PackageTranslationsSchema (const) ──
+declare const PackageTranslationsSchema: z.ZodRecord<z.ZodString, z.ZodObject<{
+    displayName: z.ZodOptional<z.ZodString>;
+    description: z.ZodOptional<z.ZodString>;
+    readme: z.ZodOptional<z.ZodString>;
+    tagline: z.ZodOptional<z.ZodString>;
+    screenshotCaptions: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+}, z.core.$strip>>;
+
+// ── PackageVersion (type) ──
+type PackageVersion = z.input<typeof PackageVersionSchema>;
+
+// ── PackageVersionParsed (type) ──
+type PackageVersionParsed = z.infer<typeof PackageVersionSchema>;
+
+// ── PackageVersionSchema (const) ──
+declare const PackageVersionSchema: z.ZodObject<{
+    id: z.ZodString;
+    packageId: z.ZodString;
+    version: z.ZodString;
+    status: z.ZodDefault<z.ZodEnum<{
+        deprecated: "deprecated";
+        draft: "draft";
+        published: "published";
+    }>>;
+    manifestJson: z.ZodString;
+    checksum: z.ZodOptional<z.ZodString>;
+    releaseNotes: z.ZodOptional<z.ZodString>;
+    minPlatformVersion: z.ZodOptional<z.ZodString>;
+    isPreRelease: z.ZodDefault<z.ZodBoolean>;
+    publishedAt: z.ZodOptional<z.ZodString>;
+    publishedBy: z.ZodOptional<z.ZodString>;
+    createdAt: z.ZodString;
+    updatedAt: z.ZodString;
+    createdBy: z.ZodString;
+}, z.core.$strip>;
+
+// ── PackageVersionStatus (type) ──
+type PackageVersionStatus = z.input<typeof PackageVersionStatusSchema>;
+
+// ── PackageVersionStatusSchema (const) ──
+declare const PackageVersionStatusSchema: z.ZodEnum<{
+    deprecated: "deprecated";
+    draft: "draft";
+    published: "published";
+}>;
+
+// ── PackageVisibility (type) ──
+type PackageVisibility = z.input<typeof PackageVisibilitySchema>;
+
+// ── PackageVisibilitySchema (const) ──
+declare const PackageVisibilitySchema: z.ZodEnum<{
+    org: "org";
+    private: "private";
+    marketplace: "marketplace";
+}>;
+
+// ── PricingModel (type) ──
+type PricingModel = z.input<typeof PricingModelSchema>;
+
+// ── PricingModelSchema (const) ──
+declare const PricingModelSchema: z.ZodEnum<{
+    subscription: "subscription";
+    free: "free";
+    freemium: "freemium";
+    paid: "paid";
+    "usage-based": "usage-based";
+    "contact-sales": "contact-sales";
+}>;
+
+// ── PublishPackageVersionRequest (type) ──
+type PublishPackageVersionRequest = z.input<typeof PublishPackageVersionRequestSchema>;
+
+// ── PublishPackageVersionRequestSchema (const) ──
+declare const PublishPackageVersionRequestSchema: z.ZodObject<{
+    publishedBy: z.ZodString;
+}, z.core.$strip>;
+
+// ── Publisher (type) ──
+type Publisher = z.input<typeof PublisherSchema>;
+
+// ── PublisherParsed (type) ──
+type PublisherParsed = z.infer<typeof PublisherSchema>;
+
+// ── PublisherSchema (const) ──
+declare const PublisherSchema: z.ZodObject<{
+    id: z.ZodString;
+    name: z.ZodString;
+    type: z.ZodEnum<{
+        organization: "organization";
+        individual: "individual";
+    }>;
+    verification: z.ZodDefault<z.ZodEnum<{
+        partner: "partner";
+        pending: "pending";
+        unverified: "unverified";
+        verified: "verified";
+        trusted: "trusted";
+    }>>;
+    email: z.ZodOptional<z.ZodString>;
+    website: z.ZodOptional<z.ZodString>;
+    logoUrl: z.ZodOptional<z.ZodString>;
+    description: z.ZodOptional<z.ZodString>;
+    registeredAt: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── PublisherVerification (type) ──
+type PublisherVerification = z.input<typeof PublisherVerificationSchema>;
+
+// ── PublisherVerificationSchema (const) ──
+declare const PublisherVerificationSchema: z.ZodEnum<{
+    partner: "partner";
+    pending: "pending";
+    unverified: "unverified";
+    verified: "verified";
+    trusted: "trusted";
+}>;
+
+// ── ResolvePackageL10nOptions (interface) ──
+interface ResolvePackageL10nOptions {
+    /** BCP-47 locale to render (e.g. `zh-CN`, `ja`). */
+    locale: string;
+    /** Locale to fall back to before the base column. Default `en`. */
+    fallbackLocale?: string;
+}
+
+// ── TemplateManifest (type) ──
+type TemplateManifest = z.input<typeof TemplateManifestSchema>;
+
+// ── TemplateManifestSchema (const) ──
+declare const TemplateManifestSchema: z.ZodObject<{
+    description: z.ZodOptional<z.ZodString>;
+    displayName: z.ZodString;
+    visibility: z.ZodOptional<z.ZodEnum<{
+        private: "private";
+        org: "org";
+        marketplace: "marketplace";
+    }>>;
+    category: z.ZodOptional<z.ZodString>;
+    tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    iconUrl: z.ZodOptional<z.ZodString>;
+    homepageUrl: z.ZodOptional<z.ZodString>;
+    license: z.ZodOptional<z.ZodString>;
+    publisher: z.ZodOptional<z.ZodEnum<{
+        private: "private";
+        objectstack: "objectstack";
+        partner: "partner";
+        community: "community";
+    }>>;
+    isStarter: z.ZodOptional<z.ZodBoolean>;
+    translations: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
+        displayName: z.ZodOptional<z.ZodString>;
+        description: z.ZodOptional<z.ZodString>;
+        readme: z.ZodOptional<z.ZodString>;
+        tagline: z.ZodOptional<z.ZodString>;
+        screenshotCaptions: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+    }, z.core.$strip>>>;
+    manifestId: z.ZodOptional<z.ZodString>;
+    name: z.ZodString;
+    specVersion: z.ZodString;
+    namespace: z.ZodOptional<z.ZodString>;
+    skills: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    preview: z.ZodOptional<z.ZodObject<{
+        screenshots: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        demoUrl: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+    scaffold: z.ZodOptional<z.ZodObject<{
+        variables: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        postInstall: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    }, z.core.$strip>>;
+    readmePath: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── UpdatePackageRequest (type) ──
+type UpdatePackageRequest = z.input<typeof UpdatePackageRequestSchema>;
+
+// ── UpdatePackageRequestSchema (const) ──
+declare const UpdatePackageRequestSchema: z.ZodObject<{
+    displayName: z.ZodOptional<z.ZodString>;
+    description: z.ZodOptional<z.ZodString>;
+    readme: z.ZodOptional<z.ZodString>;
+    visibility: z.ZodOptional<z.ZodEnum<{
+        org: "org";
+        private: "private";
+        marketplace: "marketplace";
+    }>>;
+    category: z.ZodOptional<z.ZodString>;
+    tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    iconUrl: z.ZodOptional<z.ZodString>;
+    homepageUrl: z.ZodOptional<z.ZodString>;
+    license: z.ZodOptional<z.ZodString>;
+    publisher: z.ZodOptional<z.ZodEnum<{
+        partner: "partner";
+        private: "private";
+        objectstack: "objectstack";
+        community: "community";
+    }>>;
+    isStarter: z.ZodOptional<z.ZodBoolean>;
+    translations: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
+        displayName: z.ZodOptional<z.ZodString>;
+        description: z.ZodOptional<z.ZodString>;
+        readme: z.ZodOptional<z.ZodString>;
+        tagline: z.ZodOptional<z.ZodString>;
+        screenshotCaptions: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+    }, z.core.$strip>>>;
+}, z.core.$strip>;
+
+// ── UpdatePackageVersionRequest (type) ──
+type UpdatePackageVersionRequest = z.input<typeof UpdatePackageVersionRequestSchema>;
+
+// ── UpdatePackageVersionRequestSchema (const) ──
+declare const UpdatePackageVersionRequestSchema: z.ZodObject<{
+    manifestJson: z.ZodOptional<z.ZodString>;
+    releaseNotes: z.ZodOptional<z.ZodString>;
+    isPreRelease: z.ZodOptional<z.ZodBoolean>;
+}, z.core.$strip>;
+
+// ── resolvePackageL10n (function) ──
+declare function resolvePackageL10n(row: {
+    translations?: PackageTranslations | null;
+} & Record<string, unknown>, opts: ResolvePackageL10nOptions): {
+    displayName?: string;
+    description?: string;
+    readme?: string;
+    tagline?: string;
+    screenshotCaptions?: Record<string, string>;
+};
+
+// ── resolvePackageL10nField (function) ──
+declare function resolvePackageL10nField(row: {
+    translations?: PackageTranslations | null;
+} & Record<string, unknown>, field: PackageL10nField, opts: ResolvePackageL10nOptions): string | undefined;
+
+// ── resolveScreenshotCaptions (function) ──
+declare function resolveScreenshotCaptions(row: {
+    translations?: PackageTranslations | null;
+} & Record<string, unknown>, opts: ResolvePackageL10nOptions): Record<string, string> | undefined;
