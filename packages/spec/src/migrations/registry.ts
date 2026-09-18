@@ -6704,9 +6704,9 @@ const step18: MigrationStep = {
         + 'injection / allow-list boundary decided first, which the ruling deferred deliberately.',
       acceptanceCriteria:
         'Delete `sql` and `relationship` from every entry of every cube `joins` map; keep `name`. '
-        + '`os migrate meta --from 17` lists those edits site by site (the chain applies the same '
-        + 'strip to metadata already at rest, so a deployed artifact keeps booting either way). Then '
-        + 'check three things. (1) Did any deleted `sql` express something OTHER than the foreign-key '
+        + 'The paired D2 conversion `cube-join-sql-and-relationship-removed` performs that same '
+        + 'strip mechanically wherever the chain is replayed — including over metadata already at '
+        + 'rest, so a deployed artifact keeps booting while you do. Then check three things. (1) Did any deleted `sql` express something OTHER than the foreign-key '
         + 'equality between the two objects — a filtered join, a non-key column, a literal predicate? '
         + 'If so, the query you were getting was already the FK-equality answer and not the one you '
         + 'wrote, so re-read the numbers that join produced before assuming this change moved them; the '
