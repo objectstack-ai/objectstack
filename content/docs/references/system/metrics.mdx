@@ -309,13 +309,13 @@ Metrics configuration
 | **metrics** | `{ name: string; label?: string; type: Enum<'counter' \| 'gauge' \| 'histogram' \| 'summary'>; unit?: Enum<'nanoseconds' \| 'microseconds' \| 'milliseconds' \| 'seconds' \| 'minutes' \| …>; … }[]` | optional (default: `[]`) |  |
 | **defaultLabels** | `Record<string, string>` | optional (default: `{}`) | Metric labels |
 | **aggregations** | `{ type: Enum<'sum' \| 'avg' \| 'min' \| 'max' \| 'count' \| 'p50' \| 'p75' \| 'p90' \| 'p95' \| 'p99' \| …>; window?: object; groupBy?: string[]; filters?: Record<string, any> }[]` | optional (default: `[]`) |  |
-| **slis** | `{ name: string; label: string; description?: string; metric: string; … }[]` | optional |  |
+| **slis** | `{ name: string; label: string; description?: string; metric: string; … }[]` | optional (default: `[]`) |  |
 | **slos** | `{ name: string; label: string; description?: string; sli: string; … }[]` | optional (default: `[]`) |  |
-| **exports** | `{ type: Enum<'prometheus' \| 'openmetrics' \| 'graphite' \| 'statsd' \| 'influxdb' \| 'datadog' \| …>; endpoint?: string; intervalSeconds?: integer; batch?: object; … }[]` | optional (default: `[]`) |  |
+| **exports** | `{ type: Enum<'prometheus' \| 'openmetrics' \| 'graphite' \| 'statsd' \| 'influxdb' \| 'datadog' \| …>; endpoint?: string; intervalSeconds: integer; batch?: object; … }[]` | optional (default: `[]`) |  |
 | **collectionIntervalSeconds** | `integer` | optional (default: `15`) | Collection interval in seconds |
 | **collectionInterval** | `never` | optional | [REMOVED] `MetricsConfig.collectionInterval` was renamed to `collectionIntervalSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Its unit (seconds) lived in a source JSDoc only and the key carried no describe at all, so a reader of the reference page could not tell 15 seconds from 15 milliseconds. The qualifier is kept — `collectionIntervalSeconds`, not `intervalSeconds` — because `MetricExportConfig.intervalSeconds` is a different cadence one def over. Rename the key to `collectionIntervalSeconds`; the value (seconds) is unchanged. |
-| **retention** | `{ durationSeconds?: integer; downsampling?: object[] }` | optional |  |
-| **cardinalityLimits** | `{ maxLabelCombinations?: integer; onLimitExceeded?: Enum<'drop' \| 'sample' \| 'alert'> }` | optional |  |
+| **retention** | `{ durationSeconds: integer; downsampling?: object[] }` | optional |  |
+| **cardinalityLimits** | `{ maxLabelCombinations: integer; onLimitExceeded: Enum<'drop' \| 'sample' \| 'alert'> }` | optional |  |
 
 ### Nested Shape: `MetricsConfig.metrics[number]`
 
@@ -330,7 +330,7 @@ Metric definition
 | **description** | `string` | optional | Metric description |
 | **labelNames** | `string[]` | optional (default: `[]`) | Label names |
 | **histogram** | `{ type: Enum<'linear' \| 'exponential' \| 'explicit'>; linear?: object; exponential?: object; explicit?: object }` | optional | Histogram bucket configuration |
-| **summary** | `{ quantiles?: number[]; maxAgeSeconds?: integer; ageBuckets?: integer }` | optional |  |
+| **summary** | `{ quantiles: number[]; maxAgeSeconds: integer; ageBuckets: integer }` | optional |  |
 | **enabled** | `boolean` | optional (default: `true`) |  |
 
 ### Nested Shape: `MetricsConfig.aggregations[number]`
@@ -340,7 +340,7 @@ Metric aggregation configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `Enum<'sum' \| 'avg' \| 'min' \| 'max' \| 'count' \| 'p50' \| 'p75' \| 'p90' \| 'p95' \| 'p99' \| …>` | ✅ | Aggregation type |
-| **window** | `{ durationSeconds: integer; sliding?: boolean; slideInterval?: integer }` | optional |  |
+| **window** | `{ durationSeconds: integer; sliding: boolean; slideInterval?: integer }` | optional |  |
 | **groupBy** | `string[]` | optional | Group by label names |
 | **filters** | `Record<string, any>` | optional | Filter criteria |
 
@@ -355,8 +355,8 @@ Service Level Indicator
 | **description** | `string` | optional | SLI description |
 | **metric** | `string` | ✅ | Base metric name |
 | **type** | `Enum<'availability' \| 'latency' \| 'throughput' \| 'error_rate' \| 'saturation' \| 'custom'>` | ✅ | SLI type |
-| **successCriteria** | `{ threshold: number; operator: Enum<'lt' \| 'lte' \| 'gt' \| 'gte' \| 'eq'>; percentile?: number } \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | ✅ | Success criteria — structured or CEL predicate |
-| **window** | `{ durationSeconds: integer; rolling?: boolean }` | ✅ | Measurement window |
+| **successCriteria** | `{ threshold: number; operator: Enum<'lt' \| 'lte' \| 'gt' \| 'gte' \| 'eq'>; percentile?: number }` | ✅ | Success criteria — a structured threshold rule. A CEL predicate is NOT accepted here: that arm was removed in 17.5.0 because nothing evaluated it. |
+| **window** | `{ durationSeconds: integer; rolling: boolean }` | ✅ | Measurement window |
 | **enabled** | `boolean` | optional (default: `true`) |  |
 
 ### Nested Shape: `MetricsConfig.slos[number]`
@@ -371,7 +371,7 @@ Service Level Objective
 | **sli** | `string` | ✅ | SLI name |
 | **target** | `number` | ✅ | Target percentage |
 | **period** | `{ type: Enum<'rolling' \| 'calendar'>; durationSeconds?: integer; calendar?: Enum<'daily' \| 'weekly' \| 'monthly' \| 'quarterly' \| 'yearly'> }` | ✅ | Time period |
-| **errorBudget** | `{ enabled?: boolean; alertThreshold?: number; burnRateWindows?: object[] }` | optional |  |
+| **errorBudget** | `{ enabled: boolean; alertThreshold: number; burnRateWindows?: object[] }` | optional |  |
 | **alerts** | `{ name: string; severity: Enum<'info' \| 'warning' \| 'critical'>; condition: object }[]` | optional (default: `[]`) |  |
 | **enabled** | `boolean` | optional (default: `true`) |  |
 
@@ -385,7 +385,7 @@ Metric export configuration
 | **endpoint** | `string` | optional | Export endpoint |
 | **intervalSeconds** | `integer` | optional (default: `60`) | Export interval in seconds |
 | **interval** | `never` | optional | [REMOVED] `MetricExportConfig.interval` was renamed to `intervalSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Its unit (seconds) lived in a source JSDoc only and the key carried no describe at all, so a reader of the reference page could not tell 60 seconds from 60 milliseconds. Rename the key to `intervalSeconds`; the value (seconds) is unchanged. |
-| **batch** | `{ enabled?: boolean; size?: integer }` | optional |  |
+| **batch** | `{ enabled: boolean; size: integer }` | optional |  |
 | **auth** | `{ type: Enum<'none' \| 'basic' \| 'bearer' \| 'api_key'>; username?: string; password?: string; token?: string; … }` | optional |  |
 | **config** | `Record<string, any>` | optional | Additional configuration |
 
@@ -413,11 +413,11 @@ Service Level Indicator
 | **description** | `string` | optional | SLI description |
 | **metric** | `string` | ✅ | Base metric name |
 | **type** | `Enum<'availability' \| 'latency' \| 'throughput' \| 'error_rate' \| 'saturation' \| 'custom'>` | ✅ | SLI type |
-| **successCriteria** | `{ threshold: number; operator: Enum<'lt' \| 'lte' \| 'gt' \| 'gte' \| 'eq'>; percentile?: number } \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | ✅ | Success criteria — structured or CEL predicate |
-| **window** | `{ durationSeconds: integer; rolling?: boolean }` | ✅ | Measurement window |
+| **successCriteria** | `{ threshold: number; operator: Enum<'lt' \| 'lte' \| 'gt' \| 'gte' \| 'eq'>; percentile?: number }` | ✅ | Success criteria — a structured threshold rule. A CEL predicate is NOT accepted here: that arm was removed in 17.5.0 because nothing evaluated it. |
+| **window** | `{ durationSeconds: integer; rolling: boolean }` | ✅ | Measurement window |
 | **enabled** | `boolean` | optional (default: `true`) |  |
 
-### Nested Shape: `ServiceLevelIndicator.successCriteria[option 1]`
+### Nested Shape: `ServiceLevelIndicator.successCriteria`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |

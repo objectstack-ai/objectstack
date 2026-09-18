@@ -1,5 +1,4 @@
 import { describe, it, expect } from 'vitest';
-import { EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '../shared/expression.zod';
 import {
   TraceStateSchema,
   TraceFlagsSchema,
@@ -691,33 +690,35 @@ describe('the OTel exporter and performance durations carry their unit (#17785)'
 
 
 // ---------------------------------------------------------------------------
-// #15811 — TraceSamplingConfig.composite[].condition
+// #18118 — TraceSamplingConfig.composite[].condition
 // ---------------------------------------------------------------------------
 
 /**
- * The one evaluated slot whose SIBLING arm narrowed with it, and the one whose
- * refusal messages nothing pinned.
+ * The slot whose CEL arm was RETIRED, and the structured filter that survived it.
  *
- * Two facts, and either alone is a green that proves nothing:
+ * The union was `z.union([<a structured filter record>, <the evaluated
+ * expression schema>])`. Nothing anywhere evaluated the expression arm, so a
+ * condition authored as a predicate parsed, registered and read back while
+ * sampling nothing (ADR-0049 enforce-or-remove, ruled A). The arm is gone; the
+ * record arm is untouched.
  *
- *  - ACCEPT SET. The structured-filter arm is a bare
- *    `z.record(z.string(), z.unknown())`, so before #15811 it took
- *    `{ dialect: 'cel', ast }` as an ordinary filter and the narrowing at the
- *    expression arm changed nothing here. The arm now declines any object
- *    carrying a `dialect` key. Six shapes the base accepted THROUGH THAT ARM
- *    ALONE — measured: the base's `ExpressionInputSchema` refused all six —
- *    are refused here, and the control leg is the filters that carry no
- *    `dialect` key, which are accepted exactly as before. Without that control
- *    a table of `false`s would be a schema that refuses everything.
- *  - MESSAGES. A slot the author cannot read is a slot that gets re-broken
- *    silently. The refine aborts, so each refusal is answered by whoever owns
- *    it: one `custom` issue AT `source` for a blank `source`, one
- *    `invalid_union` at the slot carrying the published sentence for an
- *    `ast`-only envelope or a blank bare string. Both spellings of blank are
- *    pinned, and so is the negative: an object refused for a reason that is
- *    NOT about `source` must not be answered with the `source` sentence.
+ * Three facts, and any one alone is a green that proves nothing:
+ *
+ *  - ACCEPT SET, the surviving half. A structured filter carrying no `dialect`
+ *    key parses exactly as it did before. Without this control a table of
+ *    `false`s below would be a schema that refuses everything.
+ *  - ACCEPT SET, the retired half. A bare string and a HEALTHY
+ *    `{ dialect: 'cel', source: '…' }` envelope were accepted before and are
+ *    refused now — that pair IS the retirement, and pinning only the shapes
+ *    #15811 already refused would pin nothing this card changed.
+ *  - MESSAGES. A refusal the author cannot read is a retirement that gets
+ *    re-authored. Every refusal in the retired half carries the prescription,
+ *    by two different routes — the record's own `error` map for a non-object,
+ *    the aborting `dialect` refine for an object — so a pin on one says nothing
+ *    about the other. The negative is pinned too: a value refused for a reason
+ *    that is NOT the retirement must not borrow its sentence.
  */
-describe('#15811 TraceSamplingConfig.composite[].condition — the narrowed structured-filter arm', () => {
+describe('#18118 TraceSamplingConfig.composite[].condition — the retired CEL arm', () => {
   const parse = (condition: unknown) => TraceSamplingConfigSchema.safeParse({
     type: 'composite',
     composite: [{ strategy: 'always_on', condition }],
@@ -728,74 +729,55 @@ describe('#15811 TraceSamplingConfig.composite[].condition — the narrowed stru
     expect(r.success, `expected a refusal for ${JSON.stringify(condition)}`).toBe(false);
     return r.success ? [] : r.error.issues;
   };
+  /** The one sentence this slot refuses a retired expression with. */
+  const PRESCRIPTION = /`tracing\.sampling\.composite\[\]\.condition` no longer accepts a CEL predicate.*removed in @objectstack\/spec 17\.5\.0 \(ADR-0049 enforce-or-remove\).*structured filter/s;
 
   it('CONTROL — a structured filter carrying no `dialect` key is accepted, as before', () => {
-    // This is what makes the refusals below a reading about `dialect` and not
-    // about the arm having been switched off.
+    // This is what makes the refusals below a reading about the retired arm and
+    // not about the slot having been switched off.
     expect(parse({}).success).toBe(true);
     expect(parse({ service: 'api' }).success).toBe(true);
     expect(parse({ attributes: { 'http.route': '/v1/orders' } }).success).toBe(true);
-  });
-
-  it('CONTROL — a healthy predicate is still accepted in both spellings', () => {
-    expect(parse('record.amount > 10').success).toBe(true);
-    expect(parse({ dialect: 'cel', source: 'record.amount > 10' }).success).toBe(true);
-    // An `ast` BESIDE a string `source` stays admitted — the rule is about a
-    // MISSING source, never about carrying an ast.
-    expect(parse({ dialect: 'cel', source: 'record.amount > 10', ast: { kind: 'const' } }).success).toBe(true);
+    // `source` alone carries no dialect, so it is an ordinary filter key and
+    // stays accepted — the retirement narrowed the `dialect` door, not this one.
+    expect(parse({ source: 'x' }).success).toBe(true);
   });
 
   it.each([
+    ['a bare CEL predicate', 'record.amount > 10'],
+    ['an empty bare string', ''],
+    ['a blank bare string', '   '],
+  ] as const)('REFUSES %s with the retirement prescription — it parsed before this card', (_label, condition) => {
+    const issues = topIssues(condition);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe('invalid_type');
+    expect(issues[0].path).toEqual(['composite', 0, 'condition']);
+    expect(issues[0].message).toMatch(PRESCRIPTION);
+  });
+
+  it.each([
+    ["a HEALTHY { dialect: 'cel', source } envelope", { dialect: 'cel', source: 'record.amount > 10' }],
     ["{ dialect: 'cel' }", { dialect: 'cel' }],
+    ["{ dialect: 'cel', ast }", { dialect: 'cel', ast: { kind: 'const', value: 1 } }],
     ["{ dialect: 'js', source: 'x' }", { dialect: 'js', source: 'x' }],
-    ["{ dialect: 'nope', source: 'x' }", { dialect: 'nope', source: 'x' }],
-    ["{ dialect: 'cel', source: 5 }", { dialect: 'cel', source: 5 }],
-    ["{ dialect: 'cel', source: 'x', meta: { rationale: 5 } }", { dialect: 'cel', source: 'x', meta: { rationale: 5 } }],
     ["{ dialect: 'zzz', foo: 1 }", { dialect: 'zzz', foo: 1 }],
-  ] as const)('refuses %s — the base accepted it through the structured-filter arm alone', (_label, condition) => {
-    expect(parse(condition).success).toBe(false);
+  ] as const)('REFUSES %s with the retirement prescription — an object carrying `dialect` is an expression attempt', (_label, condition) => {
+    const issues = topIssues(condition);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe('custom');
+    expect(issues[0].path).toEqual(['composite', 0, 'condition']);
+    expect(issues[0].message).toMatch(PRESCRIPTION);
   });
 
-  it('a blank `source` publishes the sentence AT `source`, not a bare `Invalid input`', () => {
-    // The cell this pins: the refine used to be non-aborting, so two arms
-    // survived, the union fell back to `invalid_union`, and its own map
-    // answers `undefined` for a string `source` — the slot published zod's
-    // bare `Invalid input` and the sentence was reachable only by walking
-    // into nested arm issues.
-    for (const blank of ['', '   ']) {
-      const issues = topIssues({ dialect: 'cel', source: blank });
-      expect(issues).toHaveLength(1);
-      expect(issues[0].code).toBe('custom');
-      expect(issues[0].path).toEqual(['composite', 0, 'condition', 'source']);
-      expect(issues[0].message).toBe(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
-    }
+  it('does NOT borrow the retirement sentence for a refusal that is not the retirement', () => {
+    // A number is not an expression attempt in any spelling; zod's own
+    // `expected record` message is the honest answer and must stand.
+    const issues = topIssues(5);
+    expect(issues.map((i) => i.message).join('\n')).not.toMatch(PRESCRIPTION);
+    expect(issues[0].message).toMatch(/expected record/);
   });
 
-  it('an `ast`-only envelope and a blank bare string publish the sentence AT the slot', () => {
-    for (const condition of [{ dialect: 'cel', ast: { kind: 'const', value: 1 } }, '', '   ']) {
-      const issues = topIssues(condition);
-      expect(issues).toHaveLength(1);
-      expect(issues[0].code).toBe('invalid_union');
-      expect(issues[0].path).toEqual(['composite', 0, 'condition']);
-      expect(issues[0].message).toBe(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
-    }
-  });
-
-  it('does NOT blame `source` for a refusal that is not about `source`', () => {
-    // `{ dialect: 'js', source: 'x' }` carries a perfectly good non-blank
-    // `source`; what is wrong is the dialect. It used to be refused with the
-    // published `source` sentence, which sent the author at the wrong key.
-    for (const condition of [
-      { dialect: 'js', source: 'x' },
-      { dialect: 'nope', source: 'x' },
-      { dialect: 'cel', source: 'x', meta: { rationale: 5 } },
-    ]) {
-      const issues = topIssues(condition);
-      expect(issues.map((i) => i.message)).not.toContain(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
-    }
-  });
-
-  it('publishes the `dialect` rule in the `describe()` the reference page renders', () => {
+  it('publishes the retirement in the `describe()` the reference page renders', () => {
     // `.refine()` has NO JSON Schema projection (zod 4.4, measured: the
     // projected node is byte-identical with and without it), so the reference
     // table's TYPE cell cannot carry this constraint and the description
@@ -808,7 +790,7 @@ describe('#15811 TraceSamplingConfig.composite[].condition — the narrowed stru
     const element = (composite.def ?? composite._def).element;
     const condition = element.shape.condition as { description?: string };
     expect(condition.description).toBeTypeOf('string');
-    expect(condition.description).toContain('must NOT carry one');
-    expect(condition.description).toContain('`dialect`');
+    expect(condition.description).toContain('carrying no `dialect` key');
+    expect(condition.description).toContain('A CEL predicate is NOT accepted here');
   });
 });
