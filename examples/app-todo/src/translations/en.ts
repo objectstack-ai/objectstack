@@ -93,8 +93,8 @@ export const en: TranslationData = {
   // *contains* a dot — `'common.save'` — is one key NAMED `common.save`, and
   // `t('messages.common.save', …)` looks for a nested `common` object, finds
   // none, and returns the key string. `messages.commonSave` resolves (#18566).
-  // Rule: `content/docs/protocol/kernel/i18n-standard.mdx`; proof that these
-  // ids reach a value through both implementations:
+  // Rule: `content/docs/protocol/kernel/i18n-standard.mdx`; proof that every id
+  // below reaches its string through the real `t()`:
   // `./message-id-resolution.test.ts`.
   messages: {
     commonSave: 'Save',

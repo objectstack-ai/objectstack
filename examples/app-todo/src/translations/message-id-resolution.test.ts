@@ -2,7 +2,6 @@
 
 import { describe, it, expect } from 'vitest';
 import { createMemoryI18n } from '@objectstack/core';
-import { FileI18nAdapter } from '@objectstack/service-i18n';
 import type { TranslationData } from '@objectstack/spec/system';
 import { en } from './en';
 import { zhCN } from './zh-CN';
@@ -19,11 +18,21 @@ import { jaJP } from './ja-JP';
  * for a nested `common` object, finds none, and returns the key string.
  *
  * A reference example is what an author copies, so the repair is not asserted
- * here, it is demonstrated: the real bundle is loaded into BOTH real providers
- * and every id is resolved through the public `t()` contract. The last suite is
- * the control — it drives the OLD spelling through the same call and pins that
- * it returns the key itself, so a green run above cannot be a green run of an
+ * here, it is demonstrated: the real bundle is loaded into a real provider and
+ * every id is resolved through the public `t()` contract. The last suite is the
+ * control — it drives the OLD spelling through the same call and pins that it
+ * returns the key itself, so a green run above cannot be a green run of an
  * assertion that could not fail.
+ *
+ * The provider driven here is the core in-memory fallback. `FileI18nAdapter`
+ * (`@objectstack/service-i18n`) is deliberately NOT imported: it would add a
+ * seventh entry to this package's shrink-only unaliased-artifact ledger
+ * (`scripts/check-test-source-alias.mjs`), whose remedy is an alias in
+ * `examples/app-todo/vitest.config.ts`. The two implementations resolve keys
+ * with the same code — `key.split('.')` walked segment by segment, in
+ * `packages/core/src/fallbacks/memory-i18n.ts` and in
+ * `packages/services/service-i18n/src/file-i18n-adapter.ts` — so what this
+ * suite proves about the ids holds for both.
  */
 
 const BUNDLES: [string, TranslationData][] = [
@@ -39,13 +48,12 @@ interface Provider {
 }
 
 /**
- * Both shipped `II18nService` implementations, each loaded with this app's real
- * bundle. Constructed per call so no suite can observe another's writes.
+ * The shipped `II18nService` fallback, loaded with this app's real bundle.
+ * Constructed per call so no suite can observe another's writes.
  */
 function providers(): [string, Provider][] {
   const built: [string, Provider][] = [
     ['memory-i18n (core fallback)', createMemoryI18n() as unknown as Provider],
-    ['FileI18nAdapter (service-i18n)', new FileI18nAdapter({ defaultLocale: 'en' }) as unknown as Provider],
   ];
   for (const [, provider] of built) {
     for (const [locale, data] of BUNDLES) {
