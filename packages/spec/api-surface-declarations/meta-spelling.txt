@@ -1,0 +1,49 @@
+# @objectstack/spec — the .d.ts DECLARATION TEXT of every export of `./meta-spelling`.
+#
+# The SHAPE half of the ADR-0059 public-API pin, and the readable counterpart of
+# api-surface/meta-spelling.json's breadth half. That file pins each export by
+# `name (kind)`, which a signature change, a renamed interface field and a dropped
+# union member all leave untouched. This file pins the declaration text, so each of
+# those moves a line here. Text and NOT a hash, deliberately: a diff a reviewer can
+# read is what makes contract review a guard rather than a rubber stamp.
+#
+# Verbatim from the PACKED `.d.ts` reached through this package's `exports` map — the
+# declarations a consumer installs, never `src/`. A declaration's leading TSDoc is
+# excluded: documentation drift is `check:docs`'s axis, not this one.
+#
+# entry: ./meta-spelling
+# exported names: 8
+# declarations: 8
+#
+# GENERATED — ⛔ never hand-edited. Regenerate after a real build:
+#   pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec gen:api-surface-declarations
+# Gated by `check:api-surface-declarations`; a hand edit is a red gate, not a change.
+
+// ── META_URL_TO_SINGULAR (const) ──
+declare const META_URL_TO_SINGULAR: Readonly<Record<string, string>>;
+
+// ── PLURAL_TO_SINGULAR (const) ──
+declare const PLURAL_TO_SINGULAR: Record<string, string>;
+
+// ── SINGULAR_TO_PLURAL (const) ──
+declare const SINGULAR_TO_PLURAL: Record<string, string>;
+
+// ── canonicalMetaUrlType (function) ──
+declare function canonicalMetaUrlType(type: string): string;
+
+// ── metaUrlSpellingRefusal (function) ──
+declare function metaUrlSpellingRefusal(urlType: string): {
+    declared: string;
+    hint: string;
+} | null;
+
+// ── pluralToSingular (function) ──
+declare function pluralToSingular(key: string): string;
+
+// ── singularToPlural (function) ──
+declare function singularToPlural(key: string): string;
+
+// ── unrecognisedMetaTypeRefusal (function) ──
+declare function unrecognisedMetaTypeRefusal(urlType: string): {
+    type: string;
+} | null;

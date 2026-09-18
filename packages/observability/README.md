@@ -29,20 +29,29 @@ framework runtime and services.
 
 ## Wiring
 
+Pick one registry per deployment.
+
+Self-hosted (any K8s with an OpenTelemetry Collector):
+
 ```ts
-// Self-hosted (any K8s with an OpenTelemetry Collector):
 const metrics = new OtlpHttpMetricsRegistry({
   endpoint: 'http://otel-collector:4318',
   resource: { 'service.name': 'objectos', 'deployment.environment': 'prod' },
 });
+```
 
-// Cloudflare Workers (handled in apps/cloud — see that repo's exporter):
-//   const metrics = new AnalyticsEngineRegistry(env.AE);
+Cloudflare Workers are handled in `apps/cloud` — see that repo's exporter
+(`new AnalyticsEngineRegistry(env.AE)`).
 
-// Local dev:
+Local dev:
+
+```ts
 const metrics = new ConsoleMetricsRegistry();
+```
 
-// Tests:
+Tests:
+
+```ts
 const metrics = new InMemoryMetricsRegistry();
 expect(metrics.totalCounter('http_requests_total', { status: '500' })).toBe(0);
 ```

@@ -19,10 +19,11 @@ pnpm add @objectstack/driver-memory
 
 ```typescript
 import { ObjectKernel } from '@objectstack/core';
-import memoryPlugin from '@objectstack/driver-memory';
+import { DriverPlugin } from '@objectstack/runtime';
+import { InMemoryDriver } from '@objectstack/driver-memory';
 
 const kernel = new ObjectKernel();
-kernel.use(memoryPlugin);                 // default plugin
+await kernel.use(new DriverPlugin(new InMemoryDriver(), 'memory'));
 await kernel.bootstrap();
 ```
 
@@ -41,7 +42,7 @@ await driver.connect();
 import { InMemoryDriver, FileSystemPersistenceAdapter } from '@objectstack/driver-memory';
 
 const driver = new InMemoryDriver({
-  persistence: new FileSystemPersistenceAdapter('./data/snapshot.json'),
+  persistence: { adapter: new FileSystemPersistenceAdapter({ path: './data/snapshot.json' }) },
 });
 await driver.connect();
 ```
@@ -52,7 +53,7 @@ await driver.connect();
 import { InMemoryDriver, LocalStoragePersistenceAdapter } from '@objectstack/driver-memory';
 
 const driver = new InMemoryDriver({
-  persistence: new LocalStoragePersistenceAdapter('objectstack:dev'),
+  persistence: { adapter: new LocalStoragePersistenceAdapter({ key: 'objectstack:dev' }) },
 });
 ```
 
@@ -60,7 +61,7 @@ const driver = new InMemoryDriver({
 
 | Export | Kind | Description |
 |:---|:---|:---|
-| `default` | kernel plugin | Drop-in plugin. |
+| `default` | legacy plugin object | Legacy `onEnable` shape — not a kernel `Plugin`; register through `DriverPlugin`. |
 | `InMemoryDriver` | class | Driver instance for direct use. |
 | `InMemoryStrategy` | class | Query execution strategy used by ObjectQL. |
 | `FileSystemPersistenceAdapter` | class | Node-only persistence. |

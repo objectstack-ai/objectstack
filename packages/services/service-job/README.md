@@ -29,7 +29,7 @@ await jobs.schedule(
   'daily_report',
   { type: 'cron', expression: '0 9 * * *', timezone: 'America/New_York' },
   async ({ jobId }) => { await generateReport(jobId); },
-  { retryPolicy: { maxRetries: 2, backoffMs: 1000 }, timeout: 60_000 },
+  { retryPolicy: { maxRetries: 2, backoffMs: 1000 }, timeoutMs: 60_000 },
 );
 ```
 

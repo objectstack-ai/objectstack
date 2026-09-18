@@ -131,7 +131,7 @@ The CLI looks for `objectstack.config.ts` (or `.js`, `.mjs`) in the current dire
 
 ```typescript
 import { defineStack } from '@objectstack/spec';
-import * as objects from './src/objects';
+import { project, task } from './src/objects';
 
 export default defineStack({
   manifest: {
@@ -141,7 +141,7 @@ export default defineStack({
     type: 'app',
     name: 'My App',
   },
-  objects: Object.values(objects),
+  objects: [project, task],
 });
 ```
 

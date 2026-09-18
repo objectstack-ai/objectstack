@@ -1,0 +1,1259 @@
+# @objectstack/spec — the .d.ts DECLARATION TEXT of every export of `./identity`.
+#
+# The SHAPE half of the ADR-0059 public-API pin, and the readable counterpart of
+# api-surface/identity.json's breadth half. That file pins each export by
+# `name (kind)`, which a signature change, a renamed interface field and a dropped
+# union member all leave untouched. This file pins the declaration text, so each of
+# those moves a line here. Text and NOT a hash, deliberately: a diff a reviewer can
+# read is what makes contract review a guard rather than a rubber stamp.
+#
+# Verbatim from the PACKED `.d.ts` reached through this package's `exports` map — the
+# declarations a consumer installs, never `src/`. A declaration's leading TSDoc is
+# excluded: documentation drift is `check:docs`'s axis, not this one.
+#
+# entry: ./identity
+# exported names: 102
+# declarations: 103
+#
+# GENERATED — ⛔ never hand-edited. Regenerate after a real build:
+#   pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec gen:api-surface-declarations
+# Gated by `check:api-surface-declarations`; a hand edit is a red gate, not a change.
+
+// ── ADMIN_FULL_ACCESS (const) ──
+declare const ADMIN_FULL_ACCESS = "admin_full_access";
+
+// ── ADMIN_FULL_ACCESS_CAPABILITIES (const) ──
+declare const ADMIN_FULL_ACCESS_CAPABILITIES: Pick<PermissionSet, 'objects' | 'systemPermissions'>;
+
+// ── AUDIENCE_ANCHOR_POSITIONS (const) ──
+declare const AUDIENCE_ANCHOR_POSITIONS: readonly ["everyone", "guest"];
+
+// ── AUTH_CONSTANTS (const) ──
+declare const AUTH_CONSTANTS: {
+    /**
+     * HTTP header key for authentication tokens
+     */
+    readonly HEADER_KEY: "Authorization";
+    /**
+     * Token prefix for Bearer authentication
+     */
+    readonly TOKEN_PREFIX: "Bearer ";
+    /**
+     * Cookie prefix for ObjectStack auth cookies
+     */
+    readonly COOKIE_PREFIX: "os_";
+    /**
+     * CSRF token header name
+     */
+    readonly CSRF_HEADER: "x-os-csrf-token";
+    /**
+     * Default session cookie name
+     */
+    readonly SESSION_COOKIE: "os_session_token";
+    /**
+     * Default CSRF cookie name
+     */
+    readonly CSRF_COOKIE: "os_csrf_token";
+    /**
+     * Refresh token cookie name
+     */
+    readonly REFRESH_TOKEN_COOKIE: "os_refresh_token";
+};
+
+// ── AUTH_ERROR_CODES (const) ──
+declare const AUTH_ERROR_CODES: {
+    readonly INVALID_CREDENTIALS: "invalid_credentials";
+    readonly INVALID_TOKEN: "invalid_token";
+    readonly TOKEN_EXPIRED: "token_expired";
+    readonly INSUFFICIENT_PERMISSIONS: "insufficient_permissions";
+    readonly ACCOUNT_LOCKED: "account_locked";
+    readonly ACCOUNT_NOT_VERIFIED: "account_not_verified";
+    readonly TOO_MANY_REQUESTS: "too_many_requests";
+    readonly INVALID_CSRF_TOKEN: "invalid_csrf_token";
+    readonly SESSION_EXPIRED: "session_expired";
+    readonly OAUTH_ERROR: "oauth_error";
+    readonly PROVIDER_ERROR: "provider_error";
+};
+
+// ── Account (type) ──
+type Account = z.input<typeof AccountSchema>;
+
+// ── AccountSchema (const) ──
+declare const AccountSchema: z.ZodObject<{
+    id: z.ZodString;
+    userId: z.ZodString;
+    type: z.ZodEnum<{
+        email: "email";
+        oauth: "oauth";
+        oidc: "oidc";
+        credentials: "credentials";
+        saml: "saml";
+        ldap: "ldap";
+    }>;
+    provider: z.ZodString;
+    providerAccountId: z.ZodString;
+    refreshToken: z.ZodOptional<z.ZodString>;
+    accessToken: z.ZodOptional<z.ZodString>;
+    expiresAt: z.ZodOptional<z.ZodNumber>;
+    tokenType: z.ZodOptional<z.ZodString>;
+    scope: z.ZodOptional<z.ZodString>;
+    idToken: z.ZodOptional<z.ZodString>;
+    sessionState: z.ZodOptional<z.ZodString>;
+    createdAt: z.ZodString;
+    updatedAt: z.ZodString;
+}, z.core.$strip>;
+
+// ── AuthError (interface) ──
+interface AuthError {
+    /**
+     * Error code from AUTH_ERROR_CODES
+     */
+    code: typeof AUTH_ERROR_CODES[keyof typeof AUTH_ERROR_CODES];
+    /**
+     * Human-readable error message
+     */
+    message: string;
+    /**
+     * Additional error details
+     */
+    details?: Record<string, any>;
+}
+
+// ── AuthHeaders (interface) ──
+interface AuthHeaders {
+    /**
+     * Authorization header with Bearer token
+     * @example "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+     */
+    Authorization?: string;
+    /**
+     * CSRF token header
+     * @example "x-os-csrf-token: abc123def456..."
+     */
+    'x-os-csrf-token'?: string;
+    /**
+     * Session ID header (alternative to cookie)
+     * @example "x-os-session-id: session_abc123..."
+     */
+    'x-os-session-id'?: string;
+    /**
+     * API key header (for service-to-service auth)
+     * @example "x-os-api-key: sk_live_abc123..."
+     */
+    'x-os-api-key'?: string;
+}
+
+// ── AuthResponse (interface) ──
+interface AuthResponse {
+    /**
+     * Access token (JWT or opaque token)
+     */
+    accessToken: string;
+    /**
+     * Refresh token (for token renewal)
+     */
+    refreshToken?: string;
+    /**
+     * Token type (usually "Bearer")
+     */
+    tokenType: string;
+    /**
+     * Token expiry in seconds
+     */
+    expiresIn: number;
+    /**
+     * User information
+     */
+    user: {
+        id: string;
+        email: string;
+        name?: string;
+        image?: string;
+    };
+    /**
+     * Session ID
+     */
+    sessionId?: string;
+}
+
+// ── BUILTIN_IDENTITY_METADATA (const) ──
+declare const BUILTIN_IDENTITY_METADATA: Record<BuiltinIdentityName, {
+    label: string;
+    description: string;
+}>;
+
+// ── BUILTIN_IDENTITY_NAMES (const) ──
+declare const BUILTIN_IDENTITY_NAMES: readonly ["platform_admin", "org_owner", "org_admin", "org_member"];
+
+// ── BUILTIN_IDENTITY_ORG_ADMIN (const) ──
+declare const BUILTIN_IDENTITY_ORG_ADMIN = "org_admin";
+
+// ── BUILTIN_IDENTITY_ORG_MEMBER (const) ──
+declare const BUILTIN_IDENTITY_ORG_MEMBER = "org_member";
+
+// ── BUILTIN_IDENTITY_ORG_OWNER (const) ──
+declare const BUILTIN_IDENTITY_ORG_OWNER = "org_owner";
+
+// ── BUILTIN_IDENTITY_PLATFORM_ADMIN (const) ──
+declare const BUILTIN_IDENTITY_PLATFORM_ADMIN = "platform_admin";
+
+// ── BUILTIN_MEMBERSHIP_ROLES (const) ──
+declare const BUILTIN_MEMBERSHIP_ROLES: readonly ["owner", "admin", "delegated_admin", "member"];
+
+// ── BUILTIN_MEMBERSHIP_ROLE_OPTIONS (const) ──
+declare const BUILTIN_MEMBERSHIP_ROLE_OPTIONS: readonly Readonly<{
+    label: string;
+    value: string;
+}>[];
+
+// ── BuiltinIdentityName (type) ──
+type BuiltinIdentityName = (typeof BUILTIN_IDENTITY_NAMES)[number];
+
+// ── BuiltinMembershipRole (type) ──
+type BuiltinMembershipRole = (typeof BUILTIN_MEMBERSHIP_ROLES)[number];
+
+// ── EVERYONE_POSITION (const) ──
+declare const EVERYONE_POSITION = "everyone";
+
+// ── EvalUser (type) ──
+type EvalUser = z.input<typeof EvalUserSchema>;
+
+// ── EvalUserParsed (type) ──
+type EvalUserParsed = z.infer<typeof EvalUserSchema>;
+
+// ── EvalUserSchema (const) ──
+declare const EvalUserSchema: z.ZodObject<{
+    id: z.ZodString;
+    name: z.ZodOptional<z.ZodString>;
+    email: z.ZodOptional<z.ZodString>;
+    positions: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    isPlatformAdmin: z.ZodOptional<z.ZodBoolean>;
+    organizationId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+}, z.core.$strip>;
+
+// ── GUEST_POSITION (const) ──
+declare const GUEST_POSITION = "guest";
+
+// ── Invitation (type) ──
+type Invitation = z.input<typeof InvitationSchema>;
+
+// ── InvitationParsed (type) ──
+type InvitationParsed = z.infer<typeof InvitationSchema>;
+
+// ── InvitationSchema (const) ──
+declare const InvitationSchema: z.ZodObject<{
+    id: z.ZodString;
+    organizationId: z.ZodString;
+    email: z.ZodString;
+    role: z.ZodString;
+    status: z.ZodDefault<z.ZodEnum<{
+        pending: "pending";
+        accepted: "accepted";
+        rejected: "rejected";
+        expired: "expired";
+        canceled: "canceled";
+    }>>;
+    expiresAt: z.ZodString;
+    inviterId: z.ZodString;
+    createdAt: z.ZodString;
+    updatedAt: z.ZodString;
+}, z.core.$strip>;
+
+// ── InvitationStatus (const) ──
+declare const InvitationStatus: z.ZodEnum<{
+    pending: "pending";
+    accepted: "accepted";
+    rejected: "rejected";
+    expired: "expired";
+    canceled: "canceled";
+}>;
+
+// ── InvitationStatus (type) ──
+type InvitationStatus = z.input<typeof InvitationStatus>;
+
+// ── MEMBERSHIP_ROLE_ADMIN (const) ──
+declare const MEMBERSHIP_ROLE_ADMIN = "admin";
+
+// ── MEMBERSHIP_ROLE_DELEGATED_ADMIN (const) ──
+declare const MEMBERSHIP_ROLE_DELEGATED_ADMIN = "delegated_admin";
+
+// ── MEMBERSHIP_ROLE_MEMBER (const) ──
+declare const MEMBERSHIP_ROLE_MEMBER = "member";
+
+// ── MEMBERSHIP_ROLE_OWNER (const) ──
+declare const MEMBERSHIP_ROLE_OWNER = "owner";
+
+// ── Member (type) ──
+type Member = z.input<typeof MemberSchema>;
+
+// ── MemberSchema (const) ──
+declare const MemberSchema: z.ZodObject<{
+    id: z.ZodString;
+    organizationId: z.ZodString;
+    userId: z.ZodString;
+    role: z.ZodString;
+    createdAt: z.ZodString;
+    updatedAt: z.ZodString;
+}, z.core.$strip>;
+
+// ── ORGANIZATION_ADMIN (const) ──
+declare const ORGANIZATION_ADMIN = "organization_admin";
+
+// ── ORGANIZATION_ADMIN_GRANTS (const) ──
+declare const ORGANIZATION_ADMIN_GRANTS: readonly string[];
+
+// ── ORGANIZATION_ADMIN_NO_BYPASS (const) ──
+declare const ORGANIZATION_ADMIN_NO_BYPASS = "organization_admin_no_bypass";
+
+// ── Organization (type) ──
+type Organization = z.input<typeof OrganizationSchema>;
+
+// ── OrganizationSchema (const) ──
+declare const OrganizationSchema: z.ZodObject<{
+    id: z.ZodString;
+    name: z.ZodString;
+    slug: z.ZodString;
+    logo: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    createdAt: z.ZodString;
+    updatedAt: z.ZodString;
+}, z.core.$strip>;
+
+// ── Position (type) ──
+type Position = z.input<typeof PositionSchema>;
+
+// ── PositionParsed (type) ──
+type PositionParsed = z.infer<typeof PositionSchema>;
+
+// ── PositionSchema (const) ──
+declare const PositionSchema: z.ZodObject<{
+    _lock: z.ZodOptional<z.ZodEnum<{
+        none: "none";
+        "no-overlay": "no-overlay";
+        "no-delete": "no-delete";
+        full: "full";
+    }>>;
+    _lockReason: z.ZodOptional<z.ZodString>;
+    _lockSource: z.ZodOptional<z.ZodEnum<{
+        artifact: "artifact";
+        package: "package";
+        "env-forced": "env-forced";
+    }>>;
+    _provenance: z.ZodOptional<z.ZodEnum<{
+        package: "package";
+        "env-forced": "env-forced";
+        org: "org";
+    }>>;
+    _packageId: z.ZodOptional<z.ZodString>;
+    _packageVersion: z.ZodOptional<z.ZodString>;
+    _lockDocsUrl: z.ZodOptional<z.ZodString>;
+    name: z.ZodString;
+    label: z.ZodString;
+    description: z.ZodOptional<z.ZodString>;
+    delegatable: z.ZodDefault<z.ZodBoolean>;
+    protection: z.ZodOptional<z.ZodObject<{
+        lock: z.ZodEnum<{
+            none: "none";
+            "no-overlay": "no-overlay";
+            "no-delete": "no-delete";
+            full: "full";
+        }>;
+        reason: z.ZodString;
+        docsUrl: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+
+// ── SCIM (const) ──
+declare const SCIM: {
+    /**
+     * Create a basic SCIM user
+     */
+    readonly user: (userName: string, email: string, givenName?: string, familyName?: string) => SCIMUser;
+    /**
+     * Create a SCIM group
+     */
+    readonly group: (displayName: string, members?: SCIMMemberReference[]) => SCIMGroup;
+    /**
+     * Create a list response
+     */
+    readonly listResponse: <T>(resources: T[], totalResults?: number) => SCIMListResponse;
+    /**
+     * Create an error response
+     */
+    readonly error: (status: number, detail: string, scimType?: "invalidFilter" | "tooMany" | "uniqueness" | "mutability" | "invalidSyntax" | "invalidPath" | "noTarget" | "invalidValue" | "invalidVers" | "sensitive") => SCIMError;
+};
+
+// ── SCIMAddress (type) ──
+type SCIMAddress = z.input<typeof SCIMAddressSchema>;
+
+// ── SCIMAddressParsed (type) ──
+type SCIMAddressParsed = z.infer<typeof SCIMAddressSchema>;
+
+// ── SCIMAddressSchema (const) ──
+declare const SCIMAddressSchema: z.ZodObject<{
+    formatted: z.ZodOptional<z.ZodString>;
+    streetAddress: z.ZodOptional<z.ZodString>;
+    locality: z.ZodOptional<z.ZodString>;
+    region: z.ZodOptional<z.ZodString>;
+    postalCode: z.ZodOptional<z.ZodString>;
+    country: z.ZodOptional<z.ZodString>;
+    type: z.ZodOptional<z.ZodEnum<{
+        work: "work";
+        home: "home";
+        other: "other";
+    }>>;
+    primary: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+}, z.core.$strip>;
+
+// ── SCIMBulkOperation (type) ──
+type SCIMBulkOperation = z.input<typeof SCIMBulkOperationSchema>;
+
+// ── SCIMBulkOperationSchema (const) ──
+declare const SCIMBulkOperationSchema: z.ZodObject<{
+    method: z.ZodEnum<{
+        POST: "POST";
+        PUT: "PUT";
+        DELETE: "DELETE";
+        PATCH: "PATCH";
+    }>;
+    path: z.ZodString;
+    bulkId: z.ZodOptional<z.ZodString>;
+    data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    version: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── SCIMBulkRequest (type) ──
+type SCIMBulkRequest = z.input<typeof SCIMBulkRequestSchema>;
+
+// ── SCIMBulkRequestParsed (type) ──
+type SCIMBulkRequestParsed = z.infer<typeof SCIMBulkRequestSchema>;
+
+// ── SCIMBulkRequestSchema (const) ──
+declare const SCIMBulkRequestSchema: z.ZodObject<{
+    schemas: z.ZodDefault<z.ZodArray<z.ZodLiteral<"urn:ietf:params:scim:api:messages:2.0:BulkRequest">>>;
+    operations: z.ZodArray<z.ZodObject<{
+        method: z.ZodEnum<{
+            POST: "POST";
+            PUT: "PUT";
+            DELETE: "DELETE";
+            PATCH: "PATCH";
+        }>;
+        path: z.ZodString;
+        bulkId: z.ZodOptional<z.ZodString>;
+        data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+        version: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+    failOnErrors: z.ZodOptional<z.ZodNumber>;
+}, z.core.$strip>;
+
+// ── SCIMBulkResponse (type) ──
+type SCIMBulkResponse = z.input<typeof SCIMBulkResponseSchema>;
+
+// ── SCIMBulkResponseOperation (type) ──
+type SCIMBulkResponseOperation = z.input<typeof SCIMBulkResponseOperationSchema>;
+
+// ── SCIMBulkResponseOperationSchema (const) ──
+declare const SCIMBulkResponseOperationSchema: z.ZodObject<{
+    method: z.ZodEnum<{
+        POST: "POST";
+        PUT: "PUT";
+        DELETE: "DELETE";
+        PATCH: "PATCH";
+    }>;
+    bulkId: z.ZodOptional<z.ZodString>;
+    location: z.ZodOptional<z.ZodString>;
+    status: z.ZodString;
+    response: z.ZodOptional<z.ZodUnknown>;
+}, z.core.$strip>;
+
+// ── SCIMBulkResponseParsed (type) ──
+type SCIMBulkResponseParsed = z.infer<typeof SCIMBulkResponseSchema>;
+
+// ── SCIMBulkResponseSchema (const) ──
+declare const SCIMBulkResponseSchema: z.ZodObject<{
+    schemas: z.ZodDefault<z.ZodArray<z.ZodLiteral<"urn:ietf:params:scim:api:messages:2.0:BulkResponse">>>;
+    operations: z.ZodArray<z.ZodObject<{
+        method: z.ZodEnum<{
+            POST: "POST";
+            PUT: "PUT";
+            DELETE: "DELETE";
+            PATCH: "PATCH";
+        }>;
+        bulkId: z.ZodOptional<z.ZodString>;
+        location: z.ZodOptional<z.ZodString>;
+        status: z.ZodString;
+        response: z.ZodOptional<z.ZodUnknown>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+
+// ── SCIMEmail (type) ──
+type SCIMEmail = z.input<typeof SCIMEmailSchema>;
+
+// ── SCIMEmailParsed (type) ──
+type SCIMEmailParsed = z.infer<typeof SCIMEmailSchema>;
+
+// ── SCIMEmailSchema (const) ──
+declare const SCIMEmailSchema: z.ZodObject<{
+    value: z.ZodString;
+    type: z.ZodOptional<z.ZodEnum<{
+        work: "work";
+        home: "home";
+        other: "other";
+    }>>;
+    display: z.ZodOptional<z.ZodString>;
+    primary: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+}, z.core.$strip>;
+
+// ── SCIMEnterpriseUser (type) ──
+type SCIMEnterpriseUser = z.input<typeof SCIMEnterpriseUserSchema>;
+
+// ── SCIMEnterpriseUserSchema (const) ──
+declare const SCIMEnterpriseUserSchema: z.ZodObject<{
+    employeeNumber: z.ZodOptional<z.ZodString>;
+    costCenter: z.ZodOptional<z.ZodString>;
+    organization: z.ZodOptional<z.ZodString>;
+    division: z.ZodOptional<z.ZodString>;
+    department: z.ZodOptional<z.ZodString>;
+    manager: z.ZodOptional<z.ZodObject<{
+        value: z.ZodString;
+        $ref: z.ZodOptional<z.ZodString>;
+        displayName: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+
+// ── SCIMError (type) ──
+type SCIMError = z.input<typeof SCIMErrorSchema>;
+
+// ── SCIMErrorParsed (type) ──
+type SCIMErrorParsed = z.infer<typeof SCIMErrorSchema>;
+
+// ── SCIMErrorSchema (const) ──
+declare const SCIMErrorSchema: z.ZodObject<{
+    schemas: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    status: z.ZodNumber;
+    scimType: z.ZodOptional<z.ZodEnum<{
+        invalidFilter: "invalidFilter";
+        tooMany: "tooMany";
+        uniqueness: "uniqueness";
+        mutability: "mutability";
+        invalidSyntax: "invalidSyntax";
+        invalidPath: "invalidPath";
+        noTarget: "noTarget";
+        invalidValue: "invalidValue";
+        invalidVers: "invalidVers";
+        sensitive: "sensitive";
+    }>>;
+    detail: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── SCIMGroup (type) ──
+type SCIMGroup = z.input<typeof SCIMGroupSchema>;
+
+// ── SCIMGroupParsed (type) ──
+type SCIMGroupParsed = z.infer<typeof SCIMGroupSchema>;
+
+// ── SCIMGroupReference (type) ──
+type SCIMGroupReference = z.input<typeof SCIMGroupReferenceSchema>;
+
+// ── SCIMGroupReferenceSchema (const) ──
+declare const SCIMGroupReferenceSchema: z.ZodObject<{
+    value: z.ZodString;
+    $ref: z.ZodOptional<z.ZodString>;
+    display: z.ZodOptional<z.ZodString>;
+    type: z.ZodOptional<z.ZodEnum<{
+        direct: "direct";
+        indirect: "indirect";
+    }>>;
+}, z.core.$strip>;
+
+// ── SCIMGroupSchema (const) ──
+declare const SCIMGroupSchema: z.ZodObject<{
+    schemas: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    id: z.ZodOptional<z.ZodString>;
+    externalId: z.ZodOptional<z.ZodString>;
+    displayName: z.ZodString;
+    members: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        value: z.ZodString;
+        $ref: z.ZodOptional<z.ZodString>;
+        type: z.ZodOptional<z.ZodEnum<{
+            User: "User";
+            Group: "Group";
+        }>>;
+        display: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>>;
+    meta: z.ZodOptional<z.ZodObject<{
+        resourceType: z.ZodOptional<z.ZodString>;
+        created: z.ZodOptional<z.ZodString>;
+        lastModified: z.ZodOptional<z.ZodString>;
+        location: z.ZodOptional<z.ZodString>;
+        version: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+
+// ── SCIMListResponse (type) ──
+type SCIMListResponse = z.input<typeof SCIMListResponseSchema>;
+
+// ── SCIMListResponseParsed (type) ──
+type SCIMListResponseParsed = z.infer<typeof SCIMListResponseSchema>;
+
+// ── SCIMListResponseSchema (const) ──
+declare const SCIMListResponseSchema: z.ZodObject<{
+    schemas: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    totalResults: z.ZodNumber;
+    Resources: z.ZodArray<z.ZodUnion<readonly [z.ZodObject<{
+        schemas: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        id: z.ZodOptional<z.ZodString>;
+        externalId: z.ZodOptional<z.ZodString>;
+        userName: z.ZodString;
+        name: z.ZodOptional<z.ZodObject<{
+            formatted: z.ZodOptional<z.ZodString>;
+            familyName: z.ZodOptional<z.ZodString>;
+            givenName: z.ZodOptional<z.ZodString>;
+            middleName: z.ZodOptional<z.ZodString>;
+            honorificPrefix: z.ZodOptional<z.ZodString>;
+            honorificSuffix: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
+        displayName: z.ZodOptional<z.ZodString>;
+        nickName: z.ZodOptional<z.ZodString>;
+        profileUrl: z.ZodOptional<z.ZodString>;
+        title: z.ZodOptional<z.ZodString>;
+        userType: z.ZodOptional<z.ZodString>;
+        preferredLanguage: z.ZodOptional<z.ZodString>;
+        locale: z.ZodOptional<z.ZodString>;
+        timezone: z.ZodOptional<z.ZodString>;
+        active: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+        password: z.ZodOptional<z.ZodString>;
+        emails: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            value: z.ZodString;
+            type: z.ZodOptional<z.ZodEnum<{
+                work: "work";
+                home: "home";
+                other: "other";
+            }>>;
+            display: z.ZodOptional<z.ZodString>;
+            primary: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+        }, z.core.$strip>>>;
+        phoneNumbers: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            value: z.ZodString;
+            type: z.ZodOptional<z.ZodEnum<{
+                work: "work";
+                home: "home";
+                other: "other";
+                mobile: "mobile";
+                fax: "fax";
+                pager: "pager";
+            }>>;
+            display: z.ZodOptional<z.ZodString>;
+            primary: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+        }, z.core.$strip>>>;
+        ims: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            value: z.ZodString;
+            type: z.ZodOptional<z.ZodString>;
+            primary: z.ZodOptional<z.ZodBoolean>;
+        }, z.core.$strip>>>;
+        photos: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            value: z.ZodString;
+            type: z.ZodOptional<z.ZodEnum<{
+                photo: "photo";
+                thumbnail: "thumbnail";
+            }>>;
+            primary: z.ZodOptional<z.ZodBoolean>;
+        }, z.core.$strip>>>;
+        addresses: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            formatted: z.ZodOptional<z.ZodString>;
+            streetAddress: z.ZodOptional<z.ZodString>;
+            locality: z.ZodOptional<z.ZodString>;
+            region: z.ZodOptional<z.ZodString>;
+            postalCode: z.ZodOptional<z.ZodString>;
+            country: z.ZodOptional<z.ZodString>;
+            type: z.ZodOptional<z.ZodEnum<{
+                work: "work";
+                home: "home";
+                other: "other";
+            }>>;
+            primary: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+        }, z.core.$strip>>>;
+        groups: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            value: z.ZodString;
+            $ref: z.ZodOptional<z.ZodString>;
+            display: z.ZodOptional<z.ZodString>;
+            type: z.ZodOptional<z.ZodEnum<{
+                direct: "direct";
+                indirect: "indirect";
+            }>>;
+        }, z.core.$strip>>>;
+        entitlements: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            value: z.ZodString;
+            type: z.ZodOptional<z.ZodString>;
+            primary: z.ZodOptional<z.ZodBoolean>;
+        }, z.core.$strip>>>;
+        roles: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            value: z.ZodString;
+            type: z.ZodOptional<z.ZodString>;
+            primary: z.ZodOptional<z.ZodBoolean>;
+        }, z.core.$strip>>>;
+        x509Certificates: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            value: z.ZodString;
+            type: z.ZodOptional<z.ZodString>;
+            primary: z.ZodOptional<z.ZodBoolean>;
+        }, z.core.$strip>>>;
+        meta: z.ZodOptional<z.ZodObject<{
+            resourceType: z.ZodOptional<z.ZodString>;
+            created: z.ZodOptional<z.ZodString>;
+            lastModified: z.ZodOptional<z.ZodString>;
+            location: z.ZodOptional<z.ZodString>;
+            version: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
+        "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User": z.ZodOptional<z.ZodObject<{
+            employeeNumber: z.ZodOptional<z.ZodString>;
+            costCenter: z.ZodOptional<z.ZodString>;
+            organization: z.ZodOptional<z.ZodString>;
+            division: z.ZodOptional<z.ZodString>;
+            department: z.ZodOptional<z.ZodString>;
+            manager: z.ZodOptional<z.ZodObject<{
+                value: z.ZodString;
+                $ref: z.ZodOptional<z.ZodString>;
+                displayName: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>>;
+        }, z.core.$strip>>;
+    }, z.core.$strip>, z.ZodObject<{
+        schemas: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        id: z.ZodOptional<z.ZodString>;
+        externalId: z.ZodOptional<z.ZodString>;
+        displayName: z.ZodString;
+        members: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            value: z.ZodString;
+            $ref: z.ZodOptional<z.ZodString>;
+            type: z.ZodOptional<z.ZodEnum<{
+                User: "User";
+                Group: "Group";
+            }>>;
+            display: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>>;
+        meta: z.ZodOptional<z.ZodObject<{
+            resourceType: z.ZodOptional<z.ZodString>;
+            created: z.ZodOptional<z.ZodString>;
+            lastModified: z.ZodOptional<z.ZodString>;
+            location: z.ZodOptional<z.ZodString>;
+            version: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
+    }, z.core.$strip>, z.ZodRecord<z.ZodString, z.ZodUnknown>]>>;
+    startIndex: z.ZodOptional<z.ZodNumber>;
+    itemsPerPage: z.ZodOptional<z.ZodNumber>;
+}, z.core.$strip>;
+
+// ── SCIMMemberReference (type) ──
+type SCIMMemberReference = z.input<typeof SCIMMemberReferenceSchema>;
+
+// ── SCIMMemberReferenceSchema (const) ──
+declare const SCIMMemberReferenceSchema: z.ZodObject<{
+    value: z.ZodString;
+    $ref: z.ZodOptional<z.ZodString>;
+    type: z.ZodOptional<z.ZodEnum<{
+        User: "User";
+        Group: "Group";
+    }>>;
+    display: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── SCIMMeta (type) ──
+type SCIMMeta = z.input<typeof SCIMMetaSchema>;
+
+// ── SCIMMetaSchema (const) ──
+declare const SCIMMetaSchema: z.ZodObject<{
+    resourceType: z.ZodOptional<z.ZodString>;
+    created: z.ZodOptional<z.ZodString>;
+    lastModified: z.ZodOptional<z.ZodString>;
+    location: z.ZodOptional<z.ZodString>;
+    version: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── SCIMName (type) ──
+type SCIMName = z.input<typeof SCIMNameSchema>;
+
+// ── SCIMNameSchema (const) ──
+declare const SCIMNameSchema: z.ZodObject<{
+    formatted: z.ZodOptional<z.ZodString>;
+    familyName: z.ZodOptional<z.ZodString>;
+    givenName: z.ZodOptional<z.ZodString>;
+    middleName: z.ZodOptional<z.ZodString>;
+    honorificPrefix: z.ZodOptional<z.ZodString>;
+    honorificSuffix: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── SCIMPatchOperation (type) ──
+type SCIMPatchOperation = z.input<typeof SCIMPatchOperationSchema>;
+
+// ── SCIMPatchOperationSchema (const) ──
+declare const SCIMPatchOperationSchema: z.ZodObject<{
+    op: z.ZodEnum<{
+        replace: "replace";
+        add: "add";
+        remove: "remove";
+    }>;
+    path: z.ZodOptional<z.ZodString>;
+    value: z.ZodOptional<z.ZodUnknown>;
+}, z.core.$strip>;
+
+// ── SCIMPatchRequest (type) ──
+type SCIMPatchRequest = z.input<typeof SCIMPatchRequestSchema>;
+
+// ── SCIMPatchRequestParsed (type) ──
+type SCIMPatchRequestParsed = z.infer<typeof SCIMPatchRequestSchema>;
+
+// ── SCIMPatchRequestSchema (const) ──
+declare const SCIMPatchRequestSchema: z.ZodObject<{
+    schemas: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    Operations: z.ZodArray<z.ZodObject<{
+        op: z.ZodEnum<{
+            replace: "replace";
+            add: "add";
+            remove: "remove";
+        }>;
+        path: z.ZodOptional<z.ZodString>;
+        value: z.ZodOptional<z.ZodUnknown>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+
+// ── SCIMPhoneNumber (type) ──
+type SCIMPhoneNumber = z.input<typeof SCIMPhoneNumberSchema>;
+
+// ── SCIMPhoneNumberParsed (type) ──
+type SCIMPhoneNumberParsed = z.infer<typeof SCIMPhoneNumberSchema>;
+
+// ── SCIMPhoneNumberSchema (const) ──
+declare const SCIMPhoneNumberSchema: z.ZodObject<{
+    value: z.ZodString;
+    type: z.ZodOptional<z.ZodEnum<{
+        work: "work";
+        home: "home";
+        other: "other";
+        mobile: "mobile";
+        fax: "fax";
+        pager: "pager";
+    }>>;
+    display: z.ZodOptional<z.ZodString>;
+    primary: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+}, z.core.$strip>;
+
+// ── SCIMResource (type) ──
+type SCIMResource = SCIMUser | SCIMGroup;
+
+// ── SCIMUser (type) ──
+type SCIMUser = z.input<typeof SCIMUserSchema>;
+
+// ── SCIMUserParsed (type) ──
+type SCIMUserParsed = z.infer<typeof SCIMUserSchema>;
+
+// ── SCIMUserSchema (const) ──
+declare const SCIMUserSchema: z.ZodObject<{
+    schemas: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    id: z.ZodOptional<z.ZodString>;
+    externalId: z.ZodOptional<z.ZodString>;
+    userName: z.ZodString;
+    name: z.ZodOptional<z.ZodObject<{
+        formatted: z.ZodOptional<z.ZodString>;
+        familyName: z.ZodOptional<z.ZodString>;
+        givenName: z.ZodOptional<z.ZodString>;
+        middleName: z.ZodOptional<z.ZodString>;
+        honorificPrefix: z.ZodOptional<z.ZodString>;
+        honorificSuffix: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+    displayName: z.ZodOptional<z.ZodString>;
+    nickName: z.ZodOptional<z.ZodString>;
+    profileUrl: z.ZodOptional<z.ZodString>;
+    title: z.ZodOptional<z.ZodString>;
+    userType: z.ZodOptional<z.ZodString>;
+    preferredLanguage: z.ZodOptional<z.ZodString>;
+    locale: z.ZodOptional<z.ZodString>;
+    timezone: z.ZodOptional<z.ZodString>;
+    active: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+    password: z.ZodOptional<z.ZodString>;
+    emails: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        value: z.ZodString;
+        type: z.ZodOptional<z.ZodEnum<{
+            work: "work";
+            home: "home";
+            other: "other";
+        }>>;
+        display: z.ZodOptional<z.ZodString>;
+        primary: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+    }, z.core.$strip>>>;
+    phoneNumbers: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        value: z.ZodString;
+        type: z.ZodOptional<z.ZodEnum<{
+            work: "work";
+            home: "home";
+            other: "other";
+            mobile: "mobile";
+            fax: "fax";
+            pager: "pager";
+        }>>;
+        display: z.ZodOptional<z.ZodString>;
+        primary: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+    }, z.core.$strip>>>;
+    ims: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        value: z.ZodString;
+        type: z.ZodOptional<z.ZodString>;
+        primary: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>>;
+    photos: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        value: z.ZodString;
+        type: z.ZodOptional<z.ZodEnum<{
+            photo: "photo";
+            thumbnail: "thumbnail";
+        }>>;
+        primary: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>>;
+    addresses: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        formatted: z.ZodOptional<z.ZodString>;
+        streetAddress: z.ZodOptional<z.ZodString>;
+        locality: z.ZodOptional<z.ZodString>;
+        region: z.ZodOptional<z.ZodString>;
+        postalCode: z.ZodOptional<z.ZodString>;
+        country: z.ZodOptional<z.ZodString>;
+        type: z.ZodOptional<z.ZodEnum<{
+            work: "work";
+            home: "home";
+            other: "other";
+        }>>;
+        primary: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+    }, z.core.$strip>>>;
+    groups: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        value: z.ZodString;
+        $ref: z.ZodOptional<z.ZodString>;
+        display: z.ZodOptional<z.ZodString>;
+        type: z.ZodOptional<z.ZodEnum<{
+            direct: "direct";
+            indirect: "indirect";
+        }>>;
+    }, z.core.$strip>>>;
+    entitlements: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        value: z.ZodString;
+        type: z.ZodOptional<z.ZodString>;
+        primary: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>>;
+    roles: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        value: z.ZodString;
+        type: z.ZodOptional<z.ZodString>;
+        primary: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>>;
+    x509Certificates: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        value: z.ZodString;
+        type: z.ZodOptional<z.ZodString>;
+        primary: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>>;
+    meta: z.ZodOptional<z.ZodObject<{
+        resourceType: z.ZodOptional<z.ZodString>;
+        created: z.ZodOptional<z.ZodString>;
+        lastModified: z.ZodOptional<z.ZodString>;
+        location: z.ZodOptional<z.ZodString>;
+        version: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+    "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User": z.ZodOptional<z.ZodObject<{
+        employeeNumber: z.ZodOptional<z.ZodString>;
+        costCenter: z.ZodOptional<z.ZodString>;
+        organization: z.ZodOptional<z.ZodString>;
+        division: z.ZodOptional<z.ZodString>;
+        department: z.ZodOptional<z.ZodString>;
+        manager: z.ZodOptional<z.ZodObject<{
+            value: z.ZodString;
+            $ref: z.ZodOptional<z.ZodString>;
+            displayName: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+
+// ── SCIM_SCHEMAS (const) ──
+declare const SCIM_SCHEMAS: {
+    readonly USER: "urn:ietf:params:scim:schemas:core:2.0:User";
+    readonly GROUP: "urn:ietf:params:scim:schemas:core:2.0:Group";
+    readonly ENTERPRISE_USER: "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User";
+    readonly RESOURCE_TYPE: "urn:ietf:params:scim:schemas:core:2.0:ResourceType";
+    readonly SERVICE_PROVIDER_CONFIG: "urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig";
+    readonly SCHEMA: "urn:ietf:params:scim:schemas:core:2.0:Schema";
+    readonly LIST_RESPONSE: "urn:ietf:params:scim:api:messages:2.0:ListResponse";
+    readonly PATCH_OP: "urn:ietf:params:scim:api:messages:2.0:PatchOp";
+    readonly BULK_REQUEST: "urn:ietf:params:scim:api:messages:2.0:BulkRequest";
+    readonly BULK_RESPONSE: "urn:ietf:params:scim:api:messages:2.0:BulkResponse";
+    readonly ERROR: "urn:ietf:params:scim:api:messages:2.0:Error";
+};
+
+// ── TokenPayload (interface) ──
+interface TokenPayload {
+    /**
+     * Subject (user ID)
+     */
+    sub: string;
+    /**
+     * Issued at timestamp
+     */
+    iat: number;
+    /**
+     * Expiration timestamp
+     */
+    exp: number;
+    /**
+     * Session ID
+     */
+    sid?: string;
+    /**
+     * User email
+     */
+    email?: string;
+    /**
+     * User roles
+     */
+    roles?: string[];
+    /**
+     * User permissions
+     */
+    permissions?: string[];
+    /**
+     * Additional custom claims
+     */
+    [key: string]: any;
+}
+
+// ── User (type) ──
+type User = z.input<typeof UserSchema>;
+
+// ── UserParsed (type) ──
+type UserParsed = z.infer<typeof UserSchema>;
+
+// ── UserSchema (const) ──
+declare const UserSchema: z.ZodObject<{
+    id: z.ZodString;
+    email: z.ZodString;
+    emailVerified: z.ZodDefault<z.ZodBoolean>;
+    name: z.ZodOptional<z.ZodString>;
+    image: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    createdAt: z.ZodString;
+    updatedAt: z.ZodString;
+}, z.core.$strip>;
+
+// ── VerificationToken (type) ──
+type VerificationToken = z.input<typeof VerificationTokenSchema>;
+
+// ── VerificationTokenSchema (const) ──
+declare const VerificationTokenSchema: z.ZodObject<{
+    identifier: z.ZodString;
+    token: z.ZodString;
+    expires: z.ZodString;
+    createdAt: z.ZodString;
+}, z.core.$strip>;
+
+// ── createEvalUser (function) ──
+declare function createEvalUser(input: {
+    id: string;
+    name?: string | null;
+    email?: string | null;
+    positions?: readonly string[] | null;
+    organizationId?: string | null;
+}): EvalUserParsed;
+
+// ── definePosition (function) ──
+declare function definePosition(config: z.input<typeof PositionSchema>): PositionParsed;
+
+// ── mapMembershipRole (function) ──
+declare function mapMembershipRole(raw: string): string;
+
+// ── positionForm (const) ──
+declare const positionForm: {
+    type: "split" | "drawer" | "modal" | "simple" | "tabbed" | "wizard";
+    layout?: "grid" | "inline" | "vertical" | "horizontal" | undefined;
+    columns?: number | undefined;
+    title?: string | undefined;
+    description?: string | undefined;
+    defaultTab?: string | undefined;
+    tabPosition?: "left" | "right" | "top" | "bottom" | undefined;
+    allowSkip?: boolean | undefined;
+    showStepIndicator?: boolean | undefined;
+    splitDirection?: "vertical" | "horizontal" | undefined;
+    splitSize?: number | undefined;
+    splitResizable?: boolean | undefined;
+    drawerSide?: "left" | "right" | "top" | "bottom" | undefined;
+    drawerWidth?: string | undefined;
+    modalSize?: "default" | "full" | "sm" | "lg" | "xl" | undefined;
+    data?: {
+        provider: "object";
+        object: string;
+    } | {
+        provider: "api";
+        read?: {
+            url: string;
+            method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
+            headers?: Record<string, string> | undefined;
+            params?: Record<string, unknown> | undefined;
+            body?: unknown;
+        } | undefined;
+        write?: {
+            url: string;
+            method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
+            headers?: Record<string, string> | undefined;
+            params?: Record<string, unknown> | undefined;
+            body?: unknown;
+        } | undefined;
+    } | {
+        provider: "value";
+        items: unknown[];
+    } | {
+        provider: "schema";
+        schemaId: string;
+        schema?: Record<string, unknown> | undefined;
+    } | undefined;
+    sections?: Omit<{
+        collapsible: boolean;
+        collapsed: boolean;
+        columns: 1 | 2 | 4 | 3;
+        name?: string | undefined;
+        label?: string | (Record<string, string> & {
+            key?: never;
+            defaultValue?: never;
+        }) | undefined;
+        description?: string | undefined;
+        visibleWhen?: {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | undefined;
+        visibleOn?: {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | undefined;
+        pane?: "primary" | "secondary" | undefined;
+        group?: string | undefined;
+        fields?: (string | FormField)[] | undefined;
+    }, "visibleOn" | "visibility">[] | undefined;
+    groups?: Omit<{
+        collapsible: boolean;
+        collapsed: boolean;
+        columns: 1 | 2 | 4 | 3;
+        name?: string | undefined;
+        label?: string | (Record<string, string> & {
+            key?: never;
+            defaultValue?: never;
+        }) | undefined;
+        description?: string | undefined;
+        visibleWhen?: {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | undefined;
+        visibleOn?: {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | undefined;
+        pane?: "primary" | "secondary" | undefined;
+        group?: string | undefined;
+        fields?: (string | FormField)[] | undefined;
+    }, "visibleOn" | "visibility">[] | undefined;
+    subforms?: {
+        childObject: string;
+        relationshipField?: string | undefined;
+        columns?: any[] | undefined;
+        amountField?: string | undefined;
+        totalField?: string | undefined;
+        title?: string | undefined;
+        addLabel?: string | undefined;
+        minRows?: number | undefined;
+        maxRows?: number | undefined;
+    }[] | undefined;
+    defaultSort?: undefined;
+    sharing?: {
+        enabled: boolean;
+        allowAnonymous: boolean;
+        publicLink?: string | undefined;
+        password?: string | undefined;
+        allowedDomains?: string[] | undefined;
+        expiresAt?: string | undefined;
+    } | undefined;
+    submitBehavior?: {
+        kind: "thank-you";
+        title?: string | undefined;
+        message?: string | undefined;
+    } | {
+        kind: "redirect";
+        url: string;
+        delayMs?: number | undefined;
+    } | {
+        kind: "continue";
+    } | {
+        kind: "next-record";
+    } | undefined;
+    buttons?: {
+        submit?: {
+            show?: boolean | undefined;
+            label?: string | (Record<string, string> & {
+                key?: never;
+                defaultValue?: never;
+            }) | undefined;
+        } | undefined;
+        cancel?: {
+            show?: boolean | undefined;
+            label?: string | (Record<string, string> & {
+                key?: never;
+                defaultValue?: never;
+            }) | undefined;
+        } | undefined;
+        reset?: {
+            show?: boolean | undefined;
+            label?: string | (Record<string, string> & {
+                key?: never;
+                defaultValue?: never;
+            }) | undefined;
+        } | undefined;
+    } | undefined;
+    defaults?: Record<string, unknown> | undefined;
+    aria?: undefined;
+};
