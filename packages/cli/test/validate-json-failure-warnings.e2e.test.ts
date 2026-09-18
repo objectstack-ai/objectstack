@@ -495,11 +495,55 @@ describe('#12047 — the contract is exhaustive over `validate.ts`, not just ove
     expect(found[1]).toContain('warnings: warningsSoFar()');
   });
 
-  it('all 6 `emitJson` exits carry `warnings` — 5 failure exits and the success payload', () => {
+  it('every `emitJson` exit carries `warnings` — the exit count is READ OFF the source, never an integer', () => {
     const literals = payloadLiterals(SRC);
-    expect(literals, 'the `emitJson` exit count moved — a new exit must carry `warnings` too').toHaveLength(6);
-    expect(literals.filter((p) => p.includes('valid: false'))).toHaveLength(5);
+
+    // ⭐ #18848 — this line read `toHaveLength(6)`, and that integer is what
+    // put `main` in the red without a run to say so. `validate.ts` gained a
+    // seventh, entirely legitimate exit (#18769, the per-package author-time
+    // rule pass) whose payload carries this key like every other; the CONTRACT
+    // below held throughout and only the COUNT was stale. And because this
+    // file is nightly-tier by NAME (`*.e2e.test.ts` — `scripts/nightly-tiers.mjs`),
+    // no pull request and no merge-queue run could collect it: measured on the
+    // branch that landed this, `OS_TEST_TIERS` unset collects 266 files here
+    // with ZERO of them this one, and `=nightly` collects 68 with this one in
+    // it. An integer that only a cron can read is a pin with no reader at the
+    // moment it matters.
+    //
+    // ⛔ So the count is not re-pinned to 7 — that just re-arms the same trap
+    // for exit eight. It is DERIVED: the extractor read every `emitJson` call
+    // site the file has, whatever today's number is. An honest new exit stays
+    // green here and is still held to the contract below and to the
+    // `warningsSoFar()` loop further down; a needle that stopped matching one
+    // reddens HERE instead of quietly turning that negative into a vacuous
+    // pass over fewer exits than the file has.
+    //
+    // Both sides read RAW source, which is what keeps them symmetric: a
+    // commented-out `await emitJson(` is counted by the extractor and by the
+    // pattern alike. The one asymmetric case — prose naming the call with its
+    // paren but no `await` — reddens, and that is the accepted price for not
+    // importing a comment masker into this file.
+    const callSites = SRC.match(/\bemitJson\s*\(/g) ?? [];
+    expect(
+      literals,
+      'an `emitJson(` call site the payload extractor could not read — the contract below would skip it',
+    ).toHaveLength(callSites.length);
+
+    // The one integer left, and it rots only in the direction that has to be
+    // reviewed anyway: exits being REMOVED. Six is the population the ruling
+    // above was made over, not a count of today. It is also the floor under
+    // the one vacuum the derived pair shares — an `emitJson` renamed out of
+    // existence takes BOTH sides to zero and every assertion here with them.
+    expect(
+      literals.length,
+      '`os validate --json` publishes fewer exits than the ruling above was made over',
+    ).toBeGreaterThanOrEqual(6);
+
+    // Exactly one success payload; every other exit is a failure exit. The
+    // second count is derived from the length, so the two together also assert
+    // the PARTITION — an exit carrying neither literal reddens.
     expect(literals.filter((p) => p.includes('valid: true'))).toHaveLength(1);
+    expect(literals.filter((p) => p.includes('valid: false'))).toHaveLength(literals.length - 1);
 
     const bare = literals.filter((p) => !p.includes('warnings:'));
     expect(
