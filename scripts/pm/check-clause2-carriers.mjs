@@ -409,6 +409,12 @@
  *      re-dispatch the card. It is also excluded from the MISPLACED scan: a
  *      recognised correction is this limb's designated second carrier, not a
  *      declaration written in a place the predicate does not look.
+ *      ⭐ The prohibition this exit exists for — 「the claim protocol forbids a
+ *      second `Claim:`」, three lines up — had no enforcing reader until
+ *      #18828: a seat that wrote the second line anyway was RANKED, not
+ *      refused, and the record called it a SUPERSESSION at exit 0.
+ *      `claimRepeats` / `c8SecondClaimSameSeat` downstairs are that reader, and
+ *      the correction above is the first of the two acts its remedy names.
  *   3. **It is not the checker filling anything in.** The value is the seat's
  *      own, written by the seat, in the fixed spelling. This file reads it and
  *      still writes nothing.
@@ -1780,6 +1786,162 @@ export function claimRetractions(commentRows) {
     }
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// #18828 — a SECOND `Claim:` by ONE seat. The prohibition is on the WRITING,
+// and until this row nothing READ it.
+//
+// The rule is this file's own, in the #17366 block upstairs: 「the claim
+// protocol forbids a second `Claim:`」. It is the reason the correction key
+// exists at all and the reason that key is a DIFFERENT key — a correction never
+// enters the pool, never governs, and cannot re-dispatch the card. What the
+// reader did with a thread that carried a second claim anyway was RANK it: the
+// governing-claim selector takes the newest LIVE claim that parses a branch and
+// prints the loser as 「a SUPERSEDED claim」 — clean, green, exit 0. ⇒ a
+// writer-side prohibition with no enforcing reader, and the word the record
+// reached for («SUPERSEDED») is the word for a transition the protocol
+// DESIGNED, said about a line the protocol says must not be written.
+//
+// ⚠️ Measured before this row was written, over both boards this gate reads,
+// at 2026-09-18T00:05Z: 533 open cards in `objectstack-ai/objectstack`, 416 in
+// `objectstack-ai/objectui` (949, of which 167 carry at least one claim
+// comment). The five the filing card named — #18540 · #18677 · #18748 ·
+// #18651 · #18778 — each carry TWO live `Claim:` comments by `os-support-ai`
+// and zero corrections, and #18559 is the control: one claim plus the
+// sanctioned `Clause-②-correction: 5721425131`. ⛔ The repair of those five is
+// their author's; this file only names them.
+//
+// ## MEMBERSHIP first, and that is what makes the state REPAIRABLE
+//
+// The state is read over the LIVE claims — `claimRetractions` is the authority
+// on 「retracted」, exactly as it is for governance (#18719) — and ⛔ never over
+// the raw claim listing. Two consequences, both deliberate:
+//
+//   · a re-claim AFTER a `Release:` (or the id-naming retraction) of the first
+//     is the protocol working: the first no longer stands, one live claim is
+//     left, and the thread reads exactly as it did before this row existed;
+//   · a seat that ALREADY wrote a second claim has an act that clears the row —
+//     a `Release:` of what it holds, then one fresh claim. ⭐ That is the whole
+//     lesson of #17366 one screen up: a state whose only repair is an act no
+//     seat can perform is a green PR waiting on somebody outside the
+//     repository. A rule written over the WRITING moment instead ("there was no
+//     retraction strictly BETWEEN the two lines") would have been unrepairable
+//     by construction — nothing un-writes a comment, and the MCP tool set has
+//     no edit-a-comment call — so this row would have been a permanent red with
+//     a remedy sentence nobody could execute. ⛔ Not that.
+//
+// ## ⛔ What this row is NOT
+//
+//   1. **Not a second selector.** `CLAIM_SELECTION_RULE` and the governing
+//      claim are untouched for every shape; the pool is what it was. This is an
+//      ADDITIONAL reading of the same thread, and `claimCarrierSelection` stays
+//      a pure function of the rows it is handed with the same return shape.
+//   2. **Not a widened marker.** `CLAIM_COMMENT_MARKER` is read through
+//      `markerMatches` — the sibling's ONE reading (#18764) — so a decorated
+//      `**Claim:**` is counted here exactly as a bare one is counted there, and
+//      ⛔ this file does not grow a second reader of the marker.
+//   3. **Not a cross-seat ownership rule.** Two live claims by DIFFERENT
+//      authors are a real and separate question — the triage's p1 escalation
+//      condition — and this row is deliberately silent on it: refusing an
+//      ownership transfer between sessions is not this card's to do, and a row
+//      that answered both would make one sentence out of two states. The probe
+//      is reported in the PR body, with its population and its time.
+//   4. **Not a NOTE.** The `--pair` path answers `EXIT_PAIR_ADVERSE`. An
+//      adverse fact rendered as 0-with-a-message is the silence this file
+//      exists against, and it is what the old SUPERSEDED reading already was.
+// ---------------------------------------------------------------------------
+
+/** The rule this row is judged by, written out once and PRINTED beside it. */
+export const CLAIM_REPEAT_RULE =
+  'The claim protocol forbids a SECOND `Claim:`: a card is claimed once, and the seat that must '
+  + 'correct its own declaration writes `Clause-②-correction: <claim comment id>` — a DIFFERENT key, '
+  + 'which `CLAIM_COMMENT_MARKER` does not match, so a correction never enters the pool, never governs '
+  + 'and cannot re-dispatch the card. TWO OR MORE LIVE claim comments BY ONE AUTHOR on one thread is '
+  + 'therefore a state the protocol says cannot be written, and it is NAMED here — every comment id, '
+  + 'the author, and the repair — ⛔ never printed as a SUPERSESSION, which is the word for a '
+  + 'transition the protocol designed. MEMBERSHIP comes first: a RETRACTED claim does not stand, so a '
+  + 'fresh claim after a `Release:` of the first is the protocol working and reads exactly as it did '
+  + 'before. ⛔ Two live claims by DIFFERENT authors are not this state — that is a separate reading '
+  + 'and this row does not make it. ⛔ An unattributable row is never counted, the way `claimRetractions` '
+  + 'fails closed on one.';
+
+/** The repair, in the seat's own acts — printed with every instance of the row. */
+export const CLAIM_REPEAT_REMEDY =
+  'Repair, by the seat that holds them and ⛔ by nobody else: post `Clause-②-correction: <claim comment '
+  + 'id>` when what needs fixing is the declaration the claim carries (the #17366 exit — it corrects the '
+  + 'line without touching the claim, and nothing has to be edited), or post `Release:` and then ONE '
+  + 'fresh `Claim:` when the card really is being re-taken (the release retracts what this seat holds, so '
+  + 'the fresh claim is the only one standing). ⛔ Never a second `Claim:` under a live one, and ⛔ never '
+  + 'a `Release:` or a correction posted on another seat\'s behalf.';
+
+/**
+ * Every author holding MORE THAN ONE LIVE claim comment on this thread.
+ *
+ * A sibling pure reader beside `claimRetractions` and built on it: the same map
+ * decides membership here and for governance, so the pool and this row cannot
+ * describe two different retractions. ⛔ It resolves no state, no row and no
+ * exit code — `c8SecondClaimSameSeat` renders the verdict and `pairInputRecord`
+ * renders the reading, both from this one derivation.
+ *
+ * Ordering is the file's one recency rule (`laterOnThread`), used to ORDER the
+ * record rather than to pick a winner: `first` is the claim that stood, and
+ * every row in `repeats` is a line written under it.
+ *
+ * @param {{ id?: number|string, body?: string, created_at?: string,
+ *   user?: { login?: string } }[]|null} commentRows
+ * @returns {{ author: string, claims: object[], ids: string[], first: object,
+ *   repeats: object[] }[]} one entry per author, in thread order.
+ */
+export function claimRepeats(commentRows) {
+  const rows = Array.isArray(commentRows) ? commentRows : [];
+  const retracted = claimRetractions(rows);
+  const indexed = rows.map((row, index) => {
+    const parsed = Date.parse(row?.created_at ?? '');
+    return { row, index, stamp: Number.isFinite(parsed) ? parsed : null, author: rowAuthor(row) };
+  });
+  const byAuthor = new Map();
+  for (const claim of indexed) {
+    // The sibling's ONE reading of the marker (#18764) — ⛔ never a second one.
+    if (!markerMatches(CLAIM_COMMENT_MARKER, String(claim.row?.body ?? ''))) continue;
+    // A withdrawn claim does not stand, so it neither carries this prohibition
+    // nor receives it: ⭐ the same MEMBERSHIP-first order governance takes.
+    if (retracted.has(claim.row)) continue;
+    // Fail closed, exactly as `claimRetractions` does: a row this file cannot
+    // attribute is never counted as some seat's second anything.
+    if (claim.author === null) continue;
+    if (!byAuthor.has(claim.author)) byAuthor.set(claim.author, []);
+    byAuthor.get(claim.author).push(claim);
+  }
+  const out = [];
+  for (const [author, claims] of byAuthor) {
+    if (claims.length < 2) continue;
+    const ordered = [...claims].sort((a, b) => (laterOnThread(a, b) ? 1 : laterOnThread(b, a) ? -1 : 0));
+    out.push({
+      author,
+      claims: ordered.map((c) => c.row),
+      ids: ordered.map((c) => String(c.row?.id ?? '(no id)')),
+      first: ordered[0].row,
+      repeats: ordered.slice(1).map((c) => c.row),
+    });
+  }
+  return out;
+}
+
+/**
+ * The repeat state as ONE sentence per author — shared by the row that refuses
+ * and the input record that reports what was read, so the two cannot disagree
+ * about how many claims are involved or which ones.
+ */
+function claimRepeatSentences(groups) {
+  const when = (row) => `${String(row?.id ?? '(no id)')} at ${row?.created_at ?? '(no readable date)'}`;
+  return groups.map(
+    (g) =>
+      `\`${g.author}\` holds ${g.claims.length} LIVE claim comment(s) here — ${g.claims.map(when).join(', ')} `
+      + `— of which ${String(g.first?.id ?? '(no id)')} is the claim that stood and the other `
+      + `${g.repeats.length} (${g.repeats.map((r) => String(r?.id ?? '(no id)')).join(', ')}) `
+      + 'was written under it, un-retracted',
+  );
 }
 
 /** The key as prose, for the sentences above — declared once, beside the regex that reads it. */
@@ -4192,6 +4354,37 @@ export function locatedRecordUnjudged(pair) {
 }
 
 /**
+ * C8 — a SECOND `Claim:` by the SAME seat, named (#18828).
+ *
+ * ⭐ A VERDICT, and the file's own table decides that exactly as it decided C4's:
+ * the row is a fact about THIS pair — a line the claim protocol says must not be
+ * written, standing on the thread the declaration limb is judged over — and an
+ * adverse fact rendered as 0-with-a-message is the silence this file exists
+ * against. It is also, precisely, what the old reading WAS: `rejected: 1 … a
+ * SUPERSEDED claim`, exit 0, in the register reserved for a transition the
+ * protocol designed.
+ *
+ * ⛔ It re-blocks no legal workflow. A card claimed once reads as it always did;
+ * a re-claim after a `Release:` reads as it always did; a `Clause-②-correction:`
+ * is not a claim and never was. What it refuses is the one shape the protocol
+ * already forbade in writing, and the sentence carries the two acts that clear
+ * it — both performable by the seat that wrote the line, with the one tool every
+ * seat certainly has.
+ *
+ * ⛔ Never prescribes WHICH repair: the declaration is the seat's judgement and
+ * a checker that chose between a correction and a release would be choosing
+ * whether the card is being re-taken. It names both and writes nothing.
+ */
+export function c8SecondClaimSameSeat(pair) {
+  const groups = claimRepeats(pair?.cardComments ?? null);
+  if (groups.length === 0) return null;
+  return (
+    `card #${pair?.card} (delivering open PR #${pair?.pr}) — ${claimRepeatSentences(groups).join(' · ')}. `
+    + `${CLAIM_REPEAT_RULE} ${CLAIM_REPEAT_REMEDY} ${NEVER_WRITES}`
+  );
+}
+
+/**
  * Every FINDING row for one pair, in reporting order.
  *
  * `pairs` — the derived set this pair came from — is optional and defaults to
@@ -4224,6 +4417,15 @@ export function pairRows(pair, pairs = null) {
   // absent or unsigned record earns exactly one row, C6's, where C6 is owed.
   const servedTier = c7ServedTierBelow(pair);
   if (servedTier) rows.push({ code: 'C7', text: servedTier });
+  // ⭐ Last, and ORTHOGONAL to every row above it: C1–C7 read the gate's
+  // carriers, its declaration and the round that served the verdict, and this
+  // one reads the THREAD those readings are taken over — a line the claim
+  // protocol says must not be written, which the selector above ranks as a
+  // designed supersession at exit 0. A pair can earn it beside any other row,
+  // and it is a row rather than a note for the reason `c8SecondClaimSameSeat`
+  // states (#18828).
+  const repeatClaim = c8SecondClaimSameSeat(pair);
+  if (repeatClaim) rows.push({ code: 'C8', text: repeatClaim });
   return rows;
 }
 
@@ -5344,6 +5546,11 @@ async function gather(repo, prFilter = null, reader = NETWORK_READER, { landingR
  *     and every other claim it rejected WITH the reason — so "the two runs
  *     selected different comments" is distinguishable from "the two runs
  *     applied different rules";
+ *   · the REPEAT reading (#18828): which author, if any, holds more than one
+ *     LIVE claim comment on this thread, with every id — a fact about the rows
+ *     that were read, stated where the SUPERSEDED sentence used to be the only
+ *     trace of it. ⚠️ The verdict it earns is row C8's; ⛔ no field here
+ *     resolves one;
  *   · a BODY FINGERPRINT (bytes + `sha256:`) on each claim in the pool. ⭐ This
  *     is the field the measured 0/4/0 actually needs: the 4 was `misplaced`,
  *     which on that thread requires the governing claim to have carried NO
@@ -5429,6 +5636,7 @@ export const INPUT_RECORD_PAIR_FIELDS = Object.freeze([
   'claim.rule',
   'claim.selected',
   'claim.rejected',
+  'claim.repeat',
   'claim.clause2-line',
   'pr-body.clause2-line',
 ]);
@@ -5658,6 +5866,20 @@ export function pairInputRecord(pair) {
       `${rejected.length} claim comment(s) rejected`,
       ...rejected.map((r) => `${namedRow(r.row)} — ${r.reason}`),
     ];
+
+  // ⭐ The same derivation the C8 row renders, so the record and the verdict
+  // cannot disagree about how many claims one seat holds or which they are
+  // (#18828). ⚠️ A READING of the rows — ⛔ not the verdict, which is the row.
+  const repeats = claimRepeats(pair?.cardComments ?? null);
+  out['claim.repeat'] = !Array.isArray(pair?.cardComments)
+    ? 'UNREAD — the thread could not be read, so no repeat reading was taken'
+    : repeats.length === 0
+      ? 'none — no author holds more than one LIVE claim comment on this thread'
+      : [
+        `${repeats.length} author(s) holding more than one LIVE claim comment — the protocol forbids a `
+        + 'second `Claim:` (row C8 is the verdict; this line is what was read)',
+        ...claimRepeatSentences(repeats),
+      ];
 
   out['claim.clause2-line'] = pool.length === 0
     ? '(no carrier, so no line was read from one)'
