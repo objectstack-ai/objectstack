@@ -4234,3 +4234,62 @@ describe("validateStackExpressions — a non-record entry in an object's `fields
     expect(issues[0].message).toContain('amount');
   });
 });
+
+/**
+ * [#18550] `masterDetailCount` must refuse a `reference` carrier it cannot
+ * read, rather than counting the relationship as undeclared.
+ *
+ * One of the measured residue sites of ruling letter E item 2 on #18095. The
+ * count was `typeof ref === 'string' && ref.trim() !== ''`, which gives an
+ * UNREADABLE carrier the same answer as an ABSENT one — so an object whose
+ * master IS declared counted zero masters, and the `parent`-scope gate above
+ * reported "declares no `master_detail` relationships" about metadata that
+ * declares one. A finding about the wrong thing: the relationship is not
+ * missing, its target is unreadable, and the two want different fixes.
+ *
+ * Absence keeps its answer: `undefined`, `null`, `''` and a whitespace-only
+ * carrier all still count as no master, because none of them names an object.
+ */
+describe('masterDetailCount — an unreadable `reference` carrier is refused (#18550)', () => {
+  const lintObject = (obj: Record<string, unknown>) => () => validateStackExpressions({ objects: [obj] });
+  const detailOn = (carrier: Record<string, unknown>) => ({
+    name: 'inv_line',
+    fields: {
+      inv: { type: 'master_detail', ...carrier },
+      qty: { type: 'number', readonlyWhen: "parent.status == 'paid'" },
+    },
+  });
+
+  it('control: a READABLE carrier counts as a master, so the `parent` gate stays silent', () => {
+    // Without this, every refusal below could pass on a gate that had stopped
+    // resolving masters at all.
+    expect(lintObject(detailOn({ reference: 'inv' }))()).toHaveLength(0);
+  });
+
+  it('an OBJECT-valued carrier REFUSES — ⛔ not a "declares no master_detail" finding', () => {
+    const run = lintObject(detailOn({ reference: { object: 'inv' } }));
+    expect(run).toThrow(TypeError);
+    expect(run).toThrow(/validate-expressions masterDetailCount/);
+    expect(run).toThrow(/`reference` is an object/);
+    expect(run).toThrow(/FieldSchema declares it as an optional STRING/);
+  });
+
+  it('an ARRAY-valued carrier refuses too, naming the shape it found', () => {
+    expect(lintObject(detailOn({ reference: ['inv', 'inv2'] }))).toThrow(/`reference` is an array \(length 2\)/);
+  });
+
+  // ── ABSENCE: still counted as no master, still reported as the `parent`-gate
+  //    finding, ⛔ never thrown on. These are the cases a mechanical
+  //    throw-on-falsy sweep would break.
+  it.each([
+    ['undefined (the key omitted)', {}],
+    ['null (`StrictField` declares it nullable)', { reference: null }],
+    ["'' (names no object)", { reference: '' }],
+    ['whitespace only (names no object either)', { reference: '   ' }],
+  ])('absence stays a FINDING, not a throw: %s', (_label, carrier) => {
+    const issues = lintObject(detailOn(carrier))();
+    const parentScope = issues.filter((i) => /reads `parent`/.test(i.message));
+    expect(parentScope).toHaveLength(1);
+    expect(parentScope[0]!.message).toMatch(/declares no `master_detail` relationships/);
+  });
+});

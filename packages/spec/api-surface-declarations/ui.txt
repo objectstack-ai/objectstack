@@ -4470,7 +4470,10 @@ declare const ComponentPropsMap: {
             }>;
         }, z.core.$strip>>>;
         defaultSort: z.ZodOptional<z.ZodNever>;
-        pagination: z.ZodOptional<z.ZodUnknown>;
+        pagination: z.ZodOptional<z.ZodObject<{
+            pageSize: z.ZodOptional<z.ZodNumber>;
+            pageSizeOptions: z.ZodOptional<z.ZodArray<z.ZodNumber>>;
+        }, z.core.$loose>>;
         pageSize: z.ZodOptional<z.ZodNumber>;
         showPagination: z.ZodOptional<z.ZodBoolean>;
         searchableFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
@@ -11094,7 +11097,10 @@ declare const ObjectGridPropsSchema: z.ZodObject<{
         }>;
     }, z.core.$strip>>>;
     defaultSort: z.ZodOptional<z.ZodNever>;
-    pagination: z.ZodOptional<z.ZodUnknown>;
+    pagination: z.ZodOptional<z.ZodObject<{
+        pageSize: z.ZodOptional<z.ZodNumber>;
+        pageSizeOptions: z.ZodOptional<z.ZodArray<z.ZodNumber>>;
+    }, z.core.$loose>>;
     pageSize: z.ZodOptional<z.ZodNumber>;
     showPagination: z.ZodOptional<z.ZodBoolean>;
     searchableFields: z.ZodOptional<z.ZodArray<z.ZodString>>;
