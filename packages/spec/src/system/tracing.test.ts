@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '../shared/expression.zod';
 import {
   TraceStateSchema,
   TraceFlagsSchema,
@@ -685,5 +686,129 @@ describe('the OTel exporter and performance durations carry their unit (#17785)'
       .toBe('Delay between scheduled batch exports, in milliseconds');
     expect(describeOf(TracingConfigSchema, ['performance', 'exportIntervalMs']))
       .toBe('Background span-export interval in milliseconds');
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// #15811 — TraceSamplingConfig.composite[].condition
+// ---------------------------------------------------------------------------
+
+/**
+ * The one evaluated slot whose SIBLING arm narrowed with it, and the one whose
+ * refusal messages nothing pinned.
+ *
+ * Two facts, and either alone is a green that proves nothing:
+ *
+ *  - ACCEPT SET. The structured-filter arm is a bare
+ *    `z.record(z.string(), z.unknown())`, so before #15811 it took
+ *    `{ dialect: 'cel', ast }` as an ordinary filter and the narrowing at the
+ *    expression arm changed nothing here. The arm now declines any object
+ *    carrying a `dialect` key. Six shapes the base accepted THROUGH THAT ARM
+ *    ALONE — measured: the base's `ExpressionInputSchema` refused all six —
+ *    are refused here, and the control leg is the filters that carry no
+ *    `dialect` key, which are accepted exactly as before. Without that control
+ *    a table of `false`s would be a schema that refuses everything.
+ *  - MESSAGES. A slot the author cannot read is a slot that gets re-broken
+ *    silently. The refine aborts, so each refusal is answered by whoever owns
+ *    it: one `custom` issue AT `source` for a blank `source`, one
+ *    `invalid_union` at the slot carrying the published sentence for an
+ *    `ast`-only envelope or a blank bare string. Both spellings of blank are
+ *    pinned, and so is the negative: an object refused for a reason that is
+ *    NOT about `source` must not be answered with the `source` sentence.
+ */
+describe('#15811 TraceSamplingConfig.composite[].condition — the narrowed structured-filter arm', () => {
+  const parse = (condition: unknown) => TraceSamplingConfigSchema.safeParse({
+    type: 'composite',
+    composite: [{ strategy: 'always_on', condition }],
+  });
+  /** Issues as the caller reads them — top level, before any nested arm walk. */
+  const topIssues = (condition: unknown) => {
+    const r = parse(condition);
+    expect(r.success, `expected a refusal for ${JSON.stringify(condition)}`).toBe(false);
+    return r.success ? [] : r.error.issues;
+  };
+
+  it('CONTROL — a structured filter carrying no `dialect` key is accepted, as before', () => {
+    // This is what makes the refusals below a reading about `dialect` and not
+    // about the arm having been switched off.
+    expect(parse({}).success).toBe(true);
+    expect(parse({ service: 'api' }).success).toBe(true);
+    expect(parse({ attributes: { 'http.route': '/v1/orders' } }).success).toBe(true);
+  });
+
+  it('CONTROL — a healthy predicate is still accepted in both spellings', () => {
+    expect(parse('record.amount > 10').success).toBe(true);
+    expect(parse({ dialect: 'cel', source: 'record.amount > 10' }).success).toBe(true);
+    // An `ast` BESIDE a string `source` stays admitted — the rule is about a
+    // MISSING source, never about carrying an ast.
+    expect(parse({ dialect: 'cel', source: 'record.amount > 10', ast: { kind: 'const' } }).success).toBe(true);
+  });
+
+  it.each([
+    ["{ dialect: 'cel' }", { dialect: 'cel' }],
+    ["{ dialect: 'js', source: 'x' }", { dialect: 'js', source: 'x' }],
+    ["{ dialect: 'nope', source: 'x' }", { dialect: 'nope', source: 'x' }],
+    ["{ dialect: 'cel', source: 5 }", { dialect: 'cel', source: 5 }],
+    ["{ dialect: 'cel', source: 'x', meta: { rationale: 5 } }", { dialect: 'cel', source: 'x', meta: { rationale: 5 } }],
+    ["{ dialect: 'zzz', foo: 1 }", { dialect: 'zzz', foo: 1 }],
+  ] as const)('refuses %s — the base accepted it through the structured-filter arm alone', (_label, condition) => {
+    expect(parse(condition).success).toBe(false);
+  });
+
+  it('a blank `source` publishes the sentence AT `source`, not a bare `Invalid input`', () => {
+    // The cell this pins: the refine used to be non-aborting, so two arms
+    // survived, the union fell back to `invalid_union`, and its own map
+    // answers `undefined` for a string `source` — the slot published zod's
+    // bare `Invalid input` and the sentence was reachable only by walking
+    // into nested arm issues.
+    for (const blank of ['', '   ']) {
+      const issues = topIssues({ dialect: 'cel', source: blank });
+      expect(issues).toHaveLength(1);
+      expect(issues[0].code).toBe('custom');
+      expect(issues[0].path).toEqual(['composite', 0, 'condition', 'source']);
+      expect(issues[0].message).toBe(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+    }
+  });
+
+  it('an `ast`-only envelope and a blank bare string publish the sentence AT the slot', () => {
+    for (const condition of [{ dialect: 'cel', ast: { kind: 'const', value: 1 } }, '', '   ']) {
+      const issues = topIssues(condition);
+      expect(issues).toHaveLength(1);
+      expect(issues[0].code).toBe('invalid_union');
+      expect(issues[0].path).toEqual(['composite', 0, 'condition']);
+      expect(issues[0].message).toBe(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+    }
+  });
+
+  it('does NOT blame `source` for a refusal that is not about `source`', () => {
+    // `{ dialect: 'js', source: 'x' }` carries a perfectly good non-blank
+    // `source`; what is wrong is the dialect. It used to be refused with the
+    // published `source` sentence, which sent the author at the wrong key.
+    for (const condition of [
+      { dialect: 'js', source: 'x' },
+      { dialect: 'nope', source: 'x' },
+      { dialect: 'cel', source: 'x', meta: { rationale: 5 } },
+    ]) {
+      const issues = topIssues(condition);
+      expect(issues.map((i) => i.message)).not.toContain(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+    }
+  });
+
+  it('publishes the `dialect` rule in the `describe()` the reference page renders', () => {
+    // `.refine()` has NO JSON Schema projection (zod 4.4, measured: the
+    // projected node is byte-identical with and without it), so the reference
+    // table's TYPE cell cannot carry this constraint and the description
+    // column is the only place the published page can state it.
+    // `composite` is `z.array(...).optional()`, so the element sits one
+    // wrapper down; the `.describe()` sits on the OPTIONAL wrapper, which is
+    // the node `build-docs.ts` reads, so it is not unwrapped further.
+    const unwrapOnce = (node: any): any => node?.def?.innerType ?? node?._def?.innerType ?? node;
+    const composite = unwrapOnce((TraceSamplingConfigSchema as any).shape.composite);
+    const element = (composite.def ?? composite._def).element;
+    const condition = element.shape.condition as { description?: string };
+    expect(condition.description).toBeTypeOf('string');
+    expect(condition.description).toContain('must NOT carry one');
+    expect(condition.description).toContain('`dialect`');
   });
 });

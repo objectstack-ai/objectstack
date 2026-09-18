@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { ExpressionInputSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 
@@ -177,7 +177,7 @@ export const ScriptValidationSchema = lazySchema(() => strictObject({
 }, {
   ...BASE_VALIDATION_SHAPE,
   type: z.literal('script'),
-  condition: ExpressionInputSchema.describe('Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount < 0`. A TRUE INVARIANT, not a transition gate: re-evaluated against the merged record (the prior row overlaid with this write) on every write, with no exemption for a violation that was already stored — a row that already violates is refused on ANY edit until a repairing write lands (frozen, not bricked). Need a transition condition instead — one that only has to hold from a given state onward — use `Field.requiredWhen` or a field bound (`min` / `max` / `maxLength`), which judge the write rather than the stored row.'),
+  condition: EvaluatedExpressionInputSchema.describe('Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount < 0`. A TRUE INVARIANT, not a transition gate: re-evaluated against the merged record (the prior row overlaid with this write) on every write, with no exemption for a violation that was already stored — a row that already violates is refused on ANY edit until a repairing write lands (frozen, not bricked). Need a transition condition instead — one that only has to hold from a given state onward — use `Field.requiredWhen` or a field bound (`min` / `max` / `maxLength`), which judge the write rather than the stored row.'),
 }));
 
 /**
@@ -291,7 +291,7 @@ export const CrossFieldValidationSchema = lazySchema(() => strictObject({
 }, {
   ...BASE_VALIDATION_SHAPE,
   type: z.literal('cross_field'),
-  condition: ExpressionInputSchema.describe('Predicate (CEL) comparing fields. e.g. P`record.end_date > record.start_date`'),
+  condition: EvaluatedExpressionInputSchema.describe('Predicate (CEL) comparing fields. e.g. P`record.end_date > record.start_date`'),
   fields: z.array(z.string()).describe('Fields involved. Only fields[0] is read (labels which field the violation attaches to); the rest are advisory. Shares script’s evaluation path.'),
 }));
 
@@ -543,7 +543,7 @@ export const ConditionalValidationSchema = lazySchema(() => strictObject({
 }, {
   ...BASE_VALIDATION_SHAPE,
   type: z.literal('conditional'),
-  when: ExpressionInputSchema.describe('Predicate (CEL). e.g. P`record.type == \'enterprise\'`'),
+  when: EvaluatedExpressionInputSchema.describe('Predicate (CEL). e.g. P`record.type == \'enterprise\'`'),
   then: ValidationRuleSchema.describe('Validation rule to apply when condition is true'),
   otherwise: ValidationRuleSchema.optional().describe('Validation rule to apply when condition is false'),
 }));

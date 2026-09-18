@@ -28,37 +28,87 @@ import { z } from 'zod';
  *
  * > 多组织定时任务本来只能在组织内运行，应该带组织ID，不允许跨组织的定时任务。
  *
- * Under a WALLED tenancy posture (`group` / `isolated`) a time-triggered flow
- * is **organization-scoped by construction**: it names one organization and the
+ * Under the `isolated` tenancy posture a time-triggered flow is
+ * **organization-scoped by construction**: it names one organization and the
  * run executes as that organization. There is deliberately no fan-out — a
  * tenant that wants the same sweep in N organizations declares it N times — and
- * under a wall there is deliberately no fallback: a flow that names none is a
- * DECLARATION ERROR, not a run that quietly picks one. Guessing is the failure
- * this key exists to prevent, and the platform organization is not a safe
- * guess: a wrong `organization_id` is worse than a null, because a null is
- * visibly missing while a wrong value is silently authoritative to every
- * report, export and cleanup script that filters by organization.
+ * there is deliberately no fallback: a flow that names none is a DECLARATION
+ * ERROR, not a run that quietly picks one. Guessing is the failure this key
+ * exists to prevent, and the platform organization is not a safe guess: a wrong
+ * `organization_id` is worse than a null, because a null is visibly missing
+ * while a wrong value is silently authoritative to every report, export and
+ * cleanup script that filters by organization.
  *
- * ## Where that requirement bites, and where it does not (#17396)
+ * ## Where that requirement bites, and where it does not (#17396, #18378)
  *
- * ⚠️ The sentence above is scoped to walled postures, and the scoping is the
- * whole of the 2026-09-12 amendment. Two deployment facts decide whether this
- * key is required, and ⛔ neither of them is metadata — both are read from the
- * environment at boot, beside `resolveTenancyPosture`:
+ * ⚠️ The sentence above is scoped by POSTURE, and that scoping is the whole of
+ * the 2026-09-12 and 2026-09-16 amendments. Two deployment facts decide whether
+ * this key is required, and ⛔ neither of them is metadata — both are read from
+ * the environment at boot, beside `resolveTenancyPosture`:
  *
- * | deployment | is this key required? |
- * |:--|:--|
- * | package-authored scheduled work switched OFF (the global default) | ⛔ nothing arms, so nothing is required — the flow is listed as *disabled by deployment policy*, never as a binding failure |
- * | switched ON, posture `single` | **no** — the deployment holds exactly one organization, the run carries none, and every tenant-scoped insert beneath it resolves that one through the #8844 guard |
- * | switched ON, posture `group` / `isolated` | **yes** — declare or the flow is not armed, exactly as above |
+ * | deployment | is this key required? | where a bound run's writes get their organization |
+ * |:--|:--|:--|
+ * | package-authored scheduled work switched OFF (the global default) | ⛔ nothing arms, so nothing is required — the flow is listed as *disabled by deployment policy*, never as a binding failure | — |
+ * | switched ON, posture `single` | **no** | the run carries none; every tenant-scoped insert beneath it resolves the install's one organization through the #8844 guard |
+ * | switched ON, posture `group` | **no — optional** | declared ⇒ the declaration, bounding SELECTION and identity alike; undeclared ⇒ **the swept record's own organization** |
+ * | switched ON, posture `isolated` | **yes** — declare or the flow is not armed | the declaration |
  *
- * ⇒ The key is never *deprecated* and its meaning never changes: it is the only
- * way a run under a wall gets an organization, and nothing on this path ever
- * chooses one. What changed is that a missing key is no longer a defect on
- * every deployment — so ⛔ do not read the refusal sentence below as a universal
- * authoring rule, and ⛔ do not re-add an authoring-time lint for it: at
- * authoring time neither the switch nor the posture is knowable, which is why
- * the diagnostic lives at BIND and only fires where the answer is settled.
+ * ⇒ The key is never *deprecated* and its meaning never changes: where a run
+ * declares one, that is the organization it acts as, and nothing on this path
+ * ever chooses one out of the air. What changed is that a missing key is no
+ * longer a defect on every deployment — so ⛔ do not read the refusal sentence
+ * below as a universal authoring rule, and ⛔ do not re-add an authoring-time
+ * lint for it: at authoring time neither the switch nor the posture is
+ * knowable, which is why the diagnostic lives at BIND and only fires where the
+ * answer is settled.
+ *
+ * ## Why `group` is optional rather than required (#18378, ruling A′, 2026-09-16)
+ *
+ * The 2026-09-08 ruling was made for the MULTI-TENANT shape. #18378 asked
+ * whether it binds a `group` — one legal group, one database, with group-wide
+ * visibility and cross-org workflow *inherent to the posture* (ADR-0105 D1, the
+ * multi-plant MES example is the ADR's own). It does not.
+ *
+ * ⚠️ The `group` row is not a fallback that guesses. It is the resolution order
+ * `sys_automation_run` has ALREADY been ruled to use: `ObjectStoreSuspendedRunStore`
+ * resolves a run's organization as `organizationOf(<subject record>) ?? ctx.tenantId`
+ * — subject first, the acting context as the fallback and *never* the primary
+ * (`objectql/src/tenancy/platform-object-tenancy.ts`, the `sys_automation_run`
+ * evidence line). Before this card the two halves disagreed under `group`: the
+ * history row was stamped from the record while the inbox and delivery rows
+ * followed an acting context that could not exist there, so they were refused.
+ * Filling the acting context from the record makes one run carry ONE
+ * organization's opinion about who it belonged to — which is the defect #16659
+ * opened on, read from the other side.
+ *
+ * ⚠️ With ONE stated exception, so the sentence above is not read as a promise
+ * it cannot keep. The two halves ask different questions and are answered by
+ * different faces of the shared resolver: the history row is STAMPED (`who is
+ * this row about` — `tenancy.organizationField` wins there, by the #8778 /
+ * cloud#1395 ruling), while the run's acting organization is a WALL reading
+ * (`what is this row scoped by`, which never consults that key). They give the
+ * same answer on every object where the two coincide — every ordinary object,
+ * because a declared stamp column is what makes them differ and one shipped
+ * object declares one (`sys_api_key`, deliberately unwalled, #8287). Sweeping
+ * THAT object under `group` stamps the history row from its stamp column while
+ * the run itself acts as nothing and its inbox writes are refused. That is the
+ * correct pair of answers rather than a residue of the old disagreement — a row
+ * nothing walls has no organization for a run to act as, however clearly it
+ * says who it is about — but it is a divergence, and it is recorded here rather
+ * than smoothed over.
+ *
+ * ⛔ A record-less run under `group` that declared nothing still resolves NOTHING,
+ * and takes the existing `walled-posture` refusal at the write
+ * (`resolveSystemWriteOrganization`) — loud, by name, carrying the remedy. The
+ * card's original option A would have fallen back to the bootstrap organization
+ * (`slug='default'`); that arm was rejected on measurement. Under a wall
+ * `AuthPlugin` skips its own default-organization bootstrap and the enterprise
+ * organizations runtime mints one ADMIN-KEYED, so a `group` install with no
+ * resolvable platform admin holds no such organization at all; where one does
+ * exist it is whichever organization the platform owner registered under —
+ * plausibly one plant of many, not the group's head office. Landing a group-wide
+ * cron's notifications in one arbitrary plant's inbox is the wrong-owner failure
+ * the paragraph above forbids, not a lesser version of it.
  *
  * ## Where it lives, and why there
  *
@@ -119,7 +169,7 @@ export const ScheduleOrganizationSchema = z
   .string()
   .min(1)
   .describe(
-    'Organization id (sys_organization.id) this scheduled/time-relative flow runs as. A time-triggered run has no session to inherit a tenant from, so under a walled tenancy posture (group/isolated) a flow that declares none is not armed; under the single posture it is not required and the run carries no organization.',
+    'Organization id (sys_organization.id) this scheduled/time-relative flow runs as. A time-triggered run has no session to inherit a tenant from. Required under the isolated tenancy posture: a flow that declares none is not armed. Optional under group, where an undeclared run acts as the organization of the record it swept. Not required under single, where the run carries no organization.',
   );
 
 /**
@@ -232,15 +282,20 @@ function findScheduleOrganizationNearMissInConfig(
  * consequence lives: there is no path by which an organization-less
  * time-triggered run reaches the data layer once bind refuses.
  *
- * ⚠️ [#17396] BIND is also the only door that knows whether the key is required
- * at all. This sentence is emitted by exactly one gate — a walled tenancy
- * posture (`group` / `isolated`) with package-authored scheduled work switched
- * on — because those are the two deployment facts that decide it, and a trigger
- * binding inside a booted kernel is the first place both are readable. Under
- * `single` the sentence is never emitted and must not be: nothing is missing
- * there. It is written unconditionally as a requirement because every reader
- * that receives it IS under that gate; ⛔ do not reuse it to describe a flow on
- * a deployment where the key is optional.
+ * ⚠️ [#17396, #18378] BIND is also the only door that knows whether the key is
+ * required at all. This sentence is emitted by exactly one gate — tenancy
+ * posture `isolated` with package-authored scheduled work switched on — because
+ * those are the two deployment facts that decide it, and a trigger binding
+ * inside a booted kernel is the first place both are readable. Under `single`
+ * and under `group` the sentence is never emitted and must not be: nothing is
+ * missing there. It is written unconditionally as a requirement because every
+ * reader that receives it IS under that gate; ⛔ do not reuse it to describe a
+ * flow on a deployment where the key is optional.
+ *
+ * ⛔ `group` is NOT a near-miss of `isolated` for this purpose. An undeclared
+ * `group` flow is a legal, armed, fully-supported shape (ruling A′) — emitting
+ * this sentence there would send an operator to write a key the deployment does
+ * not want, and would describe a bound flow as unbound.
  *
  * It names the flow (the ruling requires that), the key, where the key goes,
  * and — when the author wrote a near-miss — which spelling of theirs was

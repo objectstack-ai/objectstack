@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
-import { ExpressionInputSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { I18nLabelSchema } from '../ui/i18n.zod';
 import { ValueDomainSchema } from '../shared/value-domain.zod';
 
@@ -318,8 +318,8 @@ function visibilityGrammarViolation(src: string): string | undefined {
  * `visible` on a settings manifest is **not** CEL, and this schema says so.
  *
  * Every other `visible` / `visibleWhen` in the spec is
- * `ExpressionInputSchema` — a bare string normalised to `dialect: 'cel'` and
- * handed to `@objectstack/formula`. The settings manifest slot never was:
+ * `EvaluatedExpressionInputSchema` — a bare string normalised to
+ * `dialect: 'cel'` and handed to `@objectstack/formula`. The settings manifest slot never was:
  * its only evaluators are the console's client-side `new Function(...)` over
  * the raw string and, since #7169, the server-side `evaluateVisibility` in
  * `packages/services/service-settings/src/visibility-eval.ts`, which
@@ -345,12 +345,19 @@ function visibilityGrammarViolation(src: string): string | undefined {
  *
  * The wire shape is untouched — bare string and `{ dialect, source }`
  * envelope are both still accepted, and the bare string still normalises to
- * the canonical envelope. Only the set of accepted `source` strings narrows.
+ * the canonical envelope. #7169 narrowed only the set of accepted `source`
+ * strings.
  *
- * An `ast`-only envelope is passed through — the AST is opaque at this layer,
- * and the evaluator reads `source`.
+ * An `ast`-only envelope used to be passed through here — the AST is opaque at
+ * this layer, and the evaluator reads `source`. It is refused since #15811:
+ * this slot composes `EvaluatedExpressionInputSchema`, so the envelope an
+ * evaluator cannot run is refused at the door rather than at the tenant's next
+ * save. The closed grammar still judges the `source` that survives that rule,
+ * and the two refusals are independent — `EVALUATED_EXPRESSION_SOURCE_REQUIRED`
+ * answers "there is no `source` to judge", the grammar answers "this `source`
+ * is not in the grammar".
  */
-const SettingsVisibilityInputSchema = ExpressionInputSchema.superRefine((value, ctx) => {
+const SettingsVisibilityInputSchema = EvaluatedExpressionInputSchema.superRefine((value, ctx) => {
   const source = unwrapVisibilitySource(value);
   // `undefined` is an `ast`-only envelope; `''` is `"${}"`, which the
   // evaluator answers with `true` rather than a parse error. Neither reaches

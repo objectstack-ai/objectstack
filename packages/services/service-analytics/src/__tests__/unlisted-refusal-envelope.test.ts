@@ -169,7 +169,7 @@ const joinedCube: Cube = {
     opened: { name: 'opened', label: 'Opened', type: 'time', sql: 'account.created_at' },
   },
   joins: {
-    account: { name: 'account', relationship: 'many_to_one', sql: 'opportunity.account = account.id' },
+    account: { name: 'account' },
   },
   public: false,
 };

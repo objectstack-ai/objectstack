@@ -1011,7 +1011,47 @@ export const CEILINGS = new Map([
   // contended it is, the detached prescription unchanged.
   // Nothing else was paid in place: re-wrap funding is refused per the
   // 2026-08-17 rule in any case. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 466],
+  // Raised 466 → 469 by the EIGHTEENTH readings increment, again under the
+  // STANDING one-file exception quoted above rather than a fresh decision card,
+  // and again recorded as a `ruledRaises` record citing it. Its carrier card
+  // named a MEASURABLE unknown — the missing half of a controlled contrast this
+  // map itself declares absent — and the probe was the raising PR's own body:
+  // composed to end in the signature line with NO rule line above it, sent once
+  // through a bare `POST /pulls`, then read back (11,689 bytes sent and one
+  // signature line, 11,780 stored and two, the send a strict PREFIX of the
+  // store). Spent at ONE line per deduplicated reading: on the PATCH channel the
+  // append is UNCONDITIONAL, so a sent tail that IS the rule-plus-signature
+  // block — the very shape the create side leaves alone — is appended to
+  // anyway, reproduced on a second send, and the create-side criterion does not
+  // carry to it (+1); a thread's count-versus-enumeration discrepancy is a
+  // TRANSIENT flag, because the count converges on the enumeration and after it
+  // converges the records are gone and the difference is zero, so that
+  // discriminant cannot be the only defence (+1); and the controlled contrast
+  // now holds only on the bare-REST create channel, the MCP create channel's
+  // same input being unmeasured, so the conclusion is not carried there (+1) =
+  // +3 exactly. Candidates 5 / landed 3 / already present 1 / refused 1 — the
+  // already-present one is that channel's operational cost, carried by
+  // 「⇒ 该格处方是不送页脚」 and by the attribution row beside it; the refusal is a
+  // residual row whose first clause restated its neighbour's own conclusion
+  // 「判据是送出体尾部」 and whose second clause named the comment surface and
+  // the patch cell's other input as uncontrolled when both are in fact measured.
+  // Absence was measured per row with a lit control: `收敛` reads 0 in this file
+  // against `计数` at 9, `瞬态` hits only the `unstable` and PR-files rows, and
+  // `updated_at` reads 0.
+  //
+  // THREE corrections are paid in place and buy nothing — a rewrite is not a
+  // raise. The prescription row 「PR 正文页脚不带前置横线」, whose spelling is
+  // precisely what TRIGGERS the create-side append, is split per action. The
+  // PATCH row is re-stated as a RULE instead of one of two rows of inputs. And
+  // the append-size row's 「恰 90 字节」 becomes 「字节数非常量(90/91)」:
+  // this increment's send measured 91 bytes on a body with no trailing newline,
+  // the appended line being the session-URL spelling, which the row now NAMES
+  // instead of leaving it to be inferred from a constant that is not one. ⛔ No
+  // cause is asserted for the spread — one reading each, and no controlled
+  // contrast on the trailing newline or on session-id length.
+  // Nothing else was paid in place: re-wrap funding is refused per the
+  // 2026-08-17 rule in any case. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 469],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -1735,6 +1775,23 @@ export const CROSS_FILE_MOVES = new Map([
             + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
           date: '2026-09-15',
           delta: 1,
+        },
+        {
+          // The EIGHTEENTH increment, under the same STANDING exception — the
+          // same words again, for the same reason: a record that quotes no
+          // ruling is RED and each record stands alone. The +3 is accounted for
+          // line by line beside this entry's ceiling above; the exception's
+          // conditions (per-item verification and the candidate / landed /
+          // already-present / refused counts) are carried by the raising PR's
+          // body and the seat's ACCEPT.
+          ruling:
+            'the standing one-file exception for'
+            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
+            + ' SKILL.md, verbatim and untranslated: 「唯一例外：`platform-readings.md`'
+            + ' 增量抬上限到落地行数，免决策卡，记 `ruledRaises` 引常设裁决。条件：席位验收评论'
+            + '逐条核实、去重计数（候选/落地/已有/拒收）、一事一行、不计重排」',
+          date: '2026-09-18',
+          delta: 3,
         },
       ],
       sources: [
