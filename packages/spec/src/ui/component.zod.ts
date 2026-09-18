@@ -2502,6 +2502,21 @@ const objectBlockHistory = (type: string) =>
 const FILTERS_TO_FILTER = { filters: 'filter' } as const;
 
 /**
+ * A page size — a positive integer, and nothing else.
+ *
+ * ONE spelling for a rule the rest of this package already carries, so the
+ * component arm cannot drift from it again: `PaginationConfigSchema`
+ * (`view.zod.ts`) declares `pageSize: z.number().int().positive()` and
+ * `pageSizeOptions: z.array(z.number().int().positive())`; `MetadataQuery`
+ * (`kernel/metadata-plugin.zod.ts`) and the two marketplace request schemas
+ * (`marketplace/marketplace.zod.ts`) say `z.number().int().min(1)`. Each of
+ * those pins its own refusal of `0` by name. Until #19046 the `object-grid`
+ * door below said `z.number()` and `z.unknown()`, and was the only
+ * page-size declaration in the package that accepted `0`.
+ */
+const GridPageSizeSchema = z.number().int().positive();
+
+/**
  * `object-grid` (objectui `plugin-grid/src/ObjectGrid.tsx` @ `eb7f586b`).
  * Read points per key: `objectName` (throughout), `columns`/`fields` (:714-715),
  * `filter` (:739, lowered via `toFilterNode` to `$filter`), `defaultFilters`
@@ -2629,9 +2644,53 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
     + 'becomes `sort: [{ field, order }]`); the pair itself is unchanged. '
     + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
   ),
-  pagination: z.unknown().optional()
-    .describe('Pagination config ({ pageSize, pageSizeOptions, … }); its presence enables paging'),
-  pageSize: z.number().optional().describe('Flat page-size shorthand; `pagination.pageSize` wins when both are set'),
+  /**
+   * Pagination config — the two members whose value is a PAGE SIZE bounded to
+   * {@link GridPageSizeSchema}, the accept set the view arm has ruled all
+   * along, and the bag itself left OPEN.
+   *
+   * The `z.unknown()` this door carried until #19046 was a read-point record
+   * of the same #7751 vintage as its `filter` and `sort` neighbours above, and
+   * it made the SAME authored member carry two accept sets, of which renderers
+   * read the looser: `PaginationConfigSchema` refuses `pageSize: 0` and pins
+   * that refusal by name ('should reject zero pageSize' / 'should reject zero
+   * values in pageSizeOptions', `view.test.ts`), while this door receipted it
+   * `success: true`. Measured at objectui#9853: an authored
+   * `pagination.pageSize: 0` reached `ObjectGrid`, went out on the wire as
+   * `$top: 0` and rendered ZERO ROWS, with no grouping needed to trigger it,
+   * and it reached the renderer through THIS arm — the view arm would have
+   * refused it. objectui#9896 repaired the consumer half (a resolver at every
+   * read point); this is the declaration half.
+   *
+   * **`z.looseObject`, not `strictObject` — the bag stays open, deliberately.**
+   * `PaginationConfigSchema` is itself closed, but reusing it here would
+   * refuse every sibling key this door has accepted since it was written — the
+   * `…` in its own describe says authors pass them — which is a wider
+   * narrowing than the defect measured above and a different decision. So what
+   * narrows is the accept set of a page size; what does NOT narrow is which
+   * keys the bag may carry. `BuildProgressFrameSchema`
+   * (`ai/build-progress.zod.ts`) is the house precedent for a floor-not-ceiling
+   * shape, and `DashboardWidgetConfigSchema` for an open bag with declared
+   * members.
+   *
+   * Read points measured at objectui `d18322415`: `ObjectGrid.tsx:1209` and
+   * `:1628` read `(schema.pagination as any)?.pageSize ?? schema.pageSize`,
+   * `:4179` reads `schema.pagination?.pageSize` and `:4359`
+   * `schema.pagination?.pageSizeOptions` — those two are the only members any
+   * read point on this door names, and the objectui registry has published
+   * this input as `type: 'object'` all along (`plugin-grid/src/index.tsx:223`),
+   * so a non-object value here was already answered `type-mismatch` one tier
+   * down while this schema accepted it. `:4175` reads presence only
+   * (`schema.pagination !== undefined ? true : …`), which is why an authored
+   * `pagination: false` used to mean paging ON.
+   */
+  pagination: z.looseObject({
+    pageSize: GridPageSizeSchema.optional(),
+    pageSizeOptions: z.array(GridPageSizeSchema).optional(),
+  }).optional()
+    .describe('Pagination config ({ pageSize, pageSizeOptions, … }); its presence enables paging. `pageSize` and every `pageSizeOptions` entry is a positive integer — the accept set the view arm\'s `PaginationConfigSchema` already rules; the bag stays open, so other keys pass through unvalidated'),
+  pageSize: GridPageSizeSchema.optional()
+    .describe('Flat page-size shorthand, a positive integer; `pagination.pageSize` wins when both are set'),
   showPagination: z.boolean().optional().describe('Show the pager (read only when `pagination` is absent)'),
   searchableFields: z.array(z.string()).optional()
     .describe('Fields the toolbar search queries; a non-empty list enables search'),
