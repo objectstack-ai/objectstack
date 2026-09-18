@@ -458,6 +458,9 @@ import {
 import { EXIT_PREREQUISITE_NOT_MET } from '../import-prerequisite.mjs';
 import { blank, maskComments, scanSource } from '../js-comment-mask.mjs';
 import { invokedAs, isEntrypoint } from '../invoked-as.mjs';
+// The human-merge line threshold is declared ONCE, in the landing gate; this
+// tool prints the same reading at dispatch time and never carries a second copy.
+import { HUMAN_MERGE_LINE_THRESHOLD, parseNumstat, sizeVerdict } from './check-governed-merges.mjs';
 
 // Re-exported so this tool's self-test drives the SAME predicates the gate
 // runs, not copies of them. They used to be written twice — see the shared
@@ -12185,6 +12188,41 @@ export function tierLines(result) {
   ];
 }
 
+/**
+ * The dispatch-time reading of the human-merge line threshold (maintainer
+ * ruling 2026-09-18; `HUMAN_MERGE_LINE_THRESHOLD`, declared once in
+ * check-governed-merges.mjs), printed beside the tier verdict so a seat knows
+ * BEFORE ACCEPT that the PR needs a human. Prints on EVERY run, like the tier
+ * line: an absent line would mean both "under" and "this build has no size
+ * derivation", and a claim comment is written from whatever the run said. An
+ * explicit path list carries no diff, so it is NOT MEASURED — said out loud,
+ * never a silent "under". Pure.
+ */
+export function changedLineLines(size) {
+  const s = sizeVerdict(size);
+  const t = s.threshold;
+  if (!s.measured) {
+    return [
+      `Changed lines — NOT MEASURED: a path list carries no diff to count. The human-merge threshold (${t},` +
+        ' additions + deletions, generated files INCLUDED) is read off the worktree by this tool run with no paths,' +
+        ' and at landing by `node scripts/pm/check-governed-merges.mjs --pr <n>`.',
+    ];
+  }
+  const reading = `Changed lines — ${s.changedLines} (+${s.additions} / -${s.deletions}; generated files INCLUDED) vs the human-merge threshold ${t}:`;
+  if (!s.exceeds) {
+    return [
+      `${reading} under. Read off THIS worktree's diff against the merge base, not off the PR; the landing pre-check` +
+        ' (`check-governed-merges.mjs --pr <n>`) reads the PR\'s own number.',
+    ];
+  }
+  return [
+    `${reading} ⛔ OVER — this PR lands only by a HUMAN MERGE (maintainer ruling 2026-09-18; no exemption for generated` +
+      ' files, regen artefacts, docs builds or reverts). The governed terminal: no seat flips it ready, enqueues it, or' +
+      ' arms auto-merge — ACCEPT on the card, `needs-user-decision` on the PR, the final 维护者速读, review requested' +
+      ' from GOVERNED_APPROVERS. The landing pre-check `check-governed-merges.mjs --pr <n>` reads the PR\'s own number.',
+  ];
+}
+
 // ---------------------------------------------------------------------------
 // Live derivation
 // ---------------------------------------------------------------------------
@@ -14017,7 +14055,7 @@ function notMeasuredEvidenceTerm(recon) {
  * That distinction is the card's own subject matter: what is left out of a list
  * must be visible in the list.
  */
-export function derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows = [], widePopulationRows = [], rosters = [], jobFiltered = { rows: [], counts: {} } }) {
+export function derivationJson({ paths, size = null, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows = [], widePopulationRows = [], rosters = [], jobFiltered = { rows: [], counts: {} } }) {
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const { otherCommands, ...spelling } = spellingSplit(commands);
   return {
@@ -14025,6 +14063,12 @@ export function derivationJson({ paths, matchedRows, kindGroups, pending, counts
     repo: identity?.slug ?? null,
     commit: identity?.head ?? null,
     paths: [...paths],
+    // The changed-line reading (2026-09-18 human-merge threshold), measured
+    // only when the change set was derived from git: an explicit path list
+    // carries no diff, and `measured: false` says so rather than a zero.
+    changedLines: size
+      ? { ...sizeVerdict(size), files: size.files, binaryFiles: size.binaryFiles, untrackedFiles: size.untrackedFiles }
+      : sizeVerdict(null),
     commands,
     spelling: otherCommands.length ? { ...spelling, otherCommands } : spelling,
     matched: matchedRows,
@@ -14100,13 +14144,13 @@ export function derivationJson({ paths, matchedRows, kindGroups, pending, counts
  * and the declared WIDE population was not mentioned in it at all. It reads
  * `outsideBlockNames` now, with the counts this function already holds (#16795).
  */
-function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [], widePopulationRows = [], rosters = [], jobFiltered = { rows: [], counts: {} } }) {
+function machineReadableOutput(mode, { paths, size = null, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [], widePopulationRows = [], rosters = [], jobFiltered = { rows: [], counts: {} } }) {
   const identity = repoIdentity();
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const split = spellingSplit(commands);
 
   if (mode === 'json') {
-    console.log(JSON.stringify(derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows, widePopulationRows, rosters, jobFiltered }), null, 2));
+    console.log(JSON.stringify(derivationJson({ paths, size, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows, widePopulationRows, rosters, jobFiltered }), null, 2));
   } else {
     for (const command of commands) console.log(command);
   }
@@ -14228,7 +14272,7 @@ function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, 
   );
 }
 
-function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } = {}) {
+function derive(paths, { showResidue = false, mode = 'human', runRecord = [], size = null } = {}) {
   // The reachability sweep runs BEFORE a line is printed, so its refusals
   // (#4690: an empty corpus, or an all-unreachable answer) come out as a
   // failed derivation rather than as a footnote under an answer that already
@@ -14412,6 +14456,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   if (mode !== 'human') {
     machineReadableOutput(mode, {
       paths,
+      size,
       matchedRows,
       kindGroups,
       pending,
@@ -14455,6 +14500,9 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // build has no tier derivation" — and the claim comment is written from
   // whatever the run said.
   for (const line of tierLines(deriveTier(paths))) console.log(line);
+  // The changed-line reading beside it (2026-09-18 ruling), on every run for
+  // the same reason the tier verdict is.
+  for (const line of changedLineLines(size)) console.log(line);
   console.log('');
   // The block a dev PASTES carries only families a dev can run (#14004). The
   // CI-measured ones are not dropped — they get their own heading below, past
@@ -14870,7 +14918,65 @@ export function changedPathsFromGit({ cwd = ROOT, base = DEFAULT_BASE_REF } = {}
   const untracked = gitLines(['ls-files', '--others', '--exclude-standard'], cwd);
 
   const paths = [...new Set([...committed, ...worktree, ...untracked])].sort();
-  return { paths, base, baseSha, mergeBase, counts: { committed: committed.length, worktree: worktree.length, untracked: untracked.length } };
+  const size = changedLinesFromGit({ cwd, mergeBase, untracked });
+  return { paths, base, baseSha, mergeBase, counts: { committed: committed.length, worktree: worktree.length, untracked: untracked.length }, size };
+}
+
+/**
+ * The changed-line count of the same change set (the 2026-09-18 human-merge
+ * line threshold, `HUMAN_MERGE_LINE_THRESHOLD` in check-governed-merges.mjs):
+ * `git diff --numstat --no-renames <merge-base>` against the WORKING TREE, so
+ * committed and uncommitted edits to tracked files count in one read, plus
+ * every untracked file counted from disk — under-derivation is the one
+ * failure direction the path derivation above refuses, and the size follows
+ * it. A binary file (a NUL in its first 8000 bytes, git's own heuristic) is a
+ * file and 0 lines, as GitHub counts it. An untracked file that cannot be read
+ * is counted as 0 lines and NAMED in the reading rather than crashing the
+ * derivation. Throws on a `--numstat` that does not read: an unanswered size
+ * is never a size of zero.
+ */
+export function changedLinesFromGit({ cwd = ROOT, mergeBase, untracked = null }) {
+  const tracked = runGit(['diff', '--numstat', '--no-renames', mergeBase], cwd);
+  if (tracked.status !== 0) {
+    throw new Error(`git diff --numstat ${mergeBase.slice(0, 9)} failed — ${tracked.stderr || `exit ${tracked.status}`}; the changed-line count cannot be answered, and an unanswered count is never zero`);
+  }
+  const counted = parseNumstat(tracked.stdout);
+  const others = untracked ?? gitLines(['ls-files', '--others', '--exclude-standard'], cwd);
+  let untrackedLines = 0;
+  let untrackedBinary = 0;
+  let unreadable = 0;
+  for (const rel of others) {
+    let bytes;
+    try {
+      bytes = readFileSync(nodePath.join(cwd, rel));
+    } catch {
+      unreadable += 1;
+      continue;
+    }
+    const n = lineCountOf(bytes);
+    if (n === null) untrackedBinary += 1;
+    else untrackedLines += n;
+  }
+  return {
+    additions: counted.additions + untrackedLines,
+    deletions: counted.deletions,
+    files: counted.files + others.length,
+    binaryFiles: counted.binaryFiles + untrackedBinary,
+    untrackedFiles: others.length,
+    unreadableFiles: unreadable,
+    source: 'git diff --numstat off the merge base against the working tree, plus untracked files counted from disk',
+  };
+}
+
+/** Lines in a buffer as GitHub would count a NEW file: null for binary (a NUL in the first 8000 bytes). Pure. */
+export function lineCountOf(bytes) {
+  const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes ?? ''), 'utf8');
+  if (buf.subarray(0, 8000).includes(0)) return null;
+  if (buf.length === 0) return 0;
+  let n = 0;
+  for (const b of buf) if (b === 10) n += 1;
+  if (buf[buf.length - 1] !== 10) n += 1;
+  return n;
 }
 
 /**
@@ -14881,10 +14987,19 @@ export function changedPathsFromGit({ cwd = ROOT, base = DEFAULT_BASE_REF } = {}
  * produced the list — a derived run that looked identical to an explicit-path
  * run would just move the unverifiable claim one level up.
  */
-function derivationProvenance({ paths, base, mergeBase, counts }) {
+function derivationProvenance({ paths, base, mergeBase, counts, size = null }) {
+  const sized = sizeVerdict(size);
+  const sizeLine = sized.measured
+    ? [
+        `  changed lines: ${sized.changedLines} (+${sized.additions} / -${sized.deletions}; ${size.files} file(s), ${size.binaryFiles} binary counted 0,` +
+          ` ${size.untrackedFiles} untracked counted from disk${size.unreadableFiles ? `, ${size.unreadableFiles} unreadable counted 0` : ''})` +
+          ` vs the human-merge threshold ${sized.threshold}: ${sized.exceeds ? 'OVER — see the Changed-lines line on stdout' : 'under'}`,
+      ]
+    : [];
   return [
     `dispatch-gates: change set derived from git — ${paths.length} path(s) vs merge base ${mergeBase.slice(0, 9)} of '${base}' and HEAD`,
     `  (committed ${counts.committed}, working tree ${counts.worktree}, untracked ${counts.untracked}; three-dot semantics, never '${base}..HEAD')`,
+    ...sizeLine,
     ...paths.map((p) => `  · ${p}`),
   ];
 }
@@ -24667,6 +24782,18 @@ function selfTest() {
   const mandatedAndSuspect = fableOf(['.claude/skills/pm-dispatch/SKILL.md', 'packages/spec/src/data/filter.zod.ts']);
   t('a mandated surface still prints its suspect paths — the enqueue gate reads diffs, not dispatch tiers', mandatedAndSuspect.mandatory && mandatedAndSuspect.suspects.length === 1 && tierLines(mandatedAndSuspect).join('\n').includes('SUSPECT'));
   t('a verdict built without a suspects field still renders (suspicion defaults empty)', tierLines({ mandatory: false, tier: null, hits: [], declared: 1 }).length === 3);
+
+  // ── The changed-line reading beside the tier verdict (2026-09-18 ruling) ──
+  const overLine = changedLineLines({ additions: HUMAN_MERGE_LINE_THRESHOLD, deletions: 1 }).join('\n');
+  t('over the threshold, the line says HUMAN MERGE, names the governed terminal and the landing pre-check',
+    overLine.includes('HUMAN MERGE') && overLine.includes(`threshold ${HUMAN_MERGE_LINE_THRESHOLD}`) && overLine.includes('arms auto-merge') && overLine.includes('check-governed-merges.mjs --pr'), overLine);
+  const atLine = changedLineLines({ additions: HUMAN_MERGE_LINE_THRESHOLD, deletions: 0 }).join('\n');
+  t('exactly at the threshold is under it — strictly greater, as the gate reads it', atLine.includes('under.') && !atLine.includes('HUMAN MERGE'), atLine);
+  const noneLine = changedLineLines(null).join('\n');
+  t('an explicit path list is NOT MEASURED, said out loud, never a silent under', noneLine.includes('NOT MEASURED') && !noneLine.includes('under.') && noneLine.includes('--pr'), noneLine);
+  t('the threshold is read from the gate — no second copy here — and it is the ruled 5000', HUMAN_MERGE_LINE_THRESHOLD === 5000 && changedLineLines({ additions: 5001, deletions: 0 }).join('\n').includes('OVER'));
+  t('a text buffer counts its lines, an unterminated last line included', lineCountOf(Buffer.from('a\nb\n')) === 2 && lineCountOf(Buffer.from('a\nb')) === 2 && lineCountOf(Buffer.alloc(0)) === 0);
+  t('a buffer with a NUL in its first 8000 bytes is binary: null, which the caller counts as zero lines', lineCountOf(Buffer.from([0x61, 0, 0x62])) === null);
   // Same liveness guards as the mandatory table: dead data reading as
   // protection is the incident class itself.
   const deadSuspects = SUSPECT_TIER_GLOBS.filter(
@@ -24838,6 +24965,10 @@ function selfTest() {
       !derived.paths.includes('packages/runtime/sibling-landed.ts'),
     );
     t('the derived set reports the merge base it measured from', /^[0-9a-f]{40}$/.test(derived.mergeBase));
+    // The changed-line count (2026-09-18 human-merge threshold) rides the same
+    // merge base: the sibling's landed line is not ours either.
+    t('the derived set carries the changed-line count off the same merge base: +1 / -0 for this branch own committed line',
+      derived.size.additions === 1 && derived.size.deletions === 0 && derived.size.untrackedFiles === 0 && derived.size.binaryFiles === 0, derived.size);
 
     // Uncommitted and untracked work counts: a dev re-deriving before the
     // commit must not be handed a SHORT list.
@@ -24847,6 +24978,14 @@ function selfTest() {
     t('an uncommitted edit to a tracked file joins the change set', withDirty.paths.includes('packages/spec/base.ts'));
     t('an untracked new file joins the change set', withDirty.paths.includes('packages/ddd/brand-new.ts'));
     t('the sibling file stays out once the tree is dirty too', !withDirty.paths.includes('packages/runtime/sibling-landed.ts'));
+    t('an uncommitted edit and an untracked file join the changed-line count too: +3 / -1, one untracked file counted from disk',
+      withDirty.size.additions === 3 && withDirty.size.deletions === 1 && withDirty.size.untrackedFiles === 1, withDirty.size);
+    write(up, 'packages/ddd/blob.bin', Buffer.from([0, 1, 2, 0]));
+    const withBinary = changedPathsFromGit({ cwd: up });
+    t('an untracked BINARY file is a file and zero lines, as GitHub counts it',
+      withBinary.size.binaryFiles === 1 && withBinary.size.additions === 3 && withBinary.size.untrackedFiles === 2 && withBinary.size.files === 4, withBinary.size);
+    t('and the provenance names the count, the threshold and the verdict beside the path list',
+      derivationProvenance(withBinary).some((l) => l.includes('changed lines: 4 (+3 / -1') && l.includes(`threshold ${HUMAN_MERGE_LINE_THRESHOLD}: under`)), derivationProvenance(withBinary));
 
     // A branch that changes nothing derives an EMPTY set rather than the
     // base branch history — the CLI turns that into a refusal, not "no gates".
@@ -25498,6 +25637,8 @@ function selfTest() {
     moduleStderrLines(cliBaseline, cliBaseline).length === 0 && moduleStderrLines(plainRun, cliBaseline).length > 0,
   );
   t('the banner stays OFF stdout, which is pasted verbatim into claim comments', !(plainRun.stdout ?? '').includes('gate list derived from the tree of'));
+  t('--tier on an explicit path list prints the changed-lines line beside the tier verdict, as NOT MEASURED (a path list has no diff)',
+    (plainRun.stdout ?? '').includes('Changed lines — NOT MEASURED'), plainRun.stdout);
   const liveSlug = repoIdentity().slug;
   /**
    * A CLI run whose card names a path that is HYPOTHETICAL by design — the
@@ -26734,6 +26875,25 @@ function selfTest() {
     // that combination — the two input modes answer different questions — and
     // its refusal carries a different sentence at the same exit 2, which is
     // exactly the confusion the predicate has to survive.
+    // The changed-line reading on a DERIVED run, end to end (2026-09-18
+    // ruling): stdout carries the measured line beside the tier verdict and
+    // stderr's provenance carries the count — or the same no-diff refusal.
+    const tierDerivedRun = runCli(['--tier']);
+    t(
+      '--tier with no paths derives the change set and prints the MEASURED changed-lines line beside the tier verdict'
+        + ' — or the exit-2 no-diff refusal on a tree that has nothing to derive',
+      (tierDerivedRun.status === 0 && (tierDerivedRun.stdout ?? '').includes('Changed lines — ')
+        && !(tierDerivedRun.stdout ?? '').includes('NOT MEASURED') && (tierDerivedRun.stderr ?? '').includes('changed lines:'))
+        || (tierDerivedRun.status === 2 && (tierDerivedRun.stderr ?? '').includes(NO_DIFF_REFUSAL)),
+      { status: tierDerivedRun.status, out: (tierDerivedRun.stdout ?? '').slice(0, 300), err: (tierDerivedRun.stderr ?? '').slice(0, 300) },
+    );
+    const jsonExplicitRun = runCli(['--json', 'packages/spec/src/index.ts']);
+    let jsonExplicitDoc = null;
+    try { jsonExplicitDoc = JSON.parse(jsonExplicitRun.stdout ?? ''); } catch { /* asserted below */ }
+    t('--json on an explicit path list carries changedLines as NOT MEASURED with the ruled threshold, never as a zero',
+      jsonExplicitRun.status === 0 && jsonExplicitDoc?.changedLines?.measured === false && jsonExplicitDoc?.changedLines?.threshold === HUMAN_MERGE_LINE_THRESHOLD
+        && jsonExplicitDoc?.changedLines?.changedLines === null,
+      (jsonExplicitRun.stdout ?? '').slice(0, 200));
     const changedPathRun = runCli(['--changed', '--commands', seamCard]);
     t(
       '…and that same predicate REJECTS the illegal --changed-with-a-path combination, so no parse failure can satisfy the control above',
@@ -28099,6 +28259,9 @@ if (invokedDirectly) {
       }
     }
     let paths;
+    // The changed-line reading travels with a DERIVED change set only; an
+    // explicit path list carries no diff and prints NOT MEASURED.
+    let size = null;
     if (argvPaths.length > 0) {
       paths = declaredPaths;
     } else {
@@ -28127,6 +28290,7 @@ if (invokedDirectly) {
       for (const line of derivationProvenance(derived)) console.error(line);
       console.error('');
       paths = derived.paths;
+      size = derived.size;
     }
     try {
       // `--tier` answers the claim-time question alone: it reads no workflow and
@@ -28134,13 +28298,14 @@ if (invokedDirectly) {
       // cannot run — and a claim comment is written before any of that matters.
       if (process.argv.includes('--tier')) {
         for (const line of tierLines(deriveTier(paths))) console.log(line);
+        for (const line of changedLineLines(size)) console.log(line);
       } else {
         // The only mode with a VERDICT in it, so the only one whose exit code
         // carries an answer rather than "the derivation completed". A run that
         // names unrun families must not exit 0: this mode exists because a
         // report claiming coverage it did not have read exactly like one that
         // did, and an exit code is the half of that a caller cannot paraphrase.
-        const status = derive(paths, { showResidue: process.argv.includes('--residue'), mode, runRecord });
+        const status = derive(paths, { showResidue: process.argv.includes('--residue'), mode, runRecord, size });
         if (status) process.exit(status);
       }
     } catch (err) {
