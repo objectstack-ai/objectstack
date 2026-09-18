@@ -53,6 +53,7 @@
  */
 
 import fs from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { isEntrypoint } from './invoked-as.mjs';
@@ -351,7 +352,14 @@ function writeTree(root, files) {
 }
 
 function selfTest() {
-  const tmp = fs.mkdtempSync(path.join(fs.realpathSync('/tmp'), 'release-spec-changes-selftest-'));
+  // `tmpdir()`, never a `/tmp` literal and never a `realpathSync` around one:
+  // the scratch-dir sweep in `scripts/pm/dispatch-gates.mjs` resolves this base
+  // statically to prove no gate writes its scratch tree INTO the repo, and a
+  // base it cannot read is reported UNRESOLVED rather than assumed fine. A call
+  // it does not model hides an in-tree scratch dir just as effectively as one
+  // that really is in-tree. `tmpdir()` also honours TMPDIR/RUNNER_TEMP, which a
+  // hardcoded `/tmp` does not.
+  const tmp = fs.mkdtempSync(path.join(tmpdir(), 'release-spec-changes-selftest-'));
   let failed = 0;
   const batterySeen = new Map();
   const registerCase = (label) => batterySeen.set(label, (batterySeen.get(label) ?? 0) + 1);
