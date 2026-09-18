@@ -621,8 +621,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - ④ 轮次报告单列 awaiting a human merge。
 - 已入队才读到本条 ⇒ 转 draft 与 disable 都做;出队以阳性探针答,ref 缺席只旁证。
 - skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席按达档自审(清单不减)后落地。
-- 受管面两层:事实层仅本技能 `references/`,其余为规则层(含发布 `skills/**` 与 SKILL.md)。
-- 规则层四件套等人批;事实层 PR(受管路径全在该目录)经席内达档复核后 ready → 入队。
+- 受管面两层:Tier H(规则层)= `AGENTS.md`+`CLAUDE.md`+`docs/adr/**`+`docs/NORTH-STAR.md`+发布 `skills/**`。
+- Tier S = `.claude/**` 全树;Tier H 四件套等人批;Tier S 经席内达档复核 PASS 在案后 ready → 入队。
 - 路径面干净的才转 ready → 入队;队列是唯一被认可的落地路径,⛔ 永不队列外合并。
 - 入队资格:每 check 绿或预期 skip,⛔ 非必查子集;名单 check-expected-skips.mjs 只判 objectstack。
 - 非必查红是真缺陷或坏门,归 PM 入队前处置;第三种按设计而红,三条全立才可带红入队:

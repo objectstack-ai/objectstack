@@ -407,9 +407,12 @@ import { fileURLToPath } from 'node:url';
 import {
   GENERATED_SURFACE_EXCEPTIONS,
   GOVERNED_SURFACES,
+  GOVERNED_TIER_H,
+  GOVERNED_TIER_S,
   applyGeneratedExceptions,
   generatedExceptionFor,
   governedPathsIn,
+  governedTierFor,
   groupHitsByException,
   pullNumberFromSubject,
   recomputeProvenanceFor,
@@ -443,7 +446,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the 2026-09-04 unpinned predicate (the queue leg\'s)': 12,
   'decomposition, and the multi-PR group trap': 6,
   'the verdict table, both events': 10,
-  'the pull_request leg is an EARLY WARNING and never reddens': 3,
+  'the pull_request leg is an EARLY WARNING and never reddens': 5,
   'the replay fixtures: the three incidents this guard descends from': 9,
   '⭐ the ordering guarantee, measured with a spy that THROWS': 7,
   'the words a reader acts on (requirement (e))': 26,
@@ -453,7 +456,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ #14063: the environment the exemption needs, pinned to the YAML': 7,
   '⭐ #15406: a CLEAR reached through a lift is not a clear that saw nothing': 10,
   '⛔ #17040: the contract-review carrier is the enqueue gate': 39,
-  '⭐ #18020: the references tier — a review of record, not an approval': 40,
+  '⭐ #18020 → #19133 Tier S: a review of record, not an approval': 43,
   '⭐ #18701: the record lives on the PR or its card, and BOTH are read': 14,
 });
 
@@ -548,39 +551,47 @@ export const GOVERNED_APPROVERS = Object.freeze(['os-zhuang', 'hotlong']);
  */
 export const CONTRACT_REVIEW_LABEL = 'needs:contract-review';
 
-// ── the references TIER: a review of record in place of an approval (#18020) ─
+// ── the landing TIER: Tier S lands on a review of record, Tier H on an approval ─
 
 /**
- * The ONE governed prefix that lands through the merge queue on a review of
- * record (#17950, ruled 2026-09-13 「我点头」; charter text landed by PR #18018).
+ * The two landing tiers, READ from the register (#19133, ruled 2026-09-18
+ * 「同意改规则。」 on the skills seat's proposal; the amendment moved
+ * `.claude/settings.json` and `.claude/hooks/**` over too: 「我觉得这些我也没
+ * 必要确认」). Every `GOVERNED_SURFACES` row carries `tier`, and
+ * `governedTierFor` — imported from the register's own file at module scope,
+ * like every other predicate this guard reads — derives a pull request's tier
+ * from the rows its GOVERNED paths hit. ⛔ Nothing here spells a prefix, a glob
+ * or a row: the #18020 references tier was a prefix constant declared here
+ * (`REFERENCES_TIER_PREFIX`, the fact layer alone); it is gone, and a seat
+ * reading the register gets the same answer to "what lands this on a record"
+ * as this guard does. The register's `.claude/**` row still AUDITS every path
+ * under it exactly as before — the tier is a LANDING rule inside the row, never
+ * a membership one, which is why ⛔ nothing here touches `GOVERNED_SURFACES`.
  *
- * ⛔ Spelled as a PREFIX with its trailing slash, never as a `**` glob. The
- * glob shape is the REGISTER's vocabulary — `check-governed-prose` reads every
- * `**`-shaped code span in an instruction surface as a claim about
- * `GOVERNED_SURFACES` — and this is not a register entry: the register's
- * `.claude/**` row still AUDITS every path under it, exactly as before. What
- * this constant names is a LANDING tier inside that row, which is why ⛔ nothing
- * here touches `GOVERNED_SURFACES` and why a seat reading the register still
- * gets the same answer to "is this governed": yes.
+ * `H` (人合) is the DEFAULT in every ambiguous case, because the two are not
+ * symmetric: reading a Tier H path as S lands a maintainer-owned file on a
+ * seat's own review, while reading a Tier S path as H costs one authorized
+ * approval — the maintainer is asked to look at a pull request they need not
+ * have, and the claiming seat lands it from there. An empty list answers H for
+ * the same reason (the register's `landingTierOf` does; see its docblock).
  *
- * The trailing slash is load-bearing rather than tidy: without it
- * `.claude/skills/pm-dispatch/references-draft/x.md` would classify into the
- * tier on a bare `startsWith`, and a sibling directory one character away from
- * the ruled one is the cheapest possible way to widen a governance boundary
- * nobody agreed to widen. The battery pins that path in the refusing direction.
+ * ⭐ ALL, not ANY, and not a proportion: 「混合 diff 一条命中即整 PR 分叉」 is the
+ * regime's own rule one level up, and this is the same rule one level down. One
+ * Tier H path in the diff and the whole pull request is Tier H. The paths
+ * handed to `governedTierFor` are the GOVERNED paths of one entry —
+ * `decomposeGovernedWork` has already dropped everything the register does not
+ * match, so an ordinary source file riding along cannot demote it.
  */
-export const REFERENCES_TIER_PREFIX = '.claude/skills/pm-dispatch/references/';
+export const TIER_H = GOVERNED_TIER_H;
+export const TIER_S = GOVERNED_TIER_S;
 
 /**
- * The two landing tiers. `rules` is the DEFAULT in every ambiguous case,
- * because the two are not symmetric: reading a rules-layer path as references
- * lands a maintainer-owned file on a seat's own review, while reading a
- * references path as rules costs one authorized approval — the maintainer is
- * asked to look at a pull request they need not have, and the claiming seat
- * lands it from there.
+ * The Tier S surfaces in the register's own glob spelling — for the WORDS a
+ * verdict prints, never for a second match (the match is `governedTierFor`).
  */
-export const TIER_RULES = 'rules';
-export const TIER_REFERENCES = 'references';
+export function tierSGlobs() {
+  return GOVERNED_SURFACES.filter((s) => s.tier === GOVERNED_TIER_S).map((s) => s.glob).join(', ');
+}
 
 /**
  * WHERE a review of record may live, in the words a refusal prints — a MIRROR
@@ -599,25 +610,12 @@ export const TIER_REFERENCES = 'references';
 export const REVIEW_OF_RECORD_LOCATION = 'the PR or its card';
 
 /**
- * Which tier a governed pull request's governed paths fall in.
- *
- * ⭐ ALL, not ANY, and not a proportion: 「混合 diff 一条命中即整 PR 分叉」 is the
- * regime's own rule one level up, and this is the same rule one level down. One
- * rules-layer path in the diff and the whole pull request is rules-layer.
- *
- * `paths` are the GOVERNED paths of one entry — `decomposeGovernedWork` has
- * already dropped everything the register does not match, so an ordinary source
- * file riding along in the same PR is not consulted here and cannot demote it.
- *
- * An EMPTY list answers `rules`: an entry with no governed paths never reaches
- * this function, and a caller that got one anyway has lost the fact this
- * decision rests on.
+ * `governedTierFor` — the register's own function, re-exported so this file's
+ * readers (`check-clause2-carriers.mjs`'s cross-tool pin) and its battery keep
+ * one name. ⛔ Not a wrapper and not a copy: the register answers, this file
+ * relays. The tier docblock above carries the ALL-not-ANY rule and the H default.
  */
-export function governedTierFor(paths) {
-  const list = (Array.isArray(paths) ? paths : []).map((path) => String(path ?? ''));
-  if (list.length === 0) return TIER_RULES;
-  return list.every((path) => path.startsWith(REFERENCES_TIER_PREFIX)) ? TIER_REFERENCES : TIER_RULES;
-}
+export { governedTierFor };
 
 /** Where each imported recogniser lives. Named, so a failure can say which file. */
 export const RECOGNISER_SOURCES = Object.freeze({
@@ -980,16 +978,16 @@ export function unreadableApproval(reason) {
 /**
  * Is this governed pull request SATISFIED?
  *
- * ⭐ The approval limb is first and is unchanged, which is what makes the
- * references tier MONOTONE: an entry the 2026-09-04 predicate already cleared
- * is cleared here by the same reading, at the same cost, in the same words. The
- * tier limb can only ADD a pass, and only on an entry whose `record` key exists
- * — merge_group, references tier. ⛔ Never reorder these two: a record consulted
- * ahead of an approval would let a seat's own review displace a maintainer's.
+ * ⭐ The approval limb is first and is unchanged, which is what makes Tier S
+ * MONOTONE: an entry the 2026-09-04 predicate already cleared is cleared here
+ * by the same reading, at the same cost, in the same words. The tier limb can
+ * only ADD a pass, and only on an entry whose `record` key exists — merge_group,
+ * Tier S. ⛔ Never reorder these two: a record consulted ahead of an approval
+ * would let a seat's own review displace a maintainer's.
  */
 export function entrySatisfied(entry) {
   if (entry?.approval?.state === 'approved') return true;
-  return entry?.tier === TIER_REFERENCES && entry?.record?.state === 'stands';
+  return entry?.tier === TIER_S && entry?.record?.state === 'stands';
 }
 
 /**
@@ -1000,7 +998,7 @@ export function entrySatisfied(entry) {
  */
 export function entryUnreadable(entry) {
   if (entry?.approval?.state === 'unreadable') return true;
-  return entry?.tier === TIER_REFERENCES && entry?.record?.state === 'unreadable';
+  return entry?.tier === TIER_S && entry?.record?.state === 'unreadable';
 }
 
 /**
@@ -1012,10 +1010,10 @@ export function guardVerdict({ event, governed = [], unattributed = [], approval
     ...entry,
     approval: approvals.get(entry.pr) ?? unreadableApproval('no review reading was recorded for this pull request'),
     // ⭐ The record key EXISTS only where the tier leg ran — merge_group, on a
-    // references-tier entry. That is not a nicety: the `pull_request` leg's
-    // rendering is byte-identical to the pre-#18020 one BY CONSTRUCTION, since
-    // the renderer can only print what the key's presence lets it see.
-    ...(event === EVENT_MERGE_GROUP && entry.tier === TIER_REFERENCES
+    // Tier S entry. That is not a nicety: the `pull_request` leg's record
+    // block is absent BY CONSTRUCTION, since the renderer can only print what
+    // the key's presence lets it see (the tier LINE itself prints on both legs).
+    ...(event === EVENT_MERGE_GROUP && entry.tier === TIER_S
       ? { record: records.get(entry.pr) ?? { state: 'unreadable', reason: 'no record reading was recorded for this pull request' } }
       : {}),
   }));
@@ -1056,6 +1054,23 @@ export function renderGuardVerdict(verdict) {
       ...s.files.slice(0, 12).map((f) => `          - ${f}`),
       ...(s.files.length > 12 ? [`          … and ${s.files.length - 12} more`] : []),
     ]);
+  // ⚖️ The landing tier and what it waits for (#19133), printed on BOTH legs so
+  // the early warning names the tier as the card requires. The queue leg's
+  // record block follows it where the record key exists.
+  const tierLines = (entry) =>
+    entry.tier === TIER_S
+      ? [
+          `        ⚖️ landing tier: S(席内达档复核落地) — every governed path above lies under a Tier S surface (${tierSGlobs()}),`,
+          '           so a review of record on the CURRENT head lands it in place of an authorized approval: a `## Contract',
+          `           review\` comment on ${REVIEW_OF_RECORD_LOCATION} naming this head, \`Served-tier: CONTRACT_REVIEW_TIER\`,`,
+          '           `**VERDICT: PASS**`, `check-clause2-carriers.mjs --pair N` at 0 and every check green; then the OWNING seat',
+          '           lands it (#19133, maintainer 2026-09-18 「同意改规则。」). One Tier H path here and this line would read H.',
+        ]
+      : [
+          '        ⚖️ landing tier: H(人合) — waits for the maintainer\'s hand or an authorized APPROVED review',
+          `           (GOVERNED_APPROVERS: ${GOVERNED_APPROVERS.join(', ')}); then the OWNING seat lands it. No review of record`,
+          '           substitutes here: one Tier H path in the diff and the whole pull request is Tier H.',
+        ];
 
   // ⚠️ The `pull_request` leg's wording is BYTE-IDENTICAL to the pre-pinning
   // guard (the 2026-08-27 card's own constraint) — only the queue leg, where
@@ -1128,15 +1143,10 @@ export function renderGuardVerdict(verdict) {
   for (const entry of verdict.entries) {
     lines.push('', `  #${entry.pr} — governed:`);
     lines.push(...surfaceLines(entry));
-    // ⭐ Printed only where the tier leg ran, so the rules layer's block and the
-    // whole `pull_request` leg keep their bytes.
-    if (entry.record !== undefined) {
-      lines.push(
-        `        ⚖️ landing tier: REFERENCES — every governed path above is under ${REFERENCES_TIER_PREFIX}, so a`,
-        '           review of record on the CURRENT head satisfies this check in place of an authorized approval',
-        '           (#17950, ruled 2026-09-13 「我点头」). One rules-layer path here and this line would be absent.',
-      );
-    }
+    // The pre-#19133 `pull_request` byte-identity constraint (2026-08-27) is
+    // superseded by that ruling's own requirement: the early warning names the
+    // tier and what it waits for.
+    lines.push(...tierLines(entry));
     if (entry.approval.state === 'approved') {
       lines.push(
         queueLeg(entry.approval)
@@ -1244,26 +1254,51 @@ export function renderGuardVerdict(verdict) {
 
   lines.push('');
   if (verdict.conclusion === 'warned') {
+    // Per tier (#19133): the early warning names which tier each pull request
+    // is and what it waits for. A Tier H block and a Tier S block, each printed
+    // only when an entry of that tier is present.
+    const tierH = verdict.entries.filter((e) => e.tier !== TIER_S);
+    const tierS = verdict.entries.filter((e) => e.tier === TIER_S);
     lines.push(
       '  ⚠️  EARLY WARNING, not a failure — this run is on the pull request, and this check is deliberately',
-      '      GREEN here. A governed PR parked in draft while it waits for an authorized approval IS the',
+      '      GREEN here. A governed PR parked in draft while it waits for what its tier lands on IS the',
       '      regime\'s healthy resting state (「四件套留 draft 等人批,⛔ 不翻正式不入队」), and a check that',
       '      reddens on the healthy case is the permanently-red gate the 2026-08-18 ruling retired',
-      '      (红灯常态化本身有毒).',
-      '',
-      '      ⛔ What a seat must NOT do with this PR while no authorized APPROVED review is on record:',
-      '         flip it ready, enqueue it, or arm auto-merge (AGENTS.md Prime Directive #14 — its four',
-      '         prohibitions lift for that approval and for nothing else). One governed path governs the',
-      '         whole PR — 「混合 diff 一条命中即整 PR 分叉」; proportion is not a question.',
-      '',
-      `      ✅ What a seat DOES do once an account in GOVERNED_APPROVERS (${GOVERNED_APPROVERS.join(', ')}) has APPROVED it,`,
-      '         on ANY commit: the CLAIMING SEAT lands it — ruling C (#17971, maintainer 2026-09-13, verbatim',
-      '         「C. approve 后不管后续改动都由席位落地:」), 「席位落地 = 过落地前检、清标、ready、',
-      '         auto-merge,踢出/变基同法。」 Unapproved, the maintainer\'s own direct merge (人工直合) is',
-      '         the only landing this pull request has.',
+      '      (红灯常态化本身有毒). The tier line on each entry above names its tier and what it waits for.',
+    );
+    if (tierH.length > 0) {
+      lines.push(
+        '',
+        `      ⚖️ Tier H (人合) — ${tierH.map((e) => `#${e.pr}`).join(', ')}:`,
+        '      ⛔ What a seat must NOT do with this PR while no authorized APPROVED review is on record:',
+        '         flip it ready, enqueue it, or arm auto-merge (AGENTS.md Prime Directive #14 — its four',
+        '         prohibitions lift for that approval and for nothing else). One governed path governs the',
+        '         whole PR — 「混合 diff 一条命中即整 PR 分叉」; proportion is not a question.',
+        '',
+        `      ✅ What a seat DOES do once an account in GOVERNED_APPROVERS (${GOVERNED_APPROVERS.join(', ')}) has APPROVED it,`,
+        '         on ANY commit: the CLAIMING SEAT lands it — ruling C (#17971, maintainer 2026-09-13, verbatim',
+        '         「C. approve 后不管后续改动都由席位落地:」), 「席位落地 = 过落地前检、清标、ready、',
+        '         auto-merge,踢出/变基同法。」 Unapproved, the maintainer\'s own direct merge (人工直合) is',
+        '         the only landing this pull request has.',
+      );
+    }
+    if (tierS.length > 0) {
+      lines.push(
+        '',
+        `      ⚖️ Tier S (席内达档复核落地) — ${tierS.map((e) => `#${e.pr}`).join(', ')}: every governed path lies under a Tier S`,
+        `         surface (${tierSGlobs()}). ⛔ What a seat must NOT do while no review of record for the CURRENT head is on`,
+        '         the thread: flip it ready, enqueue it, or arm auto-merge — and ⛔ no seat submits an approving review',
+        '         in its place. ✅ What lifts those: a `## Contract review` comment on',
+        `         ${REVIEW_OF_RECORD_LOCATION} naming this head with \`Served-tier: CONTRACT_REVIEW_TIER\` and \`**VERDICT: PASS**\`,`,
+        '         `check-clause2-carriers.mjs --pair N` at 0 and every check green; then the OWNING seat lands it through',
+        '         the queue — no maintainer click is waited for (#19133, maintainer 2026-09-18 「同意改规则。」). A record',
+        '         on an OLDER head does not carry forward: a record names the head it judged.',
+      );
+    }
+    lines.push(
       '',
       '      If it IS enqueued anyway, the merge-queue run of this same check will REFUSE it unless every',
-      '      governed pull request above carries an APPROVED review by then.',
+      '      governed pull request above carries what its tier waits for by then — the approval, or the record.',
     );
     return lines.join('\n');
   }
@@ -1276,15 +1311,15 @@ export function renderGuardVerdict(verdict) {
     const viaRecord = verdict.entries.filter((e) => e.approval.state !== 'approved' && e.record?.state === 'stands');
     if (viaRecord.length > 0) {
       lines.push(
-        '  ✅  CLEARED — and NOT every pull request below cleared on an approval. ⚖️ The references tier (#17950,',
-        `      ruled 2026-09-13 「我点头」) satisfied ${viaRecord.length} of them: ${viaRecord.map((e) => `#${e.pr}`).join(', ')} —`,
-        `      every governed path in each lies under ${REFERENCES_TIER_PREFIX}, and each carries the skills seat's`,
+        '  ✅  CLEARED — and NOT every pull request below cleared on an approval. ⚖️ Tier S (#17950\'s references',
+        `      path, generalised by #19133, maintainer 2026-09-18 「同意改规则。」) satisfied ${viaRecord.length} of them: ${viaRecord.map((e) => `#${e.pr}`).join(', ')} —`,
+        `      every governed path in each lies under a Tier S surface (${tierSGlobs()}), and each carries the owning seat's`,
         '      review of record on its CURRENT head (`## Contract review`, `Reviewed-by:`, a standing `Served-tier:`).',
         '      ⛔ This is NOT the approval clear: no account in GOVERNED_APPROVERS acted on those pull requests, and',
         '      the record above is the entire review. ⚠️ Existence and provenance only — whether it reads PASS is',
-        '      precondition ① of the landing check and stays human. Every OTHER governed path is the rules layer and',
-        '      still needs the authorized approval; the post-merge audit',
-        '      (`node scripts/pm/check-governed-merges.mjs`) lists these landings exactly as it always has.',
+        '      precondition ① of the landing check and stays human. Every Tier H path still needs the authorized',
+        '      approval; the post-merge audit (`node scripts/pm/check-governed-merges.mjs`) lists these landings',
+        '      exactly as it always has, and a Tier S merge without a PASS record is that audit\'s finding.',
       );
       return lines.join('\n');
     }
@@ -1340,8 +1375,8 @@ export function renderGuardVerdict(verdict) {
   );
   if (verdict.entries.some((e) => e.record !== undefined)) {
     lines.push(
-      `        3. Or — ONLY for a pull request whose governed paths all lie under ${REFERENCES_TIER_PREFIX},`,
-      '           which the tier line on each entry above says outright — the skills seat posts its review of record',
+      `        3. Or — ONLY for a pull request whose governed paths all lie under a Tier S surface (${tierSGlobs()}),`,
+      '           which the tier line on each entry above says outright — the owning seat posts its review of record',
       `           on the CURRENT head and re-queues: a \`## Contract review\` comment on ${REVIEW_OF_RECORD_LOCATION} naming`,
       '           this head, carrying a `Reviewed-by:` line and a `Served-tier:` line whose token is the NAME',
       '           `CONTRACT_REVIEW_TIER` — ⛔ never its value and never any model identifier, because `AGENTS.md`',
@@ -1349,7 +1384,7 @@ export function renderGuardVerdict(verdict) {
       '           seat\'s own transcript grep, which leaves no repository artifact at all.',
       '           ⛔ A record on an OLDER head does not carry forward — unlike an approval,',
       '           which since 2026-09-04 does — because a record names the head it judged. ⛔ And it widens to nothing:',
-      '           one rules-layer path in the diff and option 1 or 2 is the only way through.',
+      '           one Tier H path in the diff and option 1 or 2 is the only way through.',
     );
   }
   lines.push(
@@ -1423,7 +1458,7 @@ export async function runGuard({ event, rows, fetchReviews, fetchPull, fetchComm
       approvals.set(entry.pr, unreadableApproval(String(error?.message ?? error).split('\n')[0]));
     }
   }
-  // ── the references tier (#18020) ────────────────────────────────────────
+  // ── Tier S: the record leg (#18020, generalised to the tier by #19133) ──
   //
   // ⭐ LAST, and only for what is still unsatisfied. Two properties come out of
   // that placement and neither is decoration: the leg is MONOTONE (it is never
@@ -1433,7 +1468,7 @@ export async function runGuard({ event, rows, fetchReviews, fetchPull, fetchComm
   if (event === EVENT_MERGE_GROUP) {
     let recognisers = null;
     for (const entry of governed) {
-      if (entry.tier !== TIER_REFERENCES) continue;
+      if (entry.tier !== TIER_S) continue;
       if (approvals.get(entry.pr)?.state === 'approved') continue;
       if (recognisers === null) {
         try {
@@ -2388,6 +2423,18 @@ export async function selfTest() {
     ),
   );
   assert('and-an-unattributed-governed-commit-does-not-redden-a-pr-run-either', run('pull_request', [{ sha: 'c'.repeat(40), subject: 'x', pr: null, paths: ['CLAUDE.md'] }]).exitCode === EXIT_CLEAR);
+  // #19133: the early warning names the TIER and what it waits for, on the
+  // pull_request leg — where no record is read, so the tier line alone carries it.
+  const warnedS = run('pull_request', [row(9528, ['.claude/agents/os-dev.md'])], new Map([[9528, approvalVerdict([])]]));
+  const warnedSText = renderGuardVerdict(warnedS);
+  assert(
+    'the-early-warning-names-Tier-S-and-the-record-it-waits-for-and-asks-for-no-approval',
+    warnedS.conclusion === 'warned' && /landing tier: S/.test(warnedSText) && /## Contract review/.test(warnedSText) && /CONTRACT_REVIEW_TIER/.test(warnedSText) &&
+      !/What a seat DOES do once an account in GOVERNED_APPROVERS/.test(warnedSText),
+    warnedSText,
+  );
+  const warnedHText = renderGuardVerdict(warnedV);
+  assert('and-names-Tier-H-and-the-approval-it-waits-for-with-no-Tier-S-block', /landing tier: H/.test(warnedHText) && /authorized APPROVED review/.test(warnedHText) && !/Tier S \(/.test(warnedHText), warnedHText);
 
   // ── the replay fixtures: the three incidents this guard descends from ─────
   battery('the replay fixtures: the three incidents this guard descends from');
@@ -3253,23 +3300,30 @@ export async function selfTest() {
   // the REAL ones, loaded through the real lazy import, because a battery run
   // against hand-made stubs would keep passing the day an upstream rename broke
   // the live leg — which is the entire failure mode importing them avoids.
-  battery('⭐ #18020: the references tier — a review of record, not an approval');
-  const REF_A = `${REFERENCES_TIER_PREFIX}platform-readings.md`;
-  const REF_B = `${REFERENCES_TIER_PREFIX}lanes/skills.md`;
-  const RULES_PATH = '.claude/skills/pm-dispatch/SKILL.md';
-  // ⛔ The sibling one character away from the ruled directory. A bare
-  // `startsWith` without the trailing slash lands this in the tier.
-  const NEAR_MISS = '.claude/skills/pm-dispatch/references-draft/x.md';
+  battery('⭐ #18020 → #19133 Tier S: a review of record, not an approval');
+  // The fact layer that WAS the whole tier under #18020, and the siblings the
+  // 2026-09-18 ruling moved in beside it — skills, agents, hooks, settings.
+  const REF_A = '.claude/skills/pm-dispatch/references/platform-readings.md';
+  const REF_B = '.claude/skills/pm-dispatch/references/lanes/skills.md';
+  const SKILL_PATH = '.claude/skills/pm-dispatch/SKILL.md';
+  const AGENT_PATH = '.claude/agents/os-dev.md';
+  const HOOK_PATH = '.claude/hooks/guard-main-checkout.sh';
+  const SETTINGS_PATH = '.claude/settings.json';
+  // ⛔ The law. One of these in the diff and the whole entry is Tier H.
+  const RULES_PATH = 'AGENTS.md';
+  const TIER_H_PATHS = ['AGENTS.md', 'CLAUDE.md', 'docs/adr/0001-x.md', 'docs/NORTH-STAR.md', 'skills/objectstack-ui/SKILL.md'];
 
-  assert('a-references-only-path-set-is-the-REFERENCES-tier', governedTierFor([REF_A, REF_B]) === TIER_REFERENCES);
-  assert('⛔ the-adjacent-directory-is-NOT-the-tier-the-trailing-slash-is-the-control', governedTierFor([NEAR_MISS]) === TIER_RULES, NEAR_MISS);
-  assert('ONE-rules-layer-path-makes-the-WHOLE-entry-rules-layer', governedTierFor([REF_A, REF_B, RULES_PATH]) === TIER_RULES);
-  assert('a-rules-only-set-is-rules', governedTierFor([RULES_PATH]) === TIER_RULES);
-  assert('an-EMPTY-path-set-defaults-to-rules-never-to-the-tier', governedTierFor([]) === TIER_RULES && governedTierFor(undefined) === TIER_RULES);
+  assert('a-Tier-S-only-path-set-is-Tier-S', governedTierFor([REF_A, REF_B, SKILL_PATH, AGENT_PATH, HOOK_PATH, SETTINGS_PATH]) === TIER_S);
+  assert('⛔ the-old-references-boundary-is-GONE-SKILL-md-and-a-references-draft-sibling-are-Tier-S-alike', governedTierFor([SKILL_PATH]) === TIER_S && governedTierFor(['.claude/skills/pm-dispatch/references-draft/x.md']) === TIER_S);
+  assert('ONE-Tier-H-path-makes-the-WHOLE-entry-Tier-H', governedTierFor([REF_A, REF_B, RULES_PATH]) === TIER_H);
+  assert('each-Tier-H-surface-alone-is-Tier-H', TIER_H_PATHS.every((p) => governedTierFor([p]) === TIER_H), TIER_H_PATHS.join());
+  assert('an-EMPTY-path-set-defaults-to-Tier-H-never-to-S', governedTierFor([]) === TIER_H && governedTierFor(undefined) === TIER_H);
+  assert('the-tier-constants-are-the-registers-own-two-distinct-values', TIER_H === GOVERNED_TIER_H && TIER_S === GOVERNED_TIER_S && TIER_H !== TIER_S);
   assert(
     'the-tier-travels-on-the-decomposed-entry-so-the-verdict-never-re-derives-it',
-    decomposeGovernedWork([row(5, [REF_A])]).governed[0].tier === TIER_REFERENCES &&
-      decomposeGovernedWork([row(5, [REF_A, RULES_PATH])]).governed[0].tier === TIER_RULES,
+    decomposeGovernedWork([row(5, [REF_A])]).governed[0].tier === TIER_S &&
+      decomposeGovernedWork([row(5, [AGENT_PATH])]).governed[0].tier === TIER_S &&
+      decomposeGovernedWork([row(5, [REF_A, RULES_PATH])]).governed[0].tier === TIER_H,
   );
 
   // The real recognisers, and the tier VALUE read from the constant's one home
@@ -3345,6 +3399,21 @@ export async function selfTest() {
     'references-only-plus-a-valid-record-on-the-CURRENT-head-PASSES-with-zero-approvals',
     tierPass.exitCode === EXIT_CLEAR && tierPass.conclusion === 'cleared' && tierPass.entries[0].record.state === 'stands',
     JSON.stringify(tierPass.entries[0].record),
+  );
+  // ⭐ #19133, end to end: the generalised tier. An agents + settings diff lands
+  // on the same record — and its lit control, the same diff with NO record, is
+  // refused (the card's own acceptance line).
+  const agentPass = await tierRun({ files: [AGENT_PATH, SETTINGS_PATH], comments: [recordComment()] });
+  assert(
+    'a-claude-agents-plus-settings-PR-with-a-valid-record-PASSES-with-zero-approvals-Tier-S-generalised',
+    agentPass.exitCode === EXIT_CLEAR && agentPass.conclusion === 'cleared' && agentPass.entries[0].tier === TIER_S && agentPass.entries[0].record.state === 'stands',
+    JSON.stringify(agentPass.entries[0].record),
+  );
+  const agentNoRecord = await tierRun({ files: [AGENT_PATH, SETTINGS_PATH], comments: [] });
+  assert(
+    '⛔ CONTROL: the-same-Tier-S-PR-with-NO-record-is-REFUSED',
+    agentNoRecord.exitCode === EXIT_REFUSED_UNAPPROVED && agentNoRecord.entries[0].tier === TIER_S && agentNoRecord.entries[0].record.state === 'absent',
+    JSON.stringify(agentNoRecord.entries[0].record),
   );
   // The lit controls: the same fixture, one fact away, in five directions.
   const tierOldHead = await tierRun({ comments: [recordComment({ sha: REF_OLD.slice(0, 12) })] });
@@ -3510,11 +3579,11 @@ export async function selfTest() {
   );
 
   // ⭐ The BOUNDARY: one rules-layer path and the tier is not reachable at all.
-  battery('⭐ #18020: the references tier — a review of record, not an approval');
+  battery('⭐ #18020 → #19133 Tier S: a review of record, not an approval');
   const tierMixed = await tierRun({ files: [REF_A, RULES_PATH], comments: [recordComment()] });
   assert(
-    '⛔ a-MIXED-diff-with-one-rules-layer-path-is-REFUSED-even-with-a-perfect-record',
-    tierMixed.exitCode === EXIT_REFUSED_UNAPPROVED && tierMixed.entries[0].tier === TIER_RULES && tierMixed.entries[0].record === undefined,
+    '⛔ a-MIXED-diff-with-one-Tier-H-path-is-REFUSED-even-with-a-perfect-record',
+    tierMixed.exitCode === EXIT_REFUSED_UNAPPROVED && tierMixed.entries[0].tier === TIER_H && tierMixed.entries[0].record === undefined,
   );
   assert('and-the-mixed-entry-never-even-BOUGHT-the-thread-read', tierApiCalls === 2, `api calls: ${tierApiCalls}`);
 
@@ -3660,9 +3729,9 @@ export async function selfTest() {
     Object.keys(RECOGNISER_SOURCES).join(', '),
   );
   assert(
-    '⛔ the-tier-prefix-keeps-its-trailing-slash-and-is-NOT-written-as-a-register-glob',
-    REFERENCES_TIER_PREFIX.endsWith('/') && !REFERENCES_TIER_PREFIX.includes('*'),
-    REFERENCES_TIER_PREFIX,
+    '⛔ this-file-spells-NO-tier-prefix-Tier-S-is-the-register-rows-that-carry-S-and-today-that-is-the-whole-claude-tree',
+    GOVERNED_SURFACES.filter((s) => s.tier === TIER_S).map((s) => s.glob).join() === '.claude/**' && tierSGlobs() === '.claude/**',
+    tierSGlobs(),
   );
   assert(
     '⛔ and-this-leg-added-NO-surface-to-the-register-the-tier-is-a-landing-rule-not-a-membership-one',
