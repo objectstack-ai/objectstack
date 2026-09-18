@@ -1,6 +1,6 @@
-# ADR-0136: A predicate's FAULT semantics are part of the protocol — loud at submit, fail-open at render, and a blank predicate is a declared third state
+# ADR-0137: A predicate's FAULT semantics are part of the protocol — loud at submit, fail-open at render, and a blank predicate is a declared third state
 
-**Status**: Accepted (2026-09-18) — **D1 implemented here** (`PredicateSchema` / `PredicateInputSchema` compose the evaluated rule; the `FieldSchema` field-rule triad binds them; ADR-0087 D3 entry `field-rule-predicate-evaluated-slot-source-required`). **D2 / D3 / D4 are declared here and delivered by consumers** — the renderer and submit path in objectui#8069, which is `pm:blocked` on this record. D4's spec-side authoring refusal for the action / visibility GATE slots is deliberately **not** in this record's PR; see [Scope boundary](#scope-boundary-what-this-record-does-not-land).
+**Status**: Accepted (2026-09-18) — **this record declares; it implements nothing.** D1's authoring refusal is ruled by decision batch #122 item 2 (card #15811, [`5644350409`](https://github.com/objectstack-ai/objectstack/issues/15811#issuecomment-5644350409), 2026-09-12) and lands in PR #18638, which owns the accept-set narrowing across every evaluated slot under one ADR-0087 id — this record's own PR carries **no** schema change, by decision batch #160 item 1 (2026-09-18: 「同意」 to **A**). **D2 / D3 / D4 are declared here and delivered by consumers** — the renderer and submit path in objectui#8069, which is `pm:blocked` on this record. See [Scope boundary](#scope-boundary-what-this-record-does-not-land) for what this record does not land and who lands it.
 **Deciders**: ObjectStack Protocol Architects (maintainer ruling on objectui#8069, decision batch #119 item 3, 2026-09-12: 「同意」 to **A**, with **Q2 yes** and **Q3 yes**), filed as objectstack#17778 by the director seat
 **Builds on**: [ADR-0058](./0058-expression-and-predicate-surface.md) (the expression & predicate surface — its D5 predicate failure tiers are the table this record writes the field-rule row of), [ADR-0089](./0089-unify-visibility-predicate-naming.md) (unified the `*When` family under one NAME; this record decides what that family does when it cannot RUN), [ADR-0087](./0087-metadata-protocol-upgrade-contract.md) (conversion-over-notification — D1 lands as a D3 semantic entry because no D2 conversion exists), [ADR-0124](./0124-server-enforces-client-is-courtesy.md) (D1 server-enforces — why a render-side direction is never the whole answer), [ADR-0078](./0078-no-silently-inert-metadata.md) (no silently-inert metadata — a predicate that cannot run is the purest case), [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove), [ADR-0032](./0032-unified-expression-layer.md) (the CEL layer these predicates are written in)
 **Consumers**: `@objectstack/spec` (`shared/expression.zod.ts` — the predicate contract; `data/field.zod.ts` — the field-rule triad), `@objectstack/objectql` (`validation/rule-validator.ts` — the server-side enforcer whose three fault directions this record measured), `@objectstack/lint` (`validate-expressions.ts`, `validate-visibility-predicates.ts` — the author-time reporters), and the ObjectUI form renderer + submit path (objectui#8069)
@@ -15,12 +15,16 @@ named two. The missing state is **"authored, but the engine cannot run it"** —
 because nothing named it, every layer resolved it to its own local fallback and
 none of those fallbacks was the author's.
 
-| state | before | after this record |
+| state | before | after this decision |
 |---|---|---|
 | absent | no rule | no rule (unchanged) |
 | authored and evaluable | the author's verdict | the author's verdict (unchanged) |
 | **authored, blank** | parsed, then silently no-op'd | **refused at authoring** (D1) |
 | **authored, not evaluable** | each layer's own fallback, silently | **refused at submit, loudly** (D2) |
+
+"After this decision", not "after this PR": every row of the right-hand column is
+carried by someone else — D1 by PR #18638 under decision batch #122 item 2, D2–D4
+by the consumers in objectui#8069. This record is the contract, not the landing.
 
 **Decision:** a predicate's fault semantics are **protocol**, not renderer choice.
 A predicate slot accepts only what the engine can actually run (D1). A fault at
@@ -68,39 +72,64 @@ migration prescription: removing such a key is behaviour-preserving, which makes
 it a safe default — and a dishonest one to reach for without noticing that it
 records a rule that never ran.
 
-### The narrowing mechanism already existed
+### The narrowing mechanism already existed, and it already has an owner
 
-This record introduces no new validation machinery. `EvaluatedExpressionSchema`
-and `EvaluatedExpressionInputSchema` already spell "an evaluated slot is held to
-what the engine can actually run", already publish one sentence for it
-(`EVALUATED_EXPRESSION_SOURCE_REQUIRED`), and `FlowEdgeSchema.condition` already
-composes them for exactly this defect one family over. What was missing is that
-`PredicateSchema` / `PredicateInputSchema` — the aliases whose entire purpose is
-to mark a slot as a predicate — composed the **persistence** contract, whose rule
-is "`source` OR `ast`". The alias that means "this will be evaluated" pointed at
-the schema that does not require evaluability.
+This record introduces no validation machinery and carries none.
+`EvaluatedExpressionSchema` and `EvaluatedExpressionInputSchema` already spell
+"an evaluated slot is held to what the engine can actually run", already publish
+one sentence for it (`EVALUATED_EXPRESSION_SOURCE_REQUIRED`), and
+`FlowEdgeSchema.condition` already composes them for exactly this defect one
+family over.
+
+Generalising that composition to the rest of the evaluated slots was ruled six
+days before this record, on its own card: **decision batch #122 item 2**
+(card #15811, comment
+[`5644350409`](https://github.com/objectstack-ai/objectstack/issues/15811#issuecomment-5644350409),
+2026-09-12, maintainer 「同意」 to **A**). Its item 1 names the population from
+a measured census, the field-rule triad included: *「field / option /
+grid-column `visibleWhen` / `readonlyWhen` / `requiredWhen`」*. Its item 2 keeps
+`ExpressionSchema` / `ExpressionInputSchema` on "`source` OR `ast`". **PR #18638
+implements it** — one ADR-0087 id for all 36 declaring positions.
+
+So the authoring refusal this record's D1 states is **not this record's to
+carry**, and a second carrier for it would be a second id for one migration.
+`PredicateSchema` / `PredicateInputSchema` are **not** that carrier either: they
+are a plain alias pair of the persistence contract with zero slot users, they
+stay wide with the schema they alias (#18638's own measurement says so), and
+retiring them as dead symbols is a separate question on its own measurement.
 
 ## Decision
 
 ### D1 — A predicate slot accepts only what the engine can run
 
-`PredicateSchema` and `PredicateInputSchema` compose `EvaluatedExpressionSchema` /
-`EvaluatedExpressionInputSchema`. An envelope carrying only an `ast`, and a
-`source` that is blank after trimming (through the envelope key or the bare-string
-shorthand), are refused at authoring with `EVALUATED_EXPRESSION_SOURCE_REQUIRED`.
-The `FieldSchema` field-rule triad — `visibleWhen`, `readonlyWhen`, `requiredWhen`
-— binds them.
+A field-rule predicate is an EVALUATED slot by definition, so the envelope it
+accepts must be one the engine can evaluate, and the CEL engine reads `source`
+alone (`cel-engine.ts` `evaluate`: "AST-only evaluation not yet supported;
+persist `source`"). An envelope carrying only an `ast`, and a `source` that is
+blank after trimming (through the envelope key or the bare-string shorthand), are
+refused at **authoring** with `EVALUATED_EXPRESSION_SOURCE_REQUIRED` rather than
+parsing, registering, and faulting at evaluation time.
+
+⚠️ **This decision is recorded here and carried elsewhere.** It is the
+field-rule row of a rule already ruled across every evaluated slot by decision
+batch #122 item 2 and implemented by PR #18638 (see [the
+Context](#the-narrowing-mechanism-already-existed-and-it-already-has-an-owner)
+above): `EvaluatedExpressionSchema` / `EvaluatedExpressionInputSchema` compose
+into the slots themselves, and **one** ADR-0087 D3 semantic entry covers the
+whole population. This record's own PR changes no schema and registers no
+migration id. A reader who arrives at this line asking "where is it enforced"
+should read #18638's entry, not look for a second one.
 
 `ExpressionSchema` / `ExpressionInputSchema` are **not** narrowed: they remain the
 persistence contract, and `ast` remains an optional opaque structured value there.
 An `ast` **beside** a string `source` stays admitted everywhere.
 
-This is an accept-set narrowing and ships with an ADR-0087 D3 semantic entry
-(`field-rule-predicate-evaluated-slot-source-required`), because no D2 conversion
-can express it: an `ast`-only envelope carries no `source` to lower an AST back
-into, and a blank `source` names no predicate to reconstruct. Which of "author the
-rule" and "drop the rule" the author meant is not derivable, and the platform does
-not guess.
+The refusal needs an ADR-0087 D3 **semantic** entry rather than a D2 conversion,
+and the reason is worth keeping next to the decision: no conversion can express
+it. An `ast`-only envelope carries no `source` to lower an AST back into where
+the dialect has no printer, and a blank `source` names no predicate to
+reconstruct. Which of "author the rule" and "drop the rule" the author meant is
+not derivable, and the platform does not guess.
 
 ### D2 — A field-rule predicate that FAULTS refuses the SUBMIT, loudly
 
@@ -168,28 +197,46 @@ Stated explicitly so that no part of it reads as delivered when it is not
 (Prime Directive #10: declared ≠ enforced is the defect this whole record is
 about).
 
+- **This record lands no schema change at all.** Its own PR carries the record,
+  the ADR-0089 pointer and nothing that a runtime or an author can observe. D1's
+  authoring refusal is #18638's, under batch #122 item 2; the record is here
+  because the fault semantics D2–D4 state are what a consumer is held to, and a
+  consumer cannot be held to a direction no protocol states.
 - **D2 / D3 / D4 are consequences CONSUMERS deliver.** `packages/spec` carries no
   business logic (Prime Directive #2), so the submit refusal, the render direction
   and the gate diagnostic are declared here and implemented in objectui#8069.
   This record is the contract they are held to.
-- **D4's spec-side authoring refusal is NOT applied to the gate slots in this
-  record's PR.** The action / visibility gate slots — view and page `visibleWhen` /
-  `visibleOn` / `visibility`, action and bulk-action `visible` / `visibleWhen`,
-  component `visible` / `visibleWhen`, app nav `visible`, `ObjectFieldGroupSchema`
-  `visibleWhen`, `RowCrudActionOverride` `visibleWhen` / `disabledWhen`, the
-  per-OPTION `visibleWhen` and the inline-column `readonlyWhen` / `requiredWhen`
-  — still compose `ExpressionInputSchema`. Two reasons, and the first is the one
-  that matters: several of those slots carry their **own** declared fault
-  directions ("fail-closed", "fail-soft") which are not the field-rule triad's,
-  and the ruling measured its evidence on the field-rule path. Binding them all to
-  one rule without re-measuring each declared direction would bake a direction the
-  ruling did not give, which is exactly what the second constraint above forbids.
-  Second, `validate-visibility-predicates.ts`'s `celRefusal` currently records the
-  opposite position for those slots — a blank predicate there "is 'no predicate',
-  exactly what the author meant" — so converting them is also a behaviour change
-  in a second package, not a schema swap. That conversion is filed as a follow-up
-  with the slot inventory, and it is the one place where D4 is currently declared
-  ahead of its authoring-side enforcement.
+- **D4's spec-side authoring refusal for the GATE slots is RULED and IN FLIGHT —
+  it is not a follow-up, and it is not this record's to give or withhold.** The
+  action / visibility gate slots are inside decision batch #122 item 2's
+  population, which was drawn from the measured census on card #15811
+  ([`5629834274`](https://github.com/objectstack-ai/objectstack/issues/15811#issuecomment-5629834274),
+  36 declaring positions, re-derived by identity on #18638's base) and named in
+  the ruling as *「action `visibleWhen` / `visible` / `ActionConditionInputSchema`;
+  app `visible`; settings visibility; … `ui/bulk-action` visibility」*. **Cite that
+  census rather than re-enumerating it** — a hand list rots, and this record's
+  did: it omitted `system/settings-manifest.zod.ts:424` and `:686`, both
+  `visible: SettingsVisibilityInputSchema`, which is
+  `ExpressionInputSchema.superRefine(…)` — the refinement returns early on a
+  `source` that is absent or blank (`if (!source) return;`), so it narrows
+  neither the `ast`-only nor the blank-`source` arm and those two slots sit on
+  the persistence contract exactly like the rest.
+- **What the batch #119 ruling did not give, and what that does not mean.** The
+  card behind this record measured its evidence on the field-rule path, and
+  several gate slots carry their **own** declared fault directions
+  ("fail-closed" on `ObjectFieldGroupSchema.visibleWhen` and
+  `RowCrudActionOverride.visibleWhen`, "fail-soft" on `disabledWhen`) which are
+  not the field-rule triad's. Converting them **on the strength of batch #119**
+  would bake a direction that ruling did not give. That is the whole of the
+  claim: it is a statement about which ruling authorizes what, not a reason the
+  conversion should wait. Batch #122 item 2 gave exactly that direction six days
+  earlier, on its own measured census, and #18638 implements it. A second
+  consideration is a cost, not an objection: `packages/lint`'s
+  `validate-visibility-predicates.ts` `celRefusal` records the opposite position
+  for those slots today — a blank predicate there "is 'no predicate', exactly
+  what the author meant" — so the conversion is a behaviour change in a second
+  package rather than a schema swap, and #18638 carries that cost with the
+  narrowing.
 
 ## Consequences
 
@@ -198,18 +245,19 @@ exist in production is **unmeasured** — the loud state is what will reveal the
 and that is its purpose. It is user-visible, so the objectui half ships with a
 changeset banner saying so. A repo-wide census over `examples/`, `packages/`,
 `content/` and `skills/` at `03b7b8187` found **zero** field-rule predicates of
-either refused spelling, against two live lit controls (15 files carrying
+either spelling D1 refuses, against two live lit controls (15 files carrying
 non-blank tagged-template predicates, 14 carrying envelope-form ones) — so there
-is nothing in this repository to rewrite.
+is nothing in this repository for D1's landing to rewrite.
 
 **One stored-row edge is named rather than asserted.**
 `applyConversionsToStoredItem` **is** applied to `object` (only `flow` is
 skipped), but no conversion repairs either refused spelling, so a stored row
-carrying one now meets a strict schema at whichever seam parses it. Which seam
-that is, and whether it degrades to a warn or refuses the object, was **not
-measured** on this card. It is recorded here as the open edge, and in the D3
-entry's acceptance criteria as "read the boot log for the object by name rather
-than expecting a specific message".
+carrying one meets a strict schema at whichever seam parses it once the refusal
+lands. Which seam that is, and whether it degrades to a warn or refuses the
+object, was **not measured** on this card. It is recorded here as the open edge,
+and it belongs in the acceptance criteria of the ADR-0087 entry that carries the
+refusal — #18638's, under batch #122 item 2 — as "read the boot log for the
+object by name rather than expecting a specific message".
 
 **ADR-0089 is extended, not reversed.** That record unified the `*When` family
 under one name and is untouched by this one; this record decides what the family
