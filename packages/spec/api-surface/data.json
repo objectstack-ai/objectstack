@@ -741,6 +741,7 @@
     "discriminateDefaultValueShape (function)",
     "driverConfigJsonSchema (function)",
     "driverHasLocalDefault (function)",
+    "driverSupportsTransactions (function)",
     "effectiveOperationsArray (function)",
     "emptyGroupValueFor (function)",
     "fieldForm (const)",
