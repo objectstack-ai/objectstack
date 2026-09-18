@@ -211,6 +211,17 @@
  * (dropping the closing keyword) needs a fresh event, which the `edited`
  * activity type supplies.
  *
+ * ## The route to GitHub, and why a bypassed one used to read as green
+ *
+ * In an agent container api.github.com is reachable only through the session
+ * proxy, and node's `fetch` does not read the proxy variables. An unrouted run
+ * therefore arrived without its credential, GitHub answered 401, and this file
+ * folded that into a per-target UNDETERMINED behind EXIT 0 — a gate that judged
+ * nothing while its exit code said clean. So a judging run re-execs itself ONCE
+ * through the shared proxy plan before its first read; see the route section
+ * further down. On an Actions runner there is no proxy in the environment, the
+ * plan never re-arms, and nothing about this gate changes there.
+ *
  * ## Why the paths above are unquoted, and the fixtures fictional
  *
  * The dispatch-gates derivation resolves a check family to its script file and
@@ -221,16 +232,27 @@
  * two real inputs the self-test reads.
  */
 
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
+import { maskCommentsAndLiterals } from './js-comment-mask.mjs';
 
 // Imported, never restated. The closing-keyword grammar and the claim
 // predicate both have exactly one home in this tree, and this gate is their
-// second consumer rather than a second spelling.
-import { claimGovernance, closingKeywordTargets, h46ClaimNamesBranch } from './pm/check-half-states.mjs';
+// second consumer rather than a second spelling. The proxy-rearm PLAN joins
+// them for the same reason: one spelling of "go through the proxy" for every
+// instrument in this tree, so this gate and the sweeps can never disagree
+// about whether this container's fetch reaches GitHub at all. Only the guard
+// VARIABLE below is this file's own, and the block above `rearmThroughProxy`
+// says why.
+import { claimGovernance, closingKeywordTargets, h46ClaimNamesBranch, PROXY_FLAG, PROXY_REARM_GUARD, proxyRearmPlan } from './pm/check-half-states.mjs';
 import { pullNumberFromQueueRef } from './pm/check-governed-queue-guard.mjs';
+
+/** This file, resolved once, so the re-exec below hands off to THIS script and not to an argv guess. */
+const SELF_PATH = fileURLToPath(import.meta.url);
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -255,13 +277,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'UNDETERMINED is its own answer: never clean, never an accusation.': 9,
   'Wiring absent: never clean, never an accusation.': 12,
   'The merge-queue leg, asserted rather than assumed.': 9,
+  'The route to GitHub. A bypassed proxy reads as a dead credential, so both': 9,
   'The wiring itself. A gate whose workflow step is deleted or whose': 10,
   'The predicate sources this gate reuses must still be there to reuse.': 3,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 10;
+const SELF_TEST_BATTERY_FLOOR = 11;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -669,6 +692,83 @@ const githubApi = (token) => async (path) => {
 };
 
 // ---------------------------------------------------------------------------
+// The route to GitHub — why this gate re-execs itself once.
+//
+// Every judging run reads comment threads over the network, and in an agent
+// container that network is reachable only through the session proxy, which is
+// also where the credential is injected. Node's `fetch` does not read the proxy
+// variables, so an unrouted run left WITHOUT its credential and GitHub answered
+// 401 — and this file turned that answer into a per-target UNDETERMINED behind
+// exit 0. A seat pre-running this gate therefore read a green exit code for a
+// run that judged nothing, which is the one reading a derived-gate sweep
+// records (it reads exit codes, not prose).
+//
+// The switch is read at process START, which is the whole reason this is a
+// re-exec rather than an assignment.
+//
+// The DECISION is imported, not restated. What is local is the guard VARIABLE,
+// deliberately: sharing a sibling's guard would let that sibling's re-exec
+// suppress this one's — a grandchild is spawned without the flag in its argv,
+// so it needs the re-exec even though the guard the parent set says one already
+// happened.
+//
+// ⭐ On a GitHub Actions runner there is no proxy in the environment, so the
+// plan never re-arms and this gate behaves there exactly as it did before.
+// ---------------------------------------------------------------------------
+
+/** This file's OWN re-exec guard — deliberately not any sibling's. */
+export const OWN_PROXY_REARM_GUARD = 'OS_CLOSING_TARGET_CLAIM_PROXY_REARMED';
+
+/**
+ * The environment the imported plan is asked about: this file's own guard,
+ * presented under the name the plan reads. Pure, so the self-test drives every
+ * branch offline — and the branch worth pinning is a SIBLING's guard being set,
+ * which must NOT stop this run from re-arming.
+ */
+export function proxyPlanEnv(env) {
+  return { ...env, [PROXY_REARM_GUARD]: env[OWN_PROXY_REARM_GUARD] };
+}
+
+/**
+ * Hand this run off through the proxy, or `null` to carry on in-process.
+ *
+ * A returned number is the child's exit status, forwarded VERBATIM: the exit
+ * codes above are this gate's contract with CI, so the hand-off has to be
+ * invisible in them.
+ *
+ * Everything printed here goes to STDERR. The clean verdict is this script's
+ * only stdout, and a status line there would land inside whatever reads it.
+ *
+ * @param {string[]} args  this run's own argv tail, forwarded unchanged
+ */
+function rearmThroughProxy(args) {
+  const plan = proxyRearmPlan({
+    env: proxyPlanEnv(process.env),
+    execArgv: process.execArgv,
+    flagSupported: process.allowedNodeEnvironmentFlags.has(PROXY_FLAG),
+  });
+  if (plan.hint) {
+    console.error(`ℹ️  ${plan.reason}. A refusal below may be about the route, not this container.`);
+    return null;
+  }
+  if (!plan.rearm) return null;
+  console.error(`ℹ️  re-exec with ${plan.flag}: ${plan.reason}.`);
+  // The env proxy agent is experimental and says so once per run. Nobody can
+  // act on that notice, so silence it where the node in use can.
+  const quiet = process.allowedNodeEnvironmentFlags.has('--disable-warning') ? ['--disable-warning=UNDICI-EHPA'] : [];
+  const child = spawnSync(process.execPath, [plan.flag, ...quiet, SELF_PATH, ...args], {
+    stdio: 'inherit',
+    env: { ...process.env, [OWN_PROXY_REARM_GUARD]: '1' },
+  });
+  if (typeof child.status === 'number') return child.status;
+  console.error(
+    `⚠️  could not re-exec with ${plan.flag} (${child.error?.message ?? 'no exit status'}); `
+      + 'continuing in-process — every request will bypass the proxy.',
+  );
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Self-test — the verdict layer, the exit-code contract, the collection policy
 // over a fake transport, and the wiring.
 //
@@ -936,6 +1036,30 @@ async function selfTest() {
   const queueBroken = judge(await collect(queueCtx, fakeApi({}).api));
   t('a queue ref whose pull request cannot be read is NOT MEASURED, never clean and never a finding', queueBroken.exit, EXIT_NOT_WIRED);
 
+  // --- The route to GitHub. A bypassed proxy reads as a dead credential, so both
+  // legs are pinned rather than one: the Actions-runner leg must stay untouched
+  // (no proxy in the environment, no re-exec, no behaviour change at all), and a
+  // container must re-arm EXACTLY once. The fixture proxy names no tree in any
+  // repo, per this file's header rule on quoted literals.
+  battery('The route to GitHub. A bypassed proxy reads as a dead credential, so both');
+  const proxied = { HTTPS_PROXY: 'http://127.0.0.1:41733' };
+  t('the Actions-runner leg: no proxy in the env, so no re-exec and nothing changes in CI', proxyRearmPlan({ env: proxyPlanEnv({}) }).rearm, false);
+  t('an agent container re-arms, which is the whole of the route fix', proxyRearmPlan({ env: proxyPlanEnv(proxied), flagSupported: true }).rearm, true);
+  t("...exactly once — this run's OWN guard is what stops the loop", proxyRearmPlan({ env: proxyPlanEnv({ ...proxied, [OWN_PROXY_REARM_GUARD]: '1' }), flagSupported: true }).rearm, false);
+  t("...and a SIBLING instrument's guard does NOT suppress it", proxyRearmPlan({ env: proxyPlanEnv({ ...proxied, [PROXY_REARM_GUARD]: '1' }), flagSupported: true }).rearm, true);
+  t("this file's guard is not the imported one, which is what makes that hold", OWN_PROXY_REARM_GUARD === PROXY_REARM_GUARD, false);
+  t('a run already routed through the proxy does not re-arm again', proxyRearmPlan({ env: proxyPlanEnv(proxied), execArgv: [PROXY_FLAG], flagSupported: true }).rearm, false);
+  const unsupportedFlag = proxyRearmPlan({ env: proxyPlanEnv(proxied), flagSupported: false });
+  t('a node that cannot take the flag SAYS so rather than bypassing silently', [unsupportedFlag.rearm, unsupportedFlag.hint], [false, true]);
+  const ownSource = maskCommentsAndLiterals(readFileSync(SELF_PATH, 'utf8'));
+  t('structural: the plan is imported, not restated here', /\bproxyRearmPlan\b/.test(ownSource) && !/function\s+proxyRearmPlan\b/.test(ownSource), true);
+  // Both halves, because the sibling's ablation found the ordering alone
+  // vacuous: with the CALL deleted, the last occurrence is the DECLARATION,
+  // which sits above the collection and satisfied the comparison with no
+  // hand-off left in the file at all.
+  const rearmSites = ownSource.split('rearmThroughProxy(').length - 1;
+  t('structural: the hand-off is CALLED exactly once, and decided BEFORE the first network read', [rearmSites, ownSource.lastIndexOf('rearmThroughProxy(') < ownSource.lastIndexOf('await collect(')], [2, true]);
+
   // --- The wiring itself. A gate whose workflow step is deleted or whose
   // trigger loses a leg is not a weaker gate, it is a silent one.
   battery('The wiring itself. A gate whose workflow step is deleted or whose');
@@ -991,6 +1115,13 @@ if (isEntrypoint(import.meta.url)) {
     }
   } else {
     const ctx = readPrContext(process.env);
+    // Only a run with a usable context reaches the network, so only that run
+    // needs the route. Re-execing a NOT WIRED run would spend a process to
+    // reprint the identical wiring verdict.
+    if (ctx !== null && ctx.wired !== false) {
+      const handed = rearmThroughProxy(process.argv.slice(2));
+      if (handed !== null) process.exit(handed);
+    }
     const collected = ctx === null || ctx.wired === false ? ctx : await collect(ctx, githubApi(ctx.token));
     const result = judge(collected);
     const emit = result.exit === EXIT_CLEAN ? console.log : console.error;
