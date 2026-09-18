@@ -3,12 +3,16 @@
 /**
  * #18677 — `os build` ran the author-time rule table a SECOND time, once per
  * `artifactPackages(…)` entry with `packageBodyAsStack(…)` as resolution
- * context; `os validate` ran the union fold and stopped. `compile.ts`' own
- * comment says what survives that de-duplication is "exactly the set the union
- * could not see" ⇒ that whole set was findings `os build` reported and
- * `os validate` structurally could not. FALSE-CLEAN, on the command an author
- * runs BEFORE shipping — the same direction #17069 fixed one layer up, which is
- * why `authoringRuleUnionStack` landing in both commands did not settle it.
+ * context; `os validate` ran the union fold and stopped, so every survivor of
+ * that de-duplication was a finding `os build` reported and `os validate`
+ * structurally could not. FALSE-CLEAN, on the command an author runs BEFORE
+ * shipping — the same direction #17069 fixed one layer up, which is why
+ * `authoringRuleUnionStack` landing in both commands did not settle it.
+ *
+ * ⚠️ [#18779] This header used to size that set by quoting `compile.ts` —
+ * "exactly the set the union could not see" — and the sentence was false when
+ * it was quoted: the key carried the POSITIONAL `path`, so echoes survived it.
+ * The key was corrected there; the seam this file pins is unaffected.
  *
  * ## What this file pins, and what its sibling pins
  *
@@ -186,8 +190,13 @@ describe('#18677 — the per-package author-time pass is ONE seam both doors rea
 
   it('de-duplicates against the union run it is handed', () => {
     // The filter `compile.ts` described and this pass now owns. Handing it its
-    // OWN output as the union run must empty it — the property that makes
-    // "exactly the set the union could not see" mean anything at all.
+    // OWN output as the union run must empty it — the property that makes the
+    // survivor list mean anything at all. ⚠️ This case is NOT sensitive to
+    // #18779's defect and never was: both runs judge the same stack, so the
+    // two paths are identical and the positional key matched them anyway. The
+    // echo it missed needs the two views to DISAGREE about the index, which
+    // only a real package-body-vs-union comparison produces — pinned in
+    // `per-package-dedup-positional-echo.test.ts`.
     const parsed = twoPackageArtifact();
     const first = runPerPackageAuthoringRules({ command: 'validate', parsed, unionFindings: [] });
     const raw = [...first.errors, ...first.advisories];

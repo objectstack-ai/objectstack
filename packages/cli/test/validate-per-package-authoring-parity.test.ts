@@ -5,11 +5,17 @@
  * author-time advisory set for a MULTI-PACKAGE project.
  *
  * `os build` ran the rule table a second time, once per `artifactPackages(…)`
- * entry; `os validate` ran the union fold and stopped. By `compile.ts`' own
- * description the survivors of that pass are "exactly the set the union could
- * not see" ⇒ that whole set was findings `os build` reported and `os validate`
- * structurally could not. FALSE-CLEAN, on the fast pre-flight an author runs
- * before shipping.
+ * entry; `os validate` ran the union fold and stopped, so every survivor of
+ * that pass was a finding `os build` reported and `os validate` structurally
+ * could not. FALSE-CLEAN, on the fast pre-flight an author runs before
+ * shipping.
+ *
+ * ⚠️ [#18779] This header used to size that set by quoting `compile.ts` —
+ * "exactly the set the union could not see" — and the sentence was false when
+ * it was quoted: the de-duplication key carried the POSITIONAL `path`, so
+ * echoes survived it. The key was corrected there; the PARITY pinned here is
+ * unaffected in either direction, because both doors run the one pass with the
+ * one key.
  *
  * ## Why a NEW fixture and not an assertion on the existing parity file
  *
