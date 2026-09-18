@@ -581,6 +581,130 @@ describe('RangeOperatorSchema', () => {
       expect(FieldOperatorsSchema.safeParse({ $eq: { $field: 'budget' } }).success).toBe(true);
     });
   });
+
+  // ==========================================================================
+  // #18012 — a BLANK endpoint is ruled out, in both endpoint unions and in both
+  // copies of the schema. Ruled 2026-09-17 (decision batch #146 item 5, letter
+  // A): `$between` requires two endpoints that are present and non-empty.
+  //
+  // This is a NEW RULE narrowing a published face, not a pull-back to a
+  // declared one: `RANGE_ENDPOINT_DESCRIPTION` admitted string endpoints and
+  // `''` is a string, so `{ $between: [1, ''] }` parsed green — measured on the
+  // card against spec 17.4.0 and re-measured on `origin/main` before this
+  // change. The only producer ever measured is a UI builder padding a
+  // HALF-TYPED pair, which is why the refusal names the blank SIDE.
+  //
+  // Scope, deliberately: the empty string and `undefined`. `null` keeps the
+  // 2026-08-31 ruling's own message (it prescribes the null PREDICATE, a
+  // different remedy for a different intent), and whitespace-only endpoints are
+  // NOT judged — narrowing further than ruled is the seat call this card's
+  // whole history refuses to make.
+  //
+  // The RUNTIME door — `parseFilterAST`, which does not run this schema — is
+  // untouched by this ruling and still reads `''` as a value
+  // (`filter-comparand-shape.test.ts`).
+  // ==========================================================================
+
+  describe('blank $between endpoints are refused (#18012)', () => {
+    const issuesOf = (result: { error?: { issues: Array<{ path: PropertyKey[]; message: string }> } }) =>
+      result.error?.issues ?? [];
+
+    it('refuses the card\'s own reading — { $between: [1, \'\'] } on the ENFORCED copy', () => {
+      // The card's measurement, flipped: `FieldOperatorsSchema.safeParse({
+      // $between: [1, ''] })` answered `success: true`.
+      const result = FieldOperatorsSchema.safeParse({ $between: [1, ''] });
+      expect(result.success).toBe(false);
+      const issue = issuesOf(result)[0];
+      expect(issue?.path).toEqual(['$between', 1]);
+      expect(issue?.message).toContain('$between endpoint at index 1');
+      expect(issue?.message).toContain('MAX');
+    });
+
+    it('names the MIN side when the LOWER bound is the blank one', () => {
+      const result = RangeOperatorSchema.safeParse({ $between: ['', '2026-12-31'] });
+      expect(result.success).toBe(false);
+      const issue = issuesOf(result)[0];
+      expect(issue?.path).toEqual(['$between', 0]);
+      expect(issue?.message).toContain('$between endpoint at index 0');
+      expect(issue?.message).toContain('MIN');
+    });
+
+    it('reports BOTH sides when both are blank, each at its own path', () => {
+      const result = RangeOperatorSchema.safeParse({ $between: ['', ''] });
+      expect(result.success).toBe(false);
+      expect(issuesOf(result).map((i) => i.path)).toEqual([['$between', 0], ['$between', 1]]);
+    });
+
+    it('prescribes the scalar comparison for a genuinely one-sided bound', () => {
+      // A half-filled range is not a range; the message must send the author to
+      // the operator that expresses what they actually have.
+      const message = issuesOf(RangeOperatorSchema.safeParse({ $between: ['2026-01-01', ''] }))[0]?.message ?? '';
+      expect(message).toContain('{"$gte": min}');
+      expect(message).toContain('{"$lte": max}');
+      expect(message).toContain('Ruled 2026-09-17');
+    });
+
+    it('refuses an ABSENT bound with the pointed message, not zod\'s generic union text', () => {
+      const result = RangeOperatorSchema.safeParse({ $between: [1, undefined] });
+      expect(result.success).toBe(false);
+      const issue = issuesOf(result)[0];
+      expect(issue?.path).toEqual(['$between', 1]);
+      expect(issue?.message).toContain('$between endpoint at index 1');
+      expect(issue?.message).not.toBe('Invalid input');
+    });
+
+    it('leaves the null bound on the 2026-08-31 ruling\'s own message', () => {
+      // Two blank spellings, two rulings. If this ever went red the null author
+      // would be sent to a scalar comparison instead of the null predicate.
+      const message = issuesOf(RangeOperatorSchema.safeParse({ $between: [null, '2026-12-31'] }))[0]?.message ?? '';
+      expect(message).toContain('{"$null": true}');
+      expect(message).not.toContain('Ruled 2026-09-17');
+    });
+
+    it('is matched by the enforced copy and by the whole-filter face', () => {
+      expect(FieldOperatorsSchema.safeParse({ $between: ['', 65] }).success).toBe(false);
+      expect(NormalizedFilterSchema.safeParse({
+        $and: [{ close_date: { $between: ['2026-01-01', ''] } }],
+      }).success).toBe(false);
+    });
+
+    /**
+     * `FilterConditionSchema` is `z.record(z.string(), z.unknown())` at every
+     * field position, so it judges no comparand at all — measured here against
+     * the ALREADY-RULED `{ $field }` endpoint (#7596), which it also lets
+     * through. That control is the point: the green below is this schema's
+     * standing shape and NOT a hole this narrowing opened, and the enforcement
+     * lives where it always did (`FieldOperatorsSchema` / the normalized AST).
+     */
+    it('is not judged by the loose FilterConditionSchema — and neither is the #7596 shape', () => {
+      expect(FilterConditionSchema.safeParse({ age: { $between: [18, ''] } }).success).toBe(true);
+      expect(FilterConditionSchema.safeParse({
+        age: { $between: [18, { $field: 'cap' }] },
+      }).success).toBe(true);
+    });
+
+    it('narrows the blank endpoint and NOTHING wider — the falsy and short values stay', () => {
+      // Positive controls: every one of these is a real endpoint, and a red
+      // here would mean the check is reading falsiness instead of blankness.
+      expect(RangeOperatorSchema.safeParse({ $between: [0, 100] }).success).toBe(true);
+      expect(RangeOperatorSchema.safeParse({ $between: ['0', '9'] }).success).toBe(true);
+      expect(RangeOperatorSchema.safeParse({ $between: ['A', 'M'] }).success).toBe(true);
+      expect(RangeOperatorSchema.safeParse({ $between: ['08:00:00', '18:00:00'] }).success).toBe(true);
+      expect(FieldOperatorsSchema.safeParse({ $between: ['2026-01-01', '2026-12-31'] }).success)
+        .toBe(true);
+      // Whitespace-only is deliberately NOT judged — the ruling is the empty
+      // string, and this assertion is what keeps a later reader from widening
+      // it without a ruling of their own.
+      expect(RangeOperatorSchema.safeParse({ $between: [' ', 'M'] }).success).toBe(true);
+    });
+
+    it('leaves the SET slots taking an empty-string member — the ruling is $between only', () => {
+      expect(FieldOperatorsSchema.safeParse({ $in: ['', 'won'] }).success).toBe(true);
+      expect(FieldOperatorsSchema.safeParse({ $nin: [''] }).success).toBe(true);
+      expect(FieldOperatorsSchema.safeParse({ $eq: '' }).success).toBe(true);
+      expect(FieldOperatorsSchema.safeParse({ $gte: '' }).success).toBe(true);
+    });
+  });
 });
 
 // ============================================================================

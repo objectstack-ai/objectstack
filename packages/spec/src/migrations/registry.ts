@@ -8383,6 +8383,92 @@ const step18: MigrationStep = {
         + 'malformed value keep loading (the rehydration seam replays the conversion, which drops '
         + 'the meaningless key).',
     },
+    // The authoring-door half of the class #13495 ruled at the matcher. That card
+    // taught driver-memory what to do with a missing bound; this one decides what
+    // the SCHEMA does with one.
+    {
+      id: 'filter-between-blank-endpoint-refused',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span already, and a nested backtick would close it.
+      surface:
+        'either endpoint of a $between range, authored BLANK — the empty string, or an absent '
+        + '(undefined) bound — on any carrier of FieldOperatorsSchema / RangeOperatorSchema: a view '
+        + 'or dashboard widget filter, a dataset filter, a report runtimeFilter, a page or component '
+        + 'filter, a rollup filter, and the NormalizedFilter AST the query faces validate against. '
+        + 'ARITY is not what changed: a blank bound is a well-formed TWO-element range one of whose '
+        + 'elements means nothing',
+      replacement:
+        'two endpoints that are present and non-empty — the bound the author meant, written out. '
+        + 'If only ONE side is genuinely bounded, that is not a range at all: drop `$between` and '
+        + 'write the side you have as a scalar comparison, `{"$gte": min}` for a lower bound and '
+        + '`{"$lte": max}` for an upper one, which every backend already answers. ⛔ There is no '
+        + 'replacement that can be DERIVED from what was written: the bound the author did not type '
+        + 'is not recoverable from the one they did, and picking either reading (drop the operator, '
+        + 'or treat the blank side as unbounded) would be the platform inventing a filter. `null` '
+        + 'bounds are a different entry: they were already refused by the 2026-08-31 ruling, whose '
+        + 'message prescribes the null predicate because a `null` author was reaching for absence, '
+        + 'not for a bound',
+      reason:
+        'Maintainer ruling A on #18012 (decision batch #146 item 5, 2026-09-17 「146 同意」). '
+        + '`FieldOperatorsSchema.safeParse({ $between: [1, \'\'] })` answered `success: true` — '
+        + 'measured on the card against the installed spec 17.4.0 and re-measured on `origin/main` '
+        + 'before the change. This is a NEW RULE narrowing a published face, ⛔ not a pull-back to a '
+        + 'declared one: the endpoint contract shared by both bounds says verbatim that "Each '
+        + 'endpoint is a number, a Date, or a string", and the empty string is a string, so the '
+        + 'acceptance was conformant. What made it wrong is the other half of the same contract — '
+        + '"Closed interval [min, max]" — which no backend can honour against a blank: driver-sql '
+        + 'binds it into `whereBetween`, the JS matchers compare it as a value, and the range stops '
+        + 'bounding on that side while still reading as a complete range. #13495 had already taught '
+        + 'the reference matcher to survive the null-bound form of exactly this (a bounded range '
+        + 'answered EVERY valued row, because both of the arm\'s comparisons are false against a '
+        + 'missing bound); the door that admitted it was never addressed. The only producer ever '
+        + 'measured is a UI builder padding a HALF-TYPED pair with `\'\'` so that a length-based '
+        + 'completeness check passes it — nobody WANTS a blank bound, which is why it is refused '
+        + 'rather than given a published meaning (option B was declined: a semantics nobody asked '
+        + 'for, to be honoured per driver). The refusal names the blank SIDE (MIN / MAX plus the '
+        + 'index) because with a padded pair both bounds are present and the author is the one '
+        + 'person who cannot see which is empty. Scope is the empty string and `undefined` and '
+        + 'nothing wider: whitespace-only endpoints are deliberately NOT judged, since narrowing a '
+        + 'published face further than the ruling is the seat call this card\'s whole history '
+        + 'refuses to make. Ships at once, no grace window and no dual spelling (2026-08-27 '
+        + 'maintainer ruling 「短期不考虑渐进」). '
+        + '⚠️ No D2 conversion and no stored-metadata rewrite, and the load path was MEASURED rather '
+        + 'than assumed: `applyConversionsToStoredItem` — the one primitive every stored-row '
+        + 'rehydration seam calls — never throws and never validates, and replays only the '
+        + 'positively-recognised lossless transforms in the conversion registry; measured on '
+        + '`origin/main`, a stored view carrying `{ close_date: { $between: [\'2026-01-01\', \'\'] } }` '
+        + 'comes back as the SAME object reference. So the load path today neither drops a refused '
+        + 'operator nor refuses the row, and no conversion in the registry drops a filter OPERATOR '
+        + '(the three filter-adjacent entries are key strips and a key rename). That is also the '
+        + 'precedent the two nearest narrowings of this same surface set — '
+        + '`filter-preset-ordering-comparand-refused` and '
+        + '`analytics-date-range-array-two-bounds-required` — both of which decline a D2 conversion '
+        + 'on the ground that rewriting would be the platform guessing which bound was meant. '
+        + 'Dropping the operator would be worse than guessing: it deletes a constraint the author '
+        + 'wrote and WIDENS the result set silently, the failure mode `$nin` carries in the same '
+        + 'file. The read path does not re-validate stored rows, so no stored view becomes '
+        + 'unreadable; what changes is that RE-SAVING one is refused, at the key\'s own path, with '
+        + 'the blank side named. The objectui half — the builder stops padding a half-typed pair, so '
+        + 'the console never meets this refusal mid-typing — is objectui#9695 and lands on its own '
+        + 'schedule, either side of this one. ADR-0049 / ADR-0078 / ADR-0087.',
+      acceptanceCriteria:
+        'Grep every authored `$between` array — view and dashboard widget filters, dataset filters, '
+        + 'report runtimeFilters, page and component filters, rollup filters, saved AST filters, SDK '
+        + 'and MCP callers — and read BOTH of its elements. A range with two present, non-empty '
+        + 'endpoints parses byte-identically to before, numbers, Dates, ISO days, UTC instants, '
+        + 'clock times and non-temporal text included, and `[\'0\', \'9\']` and `[0, 100]` are '
+        + 'untouched (the rule is blankness, not falsiness). An empty-string or absent bound now '
+        + 'answers one prescriptive issue at that endpoint\'s own path (`$between.0` / `$between.1`) '
+        + 'naming MIN or MAX, so `FieldOperatorsSchema.safeParse` and re-saving the document both '
+        + 'make the sweep mechanical; a range blank on BOTH sides reports both positions. Nothing is '
+        + 'normalised on the way through — no bound is trimmed, defaulted or copied from its '
+        + 'neighbour — so an accepted range arrives byte-identical to what was written. ⚠️ Do not '
+        + 'assume a converted range was previously showing the window it named: a blank bound stopped '
+        + 'bounding on that side at every backend, so the surface was reading a wider set than its '
+        + 'filter claimed. Decide the window from what the surface was SUPPOSED to show, and if only '
+        + 'one side was ever meant, write it as `$gte` / `$lte` rather than inventing a second bound. '
+        + '`null` bounds are unaffected by this entry and keep their own refusal and prescription.',
+    },
     {
       id: 'filter-preset-ordering-comparand-refused',
       // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
