@@ -45,6 +45,11 @@ import {
   projectByPruningUnionBranches,
   type PrunedBranch,
 } from './lib/union-branch-projection';
+// The closed list of refinements this generator DOES publish (#18670 item 2).
+// The ratchet below measures against this same override, so a rule the list
+// emits leaves the ledger and a rule it does not emit stays in it — see the
+// module header for why the two halves must not be read against each other.
+import { refinementProjectionOverride } from './lib/refinement-projection';
 // The dropped-refinement ratchet (#18670). The mirror image of the branch
 // pruning above, and deliberately its own module for the same reason: the
 // pruner guards a projection NARROWER than the Zod type, this one the direction
@@ -495,6 +500,7 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
           try {
             jsonSchema = z.toJSONSchema(value, {
               target: 'draft-2020-12',
+              override: refinementProjectionOverride,
             }) as Record<string, unknown>;
           } catch (outputError) {
             if (!isKnownUnsupported(outputError)) throw outputError;
@@ -503,6 +509,7 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
               jsonSchema = z.toJSONSchema(value, {
                 target: 'draft-2020-12',
                 io: 'input',
+                override: refinementProjectionOverride,
               }) as Record<string, unknown>;
             } catch (inputError) {
               if (!isKnownUnsupported(inputError)) throw inputError;
@@ -519,7 +526,10 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
               // then re-thrown with the message Zod produced, so this attempt
               // can never change WHY an export is skipped, and so never the
               // `cause` recorded for it in unemitted-schemas.baseline.json.
-              const projected = projectByPruningUnionBranches(value, { target: 'draft-2020-12' });
+              const projected = projectByPruningUnionBranches(value, {
+                target: 'draft-2020-12',
+                override: refinementProjectionOverride,
+              });
               if (!projected) throw inputError;
               jsonSchema = projected.schema;
               io = projected.io;
