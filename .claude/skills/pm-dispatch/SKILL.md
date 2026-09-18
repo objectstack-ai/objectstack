@@ -337,7 +337,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - bump 单单张封顶:先查同题 open 单,已有就追评刷新;工具链新形态只提请不扩面。
 - 分类动作每张三选一,外加一个修复通道。
 - ⛔ 不挂 `needs:contract-review`:随 draft PR 或 `Clause-②: yes` 认领;裁定写方向、给六态之一。
-- 方向落在 ADR/已裁卡/不可重裁规则:贴 `check-prior-rulings.mjs` 的 `Prior rulings read:` 行,或不点。
+- 方向在 ADR/本卡裁决/不可重裁规则:贴 `check-prior-rulings.mjs` 的 `Prior rulings read:` 行,或不点。
 - `pm:queue` = 有具名落点或复现的具体缺陷,或范围明确的工具/门禁修复,无可问之事。
 - `pm:queue` 也收恢复不变量的 finding、test-only pin,与实现未被裁错的说明书脱节(修文档)。
 - `needs-user-decision` = 设计卡、feature/契约形状提案、需要 appetite 的多周程序。

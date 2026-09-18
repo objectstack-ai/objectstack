@@ -42,7 +42,7 @@
 - ② 实际业务拉动:今天谁撞上;零拉动默认 defer 或 remove。
 - ③ 防 AI 犯错:闭合枚举优于自由结构,响亮拒绝优于静默容忍。
 - ④ 创业阶段不扩散:remove 优于 declare-and-maintain,每个已声明的键都是永久义务。
-- 四棱后一行:`Prior rulings read: <terms> → <n> hits; <ADR-xxxx Dn|none>`;未搜成整行写 unresolved。
+- 四棱后:`Prior rulings read: <terms> → <n> hits; <ADR Dn|none>; thread: <k>|none`;未搜成整行写 unresolved。
 - 末尾推荐行 + 字母选项带自检「只看①选 X;②③④ 是否翻转:…」,再一行置信缺口。
 
 ## 应用仓推荐序特例
