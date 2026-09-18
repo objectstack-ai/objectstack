@@ -789,7 +789,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18719: a RETRACTED claim leaves the pool — a withdrawn claim never governs': 36,
   '#18683: the card-comment read pages to a cap — past 100 is UNJUDGED, ⛔ never a truncated pool': 27,
   '#18764: a DECORATED claim ENTERS the pool — ONE reading, and it is the sibling\'s': 24,
-  '#18828: a SECOND `Claim:` by ONE seat — the writer-side prohibition, finally READ': 51,
+  '#18828: a SECOND `Claim:` by ONE seat — the writer-side prohibition, finally READ': 52,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -8575,6 +8575,7 @@ export async function selfTest() {
   const R28_NO_USER = { id: 7100000060, created_at: '2026-09-18T02:00:00Z', body: R28_B.body };
   t('⭐ (h) an unattributable LATER row is never counted — ⛔ `null` is a refusal, never a wildcard', R28_IDS([R28_A, R28_NO_USER]) === '' && !R28_CODES([R28_A, R28_NO_USER]).includes('C8'));
   t('…and an unattributable FIRST row is not counted either — both sides fail closed', R28_IDS([{ id: 7100000061, created_at: '2026-09-18T01:00:00Z', body: R28_A.body }, R28_B]) === '');
+  t('…and TWO unattributable rows are not ONE seat either — ⛔ `null` never groups with `null`', R28_IDS([{ id: 7100000062, created_at: '2026-09-18T01:00:00Z', body: R28_A.body }, { id: 7100000063, created_at: '2026-09-18T02:00:00Z', body: R28_B.body }]) === '');
   t('…and the direction is STATED in the rule the row prints, so silence here is readable rather than inferred', CLAIM_REPEAT_RULE.includes('unattributable row is never counted'));
   t('⛔ CONTROL: give that same row a login and it is named — the attribution is what was missing', R28_IDS([R28_A, { ...R28_NO_USER, user: { login: R28_SEAT } }]) === '7100000001+7100000060');
 
@@ -8618,7 +8619,7 @@ export async function selfTest() {
     [18778, R28_LIVE(5721425530, '2026-09-17T21:23:25Z', '## 认领'), R28_LIVE(5722028692, '2026-09-17T22:23:32Z', '## 认领(补正)')],
   ];
   t('⭐ the five measured instances (2026-09-18T00:05Z) are ALL named — ⛔ five green readings before this row', R28_LIVE_CARDS.every(([, a, b]) => claimRepeats([a, b]).length === 1));
-  t('…each naming its own two comment ids and the one seat that wrote them', R28_LIVE_CARDS.every(([, a, b]) => R28_IDS([a, b]) === `${a.id}+${b.id}` && claimRepeats([a, b])[0].author === R28_SEAT), R28_LIVE_CARDS.map(([n, a, b]) => `${n}:${R28_IDS([a, b])}`).join(' '));
+  t('…each naming its own two comment ids and the one seat that wrote them', R28_LIVE_CARDS.every(([, a, b]) => R28_IDS([a, b]) === `${a.id}+${b.id}` && claimRepeats([a, b])[0]?.author === R28_SEAT), R28_LIVE_CARDS.map(([n, a, b]) => `${n}:${R28_IDS([a, b])}`).join(' '));
   t('⛔ …and every one of them read GREEN before, as a SUPERSESSION — the measurement this row answers', R28_LIVE_CARDS.every(([, a, b]) => says(R28_FIELD([a, b], 'claim.rejected'), 'a SUPERSEDED claim')));
   t('⛔ CONTROL #18559 — the same seat, same shift, the SANCTIONED shape: one claim plus a correction ⇒ silent', (() => {
     const claim = R28_LIVE(5721425131, '2026-09-17T21:23:24Z', '## 认领 — `domain:cli` 执行 PM 席 #6024');
@@ -8627,9 +8628,11 @@ export async function selfTest() {
   })());
   t('⭐ …and that control IS the repair this row prints, which is why the row prints it', says(R28_ROW([R28_A, R28_B]), 'Clause-②-correction: <claim comment id>'));
 
-  // ONE derivation — the record and the verdict cannot disagree.
+  // ONE derivation — the record and the verdict cannot disagree. ⛔ Every
+  // assertion below reads the group defensively: under an ablation the pin
+  // must FAIL, and a pin that THROWS aborts the run and names nothing.
   t('the repeat field is DECLARED in the pair roster, so it renders on every block, filled or not', INPUT_RECORD_PAIR_FIELDS.includes('claim.repeat'));
-  t('⭐ ONE derivation: the ids the ROW names are the ids the RECORD names', claimRepeats([R28_A, R28_B])[0].ids.every((id) => says(R28_ROW([R28_A, R28_B]), id) && says(R28_FIELD([R28_A, R28_B], 'claim.repeat'), id)));
+  t('⭐ ONE derivation: the ids the ROW names are the ids the RECORD names', (claimRepeats([R28_A, R28_B])[0]?.ids ?? []).length === 2 && (claimRepeats([R28_A, R28_B])[0]?.ids ?? []).every((id) => says(R28_ROW([R28_A, R28_B]), id) && says(R28_FIELD([R28_A, R28_B], 'claim.repeat'), id)));
   t('⛔ the row is not in the sweep\'s NOTE family and the record carries no verdict word for it', !says(R28_FIELD([R28_A, R28_B], 'claim.repeat'), 'exit 4') && says(R28_FIELD([R28_A, R28_B], 'claim.repeat'), 'row C8 is the verdict'));
 
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
