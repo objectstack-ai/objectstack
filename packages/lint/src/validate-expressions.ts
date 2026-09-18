@@ -386,7 +386,13 @@ function masterDetailCount(obj: AnyRec): number {
     // the silence: an object-valued carrier made a declared `master_detail`
     // invisible to this count, so `parent` was judged unbound (or two masters
     // read as one) from metadata that does declare a relationship.
-    const ref = referenceCarrierOf(def, 'validate-expressions masterDetailCount');
+    // ⭐ The literal `.reference` read STAYS here, in the argument, and only
+    // the SHAPE judgment moves out — the form `validate-security-posture.ts`
+    // and `data-model-rules.ts` already use, and for their stated reason: the
+    // #5017 receiver meta-test reads this rule's SOURCE to prove it reads
+    // `reference` and never an alias, and a read folded inside a helper call
+    // would disarm that scan silently.
+    const ref = referenceCarrierOf({ reference: def.reference }, 'validate-expressions masterDetailCount');
     if (ref !== undefined && ref.trim() !== '') n += 1;
   }
   return n;

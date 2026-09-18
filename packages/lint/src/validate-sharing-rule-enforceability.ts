@@ -264,7 +264,7 @@ function masterOf(obj: AnyRec): string | undefined {
       // detail whose master IS declared answered `undefined` here and the
       // arm that needs the master went quiet. Absence still answers
       // `undefined` and falls through to the `return undefined` below.
-      const ref = referenceCarrierOf(f, 'validate-sharing-rule-enforceability masterOf');
+      const ref = referenceCarrierOf({ reference: f.reference }, 'validate-sharing-rule-enforceability masterOf');
       if (ref) return ref;
     }
   }

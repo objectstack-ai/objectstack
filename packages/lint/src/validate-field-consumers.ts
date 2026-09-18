@@ -555,7 +555,9 @@ function walkObject(ledger: ConsumerLedger, obj: AnyRec, objectName: string, obj
     // so the `displayField` consumer edge below was never recorded and the
     // ledger under-reported — a field a lookup DOES display read as unused.
     // Absence still answers `undefined` and records nothing.
-    const reference = referenceCarrierOf(field, 'validate-field-consumers walkObject');
+    // Same form as the sibling lint readers: the literal `.reference` read
+    // stays at the site, only the shape judgment moves to the arbiter.
+    const reference = referenceCarrierOf({ reference: field.reference }, 'validate-field-consumers walkObject');
     const displayField = strName(field.displayField);
     if (reference && displayField && ledger.declares(reference, displayField)) {
       ledger.record(reference, displayField, { root: 'objects', path: `${fieldPath}.displayField`, kind: 'display' });

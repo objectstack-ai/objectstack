@@ -303,7 +303,7 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
       // an absent target is `field/relationship-without-reference`'s subject,
       // not this rule's.
       check(
-        referenceCarrierOf(field, 'validate-object-references field target'),
+        referenceCarrierOf({ reference: field.reference }, 'validate-object-references field target'),
         `object "${objName}" · field "${fieldName}"`,
         `objects[${oi}].fields.${fieldName}.reference`,
         `${type} target`,
@@ -326,7 +326,7 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
       // "deliberately mirrors `FieldSchema.reference` so the same spelling"
       // carries the target object's name — one contract, so one reader.
       check(
-        referenceCarrierOf(param, 'validate-object-references action param target'),
+        referenceCarrierOf({ reference: param.reference }, 'validate-object-references action param target'),
         where,
         `${actionPath}.params[${pi}].reference`,
         'record-picker target',

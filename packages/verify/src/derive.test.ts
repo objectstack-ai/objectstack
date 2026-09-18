@@ -164,3 +164,60 @@ describe('deriveCrudCases — rejected `reference` aliases are narrowed AND name
     expect(c?.blocked).not.toMatch(/rejected alias/i);
   });
 });
+
+/**
+ * [#18550] `relationTarget` must refuse a `reference` carrier it cannot read,
+ * rather than degrading it to the generic "has no `reference` target".
+ *
+ * One of the measured residue sites of ruling letter E item 2 on #18095, and
+ * the same argument the #13250 suite above makes for a rejected ALIAS, one step
+ * further. That narrowing was only safe because the report says WHY; an
+ * UNREADABLE carrier had no such partner, so it fell into the generic sentence
+ * an object with no relationship metadata at all receives. The operator would
+ * read "this object could not be derived" and never learn the carrier was the
+ * reason — one silent seam traded for another (#5262's defect).
+ *
+ * Absence keeps its answer, and keeps it as a REPORT LINE: `undefined`, `null`
+ * and `''` all still derive `null` and still produce the generic reason, which
+ * is the thing this deriver is for.
+ */
+describe('deriveCrudCases — an UNREADABLE `reference` carrier is refused (#18550)', () => {
+  const withRef = (fieldDef: Record<string, unknown>) => ({
+    objects: [
+      { name: 'company', fields: { title: { type: 'text' } } },
+      { name: 'contact', fields: { company_id: fieldDef } },
+    ],
+  });
+
+  it('control: the canonical STRING carrier still derives its target', () => {
+    const c = deriveCrudCases(
+      withRef({ type: 'lookup', required: true, reference: 'company' }),
+    ).find((x) => x.object === 'contact');
+    expect(c?.blocked).toBeFalsy();
+  });
+
+  it('an OBJECT-valued carrier REFUSES — ⛔ not a generic "has no `reference` target" block', () => {
+    const run = () => deriveCrudCases(withRef({ type: 'lookup', required: true, reference: { object: 'company' } }));
+    expect(run).toThrow(TypeError);
+    expect(run).toThrow(/verify deriveCrudCases relationTarget/);
+    expect(run).toThrow(/`reference` is an object/);
+    expect(run).toThrow(/FieldSchema declares it as an optional STRING/);
+  });
+
+  it('an ARRAY-valued carrier refuses too, naming the shape it found', () => {
+    expect(() => deriveCrudCases(withRef({ type: 'lookup', required: true, reference: ['company', 'firm'] })))
+      .toThrow(/`reference` is an array \(length 2\)/);
+  });
+
+  it.each([
+    ['undefined (the key omitted)', {}],
+    ['null (`StrictField` declares it nullable)', { reference: null }],
+    ["'' (names no object)", { reference: '' }],
+  ])('absence stays a REPORT LINE, never a throw: %s', (_label, carrier) => {
+    const blocked = deriveCrudCases(
+      withRef({ type: 'lookup', required: true, ...carrier }),
+    ).find((x) => x.object === 'contact');
+    expect(blocked?.blocked).toMatch(/has no `reference` target/);
+    expect(blocked?.blocked).not.toMatch(/rejected alias/i);
+  });
+});
