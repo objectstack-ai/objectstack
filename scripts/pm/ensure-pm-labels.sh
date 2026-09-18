@@ -430,7 +430,7 @@ done
 # what aligns it) and is absent in objectui; the roster makes both. SKILL.md's
 # domain table carries the matching row (北极星「现在不做」).
 gh label create domain:cloud -R objectstack-ai/objectstack -c bfd4f2 -d "Cloud-service journey parked for the cloud PM to migrate — not dispatched in this repo (云服务旅程,本仓不派)" 2>/dev/null || true
-gh label create domain:cloud -R objectstack-ai/objectui    -c bfd4f2 -d "Cloud-service journey parked for the cloud PM to migrate — not dispatched in this repo (云服务旅程,本仓不派)" 2>/dev/null || true
+gh label create domain:cloud -R objectstack-ai/objectui    -c bfd4f2 -d "Cloud-service journey parked for the cloud PM to migrate — not dispatched from objectui (云服务旅程,本仓不派)" 2>/dev/null || true
 
 # objectui workload streams — maintainer rulings 2026-08-21, quoted verbatim:
 # 「B:两车道」→「现在本身就有 domain:devx」→「不要搞出那么多车道名称」→「也有
