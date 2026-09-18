@@ -943,6 +943,18 @@ jobs:
       - name: A declared gate population reaches the tree
         run: pnpm check:declared-population-live
 
+      # ADR-0087 D4's per-release correctness gate (#17080). The REAL run needs
+      # two published tarballs and npm, so it lives in the release lane and
+      # cannot run on a PR; what runs here is its `--self-test`, which is
+      # therefore the only thing standing between an edit to that gate and the
+      # next release trusting it. Its batteries drive the same `verifyRelease()`
+      # the release lane calls, over synthetic tarball trees: a section matching
+      # both artifacts, one omitting a real export, one inventing an export, a
+      # from/to version pointing at another release, and the two absences that
+      # are legitimate. Fixture-only, no spawns; well under a second.
+      - name: Per-release spec-changes gate self-test
+        run: pnpm check:release-spec-changes
+
       # PM bare-root worklist self-test (#10840). The step above proves the
       # dispatch derivation still WORKS; this one proves the recorded triage of
       # the gates that derivation structurally cannot see is still true of the
