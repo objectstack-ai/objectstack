@@ -32,13 +32,14 @@ An HA adapter (Redis-backed, over `service-cluster-redis`) is a post-GA fast-fol
 
 ```typescript
 import { ObjectKernel } from '@objectstack/core';
+import type { IRealtimeService } from '@objectstack/spec/contracts';
 import { RealtimeServicePlugin } from '@objectstack/service-realtime';
 
 const kernel = new ObjectKernel();
-kernel.use(new RealtimeServicePlugin());
+await kernel.use(new RealtimeServicePlugin());
 await kernel.bootstrap();
 
-const realtime = kernel.getService('realtime');
+const realtime = kernel.getService<IRealtimeService>('realtime');
 
 const subId = await realtime.subscribe('records', (event) => {
   console.log(event.type, event.payload);
@@ -92,13 +93,21 @@ is wired without upgrading that row with a real enforcement site.
 Implements `IRealtimeService` from `@objectstack/spec/contracts`:
 
 ```typescript
+import type {
+  RealtimeEventHandler,
+  RealtimeEventPayload,
+  RealtimeSubscriptionFilter,
+  RealtimeSubscriptionOptions,
+} from '@objectstack/spec/contracts';
+
 interface IRealtimeService {
   publish(event: RealtimeEventPayload): Promise<void>;
   subscribe(channel: string, handler: RealtimeEventHandler, options?: RealtimeSubscriptionOptions): Promise<string>;
   unsubscribe(subscriptionId: string): Promise<void>;
   handleUpgrade?(request: Request): Promise<Response>;   // deliberately unimplemented — see above
-  subscribeMetadata?(filter, handler): Promise<string>;  // optional convenience — not implemented here
-  subscribeData?(filter, handler): Promise<string>;      // optional convenience — not implemented here
+  // optional convenience methods — not implemented here
+  subscribeMetadata?(filter: RealtimeSubscriptionFilter, handler: RealtimeEventHandler): Promise<string>;
+  subscribeData?(filter: RealtimeSubscriptionFilter, handler: RealtimeEventHandler): Promise<string>;
 }
 ```
 

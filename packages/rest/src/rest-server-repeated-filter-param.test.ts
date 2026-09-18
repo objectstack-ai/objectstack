@@ -344,15 +344,39 @@ describe('#7390 §3 — `POST /data/:object/query` is untouched', () => {
     });
 
     it('a body-form nested AST is forwarded too', async () => {
+        // [#16066] The PREFIX form — `['and', condA, condB]` — which is what the
+        // platform's one lowering sink actually reads. This case used to send
+        // the INFIX form and pass, because `findData` is mocked here and nothing
+        // downstream ran; the case below pins what happens to that one now.
+        const { drive, protocol } = boot();
+        const answer = await drive('POST', `${DATA}/:object/query`, {
+            params: { object: 'task' },
+            body: { filter: ['and', ['status', '=', 'open'], ['done', '=', false]] },
+        });
+        expect(answer.status).toBe(200);
+        expect(protocol.findData.mock.calls[0][0].query.filter).toEqual(
+            ['and', ['status', '=', 'open'], ['done', '=', false]],
+        );
+    });
+
+    it('[#16066] an INFIX join is refused at the declaration, not forwarded into a refusal', async () => {
+        // `isFilterAST` refuses `[condA, 'and', condB]`, `parseFilterAST` lowers
+        // it to nothing, and the engine answers `400` for it with the wording
+        // "Infix joins ([condA, "or", condB]) are NOT one of the shapes — write
+        // the prefix form" (`objectql/src/engine.ts`). So this body has always
+        // been a 400; declaring the filter slot's value set moves the refusal to
+        // the ingress, where the caller is told which parameter to fix.
+        //
+        // ⛔ Not a narrowing of what the platform serves — a narrowing of how far
+        // an unservable body travels before it is refused.
         const { drive, protocol } = boot();
         const answer = await drive('POST', `${DATA}/:object/query`, {
             params: { object: 'task' },
             body: { filter: [['status', '=', 'open'], 'and', ['done', '=', false]] },
         });
-        expect(answer.status).toBe(200);
-        expect(protocol.findData.mock.calls[0][0].query.filter).toEqual(
-            [['status', '=', 'open'], 'and', ['done', '=', false]],
-        );
+        expect(answer.status).toBe(400);
+        expect(answer.body?.code).toBe('VALIDATION_FAILED');
+        expect(protocol.findData).not.toHaveBeenCalled();
     });
 
     it('the helper itself never reads a body — it is handed `req.query` only', () => {

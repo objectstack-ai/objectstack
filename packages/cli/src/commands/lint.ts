@@ -15,7 +15,11 @@ import { scoreMetadata } from '../lint/score.js';
 import { checkHookBodyLowering } from '../lint/hook-body-lowering.js';
 import { lowerCallables } from '../utils/lower-callables.js';
 import { authoringRuleUnionStack } from '../utils/stack-collections.js';
-import { artifactPackages, packageBodyAsStack } from '../utils/artifact-packages.js';
+import {
+  artifactPackages,
+  packageBodyAsStack,
+  runPerPackageAuthoringRules,
+} from '../utils/artifact-packages.js';
 import { runMetadataEval } from '../lint/metadata-eval.js';
 import { DEFAULT_METADATA_EVAL_CORPUS } from '../lint/corpus.js';
 import {
@@ -666,7 +670,7 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
   // so `lowered` already carries the folded collections and re-folding it here
   // would be a second call that could only ever return by identity.
   const { lowered, loweredHookRefs } = lowerCallables(stack as Record<string, unknown>);
-  for (const f of runAuthoringRules('lint', {
+  const unionFindings = runAuthoringRules('lint', {
     normalized: stack,
     parsed: lowered,
     sduiManifest: opts.sduiManifest,
@@ -674,7 +678,76 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
     // input — what lets `validateReadonlyHookWrites` / `validateHookBodyWrites`
     // report `hooks[i].handler` here byte-identically to `os build`.
     loweredHookRefs,
-  })) {
+  });
+
+  // ── The SAME rule table, once per PACKAGE (ADR-0130 D4, #18778) ──
+  //
+  // The second half of the run above, and the half THIS door ran without.
+  // `os build` has run it since #16611 and `os validate` since #18677; `os
+  // lint` ran the union fold and stopped. Every finding this pass yields is
+  // therefore one `os build` reported and this command structurally could not.
+  //
+  // ⚠️ [#18779] This paragraph used to size that gap by quoting `compile.ts`
+  // step 3b-ii — "exactly the set the union could not see" — and that sentence
+  // was FALSE when it was copied here: the de-duplication key carried the
+  // POSITIONAL `path`, so a package-local finding and its flattened twin got
+  // two keys and the ECHO survived. Part of every survivor set was therefore
+  // something this door's own union run ALREADY reported. The key was
+  // corrected in `utils/artifact-packages.ts`; the gap this door closed is
+  // real and its direction is unchanged, but ⛔ do not re-derive its size from
+  // that sentence — it was quoted, never measured, by the two cards that
+  // wired the second and third doors.
+  //
+  // ⚠️ The reading that hid it for two cards is the one the imports above
+  // invite: this file DOES call `artifactPackages` and `packageBodyAsStack` —
+  // for the intra-package duplicate-name advisory (#17821), which is `os
+  // lint`'s OWN rubric and not the shared table. ⛔ A count is not a reading.
+  //
+  // ⛔ Not a second copy of the loop. This file already runs ONE per-package
+  // walk of its own (the advisory above), so "write the loop here, it is
+  // already the shape" is the live temptation at this door specifically — and
+  // it is the one `utils/artifact-packages.ts`' header forbids by name: what
+  // drifts between two hand-written loops is the VERDICT (the de-duplication
+  // key, the severity split, the `where` prefix), not the package reading.
+  //
+  // Settled from the repo's own statements, ⛔ not assumed: `authoring-rules.ts`
+  // calls the three commands "three doors in ONE wall" and holds a gate to its
+  // weakest door; the union fold landed HERE (#17069/#17528) for this exact
+  // false-clean direction, in this file's own words — "the whole table reported
+  // nothing and `os lint` returned no finding of any severity for a project
+  // `os build` refuses"; and the pre-registry hand-wired subset was removed
+  // because "a pre-flight that disagrees with the gate in both directions is
+  // worse than no pre-flight". This is that same sentence, on the INPUT.
+  //
+  // The severity face is `os lint`'s own and is unchanged: a per-package
+  // finding is mapped by the same expression the union findings are, so an
+  // `error` fails the run, a `warning` fails it under `--strict` and an `info`
+  // stays a suggestion. ⛔ No severity judgement is made here — a per-package
+  // `error` is one `os build` ALREADY refuses, so this narrows `os lint` to the
+  // bar the command that ships holds, never past it.
+  //
+  // Skipped entirely for a stack with no `packages[]` (`packageCount` 0): one
+  // package by definition, already judged whole by the union run above.
+  const perPackageFindings = runPerPackageAuthoringRules({
+    command: 'lint',
+    // The LOWERED view, exactly as the `parsed` tier above is handed it and as
+    // both other doors hand their parse: `lowerCallables` re-maps
+    // `packages[*].manifest`, so this is the same per-package body `os build`
+    // walks. ⛔ Not `stack` — that would judge un-lowered package bodies here
+    // and lowered ones there, which is #16095 one layer in.
+    parsed: lowered,
+    // De-duplicated against the run above, on the UNPREFIXED finding — so what
+    // reaches the list below is what that run did not already carry under the
+    // same rule, `where`, message and non-top-level position (#18779; the key
+    // used to compare the top-level index too, and let the echo through).
+    unionFindings,
+    sduiManifest: opts.sduiManifest,
+    loweredHookRefs,
+  }).findings;
+
+  // ⛔ ONE mapping for both halves. A second copy of this expression is how one
+  // list comes to render `info` as `suggestion` and the other does not.
+  for (const f of [...unionFindings, ...perPackageFindings]) {
     issues.push({
       severity: f.severity === 'info' ? 'suggestion' : f.severity,
       rule: f.rule,

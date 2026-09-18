@@ -100,7 +100,12 @@ import { defineStack } from '@objectstack/spec';
 import { ExportDataCapability } from './capabilities/export-data.capability';
 
 export default defineStack({
-  manifest: { name: 'billing', namespace: 'billing', version: '1.0.0' },
+  manifest: {
+    name: 'billing',
+    namespace: 'billing',
+    version: '1.0.0',
+    /* …full ObjectStackManifest… */
+  },
   capabilities: [ExportDataCapability],                   // ← ① DEFINE
   permissions: [
     { name: 'billing_admin', systemPermissions: ['export_data'] },  // ← ④ GRANT

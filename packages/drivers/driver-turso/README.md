@@ -171,7 +171,8 @@ the bound into your own client if you need both:
 const client = createClient({
   url: 'libsql://my-db.turso.io',
   authToken: process.env.TURSO_AUTH_TOKEN,
-  fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(30_000) }),
+  fetch: (input: RequestInfo | URL, init?: RequestInit) =>
+    fetch(input, { ...init, signal: AbortSignal.timeout(30_000) }),
 });
 ```
 

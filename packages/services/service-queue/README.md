@@ -32,14 +32,15 @@ pnpm add @objectstack/service-queue
 
 ```typescript
 import { ObjectKernel } from '@objectstack/core';
+import type { IQueueService } from '@objectstack/spec/contracts';
 import { QueueServicePlugin } from '@objectstack/service-queue';
 
 const kernel = new ObjectKernel();
 // 'auto' (default): durable DbQueueAdapter when ObjectQL is available, else memory
-kernel.use(new QueueServicePlugin({ adapter: 'auto' }));
+await kernel.use(new QueueServicePlugin({ adapter: 'auto' }));
 await kernel.bootstrap();
 
-const queue = kernel.getService('queue'); // IQueueService
+const queue = kernel.getService<IQueueService>('queue');
 
 // Publish a message
 await queue.subscribe('email', async (msg) => {
@@ -47,8 +48,8 @@ await queue.subscribe('email', async (msg) => {
 });
 
 await queue.publish('email', { to: 'user@example.com', template: 'welcome' }, {
-  // delay / priority / retries (see QueuePublishOptions)
-  attempts: 3,
+  // delay / priority / backoff / idempotencyKey (see QueuePublishOptions)
+  maxAttempts: 3,
 });
 ```
 

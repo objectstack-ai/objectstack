@@ -1,6 +1,6 @@
 # ADR-0131: Organization ownership is total — no NULL `organization_id`; declared metadata stays in code; a row exists only when an organization authored it
 
-**Status**: Accepted (2026-09-04) — accepted by the merge that landed it on `main` ([#14976](https://github.com/objectstack-ai/objectstack/pull/14976), commit `0ed271574`), which is itself the acceptance act for a governed surface (Prime Directive #14). Execution is paused under #15193 and the maintainer's standing instruction; that pause is carried there, not by this status line.
+**Status**: Accepted (2026-09-04) — accepted by the merge that landed it on `main` ([#14976](https://github.com/objectstack-ai/objectstack/pull/14976), commit `0ed271574`), which is itself the acceptance act for a governed surface (Prime Directive #14). Execution is paused under #15193 and the maintainer's standing instruction; that pause is carried there, not by this status line. · **Amended** (2026-09-17, [#18413](https://github.com/objectstack-ai/objectstack/issues/18413) — maintainer ruling option **B** on [#18336](https://github.com/objectstack-ai/objectstack/issues/18336), 2026-09-16: **D5's assignment of `reportLegacyPlatformAdminGrant` and `resetLegacyPlatformAdminGrantReport` to D13 is withdrawn**. Those two symbols retire on the **17.x** line under [#11663](https://github.com/objectstack-ai/objectstack/issues/11663)'s design, **walled posture only**; the `single` posture keeps its zero-config first-user promotion and its grant row. **D5's Default-Organization ownership of that row is unchanged** and still lands on the v18 line under C3 — nothing about NULL ownership moves here. D14 gains one named exception. See **"Amendment (2026-09-17, #18413): the legacy-anchor retirement leaves D13 for the walled posture"** at the end.)
 **Deciders**: ObjectStack maintainer, 2026-09-03/04, live chat on
 [#13564](https://github.com/objectstack-ai/objectstack/issues/13564), verbatim and untranslated,
 in the order the model was built: the premise 「我理解只有代码定义的元数据是跨租户的，对象、字段、视图等
@@ -359,8 +359,14 @@ registry, an assignment names one of its entries. The read-time-merge failures o
 `PLATFORM_ADMIN` derives from `OS_PLATFORM_OWNER_EMAIL` (#13514 L4) — configuration, not a row. The
 `single`-posture first-user promotion (Choice 4A), which today writes an `admin_full_access` grant row
 with a NULL organization, writes it **owned by the Default Organization** instead; under a walled
-posture no grant row is written (unchanged). `reportLegacyPlatformAdminGrant` and the legacy unscoped
-anchor retire with D13. No NULL grant row is ever produced.
+posture no grant row is written (unchanged). That ownership change is C3's, on the v18 line, and it is
+**unchanged by the 2026-09-16 ruling** — so **no NULL grant row is ever produced once C3 has landed**;
+until then the `single` row carries the NULL organization it carries today, and D10's migration is what
+clears it. The legacy unscoped anchor retires with D13 **for the `single` posture only**: its **walled**
+half, together with the two symbols that carry the migration window —
+`reportLegacyPlatformAdminGrant` and `resetLegacyPlatformAdminGrantReport` — **left D13 on 2026-09-16**
+and retire on the **17.x** line under #11663's design instead (#18336; see the Amendment at the end).
+The `single` anchor's own disposition is #11979's (Choice 4B), which this record does not pre-empt.
 
 ### D6 — Managed definitions are sealed; customization is environment-level state beside them, never an edit and never per organization
 
@@ -677,6 +683,14 @@ Maintainer, 2026-09-04: 「我发 17.3，然后后续这么大的改动应该放
   operator ceremony with a boot refusal behind it (D10) — the release notes and the self-hoster docs lead
   with it.** ⛔ No 17.x card narrows or removes an arm, adds a name column beside an id column, or ships
   a half of this record.
+- **One named exception, ruled 2026-09-16** (#18336 option B; Amendment 2026-09-17, #18413): the
+  **walled-posture** retirement of the legacy row-id grant dual read and its deprecation log — #11663
+  leg L5 — lands on **17.x**, under #18336. It is not "a half of this record", because the ruling put
+  that leg under #11663's design: it is no longer this record's to stage. It is not an arm either — the
+  arms this bullet fences are the drivers' `orWhereNull` arms inside `applyTenantScope` (D8/D13, C8), and
+  that leg touches none of them, adds no column, and changes no row's ownership. `single` is untouched,
+  and #15193 does not gate it. ⛔ The exception is exhausted by that leg and those two symbols; every
+  other retirement in D13 keeps this bullet and stays gated on D10's zero-NULL report.
 
 Doing it in one major rather than additively across 17.x avoids carrying dual id/name columns and a
 registry-first-then-rows resolution through a public release — compatibility shims for a shape nobody
@@ -824,7 +838,9 @@ seed-ownership batching (#14718, #14687), ADR-0120 D3's COALESCE shadow (#13016)
 batching (#11537), the deployment platform-global declaration (#12704); **consistent, keep** — every
 stamp-and-backfill repair (#12929, #13180, #13527, #13572, #13565, #14726) and #14635, #13685, #14129;
 **closed unmerged** — PR #14923. Pre-17.2 behaviour (Choice 4A's NULL grant row, the legacy grant anchor,
-#10103 Option C, ADR-0005 overlays) is out of the audit's scope and moves in v18.
+#10103 Option C, ADR-0005 overlays) is out of the audit's scope and moves in v18 — **except the legacy
+anchor's walled half and its deprecation pointer, which moved to the 17.x line on 2026-09-16** (see the
+Amendment at the end); Choice 4A's NULL grant row itself is unaffected and still moves in v18 (C3).
 
 - The issue body of #13564 cites the arm by a bare line number (7320) that had drifted by ~4,600 lines
   before the first census read it; on `origin/main` `2514d49f3` the
@@ -922,3 +938,112 @@ fate 2 after a verified rewrite; no surface builds a merged server-paged list of
   `packages/service-cloud/src/control-plane-org-scope-plugin.ts`;
   `packages/service-cloud/src/migrations/org-id-backfill.ts`;
   `apps/cloud/test/unscoped-control-plane-tenant-wall.test.ts`.
+
+---
+
+## Amendment (2026-09-17, #18413): the legacy-anchor retirement leaves D13 for the walled posture
+
+**Authority.** Maintainer ruling, option **B** on
+[#18336](https://github.com/objectstack-ai/objectstack/issues/18336), taken in session
+`session_01LmoCFLwGkcAGefVf7jryEV` on 2026-09-16T09:54Z and recorded on that card. The option text the
+maintainer selected, verbatim and untranslated:
+
+> **B — #11663 设计说了算**
+> 修订 ADR-0131 D13，把这两个符号从其退役清单里摘掉，本卡留在 17.x 线执行。
+
+Recorded here under **Prime Directive #13** — reversing a recorded decision is itself a decision, and
+it needs an amended record rather than a changeset that quietly does the opposite. This section is that
+act. The record it amends stays **Accepted**; only the staging of one leg moves.
+
+### What the ruling decided
+
+1. **Between the two governance records that name these symbols, #11663's design governs** — for these
+   symbols, and for nothing else. This record's D5 had claimed their retirement for D13; that claim is
+   withdrawn.
+2. **#18336 stays on the 17.x line.** It is not re-targeted to v18, and **#15193 does not gate it** —
+   that gate binds this record's execution cards, and this leg is no longer one of them.
+3. **`reportLegacyPlatformAdminGrant` and `resetLegacyPlatformAdminGrantReport` leave D13.**
+
+### What the ruling did NOT decide — two standing constraints, verbatim and untranslated
+
+The ruling was about which record governs two symbols. It touched neither of these, and both still bind:
+
+> The rest of Choice 4A (#11974, 2026-08-25) stands: **retiring the walled write must not retire the
+> `single` one**
+
+(maintainer, 2026-09-08 — [#16682](https://github.com/objectstack-ai/objectstack/issues/16682) comment
+`5587754690`)
+
+> 比如临时启动的开发环境，我不可能去配置啊
+
+(maintainer, 2026-09-16, the same session as the ruling — the zero-config constraint: a development
+environment started for a moment cannot be asked to configure an administrator first)
+
+⇒ **Mechanically: the retirement is walled-posture only.** The `single` posture keeps its zero-config
+first-user promotion and keeps its grant row until [#11979](https://github.com/objectstack-ai/objectstack/issues/11979)
+(Choice 4B) disposes of it. The all-postures reading is excluded twice over, once by each constraint.
+It is also excluded by the code the leg retires: the deprecation pointer is already posture-keyed
+(`postureEnforcesWall(resolveTenancyPosture())` at the §6b-config arm of
+`packages/core/src/security/resolve-authz-context.ts`), so under `single` there is no pointer behaviour
+to retire in the first place.
+
+### The question this amendment CLOSES
+
+This record's core rule is that NULL is not a state (D1). `single` keeps writing its grant row, and that
+row's `organization` is NULL today — so dropping two symbols from D13 has to say what becomes of that
+row, or the record is left self-contradictory. It says this:
+
+> **Decision (2026-09-17, #18413).** The `single`-posture first-user grant row **still becomes owned by
+> the Default Organization**. That is D5's own answer, accepted by the maintainer on 2026-09-04 (§6, one
+> of the four open questions answered 「接受你的建议」), and the option-B ruling does not touch it. It
+> still lands **on the v18 line, under C3** (§8), exactly where it was before this amendment. **Until C3
+> lands, the row keeps the NULL organization it carries today** — the state D10's migration exists to
+> clear — and D1's NOT NULL constraint still reaches that table only when D10 reports zero for it.
+
+**Why no new ruling was needed to close it: the drop moves no row.** `reportLegacyPlatformAdminGrant` is
+a once-per-process `warn` naming one holder and pointing at `OS_PLATFORM_OWNER_EMAIL`;
+`resetLegacyPlatformAdminGrantReport` drops that latch for tests. Neither writes the grant row, neither
+reads its `organization`, and neither participates in the derivation that confers `PLATFORM_ADMIN` —
+that derivation is the unscoped-grant read at §6/§6b, which this amendment leaves exactly as it is. So
+the 17.x retirement this amendment authorizes **adds no NULL row, removes none, and re-owns none**. The
+NULL-ownership question is not created by the drop and is not answered by it; it is answered by D5, on
+D5's own schedule.
+
+### Reconciliation with D14
+
+D14's 「⛔ No 17.x card … ships a half of this record」 gains exactly one named exception, written into
+D14 itself. Two independent reasons, either sufficient:
+
+1. **It is not a half of this record.** The ruling assigned the leg to #11663's design. Work this record
+   no longer governs cannot be a half of it.
+2. **It narrows no arm.** The arms D14 fences are the drivers' `orWhereNull` arms inside
+   `applyTenantScope` (D8/D13, removed in the same major after C7, §8 C8). The walled legacy-anchor read
+   and its pointer are neither of those, add no name column beside an id column, and move no row.
+
+⛔ The exception is exhausted by that leg and those two symbols. Every other retirement in D13 keeps
+D14's fence and stays gated on D10's zero-NULL report.
+
+### Text changed by this amendment
+
+- **Status line** — the `**Amended**` note above.
+- **D5** — the sentence 「`reportLegacyPlatformAdminGrant` and the legacy unscoped anchor retire with
+  D13」 is replaced: the anchor retires with D13 for `single` only; the walled half and both symbols
+  move to the 17.x line; `No NULL grant row is ever produced` is stated against the moment it becomes
+  true (once C3 has landed), which is what it always meant and what the open question needed spelled out.
+- **D14** — the named exception above.
+- **§7** — the post-17.2 audit's 「moves in v18」 line gains the same exception; Choice 4A's NULL grant
+  row itself is unaffected and still moves in v18.
+- **D13's own retirement list is unchanged** — see the reading note below.
+- **§8** — unchanged. C3 still carries 「platform-admin grant row owned by the Default Organization」
+  against D5, on the v18 line.
+
+### Reading note — where the symbols actually were
+
+The card that cut this amendment reported that D13's list named both symbols. Measured on `origin/main`
+`32be735e5`: **D13's own list names neither.** This record names `reportLegacyPlatformAdminGrant`
+exactly **once**, in **D5**, in the sentence that assigns its retirement to D13, and names
+`resetLegacyPlatformAdminGrantReport` **nowhere** (`grep -ro` over `docs/adr/`: 1 and 0; positive
+control — the same grep over `packages/`: 15 and 17). The **assignment** is what the ruling reaches, so
+this amendment edits D5, D14 and §7 and leaves D13's list as it stands. The substance of the card is
+unaffected: before this amendment the retirement was D13's and therefore v18's; after it, it is
+#11663's and 17.x's.

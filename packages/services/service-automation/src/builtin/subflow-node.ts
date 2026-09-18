@@ -171,9 +171,10 @@ export function registerSubflowNode(engine: AutomationEngine, ctx: PluginContext
       // Deliberately the SAME exit the three totals above already leave by, so
       // this adds one total to an existing rollup and decides nothing new
       // about which child outcomes reach it. (A `refused` child — the run
-      // OUTCOME sense, an `end` node saying no — reaches this exit today and
-      // has since refusals existed; whether a parent should go on from one at
-      // all is a separate open question about this node, not this slot's.)
+      // OUTCOME sense, an `end` node saying no — used to reach this exit as an
+      // ordinary success; #18110 answered the open question this comment left
+      // and gives it the arm below, which leaves by this same exit with the
+      // same totals.)
       //
       // Absent, never zero: a child summary with no `failed` is a row recorded
       // before the count existed, and `0` would claim it was measured.
@@ -185,7 +186,43 @@ export function registerSubflowNode(engine: AutomationEngine, ctx: PluginContext
       // directly to the parent variable map).
       if (outVar) variables.set(outVar, child.output ?? null);
 
-      return { success: true, output: { output: child.output ?? null }, ...(metrics ? { metrics } : {}) };
+      const rollup = {
+        success: true as const,
+        output: { output: child.output ?? null },
+        ...(metrics ? { metrics } : {}),
+      };
+
+      // [#18110] The child REFUSED — an `end` inside it declared
+      // `outcome: 'refused'`, which is a successful evaluation that says NO.
+      //
+      // Until this arm existed every child status other than `paused` fell
+      // through the success exit below, so the parent walked straight down this
+      // node's out-edges, recorded `completed` and fired its OWN
+      // `successMessage` over the child's refusal: the author got the opposite
+      // of what they wrote, and fail-open — a refusing gate (approval,
+      // eligibility, a precondition) that lets the run through is the one kind
+      // of wrong nobody notices, because the flow finishes green.
+      //
+      // ⛔ NOT folded into the failure arm above. A refusal is not a failure:
+      // it must not consume retry budget, must not be routable by a `fault`
+      // edge, and must not be counted in `nodes[].failures` — all of which it
+      // would inherit from `success: false`. `refuse` is the channel for
+      // exactly this (`NodeExecutionResult.refuse`), and the engine throws its
+      // signal only after this step and these `metrics` are already in the run
+      // log — which is why the child's #4354 totals survive on the refusal path
+      // instead of being lost to the unwind.
+      //
+      // The envelope is the success one PLUS the refusal, deliberately: the
+      // child's output really was produced and the nodes before its refusing
+      // `end` really ran, so withholding them here would make the parent's
+      // answer depend on how the child ended rather than on what it did —
+      // the same reasoning `finishRefusedRun` applies to a refused run's own
+      // declared outputs.
+      if (child.status === 'refused') {
+        return { ...rollup, refuse: true, refusalMessage: child.refusalMessage };
+      }
+
+      return rollup;
     },
   });
 

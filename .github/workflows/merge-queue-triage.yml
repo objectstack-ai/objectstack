@@ -174,9 +174,22 @@ jobs:
           # wrong `permissions:` block) now takes four attempts to fail instead of
           # one. It still fails.
           #
-          # 400/401/404/422 stay exempt: a malformed request, a wrong target, or a
-          # body past GitHub's 65536-character comment limit is this repo's own bug,
-          # answered on the first try and not improved by asking again.
+          # 400/401/404/422 stay exempt: a malformed request, a wrong target, or
+          # an oversized body is this repo's own bug, answered on the first try and
+          # not improved by asking again.
+          #
+          # Both caps this workflow can hit are MEASURED, in UTF-8 BYTES, and they
+          # are the same number — ⛔ neither is the 65,536 characters this comment
+          # used to name. A COMMENT (`issues.createComment` below) stores 262,144
+          # bytes and refuses 262,145 with a real 422: objectstack#18826, bisected
+          # to one byte. An ISSUE BODY (`issues.update` / `issues.create` below)
+          # stores 262,144 and refuses 262,145 — on `create` with a 422 (#18826),
+          # on `update` SILENTLY, 200 with the old body kept and nothing reported:
+          # objectstack#18793, bisected to one byte, restated as
+          # `ISSUE_BODY_LIMIT` in scripts/pm/check-half-states.mjs. ⛔ Do not
+          # re-derive 65,536 from a refusal message: GitHub's own 422 text still
+          # says "maximum is 65536 characters" and #18826 falsified it in both unit
+          # and value by storing a 262,144-character comment.
           retries: 3
           retry-exempt-status-codes: 400,401,404,422
           script: |

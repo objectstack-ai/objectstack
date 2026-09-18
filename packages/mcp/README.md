@@ -505,7 +505,7 @@ View MCP messages in client:
 import { defineStack } from '@objectstack/spec';
 import { MCPServerPlugin } from '@objectstack/mcp';
 
-import * as objects from './src/objects/index.js';
+import { account, contact, opportunity } from './src/objects/index.js';
 import { allActions } from './src/actions/index.js';
 
 export default defineStack({
@@ -517,7 +517,7 @@ export default defineStack({
     name: 'CRM Assistant',
     engines: { protocol: '^17' },
   },
-  objects: Object.values(objects),
+  objects: [account, contact, opportunity],
   // Your actions become MCP tools — the plugin bridges them at start.
   actions: allActions,
   plugins: [new MCPServerPlugin({ name: 'crm-assistant' })],

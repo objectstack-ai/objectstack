@@ -46,8 +46,9 @@ async function main() {
   // 2. Connect (Fetches system capabilities)
   await client.connect();
 
-  // 3. Metadata Access
-  const todoSchema = await client.meta.getItem('object', 'todo_task');
+  // 3. Metadata Access — the document is carried under `item`
+  const { item } = await client.meta.getItem('object', 'todo_task');
+  const todoSchema = item as { fields: Record<string, unknown> };
   console.log('Fields:', todoSchema.fields);
   
   // Save Metadata (New Feature)
@@ -143,9 +144,12 @@ Batch operations support the following options:
 The client provides standardized error handling with machine-readable error codes:
 
 ```typescript
+import type { StandardError } from '@objectstack/client';
+
 try {
   await client.data.create('todo_task', { subject: '' });
-} catch (error) {
+} catch (caught) {
+  const error = caught as Error & Partial<StandardError>;
   console.error('Error code:', error.code);        // e.g., 'validation_error'
   console.error('Category:', error.category);      // e.g., 'validation'
   console.error('HTTP status:', error.httpStatus); // e.g., 400
@@ -244,11 +248,17 @@ await client.auth.refreshToken('refresh-token-string');
 
 // Package Management
 await client.packages.list();
+// The argument is a package MANIFEST — `id`, `name`, `version` and `type` are
+// required, and the manifest surface is closed, so an undeclared key (`label`,
+// a transposed `namesapce`) is refused by name rather than dropped.
 await client.packages.install({
-  name: 'vendor_plugin',
-  label: 'Vendor Plugin',
+  id: 'com.vendor.plugin',
+  type: 'plugin',
+  name: 'Vendor Plugin',
   version: '1.0.0',
 });
+// Re-installing an id that already exists answers 409 by default; opt in:
+await client.packages.install(manifest, { overwrite: true });
 await client.packages.enable('plugin-id');
 
 // Approvals (approval is a flow node — decisions are keyed by request id)
@@ -282,7 +292,7 @@ const cubes = await client.analytics.meta('sales');
 console.log(cubes[0].name);
 
 // Automation
-const run = await client.automation.trigger('send_welcome_email', { userId });
+const run = await client.automation.trigger('send_welcome_email', { userId: 'usr_123' });
 console.log(run.status);
 
 // File Storage

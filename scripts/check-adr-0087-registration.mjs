@@ -213,6 +213,12 @@
 // by hand, or pattern-matches the much looser "no metadata surface => no changeset
 // discipline", which is NOT what #8277 argued.
 //
+// ⚠️ #18745 is that same miss recurring, through a DIFFERENT gap in the detector, on
+// a changeset claiming the category this section built. The paragraph above stays as
+// written because it records what was measured on #8277; what it must not be read as
+// is "the hole is closed". See the `#18745` section above for which gap each of the
+// two misses went through and why closing the second does not close the first.
+//
 // ### What is checked, and why it is a NARROWING
 //
 // The claim names the symbols it is about, and each one is verified at HEAD:
@@ -404,6 +410,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'G5: the catch-all, on a changeset carrying no prescription': 1,
   'D-E2E (#17357): the denial heading, END TO END through `scan()`': 6,
   'F-E2E (#17864): the framed MENTION, END TO END through `scan()`': 2,
+  'L-E2E (#18494): the compound-noun label, END TO END through `scan()`': 4,
   'R9: two markers is ambiguous, not "the first one wins"': 2,
   'R10: THE #6419 SHAPE -- a REAL prescription, written in Chinese with -': 4,
   'R11: the same, framed by a HEADING instead of an inline label': 3,
@@ -413,6 +420,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'G8: a CAPABILITY table under the same framing stays GREEN': 1,
   'G9: THE #6967 SHAPE -- a changeset that POINTS AT prescriptions': 1,
   'R14: ...and the SAME sentence with the goods still refuses the catch-all': 4,
+  'RM (#18745): a rewrite whose TO side is an INSTRUCTION, not an operand': 9,
+  'RM1-RM12 (#18745): the retirement arm, and the class it must not widen past': 12,
   'The #8299 category: `runtime-interface-only`': 12,
   '#12881: a metadata surface that names the symbol only in PROSE': 30,
   'The #13080 category: `type-surface-only`': 26,
@@ -434,7 +443,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the floors: labels that are NOT mentions, and mentions that ARE evidenced': 9,
   'D1-D9 (#17357): a heading that DENIES a prescription is not evidence of one': 9,
   'F1-F9 (#17864): a framing word between the governor and the placeholder is': 9,
+  'L1-L13 (#18494): a NOUN-PHRASE label is a label, read from the RIGHT': 13,
   'P51-P60: the HARD-WRAPPED mention, and the floors that keep the cure from': 11,
+  'X1-X11 (#18493): a framing word inside an IDENTIFIER is not framing': 11,
+  'SS1-SS8 (#18494 + #18493): the two directions of ONE predicate, pinned': 8,
   'P62-P68: the framed region closes at the same or a SHALLOWER heading, not': 7,
   'U1-U12 (#8299): unit pins on the runtime-interface-only primitives': 13,
   'S1-S5: the `--audit-stock` classifier (#6350)': 7,
@@ -891,6 +903,66 @@ export function breakingDeclaration(parsed) {
 //     imperative verb), whose false-positive surface is intuitively much larger:
 //     any changeset enumerating API usage would hit it. Falsify before implementing.
 //
+// ## #18745 -- the RETIREMENT arm: a rewrite whose TO side is an INSTRUCTION
+//
+// Every arm above reads a rewrite as a PAIR: an old name and a new one, across an
+// arrow or across a cell boundary. That is the shape of a RENAME. A REMOVAL has no
+// new name, so an author who writes the most careful possible prescription for one
+// writes the only thing there is to write -- an instruction:
+//
+//     **Migration -- `api: { ... }` -> delete the property.**
+//
+// That is `.changeset/18318-evalcontext-no-query-api.md` (#18318, PR #18736), and it
+// is the same failure this header records against #8277 one section down, arriving
+// through a different door. The line carries the framing word, it carries the arrow,
+// and its FROM side is a proper backticked operand. It was missed on ONE predicate:
+// `REWRITE_RE` requires an OPERAND on BOTH sides, and `delete the property` is an
+// instruction, not a name -- so branches 2 and 3 never saw the line, the body read as
+// carrying no prescription, and `not-required (runtime-interface-only ...)` was
+// verified against a silence. The verdict on that PR was sound -- its author verified
+// all four `runtime-interface-only` predicates POSITIVELY and handed the detector miss
+// up rather than letting it carry the claim -- and that is exactly why it is worth
+// repairing: the next author's claim would have rested on the silence.
+//
+// THE TWO MISSES ARE DIFFERENT HOLES, and the distinction decides what a repair can
+// cover. #8277's prescription is `read `result.driverFault?.message` where you read
+// `result.error`` -- no arrow, no table, no pair the vocabulary can match. It is the
+// IMPERATIVE-SENTENCE residue listed above, still deliberately out of reach, and this
+// arm does not move it one inch (RM11/RM12 pin that, so a later author widening toward
+// it has to argue with a red test rather than with prose). #18745's prescription has
+// the pair shape and fails only on the RIGHT-HAND operand. Repairing the second does
+// not repair the first, and a repair that claimed to would be the over-matching
+// criterion the residue paragraph says to falsify before implementing.
+//
+// Measured before it was written, over every `.changeset/*.md` blob in this
+// repository's history -- 5524 unique blobs -- the framed arrow lines whose right side
+// is NOT an operand number THREE, and every candidate removal vocabulary tried (the
+// bare imperatives; plus `unset`/`omit`; plus `none`/`nothing`; plus the past
+// participles; plus the Chinese arm) flags the SAME TWO changesets and no others:
+// `18318-evalcontext-no-query-api.md` and `drop-dead-env-template-flag.md`
+// (`**Migration.** `os environments create --template <id>` -> drop the flag`). Both
+// are genuine removal prescriptions on inspection. Zero false positives at any width
+// -- so the class shipped is the NARROW one, because a wider one buys nothing measured
+// and each extra word is a claim somebody later has to defend. The third non-operand
+// right side in the stock, `lookup-reference-target-gate.md`, is running prose about
+// resolution rungs, and this arm leaves it alone.
+//
+// Over the CURRENT stock (414 changesets) the arm moves exactly one verdict, from
+// `null` to `framed-removal`, and the other 413 are byte-identical before and after.
+// The one it moves holds `not-required (runtime-interface-only ...)`, so it WOULD be
+// refused if a future PR touched that file and the gate re-judged it -- this gate only
+// judges changesets a diff adds or modifies, so nothing reds today. That reading was
+// handed back rather than acted on: ⛔ a detector repair does not get to edit somebody
+// else's changeset on its way past.
+//
+// One boundary is DELIBERATE and measured rather than assumed: `carriesConcreteRewrite`,
+// the corroboration predicate branch 1 consults for a prose-governed placeholder, is NOT
+// taught this vocabulary. Over the same history, 298 blobs carry the `FROM`/`TO`
+// placeholder at all, and of those ZERO are both missed today and carry a retirement line
+// anywhere in the body -- so the widening would buy nothing and would loosen a predicate
+// whose whole licence to be loose is that it only ever grants back an occurrence the
+// positional rule already found. Re-measure before changing that.
+//
 // ## #6967 -- the first NARROWING, and why the direction reversed
 //
 // #6419, #6497 and #6559 all fixed UNDER-matching, and each is written above as a
@@ -1052,6 +1124,67 @@ export const REWRITE_RE = new RegExp(`${OPERAND}\\s*${ARROW}\\s*${OPERAND}`);
 
 /** One operand anywhere in the text -- the per-CELL half of the table arm (#6497). */
 const OPERAND_RE = new RegExp(OPERAND);
+
+/**
+ * The RIGHT-HAND side of a RETIREMENT prescription -- the half of a rewrite whose
+ * answer is "there is nothing to write instead" (#18745).
+ *
+ * `REWRITE_RE` wants a code-ish OPERAND on both sides, and for a RENAME that is
+ * exactly right: the author is telling a consumer what to type instead. A REMOVAL
+ * has no such operand to name, so the author writes the only thing there is to
+ * write -- an instruction:
+ *
+ *     **Migration -- `api: { ... }` -> delete the property.**
+ *
+ * That is `.changeset/18318-evalcontext-no-query-api.md`, and it was missed on
+ * exactly ONE predicate. It carries the framing word, it carries the arrow, and its
+ * FROM side is a proper backticked operand; `delete the property` is not an
+ * OPERAND, so `REWRITE_RE` never matched and branches 2 and 3 never saw the line.
+ * A prescription saying "delete it" prescribes as much consumer work as one saying
+ * "write `x` instead", and it contradicts the same exemption -- which is the whole
+ * teeth of `no-migration-prescription` and of the `runtime-interface-only`
+ * narrowing that inherits it (#8299).
+ *
+ * ⚠️ A CLOSED CLASS, and IMPERATIVE only. Derived from the stock rather than
+ * invented: measured over every `.changeset/*.md` blob in this repository's history
+ * (5524 unique blobs), the framed arrow lines whose right side is NOT an operand
+ * number three, and the removal spellings among them are `-> delete the property`
+ * (`18318-evalcontext-no-query-api.md`), `-> drop the flag`
+ * (`drop-dead-env-template-flag.md`) and `-> remove (never had an effect)`
+ * (`remove-dead-metadata-props-2377.md`, already caught by an older branch on
+ * another line). The other two non-operand right sides are running prose in
+ * `lookup-reference-target-gate.md`, and this class leaves both alone.
+ *
+ * ⚠️ The Chinese arm is this file's ordinary parity -- `MIGRATION_FRAMING_RE`,
+ * `OLD_COLUMN_RE` and `NEW_COLUMN_RE` each carry one -- and it adds ZERO hits over
+ * that same 5524-blob history: it buys no measured true positive and introduces no
+ * measured false one. It is here so the arm is not shaped by the language the
+ * author happened to write in, which is the "the only passing form was to avoid a
+ * word" failure `HEADING_DENIAL_RE` documents one rule over.
+ *
+ * ⚠️ `none` / `nothing` in ARROW position was measured and REFUSED. The stock
+ * evidences that spelling only as a table CELL (`| AuditConfigSchema.enabled |
+ * none -- ... |`), which branch 4 already reads, and in arrow position it has a
+ * competing reading an imperative verb does not: `... -> none of this changes what
+ * you write` is a running sentence, not a prescription. Nothing measured gained, a
+ * new way to be wrong -- the trade #6559 refused for `was`/`now`.
+ *
+ * ⚠️ The trailing lookahead is load-bearing in the NARROW direction. Without it
+ * `drop` reads `drop-in replacement` and `delete` reads `deletes rows in batches`,
+ * and neither is an instruction to remove the thing on the left.
+ */
+const REMOVAL_INSTRUCTION = '\\**\\s*(?:(?:delete|remove|drop)(?![A-Za-z-])|删除|移除|删掉|去掉)';
+
+/**
+ * `X → delete it` -- an operand RETIRED rather than renamed. Stateless (no `g`):
+ * it is used inside a loop, exactly as `REWRITE_RE` is.
+ *
+ * Read ONLY under the same framing branches 2 and 3 require. An unframed
+ * `X -> delete ...` stays invisible on purpose: framing is what separates "here is
+ * what you must rewrite" from "here is what the code does", and this arm buys no
+ * exception to that.
+ */
+export const RETIREMENT_RE = new RegExp(`${OPERAND}\\s*${ARROW}\\s*${REMOVAL_INSTRUCTION}`);
 
 /**
  * A markdown table's delimiter row (`| --- | :---: |`) -- the line that turns the
@@ -1216,6 +1349,59 @@ const FROM_TO_LABEL_G = new RegExp(FROM_TO_LABEL_RE.source, 'gm');
 const GOVERNING_WORD_RE = /(?:[A-Za-z]|的)$/;
 
 /**
+ * Does a COLON close the placeholder -- is this occurrence INTRODUCING the
+ * prescription that follows it? (#18494)
+ *
+ * `GOVERNING_WORD_RE` above reads the one character to the LEFT, and that is the
+ * whole evidence branch 1 had. It is sound for the shapes it was measured on and
+ * it is structurally blind to one family: a label whose own words are a NOUN
+ * PHRASE. `**Schema Migration FROM -> TO:** delete the block` is a label by every
+ * reading a human gives it, and the character left of the framed placeholder is an
+ * ordinary letter, so the occurrence read as a MENTION and a changeset shipping no
+ * rewrite at all was admitted under `no-migration-prescription` -- the
+ * false-NEGATIVE direction, where the cost is not a blocked PR but a break that
+ * reaches consumers with no prescription and no ledger entry.
+ *
+ * The colon is the signal the left side cannot supply, and it is a signal about
+ * USE rather than about grammar: `FROM -> TO:` is the convention's own punctuation
+ * for "what follows is the mapping". A MENTION is the head of a noun phrase inside
+ * a running sentence (`carries its FROM -> TO guide`, `the FROM -> TO is
+ * documented elsewhere`) and a running sentence does not put a colon on its
+ * object. So the two readings are separable from the RIGHT even where the left is
+ * mute, and this predicate is consulted for exactly that case.
+ *
+ * ⚠️ A CLOSED CLASS, derived from the stock rather than invented. Measured over
+ * every tracked `md`/`mdx` file in this repository at `625db0e85` (1322 files, 113
+ * of them carrying the placeholder, 1007 occurrences): 321 occurrences are closed
+ * by a colon, and the markup that may stand between the placeholder and that colon
+ * is exactly three runs -- nothing (295), `)` (25, `Migration (FROM -> TO):`) and
+ * `**` (1, `**FROM -> TO**: a direct-engine caller`). Hence at most two characters
+ * of closing markup, from the class the stock actually writes.
+ *
+ * ⚠️ The full-width colon is this file's ordinary Chinese parity, exactly as
+ * `MIGRATION_FRAMING_RE`, `OLD_COLUMN_RE`, `NEW_COLUMN_RE` and
+ * `REMOVAL_INSTRUCTION` each carry one, and its measured population in this
+ * position is ZERO: it buys no measured true positive today and introduces no
+ * measured false one. It is here so the arm is not shaped by the language the
+ * author happened to write in -- a Chinese author writes the label colon
+ * full-width, and a rule that reads only the ASCII one would make the ADR-0087
+ * disposition turn on the author's keyboard.
+ *
+ * ⚠️ DIRECTION, and why this cannot be a weakening: a colon can only ever make an
+ * occurrence a LABEL, and a label is what the gate REFUSES the catch-all on. No
+ * body that is refused today is admitted because of this predicate, and the
+ * contradiction check it feeds still grants everything
+ * `carriesConcreteRewrite` grants.
+ *
+ * ⚠️ Asked AFTER the heading arm, never before it. A heading is judged on polarity
+ * (`HEADING_DENIAL_RE`), and a denial is the one shape whose punctuation must not
+ * be allowed to overturn its meaning -- reading `## No FROM -> TO: ...` as a label
+ * would re-open exactly the #17357 false positive, in the direction this gate must
+ * not buy.
+ */
+const LABEL_COLON_RE = /^[`*)]{0,2}[:：]/;
+
+/**
  * A migration-framing word sitting immediately before the placeholder FRAMES it; it
  * does not govern it (`Migration FROM → TO`, `迁移 FROM → TO`). Anchored at the end
  * because that is the only position where the distinction can arise.
@@ -1225,7 +1411,7 @@ const GOVERNING_WORD_RE = /(?:[A-Za-z]|的)$/;
  * prefix no end-anchored predicate can read.
  */
 const FRAMING_TAIL_RE =
-  /(?:迁移|改写|改名|升级|migrat(?:e|es|ed|ing|ion|ions)|rename[sd]?|rewrit(?:e|es|ten|ing)|upgrade[sd]?)$/i;
+  /(?:迁移|改写|改名|升级|(?<![A-Za-z0-9_])(?:migrat(?:e|es|ed|ing|ion|ions)|rename[sd]?|rewrit(?:e|es|ten|ing)|upgrade[sd]?))$/i;
 
 /**
  * The prefix with its framing word taken off -- and the SPACE that word sat behind
@@ -1253,18 +1439,38 @@ const FRAMING_TAIL_RE =
  * that is an accident. No stock occurrence stacks two framing words; a repeated
  * strip is a wider claim and would need its own measurement.
  *
- * ⚠️ The pattern is not word-anchored (`MIGRATION_FRAMING_RE` is; this one is not),
- * so it strips a framing word out of an IDENTIFIER: `sys_migration FROM → TO`
- * strips to `sys_`. That reading is UNCHANGED by the right-trim and cannot be
- * changed by it -- with no whitespace before the framing word there is no
- * whitespace left behind to trim -- so the repair keys on the SPACE and reaches
- * exactly the shape where the framing word is a word of its own. The identifier
- * shape is a SEPARATE false positive, stated rather than hidden and out of this
- * repair's reach: `the sys_migration FROM → TO is documented elsewhere` is governed
- * by `the` and still reads as a label, because what the strip exposes is `_` rather
- * than the letter that was there. Word-anchoring this pattern changes WHICH
- * prefixes are stripped at all, which is a wider claim than transparency and needs
- * its own measurement over the changeset stock before it is believed.
+ * ⚠️ The English alternatives are WORD-ANCHORED, for the reason
+ * `MIGRATION_FRAMING_RE` states one rule over: without it the token matches inside
+ * an IDENTIFIER, and an identifier is not framing. `the sys_migration FROM → TO is
+ * documented elsewhere` stripped to `the sys_`, exposed `_` rather than the letter
+ * that was really there, and read as a LABEL although `the` plainly governs it
+ * (#18493) -- this docblock said so before the anchor existed, and the shape was
+ * out of the right-trim's reach because there is no whitespace before a framing
+ * word buried in an identifier. A lookbehind rather than a consuming boundary,
+ * because the match is fed to `String.replace` and a consumed delimiter would be
+ * deleted with the word.
+ *
+ * ⚠️ Word-anchoring changes WHICH prefixes are stripped, so it is a wider claim
+ * than transparency and carries its own measurement: 429 changesets and 1322
+ * tracked md/mdx at `625db0e85`, ZERO verdict deltas. The one shape it moves in
+ * isolation is `sys_migration FROM → TO:` -- the F9 floor -- which stops being a
+ * label by an accident of the strip and stays one by `LABEL_COLON_RE`, the colon
+ * that actually closes it. The two directions of this predicate are COUPLED there,
+ * and the SS battery in the self-test pins both at once so neither can be traded
+ * for the other.
+ *
+ * ⚠️ The Chinese alternatives stay unanchored, exactly as
+ * `MIGRATION_FRAMING_RE` leaves them: a word boundary is an ASCII notion, and CJK
+ * text is written without the delimiters it reads.
+ *
+ * ⚠️ The class is `\b`'s, deliberately, and what that leaves is stated rather
+ * than hidden: a framing word after a HYPHEN or a DOT (`the auto-migration FROM
+ * → TO is documented elsewhere`, `the config.migration ...`) is still stripped,
+ * because `\b` reads both as boundaries too. Measured over the same tree, the
+ * population of EVERY in-line framing tail -- of any delimiter -- is 0, so no
+ * reading here separates the two classes; and reaching further would widen what
+ * the gate ADMITS on a shape nothing has measured, which is the one direction this
+ * predicate does not buy on an argument.
  *
  * @param {string} prefix the text left of the placeholder, already right-trimmed
  */
@@ -1470,11 +1676,20 @@ const VERTICAL_TO_RE = /^\s{0,3}(?:(?:\/\/|#|-|\*|>)\s*)*\**TO\**\s*(?::|—|-|$
  * fence reads as prose, and this predicate is given one line of context rather than
  * the block structure. No stock occurrence has that shape.
  *
+ * ⚠️ And from the RIGHT, where the left is mute: a NOUN-PHRASE label
+ * (`**Schema Migration FROM → TO:** delete the block`) has an ordinary letter
+ * immediately before the placeholder and is a label all the same, so the
+ * adjacency question answers "mention" on a shape no human reads that way. It was
+ * admitted with no rewrite at all (#18494). The colon that closes the placeholder
+ * is what separates the convention's own punctuation from a running sentence, and
+ * `LABEL_COLON_RE` above carries the measured class and the direction.
+ *
  * @param {string} line the line the `FROM` token sits on
  * @param {number} col  its column within that line
  * @param {string} [prev] the line above it, when there is one (#7094)
+ * @param {string} [after] the rest of its line, right of the placeholder (#18494)
  */
-function labelPositioned(line, col, prev) {
+function labelPositioned(line, col, prev, after = '') {
   const prefix = line.slice(0, col).replace(/\s+$/, '');
   // A heading is a label by construction, whatever words it carries -- UNLESS the
   // word governing the placeholder denies it (#17357). A denying heading is not
@@ -1484,19 +1699,34 @@ function labelPositioned(line, col, prev) {
   if (/^\s{0,3}#{1,6}\s/.test(line)) {
     return !HEADING_DENIAL_RE.test(withoutFramingTail(prefix));
   }
+  // A COLON closes the placeholder, so the occurrence is introducing the mapping
+  // that follows it rather than being talked about inside a sentence (#18494).
+  // Asked here rather than above, so a DENYING heading keeps its polarity reading:
+  // punctuation must not overturn the one shape that says there is nothing to
+  // introduce. Asked BEFORE governance, because it is evidence the left side
+  // structurally cannot supply -- a label whose own words are a noun phrase has an
+  // ordinary letter to its left and is a label anyway.
+  if (LABEL_COLON_RE.test(after)) return true;
   // A framing word is transparent HERE exactly as it is in the heading arm above
   // (#17864): it frames the placeholder, so the governance question is asked of
   // whatever stands behind it -- which requires the space it sat behind to come off
   // with it (`withoutFramingTail`). Asked of the bare strip, the question met a
   // trailing space, answered "nothing governs this", and read every governed
   // MENTION carrying a framing word as a label.
-  if (prefix !== '') return !GOVERNING_WORD_RE.test(withoutFramingTail(prefix));
-  // The placeholder OPENS its line -- bare or merely indented, so a wrapped list
-  // item counts. There is no character to its left, so the governing word, if there
-  // is one, is the last word of the line above; and only a line that is prose the
-  // sentence can run on from is asked (#7094).
+  const bare = withoutFramingTail(prefix);
+  if (bare !== '') return !GOVERNING_WORD_RE.test(bare);
+  // Nothing on THIS line governs the placeholder: either it opens the line -- bare
+  // or merely indented, so a wrapped list item counts -- or everything left of it
+  // was a framing word, which by the transparency above is not there at all
+  // (#18493 W1: `the` ending the line above, `Migration FROM → TO` opening the one
+  // below). Either way the governing word, if there is one, is the last word of the
+  // line above; and only a line that is prose the sentence can run on from is asked
+  // (#7094).
   if (prev === undefined || STRUCTURAL_LINE_RE.test(prev)) return true;
-  return !WRAPPED_GOVERNOR_RE.test(prev.replace(/\s+$/, ''));
+  // Transparent across the wrap exactly as it is within the line and in the heading
+  // arm (#18493 W2): a framing word ENDING the line above frames the placeholder
+  // below it, so the closed class is asked of the word behind it.
+  return !WRAPPED_GOVERNOR_RE.test(withoutFramingTail(prev.replace(/\s+$/, '')));
 }
 
 /**
@@ -1557,7 +1787,9 @@ function carriesConcreteRewrite(body) {
  * which shapes are deliberately out of reach.
  *
  * @param {string} body
- * @returns {{ branch: 'from-to-label' | 'framed-line' | 'framed-section' | 'framed-table' | 'header-framed-table', line: string } | null}
+ * @returns {{ branch: 'from-to-label' | 'framed-line' | 'framed-section' | 'framed-table'
+ *             | 'header-framed-table' | 'framed-removal' | 'framed-section-removal',
+ *             line: string } | null}
  */
 export function findMigrationPrescription(body) {
   const lines = body.split(/\r?\n/);
@@ -1576,7 +1808,12 @@ export function findMigrationPrescription(body) {
     const at = m.index + m[0].indexOf('FROM');
     const lineStart = body.lastIndexOf('\n', at - 1) + 1;
     const lineNo = body.slice(0, at).split(/\r?\n/).length - 1;
-    if (!labelPositioned(lines[lineNo] ?? '', at - lineStart, lineNo > 0 ? lines[lineNo - 1] : undefined)) {
+    // The text RIGHT of the placeholder, on its own line: the match ends on the
+    // `TO` token (its trailing lookahead consumes nothing), and every alternative
+    // of `FROM_TO_LABEL_RE` is single-line, so the match's end is a column on the
+    // same line the token sits on (#18494).
+    const after = (lines[lineNo] ?? '').slice(m.index + m[0].length - lineStart);
+    if (!labelPositioned(lines[lineNo] ?? '', at - lineStart, lineNo > 0 ? lines[lineNo - 1] : undefined, after)) {
       if (corroborated === null) corroborated = carriesConcreteRewrite(body);
       if (!corroborated) continue;
     }
@@ -1613,6 +1850,13 @@ export function findMigrationPrescription(body) {
   // take a hit away from an older one, and nothing has to be re-measured to know it.
   let headerTable = null;
   let headerFramed = false;
+  // The RETIREMENT arm's first hit (#18745), held back for the reason the two above
+  // are and consulted LAST, so the whole function stays exactly
+  // `arrowBranches ?? framedTable ?? headerFramedTable ?? framedRemoval`. That keeps
+  // the superset property STRUCTURAL one more level down: no body an older arm
+  // already reads can change its branch or its evidence line because this arm exists,
+  // and nobody has to re-measure the stock to know it.
+  let removal = null;
   let prev = '';
   for (const line of lines) {
     const heading = HEADING_RE.exec(line);
@@ -1627,6 +1871,15 @@ export function findMigrationPrescription(body) {
     if (REWRITE_RE.test(line)) {
       if (MIGRATION_FRAMING_RE.test(line)) return { branch: 'framed-line', line: line.trim() };
       if (framedSection) return { branch: 'framed-section', line: line.trim() };
+    }
+    // A rewrite whose TO side is an INSTRUCTION rather than an operand -- the
+    // author has nothing to name because the answer is "delete it" (#18745). Read
+    // under exactly the framing branches 2 and 3 require, and never instead of
+    // them: `REWRITE_RE` is tested first above, so a line that is both a rename and
+    // a removal keeps the branch and evidence it already had.
+    if (removal === null && RETIREMENT_RE.test(line)) {
+      if (MIGRATION_FRAMING_RE.test(line)) removal = { branch: 'framed-removal', line: line.trim() };
+      else if (framedSection) removal = { branch: 'framed-section-removal', line: line.trim() };
     }
     // Delimiter first: it also matches TABLE_ROW_RE, and it is the row that opens
     // the data region rather than a row inside it. The line ABOVE it is the header,
@@ -1644,7 +1897,7 @@ export function findMigrationPrescription(body) {
     }
     prev = line;
   }
-  return table ?? headerTable;
+  return table ?? headerTable ?? removal;
 }
 
 /**
@@ -2088,6 +2341,15 @@ export function assertInputs({ cwd, head }) {
       'framed-table',
     ],
     ['an arrow rewrite under a `## 迁移` heading', '## 迁移\n\n- `a.b` → `a.c`\n', 'framed-section'],
+    // The retirement arm (#18745) reads a rewrite inside the SAME framed region, so
+    // it rots with the framing scan and is controlled with it. Without this row a
+    // framing scan that stopped seeing headings would take the removal arm down
+    // silently and the three rows above would still say the scan is healthy.
+    [
+      'a REMOVAL prescription under a `## Migration` heading (#18745)',
+      '## Migration\n\n- `a.b` → delete the property\n',
+      'framed-section-removal',
+    ],
   ];
   const MUST_NOT_FRAME = [
     [
@@ -4388,6 +4650,36 @@ function selfTest() {
     },
   })), [/contradicts the changeset's own body/, /Evidence \(from-to-label\)/]);
 
+  // ---- L-E2E (#18494): the compound-noun label, END TO END through `scan()` ---
+  //
+  // #18494's own criterion is a COMMITTED probe changeset, not a unit reading: the
+  // body carries `**Schema Migration FROM → TO:** delete the block` and no
+  // concrete rewrite, and claims the catch-all. Before the colon arm the gate read
+  // that label as a mention, found no prescription to contradict the claim, and
+  // admitted a published break with no ledger entry -- exit 0 where exit 1 is owed.
+  // The GREEN half runs too, because a narrowing that refused the mention as well
+  // would have re-opened #17864 while passing the red.
+  battery('L-E2E (#18494): the compound-noun label, END TO END through `scan()`');
+  const NOUN_LABEL = '**Schema Migration FROM → TO:** delete the block';
+  const NOUN_WHY = 'a bare deletion on a non-strict schema refuses nothing and converts nothing';
+  red('L-E2E-R the compound-noun label contradicts the catch-all it claims', run(mk({
+    files: {
+      '.changeset/x.md': CS({
+        body: '**BREAKING** the `x` key is deleted outright.\n\n' + NOUN_LABEL + '\n\n'
+          + '<!-- adr-0087: not-required (no-migration-prescription) ' + NOUN_WHY + ' -->\n',
+      }),
+    },
+  })), [/contradicts the changeset's own body/, /Evidence \(from-to-label\)/]);
+  green('L-E2E-G the same sentence with no colon closing it is still the admitted mention', run(mk({
+    files: {
+      '.changeset/x.md': CS({
+        body: '**BREAKING** the `x` key is deleted outright.\n\n'
+          + 'The Schema Migration FROM → TO is documented in the release notes.\n\n'
+          + '<!-- adr-0087: not-required (no-migration-prescription) ' + NOUN_WHY + ' -->\n',
+      }),
+    },
+  })));
+
   // ---- R9: two markers is ambiguous, not "the first one wins" ---------------
   battery('R9: two markers is ambiguous, not "the first one wins"');
   red('R9 two disposition markers', run(mk({
@@ -4578,6 +4870,137 @@ function selfTest() {
       }),
     },
   })), [/contradicts the changeset's own body/, /Evidence \(from-to-label\)/, /mappings baked into it/]);
+
+  // ---- RM: THE #18745 SHAPE -- a rewrite whose TO side is an INSTRUCTION -------
+  //
+  // `.changeset/18318-evalcontext-no-query-api.md`, reduced to its shape. The line
+  // carries the framing word, the arrow and a proper operand on the FROM side, and
+  // it was missed on exactly ONE predicate: `REWRITE_RE` wants an OPERAND on BOTH
+  // sides, and `delete the property` is an instruction, not a name. So a changeset
+  // that PRESCRIBES a removal held an exemption whose one mechanical check is "your
+  // body carries no prescription" -- granted by SILENCE rather than by a finding,
+  // which is the very failure the #8299 section of this header records against
+  // #8277 and which the `runtime-interface-only` narrowing exists to end.
+  //
+  // RM-E2E1 is the card's own scenario end to end: the real missed text under the
+  // real category it rode on. Reverse-verified -- drop the retirement arm and this
+  // case reports "expected RED, got green".
+  battery('RM (#18745): a rewrite whose TO side is an INSTRUCTION, not an operand');
+  const RM_BODY = (marker) =>
+    '**BREAKING** for a TypeScript consumer: an `EvalContext` literal carrying `api` stops compiling\n\n' +
+    '**Migration — `api: { … }` → delete the property.** There is no replacement key and\n' +
+    'nothing to re-point: every implementation ever passed there was discarded before\n' +
+    'evaluation.\n\n' +
+    `<!-- adr-0087: ${marker} -->\n`;
+
+  // Self-contained rather than borrowing the `#8299` fixture below: this case has to
+  // hold the CARD'S symbol (`packages/formula/src/types.ts#EvalContext`), and a
+  // fixture shared with another rule is a fixture two rules can quietly move.
+  const RM_PKGS = {
+    '@objectstack/spec': { dir: 'packages/spec', private: false },
+    '@objectstack/formula': { dir: 'packages/formula', private: false },
+  };
+  // The `.zod.ts` is the #4690 half: predicate 4 refuses a claim it cannot check, so
+  // a fixture with NO metadata surface at all is refused for absence rather than
+  // judged. It names a different symbol on purpose -- the scan must have something
+  // real to read and nothing to find.
+  const RM_FILES = {
+    'packages/formula/src/types.ts': 'export interface EvalContext {\n  user?: { id: string };\n}\n',
+    'packages/spec/src/data/unrelated.zod.ts':
+      "import { z } from 'zod';\n\nexport const UnrelatedSchema = z.object({ id: z.string() });\n",
+  };
+
+  red('RM-E2E1 the real missed text still rides `runtime-interface-only`', run(mk({
+    pkgs: RM_PKGS,
+    files: {
+      ...RM_FILES,
+      '.changeset/x.md': CS({
+        bumps: [['@objectstack/formula', 'major']],
+        body: RM_BODY('not-required (runtime-interface-only packages/formula/src/types.ts#EvalContext) no Zod schema, no spec declaration, no stored form'),
+      }),
+    },
+  })), [/contradicts the changeset's own body/, /Evidence \(framed-removal\)/, /delete the property/]);
+
+  // The positive control for RM-E2E1's own fixture: the SAME claim on the SAME
+  // symbol, with the removal sentence taken out, is ACCEPTED. It is what says the
+  // RED above is the prescription refusal rather than a `runtime-interface-only`
+  // predicate failing for some unrelated reason in a hand-built fixture.
+  green('RM-E2E1b the same runtime-interface-only claim without the removal line is accepted', run(mk({
+    pkgs: RM_PKGS,
+    files: {
+      ...RM_FILES,
+      '.changeset/x.md': CS({
+        bumps: [['@objectstack/formula', 'major']],
+        body:
+          '**BREAKING** for a TypeScript consumer: an `EvalContext` literal carrying `api` stops compiling\n\n' +
+          'There is no replacement key and nothing to re-point.\n\n' +
+          '<!-- adr-0087: not-required (runtime-interface-only packages/formula/src/types.ts#EvalContext) no Zod schema, no spec declaration, no stored form -->\n',
+      }),
+    },
+  })));
+
+  red('RM-E2E2 ...and under the catch-all it rode into, for the same reason', run(mk({
+    files: {
+      '.changeset/x.md': CS({
+        body: RM_BODY('not-required (no-migration-prescription) the member was inert and nothing stored moves'),
+      }),
+    },
+  })), [/contradicts the changeset's own body/, /Evidence \(framed-removal\)/]);
+
+  // The control that makes the two REDs above attributable to the LINE rather than
+  // to anything else in the fixture: the identical changeset with the removal
+  // sentence taken out is GREEN. Without it, a fixture that reds for an unrelated
+  // reason reads exactly like a working detector.
+  green('RM-E2E3 the SAME changeset without the removal line keeps its exemption', run(mk({
+    files: {
+      '.changeset/x.md': CS({
+        body:
+          '**BREAKING** for a TypeScript consumer: an `EvalContext` literal carrying `api` stops compiling\n\n' +
+          'There is no replacement key and nothing to re-point: every implementation ever\n' +
+          'passed there was discarded before evaluation.\n\n' +
+          '<!-- adr-0087: not-required (no-migration-prescription) the member was inert and nothing stored moves -->\n',
+      }),
+    },
+  })));
+
+  // ---- RM1-RM12: unit pins on the retirement arm and on its CLOSED class -------
+  //
+  // RM1-RM3 are the arm. RM4-RM9 are the floor: every one of them is a shape that
+  // must NOT read as a prescription, and each was a live over-matching candidate
+  // rather than a hypothetical. RM10 is the SUPERSET pin -- a body an older arm
+  // already reads keeps that arm's branch AND its evidence line, which is what
+  // makes "this can only add hits" structural instead of remembered. RM11-RM12 pin
+  // the DIFFERENT hole: #8277's imperative-sentence prescription (no arrow, no
+  // table) is the residue this header lists as deliberate, and this arm does not
+  // and must not reach it -- if a later author widens toward it, these two say so.
+  battery('RM1-RM12 (#18745): the retirement arm, and the class it must not widen past');
+  assert(findMigrationPrescription('**Migration — `api: { … }` → delete the property.**\n')?.branch === 'framed-removal',
+    'RM1: the real missed line reads as a framed removal prescription');
+  assert(findMigrationPrescription('## Migration\n\n- `node.config.filters` → remove it\n')?.branch === 'framed-section-removal',
+    'RM2: a removal under a migration HEADING reads on the section branch');
+  assert(findMigrationPrescription('**迁移** — `api` → 删除该属性。\n')?.branch === 'framed-removal',
+    'RM3: the Chinese removal spelling reads the same as the English one');
+  assert(findMigrationPrescription('`api: { … }` → delete the property.\n') === null,
+    'RM4: an UNFRAMED removal is not a prescription -- framing is still what separates a rewrite from a description');
+  assert(findMigrationPrescription('**Migration.** `a.b` → drop-in replacement keeps working\n') === null,
+    'RM5: `drop-in` is not the imperative `drop` -- the trailing lookahead is load-bearing');
+  assert(findMigrationPrescription('## Migration\n\nthe pipeline `a.b` → deletes rows in batches now\n') === null,
+    'RM6: `deletes` is a description of behaviour, not an instruction to remove');
+  assert(findMigrationPrescription('**Migration.** runtime → delete the package\n') === null,
+    'RM7: a BARE word on the FROM side is not an operand -- the left half is unchanged');
+  assert(findMigrationPrescription('**Migration.** `a.b` → none of this changes what you write\n') === null,
+    'RM8: `none` in arrow position stays REFUSED -- it is a running sentence as often as a prescription');
+  assert(findMigrationPrescription('## What changed\n\n- `a.b` → delete the property\n') === null,
+    'RM9: a removal under a heading carrying NO framing is not a prescription');
+  assert(
+    findMigrationPrescription('## Migration\n\n- `a.b` → delete the property\n- `c.d` → `c.e`\n')?.branch === 'framed-section' &&
+    findMigrationPrescription('## Migration\n\n- `a.b` → delete the property\n- `c.d` → `c.e`\n')?.line === '- `c.d` → `c.e`',
+    'RM10: a body an OLDER arm already reads keeps that arm\'s branch and evidence line, removal line or not');
+  assert(findMigrationPrescription('If you only *call* `publish`, read `result.driverFault?.message` where you read `result.error`.\n') === null,
+    'RM11: the #8277 shape -- an imperative SENTENCE with no arrow and no table -- is a DIFFERENT hole and stays out of reach');
+  assert(findMigrationPrescription('## Migration\n\nread `result.driverFault?.message` where you read `result.error`.\n') === null,
+    'RM12: ...and framing alone does not reach it either -- this arm needs the arrow the #8277 body never had');
+
 
   // ---- The #8299 category: `runtime-interface-only` -------------------------
   //
@@ -6096,6 +6519,75 @@ function selfTest() {
     'F9: FLOOR -- the repair keys on the SPACE, so an identifier ending in a framing word strips to `sys_` and reads exactly as it did',
   );
 
+  // --- L1-L13 (#18494): a NOUN-PHRASE label is a label, read from the RIGHT.
+  //
+  // `GOVERNING_WORD_RE` reads the one character to the LEFT, and a label whose own
+  // words are a noun phrase has an ordinary letter there -- so `**Schema Migration
+  // FROM → TO:** delete the block` read as a MENTION and a changeset shipping
+  // no rewrite at all was admitted under the catch-all. That is the false-NEGATIVE
+  // direction: the cost is not a blocked PR but a break reaching consumers with no
+  // prescription and no ledger entry.
+  //
+  // L1-L7 are the RED set under reverse verification (remove the `LABEL_COLON_RE`
+  // arm and all seven go red). L8 is the control that makes L1 a READING rather
+  // than a specimen: one colon is the only difference between them. L9-L13 are the
+  // floors in the dangerous direction -- a widening that read a colon ANYWHERE in
+  // the line as a label, or that let punctuation overturn a denial, shows up there
+  // and not in L1.
+  battery('L1-L13 (#18494): a NOUN-PHRASE label is a label, read from the RIGHT');
+  assert(
+    findMigrationPrescription('**Schema Migration FROM → TO:** delete the block\n')?.branch === 'from-to-label',
+    'L1: THE #18494 SHAPE -- a compound-noun label, with no concrete rewrite in the body to fall back on',
+  );
+  assert(
+    findMigrationPrescription('- Schema Migration FROM → TO: the block goes away\n')?.branch === 'from-to-label',
+    'L2: ...and under a bullet marker',
+  );
+  assert(
+    findMigrationPrescription('Key renames FROM → TO: listed below in prose\n')?.branch === 'from-to-label',
+    'L3: a PLURAL noun immediately before the framing word reads the same way',
+  );
+  assert(
+    findMigrationPrescription('**Required migration FROM → TO:** delete the block\n')?.branch === 'from-to-label',
+    'L4: ...and an ADJECTIVE before it -- the rule is the colon, not a part-of-speech judgement',
+  );
+  assert(
+    findMigrationPrescription('Authoring-key migration FROM → TO:\n')?.branch === 'from-to-label',
+    'L5: ...and a hyphenated compound, which no word-anchoring can separate',
+  );
+  assert(
+    findMigrationPrescription('字段的 迁移 FROM → TO: 删除这一块\n')?.branch === 'from-to-label',
+    'L6: the Chinese spelling of the same label -- the attributive particle governs the framing word, not the placeholder',
+  );
+  assert(
+    findMigrationPrescription('**Removed keys FROM → TO:**\n')?.branch === 'from-to-label',
+    'L7: the same defect ONE WORD SHORTER -- a noun-phrase label with no framing word in it at all (#18494 fairness control)',
+  );
+  assert(
+    !hasMigrationPrescription('the Migration FROM → TO is documented elsewhere\n'),
+    'L8: THE CONTROL L1 IS A READING AGAINST -- the same framed placeholder with no colon closing it is still the #17864 mention',
+  );
+  assert(
+    !hasMigrationPrescription('the FROM → TO mapping is documented elsewhere: see the release notes\n'),
+    'L9: FLOOR -- ADJACENCY on the right, exactly as on the left: a colon later in the LINE closes a clause, not the placeholder',
+  );
+  assert(
+    !hasMigrationPrescription('The checklist requires breaking changesets to carry their FROM → TO migration.\n'),
+    'L10: FLOOR -- P41 unmoved; a governed mention whose line carries no colon at all is untouched by this arm',
+  );
+  assert(
+    findMigrationPrescription('Migration (FROM → TO): delete the block\n')?.branch === 'from-to-label',
+    'L11: FLOOR -- the `)` run the stock measures between the placeholder and its colon',
+  );
+  assert(
+    findMigrationPrescription('**FROM → TO**: a direct-engine caller must pass the flag\n')?.branch === 'from-to-label',
+    'L12: FLOOR -- and the `**` run, the one occurrence of it in the corpus',
+  );
+  assert(
+    !hasMigrationPrescription('## No FROM → TO: this section prescribes nothing\n'),
+    'L13: FLOOR, POLARITY -- a DENYING heading keeps its reading; the colon is asked AFTER the heading arm so punctuation cannot overturn a denial (#17357)',
+  );
+
   // --- P51-P60: the HARD-WRAPPED mention, and the floors that keep the cure from
   // --- being worse than the disease (#7094).
   //
@@ -6152,6 +6644,122 @@ function selfTest() {
   assert(
     findMigrationPrescription('**Migration (FROM → TO).** Replace each legacy value with the primitive\n\nit is NOT a parse error: `stripLegacyApiMethods` strips it with a\nFROM→TO warning (canonicalize-and-warn)\n')?.line === '**Migration (FROM → TO).** Replace each legacy value with the primitive',
     'P61: a body holding a real label AND a wrapped mention keeps the LABEL as its evidence -- `apimethod-enum-shrink.md`, declared-breaking, the stock\'s own control for this arm',
+  );
+
+  // --- X1-X11 (#18493): a framing word inside an IDENTIFIER is not framing, and
+  // --- prose WRAPS between the governor and the placeholder.
+  //
+  // Both are the #17864 transparency rule failing to compose, in the FALSE-POSITIVE
+  // direction where a mention is read as a label and the author is refused a
+  // rewrite they do not owe. `FRAMING_TAIL_RE` carried no word anchor, so
+  // `the sys_migration FROM → TO is documented elsewhere` stripped `migration`
+  // out of the identifier, exposed `_` instead of the `n` that was really there and
+  // answered "nothing governs this"; and the in-line arm is computed within ONE
+  // line, so a markdown hard wrap put the governor out of its reach in both
+  // directions (governor above, framed placeholder below -- and framing word above,
+  // placeholder below).
+  //
+  // X1/X4/X5/X10 are the RED set under reverse verification (drop the word anchor
+  // for X1, the empty-strip fall-through for X4, the wrap-side strip for X5/X10).
+  // X2/X7/X8/X9 are the floors that keep the cure from being the disease: every one
+  // of them is a LABEL that this widening must not admit.
+  battery('X1-X11 (#18493): a framing word inside an IDENTIFIER is not framing');
+  assert(
+    !hasMigrationPrescription('the sys_migration FROM → TO is documented elsewhere\n'),
+    'X1: THE #18493 TRIGGER 1 -- `the` governs the placeholder across an identifier that merely ENDS in a framing word',
+  );
+  assert(
+    findMigrationPrescription('sys_migration FROM → TO: delete the block\n')?.branch === 'from-to-label',
+    'X2: POSITIVE CONTROL and the F9 FLOOR -- the same identifier with a colon closing the placeholder is a label, now for the reason it always was one',
+  );
+  assert(
+    !hasMigrationPrescription('the onUpgrade FROM → TO is documented elsewhere\n'),
+    'X3: ...and a camelCase identifier ending in one, which no right-trim could ever have reached',
+  );
+  assert(
+    !hasMigrationPrescription('the\nMigration FROM → TO is documented elsewhere\n'),
+    'X4: THE #18493 TRIGGER 2, W1 -- the governor ends the line ABOVE and the framing word opens the one below',
+  );
+  assert(
+    !hasMigrationPrescription('the Migration\nFROM → TO is documented elsewhere\n'),
+    'X5: ...and W2, the same sentence wrapped one word later -- the framing word is transparent across the wrap as it is within the line',
+  );
+  assert(
+    !hasMigrationPrescription('The checklist requires breaking changesets to carry their\nFROM → TO migration.\n'),
+    'X6: THE #7094 CONTROL -- unaffected, and it must stay that way: the wrap arm it shares is the one being composed with',
+  );
+  assert(
+    findMigrationPrescription('prose that wraps at eighty columns and ends the line here\nFROM → TO: delete the block\n')?.branch === 'from-to-label',
+    'X7: FLOOR, W4 -- a wrapped LABEL under a line that governs nothing is still a label (P52 unmoved)',
+  );
+  assert(
+    findMigrationPrescription('## Migration\nFROM → TO: delete the block\n')?.branch === 'from-to-label',
+    'X8: FLOOR -- a HEADING does not wrap, so the strip on the line above is never asked (P55 unmoved)',
+  );
+  assert(
+    findMigrationPrescription('Migration FROM → TO: delete the block\n')?.branch === 'from-to-label',
+    'X9: FLOOR -- a framing word that is the WHOLE prefix with no line above it still opens a label (F2 unmoved through the new fall-through)',
+  );
+  assert(
+    !hasMigrationPrescription('这次改动只是把发布说明搜了个地方，真正的\n迁移 FROM → TO 落在部署方自己的代理配置上。\n'),
+    'X10: the Chinese spelling of W1 -- the attributive particle ends the line above and the framing word opens the one below (P57 framed)',
+  );
+  assert(
+    findMigrationPrescription('- a bullet that ended cleanly\n\n  FROM → TO: delete the block\n')?.branch === 'from-to-label',
+    'X11: FLOOR -- an INDENTED label under a blank line is still a label; indentation is not the test (P59 unmoved)',
+  );
+
+  // --- SS1-SS8 (#18494 + #18493): the two directions of ONE predicate, pinned
+  // --- AGAINST each other so neither can be traded for the other.
+  //
+  // These two cards are the SAME decision failing in OPPOSITE directions, and the
+  // repairs are coupled rather than adjacent: word-anchoring `FRAMING_TAIL_RE`
+  // (#18493) is what stops `sys_migration` being stripped, and it takes the F9
+  // label with it unless `LABEL_COLON_RE` (#18494) is holding that label up for the
+  // reason it is actually a label. Tune either one alone and the other direction
+  // re-opens.
+  //
+  // So they are pinned as MINIMAL PAIRS, in ONE battery, with one floor over both:
+  // each pair differs in exactly one character or one line break and asserts
+  // OPPOSITE verdicts. A future tuning that buys one direction with the other reds
+  // a pair rather than passing a battery that only pins the half it just moved, and
+  // deleting half the pairs to make that go away drops the battery under its floor.
+  battery('SS1-SS8 (#18494 + #18493): the two directions of ONE predicate, pinned');
+  // PAIR 1 -- the colon, and nothing else: noun-phrase LABEL vs governed MENTION.
+  assert(
+    findMigrationPrescription('Schema Migration FROM → TO: delete the block\n')?.branch === 'from-to-label',
+    'SS1: the colon closes the placeholder, so the noun phrase is a LABEL (#18494 direction)',
+  );
+  assert(
+    !hasMigrationPrescription('Schema Migration FROM → TO is documented elsewhere\n'),
+    'SS2: PAIRED WITH SS1 -- the same noun phrase with no colon is prose, and prose about a convention is a MENTION',
+  );
+  // PAIR 2 -- the identifier, and nothing else: the F9 label survives the anchor.
+  assert(
+    findMigrationPrescription('sys_migration FROM → TO: delete the block\n')?.branch === 'from-to-label',
+    'SS3: an identifier before a colon-closed placeholder is a LABEL -- held by the colon, not by a strip accident',
+  );
+  assert(
+    !hasMigrationPrescription('the sys_migration FROM → TO is documented elsewhere\n'),
+    'SS4: PAIRED WITH SS3 -- add the governor and drop the colon, and the identical identifier is a MENTION (#18493 direction)',
+  );
+  // PAIR 3 -- the line break, and nothing else.
+  assert(
+    !hasMigrationPrescription('the Migration\nFROM → TO is documented elsewhere\n'),
+    'SS5: a wrap does not manufacture a label out of a governed framed mention',
+  );
+  assert(
+    findMigrationPrescription('the sentence ended here.\nFROM → TO: delete the block\n')?.branch === 'from-to-label',
+    'SS6: PAIRED WITH SS5 -- and does not take one away where the line above governs nothing',
+  );
+  // PAIR 4 -- the whole point, end to end: what each direction COSTS if traded.
+  assert(
+    findMigrationPrescription('**Required migration FROM → TO:** delete the block\n')?.branch === 'from-to-label',
+    'SS7: trading this away re-admits a published break with no prescription and no ledger entry (the #18494 cost)',
+  );
+  assert(
+    !hasMigrationPrescription('the sys_migration FROM → TO guide lives in the release notes\n'),
+    'SS8: PAIRED WITH SS7 -- trading THIS away hard-blocks a PR for a rewrite it does not owe, with an evidence line naming the author\'s own sentence (the #18493 cost)',
   );
 
   // --- P62-P68: the framed region closes at the same or a SHALLOWER heading, not

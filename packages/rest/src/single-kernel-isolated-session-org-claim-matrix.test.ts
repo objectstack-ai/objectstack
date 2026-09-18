@@ -8,9 +8,10 @@
  * ## What was measured, before this guard existed
  *
  * On a real `objectstack serve` of cloud's `apps/objectos-ee` — 44 plugins, the
- * REAL cloud-private `@objectstack/organizations`, `Tenancy: isolated`,
- * `SqlDriver(better-sqlite3)` on a FILE — a browser session whose
- * `activeOrganizationId` pointed at an organization its owner had LEFT:
+ * REAL licence-gated `@objectstack/organizations` subclass,
+ * `Tenancy: isolated`, `SqlDriver(better-sqlite3)` on a FILE — a browser
+ * session whose `activeOrganizationId` pointed at an organization its owner
+ * had LEFT:
  *
  * | after the membership ended | GET | POST | the row, read back from the sqlite file |
  * |:--|:--|:--|:--|

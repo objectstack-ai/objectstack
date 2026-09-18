@@ -565,7 +565,7 @@ Gallery/card view configuration
 | **typeField** | `string` | optional | Field whose value maps to task/summary/milestone |
 | **baselineStartField** | `string` | optional | Baseline (planned) start field |
 | **baselineEndField** | `string` | optional | Baseline (planned) end field |
-| **groupByField** | `string` | optional | Field to group leaf tasks by (synthesized summary rows) |
+| **groupByField** | `string` | optional | Field to group leaf tasks by (synthesized summary rows). NO leading or trailing whitespace: the group accessor reads this name off every task verbatim, so a padded spelling drops every task into one ungrouped bucket. |
 | **resourceView** | `boolean` | optional | Render a per-resource workload histogram instead of the timeline |
 | **assigneeField** | `string` | optional | Resource field to bucket load by (resource view) |
 | **effortField** | `string` | optional | Per-task load units (resource view; default 1) |
@@ -696,7 +696,7 @@ HTTP methods a view data source may request — the subset of `HttpMethod` witho
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **groupByField** | `string` | ✅ | Field to group columns by (usually status/select) |
+| **groupByField** | `string` | ✅ | Field to group columns by (usually status/select). NO leading or trailing whitespace: the board reads this name off every card verbatim, so a padded spelling collapses the whole board into one `Uncategorized` lane. |
 | **summarizeField** | `string` | optional | Field to sum at top of column (e.g. amount) |
 | **titleField** | `string` | optional | Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
 | **columns** | `string[]` | ✅ | Fields to show on cards |
@@ -775,6 +775,7 @@ Map view configuration
 | **descriptionField** | `string` | optional | Field displayed as the marker description |
 | **zoom** | `number` | optional | Initial zoom level (1-20). Omit to let the renderer fit the camera to the queried records |
 | **center** | `[number, number]` | optional | Initial camera center as [latitude, longitude]. Omit to let the renderer fit the camera to the queried records |
+| **style** | `string` | optional | Map style URL — the MapLibre style document the renderer loads in place of the public demo tiles. The component-level `mapStyle` is read FIRST and wins when both are present; this is NOT the inline CSS `style` record a component node carries |
 
 
 ---
@@ -933,7 +934,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **groupByField** | `string` | ✅ | Field to group columns by (usually status/select) |
+| **groupByField** | `string` | ✅ | Field to group columns by (usually status/select). NO leading or trailing whitespace: the board reads this name off every card verbatim, so a padded spelling collapses the whole board into one `Uncategorized` lane. |
 | **summarizeField** | `string` | optional | Field to sum at top of column (e.g. amount) |
 | **titleField** | `string` | optional | Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
 | **columns** | `string[]` | ✅ | Fields to show on cards |
@@ -962,7 +963,7 @@ View filter rule
 | **typeField** | `string` | optional | Field whose value maps to task/summary/milestone |
 | **baselineStartField** | `string` | optional | Baseline (planned) start field |
 | **baselineEndField** | `string` | optional | Baseline (planned) end field |
-| **groupByField** | `string` | optional | Field to group leaf tasks by (synthesized summary rows) |
+| **groupByField** | `string` | optional | Field to group leaf tasks by (synthesized summary rows). NO leading or trailing whitespace: the group accessor reads this name off every task verbatim, so a padded spelling drops every task into one ungrouped bucket. |
 | **resourceView** | `boolean` | optional | Render a per-resource workload histogram instead of the timeline |
 | **assigneeField** | `string` | optional | Resource field to bucket load by (resource view) |
 | **effortField** | `string` | optional | Per-task load units (resource view; default 1) |
@@ -999,7 +1000,7 @@ View filter rule
 | **startDateField** | `string` | ✅ | Field for timeline item start date |
 | **endDateField** | `string` | optional | Field for timeline item end date |
 | **titleField** | `string` | ✅ | Field to display as timeline item title |
-| **groupByField** | `string` | optional | Field to group timeline rows |
+| **groupByField** | `string` | optional | Field to group timeline rows. NO leading or trailing whitespace: the renderer reads this name off every row verbatim, so a padded spelling drops every row into one ungrouped band. |
 | **colorField** | `string` | optional | Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color |
 | **scale** | `Enum<'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional (default: `"week"`) | Default timeline scale |
 
@@ -1023,6 +1024,7 @@ View filter rule
 | **descriptionField** | `string` | optional | Field displayed as the marker description |
 | **zoom** | `number` | optional | Initial zoom level (1-20). Omit to let the renderer fit the camera to the queried records |
 | **center** | `[number, number]` | optional | Initial camera center as [latitude, longitude]. Omit to let the renderer fit the camera to the queried records |
+| **style** | `string` | optional | Map style URL — the MapLibre style document the renderer loads in place of the public demo tiles. The component-level `mapStyle` is read FIRST and wins when both are present; this is NOT the inline CSS `style` record a component node carries |
 
 ### Nested Shape: `ListView.tree`
 
@@ -1051,7 +1053,7 @@ View filter rule
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field whose value is looked up in the `colors` map below to pick a row colour (typically a select/status field). The map is what does the colouring — with no `colors`, no row is ever coloured, whatever this field holds. Author-time diagnostic `view/row-color-without-colors` reports that combination. |
-| **colors** | `Record<string, string>` | optional | Map of field value to color (hex/token) |
+| **colors** | `Record<string, string>` | optional | Map of field value to row colour. The spellings that actually paint a row are not free-form: objectui `plugin-grid`'s `useRowColor` hands a value already written as a complete Tailwind background class (`bg-red-200`) straight through, otherwise lower-cases and trims it and resolves it through its own closed vocabulary of colour NAMES (`red`, `blue`, `slate`, … each mapping to `bg-NAME-100`), and returns undefined for anything else. A hex, an `rgb()` or a CSS variable parses here, publishes, and colours no row — Tailwind v4 has no runtime, so no class can be fabricated from one. Author-time diagnostic `view/row-color-unresolvable-value` reports a value that cannot resolve. |
 
 ### Nested Shape: `ListView.bulkActionDefs[number]`
 
@@ -1331,7 +1333,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **groupByField** | `string` | ✅ | Field to group columns by (usually status/select) |
+| **groupByField** | `string` | ✅ | Field to group columns by (usually status/select). NO leading or trailing whitespace: the board reads this name off every card verbatim, so a padded spelling collapses the whole board into one `Uncategorized` lane. |
 | **summarizeField** | `string` | optional | Field to sum at top of column (e.g. amount) |
 | **titleField** | `string` | optional | Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
 | **columns** | `string[]` | ✅ | Fields to show on cards |
@@ -1360,7 +1362,7 @@ View filter rule
 | **typeField** | `string` | optional | Field whose value maps to task/summary/milestone |
 | **baselineStartField** | `string` | optional | Baseline (planned) start field |
 | **baselineEndField** | `string` | optional | Baseline (planned) end field |
-| **groupByField** | `string` | optional | Field to group leaf tasks by (synthesized summary rows) |
+| **groupByField** | `string` | optional | Field to group leaf tasks by (synthesized summary rows). NO leading or trailing whitespace: the group accessor reads this name off every task verbatim, so a padded spelling drops every task into one ungrouped bucket. |
 | **resourceView** | `boolean` | optional | Render a per-resource workload histogram instead of the timeline |
 | **assigneeField** | `string` | optional | Resource field to bucket load by (resource view) |
 | **effortField** | `string` | optional | Per-task load units (resource view; default 1) |
@@ -1397,7 +1399,7 @@ View filter rule
 | **startDateField** | `string` | ✅ | Field for timeline item start date |
 | **endDateField** | `string` | optional | Field for timeline item end date |
 | **titleField** | `string` | ✅ | Field to display as timeline item title |
-| **groupByField** | `string` | optional | Field to group timeline rows |
+| **groupByField** | `string` | optional | Field to group timeline rows. NO leading or trailing whitespace: the renderer reads this name off every row verbatim, so a padded spelling drops every row into one ungrouped band. |
 | **colorField** | `string` | optional | Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color |
 | **scale** | `Enum<'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional (default: `"week"`) | Default timeline scale |
 
@@ -1421,6 +1423,7 @@ View filter rule
 | **descriptionField** | `string` | optional | Field displayed as the marker description |
 | **zoom** | `number` | optional | Initial zoom level (1-20). Omit to let the renderer fit the camera to the queried records |
 | **center** | `[number, number]` | optional | Initial camera center as [latitude, longitude]. Omit to let the renderer fit the camera to the queried records |
+| **style** | `string` | optional | Map style URL — the MapLibre style document the renderer loads in place of the public demo tiles. The component-level `mapStyle` is read FIRST and wins when both are present; this is NOT the inline CSS `style` record a component node carries |
 
 ### Nested Shape: `ObjectListView.tree`
 
@@ -1449,7 +1452,7 @@ View filter rule
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field whose value is looked up in the `colors` map below to pick a row colour (typically a select/status field). The map is what does the colouring — with no `colors`, no row is ever coloured, whatever this field holds. Author-time diagnostic `view/row-color-without-colors` reports that combination. |
-| **colors** | `Record<string, string>` | optional | Map of field value to color (hex/token) |
+| **colors** | `Record<string, string>` | optional | Map of field value to row colour. The spellings that actually paint a row are not free-form: objectui `plugin-grid`'s `useRowColor` hands a value already written as a complete Tailwind background class (`bg-red-200`) straight through, otherwise lower-cases and trims it and resolves it through its own closed vocabulary of colour NAMES (`red`, `blue`, `slate`, … each mapping to `bg-NAME-100`), and returns undefined for anything else. A hex, an `rgb()` or a CSS variable parses here, publishes, and colours no row — Tailwind v4 has no runtime, so no class can be fabricated from one. Author-time diagnostic `view/row-color-unresolvable-value` reports a value that cannot resolve. |
 
 ### Nested Shape: `ObjectListView.bulkActionDefs[number]`
 
@@ -1607,7 +1610,7 @@ Row color configuration based on field values
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field whose value is looked up in the `colors` map below to pick a row colour (typically a select/status field). The map is what does the colouring — with no `colors`, no row is ever coloured, whatever this field holds. Author-time diagnostic `view/row-color-without-colors` reports that combination. |
-| **colors** | `Record<string, string>` | optional | Map of field value to color (hex/token) |
+| **colors** | `Record<string, string>` | optional | Map of field value to row colour. The spellings that actually paint a row are not free-form: objectui `plugin-grid`'s `useRowColor` hands a value already written as a complete Tailwind background class (`bg-red-200`) straight through, otherwise lower-cases and trims it and resolves it through its own closed vocabulary of colour NAMES (`red`, `blue`, `slate`, … each mapping to `bg-NAME-100`), and returns undefined for anything else. A hex, an `rgb()` or a CSS variable parses here, publishes, and colours no row — Tailwind v4 has no runtime, so no class can be fabricated from one. Author-time diagnostic `view/row-color-unresolvable-value` reports a value that cannot resolve. |
 
 
 ---
@@ -1649,7 +1652,7 @@ Timeline view configuration
 | **startDateField** | `string` | ✅ | Field for timeline item start date |
 | **endDateField** | `string` | optional | Field for timeline item end date |
 | **titleField** | `string` | ✅ | Field to display as timeline item title |
-| **groupByField** | `string` | optional | Field to group timeline rows |
+| **groupByField** | `string` | optional | Field to group timeline rows. NO leading or trailing whitespace: the renderer reads this name off every row verbatim, so a padded spelling drops every row into one ungrouped band. |
 | **colorField** | `string` | optional | Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color |
 | **scale** | `Enum<'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional (default: `"week"`) | Default timeline scale |
 

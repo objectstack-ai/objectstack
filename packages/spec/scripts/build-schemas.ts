@@ -45,6 +45,24 @@ import {
   projectByPruningUnionBranches,
   type PrunedBranch,
 } from './lib/union-branch-projection';
+// The closed list of refinements this generator DOES publish (#18670 item 2).
+// The ratchet below measures against this same override, so a rule the list
+// emits leaves the ledger and a rule it does not emit stays in it — see the
+// module header for why the two halves must not be read against each other.
+import { refinementProjectionOverride } from './lib/refinement-projection';
+// The dropped-refinement ratchet (#18670). The mirror image of the branch
+// pruning above, and deliberately its own module for the same reason: the
+// pruner guards a projection NARROWER than the Zod type, this one the direction
+// nothing guarded at all — a projection WIDER than it, which is the direction an
+// author's validator says yes in and the runtime says no.
+import {
+  DROPPED_REFINEMENTS_BASELINE_FILE,
+  checkDroppedRefinements,
+  collectDroppedRefinements,
+  hasDroppedRefinementProblems,
+  readDroppedRefinementsBaseline,
+  type RefinementCensusEntry,
+} from './lib/dropped-refinements';
 // Who owns what under json-schema/. This generator shares that directory with
 // gen:openapi, and used to clear it by deleting the directory itself (#5371).
 import {
@@ -424,6 +442,13 @@ const branchPrunedProjections: Array<{
   readonly pruned: readonly PrunedBranch[];
 }> = [];
 
+// Every published schema's refinement census (#18670) — the rules that reach
+// the runtime and NOT the file. Collected inside the emit loop rather than
+// re-derived afterwards because this loop is the only place that holds both the
+// Zod value and the def key the artifact is written under, and a second walk
+// keyed by something else is a second thing to keep in step.
+const refinementCensus: RefinementCensusEntry[] = [];
+
 // Error messages for schema types that inherently cannot be represented in JSON Schema.
 // These are expected warnings, not build-breaking errors.
 const KNOWN_UNSUPPORTED_PATTERNS = [
@@ -475,6 +500,7 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
           try {
             jsonSchema = z.toJSONSchema(value, {
               target: 'draft-2020-12',
+              override: refinementProjectionOverride,
             }) as Record<string, unknown>;
           } catch (outputError) {
             if (!isKnownUnsupported(outputError)) throw outputError;
@@ -483,6 +509,7 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
               jsonSchema = z.toJSONSchema(value, {
                 target: 'draft-2020-12',
                 io: 'input',
+                override: refinementProjectionOverride,
               }) as Record<string, unknown>;
             } catch (inputError) {
               if (!isKnownUnsupported(inputError)) throw inputError;
@@ -499,7 +526,10 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
               // then re-thrown with the message Zod produced, so this attempt
               // can never change WHY an export is skipped, and so never the
               // `cause` recorded for it in unemitted-schemas.baseline.json.
-              const projected = projectByPruningUnionBranches(value, { target: 'draft-2020-12' });
+              const projected = projectByPruningUnionBranches(value, {
+                target: 'draft-2020-12',
+                override: refinementProjectionOverride,
+              });
               if (!projected) throw inputError;
               jsonSchema = projected.schema;
               io = projected.io;
@@ -528,6 +558,31 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
               type: branch.type,
             }));
             branchPrunedProjections.push({ namespace: namespaceName, exportKey: key, pruned: prunedBranches });
+          }
+
+          // The refinements this projection STILL drops (#18670), named on the
+          // artifact for the same reason `x-unprojectable-branches` is: a reader
+          // of this file — an author, a reference page, an AI validating a
+          // document against it — can otherwise not tell that the contract
+          // underneath carries rules this file does not state. It is an
+          // annotation and nothing more: `x-` keywords are ignored by every
+          // validator, so the set of documents this schema ACCEPTS is unchanged
+          // by it.
+          //
+          // What DID narrow (#18670 item 2) is the closed list in
+          // `src/shared/refinement-projection.ts`, applied by the `override`
+          // above: a refinement declared through it is emitted as real
+          // keywords, so it never reaches `census.dropped` and never reaches
+          // this annotation. ⛔ The two are exclusive by construction — a site
+          // cannot be both stated and annotated as unstated.
+          const census = collectDroppedRefinements(`${categorySlug}/${schemaName}`, value);
+          refinementCensus.push(census);
+          if (census.dropped.length > 0) {
+            jsonSchema['x-dropped-refinements'] = census.dropped.map((site) => ({
+              at: site.path,
+              type: site.nodeType,
+              count: site.count,
+            }));
           }
 
           const fileName = `${schemaName}.json`;
@@ -1519,15 +1574,26 @@ interface GuidanceRoutes {
  * key in it, a union or pipe the probe cannot drive to a single door, or a refusal
  * whose message does not carry the declared text — all read as "no evidence",
  * never as "proved". ⛔ And the verdict for the second half says only THAT the
- * prescription did not arrive, never WHY: on the shipped graph 7 of the 8 defs in
- * that state are unions, where "the door is open" would be a guess this gate has
- * not measured — the mistake this proof's first cut made about
- * `additionalProperties` and must not repeat one layer down.
+ * prescription did not arrive, never WHY: at `88aa326deb` that state held 9 keys
+ * on 4 defs, 3 of those 4 defs unions carrying 7 of the 9 keys — for a union
+ * "the door is open" would be a guess this gate has not measured, the mistake
+ * this proof's first cut made about `additionalProperties` and must not repeat
+ * one layer down.
  *
- * Measured on the shipped graph at #18301 with THIS instrument — see the PR body
- * for the census run: `integration/DataSyncConfig` has NO route (its shape is not
- * a `strictObject` and nothing prescribes for `schedule`), so this proof does not
- * reach the 2026-09-10 ruling that withheld that tombstone.
+ * Every count above is a reading of ONE tree — objectstack-ai/objectstack
+ * `88aa326deb`, where #18579 re-took all of them with THIS instrument — and each
+ * is written beside the population it counts: of the 1527 emitted defs, 258
+ * resolve to exactly one declaration, and 147 of those 258 name a key the def
+ * does not declare; those 147 defs promise 779 keys, of which 770 are delivered
+ * and the 9 above are not. Which defs sit in that last group is a fact about the
+ * graph at that commit and not a property of this proof — closing an open door
+ * moves it — so a later reader RE-MEASURES rather than re-dates these, and ⛔
+ * derives none of them from the #18301 PR body, whose census row gives the 147
+ * population the 258 count: a count wearing another population's label is the
+ * defect this docblock was corrected for.
+ * `integration/DataSyncConfig` has NO route (its shape is not a `strictObject`
+ * and nothing prescribes for `schedule`), so this proof does not reach the
+ * 2026-09-10 ruling that withheld that tombstone.
  */
 function computeGuidanceRoutes(): GuidanceRoutes {
   const shapeSignature = (shape: Record<string, unknown>): string =>
@@ -3353,6 +3419,187 @@ if (unemittedSkips.length > 0) {
   for (const skip of unemittedSkips) {
     console.log(`     ${ledgerKey(skip)}  (${causeOf(skip.message)})`);
     console.log(`       ${unemittedBaseline.entries[ledgerKey(skip)].reason}`);
+  }
+}
+
+// ─── The dropped-refinement ratchet (#18670) ─────────────────────────
+//
+// Runs after the never-published ratchet above, and the two populations are
+// DISJOINT by construction: that one adjudicates exports this build published
+// NOTHING for, this one adjudicates what it DID publish. So neither can mask
+// the other, and an export that stops emitting still gets the remedy the
+// ratchet above prescribes rather than this block's.
+//
+// What it holds closed: a rule written as `.refine()` reaches the runtime and
+// not the file. `z.toJSONSchema()` has no arm for a `custom` check, so the
+// published JSON Schema is WIDER than the Zod type it was generated from — the
+// direction in which an author's validator says yes and the platform then says
+// no. Measured on this tree at the change that added this block: 682 refinement
+// sites across 237 published schemas, zero of which projected anything.
+//
+// ⛔ This ratchet still narrows nothing by itself and touches no refinement —
+// the runtime rule is correct. It makes the remaining population declared, so
+// the next gap arrives as a line in a diff instead of as nothing at all.
+//
+// The narrowing is the CLOSED list in `src/shared/refinement-projection.ts`
+// (#18670 item 2), emitted by the `override` this generator passes to every
+// projection. It and this ratchet compose in one direction: a site the list
+// emits is `projected` and its ledger row is deleted in the same PR; every
+// other site is `dropped` and stays declared. So the ledger is shrink-only in
+// the strong sense — a repair is the only thing that shortens it.
+const droppedRefinementsBaseline = readDroppedRefinementsBaseline(PKG_DIR);
+if (!droppedRefinementsBaseline) {
+  console.error(`\n❌ ${DROPPED_REFINEMENTS_BASELINE_FILE} is missing — it is a committed, hand-edited ledger (#18670).`);
+  console.error(
+    `\n   Without it nothing holds the dropped-refinement population closed, and a rule that\n` +
+      `   reaches the runtime but not packages/spec/json-schema/** arrives in total silence —\n` +
+      `   the state #18670 measured. Restore packages/spec/${DROPPED_REFINEMENTS_BASELINE_FILE}\n` +
+      `   from git rather than regenerating it: it has no generator on purpose (see\n` +
+      `   scripts/lib/dropped-refinements.ts).`,
+  );
+  process.exit(1);
+}
+
+const droppedRefinementProblems = checkDroppedRefinements({
+  census: refinementCensus,
+  publishedKeys: new Set(generatedSchemas.keys()),
+  baseline: droppedRefinementsBaseline,
+});
+
+if (hasDroppedRefinementProblems(droppedRefinementProblems)) {
+  const { undeclared, miscounted, repaired, vanished, unreasoned } = droppedRefinementProblems;
+
+  if (undeclared.length > 0) {
+    console.error(
+      `\n❌ ${undeclared.length} published schema(s) drop a refinement and are not declared in ${DROPPED_REFINEMENTS_BASELINE_FILE}:`,
+    );
+    for (const entry of undeclared) {
+      console.error(`     + ${entry.defKey}  (${entry.dropped.length} site(s))`);
+      for (const site of entry.dropped) {
+        console.error(`         ${site.path || '<root>'}  (${site.nodeType}${site.aborting ? ', aborting' : ''})`);
+      }
+    }
+    console.error(
+      `\n   The rule is enforced by the runtime and absent from the published file: a document\n` +
+        `   the file ACCEPTS can be refused at parse time, and the author — or the AI — that\n` +
+        `   validated against json-schema/** finds out a release later. The refinement itself is\n` +
+        `   correct; ⛔ do not delete or weaken it to make this line go away.\n\n` +
+        `   Declare it by adding to packages/spec/${DROPPED_REFINEMENTS_BASELINE_FILE}:\n\n` +
+        undeclared
+          .map(
+            (entry) =>
+              `        "${entry.defKey}": {\n` +
+              `          "sites": [${entry.dropped.map((s) => `"${s.path}"`).join(', ')}]\n` +
+              `        },\n`,
+          )
+          .join(''),
+    );
+  }
+
+  if (miscounted.length > 0) {
+    console.error(`\n❌ ${miscounted.length} ledger entry(ies) in ${DROPPED_REFINEMENTS_BASELINE_FILE} name a different set of sites:`);
+    for (const m of miscounted) {
+      console.error(`     ~ ${m.defKey}:`);
+      for (const site of m.added) console.error(`         + ${site || '<root>'}`);
+      for (const site of m.removed) console.error(`         - ${site || '<root>'}`);
+    }
+    console.error(
+      `\n   A \`+\` is a new gap: a rule that now reaches the runtime and not the file. A \`-\` is a\n` +
+        `   gap that closed or a path that moved — good news either way, and the line has to move\n` +
+        `   with it in the same PR. A ledger that keeps naming sites the build no longer sees has\n` +
+        `   stopped describing the tree and started covering for it, and the next gap then arrives\n` +
+        `   inside a list nobody re-read.\n\n` +
+        `   The corrected entries, in full:\n\n` +
+        miscounted
+          .map(
+            (m) =>
+              `        "${m.defKey}": {\n` +
+              `          "sites": [${m.observedSites.map((s) => `"${s}"`).join(', ')}]\n` +
+              `        },\n`,
+          )
+          .join(''),
+    );
+  }
+
+  if (repaired.length > 0) {
+    console.error(`\n❌ ${repaired.length} ledger entry(ies) in ${DROPPED_REFINEMENTS_BASELINE_FILE} drop NOTHING now:`);
+    for (const defKey of repaired) console.error(`     - ${defKey}`);
+    console.error(
+      `\n   Good news, and the line goes with it — in this same PR. Either the refinement was\n` +
+        `   removed, or the projection learned to emit what it constrains. Say which in the PR:\n` +
+        `   the second is the repair this ledger exists to become unnecessary for.`,
+    );
+  }
+
+  if (vanished.length > 0) {
+    console.error(`\n❌ ${vanished.length} ledger entry(ies) in ${DROPPED_REFINEMENTS_BASELINE_FILE} name no published schema:`);
+    for (const defKey of vanished) console.error(`     - ${defKey}`);
+    console.error(
+      `\n   The schema was removed, renamed, or stopped being published altogether. Delete the\n` +
+        `   line (a rename gets a new line under the new key), so the ledger keeps naming exactly\n` +
+        `   the population this build measures.`,
+    );
+  }
+
+  if (unreasoned.length > 0) {
+    console.error(`\n❌ ${unreasoned.length} ledger entry(ies) carry an empty \`sites\` list:`);
+    for (const defKey of unreasoned) console.error(`     - ${defKey}`);
+    console.error(
+      `\n   An entry that records only that a schema IS in the population is a count wearing a\n` +
+        `   ledger's shape. The site paths are the whole instrument: they are what makes a new\n` +
+        `   gap legible as a line in a diff instead of a number going up by one.`,
+    );
+  }
+
+  process.exit(1);
+}
+
+// The accepted population, reported in full on every run — the same discipline
+// as the never-published ledger above, and for the same reason: a population
+// that passes in silence is the silence this ratchet was built to end.
+const droppedSiteTotal = refinementCensus.reduce((sum, entry) => sum + entry.dropped.length, 0);
+const droppedFiles = refinementCensus.filter((entry) => entry.dropped.length > 0);
+const projectedSiteTotal = refinementCensus.reduce((sum, entry) => sum + entry.projected.length, 0);
+const undecidableSiteTotal = refinementCensus.reduce((sum, entry) => sum + entry.undecidable.length, 0);
+if (droppedSiteTotal > 0) {
+  console.log(
+    `\n🔇 ${droppedSiteTotal} refinement site(s) across ${droppedFiles.length} published schema(s) reach the ` +
+      `RUNTIME and not the published JSON Schema — all declared in ${DROPPED_REFINEMENTS_BASELINE_FILE} (#18670).`,
+  );
+  console.log(
+    `     Those files are therefore still WIDER than the Zod types they are generated from:\n` +
+      `     a document one of them accepts can be refused at parse time. Each affected file names\n` +
+      `     its own remaining sites as \`x-dropped-refinements\`. Closing one means teaching the\n` +
+      `     CLOSED list in src/shared/refinement-projection.ts a NAMED pattern — ⛔ never deleting\n` +
+      `     the refinement, and ⛔ never an open-ended translator over the whole population.`,
+  );
+  console.log(
+    `     Also measured this run: ${projectedSiteTotal} refinement site(s) DID reach the file, ` +
+      `${undecidableSiteTotal} had no JSON form on either side to compare.`,
+  );
+}
+
+// Which projected sites got there through which arm of the closed list (#18670
+// item 2). Printed per pattern rather than as one total, for the reason the
+// ledger records sites rather than a count: a total cannot tell "one arm stopped
+// emitting" from "somebody deleted a refinement", and the two have opposite
+// remedies. A site that projects with NO declared pattern is reported on its own
+// line — it means zod started emitting something by itself, which is news.
+if (projectedSiteTotal > 0) {
+  const byPattern = new Map<string, number>();
+  for (const entry of refinementCensus) {
+    for (const site of entry.projected) {
+      const key = site.declaredPatterns.length > 0
+        ? site.declaredPatterns.join('+')
+        : 'UNDECLARED — zod projected this on its own';
+      byPattern.set(key, (byPattern.get(key) ?? 0) + 1);
+    }
+  }
+  console.log(
+    `\n📣 ${projectedSiteTotal} refinement site(s) DO reach the published JSON Schema, by declared pattern:`,
+  );
+  for (const [pattern, n] of [...byPattern].sort((a, b) => b[1] - a[1])) {
+    console.log(`     ${String(n).padStart(4)}  ${pattern}`);
   }
 }
 

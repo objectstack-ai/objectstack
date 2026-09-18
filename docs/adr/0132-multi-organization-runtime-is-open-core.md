@@ -1,8 +1,8 @@
 # ADR-0132: The multi-organization runtime is open core — single-database organization isolation ships open; only the entitlement stays commercial
 
-- **Status**: Proposed (2026-09-06) — awaiting the maintainer's hand-merge, which is itself the
-  acceptance act for a governed surface (Prime Directive #14). ⛔ Nothing below is settled until
-  this record merges.
+- **Status**: Accepted (2026-09-07) — accepted by the merge that landed it on `main`
+  ([#16215](https://github.com/objectstack-ai/objectstack/pull/16215), commit `c677cda816`), which
+  is itself the acceptance act for a governed surface (Prime Directive #14).
 - **Deciders**: ObjectStack maintainer, 2026-09-06, live chat, verbatim and untranslated: the
   question that opened it 「感觉 单库多组织隔离是开源基本需求，如果迁移回开源项目成本有多大」, the
   instruction that chartered the work 「直接立专题卡派发处理吧」, and the statement of the effect

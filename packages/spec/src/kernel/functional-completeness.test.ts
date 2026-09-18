@@ -29,6 +29,7 @@ import {
   VIEW_LAYOUT_WITHOUT_BINDING,
   VIEW_TREE_WITHOUT_PARENT_FIELD,
   VIEW_ROW_COLOR_WITHOUT_COLORS,
+  VIEW_ROW_COLOR_UNRESOLVABLE_VALUE,
   WEBHOOK_WITHOUT_TRIGGERS,
 } from './functional-completeness';
 
@@ -331,10 +332,46 @@ describe('checkViewCompleteness — rowColor without a colour map (the parse-cle
     expect(f.fix).toContain('colors');
   });
 
+  // #18791 — the sharpest half of this card. The `fix` string this rule hands
+  // the author read `colors: { '<field_value>': '<hex_or_token>' }`, and a hex
+  // is the ONE spelling `colorToClass` cannot resolve. So the chain ran: the
+  // gate fires, the gate itself hands the author a hex, the hex parses,
+  // publishes, turns this rule GREEN, and colours nothing. A control whose own
+  // prescription switches it off.
+  //
+  // Pinning the literal string would rot. What is pinned instead is the
+  // PROPERTY that made it wrong: the value the prescription suggests is fed
+  // back through this module, and must survive it.
+  it('hands the author a prescription this module itself accepts (#18791)', () => {
+    const f = only(checkViewCompleteness({ type: 'grid', rowColor: { field: 'status' } }) as never);
+    const suggested = /'<field_value>':\s*'([^']+)'/.exec(f.fix)?.[1];
+    expect(suggested, `no suggested colour value in the prescription: ${f.fix}`).toBeDefined();
+    expect(
+      checkViewCompleteness({ type: 'grid', rowColor: { field: 'status', colors: { open: suggested! } } }),
+      `the prescription suggests \`${suggested}\`, which this module's own resolvability rule rejects — `
+        + 'the gate would be handing the author the defect it just reported',
+    ).toEqual([]);
+  });
+
+  it('⛔ names no hex placeholder anywhere in the prescription (#18791)', () => {
+    // The direct, dumb half of the pin above: whatever the wording becomes, it
+    // must not put a hex back in front of an author. `token` is refused for the
+    // same reason — it named nothing an author could look up, and stood beside
+    // hex as an equal alternative.
+    const f = only(checkViewCompleteness({ type: 'grid', rowColor: { field: 'status' } }) as never);
+    expect(f.fix).not.toMatch(/hex|#[0-9a-f]{3}|token/i);
+  });
+
   it('is silent once a `colors` map is declared — the negative fixture', () => {
+    // ⚠️ This fixture used to spell the colour `'#0f0'`. That hex is exactly
+    // the shape the sibling rule below exists to catch, so the negative
+    // fixture for THIS rule was modelling the trap: it asserted "presence is
+    // enough" over a map that colours nothing. The value is now a resolvable
+    // colour name, which is what makes this a clean negative for one rule
+    // instead of a silent positive for the other.
     expect(checkViewCompleteness({
       type: 'grid',
-      rowColor: { field: 'status', colors: { open: '#0f0' } },
+      rowColor: { field: 'status', colors: { open: 'green' } },
     })).toEqual([]);
   });
 
@@ -376,6 +413,109 @@ describe('checkViewCompleteness — rowColor without a colour map (the parse-cle
   it('never throws on junk', () => {
     expect(checkViewCompleteness({ type: 'grid', rowColor: 'red' })).toEqual([]);
     expect(checkViewCompleteness({ type: 'grid', rowColor: null })).toEqual([]);
+  });
+});
+
+/**
+ * #18791 — the half `view/row-color-without-colors` structurally cannot see.
+ *
+ * `RowColorConfigSchema.colors` is `z.record(z.string(), z.string())`, so every
+ * string parses. `useRowColor.ts`'s `colorToClass` resolves far less: a
+ * `bg-`-prefixed literal passes through, the lower-cased and trimmed value is
+ * looked up in a closed vocabulary of colour NAMES, and everything else returns
+ * `undefined`. A hex map therefore CLEARS the `!config.colors` guard — which is
+ * to say it turns the presence rule GREEN — and colours nothing, which is why
+ * presence-only can never be the detector for it.
+ *
+ * Measured, not argued: PR #18787's reverse-verification leg B swapped four
+ * colour names for the four hexes the `priority` field already declares; the
+ * app-local resolvability arm went red naming all four, and the presence arm
+ * stayed green.
+ */
+describe('checkViewCompleteness — rowColor values the renderer resolves to nothing (#18791)', () => {
+  const grid = (colors: Record<string, unknown>) =>
+    checkViewCompleteness({ type: 'grid', rowColor: { field: 'priority', colors } });
+
+  it('flags a hex map as a WARNING, naming every dead value', () => {
+    const f = only(grid({ low: '#94A3B8', high: '#EF4444' }) as never);
+    expect(f.rule).toBe(VIEW_ROW_COLOR_UNRESOLVABLE_VALUE);
+    expect(f.severity).toBe('warning');
+    expect(f.path).toBe('rowColor.colors');
+    // The author has to be able to find them, so each offending entry is named
+    // with the value it holds — a count alone sends them re-reading the map.
+    expect(f.message).toContain('`low` = "#94A3B8"');
+    expect(f.message).toContain('`high` = "#EF4444"');
+    // …and the runtime symbol that makes it true, per this module's discipline.
+    expect(f.message).toContain('colorToClass');
+    expect(f.fix).toContain("field: 'priority'");
+  });
+
+  it('⭐ says out loud that this shape SILENCES the presence rule', () => {
+    // The whole reason the card is p1: the obvious "fix" for
+    // `view/row-color-without-colors` is to paste the field's own option
+    // colours in, which are hexes — strictly worse than the original defect,
+    // because it removes the one signal that was working. A finding that does
+    // not say so invites exactly that move again.
+    const f = only(grid({ low: '#94A3B8' }) as never);
+    expect(f.message).toContain(VIEW_ROW_COLOR_WITHOUT_COLORS);
+    expect(grid({ low: '#94A3B8' }).map((x) => x.rule)).not.toContain(VIEW_ROW_COLOR_WITHOUT_COLORS);
+  });
+
+  it('accepts what the renderer accepts — colour names and `bg-` classes', () => {
+    // The showcase's shipped map, verbatim.
+    expect(grid({ low: 'slate', medium: 'blue', high: 'amber', urgent: 'red' })).toEqual([]);
+    // A complete Tailwind class is handed through untouched by `colorToClass`.
+    expect(grid({ open: 'bg-red-200', shut: 'bg-emerald-50/50' })).toEqual([]);
+    // The lookup lower-cases and trims, so these resolve too. A rule that
+    // tested the raw value would report both — a false prescription.
+    expect(grid({ open: 'RED', shut: '  green  ' })).toEqual([]);
+  });
+
+  it('flags the other unresolvable spellings, not just hex', () => {
+    for (const dead of ['rgb(255,0,0)', 'var(--danger)', '#f00', 'hsl(0 100% 50%)', 'red-500', '']) {
+      const findings = grid({ open: dead });
+      expect(findings.map((x) => x.rule), `\`${dead}\` should be reported`)
+        .toContain(VIEW_ROW_COLOR_UNRESOLVABLE_VALUE);
+    }
+    // ⚠️ ` bg-red-100` with a leading space is NOT resolvable: `startsWith`
+    // tests the RAW value and sees the space, and the lower-cased form is not a
+    // bare word either. Pinned because it is the one place where "looks like a
+    // Tailwind class" and "resolves" come apart.
+    expect(grid({ open: ' bg-red-100' }).map((x) => x.rule)).toContain(VIEW_ROW_COLOR_UNRESOLVABLE_VALUE);
+  });
+
+  it('⛔ PINNED NON-RULE: an unknown colour NAME is passed, deliberately', () => {
+    // `chartreuse` is shaped like a key and is almost certainly not one, so
+    // this rule lets it through. That is the price of refusing to transcribe
+    // another repo's 23-entry map: a copy drifts silently in both directions,
+    // and a rule that accuses a value the renderer WOULD have resolved is the
+    // false prescription this module's discipline forbids. Sound, not complete
+    // — if someone "completes" it by pasting the vocabulary in, this is where
+    // the trade-off they are reversing is written down.
+    expect(grid({ open: 'chartreuse' })).toEqual([]);
+  });
+
+  it('⛔ does not double-report the shapes the presence rule owns', () => {
+    // `{}` is the presence rule's second spelling; it must not also arrive here
+    // as "zero resolvable values", which would report one defect twice in two
+    // vocabularies — the thing the sibling block's own tests refuse.
+    const empty = checkViewCompleteness({ type: 'grid', rowColor: { field: 'priority', colors: {} } });
+    expect(empty.map((f) => f.rule)).toEqual([VIEW_ROW_COLOR_WITHOUT_COLORS]);
+  });
+
+  it('is silent on the view types whose renderer never reads `rowColor`', () => {
+    for (const type of ['kanban', 'gallery', 'chart', 'timeline']) {
+      const findings = checkViewCompleteness({ type, rowColor: { field: 'priority', colors: { a: '#fff' } } });
+      expect(findings.map((f) => f.rule)).not.toContain(VIEW_ROW_COLOR_UNRESOLVABLE_VALUE);
+    }
+  });
+
+  it('leaves what the schema refuses to the schema, and never throws', () => {
+    // Non-string values and non-record maps are parse errors, not completeness
+    // findings — this module is not a second parser.
+    expect(grid({ open: 42, shut: null })).toEqual([]);
+    expect(checkViewCompleteness({ type: 'grid', rowColor: { field: 'priority', colors: 'red' } })).toEqual([]);
+    expect(() => grid({ open: { nested: true } })).not.toThrow();
   });
 });
 
@@ -431,6 +571,7 @@ describe('registry hygiene', () => {
       'field/relationship-without-reference',
       'field/summary-without-operations',
       'view/layout-without-binding',
+      'view/row-color-unresolvable-value',
       'view/row-color-without-colors',
       'view/tree-without-parent-field',
       'webhook/without-triggers',
@@ -447,9 +588,10 @@ describe('registry hygiene', () => {
       ...checkViewCompleteness({ type: 'kanban' }),
       ...checkViewCompleteness({ type: 'tree', tree: {} }, { name: 'unit', fields: {} }),
       ...checkViewCompleteness({ type: 'grid', rowColor: { field: 'status' } }),
+      ...checkViewCompleteness({ type: 'grid', rowColor: { field: 'status', colors: { open: '#0f0' } } }),
       ...checkWebhookCompleteness({ url: 'https://x' }),
     ];
-    expect(all).toHaveLength(9);
+    expect(all).toHaveLength(10);
     for (const f of all) {
       expect(f.fix.length).toBeGreaterThan(8);
       expect(f.message.length).toBeGreaterThan(60);

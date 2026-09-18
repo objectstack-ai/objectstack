@@ -38,7 +38,7 @@
 - 清标即落地:PASS ⇒ 同席同笔剥双载体;清标同笔落 PR provenance 评论,引记录 id 与所判 head。
 - 轮次报告设复审清单专节,形状与代裁清单同为强制审计。
 - 落地前检三条:① 席内条款②复核 PASS 在案,即 PR 或卡上同形的复核记录(档位按实测)。
-- ② 双载体已清,逐对机读 `node scripts/pm/check-clause2-carriers.mjs --pair PR-NUMBER`。
+- ② 双载体已清,逐对机读 `PM_SWEEP_REPO=仓 node scripts/pm/check-clause2-carriers.mjs --pair N`。
 - 0 = 双肢一致、无放宽 tell、head 上有记录;4 = 任一不成立;3 = 环境答不了,⛔ 不作干净。
 - 放宽 tell 由 `scripts/pm/check-widening-tells.mjs` 判,`no` 撞新键/成员/导出/登记即拒,附 file:line。
 - ③ PR check 全绿,⛔ 非 required 子集;例外:merge-base 同签名的红不计、按设计而红见 SKILL.md。

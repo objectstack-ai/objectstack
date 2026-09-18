@@ -906,4 +906,82 @@ export interface IAutomationService {
         /** One sentence naming what was observed — always present, both ways. */
         reason: string;
     }>;
+
+    /**
+     * **The READ-ONLY half of the operator exit** (#15358; ruled B′,
+     * 2026-09-07): would {@link restoreConsumedSuspension} have a consumed
+     * suspension to put back for this run? It re-arms nothing, moves nothing
+     * and records nothing — asking is free, and asking twice answers twice.
+     *
+     * It is read from the SAME witnesses the restore verb reads, which is the
+     * whole reason a door may act on it: what this member calls repairable IS
+     * what that verb restores. ⚠️ It judges what SURVIVES, never whether
+     * re-arming would be safe at this instant — the restore verb keeps its own
+     * pre-flight.
+     *
+     * **Why a door needs it, and no status stamp will do.** The resume door's
+     * `400 FLOW_FAILED` details carry `repairable`
+     * (`ResumeFailureDetailsSchema`, `api/automation-api.zod.ts`). On the exit
+     * that consumed its OWN pause and then threw, `AutomationResult.status` is
+     * `'stranded'` and that word answers the question by itself. On the subflow
+     * DELEGATION exit it cannot: a caller resumes the PARENT, the signal is
+     * forwarded down, the child strands, and the parent frame answers with no
+     * `status` at all — deliberately, because nothing re-arms an ancestor by
+     * resuming it and stamping `'stranded'` there would send an operator to
+     * retry a recovery that cannot succeed. Since #15222 that parent's consumed
+     * pause IS journalled and the restore verb re-arms the whole chain as one
+     * unit, so the run is repairable while carrying no word that says so. The
+     * door asks THIS member for those exits instead of inferring an answer
+     * from the absence of a stamp.
+     *
+     * ⛔ **Asked per run; never inferred from a run's position in a subflow
+     * tree.** A cascade-failed ancestor is journalled exactly when the
+     * descendant whose failure consumed its pause is itself repairable, so
+     * "is an ancestor" predicts nothing.
+     *
+     * **The result is deliberately NARROWER than the implementation's**, for
+     * the reason {@link restoreConsumedSuspension}'s is (#16495, route (i)):
+     * the engine answers its own wider type — the pause a restore would
+     * re-arm, which of the two witnesses answered, when the suspension was
+     * consumed, and a closed refusal vocabulary whose members a consumer that
+     * branches on `repairable` alone reads wrong in both directions. That type
+     * lives with the engine and is not moved here; `reason` is typed as the
+     * string the implementation answers, not as an enumeration this contract
+     * would have to keep in step, and the wider type satisfies this one under
+     * `implements`. A consumer that needs the vocabulary itself is a spec
+     * card, never a widening at a call site.
+     *
+     * **Optional, deliberately**, and its absence is FAIL-CLOSED for a door:
+     * a service that does not declare this member cannot be asked, and a door
+     * that cannot ask answers `repairable: false` — ⛔ never `true`, because
+     * promising a repair verb that will refuse is worse than promising
+     * nothing, and ⛔ never by dropping the member, which would be
+     * indistinguishable from a server that predates the field. Absence of the
+     * discriminator is not evidence of anything.
+     *
+     * @param runId - The run to ask about (its `sys_automation_run` row)
+     * @returns `repairable: true` when a consumed-suspension snapshot is held
+     *   for the run and the restore verb would put it back; otherwise
+     *   `repairable: false` with `reason` naming what the implementation
+     *   observed. `runId` is echoed both ways.
+     * @throws when a store cannot be read. An unreadable store is UNKNOWN,
+     *   ⛔ not "nothing to restore" — a verdict that turned an outage into an
+     *   absence would send an operator to give up on a run that is repairable.
+     *   A door that must still answer treats the rejection the way it treats
+     *   absence, fail-closed, and says so where it does it.
+     */
+    inspectConsumedSuspension?(runId: string): Promise<{
+        /**
+         * `true` exactly when a consumed suspension survives for this run and
+         * {@link restoreConsumedSuspension} would put it back.
+         */
+        repairable: boolean;
+        /** The run id, echoed. */
+        runId: string;
+        /**
+         * What the implementation observed when it answers `false` (its own
+         * closed vocabulary — see above); absent on the `true` arm.
+         */
+        reason?: string;
+    }>;
 }

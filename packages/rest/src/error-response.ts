@@ -2631,6 +2631,70 @@ export function logUnexpectedRouteError(error: any, resolved: { status: number; 
 }
 
 /**
+ * [#18402] Would the classification door answer this caught value with a
+ * BARE `404 RESOURCE_NOT_FOUND` — no code the producer chose, nothing else
+ * riding along?
+ *
+ * ## Why a predicate rather than a second reading of the error
+ *
+ * A handler that owns ONE absence answer has to recognise the absences its
+ * producers THROW, and the tempting spelling — `error?.status === 404 &&
+ * error?.code === 'RESOURCE_NOT_FOUND'` — is a second opinion about what a
+ * caught value means. It disagrees with this door on every shape the door
+ * classifies rather than reads: a producer that declares a status and no code,
+ * an unregistered spelling that {@link thrownCodeFields} demotes to
+ * `declaredCode` while deriving `code` from the status, a structured arm that
+ * owns its own envelope. Each disagreement is one arm of one route quietly
+ * answering a different body again — the exact class the caller was fixing.
+ *
+ * So this ASKS the door. `resolveErrorResponse` is the function that would
+ * have rendered the value one line later; reading its verdict means the
+ * handler's fork and the fallback it forks away from can never drift apart.
+ * The function is pure and this runs on an error path, so the second
+ * classification pass costs nothing worth naming — the same argument
+ * {@link resolveErrorResponse} already makes for its own `mapDataError`
+ * re-entry.
+ *
+ * ## ⛔ Why it is NOT "the status is 404"
+ *
+ * MEASURED, and the measurement is the reason this function has three
+ * conditions instead of one. `404` on a metadata route is not a synonym for
+ * "you get nothing": `metadata-protocol` throws `{ code: 'NO_DRAFT', status:
+ * 404 }` from the Studio designer's draft probe — pinned byte-for-byte in
+ * `rest-expected-error-logging.test.ts` and `rest-4xx-message-truncation.test.ts`
+ * — and that refusal says the ITEM is there and its DRAFT is not. Folding it
+ * into an absence would tell a designer the object does not exist while it
+ * plainly does: the #5532 flattening, one pair over, minted by the repair for
+ * a sibling of it.
+ *
+ * So the question is asked about the ANSWER, not the status:
+ *
+ *  - `status` is 404, and
+ *  - `code` is `RESOURCE_NOT_FOUND`, i.e. the producer named that member. ⚠️
+ *    MEASURED: a producer that declares a 404 and NO code at all does not get
+ *    one derived into its BODY — {@link thrownCodeFields} answers `{}`,
+ *    ADR-0112's rule that nothing is invented for the half the producer did
+ *    not name — so that answer is false here and keeps the shape it had.
+ *    Folding it in would mean inventing the member the ADR declines to
+ *    invent, and
+ *  - no `declaredCode` sits beside it. Presence MEANS demotion (see
+ *    `ApiErrorSchema`): the producer spelled a code the ledger does not know,
+ *    and ADR-0112 keeps that spelling as the open, author-authored channel.
+ *    Converting such an answer would delete the one field it exists to carry.
+ *
+ * ⚠️ This predicate does NOT decide what a route answers — it only recognises
+ * an answer. The 503 an unreadable metadata store throws (#5532) resolves to
+ * 503 and is false here, which is the distinction that must never be
+ * flattened.
+ */
+export function thrownAnswerIsBareNotFound(error: any, object?: string): boolean {
+    const resolved = resolveErrorResponse(error, object);
+    return resolved.status === 404
+        && resolved.body?.code === 'RESOURCE_NOT_FOUND'
+        && resolved.body?.declaredCode === undefined;
+}
+
+/**
  * The single door a route catch block should use: resolve the response once,
  * log it only if it is a real fault, then send it. Wire behaviour is identical
  * to a bare `sendThrownError(res, error, object)` — this only decides whether the log

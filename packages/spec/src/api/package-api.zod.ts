@@ -19,7 +19,7 @@ import { AssembledPackageBodySchema } from '../stack.zod';
  *
  * @example Endpoints
  * ```
- * POST   /api/v1/packages/install              — Install a package
+ * POST   /api/v1/packages                      — Install a package
  * POST   /api/v1/packages/upgrade              — Upgrade a package
  * POST   /api/v1/packages/resolve-dependencies — Resolve dependencies
  * POST   /api/v1/packages/upload               — Upload an artifact
@@ -240,18 +240,43 @@ export type GetInstalledPackageResponse = z.input<typeof GetInstalledPackageResp
 export type GetInstalledPackageResponseParsed = z.infer<typeof GetInstalledPackageResponseSchema>;
 
 // ==========================================
-// 4. Install Package (POST /api/v1/packages/install)
+// 4. Install Package (POST /api/v1/packages)
 // ==========================================
 
 /**
- * Request body for installing a package.
+ * Request body for installing a package, in its WRAPPED form.
  *
- * @example POST /api/v1/packages/install
- * { manifest: {...}, platformVersion: '3.2.0', enableOnInstall: true }
+ * ## The door this is bound to, and the one it used to name
+ *
+ * This declaration was bound to `POST /api/v1/packages/install` — a path the
+ * real dispatcher answers `handled=false`, because `handlePackagesRequest`
+ * has no one-segment `POST` branch and `packages/rest`'s registrar mounts only
+ * `POST /api/v1/packages/publish`. The install door that actually serves is
+ * `POST /api/v1/packages` (`packages/runtime/src/domains/packages.ts`), and it
+ * had no declared request contract at all: the read side was strictly more
+ * truthful than the write side producing the rows it describes.
+ *
+ * The binding now names the serving door. ⛔ Never re-point it at a path on the
+ * strength of a docs line or a section heading — «machine-readable surfaces
+ * must not lie» is judged against what the composed runtime mounts.
+ *
+ * ## The manifest STAGE this names
+ *
+ * `manifest` is `ManifestSchema`, the **AUTHORING** stage — `objects` is
+ * `z.array(z.string())`, GLOB PATTERNS naming files a file-based loader should
+ * read. That is the only stage this HTTP door is reached at: the ASSEMBLED
+ * stage reaches the same table through `ObjectQL.registerApp`, never over this
+ * wire. The read doors serve rows from BOTH and say so by name
+ * ({@link InstalledPackageAtEitherStageSchema}); the write door serves one and
+ * says so here. ⛔ Naming one stage on a surface reached at two, or two on a
+ * surface reached at one, is the same defect in opposite directions.
+ *
+ * @example POST /api/v1/packages
+ * { manifest: {...}, platformVersion: '3.2.0', enableOnInstall: true, overwrite: true }
  */
 export const PackageInstallRequestSchema = lazySchema(() => z.object({
-  /** Package manifest to install */
-  manifest: ManifestSchema.describe('Package manifest to install'),
+  /** Package manifest to install — the AUTHORING stage */
+  manifest: ManifestSchema.describe('Package manifest to install (AUTHORING stage: `objects` are glob patterns)'),
 
   /** User-provided settings at install time */
   settings: z.record(z.string(), z.unknown()).optional()
@@ -260,6 +285,25 @@ export const PackageInstallRequestSchema = lazySchema(() => z.object({
   /** Whether to enable immediately after install */
   enableOnInstall: z.boolean().default(true)
     .describe('Whether to enable immediately after install'),
+
+  /**
+   * Opt back in to overwriting an already-installed package id.
+   *
+   * ⭐ DECLARED BECAUSE THE DOOR ALREADY HONOURS IT, not the other way round.
+   * `POST /api/v1/packages` CREATES a package: an id that is already installed
+   * answers `409 Conflict` rather than silently destroying the existing
+   * manifest. `overwrite: true` (body) or `?overwrite=true` (query) is how an
+   * intentional upgrade / re-install opts back in — read at
+   * `packages/runtime/src/domains/packages.ts`, sent by the first-party SDK
+   * (`client.packages.install(m, { overwrite: true })`) and pinned on both
+   * sides in `packages/client/src/client.test.ts`.
+   *
+   * It was a live body key declared by no schema anywhere, so any parse at this
+   * door would have STRIPPED it — turning a deliberate re-install into a 409.
+   * ⛔ Never remove this declaration while the handler still reads the key.
+   */
+  overwrite: z.boolean().optional()
+    .describe('Overwrite an already-installed package id instead of answering 409 Conflict'),
 
   /** Current platform version for compatibility verification */
   platformVersion: z.string().optional()
@@ -272,6 +316,83 @@ export const PackageInstallRequestSchema = lazySchema(() => z.object({
 export type PackageInstallRequest = z.input<typeof PackageInstallRequestSchema>;
 /** Post-parse shape of {@link PackageInstallRequest} — defaults applied, transforms run (ADR-0122). */
 export type PackageInstallRequestParsed = z.infer<typeof PackageInstallRequestSchema>;
+
+/**
+ * The install door's body at WHICHEVER of its two declared forms it arrives in
+ * — the wrapped request above, or a BARE manifest as the whole body.
+ *
+ * ## Why the bare form is declared rather than dropped
+ *
+ * The door reads `const manifest = body.manifest || body`, so a bare manifest
+ * IS a body form it accepts, and first-party callers send it that way — the
+ * runtime's own door drives (`package-door-namespace-conflict-code.test.ts`,
+ * `domain-handler-registry.test.ts`) post a manifest with no wrapper at all. A
+ * contract naming only the wrapped form would refuse bodies this door answers
+ * `201` to, which is the defect this declaration exists to stop repeating.
+ *
+ * ⚠️ What those two drives post is NOT covered by this branch, and saying so
+ * is the point. Measured: `{ id, name: id, namespace, version: '1.0.0' }` and
+ * `{ id: 'pkg-a', name: 'A' }` are both refused here (`invalid_union`) because
+ * neither carries `type`, and the second carries no `version` either. They are
+ * bare in FORM and incomplete in CONTENT — the form is declared, the content
+ * is part of the residual below, and they are pinned as REFUSED in
+ * `package-api.test.ts` rather than dressed up as green fixtures.
+ *
+ * ## The two branches are disjoint — but only ONE of them is closed
+ *
+ * Every parse is a FULL parse of ONE coherent form, the discipline
+ * {@link InstalledPackageAtEitherStageSchema} records on the read side. The
+ * two are disjoint by construction — `ManifestSchema` is a `strictObject`
+ * with no `manifest` key, so a wrapped body can never fall through to the bare
+ * branch, and a bare manifest has no `manifest` key, so it can never satisfy
+ * the wrapped branch.
+ *
+ * ⛔ Closedness, however, is NOT symmetric, and an earlier revision of this
+ * docblock claimed it was. {@link PackageInstallRequestSchema} is a plain
+ * `z.object`, i.e. STRIP mode: `{ manifest, bogus: 1 }` parses green and comes
+ * out with `bogus` GONE. Only the bare branch is closed, because
+ * `ManifestSchema` is a `strictObject` and refuses an unknown key by name.
+ *
+ * That asymmetry is the door's own behaviour, not a gap: the handler reads
+ * `body.manifest`, `body.settings`, `body.enableOnInstall` and `body.overwrite`
+ * and ignores every other key, so dropping them is what it does with them.
+ * ⛔ Do NOT close the wrapped branch with `.strict()` — that would refuse
+ * bodies this door answers `201` to, which is the one direction this binding
+ * may never move (ruling A). The pin lives in `package-api.test.ts`.
+ *
+ * ## What this declaration does NOT describe — the measured residual
+ *
+ * This is a SUBSET description of the live door, deliberately. Measured
+ * through `HttpDispatcher.handlePackages`, the door additionally answers `201`
+ * to five classes this schema refuses:
+ *
+ * 1. a manifest missing `type` and/or `version` (both door drives above);
+ * 2. unknown keys on either form — refused by name on the bare branch,
+ *    silently dropped on the wrapped one, `201` either way;
+ * 3. a string-typed `enableOnInstall` / `overwrite` — the door compares
+ *    against `true`/`false` and `'true'`, so `'false'` installs ENABLED and a
+ *    body-side `'true'` overwrite is treated as ABSENT;
+ * 4. install options spelled on the BARE form — ignored, never honoured;
+ * 5. and it answers `400` in the OPPOSITE direction, to a whitespace-only `id`
+ *    this declaration admits (the door trims before keying).
+ *
+ * ⛔ None of these is a licence to relax `ManifestSchema` or either branch —
+ * the residual is RECORDED here so a reader is not told the declaration is the
+ * door, and closing it is its own decision with its own card.
+ *
+ * ⚠️ The bare form carries NO install options: `settings`, `enableOnInstall`
+ * and `overwrite` are not manifest keys and `ManifestSchema`'s strict close
+ * refuses them by name. A bare-form caller reaches `overwrite` through the
+ * query string (`?overwrite=true`) alone. ⛔ Do not "fix" that by relaxing
+ * either branch — a caller that needs an option sends the wrapped form.
+ */
+export const PackageInstallBodySchema = lazySchema(() => z.union([
+  PackageInstallRequestSchema,
+  ManifestSchema,
+]).describe('Install package request body, wrapped or as a bare manifest'));
+export type PackageInstallBody = z.input<typeof PackageInstallBodySchema>;
+/** Post-parse shape of {@link PackageInstallBody} — defaults applied, transforms run (ADR-0122). */
+export type PackageInstallBodyParsed = z.infer<typeof PackageInstallBodySchema>;
 
 /**
  * Response after installing a package.
@@ -550,10 +671,15 @@ export const PackageApiContracts = {
     input: GetInstalledPackageRequestSchema,
     output: GetInstalledPackageResponseSchema,
   },
+  // `installPackage` REBOUND (#18058) — it named `/api/v1/packages/install`,
+  // a path the composed runtime mounts nowhere (the dispatcher answers
+  // `handled=false`; `packages/rest` mounts only `/packages/publish`). The
+  // serving install door is the bare `POST /api/v1/packages`, and its body is
+  // declared at BOTH the forms it accepts — see `PackageInstallBodySchema`.
   installPackage: {
     method: 'POST' as const,
-    path: '/api/v1/packages/install',
-    input: PackageInstallRequestSchema,
+    path: '/api/v1/packages',
+    input: PackageInstallBodySchema,
     output: PackageInstallResponseSchema,
   },
   upgradePackage: {

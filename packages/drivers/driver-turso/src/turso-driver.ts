@@ -258,6 +258,90 @@ function refuseRemoteAutonumber(object: string, fields: string[], path: string):
   throw err;
 }
 
+// ── Remote transactions: refused, never decorative ───────────────────────────
+
+/**
+ * [#18616] The Turso REMOTE face has no transaction semantics, and now says so
+ * instead of handing back a handle nothing honours.
+ *
+ * # The defect this replaces
+ *
+ * `@objectstack/spec`'s `driver.zod.ts` states the delivery mechanism verbatim:
+ *
+ * > A transaction handle to be passed to subsequent operations via
+ * > `options.transaction`.
+ *
+ * In remote mode nothing can receive that handle. `RemoteTransport` names a
+ * transaction in exactly three members — `beginTransaction()`, `commit(t)`,
+ * `rollback(t)` — and **zero** of its data methods take an `options` argument
+ * at all, against **9** data methods present in the file (the firing control
+ * that makes the zero a reading). Every remote arm in this class forwards
+ * without `options`, and `connect()` skips knex initialisation on that arm, so
+ * no `SqlDriver` body that would honour a handle ever runs.
+ *
+ * The consequence is not a missing feature, it is a false success: a write
+ * issued between `beginTransaction()` and `rollback()` executed on the plain
+ * connection, was **already durable**, and the rollback — which resolved —
+ * undid nothing. `turso-driver.test.ts` asserts exactly that shape for LOCAL
+ * mode ("should support transactions with rollback"), so the tree already knew
+ * what correct looks like here; the remote face was the unpinned one.
+ *
+ * # Why a refusal rather than an implementation
+ *
+ * Triage's ruling on this card (2026-09-17) drew the line and it is quoted
+ * rather than paraphrased, because the boundary IS the deliverable:
+ *
+ * > **止损(本卡)**:remote 模式遇到 `options.transaction` 或
+ * > `beginTransaction()` 时**大声拒绝 / 声明不支持**,让调用者立刻知道自己没有
+ * > 事务语义。
+ * > **实现远程事务**:那是 **#18116 已完成的那次「measure, do not implement」
+ * > 量出来的半径**,是**另一件事**、另一个量级。⛔ 不要把它折进本卡。
+ *
+ * This is the same disposition — B, explicit refusal — that
+ * {@link refuseRemoteAutonumber} above records for the sibling gap on this same
+ * transport, and it answers in the same envelope for the same reason: the
+ * caller's request is spelled correctly and `@objectstack/spec` declares the
+ * member, so the gap is the backend's, which is `NOT_IMPLEMENTED`/501 and not a
+ * 400 (ADR-0112 vocabulary; the two-class taxonomy this package already applies
+ * to aggregate functions and date buckets).
+ *
+ * # Why the refusal is raised HERE and not inside `RemoteTransport`
+ *
+ * The same layering argument `refuseRemoteAutonumber` records: the transport
+ * cannot see what it would have to refuse. Its data methods have no `options`
+ * parameter, so a handle is already gone by the time a statement is built —
+ * this class is the last layer that still holds one.
+ *
+ * # Why NOT a standard-catalog addition or a new code
+ *
+ * `NOT_IMPLEMENTED` is a {@link StandardErrorCode} member, so this emits
+ * nothing the error-code ledger has to register — the ledger carries *extension*
+ * codes only. No `packages/spec` edit is implied by this refusal, deliberately.
+ */
+function refuseRemoteTransaction(door: string, detail: string): never {
+  const err = new Error(
+    `${door} is not supported by the Turso REMOTE transport. ${detail} Remote mode routes every ` +
+    `operation through \`RemoteTransport\`, whose data methods take no \`options\` argument at ` +
+    `all, so a transaction handle cannot reach the statement that would have to join it: the ` +
+    `write executes on the plain connection and is ALREADY DURABLE, and a later \`rollback()\` ` +
+    `resolves without undoing it. Until this change that sequence reported success at every step ` +
+    `and silently kept the data. The object and the call are spelled correctly and ` +
+    `@objectstack/spec declares these members, so this is a capability gap in the remote ` +
+    `transport rather than a mistake in the request — which is why it answers ` +
+    `NOT_IMPLEMENTED/501 and not a 400. Use the local or embedded-replica transport, which ` +
+    `inherit \`SqlDriver\`'s knex transactions and honour \`options.transaction\`, or take the ` +
+    `non-transactional path deliberately: \`engine.transaction()\` without \`require: true\` on a ` +
+    `datasource whose driver has no transactions runs the callback with no rollback and says so ` +
+    // ⛔ No tracker id in this string: it reaches authors and operators, who have
+    // no tracker to resolve one against (`check:doc-authoring`). The card id is
+    // in the docblock above, where the reader who CAN resolve it is reading.
+    `(ADR-0119 D1). Implementing transactions on this transport is a separate piece of work.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  throw err;
+}
+
 // ── Remote operation timeout ─────────────────────────────────────────────────
 
 /**
@@ -967,6 +1051,7 @@ export class TursoDriver extends SqlDriver {
   // literal-string census. Pinned both halves in
   // `turso-driver-doors-declared-types.test.ts`.
   override async find(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
+    this.assertRemoteTransactionUnsupported(options, 'find');
     if (this.isRemote) return this.formatRemoteRows(object, await this.remoteTransport!.find(object, this.toRemoteReadQuery(object, query)));
     return super.find(object, query, options);
   }
@@ -978,6 +1063,7 @@ export class TursoDriver extends SqlDriver {
   // alongside). The explicit `Promise<any>` was this package's own `.d.ts`
   // re-erasing the door, which no driver-sql fix reaches.
   override async findOne(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown> | null> {
+    this.assertRemoteTransactionUnsupported(options, 'findOne');
     if (this.isRemote) return this.formatRemoteRow(object, await this.remoteTransport!.findOne(object, this.toRemoteReadQuery(object, query, { singleRowLookup: true })));
     return super.findOne(object, query, options);
   }
@@ -987,6 +1073,51 @@ export class TursoDriver extends SqlDriver {
   // memory implementations awaited `find()` for the whole result set before
   // yielding — the opposite of the memory guarantee it was declared for. This
   // override went with the base method; page `find()` with `limit`/`offset`.
+
+  /**
+   * [#18616] Refuse an operation that arrived carrying a transaction handle the
+   * remote face cannot honour — see {@link refuseRemoteTransaction} for the
+   * ruling, the contract text and the measurements.
+   *
+   * # Why this door exists BESIDE the `beginTransaction()` refusal
+   *
+   * Refusing `beginTransaction()` alone is a false floor. The engine has a
+   * SECOND, independent source for the handle it hands a driver:
+   * `buildDriverOptions` (`packages/objectql/src/engine.ts`) reads
+   * `execCtx.transaction` FIRST — "Explicit wins; ambient is the safety net" —
+   * and `ExecutionContext.transaction` is a declared, caller-settable member of
+   * the envelope (`packages/spec/src/kernel/execution-context.zod.ts`). A
+   * handle threaded in that way never passes through this driver's
+   * `beginTransaction()` at all. And the same-origin gate does not stop it
+   * either: `transactionCoversDriverFor` attributes a handle only when it IS
+   * the ambient store's handle, and for anything else it "declines to judge"
+   * and returns `true` — its own recorded limit. So an explicitly-threaded
+   * handle reaches a remote data method with nothing between it and the drop.
+   *
+   * The two doors are therefore not redundant and neither subsumes the other:
+   * `beginTransaction()` closes the path that STARTS here, this closes the path
+   * that starts anywhere else. Measured together they are the whole reachable
+   * set — every in-repo producer of a handle is a `driver.beginTransaction()`
+   * call (`engine.transaction()`, `ScopedContext.beginTransaction()`, the
+   * sandbox trio), and the only other way to hold one is to have been given it.
+   *
+   * # Fires on absence of a handle, never on absence of transactions
+   *
+   * The guard reads exactly one thing — `options.transaction !== undefined` —
+   * so a remote call with no handle is untouched, which is every call the
+   * platform makes today. The DDL arms (`syncSchema`, `initObjects`,
+   * `dropTable`, `syncSchemasBatch`) carry it for consistency and are inert by
+   * MEASUREMENT, not by hope: no caller in this repository passes a third
+   * argument to any of them, so nothing at boot can reach this refusal.
+   */
+  private assertRemoteTransactionUnsupported(options: DriverOptions | undefined, door: string): void {
+    if (!this.isRemote) return;
+    if (options?.transaction === undefined) return;
+    refuseRemoteTransaction(
+      `\`options.transaction\` on \`${door}()\``,
+      'A transaction handle was supplied for this operation and the remote face silently dropped it.',
+    );
+  }
 
   /**
    * [#6944] Refuse a remote write that would need a record number this face
@@ -1103,6 +1234,7 @@ export class TursoDriver extends SqlDriver {
   // `super.create` (narrowed alongside). Same shape the `update()` override
   // above took with #14438.
   override async create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown>> {
+    this.assertRemoteTransactionUnsupported(options, 'create');
     if (this.isRemote) {
       this.refuseUngeneratableRemoteAutonumber(object, [data], 'create');
       return this.formatRemoteRow(object, await this.remoteTransport!.create(object, this.toRemoteWriteForms(object, data)));
@@ -1116,6 +1248,7 @@ export class TursoDriver extends SqlDriver {
   // is a generic pass-through. The explicit `Promise<any>` here was the one
   // place this package's own `.d.ts` re-erased the door.
   override async update(object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown> | null> {
+    this.assertRemoteTransactionUnsupported(options, 'update');
     if (this.isRemote) return this.formatRemoteRow(object, await this.remoteTransport!.update(object, id, this.toRemoteWriteForms(object, data)));
     return super.update(object, id, data, options);
   }
@@ -1129,6 +1262,7 @@ export class TursoDriver extends SqlDriver {
   // literal-string census. Pinned both halves in
   // `turso-driver-doors-declared-types.test.ts`.
   override async upsert(object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, unknown>> {
+    this.assertRemoteTransactionUnsupported(options, 'upsert');
     if (this.isRemote) {
       // [#6944] An upsert is insert-OR-merge, and only the merge leg is safe
       // here: `RemoteTransport.upsert` emits
@@ -1167,11 +1301,13 @@ export class TursoDriver extends SqlDriver {
   }
 
   override async delete(object: string, id: string | number, options?: DriverOptions): Promise<boolean> {
+    this.assertRemoteTransactionUnsupported(options, 'delete');
     if (this.isRemote) return this.remoteTransport!.delete(object, id);
     return super.delete(object, id, options);
   }
 
   override async count(object: string, query?: DriverQuery, options?: DriverOptions): Promise<number> {
+    this.assertRemoteTransactionUnsupported(options, 'count');
     if (this.isRemote) return this.remoteTransport!.count(object, this.toRemoteQuery(object, query));
     return super.count(object, query, options);
   }
@@ -1199,6 +1335,7 @@ export class TursoDriver extends SqlDriver {
     query: DriverQuery,
     options?: DriverOptions,
   ): Promise<Record<string, unknown>[]> {
+    this.assertRemoteTransactionUnsupported(options, 'aggregate');
     if (this.isRemote) return this.remoteTransport!.aggregate(object, this.toRemoteQuery(object, query));
     return super.aggregate(object, query, options);
   }
@@ -1605,6 +1742,7 @@ export class TursoDriver extends SqlDriver {
   // `formatRemoteRows`, and the local branch forwards to `super.bulkCreate`
   // (narrowed alongside).
   override async bulkCreate(object: string, data: any[], options?: DriverOptions): Promise<Record<string, unknown>[]> {
+    this.assertRemoteTransactionUnsupported(options, 'bulkCreate');
     if (this.isRemote) {
       // [#6944] Same refusal as `create`, and it has to be stated here rather
       // than inherited: `RemoteTransport.bulkCreate` loops its OWN `create`, not
@@ -1628,6 +1766,7 @@ export class TursoDriver extends SqlDriver {
   // literal-string census. Pinned both halves in
   // `turso-driver-doors-declared-types.test.ts`.
   override async bulkUpdate(object: string, updates: Array<{ id: string | number; data: Record<string, any> }>, options?: DriverOptions): Promise<Record<string, unknown>[]> {
+    this.assertRemoteTransactionUnsupported(options, 'bulkUpdate');
     if (this.isRemote) {
       const formatted = Array.isArray(updates)
         ? updates.map((u) => ({ ...u, data: this.toRemoteWriteForms(object, u.data) }))
@@ -1638,11 +1777,13 @@ export class TursoDriver extends SqlDriver {
   }
 
   override async bulkDelete(object: string, ids: Array<string | number>, options?: DriverOptions): Promise<void> {
+    this.assertRemoteTransactionUnsupported(options, 'bulkDelete');
     if (this.isRemote) return this.remoteTransport!.bulkDelete(object, ids);
     return super.bulkDelete(object, ids, options);
   }
 
   override async updateMany(object: string, query: DriverQuery, data: any, options?: DriverOptions): Promise<number> {
+    this.assertRemoteTransactionUnsupported(options, 'updateMany');
     if (this.isRemote) {
       return this.remoteTransport!.updateMany(object, this.toRemoteQuery(object, query), this.toRemoteWriteForms(object, data));
     }
@@ -1650,6 +1791,7 @@ export class TursoDriver extends SqlDriver {
   }
 
   override async deleteMany(object: string, query: DriverQuery, options?: DriverOptions): Promise<number> {
+    this.assertRemoteTransactionUnsupported(options, 'deleteMany');
     if (this.isRemote) return this.remoteTransport!.deleteMany(object, this.toRemoteQuery(object, query));
     return super.deleteMany(object, query, options);
   }
@@ -1663,6 +1805,7 @@ export class TursoDriver extends SqlDriver {
   // forwards to `super.execute` (narrowed alongside). The explicit
   // `Promise<any>` erased the contract's `unknown` on this package's `.d.ts`.
   override async execute(command: any, params?: any[], options?: DriverOptions): Promise<unknown> {
+    this.assertRemoteTransactionUnsupported(options, 'execute');
     if (this.isRemote) {
       // [#16019] The remote transport hands the libsql client's error back
       // whole — `SQLITE_ERROR: no such function: translate`: no statement, no
@@ -1697,18 +1840,57 @@ export class TursoDriver extends SqlDriver {
   // type-safety regression for every `driver-sql` consumer) or restructuring
   // the remote handle. Both are above an annotation swap; the reasoning is
   // recorded in `turso-driver-doors-declared-types.test.ts`.
+  //
+  // ⭐ [#18616] The remote arm now REFUSES instead of returning a handle. That
+  // also retires the LSP remainder above **on this arm only**: the remote
+  // branch no longer returns a libsql transaction against an inherited
+  // declaration that promises a knex one, because it returns nothing at all.
+  // The `Promise<any>` annotation stays, because the LOCAL/replica arm is still
+  // `super.beginTransaction()` and the analysis above is unchanged for it.
   override async beginTransaction(): Promise<any> {
-    if (this.isRemote) return this.remoteTransport!.beginTransaction();
+    if (this.isRemote) {
+      refuseRemoteTransaction(
+        '`beginTransaction()`',
+        'The handle this used to return was decorative: no remote data method could receive it.',
+      );
+    }
     return super.beginTransaction();
   }
 
+  // ⭐ [#18616] `commit`/`rollback` refuse on the remote arm too, and that is
+  // not belt-and-braces. With `beginTransaction()` refusing, this driver issues
+  // no remote handle at all, so the ONLY way to reach these is to hand them a
+  // handle from somewhere else — `getLibsqlClient().transaction()`, or another
+  // driver's. `rollback()` accepting one is the precise silence this card is
+  // named for: it resolves, reports success, and undoes nothing, because the
+  // writes it was supposed to undo never entered that transaction. A door that
+  // can only ever answer a false success is closed.
+  //
+  // Unreachable from every in-repo transaction path, by construction: both
+  // engine faces (`engine.transaction()`, `ScopedContext.commitTransaction` /
+  // `rollbackTransaction`) call `commit`/`rollback` only with a handle their
+  // own `beginTransaction()` returned, which now throws before either is
+  // reached — so no caller can be left with an unrolled-back transaction by
+  // this refusal.
   override async commit(transaction: unknown): Promise<void> {
-    if (this.isRemote) return this.remoteTransport!.commit(transaction);
+    if (this.isRemote) {
+      refuseRemoteTransaction(
+        '`commit()`',
+        'This face issues no transaction handle, so the handle supplied came from elsewhere and '
+        + 'covers none of the statements this driver ran.',
+      );
+    }
     return super.commit(transaction);
   }
 
   override async rollback(transaction: unknown): Promise<void> {
-    if (this.isRemote) return this.remoteTransport!.rollback(transaction);
+    if (this.isRemote) {
+      refuseRemoteTransaction(
+        '`rollback()`',
+        'This face issues no transaction handle, so rolling one back here would report a '
+        + 'successful undo of writes that were never inside it and are already durable.',
+      );
+    }
     return super.rollback(transaction);
   }
 
@@ -1717,6 +1899,7 @@ export class TursoDriver extends SqlDriver {
   // ===================================
 
   override async syncSchema(object: string, schema: unknown, options?: DriverOptions): Promise<void> {
+    this.assertRemoteTransactionUnsupported(options, 'syncSchema');
     if (this.isRemote) {
       await this.remoteTransport!.syncSchema(object, schema);
       // See initObjects(): populate the read-coercion registries for remote mode.
@@ -1794,6 +1977,7 @@ export class TursoDriver extends SqlDriver {
    * (Knex + better-sqlite3 is already local, so batching has no benefit).
    */
   async syncSchemasBatch(schemas: Array<{ object: string; schema: unknown }>, options?: DriverOptions): Promise<void> {
+    this.assertRemoteTransactionUnsupported(options, 'syncSchemasBatch');
     if (this.isRemote) {
       return this.remoteTransport!.syncSchemasBatch(schemas);
     }
@@ -1804,6 +1988,7 @@ export class TursoDriver extends SqlDriver {
   }
 
   override async dropTable(object: string, options?: DriverOptions): Promise<void> {
+    this.assertRemoteTransactionUnsupported(options, 'dropTable');
     if (this.isRemote) return this.remoteTransport!.dropTable(object);
     return super.dropTable(object, options);
   }

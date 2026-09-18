@@ -20,6 +20,27 @@
 # to fail loudly like any other; what this gate is really asserting is that the
 # SECOND pass agrees with the first.
 #
+# ## Why pass 1 no longer ends the job (#18590)
+#
+# That last sentence was true of the design and false of the implementation. A
+# red `pass 1` ENDED THE JOB, which skipped `pass 2` — so on every night the
+# suite was red on main, the one thing this workflow exists to assert was not
+# asserted. The job went red anyway, and its red is indistinguishable from the
+# red it exists to report.
+#
+# It ran that way for a 17-night streak ending 2026-08-31: thirteen of those
+# nights died in pass 1, under FOUR different failing packages and two different
+# failure kinds, with the killer moving from `verify` to `cli` as each was
+# fixed. Only four of the seventeen nights ever reached pass 2. "Keep pass 1
+# green" is not a reachable end state on a trunk that goes red like any other,
+# so the measurement is no longer conditional on it: both passes always run,
+# and `scripts/rerun-safety-verdict.mjs` compares their failing task sets and
+# says, in one line, whether the rerun property was MEASURED and what it said.
+#
+# ⛔ Nothing here is weakened. A red pass 1 still fails this job. What changed
+# is only that a broken trunk now costs the instrument its BASELINE instead of
+# its READING.
+#
 # ## Why `--force`
 #
 # Turbo would replay cached results on the second pass and report green without
@@ -44,7 +65,19 @@ jobs:
     # while the PR read as "still running" rather than broken. Since #4314 the
     # primary stall detector is run-with-stall-guard on each pass (labeled red
     # after 15 min of frozen output); this is the pure backstop.
-    timeout-minutes: 120
+    #
+    # ⚠️ Raised 120 -> 170 (#18590). 120 had stopped being a backstop and become
+    # a second way for this instrument to go dark: the last four GREEN two-pass
+    # runs on main took 74, 89, 103 and **115** minutes, so a healthy run was
+    # within five minutes of being killed by its own bound — and #18590 makes
+    # pass 2 run on the nights pass 1 is red too, which is exactly when a
+    # 115-minute run is most likely. ⛔ This is NOT a stall budget and must never
+    # be read as one: run-with-stall-guard still declares a stall after 15
+    # minutes of frozen output on EITHER pass, so a genuine hang is still caught
+    # in 15 minutes and never at this number. Raising it can therefore hide no
+    # hang; all it stops is a slow-but-live run being reported as a failure of
+    # the thing under test.
+    timeout-minutes: 170
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -77,13 +110,35 @@ jobs:
       - name: Build packages
         run: pnpm build
 
-      # Deliberately NOT `continue-on-error`. If pass 1 is red the suite is
-      # simply broken on main and that is worth failing on; this gate adds pass
-      # 2, it does not replace the ordinary signal. The stall guard (#4250,
-      # #4314) bounds a frozen-output hang at 15 min instead of letting a
-      # nightly nobody watches sit until the 120-min timeout; on a stall it
-      # exits 75 and its banner in the log names the last output line.
-      # --log-order=stream is mandatory under the guard (see the Test Core
+      # ⭐ Pass 1 RECORDS its exit code instead of ending the job with it
+      # (#18590), and that change is what makes this workflow an instrument
+      # again rather than a light that has been on for seventeen nights.
+      #
+      # It used to be spelled "deliberately NOT `continue-on-error`", on the
+      # reasoning that a red pass 1 means the suite is broken on main and that
+      # is worth failing on. The reasoning still holds and the job still fails
+      # — see the verdict step, which owns the exit status now. What did NOT
+      # hold is the consequence nobody wrote down: a step that ends the job also
+      # skips `pass 2`, so on every night pass 1 was red the ONE measurement
+      # this workflow exists to take was not taken at all. The job went red
+      # either way, and that red is indistinguishable from the red it exists to
+      # report — "rerun safety is failing" and "rerun safety was never measured"
+      # printed the same colour.
+      #
+      # Measured over the 17-night red streak that ended 2026-08-31 (#18590):
+      # thirteen nights died here in pass 1, and the killer MOVED — six nights
+      # `@objectstack/verify#test` (an AssertionError, since fixed on main),
+      # then four nights `@objectstack/cli#test` (5000ms vitest timeouts), with
+      # `plugin-auth` and earlier `cli` nights in between. The remaining four
+      # nights reached pass 2 and are the only rerun readings the streak
+      # contains. So "keep pass 1 green" was never a reachable end state on a
+      # trunk that is red from time to time like any other — and every night it
+      # was not reached cost the reading.
+      #
+      # The stall guard (#4250, #4314) is unchanged: it bounds a frozen-output
+      # hang at 15 min instead of letting a nightly nobody watches sit to the
+      # job timeout; on a stall it exits 75 and its banner names the last output
+      # line. --log-order=stream is mandatory under the guard (see the Test Core
       # comment in ci.yml): grouped log order flushes a task's output only when
       # the task ends, so a solo tail task longer than the budget reads as
       # frozen while healthy. The guard refuses a turbo run without it.
@@ -96,8 +151,16 @@ jobs:
           # vitest's own "use the default" signal. Needs turbo.json's
           # globalPassThroughEnv entry or turbo strips it — see the script header.
           export VITEST_MAX_WORKERS="$(node scripts/vitest-worker-cap.mjs)"
+          status=0
           node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/rerun-pass1.log" --stall-minutes 15 -- \
-            pnpm turbo run test --concurrency=4 --force --log-order=stream
+            pnpm turbo run test --concurrency=4 --force --log-order=stream || status=$?
+          echo "PASS1_EXIT=$status" >> "$GITHUB_ENV"
+          if [ "$status" -ne 0 ]; then
+            echo "::warning::Pass 1 exited $status — the suite is red on main. Recorded as the"
+            echo "::warning::BASELINE and NOT failed here: pass 2 runs anyway so the rerun"
+            echo "::warning::property still gets measured tonight. The verdict step owns the"
+            echo "::warning::job's exit status and will still fail this job."
+          fi
 
       # Informational only. A stray `.objectstack/` is how the #4065 class shows
       # up on disk, so printing what pass 1 left behind turns a pass-2 failure
@@ -113,11 +176,19 @@ jobs:
           echo "Files inside them:"
           find . -path ./node_modules -prune -o -type d -name '.objectstack' -exec find {} -type f \; || true
 
-      # A pass-2 red normally means rerun-UNSAFE — but a stall (guard exit 75)
-      # says nothing about working-tree pollution, and the #4065 error text
-      # would send whoever triages it hunting for state leaks that aren't
-      # there. Keep the two verdicts apart.
+      # ⭐ `if: always()` is the other half of #18590 — pass 2 is the assertion,
+      # so it runs whatever pass 1 did. A red pass 1 now costs this instrument
+      # its BASELINE, not its reading.
+      #
+      # This step no longer renders the verdict either. It cannot: with a red
+      # baseline allowed, "pass 2 failed" is no longer the same fact as
+      # "rerun-unsafe" — a task that was already failing in pass 1 and fails
+      # again in pass 2 is ordinary breakage on main, and printing the #4065
+      # text over it would send whoever triages it hunting for state leaks that
+      # are not there. That comparison needs both passes' failing task sets, so
+      # it belongs one step down, in the verdict.
       - name: Test suite — pass 2 (same working tree)
+        if: always()
         run: |
           # Bound vitest's INNER worker pool (#11958). A no-op on a runner with
           # <= 5 cores (it only ever LOWERS vitest's own `cores - 1` default);
@@ -129,18 +200,28 @@ jobs:
           status=0
           node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/rerun-pass2.log" --stall-minutes 15 -- \
             pnpm turbo run test --concurrency=4 --force --log-order=stream || status=$?
-          if [ "$status" -eq 0 ]; then
-            exit 0
-          elif [ "$status" -eq 75 ]; then
-            echo "::error::Pass 2 STALLED — frozen output, killed by run-with-stall-guard"
-            echo "::error::(see #4250). This is NOT a rerun-safety verdict: a stall says"
-            echo "::error::nothing about working-tree pollution. Rerun the workflow; if it"
-            echo "::error::stalls again at the same file, note the occurrence on #4250."
-          else
-            echo "::error::The suite passes once and fails on a second run in the same"
-            echo "::error::working tree. Something under test writes state into the tree and"
-            echo "::error::reads it back on the next run. Ordinary CI cannot see this — every"
-            echo "::error::other job is a fresh clone, so every other job is always run #1."
-            echo "::error::See the on-disk state reported above, and #4065 for the pattern."
-          fi
-          exit "$status"
+          echo "PASS2_EXIT=$status" >> "$GITHUB_ENV"
+
+      # ⭐ THE VERDICT, and the job's exit status (#18590).
+      #
+      # It answers the question the exit code alone has never been able to
+      # express — was the rerun property MEASURED tonight — and only then what
+      # it measured. `scripts/rerun-safety-verdict.mjs` carries the table and a
+      # `--self-test`; its header is the authority on detail.
+      #
+      # ⛔ This step does not make the job green. A red pass 1 still fails it,
+      # exactly as before; what is new is that the failure now SAYS which of
+      # "broken on main" and "rerun-unsafe" it is, and a broken-on-main night no
+      # longer swallows the reading.
+      # ⛔ The self-test is NOT invoked here. It runs at PR time as
+      # `pnpm check:rerun-safety-verdict` in lint.yml, because this workflow
+      # declares only `schedule` and `workflow_dispatch`: a gate family reachable
+      # from here alone would be the tree's first SCHEDULED-ONLY family, which
+      # `check:pm-dispatch-gates` refuses by name. That step's comment carries
+      # the reasoning.
+      - name: Rerun-safety verdict
+        if: always()
+        run: |
+          node scripts/rerun-safety-verdict.mjs \
+            --pass1-log "$RUNNER_TEMP/rerun-pass1.log" --pass1-exit "${PASS1_EXIT:-1}" \
+            --pass2-log "$RUNNER_TEMP/rerun-pass2.log" --pass2-exit "${PASS2_EXIT:-1}"

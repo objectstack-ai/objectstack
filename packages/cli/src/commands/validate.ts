@@ -15,6 +15,9 @@ import {
 import { loadConfig, namedExportRejectionHints } from '../utils/config.js';
 import { lowerCallables } from '../utils/lower-callables.js';
 import { authoringRuleUnionStack } from '../utils/stack-collections.js';
+// [#18677] The per-package half of the author-time rule run, shared with
+// `os compile` — ⛔ the loop is not re-written here; see that module's header.
+import { artifactPackages, runPerPackageAuthoringRules } from '../utils/artifact-packages.js';
 import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
 import { resolveSduiManifest } from '../utils/sdui-manifest.js';
 import { preflightRequiredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
@@ -380,6 +383,80 @@ export default class Validate extends Command {
         // publishes all of them as `errors`, so the pointer resolves.
         printAuthoringRuleErrors(ruleErrors, { remedy: JSON_FULL_LIST_REMEDY });
         this.exit(1);
+      }
+
+      // 3a-ii. [ADR-0130 D4, #18677] The SAME rule table, once per PACKAGE —
+      //     the second half of the run above, and the half this door ran
+      //     without.
+      //
+      //     `os build` has run it since #16611; `os validate` ran the union
+      //     fold and stopped, importing neither `artifactPackages` nor
+      //     `packageBodyAsStack`. Every finding this pass yields is therefore
+      //     one `os build` reported and this command structurally could not.
+      //     Same FALSE-CLEAN direction #17069 fixed one layer up, and the worse
+      //     door for it: the fast inner-loop check is what an author runs
+      //     BEFORE shipping, so its clean bill of health is the strongest false
+      //     assurance the three commands can give.
+      //
+      //     ⚠️ [#18779] This step used to size that gap by quoting `compile.ts`
+      //     step 3b-ii — "exactly the set the union could not see" — and that
+      //     sentence was FALSE when it was copied here: the de-duplication key
+      //     carried the POSITIONAL `path`, so a package-local finding and its
+      //     flattened twin got two keys and the ECHO survived. Part of every
+      //     survivor set was therefore something THIS door's own union run
+      //     already reported. The key was corrected in
+      //     `utils/artifact-packages.ts`; the gap this step closed is real and
+      //     its direction is unchanged, but ⛔ do not re-derive its size from
+      //     that sentence — it was quoted, never measured.
+      //
+      //     ⛔ Not a second copy of the loop — `runPerPackageAuthoringRules` is
+      //     the one the build door calls, so the de-duplication key, the
+      //     severity split and the `where` prefix cannot drift between the two
+      //     doors. That drift is the defect this step closes, one layer down.
+      //
+      //     The SEVERITY MAPPING is `os build`'s, unchanged and deliberately:
+      //     an `error` refuses (exit 1), an advisory joins `ruleAdvisories` and
+      //     rides `warningsSoFar()`. The card asked for the asymmetry, ⛔ not
+      //     for a severity judgement, and a per-package `error` is one
+      //     `os build` ALREADY refuses — so this narrows `os validate` to the
+      //     bar the command that ships already holds, never past it.
+      //
+      //     Skipped entirely for a stack with no `packages[]`: one package by
+      //     definition, already judged whole by the union run above.
+      const packageEntries = artifactPackages(result.data as Record<string, unknown>);
+      if (packageEntries.length > 0) {
+        if (!flags.json) {
+          printStep(`Running author-time rules per package (${packageEntries.length})...`);
+        }
+        const perPackage = runPerPackageAuthoringRules({
+          command: 'validate',
+          parsed: result.data as Record<string, unknown>,
+          unionFindings: findings,
+          sduiManifest: resolveSduiManifest(),
+          // [#16546] The same ref set the union run above was handed, so a
+          // per-package hook write-set finding reports at the same `path` the
+          // other two doors report it at.
+          loweredHookRefs: lowering.loweredHookRefs,
+        });
+        ruleAdvisories = [...ruleAdvisories, ...perPackage.advisories];
+        if (perPackage.errors.length > 0) {
+          if (flags.json) {
+            await emitJson({
+              valid: false,
+              errors: perPackage.errors,
+              warnings: warningsSoFar(),
+              conversions: conversionNotices,
+              duration: timer.elapsed(),
+            });
+            this.exit(1);
+          }
+          console.log('');
+          printError(
+            `Author-time rules failed inside the artifact's packages (${perPackage.errors.length} issue${perPackage.errors.length > 1 ? 's' : ''})`,
+          );
+          printAuthoringRuleErrors(perPackage.errors, { remedy: JSON_FULL_LIST_REMEDY });
+          this.exit(1);
+        }
       }
 
       // 3b. [#3366] Installable-provider preflight — the shift-left of the

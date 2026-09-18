@@ -394,3 +394,38 @@ overrides:
   '@xmldom/xmldom@>=0.8.0 <0.9.0': '^0.8.15'
   '@xmldom/xmldom@>=0.9.0 <0.10.0': '^0.9.12'
   'qs@>=6.0.0 <7.0.0': '^6.16.0'
+  # OSV 2026-09-18 (#18930) — one advisory, and it names a fixed version, so
+  # this is the "take the fix" path osv-scanner.toml's own header prescribes
+  # and NOT an exemption; that ledger stays at ZERO entries.
+  #   devalue GHSA-9rgm-9g3h-6x36 (5.3 medium) — flagged at the single resolved
+  #     line 5.9.0, fixed 5.9.2. It turned `Validate Package Dependencies` red
+  #     on `main` itself (scheduled run 35301766597, step 13), so every PR
+  #     touching any package.json inherited a red that was not its own.
+  #     Transitive-only: no workspace manifest declares devalue, so there is no
+  #     publishable declared range to keep in lockstep and
+  #     check-override-consistency.mjs lists it as an override it cannot
+  #     cross-check against a declared range — correct for this shape, and a
+  #     report, never a failure. Reached through svelte@5.56.9, which declares
+  #     `devalue: ^5.8.1` — a range that ALREADY admits 5.9.2, so this is a
+  #     dedupe onto the patched line rather than a forced upgrade past what the
+  #     dependent supports (the dompurify / nanoid shape above).
+  #     Why the pin rather than a bare resolver refresh: the lockfile sat on
+  #     5.9.0 purely through lockfile inertia — 5.9.0 satisfied ^5.8.1, so
+  #     nothing re-resolved it when 5.9.1 and 5.9.2 published, the same
+  #     mechanism the hono note above records. `pnpm update devalue -r --depth
+  #     Infinity` does clear it, but it re-resolves the whole tree and moved
+  #     twelve unrelated packages (type-fest, seroval, postcss, nanoid, knex,
+  #     picomatch, ip-address, isbot, node-abi, use-sync-external-store …) in
+  #     one 107/87-line lockfile churn; the override moves devalue alone and
+  #     leaves a floor behind, so a future transitive reintroduction lands on
+  #     the patched line instead of silently re-arming the advisory.
+  #     ONE resolved copy in the whole tree (measured, `pnpm why devalue`), so
+  #     the floorless selector forces nothing else onto the 5.x line.
+  #     Bound at the 6.0.0 major boundary per this block's header rule, never
+  #     `<5.9.2`, which would self-invalidate the day 5.9.2 is itself flagged
+  #     (the undici 7.28.0 / brace-expansion 5.0.8 specimens, #4961 / #5032).
+  #     ⚠️ The advisory's CONTENT is NOT characterised here: api.osv.dev and
+  #     GitHub's /advisories endpoint are both refused by the authoring
+  #     container's egress proxy, so the severity and the fixed version above
+  #     are read off the scanner's own output line and nothing else.
+  'devalue@<6.0.0': '^5.9.2'

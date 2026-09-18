@@ -26,17 +26,18 @@ pnpm add @aws-sdk/client-s3 @aws-sdk/s3-request-presigner
 
 ```typescript
 import { ObjectKernel } from '@objectstack/core';
+import type { IStorageService } from '@objectstack/spec/contracts';
 import { StorageServicePlugin } from '@objectstack/service-storage';
 
 const kernel = new ObjectKernel();
-kernel.use(new StorageServicePlugin({
+await kernel.use(new StorageServicePlugin({
   adapter: 'local',
   local: { rootDir: './uploads' },
 }));
 await kernel.bootstrap();
 
 // Programmatic access
-const storage = kernel.getService('storage');
+const storage = kernel.getService<IStorageService>('storage');
 await storage.upload('files/hello.txt', Buffer.from('hello'));
 ```
 

@@ -297,9 +297,9 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // organization's rows (GET 200) and WROTE a new one into it (POST
             // 201, the row read back from the store carrying the other
             // organization's id). objectstack#15163 measured it on the
-            // framework; cloud#1982 reproduced it with the real, cloud-private
-            // `@objectstack/organizations` mounted, which adds no request-time
-            // refusal of its own.
+            // framework; cloud#1982 reproduced it with the real, licence-gated
+            // `@objectstack/organizations` subclass mounted, which adds no
+            // request-time refusal of its own.
             //
             // ## Why this is NOT `authServiceProvider`'s catch-all
             //

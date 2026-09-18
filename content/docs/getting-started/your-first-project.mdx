@@ -154,10 +154,12 @@ them a pattern to rely on:
 - a named export whose name **is** a declared stack key that the default export
   does not carry is merged in and accepted — that is the `onEnable` /
   `functions` path;
-- a named export whose name the default export **already carries** is dropped
-  **silently**, and the build still succeeds. A second
-  `export const objects = [...]` beside `defineStack({ objects })` is therefore
-  a value nothing reads. Write every stack key inside `defineStack()`.
+- a named export whose name the default export **already carries** loses to the
+  default, and the build still succeeds — but the loader now **says so on
+  stderr**, naming the key. A second `export const objects = [...]` beside
+  `defineStack({ objects })` is still a value nothing reads; it is no longer a
+  value nothing reads *and nothing mentions*. Write every stack key inside
+  `defineStack()`.
 
 </Callout>
 

@@ -30,7 +30,7 @@ import { PackageServicePlugin, type PackageService } from '@objectstack/service-
 const kernel = new ObjectKernel();
 
 // Register after a driver/ObjectQL plugin so `ctx.getService('objectql')` resolves.
-kernel.use(new PackageServicePlugin());
+await kernel.use(new PackageServicePlugin());
 
 await kernel.bootstrap();
 
@@ -39,6 +39,7 @@ const packages = kernel.getService<PackageService>('package')!;
 await packages.publish({
   manifest: {
     id: 'crm',
+    type: 'app',
     version: '1.2.0',
     name: 'CRM Package',
     /* …full ObjectStackManifest… */

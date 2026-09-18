@@ -1444,6 +1444,56 @@ jobs:
         run: |
           pnpm --filter @objectstack/metadata-protocol exec vitest run live-mysql live-postgres
 
+      # ── The cascade-delete multi-value lookup pin, on the live PostgreSQL ──
+      #
+      # `packages/runtime` rides this job for the same reason metadata-protocol
+      # above does: this is where a live PostgreSQL already exists. Only the
+      # matrix file runs here — the rest of that package's suite has no server
+      # axis and runs in Test Core.
+      #
+      # WHY (#18734). #18172 was a p1 that reached TWO published releases and
+      # was found by a customer rather than by CI: every DELETE of an object
+      # targeted by a `multiple: true` reference answered 500 on PostgreSQL,
+      # always, while the only real-stack pin of that path stayed green
+      # throughout — because it hard-coded `client: 'better-sqlite3'`. #18732
+      # removed that literal and gave the file a driver axis, and SHOWED the
+      # live cell red: ablating `SqlDriver.applyJsonMembership` produced
+      # `6 failed | 9 passed`, all six failures in the live cell and ZERO in
+      # SQLite, reproducing `operator does not exist: json ~~ text` (42883).
+      #
+      # ⚠ "There is a pin that can go red" and "that pin will be run" are two
+      # different claims, and until these two steps only the first was true.
+      # Measured on `origin/main` before this landed: `@objectstack/runtime`
+      # occurred ZERO times in this job's window, against a firing control of
+      # SEVEN for `driver-sql`. Without a URL the cell is a NAMED SKIP that
+      # says which variable would run it — a report, NOT coverage, and the
+      # shape that reads as "already fixed" in every review.
+      #
+      # `OS_EXPECT_LIVE_DIALECT_MATRIX` is scoped to the STEP, like the two
+      # legs above and deliberately not to the job: it asserts "the runner
+      # provisioned what THIS step needs", so it stays honest if a later step's
+      # server is ever dropped. No stall guard, matching the metadata-protocol
+      # leg — the two legs that carry one are the two that actually hit #4331.
+      #
+      # ⛔ THE POSITIONAL IS A SUBSTRING, NOT A GLOB — the same reading the
+      # metadata-protocol step records above, where the glob form matched zero
+      # files. ⛔ Do NOT "improve" it into `src/cascade-delete-*.test.ts`: that
+      # selects nothing, and a test that cannot fail reports success, which is
+      # the exact defect class this step exists to close. (`packages/runtime`'s
+      # vitest config also runs `runFilterPreflight` (#17853/#17978), which
+      # speaks up when a named path selects no tests — a second net, not a
+      # licence to change the form.)
+      - name: Build runtime and its dependencies
+        run: pnpm exec turbo run build --filter=@objectstack/runtime... --concurrency=4
+
+      - name: Run the runtime cascade-delete matrix against live PostgreSQL
+        env:
+          OS_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+          OS_EXPECT_LIVE_DIALECT_MATRIX: '1'
+        run: |
+          pnpm --filter @objectstack/runtime exec vitest run --project local \
+            cascade-delete-multivalue-lookup-real-driver
+
   dogfood:
     # Sharded 3-way: the suite is ~60 independent test files, each booting its
     # own in-process app; a single 4-vCPU runner needed ~7½ minutes for the

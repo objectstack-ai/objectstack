@@ -66,6 +66,7 @@ import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { maskComments } from '../../../scripts/js-comment-mask.mjs';
 import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
@@ -388,8 +389,42 @@ describe('os login --json — the declared NDJSON stream (#6531)', () => {
   });
 });
 
+/**
+ * The `{ … }` body of a declaration, brace-matched from its own `(`, as a span
+ * in the MASKED source — so a `{` inside a comment cannot close it early and
+ * the offsets are still the file's own line numbers.
+ */
+function bodySpan(src: string, declaration: RegExp): { start: number; end: number } | null {
+  const m = declaration.exec(src);
+  if (!m) return null;
+  let i = src.indexOf('(', m.index);
+  let depth = 0;
+  for (; i < src.length; i++) {
+    if (src[i] === '(') depth++;
+    else if (src[i] === ')') {
+      depth--;
+      if (depth === 0) break;
+    }
+  }
+  const open = src.indexOf('{', i);
+  if (open === -1) return null;
+  depth = 0;
+  for (let j = open; j < src.length; j++) {
+    if (src[j] === '{') depth++;
+    else if (src[j] === '}') {
+      depth--;
+      if (depth === 0) return { start: open, end: j };
+    }
+  }
+  return null;
+}
+
 describe('the exception stays declared, not just implemented (#6531 ruling)', () => {
-  const loginSrc = () => readFileSync(LOGIN_SRC, 'utf-8');
+  // Masked before anything is read: every case in this describe decides from
+  // the TEXT of `login.ts`, and a docblock that quotes `emitJson(` — the natural
+  // way to explain why one emitter exists — is indistinguishable from a call to
+  // it in a raw read (#18520).
+  const loginSrc = () => maskComments(readFileSync(LOGIN_SRC, 'utf-8'));
 
   it('routes every --json write through the single compact emitter', () => {
     // The contract is "one document per line" for the WHOLE command, so a new
@@ -397,16 +432,38 @@ describe('the exception stays declared, not just implemented (#6531 ruling)', ()
     // record on a path the e2e above does not drive. One emitter is what makes
     // that structurally impossible; this is the guard on the emitter.
     const src = loginSrc();
-    const direct = src
-      .split('\n')
-      .map((line, i) => ({ line, n: i + 1 }))
-      .filter(({ line }) => /\bemitJson\s*\(/.test(line))
-      .filter(({ line }) => !/^\s*await emitJson\(payload, exitCode, \{ compact: true \}\);$/.test(line));
+
+    // ⛔ This used to subtract ONE BYTE-EXACT LINE — `await emitJson(payload,
+    // exitCode, { compact: true });` — from the `emitJson(` line hits, and call
+    // anything left an offender. That binds the argument LIST, and binding an
+    // argument list is the defect this file's own tier cannot survive: a pull
+    // request that adds a parameter, renames `payload`, or simply wraps the call
+    // over two lines moves the spelling, the per-PR run never collects this file
+    // to say so, and the red arrives on `main` days later under whatever card
+    // happens to be open. Bind the PROPERTY the ruling actually made instead —
+    // ONE emitter — by partitioning the call sites against the emitter's own
+    // brace-matched body: outside must be empty, inside must not be, so neither
+    // half can pass by finding nothing (#18520).
+    const emitter = bodySpan(src, /async function emitRecord\s*\(/);
+    expect(emitter, '`login.ts` no longer declares the single `emitRecord` emitter').not.toBeNull();
+
+    const sites = [...src.matchAll(/\bemitJson\s*\(/g)];
+    const lineOf = (at: number): number => src.slice(0, at).split('\n').length;
+    const outside = sites
+      .filter((m) => m.index < emitter!.start || m.index > emitter!.end)
+      .map((m) => {
+        const eol = src.indexOf('\n', m.index);
+        return `${lineOf(m.index)}: ${src.slice(m.index, eol === -1 ? undefined : eol).trim()}`;
+      });
+
     expect(
-      direct.map(({ n, line }) => `${n}: ${line.trim()}`),
+      outside,
       'every --json write in login.ts must go through emitRecord()',
     ).toEqual([]);
-    expect(/async function emitRecord\(/.test(src)).toBe(true);
+    expect(
+      sites.length - outside.length,
+      'the emitter itself no longer calls `emitJson`, so the partition above is vacuous',
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it('declares NDJSON in the --json flag help text', () => {

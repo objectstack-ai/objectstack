@@ -57,8 +57,21 @@ inert as it was.
 `token.signature` form interchangeably, so a client that held the signed form
 stays signed in across the call.
 
-Two answers stay outside the declared type and are **not** addressed here: the
-anonymous `null`, which would need the published return annotation to widen, and
-`SessionUser.image`, declared `z.string().optional()` against a route that
-serves `null` (#17235). The sibling `auth.login` / `auth.register`, which
-normalize into `data` but set no `success`, are #17234.
+Three answers sat outside the declared type when this change was written and
+are **not** addressed by it. Each has since been answered on its own card, so a
+caller reading this entry does not have to code around any of them:
+
+- the **anonymous** `/get-session` answer, recorded above as `200 null`. It no
+  longer needs the published return annotation to widen, because the producer
+  moved instead: since #17881 `plugin-auth`'s `refuseAnonymousSession` converts
+  better-auth's `200` plus the literal JSON `null` into the declared ADR-0112
+  refusal — HTTP `401` with `code: UNAUTHENTICATED` — before it leaves the
+  process. The SDK's shared `fetch` wrapper throws on any non-2xx, so an
+  anonymous `auth.me()` **rejects** rather than resolving outside its own type.
+  Ruled by #17238: the producer moved and `SessionResponseSchema` is untouched.
+- `SessionUser.image`, then declared `z.string().optional()` against a route
+  that serves `null` (#17235). It is now declared `z.string().nullish()`, so
+  the `"image": null` every `/auth/*` session body carries parses.
+- the sibling `auth.login` / `auth.register`, which then normalized into `data`
+  but set no `success` (#17234). They now run this entry's own lift, which
+  fills `success` as well as `data`.

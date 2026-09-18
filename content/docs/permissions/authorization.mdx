@@ -173,7 +173,10 @@ export const ExportDataCapability = defineCapability({
 });
 
 export default defineStack({
-  manifest: { namespace: 'billing' },
+  manifest: {
+    namespace: 'billing',
+    /* …full ObjectStackManifest… */
+  },
   capabilities: [ExportDataCapability],   // ← DEFINE
   permissions: [{ name: 'billing_admin', systemPermissions: ['export_data'] }], // ← GRANT
   // a resource REQUIRES it:  requiredPermissions: ['export_data']

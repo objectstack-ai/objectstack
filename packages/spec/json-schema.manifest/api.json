@@ -302,6 +302,7 @@
     "api/OperatorMapping",
     "api/PackageApiErrorCode",
     "api/PackageExportManifest",
+    "api/PackageInstallBody",
     "api/PackageInstallRequest",
     "api/PackageInstallResponse",
     "api/PackagePathParams",
