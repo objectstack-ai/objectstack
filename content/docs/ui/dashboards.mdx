@@ -143,11 +143,13 @@ Notes on behaviour:
   truncates a reproducible window instead of an arbitrary subset.
 - Ordering is applied to the finished grid, so a **derived measure** is a valid
   `sortBy` even though no single SQL statement computes it.
-- A `sortBy` naming a **select** or **reference** dimension orders by the
-  **display label** the rows render (the option label / the related record's
-  name), not the stored value or foreign-key id — and the label is resolved
-  before `limit` applies, so a top-N by name truncates the right N.
-  **Reference** is the whole class of fields whose stored value is another
+- A `sortBy` naming a dimension **whose field carries `options`**, or a
+  **reference** dimension, orders by the **display label** the rows render (the
+  option label / the related record's name), not the stored value or
+  foreign-key id — and the label is resolved before `limit` applies, so a top-N
+  by name truncates the right N. The option arm keys on the `options` list
+  being there, not on the field's type, so it is not limited to `select`;
+  **reference** is the whole class of fields whose stored value is another
   record's id, so a `user` person axis sorts by name too. Sorting by a measure
   (the common case) involves no label lookup and is unaffected.
 - A `funnel` with no declared stage order falls back to sorting by value
