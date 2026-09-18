@@ -560,15 +560,21 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
             branchPrunedProjections.push({ namespace: namespaceName, exportKey: key, pruned: prunedBranches });
           }
 
-          // The refinements this projection DROPPED (#18670), named on the
+          // The refinements this projection STILL drops (#18670), named on the
           // artifact for the same reason `x-unprojectable-branches` is: a reader
           // of this file — an author, a reference page, an AI validating a
           // document against it — can otherwise not tell that the contract
           // underneath carries rules this file does not state. It is an
           // annotation and nothing more: `x-` keywords are ignored by every
           // validator, so the set of documents this schema ACCEPTS is unchanged
-          // by it. Narrowing the published shape to match the Zod type is a
-          // public-contract change and is deliberately NOT done here.
+          // by it.
+          //
+          // What DID narrow (#18670 item 2) is the closed list in
+          // `src/shared/refinement-projection.ts`, applied by the `override`
+          // above: a refinement declared through it is emitted as real
+          // keywords, so it never reaches `census.dropped` and never reaches
+          // this annotation. ⛔ The two are exclusive by construction — a site
+          // cannot be both stated and annotated as unstated.
           const census = collectDroppedRefinements(`${categorySlug}/${schemaName}`, value);
           refinementCensus.push(census);
           if (census.dropped.length > 0) {
@@ -3431,9 +3437,16 @@ if (unemittedSkips.length > 0) {
 // no. Measured on this tree at the change that added this block: 682 refinement
 // sites across 237 published schemas, zero of which projected anything.
 //
-// ⛔ It does NOT narrow any published shape and does not touch the refinements
-// themselves — the runtime rule is correct. It makes the population declared,
-// so the next one arrives as a line in a diff instead of as nothing at all.
+// ⛔ This ratchet still narrows nothing by itself and touches no refinement —
+// the runtime rule is correct. It makes the remaining population declared, so
+// the next gap arrives as a line in a diff instead of as nothing at all.
+//
+// The narrowing is the CLOSED list in `src/shared/refinement-projection.ts`
+// (#18670 item 2), emitted by the `override` this generator passes to every
+// projection. It and this ratchet compose in one direction: a site the list
+// emits is `projected` and its ledger row is deleted in the same PR; every
+// other site is `dropped` and stays declared. So the ledger is shrink-only in
+// the strong sense — a repair is the only thing that shortens it.
 const droppedRefinementsBaseline = readDroppedRefinementsBaseline(PKG_DIR);
 if (!droppedRefinementsBaseline) {
   console.error(`\n❌ ${DROPPED_REFINEMENTS_BASELINE_FILE} is missing — it is a committed, hand-edited ledger (#18670).`);
@@ -3554,15 +3567,40 @@ if (droppedSiteTotal > 0) {
       `RUNTIME and not the published JSON Schema — all declared in ${DROPPED_REFINEMENTS_BASELINE_FILE} (#18670).`,
   );
   console.log(
-    `     The published files are therefore WIDER than the Zod types they are generated from:\n` +
-      `     a document one of them accepts can still be refused at parse time. Each affected file\n` +
-      `     names its own sites as \`x-dropped-refinements\`. Narrowing the published shape to match\n` +
-      `     is a public-contract change and is NOT what this ratchet does.`,
+    `     Those files are therefore still WIDER than the Zod types they are generated from:\n` +
+      `     a document one of them accepts can be refused at parse time. Each affected file names\n` +
+      `     its own remaining sites as \`x-dropped-refinements\`. Closing one means teaching the\n` +
+      `     CLOSED list in src/shared/refinement-projection.ts a NAMED pattern — ⛔ never deleting\n` +
+      `     the refinement, and ⛔ never an open-ended translator over the whole population.`,
   );
   console.log(
     `     Also measured this run: ${projectedSiteTotal} refinement site(s) DID reach the file, ` +
       `${undecidableSiteTotal} had no JSON form on either side to compare.`,
   );
+}
+
+// Which projected sites got there through which arm of the closed list (#18670
+// item 2). Printed per pattern rather than as one total, for the reason the
+// ledger records sites rather than a count: a total cannot tell "one arm stopped
+// emitting" from "somebody deleted a refinement", and the two have opposite
+// remedies. A site that projects with NO declared pattern is reported on its own
+// line — it means zod started emitting something by itself, which is news.
+if (projectedSiteTotal > 0) {
+  const byPattern = new Map<string, number>();
+  for (const entry of refinementCensus) {
+    for (const site of entry.projected) {
+      const key = site.declaredPatterns.length > 0
+        ? site.declaredPatterns.join('+')
+        : 'UNDECLARED — zod projected this on its own';
+      byPattern.set(key, (byPattern.get(key) ?? 0) + 1);
+    }
+  }
+  console.log(
+    `\n📣 ${projectedSiteTotal} refinement site(s) DO reach the published JSON Schema, by declared pattern:`,
+  );
+  for (const [pattern, n] of [...byPattern].sort((a, b) => b[1] - a[1])) {
+    console.log(`     ${String(n).padStart(4)}  ${pattern}`);
+  }
 }
 
 // ─── Generate Bundled Schema ─────────────────────────────────────────
