@@ -61,21 +61,45 @@ a wrong number is worse than an absent one.
 - **ADR-0087 disposition: a D3 SEMANTIC entry**, `observability-cel-predicates-retired`,
   not a D2 conversion. A predicate is an intent that no threshold/operator pair or
   attribute filter records; a mechanical strip would delete what the author meant and leave
-  no trace of which SLI or which sampling branch lost it. The prescriptions therefore carry
-  **no** `os migrate meta` sentence — that sentence is owed only where a conversion covers
-  the surface.
+  no trace of which SLI or which sampling branch lost it — and it would not even be lossless
+  in the weak sense, because `successCriteria` is REQUIRED (a strip leaves an SLI that no
+  longer parses) and a composite branch stripped of its `condition` declares no condition at
+  all. That is the one place this retirement parts company with the two precedents it copies
+  its MECHANISM from: `crypto.hash` on `HookBodyCapability` and `managedBy: 'system'` both
+  ALSO registered a D2 conversion, because for each of them a mechanical rewrite existed.
+  Here none does, which is what makes D3 the right disposition rather than merely an
+  available one. The prescriptions therefore carry **no** `os migrate meta` sentence — that
+  sentence is owed only where a conversion covers the surface.
+- **The same-major D3 record is absorbed, per the playbook's 「同 major 记账」.** The
+  `evaluated-expression-slots-source-required` entry landed into this same unpublished step,
+  and it enumerated these two slots among its 36 declaring positions while instructing the
+  upgrader to give a sampling `condition` a dialect and a non-blank `source` — the exact
+  envelope this head now refuses. Both entries first ship together, so the composite of the
+  two changes is the retirement alone: that entry now reads 34 positions, names the two
+  absentees and why, and routes them to this retirement instead of to its own repair.
 - **The surviving accept sets are pinned beside the refusals.** `successCriteria` still
   takes `{ threshold, operator, percentile? }`; a composite `condition` still takes any
   filter object carrying no `dialect` key — `{ source: 'x' }` included, because `source`
   alone is an ordinary filter key and the retirement narrowed the `dialect` door only.
-- **Two published JSON Schemas change projection direction**, and it is mechanical rather
-  than chosen: the retired arm held the last `.transform()` in the `system/MetricsConfig`
-  and `system/TracingConfig` subtrees, so both defs now project in output mode instead of
-  falling back to the input shape. `system/MetricsConfig:slis` and
-  `system/TracingConfig:sampling` therefore publish the `default` the parser has always
-  applied, declared in `DEFAULT_CHANGES_BY_MAJOR`; and the nested type cells of both
-  reference pages lose the `?` from their default-bearing keys. **No runtime default moves**
-  — measured twice, by byte-identity of the untouched `.default(…)` and by parsing a
+- **FOUR published JSON Schemas change projection direction**, and it is mechanical rather
+  than chosen: the retired arm held the last `.transform()` in each of these subtrees, so
+  each def now projects in output mode instead of falling back to the input shape. All four
+  lose `x-io: input`, and what each gains differs:
+
+  | published schema | gains |
+  | --- | --- |
+  | `system/MetricsConfig` | `default: []` on `slis`, plus 8 `required` members |
+  | `system/TracingConfig` | `default: {"type":"always_on","rules":[]}` on `sampling`, plus 4 `required` members |
+  | `system/ServiceLevelIndicator` | one `required` member, `enabled` |
+  | `system/TraceSamplingConfig` | one `required` member, `rules` |
+
+  Only the first two carry a `default` move, so only those two are declarable in
+  `DEFAULT_CHANGES_BY_MAJOR` — the nested pair's `required` growth has no ratchet row to
+  live in and is stated here instead. A `required` that lists defaulted keys is this repo's
+  existing output-mode convention, not a new one, and the same-category control
+  `system/CacheConfig` is untouched. The reference pages show the same signature: the nested
+  type cells of both pages lose the `?` from their default-bearing keys. **No runtime default
+  moves** — measured twice, by byte-identity of the untouched `.default(…)` and by parsing a
   minimal config on the built package.
 
 ## What is deliberately NOT in this change
