@@ -49,7 +49,7 @@ import {
 // The ratchet below measures against this same override, so a rule the list
 // emits leaves the ledger and a rule it does not emit stays in it — see the
 // module header for why the two halves must not be read against each other.
-import { refinementProjectionOverride } from './lib/refinement-projection';
+import { projectPublishedJsonSchema } from './lib/refinement-projection';
 // The dropped-refinement ratchet (#18670). The mirror image of the branch
 // pruning above, and deliberately its own module for the same reason: the
 // pruner guards a projection NARROWER than the Zod type, this one the direction
@@ -498,19 +498,12 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
           let io: 'output' | 'input' = 'output';
           let prunedBranches: readonly PrunedBranch[] = [];
           try {
-            jsonSchema = z.toJSONSchema(value, {
-              target: 'draft-2020-12',
-              override: refinementProjectionOverride,
-            }) as Record<string, unknown>;
+            jsonSchema = projectPublishedJsonSchema(value) as Record<string, unknown>;
           } catch (outputError) {
             if (!isKnownUnsupported(outputError)) throw outputError;
             io = 'input';
             try {
-              jsonSchema = z.toJSONSchema(value, {
-                target: 'draft-2020-12',
-                io: 'input',
-                override: refinementProjectionOverride,
-              }) as Record<string, unknown>;
+              jsonSchema = projectPublishedJsonSchema(value, { io: 'input' }) as Record<string, unknown>;
             } catch (inputError) {
               if (!isKnownUnsupported(inputError)) throw inputError;
               // THIRD attempt, #16431 (a): both directions above refuse the
@@ -526,10 +519,7 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
               // then re-thrown with the message Zod produced, so this attempt
               // can never change WHY an export is skipped, and so never the
               // `cause` recorded for it in unemitted-schemas.baseline.json.
-              const projected = projectByPruningUnionBranches(value, {
-                target: 'draft-2020-12',
-                override: refinementProjectionOverride,
-              });
+              const projected = projectByPruningUnionBranches(value);
               if (!projected) throw inputError;
               jsonSchema = projected.schema;
               io = projected.io;
@@ -3600,6 +3590,41 @@ if (projectedSiteTotal > 0) {
   );
   for (const [pattern, n] of [...byPattern].sort((a, b) => b[1] - a[1])) {
     console.log(`     ${String(n).padStart(4)}  ${pattern}`);
+  }
+}
+
+// Nodes whose projection MOVED and which are still counted as dropped — the
+// reading the per-node differential cannot express as a verdict (#18670 third
+// arm). Two shapes reach this line and both are news:
+//
+//   - a node carrying a DECLARED arm beside a rule the closed list does not
+//     cover, so part of it is stated in the file and part of it is not. It is
+//     ledgered and annotated conservatively, which is what the ruling's 「A
+//     refinement that is not one of these named patterns stays dropped and
+//     annotated」 requires — before the verdict was per-check-aware such a node
+//     read `projected` outright and its undeclared rule was recorded nowhere;
+//   - zod having started to project a `custom` check on its own, which is the
+//     upgrade this whole instrument is waiting for and must not swallow.
+//
+// Printed rather than fatal: the site is already held by the ledger as a drop,
+// so a NEW one fails the ratchet above on its own. What this line adds is WHICH
+// of the declared population is only half-stated, which no count can say.
+const partiallyStated = refinementCensus.flatMap((entry) =>
+  entry.dropped
+    .filter((site) => site.projectionMoved)
+    .map((site) => ({ defKey: entry.defKey, site })),
+);
+if (partiallyStated.length > 0) {
+  console.log(
+    `\n🪢 ${partiallyStated.length} refinement site(s) are PARTIALLY stated by the published file — ` +
+      `the projection moved, yet not every \`custom\` check on the node is one the closed list declares, ` +
+      `so the node stays dropped and annotated (#18670).`,
+  );
+  for (const { defKey, site } of partiallyStated) {
+    const declared = site.declaredPatterns.length > 0
+      ? site.declaredPatterns.join('+')
+      : 'nothing declared — zod projected this on its own';
+    console.log(`     ${defKey} at "${site.path}": ${site.count} check(s), declared: ${declared}`);
   }
 }
 

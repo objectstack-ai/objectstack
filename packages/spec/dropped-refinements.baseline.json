@@ -739,12 +739,6 @@
     },
     "data/SQLDriverConfig": {
       "sites": [
-        "",
-        "sslConfig"
-      ]
-    },
-    "data/SSLConfig": {
-      "sites": [
         ""
       ]
     },
