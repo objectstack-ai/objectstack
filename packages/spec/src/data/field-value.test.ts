@@ -30,12 +30,36 @@ import {
   valueSchemaFor,
   referenceTargetOf,
   referenceCarrierOf,
+  LocationValueSchema,
 } from './field-value.zod';
+import { findClosestMatches } from '../shared/suggestions.zod';
 
 const ok = (def: Parameters<typeof valueSchemaFor>[0], v: unknown, form?: 'stored' | 'expanded') =>
   expect(valueSchemaFor(def, form).safeParse(v).success).toBe(true);
 const bad = (def: Parameters<typeof valueSchemaFor>[0], v: unknown, form?: 'stored' | 'expanded') =>
   expect(valueSchemaFor(def, form).safeParse(v).success).toBe(false);
+
+/**
+ * The candidate list the `location` error map actually spends its budget
+ * against, read off the schema rather than transcribed beside it — a second
+ * copy of a key list is the shape `shared/alias-integrity.test.ts` exists to
+ * refuse. No member of this shape is a tombstone, so every declared key is a
+ * candidate.
+ */
+const LOCATION_KEYS: readonly string[] = Object.keys(LocationValueSchema.shape);
+
+/** The fallback budget, verbatim from `strictUnknownKeyError`. */
+const budgetFor = (key: string) => Math.max(2, Math.floor(key.length / 3));
+
+/** The `unrecognized_keys` issue a stored `location` value rejection carries. */
+const firstLocationIssue = (value: Record<string, unknown>) => {
+  const r = valueSchemaFor({ type: 'location' }, 'stored').safeParse(value);
+  expect(r.success).toBe(false);
+  const issues = (r as { error: { issues: Array<{ code: string; message: string }> } }).error.issues;
+  const issue = issues.find((i) => i.code === 'unrecognized_keys');
+  expect(issue, 'the rejection carries an unrecognized-keys issue').toBeDefined();
+  return issue!;
+};
 
 describe('semantic type classes', () => {
   it('every class member is a declared FieldType', () => {
@@ -388,9 +412,11 @@ describe('valueSchemaFor — stored form (field-zoo reality)', () => {
     expect(geo.message).toContain('this location value');
     expect(geo.message).not.toMatch(/#\d+/);
 
-    // The retired spec-only spelling carries its rename (an alias — edit
-    // distance cannot reach `latitude` → `lat`). It is ALSO a missing-pair
-    // rejection; the unrecognized-keys issue is the one that names the fix.
+    // The retired spec-only spelling carries its rename from the curated
+    // alias, not from the distance fallback — and for `latitude` that alias is
+    // OVERRULING the fallback rather than filling a gap (pinned in the next
+    // test). It is ALSO a missing-pair rejection; the unrecognized-keys issue
+    // is the one that names the fix.
     const retired = valueSchemaFor({ type: 'location' }, 'stored').safeParse({ latitude: 1, longitude: 2 });
     expect(retired.success).toBe(false);
     const unknown = (retired as { error: { issues: Array<{ code: string; message: string }> } }).error.issues
@@ -411,5 +437,44 @@ describe('valueSchemaFor — stored form (field-zoo reality)', () => {
     ok({ type: 'json' }, { a: 1, b: [2, 3] });
     ok({ type: 'formula' }, 31.5);
     ok({ type: 'autonumber' }, 'INV-0001');
+  });
+
+  // An alias entry has TWO jobs, not one, and `LocationValueSchema` ships one
+  // of each — which is why three docblocks around this shape used to cite
+  // `latitude` → `lat` as proof that aliases exist only where distance reaches
+  // nothing. The fallback budget is `Math.max(2, Math.floor(key.length / 3))`
+  // (`shared/suggestions.zod.ts`), and the lookup is
+  // `aliases[aliasProbe(key)] ?? findClosestMatches(key, knownKeys, budget, 1)[0]`
+  // — table first, winning outright.
+  describe('the `location` alias entries, one per role', () => {
+    it('`longitude` fills a GAP — no declared member is within budget', () => {
+      // 9 characters, so the budget is 3; `lng` is 6 edits away and nothing
+      // else on the shape is closer. Drop the entry and the author gets no
+      // suggestion at all, which is the role the prose always described.
+      expect(findClosestMatches('longitude', LOCATION_KEYS, budgetFor('longitude'), 1)).toEqual([]);
+      const issue = firstLocationIssue({ lat: 1, lng: 2, longitude: 3 });
+      expect(issue.message).toContain('`longitude` → `lng`');
+    });
+
+    it('`latitude` OVERRULES a live wrong answer — the bare fallback reaches `altitude`', () => {
+      // 8 characters, so the budget is 2. `lat` is 5 edits away and out of
+      // reach, but the declared `altitude` is exactly 2 — inside the budget —
+      // so the fallback is not silent here, it is WRONG. Without the entry the
+      // refusal would read ``Did you mean `latitude` → `altitude`?`` and point
+      // an author who wrote a GPS latitude at the elevation member. That is
+      // why the negative half is asserted and not only the positive one.
+      expect(findClosestMatches('latitude', LOCATION_KEYS, budgetFor('latitude'), 1)).toEqual(['altitude']);
+      const issue = firstLocationIssue({ lat: 1, lng: 2, latitude: 3 });
+      expect(issue.message, 'the curated target is offered').toContain('`latitude` → `lat`');
+      expect(issue.message, 'the reachable wrong answer is not').not.toContain('`latitude` → `altitude`');
+    });
+
+    it('a plain typo still rides the fallback — the table is not in its way', () => {
+      // The control that keeps the two assertions above from passing against a
+      // fallback that answers nothing at all: `altitud` is one edit from the
+      // declared `altitude` and no alias mentions it.
+      const issue = firstLocationIssue({ lat: 1, lng: 2, altitud: 3 });
+      expect(issue.message).toContain('`altitud` → `altitude`');
+    });
   });
 });
