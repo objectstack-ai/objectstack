@@ -238,6 +238,119 @@ export type ArtifactPackageEntry = z.input<typeof ArtifactPackageEntrySchema>;
 export type ArtifactPackageEntryParsed = z.infer<typeof ArtifactPackageEntrySchema>;
 
 /**
+ * ONE first-run credential an application contributes to the development boot
+ * banner (#17556 — suggestion 1 of #17081).
+ *
+ * ## Why an app has to be the one to say this
+ *
+ * `os dev` seeds a platform admin on an empty DB and the banner prints it as
+ * the ONLY credential a first-run operator is handed. That account holds every
+ * PLATFORM capability (`ADMIN_FULL_ACCESS_CAPABILITIES`) and no APP-declared
+ * one, because a capability an app declares is the app's to grant. So in any
+ * application that gates its apps/tabs/nav on `requiredPermissions` it is by
+ * construction the account that resolves to an empty menu — measured on a
+ * downstream app where four of five personas rendered their group and the one
+ * the banner named rendered none.
+ *
+ * `packages/cli` cannot fix that from its own side: the platform can describe
+ * the account it seeds, and it cannot know that an application's `Hiring` group
+ * needs a position or which of five personas a demo should open with. The
+ * application knows. This key is the channel it says so through.
+ *
+ * ## What it is NOT
+ *
+ * ⛔ Not an identity, not a seed, and not an authorization: declaring an entry
+ * here CREATES NOTHING. It is presentation — the application naming accounts it
+ * seeds by some other means (`data` fixtures, an `onEnable` hook, its own
+ * script) so the banner can point the operator at one that shows something.
+ * An entry naming an account nothing seeds prints a credential that does not
+ * work, exactly as a README line would.
+ *
+ * ## Read only in development
+ *
+ * The consuming banner prints this block only on a development boot
+ * (`os dev`, `objectstack serve --dev`, or `NODE_ENV=development`). A
+ * production boot renders byte-identically to one that declares nothing.
+ */
+export const DevLoginSchema = lazySchema(() => strictObject(
+  {
+    surface: 'a `devLogins` entry',
+    history:
+      'This key is new in @objectstack/spec 17.5 and strict from birth — an unknown key here was '
+      + 'never accepted.',
+    aliases: {
+      user: 'email',
+      username: 'email',
+      login: 'email',
+      account: 'email',
+      name: 'label',
+      persona: 'label',
+      role: 'label',
+      description: 'label',
+      note: 'label',
+      hint: 'label',
+      secret: 'password',
+      pass: 'password',
+    },
+    guidance: {
+      permissions:
+        'a `devLogins` entry grants nothing — it only names an account for the boot banner to '
+        + 'print. Grant capabilities with a permission set (`permissions`) or a position '
+        + '(`positions`), and seed the account itself in `data`.',
+      capabilities:
+        'a `devLogins` entry grants nothing — it only names an account for the boot banner to '
+        + 'print. Declare capabilities in `capabilities` and distribute them with `positions` / '
+        + '`permissions`; seed the account itself in `data`.',
+      seed:
+        'a `devLogins` entry creates no account. Seed the user record in the stack\'s `data` '
+        + 'fixtures (or in `onEnable`) and name it here so the banner can print it.',
+    },
+  },
+  {
+    /**
+     * The address the operator types into the sign-in form.
+     *
+     * Required, because an entry that cannot be signed in with is a line of
+     * banner text pretending to be a credential. Validated as an email for the
+     * same reason the identity schemas are: `sys_user.email` is what the
+     * sign-in form and every seeded fixture key on, so a value that is not one
+     * names an account the operator cannot reach.
+     */
+    email: z.string().email().describe('Email of an account this application seeds — printed by the development boot banner'),
+
+    /**
+     * The password to print beside {@link DevLogin.email}.
+     *
+     * OPTIONAL, and omitted deliberately rather than defaulted: a development
+     * deployment may sign in by magic link, by SSO, or with a password the
+     * operator supplies, and inventing one would print a credential that fails.
+     * Omitted → the banner prints the address alone.
+     *
+     * ⚠️ Whatever is written here is committed to the application's repository
+     * and printed to a terminal. It is a DEVELOPMENT fixture — ⛔ never a real
+     * secret, and ⛔ never a value that also opens a deployed environment.
+     */
+    password: z.string().optional().describe('Development-fixture password printed beside the address; omit when the account signs in another way'),
+
+    /**
+     * What this account SEES, in a few words — the whole point of the key.
+     *
+     * The defect this family exists for is an operator holding a credential
+     * with no idea what audience it belongs to, so `Hiring admin` or
+     * `Job seeker` is the part that repairs it; the address alone repeats the
+     * failure one account over. Omitted → the banner prints the credential with
+     * no audience column.
+     */
+    label: z.string().optional().describe('The audience this account belongs to (e.g. `Hiring admin`) — printed before the address'),
+  },
+));
+
+/** Authoring shape of one {@link DevLoginSchema} entry. */
+export type DevLogin = z.input<typeof DevLoginSchema>;
+/** Post-parse shape of {@link DevLogin} — defaults applied, transforms run (ADR-0122). */
+export type DevLoginParsed = z.infer<typeof DevLoginSchema>;
+
+/**
  * Every metadata COLLECTION `ObjectStackDefinitionSchema` declares, as one
  * named shape.
  *
@@ -259,11 +372,14 @@ export type ArtifactPackageEntryParsed = z.infer<typeof ArtifactPackageEntrySche
  * built from this shape, so putting it in the shape would make the declaration
  * circular.
  *
- * Two members of this shape are envelope keys as well: `plugins` and
- * `devPlugins` are stack collections (they compose by `concat`, so they live
- * here), but they are runtime ASSEMBLY instructions rather than metadata, and
- * {@link ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS} keeps them out of the assembled
- * package body (#15219 — {@link AssembledPackageBodyKey} says why).
+ * Three members of this shape are envelope keys as well: `plugins`,
+ * `devPlugins` and `devLogins` are stack collections (they compose by
+ * `concat`, so they live here), but they describe the BOOT rather than a
+ * package's metadata — the first two are runtime ASSEMBLY instructions, the
+ * third is what the development banner prints — and
+ * {@link ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS} keeps all three out of the
+ * assembled package body (#15219, #17556 — {@link AssembledPackageBodyKey}
+ * says why).
  *
  * @internal
  */
@@ -805,6 +921,47 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
   devPlugins: z.array(z.union([ManifestSchema, z.string()])).optional().describe('Plugins to load only in development (CLI dev command)'),
 
   /**
+   * DevHint: One Sentence For The First-Run Operator
+   *
+   * Free-form text the development boot banner prints under the credential
+   * block — the channel for what {@link DevLoginSchema} cannot express: "run
+   * `pnpm seed:demo` first", "sign in with SSO against the local IdP", "the
+   * Hiring group needs a position, see README".
+   *
+   * Composes as `'single'`: two stacks declaring DIFFERENT hints is a
+   * composition ERROR naming both, never a silent last-wins — the same rule
+   * `api` / `server` / `i18n` carry, for the same reason (an application's
+   * first-run instruction is not a detail a composer may pick for the author).
+   *
+   * Read only on a development boot; a production boot prints nothing.
+   */
+  devHint: z.string().optional().describe('One sentence the development boot banner prints under the credential block (dev only)'),
+
+  /**
+   * DevLogins: First-Run Credentials The Application Contributes
+   *
+   * The accounts an operator should actually sign in with on this application,
+   * printed beneath the platform's own seeded dev admin (#17556). See
+   * {@link DevLoginSchema} for what one entry means — in particular that it
+   * CREATES NOTHING and grants nothing; it names accounts the application seeds
+   * by other means so the banner can point at one that shows something.
+   *
+   * ADDITIVE, never a replacement: the seeded-admin line still prints, because
+   * that account exists whether or not the application mentions it and an
+   * application-controlled key must not be able to suppress a platform
+   * disclosure.
+   *
+   * Composes as `'concat'`: composing two applications yields BOTH publishers'
+   * personas, since dropping one would hide an audience the composed artifact
+   * still serves. An artifact ENVELOPE key like `plugins` / `devPlugins` — the
+   * banner reads it off the top level, so it stays there rather than being
+   * folded into an assembled package body where nothing would read it.
+   *
+   * Read only on a development boot; a production boot prints nothing.
+   */
+  devLogins: z.array(DevLoginSchema).optional().describe('First-run credentials the application contributes to the development boot banner (dev only)'),
+
+  /**
    * Compiled Runtime Bundle Reference
    *
    * Path (relative to the JSON artifact) to a sibling ESM module emitted
@@ -994,11 +1151,18 @@ export const COMPOSE_KEY_DISPOSITIONS = Object.freeze({
   requires: 'concat',
   tiers: 'concat',
   devPlugins: 'concat',
+  // #17556 — BOTH publishers' personas survive a compose, for the reason
+  // `packages` concatenates: dropping one would hide an audience the composed
+  // artifact still serves. `devHint` is the scalar half and is `'single'` below.
+  devLogins: 'concat',
 
   // ── Single-valued configuration — same value passes, difference throws ──
   api: 'single',
   server: 'single',
   runtimeModule: 'single',
+  // #17556 — two stacks declaring different first-run instructions is a
+  // conflict to name, not a last-wins to resolve behind the authors' backs.
+  devHint: 'single',
   // #8687: declared alongside the strict close (it was undeclared-but-honoured
   // before, so composition never saw it through a parsed stack). One bundle
   // gets one `onEnable` (`AppPlugin` invokes a single hook at start()); two
@@ -1045,7 +1209,7 @@ const CONCAT_ARRAY_FIELDS = STACK_DEFINITION_KEYS
  * would refuse a multi-package artifact naming a key its author correctly
  * wrote, and the refusal would look like a defect in the author's metadata.
  *
- * Three `concat` keys are excluded — the artifact ENVELOPE keys, declared once
+ * Four `concat` keys are excluded — the artifact ENVELOPE keys, declared once
  * in {@link ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS} for this type and the runtime
  * shape alike:
  *
@@ -1064,6 +1228,15 @@ const CONCAT_ARRAY_FIELDS = STACK_DEFINITION_KEYS
  *   in-memory composition) and where `os serve` / `os migrate` read them.
  *   Inside a body both are refused by the manifest's strict close, naming the
  *   key.
+ * - `devLogins`: what the DEVELOPMENT BOOT BANNER prints (#17556), not metadata
+ *   a package registers. Its one reader is the CLI, which reads it off the top
+ *   level of the definition it booted, so an entry folded into
+ *   `packages[i].manifest` would be parsed, stored and never printed — the
+ *   declared-but-unread shape ADR-0049 exists about. Excluded for the same
+ *   reason `plugins` is, one layer over: the artifact is inert JSON describing
+ *   an application, and which account an operator should sign in with is a
+ *   property of the BOOT, not of a package inside it. `concat` stays at the top
+ *   level, where composing two applications keeps both publishers' personas.
  *
  * @internal
  */
@@ -1080,7 +1253,7 @@ type AssembledPackageBodyKey = Exclude<{
  * runtime halves cannot name different sets.
  * @internal
  */
-const ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS = ['packages', 'plugins', 'devPlugins'] as const satisfies readonly StackDefinitionKey[];
+const ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS = ['packages', 'plugins', 'devPlugins', 'devLogins'] as const satisfies readonly StackDefinitionKey[];
 
 /** One member of {@link ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS}. @internal */
 type AssembledPackageBodyEnvelopeKey = (typeof ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS)[number];
@@ -1106,8 +1279,10 @@ const ASSEMBLED_PACKAGE_BODY_DISPOSITIONS: readonly string[] = ['concat', 'objec
 function assembledPackageBodyShape(): Pick<typeof STACK_DEFINITION_COLLECTIONS_SHAPE, AssembledPackageBodyKey> {
   const shape: Record<string, unknown> = {};
   for (const [key, disposition] of Object.entries(COMPOSE_KEY_DISPOSITIONS)) {
-    // Envelope keys stay on the artifact: `packages` cannot nest, and
-    // `plugins` / `devPlugins` are assembly instructions no body could carry.
+    // Envelope keys stay on the artifact: `packages` cannot nest,
+    // `plugins` / `devPlugins` are assembly instructions no body could carry,
+    // and `devLogins` is boot-banner text whose only reader looks at the top
+    // level.
     if ((ASSEMBLED_PACKAGE_BODY_ENVELOPE_KEYS as readonly string[]).includes(key)) continue;
     if (!ASSEMBLED_PACKAGE_BODY_DISPOSITIONS.includes(disposition)) continue;
     shape[key] = (STACK_DEFINITION_COLLECTIONS_SHAPE as Record<string, unknown>)[key];
