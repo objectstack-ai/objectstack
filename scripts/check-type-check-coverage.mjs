@@ -6469,8 +6469,8 @@ function selfTest() {
     for (const needle of c.absent) {
       if (c.message.includes(needle))
         failures.push(
-          `#11491 graduation remedy — ${c.label}: message STILL contains ${needle}, which is the other `
-            + `ledger's remedy. ${c.why}`,
+          `#11491 graduation remedy — ${c.label}: message STILL contains ${needle}, which this case pins `
+            + `as ABSENT -- another ledger's remedy, or a route this one no longer offers. ${c.why}`,
         );
     }
   }
