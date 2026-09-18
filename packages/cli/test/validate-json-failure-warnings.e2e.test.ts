@@ -113,6 +113,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { maskComments } from '../../../scripts/js-comment-mask.mjs';
 import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
@@ -478,7 +479,11 @@ function payloadLiterals(src: string): string[] {
 }
 
 describe('#12047 — the contract is exhaustive over `validate.ts`, not just over the exits pinned above', () => {
-  const SRC = readFileSync(VALIDATE_TS, 'utf8');
+  // Comments masked before anything is read off this file — see the paragraph
+  // in the exhaustiveness case below for why, and note that `maskComments`
+  // blanks spans IN PLACE, so `payloadLiterals`'s brace arithmetic and the
+  // `indexOf` order case further down read the same offsets they always did.
+  const SRC = maskComments(readFileSync(VALIDATE_TS, 'utf8'));
 
   it('the extractor produces a POSITIVE before its negative is trusted', () => {
     // ⭐ A "no payload lacks `warnings`" pass is worthless from an instrument
@@ -518,11 +523,17 @@ describe('#12047 — the contract is exhaustive over `validate.ts`, not just ove
     // reddens HERE instead of quietly turning that negative into a vacuous
     // pass over fewer exits than the file has.
     //
-    // Both sides read RAW source, which is what keeps them symmetric: a
-    // commented-out `await emitJson(` is counted by the extractor and by the
-    // pattern alike. The one asymmetric case — prose naming the call with its
-    // paren but no `await` — reddens, and that is the accepted price for not
-    // importing a comment masker into this file.
+    // Both sides read the MASKED source, which is what keeps them symmetric AND
+    // keeps prose out of both. This paragraph used to record the opposite —
+    // both sides raw, with "prose naming the call with its paren but no
+    // `await`" accepted as the price of not importing a masker. That price was
+    // the whole of a nightly red once already, on a print-ORDER pin in this
+    // same package, and it is not a price a pin only a cron can read should
+    // pay: the author who writes the docblock cannot be shown the failure
+    // (#18520). Masking BLANKS spans in place, so the extractor's brace walk
+    // and this pattern still agree byte for byte — measured on the commit that
+    // landed this, raw and masked give the same 7 exits and the same 7 call
+    // sites, so the conversion moved no verdict, only the future hazard.
     const callSites = SRC.match(/\bemitJson\s*\(/g) ?? [];
     expect(
       literals,
