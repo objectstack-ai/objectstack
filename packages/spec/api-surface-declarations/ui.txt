@@ -3666,6 +3666,13 @@ declare const ComponentPropsMap: {
             heading: "heading";
             caption: "caption";
             subheading: "subheading";
+            h1: "h1";
+            h2: "h2";
+            h3: "h3";
+            h4: "h4";
+            h5: "h5";
+            h6: "h6";
+            overline: "overline";
         }>>>;
         align: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
             left: "left";
@@ -7265,6 +7272,13 @@ declare const ElementTextPropsSchema: z.ZodObject<{
         heading: "heading";
         caption: "caption";
         subheading: "subheading";
+        h1: "h1";
+        h2: "h2";
+        h3: "h3";
+        h4: "h4";
+        h5: "h5";
+        h6: "h6";
+        overline: "overline";
     }>>>;
     align: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
         left: "left";
