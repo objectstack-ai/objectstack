@@ -3146,13 +3146,13 @@ export function selfTest() {
   t('…and an empty answer is an empty string, never a throw', platformRefusalText('') === '' && platformRefusalText(undefined) === '');
   t('⛔ …and the text is never truncated where the trigger reads it', platformRefusalText(JSON.stringify({ message: `${'x'.repeat(REFUSAL_TEXT_CHARS * 2)} Body is too long` })).endsWith('Body is too long'));
 
-  t('the comment surface names the comment cap', OVER_COMMENT.cap === COMMENT_BODY_LIMIT);
-  t('the issue-body surface names the issue-body cap', OVER_BODY.cap === ISSUE_BODY_LIMIT);
+  t('the comment surface names the comment cap', OVER_COMMENT?.cap === COMMENT_BODY_LIMIT);
+  t('the issue-body surface names the issue-body cap', OVER_BODY?.cap === ISSUE_BODY_LIMIT);
   t('the two caps agree today — two bisections, one number', COMMENT_BODY_LIMIT === ISSUE_BODY_LIMIT);
   t('⛔ …and they are two constants, so the day one moves the other does not lie', WRITE_SURFACES.comment.cap === COMMENT_BODY_LIMIT && WRITE_SURFACES.body.cap === ISSUE_BODY_LIMIT);
-  t("⛔ the cap is never the platform's own number", OVER_COMMENT.cap !== 65536);
-  t('…it is four times it, which is what was measured stored', OVER_COMMENT.cap === 65536 * 4);
-  t('⛔ a surface with no declared cap names none rather than inventing one', refuse(CREATE_422, 'reaction', 300000).cap === null);
+  t("⛔ the cap is never the platform's own number", OVER_COMMENT?.cap !== undefined && OVER_COMMENT.cap !== 65536);
+  t('…it is four times it, which is what was measured stored', OVER_COMMENT?.cap === 65536 * 4);
+  t('⛔ a surface with no declared cap names none rather than inventing one', refuse(CREATE_422, 'reaction', 300000)?.cap === null);
   t('the surface table is frozen, so no caller edits a measurement in place', Object.isFrozen(WRITE_SURFACES) && Object.isFrozen(WRITE_SURFACES.comment));
 
   const OVER_TEXT = sizeRefusalText(refuse(CREATE_422, 'comment', 307200), 'objectstack-ai/objectstack', 18843);
@@ -3175,10 +3175,10 @@ export function selfTest() {
 
   const AT_CAP = refuse(CREATE_422, 'comment', COMMENT_BODY_LIMIT);
   t('⭐ a refusal AT the measured cap is this class but is NOT explained by it', AT_CAP !== null && AT_CAP.explained === false);
-  t('…and the overage is null rather than 0 — there is no overage to print', AT_CAP.over === null);
+  t('…and the overage is null rather than 0 — there is no overage to print', AT_CAP?.over === null);
   t('…so the text asks for a RE-MEASUREMENT instead of reporting a body over a cap it is not over', sizeRefusalText(AT_CAP, 'o/r', 1).includes('RE-MEASURE the cap'));
   t('⛔ THE CONTROL: the ordinary over-cap text carries no re-measurement sentence', OVER_TEXT.includes('RE-MEASURE the cap') === false);
-  t('a refusal well UNDER the cap is unexplained the same way', refuse(CREATE_422, 'comment', 10).explained === false);
+  t('a refusal well UNDER the cap is unexplained the same way', refuse(CREATE_422, 'comment', 10)?.explained === false);
   t('…and an unrecorded size does not read as zero bytes sent', sizeRefusalText(refuse(CREATE_422, 'comment', null), 'o/r', 1).includes('a body of unrecorded size'));
 
   t('⭐ the exit register carries SIX distinct values — a caller reads exactly one', new Set([EXIT_OK, EXIT_USAGE, EXIT_REFUSED, EXIT_PREREQUISITE_NOT_MET, EXIT_NOT_STORED, EXIT_TOO_LARGE]).size === 6);
