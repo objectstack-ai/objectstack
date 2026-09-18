@@ -12,8 +12,8 @@
 # excluded: documentation drift is `check:docs`'s axis, not this one.
 #
 # entry: .
-# exported names: 212
-# declarations: 213
+# exported names: 219
+# declarations: 220
 #
 # GENERATED — ⛔ never hand-edited. Regenerate after a real build:
 #   pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec gen:api-surface-declarations
@@ -44865,11 +44865,23 @@ declare const PredicateSchema: z.ZodObject<{
     }, z.core.$strip>>;
 }, z.core.$strip>;
 
+// ── PreviousReleaseRegistries (interface) ──
+interface PreviousReleaseRegistries {
+    conversionIds: readonly string[];
+    migrationIds: readonly string[];
+}
+
 // ── RETIRED_DEFS_BY_MAJOR (const) ──
 declare const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>>;
 
 // ── RETIRED_KEYS_BY_MAJOR (const) ──
 declare const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>>;
+
+// ── ReleaseSurfaceDiff (interface) ──
+interface ReleaseSurfaceDiff {
+    added: readonly string[];
+    removed: readonly string[];
+}
 
 // ── STACK_DEFINITION_KEYS (const) ──
 declare const STACK_DEFINITION_KEYS: readonly StackDefinitionKey[];
@@ -44952,6 +44964,42 @@ declare const SpecMigratedSchema: z.ZodObject<{
     migrationId: z.ZodString;
     toMajor: z.ZodNumber;
     rationale: z.ZodString;
+}, z.core.$strip>;
+
+// ── SpecReleaseChanges (type) ──
+type SpecReleaseChanges = z.infer<typeof SpecReleaseChangesSchema>;
+
+// ── SpecReleaseChangesSchema (const) ──
+declare const SpecReleaseChangesSchema: z.ZodObject<{
+    fromVersion: z.ZodString;
+    toVersion: z.ZodString;
+    added: z.ZodArray<z.ZodObject<{
+        surface: z.ZodString;
+    }, z.core.$strip>>;
+    converted: z.ZodArray<z.ZodObject<{
+        surface: z.ZodString;
+        to: z.ZodString;
+        conversionId: z.ZodString;
+        toMajor: z.ZodNumber;
+    }, z.core.$strip>>;
+    migrated: z.ZodArray<z.ZodObject<{
+        surface: z.ZodString;
+        replacement: z.ZodString;
+        migrationId: z.ZodString;
+        toMajor: z.ZodNumber;
+        rationale: z.ZodString;
+    }, z.core.$strip>>;
+    removed: z.ZodArray<z.ZodObject<{
+        surface: z.ZodString;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+
+// ── SpecReleaseSurface (type) ──
+type SpecReleaseSurface = z.infer<typeof SpecReleaseSurfaceSchema>;
+
+// ── SpecReleaseSurfaceSchema (const) ──
+declare const SpecReleaseSurfaceSchema: z.ZodObject<{
+    surface: z.ZodString;
 }, z.core.$strip>;
 
 // ── SpecSurfaceAdd (type) ──
@@ -45077,6 +45125,9 @@ declare function collectConversionNotices(stack: Record<string, unknown>, option
 
 // ── composeMigrationChain (function) ──
 declare function composeMigrationChain(fromMajor: number, toMajor?: number): MigrationStep[];
+
+// ── composeReleaseChanges (function) ──
+declare function composeReleaseChanges(fromVersion: string, toVersion: string, current: SpecChanges, previous: PreviousReleaseRegistries, surfaceDiff: ReleaseSurfaceDiff): SpecReleaseChanges;
 
 // ── composeSpecChanges (function) ──
 declare function composeSpecChanges(fromMajor: number, toMajor: number, surfaceDiff?: SurfaceDiff): SpecChanges;
