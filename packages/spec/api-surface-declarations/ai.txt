@@ -1,0 +1,3061 @@
+# @objectstack/spec — the .d.ts DECLARATION TEXT of every export of `./ai`.
+#
+# The SHAPE half of the ADR-0059 public-API pin, and the readable counterpart of
+# api-surface/ai.json's breadth half. That file pins each export by
+# `name (kind)`, which a signature change, a renamed interface field and a dropped
+# union member all leave untouched. This file pins the declaration text, so each of
+# those moves a line here. Text and NOT a hash, deliberately: a diff a reviewer can
+# read is what makes contract review a guard rather than a rubber stamp.
+#
+# Verbatim from the PACKED `.d.ts` reached through this package's `exports` map — the
+# declarations a consumer installs, never `src/`. A declaration's leading TSDoc is
+# excluded: documentation drift is `check:docs`'s axis, not this one.
+#
+# entry: ./ai
+# exported names: 182
+# declarations: 182
+#
+# GENERATED — ⛔ never hand-edited. Regenerate after a real build:
+#   pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec gen:api-surface-declarations
+# Gated by `check:api-surface-declarations`; a hand edit is a red gate, not a change.
+
+// ── AIModelConfigSchema (const) ──
+declare const AIModelConfigSchema: z.ZodObject<{
+    provider: z.ZodDefault<z.ZodEnum<{
+        local: "local";
+        openai: "openai";
+        azure_openai: "azure_openai";
+        anthropic: "anthropic";
+    }>>;
+    model: z.ZodString;
+    temperature: z.ZodDefault<z.ZodNumber>;
+    maxTokens: z.ZodOptional<z.ZodNumber>;
+    topP: z.ZodOptional<z.ZodNumber>;
+}, z.core.$strict>;
+
+// ── AIUsageRecord (type) ──
+type AIUsageRecord = z.input<typeof AIUsageRecordSchema>;
+
+// ── AIUsageRecordSchema (const) ──
+declare const AIUsageRecordSchema: z.ZodObject<{
+    model: z.ZodString;
+    usage: z.ZodObject<{
+        promptTokens: z.ZodNumber;
+        completionTokens: z.ZodNumber;
+        totalTokens: z.ZodNumber;
+    }, z.core.$strip>;
+    costUsd: z.ZodNumber;
+    latencyMs: z.ZodOptional<z.ZodNumber>;
+    timestamp: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── Agent (type) ──
+type Agent = z.input<typeof AgentSchema>;
+
+// ── AgentParsed (type) ──
+type AgentParsed = z.infer<typeof AgentSchema>;
+
+// ── AgentSchema (const) ──
+declare const AgentSchema: z.ZodObject<{
+    _lock: z.ZodOptional<z.ZodEnum<{
+        none: "none";
+        "no-overlay": "no-overlay";
+        "no-delete": "no-delete";
+        full: "full";
+    }>>;
+    _lockReason: z.ZodOptional<z.ZodString>;
+    _lockSource: z.ZodOptional<z.ZodEnum<{
+        artifact: "artifact";
+        package: "package";
+        "env-forced": "env-forced";
+    }>>;
+    _provenance: z.ZodOptional<z.ZodEnum<{
+        package: "package";
+        "env-forced": "env-forced";
+        org: "org";
+    }>>;
+    _packageId: z.ZodOptional<z.ZodString>;
+    _packageVersion: z.ZodOptional<z.ZodString>;
+    _lockDocsUrl: z.ZodOptional<z.ZodString>;
+    name: z.ZodString;
+    label: z.ZodString;
+    avatar: z.ZodOptional<z.ZodString>;
+    role: z.ZodString;
+    instructions: z.ZodString;
+    model: z.ZodOptional<z.ZodObject<{
+        provider: z.ZodDefault<z.ZodEnum<{
+            local: "local";
+            openai: "openai";
+            azure_openai: "azure_openai";
+            anthropic: "anthropic";
+        }>>;
+        model: z.ZodString;
+        temperature: z.ZodDefault<z.ZodNumber>;
+        maxTokens: z.ZodOptional<z.ZodNumber>;
+        topP: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strict>>;
+    lifecycle: z.ZodOptional<z.ZodObject<{
+        id: z.ZodString;
+        description: z.ZodOptional<z.ZodString>;
+        contextSchema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+        initial: z.ZodString;
+        states: z.ZodRecord<z.ZodString, z.ZodType<StateNodeConfig, StateNodeConfig, z.core.$ZodTypeInternals<StateNodeConfig, StateNodeConfig>>>;
+        on: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+            target: z.ZodOptional<z.ZodString>;
+            cond: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+                type: z.ZodString;
+                params: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+            }, z.core.$strict>]>>;
+            actions: z.ZodOptional<z.ZodArray<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+                type: z.ZodString;
+                params: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+            }, z.core.$strict>]>>>;
+            description: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>, z.ZodArray<z.ZodObject<{
+            target: z.ZodOptional<z.ZodString>;
+            cond: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+                type: z.ZodString;
+                params: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+            }, z.core.$strict>]>>;
+            actions: z.ZodOptional<z.ZodArray<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+                type: z.ZodString;
+                params: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+            }, z.core.$strict>]>>>;
+            description: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>]>>>;
+    }, z.core.$strict>>;
+    surface: z.ZodDefault<z.ZodEnum<{
+        ask: "ask";
+        build: "build";
+    }>>;
+    skills: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    tools: z.ZodOptional<z.ZodNever>;
+    knowledge: z.ZodOptional<z.ZodNever>;
+    active: z.ZodDefault<z.ZodBoolean>;
+    access: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    permissions: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    planning: z.ZodOptional<z.ZodObject<{
+        maxIterations: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>;
+    memory: z.ZodOptional<z.ZodObject<{
+        longTerm: z.ZodOptional<z.ZodObject<{
+            enabled: z.ZodDefault<z.ZodBoolean>;
+            store: z.ZodDefault<z.ZodEnum<{
+                vector: "vector";
+                database: "database";
+                redis: "redis";
+            }>>;
+            maxEntries: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strict>>;
+        reflectionInterval: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strict>>;
+    guardrails: z.ZodOptional<z.ZodObject<{
+        maxTokensPerInvocation: z.ZodOptional<z.ZodNumber>;
+        maxExecutionTimeSec: z.ZodOptional<z.ZodNumber>;
+        blockedTopics: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    }, z.core.$strict>>;
+    structuredOutput: z.ZodOptional<z.ZodObject<{
+        format: z.ZodEnum<{
+            regex: "regex";
+            json_schema: "json_schema";
+            json_object: "json_object";
+            grammar: "grammar";
+            xml: "xml";
+        }>;
+        schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+        strict: z.ZodDefault<z.ZodBoolean>;
+        retryOnValidationFailure: z.ZodDefault<z.ZodBoolean>;
+        maxRetries: z.ZodDefault<z.ZodNumber>;
+        fallbackFormat: z.ZodOptional<z.ZodEnum<{
+            regex: "regex";
+            json_schema: "json_schema";
+            json_object: "json_object";
+            grammar: "grammar";
+            xml: "xml";
+        }>>;
+        transformPipeline: z.ZodOptional<z.ZodArray<z.ZodEnum<{
+            trim: "trim";
+            parse_json: "parse_json";
+            validate: "validate";
+            coerce_types: "coerce_types";
+        }>>>;
+    }, z.core.$strict>>;
+    protection: z.ZodOptional<z.ZodObject<{
+        lock: z.ZodEnum<{
+            none: "none";
+            "no-overlay": "no-overlay";
+            "no-delete": "no-delete";
+            full: "full";
+        }>;
+        reason: z.ZodString;
+        docsUrl: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+
+// ── BUILD_PROGRESS_FRAME_TYPE (const) ──
+declare const BUILD_PROGRESS_FRAME_TYPE = "data-build-progress";
+
+// ── BUILD_PROGRESS_PHASES (const) ──
+declare const BUILD_PROGRESS_PHASES: readonly ["structure", "data", "verify", "done"];
+
+// ── BlueprintApp (type) ──
+type BlueprintApp = z.input<typeof BlueprintAppSchema>;
+
+// ── BlueprintAppParsed (type) ──
+type BlueprintAppParsed = z.infer<typeof BlueprintAppSchema>;
+
+// ── BlueprintAppSchema (const) ──
+declare const BlueprintAppSchema: z.ZodObject<{
+    name: z.ZodString;
+    label: z.ZodOptional<z.ZodString>;
+    icon: z.ZodOptional<z.ZodString>;
+    nav: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        type: z.ZodDefault<z.ZodEnum<{
+            object: "object";
+            dashboard: "dashboard";
+        }>>;
+        target: z.ZodString;
+        label: z.ZodOptional<z.ZodString>;
+        icon: z.ZodOptional<z.ZodString>;
+        viewName: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>>;
+}, z.core.$strip>;
+
+// ── BlueprintCondition (type) ──
+type BlueprintCondition = z.input<typeof BlueprintConditionSchema>;
+
+// ── BlueprintConditionSchema (const) ──
+declare const BlueprintConditionSchema: z.ZodObject<{
+    field: z.ZodString;
+    op: z.ZodEnum<{
+        gt: "gt";
+        gte: "gte";
+        lt: "lt";
+        lte: "lte";
+        eq: "eq";
+        ne: "ne";
+    }>;
+    value: z.ZodUnion<readonly [z.ZodNumber, z.ZodString, z.ZodBoolean]>;
+}, z.core.$strip>;
+
+// ── BlueprintDashboard (type) ──
+type BlueprintDashboard = z.input<typeof BlueprintDashboardSchema>;
+
+// ── BlueprintDashboardSchema (const) ──
+declare const BlueprintDashboardSchema: z.ZodObject<{
+    name: z.ZodString;
+    label: z.ZodOptional<z.ZodString>;
+    widgets: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        id: z.ZodString;
+        title: z.ZodOptional<z.ZodString>;
+        object: z.ZodOptional<z.ZodString>;
+        chart: z.ZodOptional<z.ZodEnum<{
+            bar: "bar";
+            line: "line";
+            pie: "pie";
+            metric: "metric";
+            table: "table";
+        }>>;
+        measure: z.ZodOptional<z.ZodString>;
+        groupBy: z.ZodOptional<z.ZodString>;
+        condition: z.ZodOptional<z.ZodObject<{
+            field: z.ZodString;
+            op: z.ZodEnum<{
+                gt: "gt";
+                gte: "gte";
+                lt: "lt";
+                lte: "lte";
+                eq: "eq";
+                ne: "ne";
+            }>;
+            value: z.ZodUnion<readonly [z.ZodNumber, z.ZodString, z.ZodBoolean]>;
+        }, z.core.$strip>>;
+    }, z.core.$strip>>>;
+}, z.core.$strip>;
+
+// ── BlueprintField (type) ──
+type BlueprintField = z.input<typeof BlueprintFieldSchema>;
+
+// ── BlueprintFieldSchema (const) ──
+declare const BlueprintFieldSchema: z.ZodObject<{
+    name: z.ZodString;
+    label: z.ZodOptional<z.ZodString>;
+    type: z.ZodEnum<{
+        number: "number";
+        boolean: "boolean";
+        code: "code";
+        date: "date";
+        record: "record";
+        file: "file";
+        email: "email";
+        url: "url";
+        datetime: "datetime";
+        time: "time";
+        formula: "formula";
+        text: "text";
+        textarea: "textarea";
+        phone: "phone";
+        password: "password";
+        secret: "secret";
+        markdown: "markdown";
+        html: "html";
+        richtext: "richtext";
+        currency: "currency";
+        percent: "percent";
+        toggle: "toggle";
+        select: "select";
+        multiselect: "multiselect";
+        radio: "radio";
+        checkboxes: "checkboxes";
+        lookup: "lookup";
+        master_detail: "master_detail";
+        tree: "tree";
+        user: "user";
+        image: "image";
+        avatar: "avatar";
+        video: "video";
+        audio: "audio";
+        summary: "summary";
+        autonumber: "autonumber";
+        composite: "composite";
+        repeater: "repeater";
+        location: "location";
+        address: "address";
+        json: "json";
+        color: "color";
+        rating: "rating";
+        slider: "slider";
+        signature: "signature";
+        qrcode: "qrcode";
+        progress: "progress";
+        tags: "tags";
+        vector: "vector";
+    }>;
+    required: z.ZodOptional<z.ZodBoolean>;
+    reference: z.ZodOptional<z.ZodString>;
+    options: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        label: z.ZodString;
+        value: z.ZodString;
+    }, z.core.$strip>>>;
+    summaryOperations: z.ZodOptional<z.ZodObject<{
+        object: z.ZodString;
+        function: z.ZodEnum<{
+            min: "min";
+            max: "max";
+            count: "count";
+            sum: "sum";
+            avg: "avg";
+        }>;
+        field: z.ZodOptional<z.ZodString>;
+        relationshipField: z.ZodOptional<z.ZodString>;
+        conditions: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            field: z.ZodString;
+            op: z.ZodEnum<{
+                gt: "gt";
+                gte: "gte";
+                lt: "lt";
+                lte: "lte";
+                eq: "eq";
+                ne: "ne";
+            }>;
+            value: z.ZodUnion<readonly [z.ZodNumber, z.ZodString, z.ZodBoolean]>;
+        }, z.core.$strip>>>;
+        filter: z.ZodOptional<z.ZodType<FilterCondition, FilterCondition, z.core.$ZodTypeInternals<FilterCondition, FilterCondition>>>;
+    }, z.core.$strip>>;
+    expression: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── BlueprintNavItem (type) ──
+type BlueprintNavItem = z.input<typeof BlueprintNavItemSchema>;
+
+// ── BlueprintNavItemParsed (type) ──
+type BlueprintNavItemParsed = z.infer<typeof BlueprintNavItemSchema>;
+
+// ── BlueprintNavItemSchema (const) ──
+declare const BlueprintNavItemSchema: z.ZodObject<{
+    type: z.ZodDefault<z.ZodEnum<{
+        object: "object";
+        dashboard: "dashboard";
+    }>>;
+    target: z.ZodString;
+    label: z.ZodOptional<z.ZodString>;
+    icon: z.ZodOptional<z.ZodString>;
+    viewName: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── BlueprintObject (type) ──
+type BlueprintObject = z.input<typeof BlueprintObjectSchema>;
+
+// ── BlueprintObjectSchema (const) ──
+declare const BlueprintObjectSchema: z.ZodObject<{
+    name: z.ZodString;
+    label: z.ZodOptional<z.ZodString>;
+    description: z.ZodOptional<z.ZodString>;
+    fields: z.ZodArray<z.ZodObject<{
+        name: z.ZodString;
+        label: z.ZodOptional<z.ZodString>;
+        type: z.ZodEnum<{
+            number: "number";
+            boolean: "boolean";
+            code: "code";
+            date: "date";
+            record: "record";
+            file: "file";
+            email: "email";
+            url: "url";
+            datetime: "datetime";
+            time: "time";
+            formula: "formula";
+            text: "text";
+            textarea: "textarea";
+            phone: "phone";
+            password: "password";
+            secret: "secret";
+            markdown: "markdown";
+            html: "html";
+            richtext: "richtext";
+            currency: "currency";
+            percent: "percent";
+            toggle: "toggle";
+            select: "select";
+            multiselect: "multiselect";
+            radio: "radio";
+            checkboxes: "checkboxes";
+            lookup: "lookup";
+            master_detail: "master_detail";
+            tree: "tree";
+            user: "user";
+            image: "image";
+            avatar: "avatar";
+            video: "video";
+            audio: "audio";
+            summary: "summary";
+            autonumber: "autonumber";
+            composite: "composite";
+            repeater: "repeater";
+            location: "location";
+            address: "address";
+            json: "json";
+            color: "color";
+            rating: "rating";
+            slider: "slider";
+            signature: "signature";
+            qrcode: "qrcode";
+            progress: "progress";
+            tags: "tags";
+            vector: "vector";
+        }>;
+        required: z.ZodOptional<z.ZodBoolean>;
+        reference: z.ZodOptional<z.ZodString>;
+        options: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            label: z.ZodString;
+            value: z.ZodString;
+        }, z.core.$strip>>>;
+        summaryOperations: z.ZodOptional<z.ZodObject<{
+            object: z.ZodString;
+            function: z.ZodEnum<{
+                min: "min";
+                max: "max";
+                count: "count";
+                sum: "sum";
+                avg: "avg";
+            }>;
+            field: z.ZodOptional<z.ZodString>;
+            relationshipField: z.ZodOptional<z.ZodString>;
+            conditions: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                field: z.ZodString;
+                op: z.ZodEnum<{
+                    gt: "gt";
+                    gte: "gte";
+                    lt: "lt";
+                    lte: "lte";
+                    eq: "eq";
+                    ne: "ne";
+                }>;
+                value: z.ZodUnion<readonly [z.ZodNumber, z.ZodString, z.ZodBoolean]>;
+            }, z.core.$strip>>>;
+            filter: z.ZodOptional<z.ZodType<FilterCondition, FilterCondition, z.core.$ZodTypeInternals<FilterCondition, FilterCondition>>>;
+        }, z.core.$strip>>;
+        expression: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+    sharingModel: z.ZodOptional<z.ZodEnum<{
+        private: "private";
+        public_read: "public_read";
+        public_read_write: "public_read_write";
+        controlled_by_parent: "controlled_by_parent";
+    }>>;
+    nameField: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── BlueprintSeed (type) ──
+type BlueprintSeed = z.input<typeof BlueprintSeedSchema>;
+
+// ── BlueprintSeedSchema (const) ──
+declare const BlueprintSeedSchema: z.ZodObject<{
+    object: z.ZodString;
+    records: z.ZodArray<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+}, z.core.$strip>;
+
+// ── BlueprintSummaryOperations (type) ──
+type BlueprintSummaryOperations = z.input<typeof BlueprintSummaryOperationsSchema>;
+
+// ── BlueprintSummaryOperationsSchema (const) ──
+declare const BlueprintSummaryOperationsSchema: z.ZodObject<{
+    object: z.ZodString;
+    function: z.ZodEnum<{
+        min: "min";
+        max: "max";
+        count: "count";
+        sum: "sum";
+        avg: "avg";
+    }>;
+    field: z.ZodOptional<z.ZodString>;
+    relationshipField: z.ZodOptional<z.ZodString>;
+    conditions: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        field: z.ZodString;
+        op: z.ZodEnum<{
+            gt: "gt";
+            gte: "gte";
+            lt: "lt";
+            lte: "lte";
+            eq: "eq";
+            ne: "ne";
+        }>;
+        value: z.ZodUnion<readonly [z.ZodNumber, z.ZodString, z.ZodBoolean]>;
+    }, z.core.$strip>>>;
+    filter: z.ZodOptional<z.ZodType<FilterCondition, FilterCondition, z.core.$ZodTypeInternals<FilterCondition, FilterCondition>>>;
+}, z.core.$strip>;
+
+// ── BlueprintView (type) ──
+type BlueprintView = z.input<typeof BlueprintViewSchema>;
+
+// ── BlueprintViewParsed (type) ──
+type BlueprintViewParsed = z.infer<typeof BlueprintViewSchema>;
+
+// ── BlueprintViewSchema (const) ──
+declare const BlueprintViewSchema: z.ZodObject<{
+    object: z.ZodString;
+    name: z.ZodString;
+    label: z.ZodOptional<z.ZodString>;
+    type: z.ZodDefault<z.ZodEnum<{
+        form: "form";
+        kanban: "kanban";
+        gantt: "gantt";
+        gallery: "gallery";
+        calendar: "calendar";
+        list: "list";
+    }>>;
+    columns: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    groupBy: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── BlueprintWidgetCondition (type) ──
+type BlueprintWidgetCondition = z.input<typeof BlueprintWidgetConditionSchema>;
+
+// ── BlueprintWidgetConditionSchema (const) ──
+declare const BlueprintWidgetConditionSchema: z.ZodObject<{
+    field: z.ZodString;
+    op: z.ZodEnum<{
+        gt: "gt";
+        gte: "gte";
+        lt: "lt";
+        lte: "lte";
+        eq: "eq";
+        ne: "ne";
+    }>;
+    value: z.ZodUnion<readonly [z.ZodNumber, z.ZodString, z.ZodBoolean]>;
+}, z.core.$strip>;
+
+// ── BuildProgressFrame (type) ──
+type BuildProgressFrame = z.input<typeof BuildProgressFrameSchema>;
+
+// ── BuildProgressFrameSchema (const) ──
+declare const BuildProgressFrameSchema: z.ZodObject<{
+    phase: z.ZodEnum<{
+        done: "done";
+        data: "data";
+        structure: "structure";
+        verify: "verify";
+    }>;
+    hop: z.ZodOptional<z.ZodNumber>;
+    tool: z.ZodOptional<z.ZodString>;
+}, z.core.$loose>;
+
+// ── BuildProgressPhase (type) ──
+type BuildProgressPhase = z.input<typeof BuildProgressPhaseSchema>;
+
+// ── BuildProgressPhaseSchema (const) ──
+declare const BuildProgressPhaseSchema: z.ZodEnum<{
+    done: "done";
+    data: "data";
+    structure: "structure";
+    verify: "verify";
+}>;
+
+// ── CodeContentSchema (const) ──
+declare const CodeContentSchema: z.ZodObject<{
+    type: z.ZodLiteral<"code">;
+    text: z.ZodString;
+    language: z.ZodDefault<z.ZodOptional<z.ZodString>>;
+    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+}, z.core.$strip>;
+
+// ── ConversationAnalytics (type) ──
+type ConversationAnalytics = z.input<typeof ConversationAnalyticsSchema>;
+
+// ── ConversationAnalyticsParsed (type) ──
+type ConversationAnalyticsParsed = z.infer<typeof ConversationAnalyticsSchema>;
+
+// ── ConversationAnalyticsSchema (const) ──
+declare const ConversationAnalyticsSchema: z.ZodObject<{
+    sessionId: z.ZodString;
+    totalMessages: z.ZodNumber;
+    userMessages: z.ZodNumber;
+    assistantMessages: z.ZodNumber;
+    systemMessages: z.ZodNumber;
+    totalTokens: z.ZodNumber;
+    averageTokensPerMessage: z.ZodNumber;
+    peakTokenUsage: z.ZodNumber;
+    pruningEvents: z.ZodDefault<z.ZodNumber>;
+    summarizationEvents: z.ZodDefault<z.ZodNumber>;
+    tokensSavedByPruning: z.ZodDefault<z.ZodNumber>;
+    tokensSavedBySummarization: z.ZodDefault<z.ZodNumber>;
+    durationSeconds: z.ZodOptional<z.ZodNumber>;
+    duration: z.ZodOptional<z.ZodNever>;
+    firstMessageAt: z.ZodOptional<z.ZodString>;
+    lastMessageAt: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── ConversationContext (type) ──
+type ConversationContext = z.input<typeof ConversationContextSchema>;
+
+// ── ConversationContextSchema (const) ──
+declare const ConversationContextSchema: z.ZodObject<{
+    sessionId: z.ZodString;
+    userId: z.ZodOptional<z.ZodString>;
+    agentId: z.ZodOptional<z.ZodString>;
+    object: z.ZodOptional<z.ZodString>;
+    recordId: z.ZodOptional<z.ZodString>;
+    scope: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    systemMessage: z.ZodOptional<z.ZodString>;
+    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+}, z.core.$strip>;
+
+// ── ConversationMessage (type) ──
+type ConversationMessage = z.input<typeof ConversationMessageSchema>;
+
+// ── ConversationMessageParsed (type) ──
+type ConversationMessageParsed = z.infer<typeof ConversationMessageSchema>;
+
+// ── ConversationMessageSchema (const) ──
+declare const ConversationMessageSchema: z.ZodObject<{
+    id: z.ZodString;
+    timestamp: z.ZodString;
+    role: z.ZodEnum<{
+        function: "function";
+        user: "user";
+        system: "system";
+        tool: "tool";
+        assistant: "assistant";
+    }>;
+    content: z.ZodArray<z.ZodUnion<readonly [z.ZodObject<{
+        type: z.ZodLiteral<"text">;
+        text: z.ZodString;
+        metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    }, z.core.$strip>, z.ZodObject<{
+        type: z.ZodLiteral<"image">;
+        imageUrl: z.ZodString;
+        detail: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
+            auto: "auto";
+            low: "low";
+            high: "high";
+        }>>>;
+        metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    }, z.core.$strip>, z.ZodObject<{
+        type: z.ZodLiteral<"file">;
+        fileUrl: z.ZodString;
+        mimeType: z.ZodString;
+        fileName: z.ZodOptional<z.ZodString>;
+        metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    }, z.core.$strip>, z.ZodObject<{
+        type: z.ZodLiteral<"code">;
+        text: z.ZodString;
+        language: z.ZodDefault<z.ZodOptional<z.ZodString>>;
+        metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    }, z.core.$strip>]>>;
+    functionCall: z.ZodOptional<z.ZodObject<{
+        name: z.ZodString;
+        arguments: z.ZodString;
+        result: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+    toolCalls: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        id: z.ZodString;
+        type: z.ZodDefault<z.ZodEnum<{
+            function: "function";
+        }>>;
+        function: z.ZodObject<{
+            name: z.ZodString;
+            arguments: z.ZodString;
+            result: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>;
+    }, z.core.$strip>>>;
+    toolCallId: z.ZodOptional<z.ZodString>;
+    name: z.ZodOptional<z.ZodString>;
+    tokens: z.ZodOptional<z.ZodObject<{
+        promptTokens: z.ZodNumber;
+        completionTokens: z.ZodNumber;
+        totalTokens: z.ZodNumber;
+    }, z.core.$strip>>;
+    cost: z.ZodOptional<z.ZodNumber>;
+    pinned: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+    importance: z.ZodOptional<z.ZodNumber>;
+    embedding: z.ZodOptional<z.ZodArray<z.ZodNumber>>;
+    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+}, z.core.$strip>;
+
+// ── ConversationSession (type) ──
+type ConversationSession = z.input<typeof ConversationSessionSchema>;
+
+// ── ConversationSessionParsed (type) ──
+type ConversationSessionParsed = z.infer<typeof ConversationSessionSchema>;
+
+// ── ConversationSessionSchema (const) ──
+declare const ConversationSessionSchema: z.ZodObject<{
+    id: z.ZodString;
+    name: z.ZodOptional<z.ZodString>;
+    context: z.ZodObject<{
+        sessionId: z.ZodString;
+        userId: z.ZodOptional<z.ZodString>;
+        agentId: z.ZodOptional<z.ZodString>;
+        object: z.ZodOptional<z.ZodString>;
+        recordId: z.ZodOptional<z.ZodString>;
+        scope: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+        systemMessage: z.ZodOptional<z.ZodString>;
+        metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    }, z.core.$strip>;
+    modelId: z.ZodOptional<z.ZodString>;
+    tokenBudget: z.ZodObject<{
+        maxTokens: z.ZodNumber;
+        maxPromptTokens: z.ZodOptional<z.ZodNumber>;
+        maxCompletionTokens: z.ZodOptional<z.ZodNumber>;
+        reserveTokens: z.ZodDefault<z.ZodNumber>;
+        bufferPercentage: z.ZodDefault<z.ZodNumber>;
+        strategy: z.ZodDefault<z.ZodEnum<{
+            summary: "summary";
+            importance: "importance";
+            fifo: "fifo";
+            semantic: "semantic";
+            sliding_window: "sliding_window";
+        }>>;
+        slidingWindowSize: z.ZodOptional<z.ZodNumber>;
+        minImportanceScore: z.ZodOptional<z.ZodNumber>;
+        semanticThreshold: z.ZodOptional<z.ZodNumber>;
+        enableSummarization: z.ZodDefault<z.ZodBoolean>;
+        summarizationThreshold: z.ZodOptional<z.ZodNumber>;
+        summaryModel: z.ZodOptional<z.ZodString>;
+        warnThreshold: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strip>;
+    messages: z.ZodDefault<z.ZodArray<z.ZodObject<{
+        id: z.ZodString;
+        timestamp: z.ZodString;
+        role: z.ZodEnum<{
+            function: "function";
+            user: "user";
+            system: "system";
+            tool: "tool";
+            assistant: "assistant";
+        }>;
+        content: z.ZodArray<z.ZodUnion<readonly [z.ZodObject<{
+            type: z.ZodLiteral<"text">;
+            text: z.ZodString;
+            metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+        }, z.core.$strip>, z.ZodObject<{
+            type: z.ZodLiteral<"image">;
+            imageUrl: z.ZodString;
+            detail: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
+                auto: "auto";
+                low: "low";
+                high: "high";
+            }>>>;
+            metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+        }, z.core.$strip>, z.ZodObject<{
+            type: z.ZodLiteral<"file">;
+            fileUrl: z.ZodString;
+            mimeType: z.ZodString;
+            fileName: z.ZodOptional<z.ZodString>;
+            metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+        }, z.core.$strip>, z.ZodObject<{
+            type: z.ZodLiteral<"code">;
+            text: z.ZodString;
+            language: z.ZodDefault<z.ZodOptional<z.ZodString>>;
+            metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+        }, z.core.$strip>]>>;
+        functionCall: z.ZodOptional<z.ZodObject<{
+            name: z.ZodString;
+            arguments: z.ZodString;
+            result: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
+        toolCalls: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            type: z.ZodDefault<z.ZodEnum<{
+                function: "function";
+            }>>;
+            function: z.ZodObject<{
+                name: z.ZodString;
+                arguments: z.ZodString;
+                result: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+        }, z.core.$strip>>>;
+        toolCallId: z.ZodOptional<z.ZodString>;
+        name: z.ZodOptional<z.ZodString>;
+        tokens: z.ZodOptional<z.ZodObject<{
+            promptTokens: z.ZodNumber;
+            completionTokens: z.ZodNumber;
+            totalTokens: z.ZodNumber;
+        }, z.core.$strip>>;
+        cost: z.ZodOptional<z.ZodNumber>;
+        pinned: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+        importance: z.ZodOptional<z.ZodNumber>;
+        embedding: z.ZodOptional<z.ZodArray<z.ZodNumber>>;
+        metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    }, z.core.$strip>>>;
+    tokens: z.ZodOptional<z.ZodObject<{
+        promptTokens: z.ZodDefault<z.ZodNumber>;
+        completionTokens: z.ZodDefault<z.ZodNumber>;
+        totalTokens: z.ZodDefault<z.ZodNumber>;
+        budgetLimit: z.ZodNumber;
+        budgetUsed: z.ZodDefault<z.ZodNumber>;
+        budgetRemaining: z.ZodNumber;
+        budgetPercentage: z.ZodNumber;
+        messageCount: z.ZodDefault<z.ZodNumber>;
+        prunedMessageCount: z.ZodDefault<z.ZodNumber>;
+        summarizedMessageCount: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strip>>;
+    totalTokens: z.ZodOptional<z.ZodObject<{
+        promptTokens: z.ZodNumber;
+        completionTokens: z.ZodNumber;
+        totalTokens: z.ZodNumber;
+    }, z.core.$strip>>;
+    totalCost: z.ZodOptional<z.ZodNumber>;
+    status: z.ZodDefault<z.ZodEnum<{
+        active: "active";
+        paused: "paused";
+        completed: "completed";
+        archived: "archived";
+    }>>;
+    createdAt: z.ZodString;
+    updatedAt: z.ZodString;
+    expiresAt: z.ZodOptional<z.ZodString>;
+    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+}, z.core.$strip>;
+
+// ── ConversationSummary (type) ──
+type ConversationSummary = z.input<typeof ConversationSummarySchema>;
+
+// ── ConversationSummarySchema (const) ──
+declare const ConversationSummarySchema: z.ZodObject<{
+    summary: z.ZodString;
+    keyPoints: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    originalTokens: z.ZodNumber;
+    summaryTokens: z.ZodNumber;
+    tokensSaved: z.ZodNumber;
+    messageRange: z.ZodObject<{
+        startIndex: z.ZodNumber;
+        endIndex: z.ZodNumber;
+    }, z.core.$strip>;
+    generatedAt: z.ZodString;
+    modelId: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── EmbeddingModel (type) ──
+type EmbeddingModel = z.input<typeof EmbeddingModelSchema>;
+
+// ── EmbeddingModelSchema (const) ──
+declare const EmbeddingModelSchema: z.ZodObject<{
+    provider: z.ZodEnum<{
+        custom: "custom";
+        local: "local";
+        openai: "openai";
+        azure_openai: "azure_openai";
+        cohere: "cohere";
+        huggingface: "huggingface";
+    }>;
+    model: z.ZodString;
+    dimensions: z.ZodNumber;
+    endpoint: z.ZodOptional<z.ZodString>;
+    secretRef: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── FileContent (type) ──
+type FileContent = z.input<typeof FileContentSchema>;
+
+// ── FileContentSchema (const) ──
+declare const FileContentSchema: z.ZodObject<{
+    type: z.ZodLiteral<"file">;
+    fileUrl: z.ZodString;
+    mimeType: z.ZodString;
+    fileName: z.ZodOptional<z.ZodString>;
+    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+}, z.core.$strip>;
+
+// ── FileKnowledgeSource (type) ──
+type FileKnowledgeSource = z.input<typeof FileKnowledgeSourceSchema>;
+
+// ── FileKnowledgeSourceSchema (const) ──
+declare const FileKnowledgeSourceSchema: z.ZodObject<{
+    kind: z.ZodLiteral<"file">;
+    prefix: z.ZodString;
+    mimeTypes: z.ZodOptional<z.ZodDefault<z.ZodArray<z.ZodString>>>;
+}, z.core.$strip>;
+
+// ── FilterCondition (type) ──
+type FilterCondition = {
+    [key: string]: any | z.infer<typeof FieldOperatorsSchema> | FilterCondition;
+} & {
+    /** Logical AND - combines all conditions that must be true */
+    $and?: FilterCondition[];
+    /** Logical OR - at least one condition must be true */
+    $or?: FilterCondition[];
+    /**
+     * Logical NOT - negates the condition, **NULL-safely** (#5146).
+     *
+     * A row whose compared column is NULL does NOT satisfy the negated condition
+     * and IS returned. In SQL terms the operand is negated as
+     * `NOT (…) OR col IS NULL` rather than as a bare `NOT (…)`.
+     *
+     * See {@link FilterConditionSchema} for why this is part of the contract
+     * rather than each backend's own choice.
+     */
+    $not?: FilterCondition;
+};
+
+// ── FunctionCall (type) ──
+type FunctionCall = z.input<typeof FunctionCallSchema>;
+
+// ── FunctionCallSchema (const) ──
+declare const FunctionCallSchema: z.ZodObject<{
+    name: z.ZodString;
+    arguments: z.ZodString;
+    result: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── HttpKnowledgeSource (type) ──
+type HttpKnowledgeSource = z.input<typeof HttpKnowledgeSourceSchema>;
+
+// ── HttpKnowledgeSourceSchema (const) ──
+declare const HttpKnowledgeSourceSchema: z.ZodObject<{
+    kind: z.ZodLiteral<"http">;
+    urls: z.ZodArray<z.ZodString>;
+    userAgent: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── ImageContentSchema (const) ──
+declare const ImageContentSchema: z.ZodObject<{
+    type: z.ZodLiteral<"image">;
+    imageUrl: z.ZodString;
+    detail: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
+        auto: "auto";
+        low: "low";
+        high: "high";
+    }>>>;
+    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+}, z.core.$strip>;
+
+// ── KnowledgeChunk (type) ──
+type KnowledgeChunk = z.input<typeof KnowledgeChunkSchema>;
+
+// ── KnowledgeChunkSchema (const) ──
+declare const KnowledgeChunkSchema: z.ZodObject<{
+    id: z.ZodString;
+    documentId: z.ZodString;
+    index: z.ZodNumber;
+    content: z.ZodString;
+    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+}, z.core.$strip>;
+
+// ── KnowledgeDocument (type) ──
+type KnowledgeDocument = z.input<typeof KnowledgeDocumentSchema>;
+
+// ── KnowledgeDocumentSchema (const) ──
+declare const KnowledgeDocumentSchema: z.ZodObject<{
+    id: z.ZodString;
+    sourceId: z.ZodString;
+    sourceRecordId: z.ZodOptional<z.ZodString>;
+    content: z.ZodString;
+    title: z.ZodOptional<z.ZodString>;
+    metadata: z.ZodOptional<z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodUnknown>>>;
+    permissions: z.ZodOptional<z.ZodArray<z.ZodString>>;
+}, z.core.$strip>;
+
+// ── KnowledgeHit (type) ──
+type KnowledgeHit = z.input<typeof KnowledgeHitSchema>;
+
+// ── KnowledgeHitSchema (const) ──
+declare const KnowledgeHitSchema: z.ZodObject<{
+    chunkId: z.ZodString;
+    documentId: z.ZodString;
+    sourceId: z.ZodString;
+    sourceRecordId: z.ZodOptional<z.ZodString>;
+    score: z.ZodNumber;
+    snippet: z.ZodString;
+    title: z.ZodOptional<z.ZodString>;
+    metadata: z.ZodOptional<z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodUnknown>>>;
+}, z.core.$strip>;
+
+// ── KnowledgeRefreshPolicy (type) ──
+type KnowledgeRefreshPolicy = z.input<typeof KnowledgeRefreshPolicySchema>;
+
+// ── KnowledgeRefreshPolicyParsed (type) ──
+type KnowledgeRefreshPolicyParsed = z.infer<typeof KnowledgeRefreshPolicySchema>;
+
+// ── KnowledgeRefreshPolicySchema (const) ──
+declare const KnowledgeRefreshPolicySchema: z.ZodObject<{
+    onRecordChange: z.ZodOptional<z.ZodDefault<z.ZodBoolean>>;
+    cron: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
+        dialect: "cron";
+        source: string;
+    }, string>>, z.ZodObject<{
+        source: z.ZodOptional<z.ZodString>;
+        ast: z.ZodOptional<z.ZodUnknown>;
+        meta: z.ZodOptional<z.ZodObject<{
+            rationale: z.ZodOptional<z.ZodString>;
+            generatedBy: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
+        dialect: z.ZodLiteral<"cron">;
+    }, z.core.$strip>]>>;
+}, z.core.$strip>;
+
+// ── KnowledgeSource (type) ──
+type KnowledgeSource = z.input<typeof KnowledgeSourceSchema>;
+
+// ── KnowledgeSourceKind (type) ──
+type KnowledgeSourceKind = z.input<typeof KnowledgeSourceKindSchema>;
+
+// ── KnowledgeSourceKindSchema (const) ──
+declare const KnowledgeSourceKindSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
+    kind: z.ZodLiteral<"object">;
+    object: z.ZodString;
+    contentFields: z.ZodArray<z.ZodString>;
+    metadataFields: z.ZodOptional<z.ZodDefault<z.ZodArray<z.ZodString>>>;
+    where: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+}, z.core.$strip>, z.ZodObject<{
+    kind: z.ZodLiteral<"file">;
+    prefix: z.ZodString;
+    mimeTypes: z.ZodOptional<z.ZodDefault<z.ZodArray<z.ZodString>>>;
+}, z.core.$strip>, z.ZodObject<{
+    kind: z.ZodLiteral<"http">;
+    urls: z.ZodArray<z.ZodString>;
+    userAgent: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>], "kind">;
+
+// ── KnowledgeSourceParsed (type) ──
+type KnowledgeSourceParsed = z.infer<typeof KnowledgeSourceSchema>;
+
+// ── KnowledgeSourceSchema (const) ──
+declare const KnowledgeSourceSchema: z.ZodObject<{
+    id: z.ZodString;
+    label: z.ZodString;
+    description: z.ZodOptional<z.ZodString>;
+    adapter: z.ZodString;
+    adapterConfig: z.ZodOptional<z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodUnknown>>>;
+    source: z.ZodDiscriminatedUnion<[z.ZodObject<{
+        kind: z.ZodLiteral<"object">;
+        object: z.ZodString;
+        contentFields: z.ZodArray<z.ZodString>;
+        metadataFields: z.ZodOptional<z.ZodDefault<z.ZodArray<z.ZodString>>>;
+        where: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    }, z.core.$strip>, z.ZodObject<{
+        kind: z.ZodLiteral<"file">;
+        prefix: z.ZodString;
+        mimeTypes: z.ZodOptional<z.ZodDefault<z.ZodArray<z.ZodString>>>;
+    }, z.core.$strip>, z.ZodObject<{
+        kind: z.ZodLiteral<"http">;
+        urls: z.ZodArray<z.ZodString>;
+        userAgent: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>], "kind">;
+    embedding: z.ZodOptional<z.ZodObject<{
+        provider: z.ZodEnum<{
+            custom: "custom";
+            local: "local";
+            openai: "openai";
+            azure_openai: "azure_openai";
+            cohere: "cohere";
+            huggingface: "huggingface";
+        }>;
+        model: z.ZodString;
+        dimensions: z.ZodNumber;
+        endpoint: z.ZodOptional<z.ZodString>;
+        secretRef: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+    vectorStore: z.ZodOptional<z.ZodObject<{
+        provider: z.ZodEnum<{
+            custom: "custom";
+            redis: "redis";
+            pgvector: "pgvector";
+            chroma: "chroma";
+            qdrant: "qdrant";
+            pinecone: "pinecone";
+            weaviate: "weaviate";
+            milvus: "milvus";
+            opensearch: "opensearch";
+            elasticsearch: "elasticsearch";
+        }>;
+        collection: z.ZodString;
+        endpoint: z.ZodOptional<z.ZodString>;
+        secretRef: z.ZodOptional<z.ZodString>;
+        dimensions: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strip>>;
+    refresh: z.ZodOptional<z.ZodDefault<z.ZodObject<{
+        onRecordChange: z.ZodOptional<z.ZodDefault<z.ZodBoolean>>;
+        cron: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
+            dialect: "cron";
+            source: string;
+        }, string>>, z.ZodObject<{
+            source: z.ZodOptional<z.ZodString>;
+            ast: z.ZodOptional<z.ZodUnknown>;
+            meta: z.ZodOptional<z.ZodObject<{
+                rationale: z.ZodOptional<z.ZodString>;
+                generatedBy: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>>;
+            dialect: z.ZodLiteral<"cron">;
+        }, z.core.$strip>]>>;
+    }, z.core.$strip>>>;
+    aiExposed: z.ZodOptional<z.ZodDefault<z.ZodBoolean>>;
+}, z.core.$strip>;
+
+// ── MCPApprovalPolicy (type) ──
+type MCPApprovalPolicy = z.input<typeof MCPApprovalPolicySchema>;
+
+// ── MCPApprovalPolicySchema (const) ──
+declare const MCPApprovalPolicySchema: z.ZodEnum<{
+    never: "never";
+    always: "always";
+    first_call: "first_call";
+}>;
+
+// ── MCPServerRef (type) ──
+type MCPServerRef = z.input<typeof MCPServerRefSchema>;
+
+// ── MCPServerRefParsed (type) ──
+type MCPServerRefParsed = z.infer<typeof MCPServerRefSchema>;
+
+// ── MCPServerRefSchema (const) ──
+declare const MCPServerRefSchema: z.ZodObject<{
+    name: z.ZodString;
+    label: z.ZodString;
+    transport: z.ZodEnum<{
+        stdio: "stdio";
+        http: "http";
+        websocket: "websocket";
+    }>;
+    endpoint: z.ZodString;
+    secretRef: z.ZodOptional<z.ZodString>;
+    active: z.ZodDefault<z.ZodBoolean>;
+}, z.core.$strip>;
+
+// ── MCPToolBinding (type) ──
+type MCPToolBinding = z.input<typeof MCPToolBindingSchema>;
+
+// ── MCPToolBindingParsed (type) ──
+type MCPToolBindingParsed = z.infer<typeof MCPToolBindingSchema>;
+
+// ── MCPToolBindingSchema (const) ──
+declare const MCPToolBindingSchema: z.ZodObject<{
+    server: z.ZodString;
+    toolName: z.ZodString;
+    aliasAs: z.ZodOptional<z.ZodString>;
+    approval: z.ZodDefault<z.ZodEnum<{
+        never: "never";
+        always: "always";
+        first_call: "first_call";
+    }>>;
+}, z.core.$strip>;
+
+// ── MCPTransport (type) ──
+type MCPTransport = z.input<typeof MCPTransportSchema>;
+
+// ── MCPTransportSchema (const) ──
+declare const MCPTransportSchema: z.ZodEnum<{
+    stdio: "stdio";
+    http: "http";
+    websocket: "websocket";
+}>;
+
+// ── MCP_AGENT_PERMISSION_SETS (const) ──
+declare const MCP_AGENT_PERMISSION_SETS: readonly ["mcp_agent_data_read", "mcp_agent_data_write", "mcp_agent_restricted"];
+
+// ── MCP_AGENT_PERMISSION_SET_READ (const) ──
+declare const MCP_AGENT_PERMISSION_SET_READ = "mcp_agent_data_read";
+
+// ── MCP_AGENT_PERMISSION_SET_RESTRICTED (const) ──
+declare const MCP_AGENT_PERMISSION_SET_RESTRICTED = "mcp_agent_restricted";
+
+// ── MCP_AGENT_PERMISSION_SET_WRITE (const) ──
+declare const MCP_AGENT_PERMISSION_SET_WRITE = "mcp_agent_data_write";
+
+// ── MCP_OAUTH_SCOPES (const) ──
+declare const MCP_OAUTH_SCOPES: readonly ["data:read", "data:write", "actions:execute"];
+
+// ── MCP_OAUTH_SCOPE_ACTIONS (const) ──
+declare const MCP_OAUTH_SCOPE_ACTIONS = "actions:execute";
+
+// ── MCP_OAUTH_SCOPE_DATA_READ (const) ──
+declare const MCP_OAUTH_SCOPE_DATA_READ = "data:read";
+
+// ── MCP_OAUTH_SCOPE_DATA_WRITE (const) ──
+declare const MCP_OAUTH_SCOPE_DATA_WRITE = "data:write";
+
+// ── McpOauthScope (type) ──
+type McpOauthScope = (typeof MCP_OAUTH_SCOPES)[number];
+
+// ── MessageContent (type) ──
+type MessageContent = z.input<typeof MessageContentSchema>;
+
+// ── MessageContentParsed (type) ──
+type MessageContentParsed = z.infer<typeof MessageContentSchema>;
+
+// ── MessageContentSchema (const) ──
+declare const MessageContentSchema: z.ZodUnion<readonly [z.ZodObject<{
+    type: z.ZodLiteral<"text">;
+    text: z.ZodString;
+    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"image">;
+    imageUrl: z.ZodString;
+    detail: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
+        auto: "auto";
+        low: "low";
+        high: "high";
+    }>>>;
+    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"file">;
+    fileUrl: z.ZodString;
+    mimeType: z.ZodString;
+    fileName: z.ZodOptional<z.ZodString>;
+    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"code">;
+    text: z.ZodString;
+    language: z.ZodDefault<z.ZodOptional<z.ZodString>>;
+    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+}, z.core.$strip>]>;
+
+// ── MessageContentType (type) ──
+type MessageContentType = z.input<typeof MessageContentTypeSchema>;
+
+// ── MessageContentTypeSchema (const) ──
+declare const MessageContentTypeSchema: z.ZodEnum<{
+    code: "code";
+    file: "file";
+    text: "text";
+    image: "image";
+    structured: "structured";
+}>;
+
+// ── MessagePruningEvent (type) ──
+type MessagePruningEvent = z.input<typeof MessagePruningEventSchema>;
+
+// ── MessagePruningEventSchema (const) ──
+declare const MessagePruningEventSchema: z.ZodObject<{
+    timestamp: z.ZodString;
+    prunedMessages: z.ZodArray<z.ZodObject<{
+        messageId: z.ZodString;
+        role: z.ZodEnum<{
+            function: "function";
+            user: "user";
+            system: "system";
+            tool: "tool";
+            assistant: "assistant";
+        }>;
+        tokens: z.ZodNumber;
+        importance: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strip>>;
+    tokensFreed: z.ZodNumber;
+    messagesRemoved: z.ZodNumber;
+    remainingTokens: z.ZodNumber;
+    remainingMessages: z.ZodNumber;
+}, z.core.$strip>;
+
+// ── MessageRole (type) ──
+type MessageRole = z.input<typeof MessageRoleSchema>;
+
+// ── MessageRoleSchema (const) ──
+declare const MessageRoleSchema: z.ZodEnum<{
+    function: "function";
+    user: "user";
+    system: "system";
+    tool: "tool";
+    assistant: "assistant";
+}>;
+
+// ── ModelCapability (type) ──
+type ModelCapability = z.input<typeof ModelCapabilitySchema>;
+
+// ── ModelCapabilityParsed (type) ──
+type ModelCapabilityParsed = z.infer<typeof ModelCapabilitySchema>;
+
+// ── ModelCapabilitySchema (const) ──
+declare const ModelCapabilitySchema: z.ZodObject<{
+    textGeneration: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+    textEmbedding: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+    imageGeneration: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+    imageUnderstanding: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+    functionCalling: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+    codeGeneration: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+    reasoning: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+}, z.core.$strip>;
+
+// ── ModelConfig (type) ──
+type ModelConfig = z.input<typeof ModelConfigSchema>;
+
+// ── ModelConfigParsed (type) ──
+type ModelConfigParsed = z.infer<typeof ModelConfigSchema>;
+
+// ── ModelConfigSchema (const) ──
+declare const ModelConfigSchema: z.ZodObject<{
+    id: z.ZodString;
+    name: z.ZodString;
+    version: z.ZodString;
+    provider: z.ZodEnum<{
+        custom: "custom";
+        local: "local";
+        openai: "openai";
+        azure_openai: "azure_openai";
+        anthropic: "anthropic";
+        google: "google";
+        cohere: "cohere";
+        huggingface: "huggingface";
+    }>;
+    capabilities: z.ZodObject<{
+        textGeneration: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+        textEmbedding: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+        imageGeneration: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+        imageUnderstanding: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+        functionCalling: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+        codeGeneration: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+        reasoning: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+    }, z.core.$strip>;
+    limits: z.ZodObject<{
+        maxTokens: z.ZodNumber;
+        contextWindow: z.ZodNumber;
+        maxOutputTokens: z.ZodOptional<z.ZodNumber>;
+        rateLimit: z.ZodOptional<z.ZodObject<{
+            requestsPerMinute: z.ZodOptional<z.ZodNumber>;
+            tokensPerMinute: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+    }, z.core.$strip>;
+    pricing: z.ZodOptional<z.ZodObject<{
+        currency: z.ZodDefault<z.ZodOptional<z.ZodString>>;
+        inputCostPer1kTokens: z.ZodOptional<z.ZodNumber>;
+        outputCostPer1kTokens: z.ZodOptional<z.ZodNumber>;
+        embeddingCostPer1kTokens: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strip>>;
+    endpoint: z.ZodOptional<z.ZodString>;
+    apiKey: z.ZodOptional<z.ZodString>;
+    secretRef: z.ZodOptional<z.ZodString>;
+    region: z.ZodOptional<z.ZodString>;
+    description: z.ZodOptional<z.ZodString>;
+    tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    deprecated: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+    recommendedFor: z.ZodOptional<z.ZodArray<z.ZodString>>;
+}, z.core.$strip>;
+
+// ── ModelLimits (type) ──
+type ModelLimits = z.input<typeof ModelLimitsSchema>;
+
+// ── ModelLimitsSchema (const) ──
+declare const ModelLimitsSchema: z.ZodObject<{
+    maxTokens: z.ZodNumber;
+    contextWindow: z.ZodNumber;
+    maxOutputTokens: z.ZodOptional<z.ZodNumber>;
+    rateLimit: z.ZodOptional<z.ZodObject<{
+        requestsPerMinute: z.ZodOptional<z.ZodNumber>;
+        tokensPerMinute: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+
+// ── ModelPricing (type) ──
+type ModelPricing = z.input<typeof ModelPricingSchema>;
+
+// ── ModelPricingParsed (type) ──
+type ModelPricingParsed = z.infer<typeof ModelPricingSchema>;
+
+// ── ModelPricingSchema (const) ──
+declare const ModelPricingSchema: z.ZodObject<{
+    currency: z.ZodDefault<z.ZodOptional<z.ZodString>>;
+    inputCostPer1kTokens: z.ZodOptional<z.ZodNumber>;
+    outputCostPer1kTokens: z.ZodOptional<z.ZodNumber>;
+    embeddingCostPer1kTokens: z.ZodOptional<z.ZodNumber>;
+}, z.core.$strip>;
+
+// ── ModelProvider (type) ──
+type ModelProvider = z.input<typeof ModelProviderSchema>;
+
+// ── ModelProviderSchema (const) ──
+declare const ModelProviderSchema: z.ZodEnum<{
+    custom: "custom";
+    local: "local";
+    openai: "openai";
+    azure_openai: "azure_openai";
+    anthropic: "anthropic";
+    google: "google";
+    cohere: "cohere";
+    huggingface: "huggingface";
+}>;
+
+// ── ModelRegistry (type) ──
+type ModelRegistry = z.input<typeof ModelRegistrySchema>;
+
+// ── ModelRegistryEntry (type) ──
+type ModelRegistryEntry = z.input<typeof ModelRegistryEntrySchema>;
+
+// ── ModelRegistryEntryParsed (type) ──
+type ModelRegistryEntryParsed = z.infer<typeof ModelRegistryEntrySchema>;
+
+// ── ModelRegistryEntrySchema (const) ──
+declare const ModelRegistryEntrySchema: z.ZodObject<{
+    model: z.ZodObject<{
+        id: z.ZodString;
+        name: z.ZodString;
+        version: z.ZodString;
+        provider: z.ZodEnum<{
+            custom: "custom";
+            local: "local";
+            openai: "openai";
+            azure_openai: "azure_openai";
+            anthropic: "anthropic";
+            google: "google";
+            cohere: "cohere";
+            huggingface: "huggingface";
+        }>;
+        capabilities: z.ZodObject<{
+            textGeneration: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            textEmbedding: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            imageGeneration: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            imageUnderstanding: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            functionCalling: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            codeGeneration: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            reasoning: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+        }, z.core.$strip>;
+        limits: z.ZodObject<{
+            maxTokens: z.ZodNumber;
+            contextWindow: z.ZodNumber;
+            maxOutputTokens: z.ZodOptional<z.ZodNumber>;
+            rateLimit: z.ZodOptional<z.ZodObject<{
+                requestsPerMinute: z.ZodOptional<z.ZodNumber>;
+                tokensPerMinute: z.ZodOptional<z.ZodNumber>;
+            }, z.core.$strip>>;
+        }, z.core.$strip>;
+        pricing: z.ZodOptional<z.ZodObject<{
+            currency: z.ZodDefault<z.ZodOptional<z.ZodString>>;
+            inputCostPer1kTokens: z.ZodOptional<z.ZodNumber>;
+            outputCostPer1kTokens: z.ZodOptional<z.ZodNumber>;
+            embeddingCostPer1kTokens: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+        endpoint: z.ZodOptional<z.ZodString>;
+        apiKey: z.ZodOptional<z.ZodString>;
+        secretRef: z.ZodOptional<z.ZodString>;
+        region: z.ZodOptional<z.ZodString>;
+        description: z.ZodOptional<z.ZodString>;
+        tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        deprecated: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+        recommendedFor: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    }, z.core.$strip>;
+    status: z.ZodDefault<z.ZodEnum<{
+        deprecated: "deprecated";
+        disabled: "disabled";
+        active: "active";
+        experimental: "experimental";
+    }>>;
+    priority: z.ZodDefault<z.ZodNumber>;
+    fallbackModels: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    healthCheck: z.ZodOptional<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        intervalSeconds: z.ZodDefault<z.ZodNumber>;
+        lastChecked: z.ZodOptional<z.ZodString>;
+        status: z.ZodDefault<z.ZodEnum<{
+            unknown: "unknown";
+            healthy: "healthy";
+            unhealthy: "unhealthy";
+        }>>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+
+// ── ModelRegistryParsed (type) ──
+type ModelRegistryParsed = z.infer<typeof ModelRegistrySchema>;
+
+// ── ModelRegistrySchema (const) ──
+declare const ModelRegistrySchema: z.ZodObject<{
+    name: z.ZodString;
+    models: z.ZodRecord<z.ZodString, z.ZodObject<{
+        model: z.ZodObject<{
+            id: z.ZodString;
+            name: z.ZodString;
+            version: z.ZodString;
+            provider: z.ZodEnum<{
+                custom: "custom";
+                local: "local";
+                openai: "openai";
+                azure_openai: "azure_openai";
+                anthropic: "anthropic";
+                google: "google";
+                cohere: "cohere";
+                huggingface: "huggingface";
+            }>;
+            capabilities: z.ZodObject<{
+                textGeneration: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+                textEmbedding: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+                imageGeneration: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+                imageUnderstanding: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+                functionCalling: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+                codeGeneration: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+                reasoning: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            }, z.core.$strip>;
+            limits: z.ZodObject<{
+                maxTokens: z.ZodNumber;
+                contextWindow: z.ZodNumber;
+                maxOutputTokens: z.ZodOptional<z.ZodNumber>;
+                rateLimit: z.ZodOptional<z.ZodObject<{
+                    requestsPerMinute: z.ZodOptional<z.ZodNumber>;
+                    tokensPerMinute: z.ZodOptional<z.ZodNumber>;
+                }, z.core.$strip>>;
+            }, z.core.$strip>;
+            pricing: z.ZodOptional<z.ZodObject<{
+                currency: z.ZodDefault<z.ZodOptional<z.ZodString>>;
+                inputCostPer1kTokens: z.ZodOptional<z.ZodNumber>;
+                outputCostPer1kTokens: z.ZodOptional<z.ZodNumber>;
+                embeddingCostPer1kTokens: z.ZodOptional<z.ZodNumber>;
+            }, z.core.$strip>>;
+            endpoint: z.ZodOptional<z.ZodString>;
+            apiKey: z.ZodOptional<z.ZodString>;
+            secretRef: z.ZodOptional<z.ZodString>;
+            region: z.ZodOptional<z.ZodString>;
+            description: z.ZodOptional<z.ZodString>;
+            tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            deprecated: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            recommendedFor: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        }, z.core.$strip>;
+        status: z.ZodDefault<z.ZodEnum<{
+            deprecated: "deprecated";
+            disabled: "disabled";
+            active: "active";
+            experimental: "experimental";
+        }>>;
+        priority: z.ZodDefault<z.ZodNumber>;
+        fallbackModels: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        healthCheck: z.ZodOptional<z.ZodObject<{
+            enabled: z.ZodDefault<z.ZodBoolean>;
+            intervalSeconds: z.ZodDefault<z.ZodNumber>;
+            lastChecked: z.ZodOptional<z.ZodString>;
+            status: z.ZodDefault<z.ZodEnum<{
+                unknown: "unknown";
+                healthy: "healthy";
+                unhealthy: "unhealthy";
+            }>>;
+        }, z.core.$strip>>;
+    }, z.core.$strip>>;
+    promptTemplates: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
+        id: z.ZodString;
+        name: z.ZodString;
+        label: z.ZodString;
+        system: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
+            dialect: "template";
+            source: string;
+        }, string>>, z.ZodObject<{
+            source: z.ZodOptional<z.ZodString>;
+            ast: z.ZodOptional<z.ZodUnknown>;
+            meta: z.ZodOptional<z.ZodObject<{
+                rationale: z.ZodOptional<z.ZodString>;
+                generatedBy: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>>;
+            dialect: z.ZodLiteral<"template">;
+        }, z.core.$strip>]>>;
+        user: z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
+            dialect: "template";
+            source: string;
+        }, string>>, z.ZodObject<{
+            source: z.ZodOptional<z.ZodString>;
+            ast: z.ZodOptional<z.ZodUnknown>;
+            meta: z.ZodOptional<z.ZodObject<{
+                rationale: z.ZodOptional<z.ZodString>;
+                generatedBy: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>>;
+            dialect: z.ZodLiteral<"template">;
+        }, z.core.$strip>]>;
+        assistant: z.ZodOptional<z.ZodString>;
+        variables: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            name: z.ZodString;
+            type: z.ZodDefault<z.ZodEnum<{
+                string: "string";
+                number: "number";
+                boolean: "boolean";
+                object: "object";
+                array: "array";
+            }>>;
+            required: z.ZodDefault<z.ZodBoolean>;
+            defaultValue: z.ZodOptional<z.ZodUnknown>;
+            description: z.ZodOptional<z.ZodString>;
+            validation: z.ZodOptional<z.ZodObject<{
+                minLength: z.ZodOptional<z.ZodNumber>;
+                maxLength: z.ZodOptional<z.ZodNumber>;
+                pattern: z.ZodOptional<z.ZodString>;
+                enum: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
+            }, z.core.$strip>>;
+        }, z.core.$strip>>>;
+        modelId: z.ZodOptional<z.ZodString>;
+        temperature: z.ZodOptional<z.ZodNumber>;
+        maxTokens: z.ZodOptional<z.ZodNumber>;
+        topP: z.ZodOptional<z.ZodNumber>;
+        frequencyPenalty: z.ZodOptional<z.ZodNumber>;
+        presencePenalty: z.ZodOptional<z.ZodNumber>;
+        stopSequences: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        version: z.ZodDefault<z.ZodOptional<z.ZodString>>;
+        description: z.ZodOptional<z.ZodString>;
+        category: z.ZodOptional<z.ZodString>;
+        tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        examples: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            input: z.ZodRecord<z.ZodString, z.ZodUnknown>;
+            output: z.ZodString;
+        }, z.core.$strip>>>;
+    }, z.core.$strip>>>;
+    defaultModel: z.ZodOptional<z.ZodString>;
+    enableAutoFallback: z.ZodDefault<z.ZodBoolean>;
+}, z.core.$strip>;
+
+// ── ModelSelectionCriteria (type) ──
+type ModelSelectionCriteria = z.input<typeof ModelSelectionCriteriaSchema>;
+
+// ── ModelSelectionCriteriaParsed (type) ──
+type ModelSelectionCriteriaParsed = z.infer<typeof ModelSelectionCriteriaSchema>;
+
+// ── ModelSelectionCriteriaSchema (const) ──
+declare const ModelSelectionCriteriaSchema: z.ZodObject<{
+    capabilities: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    maxCostPer1kTokens: z.ZodOptional<z.ZodNumber>;
+    minContextWindow: z.ZodOptional<z.ZodNumber>;
+    provider: z.ZodOptional<z.ZodEnum<{
+        custom: "custom";
+        local: "local";
+        openai: "openai";
+        azure_openai: "azure_openai";
+        anthropic: "anthropic";
+        google: "google";
+        cohere: "cohere";
+        huggingface: "huggingface";
+    }>>;
+    tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    excludeDeprecated: z.ZodDefault<z.ZodBoolean>;
+}, z.core.$strip>;
+
+// ── ObjectKnowledgeSource (type) ──
+type ObjectKnowledgeSource = z.input<typeof ObjectKnowledgeSourceSchema>;
+
+// ── ObjectKnowledgeSourceSchema (const) ──
+declare const ObjectKnowledgeSourceSchema: z.ZodObject<{
+    kind: z.ZodLiteral<"object">;
+    object: z.ZodString;
+    contentFields: z.ZodArray<z.ZodString>;
+    metadataFields: z.ZodOptional<z.ZodDefault<z.ZodArray<z.ZodString>>>;
+    where: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+}, z.core.$strip>;
+
+// ── PromptTemplate (type) ──
+type PromptTemplate = z.input<typeof PromptTemplateSchema>;
+
+// ── PromptTemplateParsed (type) ──
+type PromptTemplateParsed = z.infer<typeof PromptTemplateSchema>;
+
+// ── PromptTemplateSchema (const) ──
+declare const PromptTemplateSchema: z.ZodObject<{
+    id: z.ZodString;
+    name: z.ZodString;
+    label: z.ZodString;
+    system: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
+        dialect: "template";
+        source: string;
+    }, string>>, z.ZodObject<{
+        source: z.ZodOptional<z.ZodString>;
+        ast: z.ZodOptional<z.ZodUnknown>;
+        meta: z.ZodOptional<z.ZodObject<{
+            rationale: z.ZodOptional<z.ZodString>;
+            generatedBy: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
+        dialect: z.ZodLiteral<"template">;
+    }, z.core.$strip>]>>;
+    user: z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
+        dialect: "template";
+        source: string;
+    }, string>>, z.ZodObject<{
+        source: z.ZodOptional<z.ZodString>;
+        ast: z.ZodOptional<z.ZodUnknown>;
+        meta: z.ZodOptional<z.ZodObject<{
+            rationale: z.ZodOptional<z.ZodString>;
+            generatedBy: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
+        dialect: z.ZodLiteral<"template">;
+    }, z.core.$strip>]>;
+    assistant: z.ZodOptional<z.ZodString>;
+    variables: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        name: z.ZodString;
+        type: z.ZodDefault<z.ZodEnum<{
+            string: "string";
+            number: "number";
+            boolean: "boolean";
+            object: "object";
+            array: "array";
+        }>>;
+        required: z.ZodDefault<z.ZodBoolean>;
+        defaultValue: z.ZodOptional<z.ZodUnknown>;
+        description: z.ZodOptional<z.ZodString>;
+        validation: z.ZodOptional<z.ZodObject<{
+            minLength: z.ZodOptional<z.ZodNumber>;
+            maxLength: z.ZodOptional<z.ZodNumber>;
+            pattern: z.ZodOptional<z.ZodString>;
+            enum: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
+        }, z.core.$strip>>;
+    }, z.core.$strip>>>;
+    modelId: z.ZodOptional<z.ZodString>;
+    temperature: z.ZodOptional<z.ZodNumber>;
+    maxTokens: z.ZodOptional<z.ZodNumber>;
+    topP: z.ZodOptional<z.ZodNumber>;
+    frequencyPenalty: z.ZodOptional<z.ZodNumber>;
+    presencePenalty: z.ZodOptional<z.ZodNumber>;
+    stopSequences: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    version: z.ZodDefault<z.ZodOptional<z.ZodString>>;
+    description: z.ZodOptional<z.ZodString>;
+    category: z.ZodOptional<z.ZodString>;
+    tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    examples: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        input: z.ZodRecord<z.ZodString, z.ZodUnknown>;
+        output: z.ZodString;
+    }, z.core.$strip>>>;
+}, z.core.$strip>;
+
+// ── PromptVariable (type) ──
+type PromptVariable = z.input<typeof PromptVariableSchema>;
+
+// ── PromptVariableParsed (type) ──
+type PromptVariableParsed = z.infer<typeof PromptVariableSchema>;
+
+// ── PromptVariableSchema (const) ──
+declare const PromptVariableSchema: z.ZodObject<{
+    name: z.ZodString;
+    type: z.ZodDefault<z.ZodEnum<{
+        string: "string";
+        number: "number";
+        boolean: "boolean";
+        object: "object";
+        array: "array";
+    }>>;
+    required: z.ZodDefault<z.ZodBoolean>;
+    defaultValue: z.ZodOptional<z.ZodUnknown>;
+    description: z.ZodOptional<z.ZodString>;
+    validation: z.ZodOptional<z.ZodObject<{
+        minLength: z.ZodOptional<z.ZodNumber>;
+        maxLength: z.ZodOptional<z.ZodNumber>;
+        pattern: z.ZodOptional<z.ZodString>;
+        enum: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+
+// ── SKILL_TRIGGER_LIST_VALUE_OPERATORS (const) ──
+declare const SKILL_TRIGGER_LIST_VALUE_OPERATORS: readonly ["in", "not_in"];
+
+// ── SKILL_TRIGGER_SCALAR_VALUE_OPERATORS (const) ──
+declare const SKILL_TRIGGER_SCALAR_VALUE_OPERATORS: readonly ["eq", "neq"];
+
+// ── Skill (type) ──
+type Skill = z.input<typeof SkillSchema>;
+
+// ── SkillParsed (type) ──
+type SkillParsed = z.infer<typeof SkillSchema>;
+
+// ── SkillSchema (const) ──
+declare const SkillSchema: z.ZodObject<{
+    _lock: z.ZodOptional<z.ZodEnum<{
+        none: "none";
+        "no-overlay": "no-overlay";
+        "no-delete": "no-delete";
+        full: "full";
+    }>>;
+    _lockReason: z.ZodOptional<z.ZodString>;
+    _lockSource: z.ZodOptional<z.ZodEnum<{
+        artifact: "artifact";
+        package: "package";
+        "env-forced": "env-forced";
+    }>>;
+    _provenance: z.ZodOptional<z.ZodEnum<{
+        package: "package";
+        "env-forced": "env-forced";
+        org: "org";
+    }>>;
+    _packageId: z.ZodOptional<z.ZodString>;
+    _packageVersion: z.ZodOptional<z.ZodString>;
+    _lockDocsUrl: z.ZodOptional<z.ZodString>;
+    name: z.ZodString;
+    label: z.ZodString;
+    description: z.ZodOptional<z.ZodString>;
+    surface: z.ZodDefault<z.ZodEnum<{
+        both: "both";
+        ask: "ask";
+        build: "build";
+    }>>;
+    instructions: z.ZodOptional<z.ZodString>;
+    tools: z.ZodArray<z.ZodString>;
+    triggerPhrases: z.ZodOptional<z.ZodNever>;
+    triggerConditions: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        field: z.ZodString;
+        operator: z.ZodEnum<{
+            in: "in";
+            not_in: "not_in";
+            eq: "eq";
+            neq: "neq";
+            contains: "contains";
+        }>;
+        value: z.ZodUnion<readonly [z.ZodString, z.ZodArray<z.ZodString>]>;
+    }, z.core.$strip>>>;
+    active: z.ZodDefault<z.ZodBoolean>;
+    protection: z.ZodOptional<z.ZodObject<{
+        lock: z.ZodEnum<{
+            none: "none";
+            "no-overlay": "no-overlay";
+            "no-delete": "no-delete";
+            full: "full";
+        }>;
+        reason: z.ZodString;
+        docsUrl: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+
+// ── SkillTriggerCondition (type) ──
+type SkillTriggerCondition = z.input<typeof SkillTriggerConditionSchema>;
+
+// ── SkillTriggerConditionSchema (const) ──
+declare const SkillTriggerConditionSchema: z.ZodObject<{
+    field: z.ZodString;
+    operator: z.ZodEnum<{
+        in: "in";
+        not_in: "not_in";
+        eq: "eq";
+        neq: "neq";
+        contains: "contains";
+    }>;
+    value: z.ZodUnion<readonly [z.ZodString, z.ZodArray<z.ZodString>]>;
+}, z.core.$strip>;
+
+// ── SolutionBlueprint (type) ──
+type SolutionBlueprint = z.input<typeof SolutionBlueprintSchema>;
+
+// ── SolutionBlueprintParsed (type) ──
+type SolutionBlueprintParsed = z.infer<typeof SolutionBlueprintSchema>;
+
+// ── SolutionBlueprintSchema (const) ──
+declare const SolutionBlueprintSchema: z.ZodObject<{
+    summary: z.ZodOptional<z.ZodString>;
+    assumptions: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    questions: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    objects: z.ZodArray<z.ZodObject<{
+        name: z.ZodString;
+        label: z.ZodOptional<z.ZodString>;
+        description: z.ZodOptional<z.ZodString>;
+        fields: z.ZodArray<z.ZodObject<{
+            name: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            type: z.ZodEnum<{
+                number: "number";
+                boolean: "boolean";
+                code: "code";
+                date: "date";
+                record: "record";
+                file: "file";
+                email: "email";
+                url: "url";
+                datetime: "datetime";
+                time: "time";
+                formula: "formula";
+                text: "text";
+                textarea: "textarea";
+                phone: "phone";
+                password: "password";
+                secret: "secret";
+                markdown: "markdown";
+                html: "html";
+                richtext: "richtext";
+                currency: "currency";
+                percent: "percent";
+                toggle: "toggle";
+                select: "select";
+                multiselect: "multiselect";
+                radio: "radio";
+                checkboxes: "checkboxes";
+                lookup: "lookup";
+                master_detail: "master_detail";
+                tree: "tree";
+                user: "user";
+                image: "image";
+                avatar: "avatar";
+                video: "video";
+                audio: "audio";
+                summary: "summary";
+                autonumber: "autonumber";
+                composite: "composite";
+                repeater: "repeater";
+                location: "location";
+                address: "address";
+                json: "json";
+                color: "color";
+                rating: "rating";
+                slider: "slider";
+                signature: "signature";
+                qrcode: "qrcode";
+                progress: "progress";
+                tags: "tags";
+                vector: "vector";
+            }>;
+            required: z.ZodOptional<z.ZodBoolean>;
+            reference: z.ZodOptional<z.ZodString>;
+            options: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                label: z.ZodString;
+                value: z.ZodString;
+            }, z.core.$strip>>>;
+            summaryOperations: z.ZodOptional<z.ZodObject<{
+                object: z.ZodString;
+                function: z.ZodEnum<{
+                    min: "min";
+                    max: "max";
+                    count: "count";
+                    sum: "sum";
+                    avg: "avg";
+                }>;
+                field: z.ZodOptional<z.ZodString>;
+                relationshipField: z.ZodOptional<z.ZodString>;
+                conditions: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                    field: z.ZodString;
+                    op: z.ZodEnum<{
+                        gt: "gt";
+                        gte: "gte";
+                        lt: "lt";
+                        lte: "lte";
+                        eq: "eq";
+                        ne: "ne";
+                    }>;
+                    value: z.ZodUnion<readonly [z.ZodNumber, z.ZodString, z.ZodBoolean]>;
+                }, z.core.$strip>>>;
+                filter: z.ZodOptional<z.ZodType<FilterCondition, FilterCondition, z.core.$ZodTypeInternals<FilterCondition, FilterCondition>>>;
+            }, z.core.$strip>>;
+            expression: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
+        sharingModel: z.ZodOptional<z.ZodEnum<{
+            private: "private";
+            public_read: "public_read";
+            public_read_write: "public_read_write";
+            controlled_by_parent: "controlled_by_parent";
+        }>>;
+        nameField: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+    views: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        object: z.ZodString;
+        name: z.ZodString;
+        label: z.ZodOptional<z.ZodString>;
+        type: z.ZodDefault<z.ZodEnum<{
+            form: "form";
+            kanban: "kanban";
+            gantt: "gantt";
+            gallery: "gallery";
+            calendar: "calendar";
+            list: "list";
+        }>>;
+        columns: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        groupBy: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>>;
+    dashboards: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        name: z.ZodString;
+        label: z.ZodOptional<z.ZodString>;
+        widgets: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            title: z.ZodOptional<z.ZodString>;
+            object: z.ZodOptional<z.ZodString>;
+            chart: z.ZodOptional<z.ZodEnum<{
+                bar: "bar";
+                line: "line";
+                pie: "pie";
+                metric: "metric";
+                table: "table";
+            }>>;
+            measure: z.ZodOptional<z.ZodString>;
+            groupBy: z.ZodOptional<z.ZodString>;
+            condition: z.ZodOptional<z.ZodObject<{
+                field: z.ZodString;
+                op: z.ZodEnum<{
+                    gt: "gt";
+                    gte: "gte";
+                    lt: "lt";
+                    lte: "lte";
+                    eq: "eq";
+                    ne: "ne";
+                }>;
+                value: z.ZodUnion<readonly [z.ZodNumber, z.ZodString, z.ZodBoolean]>;
+            }, z.core.$strip>>;
+        }, z.core.$strip>>>;
+    }, z.core.$strip>>>;
+    app: z.ZodOptional<z.ZodObject<{
+        name: z.ZodString;
+        label: z.ZodOptional<z.ZodString>;
+        icon: z.ZodOptional<z.ZodString>;
+        nav: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            type: z.ZodDefault<z.ZodEnum<{
+                object: "object";
+                dashboard: "dashboard";
+            }>>;
+            target: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            icon: z.ZodOptional<z.ZodString>;
+            viewName: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>>;
+    }, z.core.$strip>>;
+    seedData: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        object: z.ZodString;
+        records: z.ZodArray<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    }, z.core.$strip>>>;
+}, z.core.$strip>;
+
+// ── SolutionBlueprintStrict (type) ──
+type SolutionBlueprintStrict = z.input<typeof SolutionBlueprintStrictSchema>;
+
+// ── SolutionBlueprintStrictSchema (const) ──
+declare const SolutionBlueprintStrictSchema: z.ZodObject<{
+    summary: z.ZodString;
+    assumptions: z.ZodArray<z.ZodString>;
+    questions: z.ZodNullable<z.ZodArray<z.ZodString>>;
+    objects: z.ZodArray<z.ZodObject<{
+        name: z.ZodString;
+        label: z.ZodNullable<z.ZodString>;
+        description: z.ZodNullable<z.ZodString>;
+        fields: z.ZodArray<z.ZodObject<{
+            name: z.ZodString;
+            label: z.ZodNullable<z.ZodString>;
+            type: z.ZodEnum<{
+                number: "number";
+                boolean: "boolean";
+                code: "code";
+                date: "date";
+                record: "record";
+                file: "file";
+                email: "email";
+                url: "url";
+                datetime: "datetime";
+                time: "time";
+                formula: "formula";
+                text: "text";
+                textarea: "textarea";
+                phone: "phone";
+                password: "password";
+                secret: "secret";
+                markdown: "markdown";
+                html: "html";
+                richtext: "richtext";
+                currency: "currency";
+                percent: "percent";
+                toggle: "toggle";
+                select: "select";
+                multiselect: "multiselect";
+                radio: "radio";
+                checkboxes: "checkboxes";
+                lookup: "lookup";
+                master_detail: "master_detail";
+                tree: "tree";
+                user: "user";
+                image: "image";
+                avatar: "avatar";
+                video: "video";
+                audio: "audio";
+                summary: "summary";
+                autonumber: "autonumber";
+                composite: "composite";
+                repeater: "repeater";
+                location: "location";
+                address: "address";
+                json: "json";
+                color: "color";
+                rating: "rating";
+                slider: "slider";
+                signature: "signature";
+                qrcode: "qrcode";
+                progress: "progress";
+                tags: "tags";
+                vector: "vector";
+            }>;
+            required: z.ZodNullable<z.ZodBoolean>;
+            reference: z.ZodNullable<z.ZodString>;
+            options: z.ZodNullable<z.ZodArray<z.ZodObject<{
+                label: z.ZodString;
+                value: z.ZodString;
+            }, z.core.$strip>>>;
+            summaryOperations: z.ZodNullable<z.ZodObject<{
+                object: z.ZodString;
+                function: z.ZodEnum<{
+                    min: "min";
+                    max: "max";
+                    count: "count";
+                    sum: "sum";
+                    avg: "avg";
+                }>;
+                field: z.ZodNullable<z.ZodString>;
+                relationshipField: z.ZodNullable<z.ZodString>;
+                conditions: z.ZodNullable<z.ZodArray<z.ZodObject<{
+                    field: z.ZodString;
+                    op: z.ZodEnum<{
+                        gt: "gt";
+                        gte: "gte";
+                        lt: "lt";
+                        lte: "lte";
+                        eq: "eq";
+                        ne: "ne";
+                    }>;
+                    value: z.ZodUnion<readonly [z.ZodNumber, z.ZodString, z.ZodBoolean]>;
+                }, z.core.$strip>>>;
+            }, z.core.$strip>>;
+            expression: z.ZodNullable<z.ZodString>;
+        }, z.core.$strip>>;
+        sharingModel: z.ZodNullable<z.ZodEnum<{
+            private: "private";
+            public_read: "public_read";
+            public_read_write: "public_read_write";
+            controlled_by_parent: "controlled_by_parent";
+        }>>;
+        nameField: z.ZodNullable<z.ZodString>;
+    }, z.core.$strip>>;
+    views: z.ZodNullable<z.ZodArray<z.ZodObject<{
+        object: z.ZodString;
+        name: z.ZodString;
+        label: z.ZodNullable<z.ZodString>;
+        type: z.ZodNullable<z.ZodEnum<{
+            form: "form";
+            kanban: "kanban";
+            gantt: "gantt";
+            gallery: "gallery";
+            calendar: "calendar";
+            list: "list";
+        }>>;
+        columns: z.ZodNullable<z.ZodArray<z.ZodString>>;
+        groupBy: z.ZodNullable<z.ZodString>;
+    }, z.core.$strip>>>;
+    dashboards: z.ZodNullable<z.ZodArray<z.ZodObject<{
+        name: z.ZodString;
+        label: z.ZodNullable<z.ZodString>;
+        widgets: z.ZodNullable<z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            title: z.ZodNullable<z.ZodString>;
+            object: z.ZodNullable<z.ZodString>;
+            chart: z.ZodNullable<z.ZodEnum<{
+                bar: "bar";
+                line: "line";
+                pie: "pie";
+                metric: "metric";
+                table: "table";
+            }>>;
+            measure: z.ZodNullable<z.ZodString>;
+            groupBy: z.ZodNullable<z.ZodString>;
+            condition: z.ZodNullable<z.ZodObject<{
+                field: z.ZodString;
+                op: z.ZodEnum<{
+                    gt: "gt";
+                    gte: "gte";
+                    lt: "lt";
+                    lte: "lte";
+                    eq: "eq";
+                    ne: "ne";
+                }>;
+                value: z.ZodUnion<readonly [z.ZodNumber, z.ZodString, z.ZodBoolean]>;
+            }, z.core.$strip>>;
+        }, z.core.$strip>>>;
+    }, z.core.$strip>>>;
+    app: z.ZodNullable<z.ZodObject<{
+        name: z.ZodString;
+        label: z.ZodNullable<z.ZodString>;
+        icon: z.ZodNullable<z.ZodString>;
+        nav: z.ZodNullable<z.ZodArray<z.ZodObject<{
+            type: z.ZodEnum<{
+                object: "object";
+                dashboard: "dashboard";
+            }>;
+            target: z.ZodString;
+            label: z.ZodNullable<z.ZodString>;
+            icon: z.ZodNullable<z.ZodString>;
+            viewName: z.ZodNullable<z.ZodString>;
+        }, z.core.$strip>>>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+
+// ── StateNodeConfig (type) ──
+type StateNodeConfig = {
+    type?: 'atomic' | 'compound' | 'parallel' | 'final' | 'history';
+    entry?: ActionRef[];
+    exit?: ActionRef[];
+    on?: Record<string, string | Transition | Transition[]>;
+    always?: Transition[];
+    initial?: string;
+    states?: Record<string, StateNodeConfig>;
+    meta?: {
+        label?: string;
+        description?: string;
+        color?: string;
+        aiInstructions?: string;
+    };
+};
+
+// ── StructuredOutputConfig (type) ──
+type StructuredOutputConfig = z.input<typeof StructuredOutputConfigSchema>;
+
+// ── StructuredOutputConfigParsed (type) ──
+type StructuredOutputConfigParsed = z.infer<typeof StructuredOutputConfigSchema>;
+
+// ── StructuredOutputConfigSchema (const) ──
+declare const StructuredOutputConfigSchema: z.ZodObject<{
+    format: z.ZodEnum<{
+        regex: "regex";
+        json_schema: "json_schema";
+        json_object: "json_object";
+        grammar: "grammar";
+        xml: "xml";
+    }>;
+    schema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    strict: z.ZodDefault<z.ZodBoolean>;
+    retryOnValidationFailure: z.ZodDefault<z.ZodBoolean>;
+    maxRetries: z.ZodDefault<z.ZodNumber>;
+    fallbackFormat: z.ZodOptional<z.ZodEnum<{
+        regex: "regex";
+        json_schema: "json_schema";
+        json_object: "json_object";
+        grammar: "grammar";
+        xml: "xml";
+    }>>;
+    transformPipeline: z.ZodOptional<z.ZodArray<z.ZodEnum<{
+        trim: "trim";
+        parse_json: "parse_json";
+        validate: "validate";
+        coerce_types: "coerce_types";
+    }>>>;
+}, z.core.$strict>;
+
+// ── StructuredOutputFormat (type) ──
+type StructuredOutputFormat = z.input<typeof StructuredOutputFormatSchema>;
+
+// ── StructuredOutputFormatSchema (const) ──
+declare const StructuredOutputFormatSchema: z.ZodEnum<{
+    regex: "regex";
+    json_schema: "json_schema";
+    json_object: "json_object";
+    grammar: "grammar";
+    xml: "xml";
+}>;
+
+// ── TextContent (type) ──
+type TextContent = z.input<typeof TextContentSchema>;
+
+// ── TextContentSchema (const) ──
+declare const TextContentSchema: z.ZodObject<{
+    type: z.ZodLiteral<"text">;
+    text: z.ZodString;
+    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+}, z.core.$strip>;
+
+// ── TokenBudgetConfig (type) ──
+type TokenBudgetConfig = z.input<typeof TokenBudgetConfigSchema>;
+
+// ── TokenBudgetConfigParsed (type) ──
+type TokenBudgetConfigParsed = z.infer<typeof TokenBudgetConfigSchema>;
+
+// ── TokenBudgetConfigSchema (const) ──
+declare const TokenBudgetConfigSchema: z.ZodObject<{
+    maxTokens: z.ZodNumber;
+    maxPromptTokens: z.ZodOptional<z.ZodNumber>;
+    maxCompletionTokens: z.ZodOptional<z.ZodNumber>;
+    reserveTokens: z.ZodDefault<z.ZodNumber>;
+    bufferPercentage: z.ZodDefault<z.ZodNumber>;
+    strategy: z.ZodDefault<z.ZodEnum<{
+        summary: "summary";
+        importance: "importance";
+        fifo: "fifo";
+        semantic: "semantic";
+        sliding_window: "sliding_window";
+    }>>;
+    slidingWindowSize: z.ZodOptional<z.ZodNumber>;
+    minImportanceScore: z.ZodOptional<z.ZodNumber>;
+    semanticThreshold: z.ZodOptional<z.ZodNumber>;
+    enableSummarization: z.ZodDefault<z.ZodBoolean>;
+    summarizationThreshold: z.ZodOptional<z.ZodNumber>;
+    summaryModel: z.ZodOptional<z.ZodString>;
+    warnThreshold: z.ZodDefault<z.ZodNumber>;
+}, z.core.$strip>;
+
+// ── TokenBudgetStrategy (type) ──
+type TokenBudgetStrategy = z.input<typeof TokenBudgetStrategySchema>;
+
+// ── TokenBudgetStrategySchema (const) ──
+declare const TokenBudgetStrategySchema: z.ZodEnum<{
+    summary: "summary";
+    importance: "importance";
+    fifo: "fifo";
+    semantic: "semantic";
+    sliding_window: "sliding_window";
+}>;
+
+// ── TokenUsage (type) ──
+type TokenUsage = z.input<typeof TokenUsageSchema>;
+
+// ── TokenUsageSchema (const) ──
+declare const TokenUsageSchema: z.ZodObject<{
+    promptTokens: z.ZodNumber;
+    completionTokens: z.ZodNumber;
+    totalTokens: z.ZodNumber;
+}, z.core.$strip>;
+
+// ── TokenUsageStats (type) ──
+type TokenUsageStats = z.input<typeof TokenUsageStatsSchema>;
+
+// ── TokenUsageStatsParsed (type) ──
+type TokenUsageStatsParsed = z.infer<typeof TokenUsageStatsSchema>;
+
+// ── TokenUsageStatsSchema (const) ──
+declare const TokenUsageStatsSchema: z.ZodObject<{
+    promptTokens: z.ZodDefault<z.ZodNumber>;
+    completionTokens: z.ZodDefault<z.ZodNumber>;
+    totalTokens: z.ZodDefault<z.ZodNumber>;
+    budgetLimit: z.ZodNumber;
+    budgetUsed: z.ZodDefault<z.ZodNumber>;
+    budgetRemaining: z.ZodNumber;
+    budgetPercentage: z.ZodNumber;
+    messageCount: z.ZodDefault<z.ZodNumber>;
+    prunedMessageCount: z.ZodDefault<z.ZodNumber>;
+    summarizedMessageCount: z.ZodDefault<z.ZodNumber>;
+}, z.core.$strip>;
+
+// ── Tool (type) ──
+type Tool = z.input<typeof ToolSchema>;
+
+// ── ToolCall (type) ──
+type ToolCall = z.input<typeof ToolCallSchema>;
+
+// ── ToolCallParsed (type) ──
+type ToolCallParsed = z.infer<typeof ToolCallSchema>;
+
+// ── ToolCallSchema (const) ──
+declare const ToolCallSchema: z.ZodObject<{
+    id: z.ZodString;
+    type: z.ZodDefault<z.ZodEnum<{
+        function: "function";
+    }>>;
+    function: z.ZodObject<{
+        name: z.ZodString;
+        arguments: z.ZodString;
+        result: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>;
+}, z.core.$strip>;
+
+// ── ToolSchema (const) ──
+declare const ToolSchema: z.ZodObject<{
+    _lock: z.ZodOptional<z.ZodEnum<{
+        none: "none";
+        "no-overlay": "no-overlay";
+        "no-delete": "no-delete";
+        full: "full";
+    }>>;
+    _lockReason: z.ZodOptional<z.ZodString>;
+    _lockSource: z.ZodOptional<z.ZodEnum<{
+        artifact: "artifact";
+        package: "package";
+        "env-forced": "env-forced";
+    }>>;
+    _provenance: z.ZodOptional<z.ZodEnum<{
+        package: "package";
+        "env-forced": "env-forced";
+        org: "org";
+    }>>;
+    _packageId: z.ZodOptional<z.ZodString>;
+    _packageVersion: z.ZodOptional<z.ZodString>;
+    _lockDocsUrl: z.ZodOptional<z.ZodString>;
+    name: z.ZodString;
+    label: z.ZodString;
+    description: z.ZodString;
+    parameters: z.ZodRecord<z.ZodString, z.ZodUnknown>;
+    outputSchema: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    objectName: z.ZodOptional<z.ZodString>;
+    protection: z.ZodOptional<z.ZodObject<{
+        lock: z.ZodEnum<{
+            none: "none";
+            "no-overlay": "no-overlay";
+            "no-delete": "no-delete";
+            full: "full";
+        }>;
+        reason: z.ZodString;
+        docsUrl: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+
+// ── TransformPipelineStep (type) ──
+type TransformPipelineStep = z.input<typeof TransformPipelineStepSchema>;
+
+// ── TransformPipelineStepSchema (const) ──
+declare const TransformPipelineStepSchema: z.ZodEnum<{
+    trim: "trim";
+    parse_json: "parse_json";
+    validate: "validate";
+    coerce_types: "coerce_types";
+}>;
+
+// ── VectorStore (type) ──
+type VectorStore = z.input<typeof VectorStoreSchema>;
+
+// ── VectorStoreProvider (type) ──
+type VectorStoreProvider = z.input<typeof VectorStoreProviderSchema>;
+
+// ── VectorStoreProviderSchema (const) ──
+declare const VectorStoreProviderSchema: z.ZodEnum<{
+    custom: "custom";
+    redis: "redis";
+    pgvector: "pgvector";
+    chroma: "chroma";
+    qdrant: "qdrant";
+    pinecone: "pinecone";
+    weaviate: "weaviate";
+    milvus: "milvus";
+    opensearch: "opensearch";
+    elasticsearch: "elasticsearch";
+}>;
+
+// ── VectorStoreSchema (const) ──
+declare const VectorStoreSchema: z.ZodObject<{
+    provider: z.ZodEnum<{
+        custom: "custom";
+        redis: "redis";
+        pgvector: "pgvector";
+        chroma: "chroma";
+        qdrant: "qdrant";
+        pinecone: "pinecone";
+        weaviate: "weaviate";
+        milvus: "milvus";
+        opensearch: "opensearch";
+        elasticsearch: "elasticsearch";
+    }>;
+    collection: z.ZodString;
+    endpoint: z.ZodOptional<z.ZodString>;
+    secretRef: z.ZodOptional<z.ZodString>;
+    dimensions: z.ZodOptional<z.ZodNumber>;
+}, z.core.$strip>;
+
+// ── agentForm (const) ──
+declare const agentForm: {
+    type: "split" | "drawer" | "modal" | "simple" | "tabbed" | "wizard";
+    layout?: "grid" | "inline" | "vertical" | "horizontal" | undefined;
+    columns?: number | undefined;
+    title?: string | undefined;
+    description?: string | undefined;
+    defaultTab?: string | undefined;
+    tabPosition?: "left" | "right" | "top" | "bottom" | undefined;
+    allowSkip?: boolean | undefined;
+    showStepIndicator?: boolean | undefined;
+    splitDirection?: "vertical" | "horizontal" | undefined;
+    splitSize?: number | undefined;
+    splitResizable?: boolean | undefined;
+    drawerSide?: "left" | "right" | "top" | "bottom" | undefined;
+    drawerWidth?: string | undefined;
+    modalSize?: "default" | "full" | "sm" | "lg" | "xl" | undefined;
+    data?: {
+        provider: "object";
+        object: string;
+    } | {
+        provider: "api";
+        read?: {
+            url: string;
+            method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
+            headers?: Record<string, string> | undefined;
+            params?: Record<string, unknown> | undefined;
+            body?: unknown;
+        } | undefined;
+        write?: {
+            url: string;
+            method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
+            headers?: Record<string, string> | undefined;
+            params?: Record<string, unknown> | undefined;
+            body?: unknown;
+        } | undefined;
+    } | {
+        provider: "value";
+        items: unknown[];
+    } | {
+        provider: "schema";
+        schemaId: string;
+        schema?: Record<string, unknown> | undefined;
+    } | undefined;
+    sections?: Omit<{
+        collapsible: boolean;
+        collapsed: boolean;
+        columns: 1 | 2 | 4 | 3;
+        name?: string | undefined;
+        label?: string | (Record<string, string> & {
+            key?: never;
+            defaultValue?: never;
+        }) | undefined;
+        description?: string | undefined;
+        visibleWhen?: {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | undefined;
+        visibleOn?: {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | undefined;
+        pane?: "primary" | "secondary" | undefined;
+        group?: string | undefined;
+        fields?: (string | FormField)[] | undefined;
+    }, "visibleOn" | "visibility">[] | undefined;
+    groups?: Omit<{
+        collapsible: boolean;
+        collapsed: boolean;
+        columns: 1 | 2 | 4 | 3;
+        name?: string | undefined;
+        label?: string | (Record<string, string> & {
+            key?: never;
+            defaultValue?: never;
+        }) | undefined;
+        description?: string | undefined;
+        visibleWhen?: {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | undefined;
+        visibleOn?: {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | undefined;
+        pane?: "primary" | "secondary" | undefined;
+        group?: string | undefined;
+        fields?: (string | FormField)[] | undefined;
+    }, "visibleOn" | "visibility">[] | undefined;
+    subforms?: {
+        childObject: string;
+        relationshipField?: string | undefined;
+        columns?: any[] | undefined;
+        amountField?: string | undefined;
+        totalField?: string | undefined;
+        title?: string | undefined;
+        addLabel?: string | undefined;
+        minRows?: number | undefined;
+        maxRows?: number | undefined;
+    }[] | undefined;
+    defaultSort?: undefined;
+    sharing?: {
+        enabled: boolean;
+        allowAnonymous: boolean;
+        publicLink?: string | undefined;
+        password?: string | undefined;
+        allowedDomains?: string[] | undefined;
+        expiresAt?: string | undefined;
+    } | undefined;
+    submitBehavior?: {
+        kind: "thank-you";
+        title?: string | undefined;
+        message?: string | undefined;
+    } | {
+        kind: "redirect";
+        url: string;
+        delayMs?: number | undefined;
+    } | {
+        kind: "continue";
+    } | {
+        kind: "next-record";
+    } | undefined;
+    buttons?: {
+        submit?: {
+            show?: boolean | undefined;
+            label?: string | (Record<string, string> & {
+                key?: never;
+                defaultValue?: never;
+            }) | undefined;
+        } | undefined;
+        cancel?: {
+            show?: boolean | undefined;
+            label?: string | (Record<string, string> & {
+                key?: never;
+                defaultValue?: never;
+            }) | undefined;
+        } | undefined;
+        reset?: {
+            show?: boolean | undefined;
+            label?: string | (Record<string, string> & {
+                key?: never;
+                defaultValue?: never;
+            }) | undefined;
+        } | undefined;
+    } | undefined;
+    defaults?: Record<string, unknown> | undefined;
+    aria?: undefined;
+};
+
+// ── defineAgent (function) ──
+declare function defineAgent(config: z.input<typeof AgentSchema>): AgentParsed;
+
+// ── defineSkill (function) ──
+declare function defineSkill(config: z.input<typeof SkillSchema>): SkillParsed;
+
+// ── defineSolutionBlueprint (function) ──
+declare function defineSolutionBlueprint(config: z.input<typeof SolutionBlueprintSchema>): SolutionBlueprintParsed;
+
+// ── defineTool (function) ──
+declare function defineTool(config: z.input<typeof ToolSchema>): Tool;
+
+// ── scopesToAgentPermissionSets (function) ──
+declare function scopesToAgentPermissionSets(scopes: readonly string[] | undefined): string[];
+
+// ── skillForm (const) ──
+declare const skillForm: {
+    type: "split" | "drawer" | "modal" | "simple" | "tabbed" | "wizard";
+    layout?: "grid" | "inline" | "vertical" | "horizontal" | undefined;
+    columns?: number | undefined;
+    title?: string | undefined;
+    description?: string | undefined;
+    defaultTab?: string | undefined;
+    tabPosition?: "left" | "right" | "top" | "bottom" | undefined;
+    allowSkip?: boolean | undefined;
+    showStepIndicator?: boolean | undefined;
+    splitDirection?: "vertical" | "horizontal" | undefined;
+    splitSize?: number | undefined;
+    splitResizable?: boolean | undefined;
+    drawerSide?: "left" | "right" | "top" | "bottom" | undefined;
+    drawerWidth?: string | undefined;
+    modalSize?: "default" | "full" | "sm" | "lg" | "xl" | undefined;
+    data?: {
+        provider: "object";
+        object: string;
+    } | {
+        provider: "api";
+        read?: {
+            url: string;
+            method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
+            headers?: Record<string, string> | undefined;
+            params?: Record<string, unknown> | undefined;
+            body?: unknown;
+        } | undefined;
+        write?: {
+            url: string;
+            method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
+            headers?: Record<string, string> | undefined;
+            params?: Record<string, unknown> | undefined;
+            body?: unknown;
+        } | undefined;
+    } | {
+        provider: "value";
+        items: unknown[];
+    } | {
+        provider: "schema";
+        schemaId: string;
+        schema?: Record<string, unknown> | undefined;
+    } | undefined;
+    sections?: Omit<{
+        collapsible: boolean;
+        collapsed: boolean;
+        columns: 1 | 2 | 4 | 3;
+        name?: string | undefined;
+        label?: string | (Record<string, string> & {
+            key?: never;
+            defaultValue?: never;
+        }) | undefined;
+        description?: string | undefined;
+        visibleWhen?: {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | undefined;
+        visibleOn?: {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | undefined;
+        pane?: "primary" | "secondary" | undefined;
+        group?: string | undefined;
+        fields?: (string | FormField)[] | undefined;
+    }, "visibleOn" | "visibility">[] | undefined;
+    groups?: Omit<{
+        collapsible: boolean;
+        collapsed: boolean;
+        columns: 1 | 2 | 4 | 3;
+        name?: string | undefined;
+        label?: string | (Record<string, string> & {
+            key?: never;
+            defaultValue?: never;
+        }) | undefined;
+        description?: string | undefined;
+        visibleWhen?: {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | undefined;
+        visibleOn?: {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | undefined;
+        pane?: "primary" | "secondary" | undefined;
+        group?: string | undefined;
+        fields?: (string | FormField)[] | undefined;
+    }, "visibleOn" | "visibility">[] | undefined;
+    subforms?: {
+        childObject: string;
+        relationshipField?: string | undefined;
+        columns?: any[] | undefined;
+        amountField?: string | undefined;
+        totalField?: string | undefined;
+        title?: string | undefined;
+        addLabel?: string | undefined;
+        minRows?: number | undefined;
+        maxRows?: number | undefined;
+    }[] | undefined;
+    defaultSort?: undefined;
+    sharing?: {
+        enabled: boolean;
+        allowAnonymous: boolean;
+        publicLink?: string | undefined;
+        password?: string | undefined;
+        allowedDomains?: string[] | undefined;
+        expiresAt?: string | undefined;
+    } | undefined;
+    submitBehavior?: {
+        kind: "thank-you";
+        title?: string | undefined;
+        message?: string | undefined;
+    } | {
+        kind: "redirect";
+        url: string;
+        delayMs?: number | undefined;
+    } | {
+        kind: "continue";
+    } | {
+        kind: "next-record";
+    } | undefined;
+    buttons?: {
+        submit?: {
+            show?: boolean | undefined;
+            label?: string | (Record<string, string> & {
+                key?: never;
+                defaultValue?: never;
+            }) | undefined;
+        } | undefined;
+        cancel?: {
+            show?: boolean | undefined;
+            label?: string | (Record<string, string> & {
+                key?: never;
+                defaultValue?: never;
+            }) | undefined;
+        } | undefined;
+        reset?: {
+            show?: boolean | undefined;
+            label?: string | (Record<string, string> & {
+                key?: never;
+                defaultValue?: never;
+            }) | undefined;
+        } | undefined;
+    } | undefined;
+    defaults?: Record<string, unknown> | undefined;
+    aria?: undefined;
+};
+
+// ── toolForm (const) ──
+declare const toolForm: {
+    type: "split" | "drawer" | "modal" | "simple" | "tabbed" | "wizard";
+    layout?: "grid" | "inline" | "vertical" | "horizontal" | undefined;
+    columns?: number | undefined;
+    title?: string | undefined;
+    description?: string | undefined;
+    defaultTab?: string | undefined;
+    tabPosition?: "left" | "right" | "top" | "bottom" | undefined;
+    allowSkip?: boolean | undefined;
+    showStepIndicator?: boolean | undefined;
+    splitDirection?: "vertical" | "horizontal" | undefined;
+    splitSize?: number | undefined;
+    splitResizable?: boolean | undefined;
+    drawerSide?: "left" | "right" | "top" | "bottom" | undefined;
+    drawerWidth?: string | undefined;
+    modalSize?: "default" | "full" | "sm" | "lg" | "xl" | undefined;
+    data?: {
+        provider: "object";
+        object: string;
+    } | {
+        provider: "api";
+        read?: {
+            url: string;
+            method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
+            headers?: Record<string, string> | undefined;
+            params?: Record<string, unknown> | undefined;
+            body?: unknown;
+        } | undefined;
+        write?: {
+            url: string;
+            method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
+            headers?: Record<string, string> | undefined;
+            params?: Record<string, unknown> | undefined;
+            body?: unknown;
+        } | undefined;
+    } | {
+        provider: "value";
+        items: unknown[];
+    } | {
+        provider: "schema";
+        schemaId: string;
+        schema?: Record<string, unknown> | undefined;
+    } | undefined;
+    sections?: Omit<{
+        collapsible: boolean;
+        collapsed: boolean;
+        columns: 1 | 2 | 4 | 3;
+        name?: string | undefined;
+        label?: string | (Record<string, string> & {
+            key?: never;
+            defaultValue?: never;
+        }) | undefined;
+        description?: string | undefined;
+        visibleWhen?: {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | undefined;
+        visibleOn?: {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | undefined;
+        pane?: "primary" | "secondary" | undefined;
+        group?: string | undefined;
+        fields?: (string | FormField)[] | undefined;
+    }, "visibleOn" | "visibility">[] | undefined;
+    groups?: Omit<{
+        collapsible: boolean;
+        collapsed: boolean;
+        columns: 1 | 2 | 4 | 3;
+        name?: string | undefined;
+        label?: string | (Record<string, string> & {
+            key?: never;
+            defaultValue?: never;
+        }) | undefined;
+        description?: string | undefined;
+        visibleWhen?: {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | undefined;
+        visibleOn?: {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | {
+            dialect: "cel" | "cron" | "template";
+            source?: string | undefined;
+            ast?: unknown;
+            meta?: {
+                rationale?: string | undefined;
+                generatedBy?: string | undefined;
+            } | undefined;
+        } | undefined;
+        pane?: "primary" | "secondary" | undefined;
+        group?: string | undefined;
+        fields?: (string | FormField)[] | undefined;
+    }, "visibleOn" | "visibility">[] | undefined;
+    subforms?: {
+        childObject: string;
+        relationshipField?: string | undefined;
+        columns?: any[] | undefined;
+        amountField?: string | undefined;
+        totalField?: string | undefined;
+        title?: string | undefined;
+        addLabel?: string | undefined;
+        minRows?: number | undefined;
+        maxRows?: number | undefined;
+    }[] | undefined;
+    defaultSort?: undefined;
+    sharing?: {
+        enabled: boolean;
+        allowAnonymous: boolean;
+        publicLink?: string | undefined;
+        password?: string | undefined;
+        allowedDomains?: string[] | undefined;
+        expiresAt?: string | undefined;
+    } | undefined;
+    submitBehavior?: {
+        kind: "thank-you";
+        title?: string | undefined;
+        message?: string | undefined;
+    } | {
+        kind: "redirect";
+        url: string;
+        delayMs?: number | undefined;
+    } | {
+        kind: "continue";
+    } | {
+        kind: "next-record";
+    } | undefined;
+    buttons?: {
+        submit?: {
+            show?: boolean | undefined;
+            label?: string | (Record<string, string> & {
+                key?: never;
+                defaultValue?: never;
+            }) | undefined;
+        } | undefined;
+        cancel?: {
+            show?: boolean | undefined;
+            label?: string | (Record<string, string> & {
+                key?: never;
+                defaultValue?: never;
+            }) | undefined;
+        } | undefined;
+        reset?: {
+            show?: boolean | undefined;
+            label?: string | (Record<string, string> & {
+                key?: never;
+                defaultValue?: never;
+            }) | undefined;
+        } | undefined;
+    } | undefined;
+    defaults?: Record<string, unknown> | undefined;
+    aria?: undefined;
+};
