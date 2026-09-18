@@ -29,8 +29,8 @@ declare const ACTION_PARAM_BUILTIN_KEYS: readonly string[];
 declare const AIChatWindowProps: z.ZodObject<{
     mode: z.ZodDefault<z.ZodEnum<{
         float: "float";
-        inline: "inline";
         sidebar: "sidebar";
+        inline: "inline";
     }>>;
     agentId: z.ZodOptional<z.ZodString>;
     context: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
@@ -3004,8 +3004,8 @@ declare const ComponentPropsMap: {
         }, z.core.$strict>>;
         allowMultiple: z.ZodDefault<z.ZodBoolean>;
         variant: z.ZodDefault<z.ZodEnum<{
-            flush: "flush";
             card: "card";
+            flush: "flush";
         }>>;
         aria: z.ZodOptional<z.ZodObject<{
             ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
@@ -3099,8 +3099,8 @@ declare const ComponentPropsMap: {
         sort: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodArray<z.ZodObject<{
             field: z.ZodString;
             order: z.ZodEnum<{
-                desc: "desc";
                 asc: "asc";
+                desc: "desc";
             }>;
         }, z.core.$strict>>]>>;
         limit: z.ZodDefault<z.ZodNumber>;
@@ -3244,14 +3244,14 @@ declare const ComponentPropsMap: {
             file: "file";
             email: "email";
             system: "system";
-            approval: "approval";
             sharing: "sharing";
-            event: "event";
+            approval: "approval";
             comment: "comment";
-            note: "note";
             field_change: "field_change";
             task: "task";
+            event: "event";
             call: "call";
+            note: "note";
             record_create: "record_create";
             record_delete: "record_delete";
         }>, z.ZodString]>>>;
@@ -3302,14 +3302,14 @@ declare const ComponentPropsMap: {
                 file: "file";
                 email: "email";
                 system: "system";
-                approval: "approval";
                 sharing: "sharing";
-                event: "event";
+                approval: "approval";
                 comment: "comment";
-                note: "note";
                 field_change: "field_change";
                 task: "task";
+                event: "event";
                 call: "call";
+                note: "note";
                 record_create: "record_create";
                 record_delete: "record_delete";
             }>, z.ZodString]>>>;
@@ -3378,14 +3378,14 @@ declare const ComponentPropsMap: {
                 file: "file";
                 email: "email";
                 system: "system";
-                approval: "approval";
                 sharing: "sharing";
-                event: "event";
+                approval: "approval";
                 comment: "comment";
-                note: "note";
                 field_change: "field_change";
                 task: "task";
+                event: "event";
                 call: "call";
+                note: "note";
                 record_create: "record_create";
                 record_delete: "record_delete";
             }>, z.ZodString]>>>;
@@ -3494,8 +3494,8 @@ declare const ComponentPropsMap: {
         severity: z.ZodOptional<z.ZodEnum<{
             error: "error";
             success: "success";
-            info: "info";
             warning: "warning";
+            info: "info";
         }>>;
         title: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
             key?: never;
@@ -3564,9 +3564,9 @@ declare const ComponentPropsMap: {
                 default: "default";
                 link: "link";
                 secondary: "secondary";
-                ghost: "ghost";
-                outline: "outline";
                 destructive: "destructive";
+                outline: "outline";
+                ghost: "ghost";
             }>>;
         }, z.core.$strict>>;
         dismissible: z.ZodOptional<z.ZodBoolean>;
@@ -3593,15 +3593,15 @@ declare const ComponentPropsMap: {
             default: "default";
             link: "link";
             secondary: "secondary";
-            ghost: "ghost";
-            outline: "outline";
             destructive: "destructive";
+            outline: "outline";
+            ghost: "ghost";
         }>>;
         size: z.ZodOptional<z.ZodEnum<{
             default: "default";
-            icon: "icon";
             sm: "sm";
             lg: "lg";
+            icon: "icon";
         }>>;
     }, z.core.$strict>;
     readonly 'record:history': z.ZodObject<{
@@ -3621,8 +3621,8 @@ declare const ComponentPropsMap: {
     readonly 'ai:chat_window': z.ZodObject<{
         mode: z.ZodDefault<z.ZodEnum<{
             float: "float";
-            inline: "inline";
             sidebar: "sidebar";
+            inline: "inline";
         }>>;
         agentId: z.ZodOptional<z.ZodString>;
         context: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
@@ -3662,10 +3662,9 @@ declare const ComponentPropsMap: {
             defaultValue?: never;
         }>>]>;
         variant: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
-            body: "body";
-            heading: "heading";
             caption: "caption";
-            subheading: "subheading";
+            heading: "heading";
+            body: "body";
             h1: "h1";
             h2: "h2";
             h3: "h3";
@@ -3673,6 +3672,7 @@ declare const ComponentPropsMap: {
             h5: "h5";
             h6: "h6";
             overline: "overline";
+            subheading: "subheading";
         }>>>;
         align: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
             left: "left";
@@ -3701,9 +3701,9 @@ declare const ComponentPropsMap: {
         object: z.ZodString;
         field: z.ZodOptional<z.ZodString>;
         aggregate: z.ZodEnum<{
-            count: "count";
             min: "min";
             max: "max";
+            count: "count";
             sum: "sum";
             avg: "avg";
         }>;
@@ -3787,8 +3787,8 @@ declare const ComponentPropsMap: {
     }, z.core.$strict>;
     readonly 'element:metadata_viewer': z.ZodObject<{
         type: z.ZodEnum<{
-            state_machine: "state_machine";
             flow: "flow";
+            state_machine: "state_machine";
             permission: "permission";
         }>;
         name: z.ZodString;
@@ -3844,8 +3844,8 @@ declare const ComponentPropsMap: {
         }>>>;
         size: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
             small: "small";
-            medium: "medium";
             large: "large";
+            medium: "medium";
         }>>>;
         icon: z.ZodOptional<z.ZodString>;
         iconPosition: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
@@ -3857,10 +3857,10 @@ declare const ComponentPropsMap: {
             type: z.ZodDefault<z.ZodEnum<{
                 url: "url";
                 form: "form";
-                script: "script";
-                modal: "modal";
-                flow: "flow";
                 api: "api";
+                modal: "modal";
+                script: "script";
+                flow: "flow";
             }>>;
             target: z.ZodOptional<z.ZodString>;
             params: z.ZodOptional<z.ZodArray<z.ZodPipe<z.ZodObject<{
@@ -3887,17 +3887,14 @@ declare const ComponentPropsMap: {
                     date: "date";
                     record: "record";
                     file: "file";
-                    tags: "tags";
                     email: "email";
-                    phone: "phone";
-                    user: "user";
-                    datetime: "datetime";
-                    location: "location";
-                    text: "text";
                     url: "url";
+                    datetime: "datetime";
                     time: "time";
                     formula: "formula";
+                    text: "text";
                     textarea: "textarea";
+                    phone: "phone";
                     password: "password";
                     secret: "secret";
                     markdown: "markdown";
@@ -3913,6 +3910,7 @@ declare const ComponentPropsMap: {
                     lookup: "lookup";
                     master_detail: "master_detail";
                     tree: "tree";
+                    user: "user";
                     image: "image";
                     avatar: "avatar";
                     video: "video";
@@ -3921,6 +3919,7 @@ declare const ComponentPropsMap: {
                     autonumber: "autonumber";
                     composite: "composite";
                     repeater: "repeater";
+                    location: "location";
                     address: "address";
                     json: "json";
                     color: "color";
@@ -3929,6 +3928,7 @@ declare const ComponentPropsMap: {
                     signature: "signature";
                     qrcode: "qrcode";
                     progress: "progress";
+                    tags: "tags";
                     vector: "vector";
                 }>>;
                 required: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
@@ -4021,7 +4021,7 @@ declare const ComponentPropsMap: {
                     key?: never;
                     defaultValue?: never;
                 }) | undefined;
-                type?: "number" | "boolean" | "code" | "date" | "record" | "file" | "tags" | "email" | "phone" | "user" | "datetime" | "location" | "text" | "url" | "time" | "formula" | "textarea" | "password" | "secret" | "markdown" | "html" | "richtext" | "currency" | "percent" | "toggle" | "select" | "multiselect" | "radio" | "checkboxes" | "lookup" | "master_detail" | "tree" | "image" | "avatar" | "video" | "audio" | "summary" | "autonumber" | "composite" | "repeater" | "address" | "json" | "color" | "rating" | "slider" | "signature" | "qrcode" | "progress" | "vector" | undefined;
+                type?: "number" | "boolean" | "code" | "date" | "record" | "file" | "email" | "url" | "datetime" | "time" | "formula" | "text" | "textarea" | "phone" | "password" | "secret" | "markdown" | "html" | "richtext" | "currency" | "percent" | "toggle" | "select" | "multiselect" | "radio" | "checkboxes" | "lookup" | "master_detail" | "tree" | "user" | "image" | "avatar" | "video" | "audio" | "summary" | "autonumber" | "composite" | "repeater" | "location" | "address" | "json" | "color" | "rating" | "slider" | "signature" | "qrcode" | "progress" | "tags" | "vector" | undefined;
                 options?: {
                     label: string | (Record<string, string> & {
                         key?: never;
@@ -4082,7 +4082,7 @@ declare const ComponentPropsMap: {
                     key?: never;
                     defaultValue?: never;
                 }) | undefined;
-                type?: "number" | "boolean" | "code" | "date" | "record" | "file" | "tags" | "email" | "phone" | "user" | "datetime" | "location" | "text" | "url" | "time" | "formula" | "textarea" | "password" | "secret" | "markdown" | "html" | "richtext" | "currency" | "percent" | "toggle" | "select" | "multiselect" | "radio" | "checkboxes" | "lookup" | "master_detail" | "tree" | "image" | "avatar" | "video" | "audio" | "summary" | "autonumber" | "composite" | "repeater" | "address" | "json" | "color" | "rating" | "slider" | "signature" | "qrcode" | "progress" | "vector" | undefined;
+                type?: "number" | "boolean" | "code" | "date" | "record" | "file" | "email" | "url" | "datetime" | "time" | "formula" | "text" | "textarea" | "phone" | "password" | "secret" | "markdown" | "html" | "richtext" | "currency" | "percent" | "toggle" | "select" | "multiselect" | "radio" | "checkboxes" | "lookup" | "master_detail" | "tree" | "user" | "image" | "avatar" | "video" | "audio" | "summary" | "autonumber" | "composite" | "repeater" | "location" | "address" | "json" | "color" | "rating" | "slider" | "signature" | "qrcode" | "progress" | "tags" | "vector" | undefined;
                 options?: {
                     label: string | (Record<string, string> & {
                         key?: never;
@@ -4136,19 +4136,6 @@ declare const ComponentPropsMap: {
                 requiresFeature?: "organization" | "twoFactor" | "multiOrgEnabled" | "degradedTenancy" | "oidcProvider" | "sso" | "ssoEnforced" | "deviceAuthorization" | "admin" | "phoneNumber" | "phoneNumberOtp" | undefined;
             }>>>>;
             name: z.ZodOptional<z.ZodString>;
-            label: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
-                key?: never;
-                defaultValue?: never;
-            }, Record<string, string> & {
-                key?: never;
-                defaultValue?: never;
-            }, z.core.$ZodTypeInternals<Record<string, string> & {
-                key?: never;
-                defaultValue?: never;
-            }, Record<string, string> & {
-                key?: never;
-                defaultValue?: never;
-            }>>]>>;
             errorMessage: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
                 key?: never;
                 defaultValue?: never;
@@ -4162,11 +4149,22 @@ declare const ComponentPropsMap: {
                 key?: never;
                 defaultValue?: never;
             }>>]>>;
-            method: z.ZodOptional<z.ZodEnum<{
-                PUT: "PUT";
-                POST: "POST";
-                DELETE: "DELETE";
-                PATCH: "PATCH";
+            label: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
+                key?: never;
+                defaultValue?: never;
+            }, Record<string, string> & {
+                key?: never;
+                defaultValue?: never;
+            }, z.core.$ZodTypeInternals<Record<string, string> & {
+                key?: never;
+                defaultValue?: never;
+            }, Record<string, string> & {
+                key?: never;
+                defaultValue?: never;
+            }>>]>>;
+            openIn: z.ZodOptional<z.ZodEnum<{
+                self: "self";
+                "new-tab": "new-tab";
             }>>;
             confirmText: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
                 key?: never;
@@ -4181,12 +4179,14 @@ declare const ComponentPropsMap: {
                 key?: never;
                 defaultValue?: never;
             }>>]>>;
+            method: z.ZodOptional<z.ZodEnum<{
+                POST: "POST";
+                PUT: "PUT";
+                DELETE: "DELETE";
+                PATCH: "PATCH";
+            }>>;
             bodyExtra: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
             opensInNewTab: z.ZodOptional<z.ZodBoolean>;
-            openIn: z.ZodOptional<z.ZodEnum<{
-                self: "self";
-                "new-tab": "new-tab";
-            }>>;
             successMessage: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
                 key?: never;
                 defaultValue?: never;
@@ -4282,8 +4282,8 @@ declare const ComponentPropsMap: {
         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
             field: z.ZodString;
             order: z.ZodEnum<{
-                desc: "desc";
                 asc: "asc";
+                desc: "desc";
             }>;
         }, z.core.$strip>>>;
         limit: z.ZodOptional<z.ZodNumber>;
@@ -4339,8 +4339,8 @@ declare const ComponentPropsMap: {
         inputType: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
             number: "number";
             email: "email";
-            text: "text";
             url: "url";
+            text: "text";
             password: "password";
             tel: "tel";
         }>>>;
@@ -4465,8 +4465,8 @@ declare const ComponentPropsMap: {
         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
             field: z.ZodString;
             order: z.ZodEnum<{
-                desc: "desc";
                 asc: "asc";
+                desc: "desc";
             }>;
         }, z.core.$strip>>>;
         defaultSort: z.ZodOptional<z.ZodNever>;
@@ -4505,8 +4505,8 @@ declare const ComponentPropsMap: {
                 url: z.ZodString;
                 method: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
                     GET: "GET";
-                    PUT: "PUT";
                     POST: "POST";
+                    PUT: "PUT";
                     DELETE: "DELETE";
                     PATCH: "PATCH";
                 }>>>;
@@ -4518,8 +4518,8 @@ declare const ComponentPropsMap: {
                 url: z.ZodString;
                 method: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
                     GET: "GET";
-                    PUT: "PUT";
                     POST: "POST";
+                    PUT: "PUT";
                     DELETE: "DELETE";
                     PATCH: "PATCH";
                 }>>>;
@@ -4582,12 +4582,12 @@ declare const ComponentPropsMap: {
         colorVariant: z.ZodOptional<z.ZodEnum<{
             default: "default";
             success: "success";
-            warning: "warning";
             danger: "danger";
             blue: "blue";
             teal: "teal";
             orange: "orange";
             purple: "purple";
+            warning: "warning";
         }>>;
         aggregate: z.ZodOptional<z.ZodUnknown>;
         filter: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -4708,8 +4708,8 @@ declare const ComponentPropsMap: {
         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
             field: z.ZodString;
             order: z.ZodEnum<{
-                desc: "desc";
                 asc: "asc";
+                desc: "desc";
             }>;
         }, z.core.$strip>>>;
         data: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
@@ -4721,15 +4721,15 @@ declare const ComponentPropsMap: {
         objectName: z.ZodOptional<z.ZodString>;
         recordId: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
         mode: z.ZodOptional<z.ZodEnum<{
-            create: "create";
-            edit: "edit";
             view: "view";
+            edit: "edit";
+            create: "create";
         }>>;
         formType: z.ZodOptional<z.ZodEnum<{
             split: "split";
-            simple: "simple";
-            modal: "modal";
             drawer: "drawer";
+            modal: "modal";
+            simple: "simple";
             tabbed: "tabbed";
             wizard: "wizard";
         }>>;
@@ -4881,8 +4881,8 @@ declare const ComponentPropsMap: {
         objectName: z.ZodOptional<z.ZodString>;
         recordId: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
         mode: z.ZodOptional<z.ZodEnum<{
-            create: "create";
             edit: "edit";
+            create: "create";
         }>>;
         formType: z.ZodOptional<z.ZodEnum<{
             simple: "simple";
@@ -4946,8 +4946,8 @@ declare const ComponentPropsMap: {
                 url: z.ZodString;
                 method: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
                     GET: "GET";
-                    PUT: "PUT";
                     POST: "POST";
+                    PUT: "PUT";
                     DELETE: "DELETE";
                     PATCH: "PATCH";
                 }>>>;
@@ -4959,8 +4959,8 @@ declare const ComponentPropsMap: {
                 url: z.ZodString;
                 method: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
                     GET: "GET";
-                    PUT: "PUT";
                     POST: "POST";
+                    PUT: "PUT";
                     DELETE: "DELETE";
                     PATCH: "PATCH";
                 }>>>;
@@ -5006,8 +5006,8 @@ declare const ComponentPropsMap: {
         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
             field: z.ZodString;
             order: z.ZodEnum<{
-                desc: "desc";
                 asc: "asc";
+                desc: "desc";
             }>;
         }, z.core.$strip>>>;
         map: z.ZodOptional<z.ZodObject<{
@@ -5035,8 +5035,8 @@ declare const ComponentPropsMap: {
                 url: z.ZodString;
                 method: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
                     GET: "GET";
-                    PUT: "PUT";
                     POST: "POST";
+                    PUT: "PUT";
                     DELETE: "DELETE";
                     PATCH: "PATCH";
                 }>>>;
@@ -5048,8 +5048,8 @@ declare const ComponentPropsMap: {
                 url: z.ZodString;
                 method: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
                     GET: "GET";
-                    PUT: "PUT";
                     POST: "POST";
+                    PUT: "PUT";
                     DELETE: "DELETE";
                     PATCH: "PATCH";
                 }>>>;
@@ -5095,8 +5095,8 @@ declare const ComponentPropsMap: {
         sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
             field: z.ZodString;
             order: z.ZodEnum<{
-                desc: "desc";
                 asc: "asc";
+                desc: "desc";
             }>;
         }, z.core.$strip>>>;
         gantt: z.ZodOptional<z.ZodObject<{
@@ -5139,8 +5139,8 @@ declare const ComponentPropsMap: {
             lockField: z.ZodOptional<z.ZodString>;
             objectField: z.ZodOptional<z.ZodString>;
             summaryExtent: z.ZodOptional<z.ZodEnum<{
-                self: "self";
                 children: "children";
+                self: "self";
             }>>;
             defaultCollapsedDepth: z.ZodOptional<z.ZodNumber>;
             dependencyTypes: z.ZodOptional<z.ZodBoolean>;
@@ -5199,8 +5199,8 @@ declare const ComponentPropsMap: {
                 url: z.ZodString;
                 method: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
                     GET: "GET";
-                    PUT: "PUT";
                     POST: "POST";
+                    PUT: "PUT";
                     DELETE: "DELETE";
                     PATCH: "PATCH";
                 }>>>;
@@ -5212,8 +5212,8 @@ declare const ComponentPropsMap: {
                 url: z.ZodString;
                 method: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
                     GET: "GET";
-                    PUT: "PUT";
                     POST: "POST";
+                    PUT: "PUT";
                     DELETE: "DELETE";
                     PATCH: "PATCH";
                 }>>>;
@@ -6495,8 +6495,8 @@ declare const ElementButtonPropsSchema: z.ZodObject<{
     }>>>;
     size: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
         small: "small";
-        medium: "medium";
         large: "large";
+        medium: "medium";
     }>>>;
     icon: z.ZodOptional<z.ZodString>;
     iconPosition: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
@@ -6508,10 +6508,10 @@ declare const ElementButtonPropsSchema: z.ZodObject<{
         type: z.ZodDefault<z.ZodEnum<{
             url: "url";
             form: "form";
-            script: "script";
-            modal: "modal";
-            flow: "flow";
             api: "api";
+            modal: "modal";
+            script: "script";
+            flow: "flow";
         }>>;
         target: z.ZodOptional<z.ZodString>;
         params: z.ZodOptional<z.ZodArray<z.ZodPipe<z.ZodObject<{
@@ -6538,17 +6538,14 @@ declare const ElementButtonPropsSchema: z.ZodObject<{
                 date: "date";
                 record: "record";
                 file: "file";
-                tags: "tags";
                 email: "email";
-                phone: "phone";
-                user: "user";
-                datetime: "datetime";
-                location: "location";
-                text: "text";
                 url: "url";
+                datetime: "datetime";
                 time: "time";
                 formula: "formula";
+                text: "text";
                 textarea: "textarea";
+                phone: "phone";
                 password: "password";
                 secret: "secret";
                 markdown: "markdown";
@@ -6564,6 +6561,7 @@ declare const ElementButtonPropsSchema: z.ZodObject<{
                 lookup: "lookup";
                 master_detail: "master_detail";
                 tree: "tree";
+                user: "user";
                 image: "image";
                 avatar: "avatar";
                 video: "video";
@@ -6572,6 +6570,7 @@ declare const ElementButtonPropsSchema: z.ZodObject<{
                 autonumber: "autonumber";
                 composite: "composite";
                 repeater: "repeater";
+                location: "location";
                 address: "address";
                 json: "json";
                 color: "color";
@@ -6580,6 +6579,7 @@ declare const ElementButtonPropsSchema: z.ZodObject<{
                 signature: "signature";
                 qrcode: "qrcode";
                 progress: "progress";
+                tags: "tags";
                 vector: "vector";
             }>>;
             required: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
@@ -6672,7 +6672,7 @@ declare const ElementButtonPropsSchema: z.ZodObject<{
                 key?: never;
                 defaultValue?: never;
             }) | undefined;
-            type?: "number" | "boolean" | "code" | "date" | "record" | "file" | "tags" | "email" | "phone" | "user" | "datetime" | "location" | "text" | "url" | "time" | "formula" | "textarea" | "password" | "secret" | "markdown" | "html" | "richtext" | "currency" | "percent" | "toggle" | "select" | "multiselect" | "radio" | "checkboxes" | "lookup" | "master_detail" | "tree" | "image" | "avatar" | "video" | "audio" | "summary" | "autonumber" | "composite" | "repeater" | "address" | "json" | "color" | "rating" | "slider" | "signature" | "qrcode" | "progress" | "vector" | undefined;
+            type?: "number" | "boolean" | "code" | "date" | "record" | "file" | "email" | "url" | "datetime" | "time" | "formula" | "text" | "textarea" | "phone" | "password" | "secret" | "markdown" | "html" | "richtext" | "currency" | "percent" | "toggle" | "select" | "multiselect" | "radio" | "checkboxes" | "lookup" | "master_detail" | "tree" | "user" | "image" | "avatar" | "video" | "audio" | "summary" | "autonumber" | "composite" | "repeater" | "location" | "address" | "json" | "color" | "rating" | "slider" | "signature" | "qrcode" | "progress" | "tags" | "vector" | undefined;
             options?: {
                 label: string | (Record<string, string> & {
                     key?: never;
@@ -6733,7 +6733,7 @@ declare const ElementButtonPropsSchema: z.ZodObject<{
                 key?: never;
                 defaultValue?: never;
             }) | undefined;
-            type?: "number" | "boolean" | "code" | "date" | "record" | "file" | "tags" | "email" | "phone" | "user" | "datetime" | "location" | "text" | "url" | "time" | "formula" | "textarea" | "password" | "secret" | "markdown" | "html" | "richtext" | "currency" | "percent" | "toggle" | "select" | "multiselect" | "radio" | "checkboxes" | "lookup" | "master_detail" | "tree" | "image" | "avatar" | "video" | "audio" | "summary" | "autonumber" | "composite" | "repeater" | "address" | "json" | "color" | "rating" | "slider" | "signature" | "qrcode" | "progress" | "vector" | undefined;
+            type?: "number" | "boolean" | "code" | "date" | "record" | "file" | "email" | "url" | "datetime" | "time" | "formula" | "text" | "textarea" | "phone" | "password" | "secret" | "markdown" | "html" | "richtext" | "currency" | "percent" | "toggle" | "select" | "multiselect" | "radio" | "checkboxes" | "lookup" | "master_detail" | "tree" | "user" | "image" | "avatar" | "video" | "audio" | "summary" | "autonumber" | "composite" | "repeater" | "location" | "address" | "json" | "color" | "rating" | "slider" | "signature" | "qrcode" | "progress" | "tags" | "vector" | undefined;
             options?: {
                 label: string | (Record<string, string> & {
                     key?: never;
@@ -6787,19 +6787,6 @@ declare const ElementButtonPropsSchema: z.ZodObject<{
             requiresFeature?: "organization" | "twoFactor" | "multiOrgEnabled" | "degradedTenancy" | "oidcProvider" | "sso" | "ssoEnforced" | "deviceAuthorization" | "admin" | "phoneNumber" | "phoneNumberOtp" | undefined;
         }>>>>;
         name: z.ZodOptional<z.ZodString>;
-        label: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
-            key?: never;
-            defaultValue?: never;
-        }, Record<string, string> & {
-            key?: never;
-            defaultValue?: never;
-        }, z.core.$ZodTypeInternals<Record<string, string> & {
-            key?: never;
-            defaultValue?: never;
-        }, Record<string, string> & {
-            key?: never;
-            defaultValue?: never;
-        }>>]>>;
         errorMessage: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
             key?: never;
             defaultValue?: never;
@@ -6813,11 +6800,22 @@ declare const ElementButtonPropsSchema: z.ZodObject<{
             key?: never;
             defaultValue?: never;
         }>>]>>;
-        method: z.ZodOptional<z.ZodEnum<{
-            PUT: "PUT";
-            POST: "POST";
-            DELETE: "DELETE";
-            PATCH: "PATCH";
+        label: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
+            key?: never;
+            defaultValue?: never;
+        }, Record<string, string> & {
+            key?: never;
+            defaultValue?: never;
+        }, z.core.$ZodTypeInternals<Record<string, string> & {
+            key?: never;
+            defaultValue?: never;
+        }, Record<string, string> & {
+            key?: never;
+            defaultValue?: never;
+        }>>]>>;
+        openIn: z.ZodOptional<z.ZodEnum<{
+            self: "self";
+            "new-tab": "new-tab";
         }>>;
         confirmText: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
             key?: never;
@@ -6832,12 +6830,14 @@ declare const ElementButtonPropsSchema: z.ZodObject<{
             key?: never;
             defaultValue?: never;
         }>>]>>;
+        method: z.ZodOptional<z.ZodEnum<{
+            POST: "POST";
+            PUT: "PUT";
+            DELETE: "DELETE";
+            PATCH: "PATCH";
+        }>>;
         bodyExtra: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
         opensInNewTab: z.ZodOptional<z.ZodBoolean>;
-        openIn: z.ZodOptional<z.ZodEnum<{
-            self: "self";
-            "new-tab": "new-tab";
-        }>>;
         successMessage: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
             key?: never;
             defaultValue?: never;
@@ -6970,8 +6970,8 @@ declare const ElementImagePropsSchema: z.ZodObject<{
 // ── ElementMetadataViewerPropsSchema (const) ──
 declare const ElementMetadataViewerPropsSchema: z.ZodObject<{
     type: z.ZodEnum<{
-        state_machine: "state_machine";
         flow: "flow";
+        state_machine: "state_machine";
         permission: "permission";
     }>;
     name: z.ZodString;
@@ -7015,9 +7015,9 @@ declare const ElementNumberPropsSchema: z.ZodObject<{
     object: z.ZodString;
     field: z.ZodOptional<z.ZodString>;
     aggregate: z.ZodEnum<{
-        count: "count";
         min: "min";
         max: "max";
+        count: "count";
         sum: "sum";
         avg: "avg";
     }>;
@@ -7126,8 +7126,8 @@ declare const ElementRecordPickerPropsSchema: z.ZodObject<{
     sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
         field: z.ZodString;
         order: z.ZodEnum<{
-            desc: "desc";
             asc: "asc";
+            desc: "desc";
         }>;
     }, z.core.$strip>>>;
     limit: z.ZodOptional<z.ZodNumber>;
@@ -7185,8 +7185,8 @@ declare const ElementTextInputPropsSchema: z.ZodObject<{
     inputType: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
         number: "number";
         email: "email";
-        text: "text";
         url: "url";
+        text: "text";
         password: "password";
         tel: "tel";
     }>>>;
@@ -7268,10 +7268,9 @@ declare const ElementTextPropsSchema: z.ZodObject<{
         defaultValue?: never;
     }>>]>;
     variant: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
-        body: "body";
-        heading: "heading";
         caption: "caption";
-        subheading: "subheading";
+        heading: "heading";
+        body: "body";
         h1: "h1";
         h2: "h2";
         h3: "h3";
@@ -7279,6 +7278,7 @@ declare const ElementTextPropsSchema: z.ZodObject<{
         h5: "h5";
         h6: "h6";
         overline: "overline";
+        subheading: "subheading";
     }>>>;
     align: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
         left: "left";
@@ -7359,10 +7359,10 @@ declare const FieldWidgetPropsSchema: z.ZodObject<{
     error: z.ZodOptional<z.ZodString>;
     field: z.ZodObject<{
         _lock: z.ZodOptional<z.ZodEnum<{
-            full: "full";
             none: "none";
             "no-overlay": "no-overlay";
             "no-delete": "no-delete";
+            full: "full";
         }>>;
         _lockReason: z.ZodOptional<z.ZodString>;
         _lockSource: z.ZodOptional<z.ZodEnum<{
@@ -7387,17 +7387,14 @@ declare const FieldWidgetPropsSchema: z.ZodObject<{
             date: "date";
             record: "record";
             file: "file";
-            tags: "tags";
             email: "email";
-            phone: "phone";
-            user: "user";
-            datetime: "datetime";
-            location: "location";
-            text: "text";
             url: "url";
+            datetime: "datetime";
             time: "time";
             formula: "formula";
+            text: "text";
             textarea: "textarea";
+            phone: "phone";
             password: "password";
             secret: "secret";
             markdown: "markdown";
@@ -7413,6 +7410,7 @@ declare const FieldWidgetPropsSchema: z.ZodObject<{
             lookup: "lookup";
             master_detail: "master_detail";
             tree: "tree";
+            user: "user";
             image: "image";
             avatar: "avatar";
             video: "video";
@@ -7421,6 +7419,7 @@ declare const FieldWidgetPropsSchema: z.ZodObject<{
             autonumber: "autonumber";
             composite: "composite";
             repeater: "repeater";
+            location: "location";
             address: "address";
             json: "json";
             color: "color";
@@ -7429,6 +7428,7 @@ declare const FieldWidgetPropsSchema: z.ZodObject<{
             signature: "signature";
             qrcode: "qrcode";
             progress: "progress";
+            tags: "tags";
             vector: "vector";
         }>;
         description: z.ZodOptional<z.ZodString>;
@@ -7504,8 +7504,8 @@ declare const FieldWidgetPropsSchema: z.ZodObject<{
                 date: "date";
                 file: "file";
                 datetime: "datetime";
-                text: "text";
                 time: "time";
+                text: "text";
                 currency: "currency";
                 select: "select";
                 lookup: "lookup";
@@ -7636,9 +7636,9 @@ declare const FieldWidgetPropsSchema: z.ZodObject<{
             object: z.ZodString;
             field: z.ZodString;
             function: z.ZodEnum<{
-                count: "count";
                 min: "min";
                 max: "max";
+                count: "count";
                 sum: "sum";
                 avg: "avg";
             }>;
@@ -7728,8 +7728,8 @@ declare const FieldWidgetPropsSchema: z.ZodObject<{
         readonly: z.ZodDefault<z.ZodBoolean>;
         requiredPermissions: z.ZodOptional<z.ZodArray<z.ZodString>>;
         maskingRule: z.ZodOptional<z.ZodUnion<readonly [z.ZodEnum<{
-            name: "name";
             email: "email";
+            name: "name";
             phone: "phone";
             id_card: "id_card";
             bank_account: "bank_account";
@@ -10615,8 +10615,8 @@ type NotificationSeverity = z.input<typeof NotificationSeveritySchema>;
 declare const NotificationSeveritySchema: z.ZodEnum<{
     error: "error";
     success: "success";
-    info: "info";
     warning: "warning";
+    info: "info";
 }>;
 
 // ── NotificationType (type) ──
@@ -10624,11 +10624,11 @@ type NotificationType = z.input<typeof NotificationTypeSchema>;
 
 // ── NotificationTypeSchema (const) ──
 declare const NotificationTypeSchema: z.ZodEnum<{
-    alert: "alert";
-    toast: "toast";
     inline: "inline";
+    toast: "toast";
     banner: "banner";
     snackbar: "snackbar";
+    alert: "alert";
 }>;
 
 // ── ObjectCalendarProps (type) ──
@@ -10675,8 +10675,8 @@ declare const ObjectCalendarPropsSchema: z.ZodObject<{
     sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
         field: z.ZodString;
         order: z.ZodEnum<{
-            desc: "desc";
             asc: "asc";
+            desc: "desc";
         }>;
     }, z.core.$strip>>>;
     data: z.ZodOptional<z.ZodArray<z.ZodUnknown>>;
@@ -10693,15 +10693,15 @@ declare const ObjectFormPropsSchema: z.ZodObject<{
     objectName: z.ZodOptional<z.ZodString>;
     recordId: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
     mode: z.ZodOptional<z.ZodEnum<{
-        create: "create";
-        edit: "edit";
         view: "view";
+        edit: "edit";
+        create: "create";
     }>>;
     formType: z.ZodOptional<z.ZodEnum<{
         split: "split";
-        simple: "simple";
-        modal: "modal";
         drawer: "drawer";
+        modal: "modal";
+        simple: "simple";
         tabbed: "tabbed";
         wizard: "wizard";
     }>>;
@@ -10868,8 +10868,8 @@ declare const ObjectGanttPropsSchema: z.ZodObject<{
             url: z.ZodString;
             method: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
                 GET: "GET";
-                PUT: "PUT";
                 POST: "POST";
+                PUT: "PUT";
                 DELETE: "DELETE";
                 PATCH: "PATCH";
             }>>>;
@@ -10881,8 +10881,8 @@ declare const ObjectGanttPropsSchema: z.ZodObject<{
             url: z.ZodString;
             method: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
                 GET: "GET";
-                PUT: "PUT";
                 POST: "POST";
+                PUT: "PUT";
                 DELETE: "DELETE";
                 PATCH: "PATCH";
             }>>>;
@@ -10928,8 +10928,8 @@ declare const ObjectGanttPropsSchema: z.ZodObject<{
     sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
         field: z.ZodString;
         order: z.ZodEnum<{
-            desc: "desc";
             asc: "asc";
+            desc: "desc";
         }>;
     }, z.core.$strip>>>;
     gantt: z.ZodOptional<z.ZodObject<{
@@ -10972,8 +10972,8 @@ declare const ObjectGanttPropsSchema: z.ZodObject<{
         lockField: z.ZodOptional<z.ZodString>;
         objectField: z.ZodOptional<z.ZodString>;
         summaryExtent: z.ZodOptional<z.ZodEnum<{
-            self: "self";
             children: "children";
+            self: "self";
         }>>;
         defaultCollapsedDepth: z.ZodOptional<z.ZodNumber>;
         dependencyTypes: z.ZodOptional<z.ZodBoolean>;
@@ -11089,8 +11089,8 @@ declare const ObjectGridPropsSchema: z.ZodObject<{
     sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
         field: z.ZodString;
         order: z.ZodEnum<{
-            desc: "desc";
             asc: "asc";
+            desc: "desc";
         }>;
     }, z.core.$strip>>>;
     defaultSort: z.ZodOptional<z.ZodNever>;
@@ -11129,8 +11129,8 @@ declare const ObjectGridPropsSchema: z.ZodObject<{
             url: z.ZodString;
             method: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
                 GET: "GET";
-                PUT: "PUT";
                 POST: "POST";
+                PUT: "PUT";
                 DELETE: "DELETE";
                 PATCH: "PATCH";
             }>>>;
@@ -11142,8 +11142,8 @@ declare const ObjectGridPropsSchema: z.ZodObject<{
             url: z.ZodString;
             method: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
                 GET: "GET";
-                PUT: "PUT";
                 POST: "POST";
+                PUT: "PUT";
                 DELETE: "DELETE";
                 PATCH: "PATCH";
             }>>>;
@@ -11963,8 +11963,8 @@ declare const ObjectMapPropsSchema: z.ZodObject<{
             url: z.ZodString;
             method: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
                 GET: "GET";
-                PUT: "PUT";
                 POST: "POST";
+                PUT: "PUT";
                 DELETE: "DELETE";
                 PATCH: "PATCH";
             }>>>;
@@ -11976,8 +11976,8 @@ declare const ObjectMapPropsSchema: z.ZodObject<{
             url: z.ZodString;
             method: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
                 GET: "GET";
-                PUT: "PUT";
                 POST: "POST";
+                PUT: "PUT";
                 DELETE: "DELETE";
                 PATCH: "PATCH";
             }>>>;
@@ -12023,8 +12023,8 @@ declare const ObjectMapPropsSchema: z.ZodObject<{
     sort: z.ZodOptional<z.ZodArray<z.ZodObject<{
         field: z.ZodString;
         order: z.ZodEnum<{
-            desc: "desc";
             asc: "asc";
+            desc: "desc";
         }>;
     }, z.core.$strip>>>;
     map: z.ZodOptional<z.ZodObject<{
@@ -12050,8 +12050,8 @@ declare const ObjectMasterDetailFormPropsSchema: z.ZodObject<{
     objectName: z.ZodOptional<z.ZodString>;
     recordId: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodNumber]>>;
     mode: z.ZodOptional<z.ZodEnum<{
-        create: "create";
         edit: "edit";
+        create: "create";
     }>>;
     formType: z.ZodOptional<z.ZodEnum<{
         simple: "simple";
@@ -12157,12 +12157,12 @@ declare const ObjectMetricPropsSchema: z.ZodObject<{
     colorVariant: z.ZodOptional<z.ZodEnum<{
         default: "default";
         success: "success";
-        warning: "warning";
         danger: "danger";
         blue: "blue";
         teal: "teal";
         orange: "orange";
         purple: "purple";
+        warning: "warning";
     }>>;
     aggregate: z.ZodOptional<z.ZodUnknown>;
     filter: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -12291,8 +12291,8 @@ declare const ObjectTreePropsSchema: z.ZodObject<{
             url: z.ZodString;
             method: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
                 GET: "GET";
-                PUT: "PUT";
                 POST: "POST";
+                PUT: "PUT";
                 DELETE: "DELETE";
                 PATCH: "PATCH";
             }>>>;
@@ -12304,8 +12304,8 @@ declare const ObjectTreePropsSchema: z.ZodObject<{
             url: z.ZodString;
             method: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
                 GET: "GET";
-                PUT: "PUT";
                 POST: "POST";
+                PUT: "PUT";
                 DELETE: "DELETE";
                 PATCH: "PATCH";
             }>>>;
@@ -12435,8 +12435,8 @@ declare const PageAccordionProps: z.ZodObject<{
     }, z.core.$strict>>;
     allowMultiple: z.ZodDefault<z.ZodBoolean>;
     variant: z.ZodDefault<z.ZodEnum<{
-        flush: "flush";
         card: "card";
+        flush: "flush";
     }>>;
     aria: z.ZodOptional<z.ZodObject<{
         ariaLabel: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
@@ -18459,14 +18459,14 @@ declare const RecordActivityProps: z.ZodObject<{
         file: "file";
         email: "email";
         system: "system";
-        approval: "approval";
         sharing: "sharing";
-        event: "event";
+        approval: "approval";
         comment: "comment";
-        note: "note";
         field_change: "field_change";
         task: "task";
+        event: "event";
         call: "call";
+        note: "note";
         record_create: "record_create";
         record_delete: "record_delete";
     }>, z.ZodString]>>>;
@@ -18527,9 +18527,9 @@ declare const RecordAlertActionSchema: z.ZodObject<{
         default: "default";
         link: "link";
         secondary: "secondary";
-        ghost: "ghost";
-        outline: "outline";
         destructive: "destructive";
+        outline: "outline";
+        ghost: "ghost";
     }>>;
 }, z.core.$strict>;
 
@@ -18538,8 +18538,8 @@ declare const RecordAlertProps: z.ZodObject<{
     severity: z.ZodOptional<z.ZodEnum<{
         error: "error";
         success: "success";
-        info: "info";
         warning: "warning";
+        info: "info";
     }>>;
     title: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodType<Record<string, string> & {
         key?: never;
@@ -18608,9 +18608,9 @@ declare const RecordAlertProps: z.ZodObject<{
             default: "default";
             link: "link";
             secondary: "secondary";
-            ghost: "ghost";
-            outline: "outline";
             destructive: "destructive";
+            outline: "outline";
+            ghost: "ghost";
         }>>;
     }, z.core.$strict>>;
     dismissible: z.ZodOptional<z.ZodBoolean>;
@@ -18638,14 +18638,14 @@ declare const RecordChatterProps: z.ZodObject<{
             file: "file";
             email: "email";
             system: "system";
-            approval: "approval";
             sharing: "sharing";
-            event: "event";
+            approval: "approval";
             comment: "comment";
-            note: "note";
             field_change: "field_change";
             task: "task";
+            event: "event";
             call: "call";
+            note: "note";
             record_create: "record_create";
             record_delete: "record_delete";
         }>, z.ZodString]>>>;
@@ -18885,15 +18885,15 @@ declare const RecordQuickActionsProps: z.ZodObject<{
         default: "default";
         link: "link";
         secondary: "secondary";
-        ghost: "ghost";
-        outline: "outline";
         destructive: "destructive";
+        outline: "outline";
+        ghost: "ghost";
     }>>;
     size: z.ZodOptional<z.ZodEnum<{
         default: "default";
-        icon: "icon";
         sm: "sm";
         lg: "lg";
+        icon: "icon";
     }>>;
 }, z.core.$strict>;
 
@@ -18924,8 +18924,8 @@ declare const RecordRelatedListProps: z.ZodObject<{
     sort: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodArray<z.ZodObject<{
         field: z.ZodString;
         order: z.ZodEnum<{
-            desc: "desc";
             asc: "asc";
+            desc: "desc";
         }>;
     }, z.core.$strict>>]>>;
     limit: z.ZodDefault<z.ZodNumber>;
@@ -27034,7 +27034,7 @@ declare const WidgetColorVariantSchema: z.ZodEnum<{
 
 // ── actionForm (const) ──
 declare const actionForm: {
-    type: "split" | "simple" | "modal" | "drawer" | "tabbed" | "wizard";
+    type: "split" | "drawer" | "modal" | "simple" | "tabbed" | "wizard";
     layout?: "grid" | "inline" | "vertical" | "horizontal" | undefined;
     columns?: number | undefined;
     title?: string | undefined;
@@ -27056,14 +27056,14 @@ declare const actionForm: {
         provider: "api";
         read?: {
             url: string;
-            method: "GET" | "PUT" | "POST" | "DELETE" | "PATCH";
+            method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
             headers?: Record<string, string> | undefined;
             params?: Record<string, unknown> | undefined;
             body?: unknown;
         } | undefined;
         write?: {
             url: string;
-            method: "GET" | "PUT" | "POST" | "DELETE" | "PATCH";
+            method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
             headers?: Record<string, string> | undefined;
             params?: Record<string, unknown> | undefined;
             body?: unknown;
@@ -27234,7 +27234,7 @@ declare const actionForm: {
 
 // ── appForm (const) ──
 declare const appForm: {
-    type: "split" | "simple" | "modal" | "drawer" | "tabbed" | "wizard";
+    type: "split" | "drawer" | "modal" | "simple" | "tabbed" | "wizard";
     layout?: "grid" | "inline" | "vertical" | "horizontal" | undefined;
     columns?: number | undefined;
     title?: string | undefined;
@@ -27256,14 +27256,14 @@ declare const appForm: {
         provider: "api";
         read?: {
             url: string;
-            method: "GET" | "PUT" | "POST" | "DELETE" | "PATCH";
+            method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
             headers?: Record<string, string> | undefined;
             params?: Record<string, unknown> | undefined;
             body?: unknown;
         } | undefined;
         write?: {
             url: string;
-            method: "GET" | "PUT" | "POST" | "DELETE" | "PATCH";
+            method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
             headers?: Record<string, string> | undefined;
             params?: Record<string, unknown> | undefined;
             body?: unknown;
@@ -27491,7 +27491,7 @@ declare function compileListViewGroupRowsQuery(view: Pick<ListViewGroupQuerySour
 
 // ── dashboardForm (const) ──
 declare const dashboardForm: {
-    type: "split" | "simple" | "modal" | "drawer" | "tabbed" | "wizard";
+    type: "split" | "drawer" | "modal" | "simple" | "tabbed" | "wizard";
     layout?: "grid" | "inline" | "vertical" | "horizontal" | undefined;
     columns?: number | undefined;
     title?: string | undefined;
@@ -27513,14 +27513,14 @@ declare const dashboardForm: {
         provider: "api";
         read?: {
             url: string;
-            method: "GET" | "PUT" | "POST" | "DELETE" | "PATCH";
+            method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
             headers?: Record<string, string> | undefined;
             params?: Record<string, unknown> | undefined;
             body?: unknown;
         } | undefined;
         write?: {
             url: string;
-            method: "GET" | "PUT" | "POST" | "DELETE" | "PATCH";
+            method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
             headers?: Record<string, string> | undefined;
             params?: Record<string, unknown> | undefined;
             body?: unknown;
@@ -27691,7 +27691,7 @@ declare const dashboardForm: {
 
 // ── datasetForm (const) ──
 declare const datasetForm: {
-    type: "split" | "simple" | "modal" | "drawer" | "tabbed" | "wizard";
+    type: "split" | "drawer" | "modal" | "simple" | "tabbed" | "wizard";
     layout?: "grid" | "inline" | "vertical" | "horizontal" | undefined;
     columns?: number | undefined;
     title?: string | undefined;
@@ -27713,14 +27713,14 @@ declare const datasetForm: {
         provider: "api";
         read?: {
             url: string;
-            method: "GET" | "PUT" | "POST" | "DELETE" | "PATCH";
+            method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
             headers?: Record<string, string> | undefined;
             params?: Record<string, unknown> | undefined;
             body?: unknown;
         } | undefined;
         write?: {
             url: string;
-            method: "GET" | "PUT" | "POST" | "DELETE" | "PATCH";
+            method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
             headers?: Record<string, string> | undefined;
             params?: Record<string, unknown> | undefined;
             body?: unknown;
@@ -27970,7 +27970,7 @@ declare function objectNavTargetExclusivity(item: {
 
 // ── pageForm (const) ──
 declare const pageForm: {
-    type: "split" | "simple" | "modal" | "drawer" | "tabbed" | "wizard";
+    type: "split" | "drawer" | "modal" | "simple" | "tabbed" | "wizard";
     layout?: "grid" | "inline" | "vertical" | "horizontal" | undefined;
     columns?: number | undefined;
     title?: string | undefined;
@@ -27992,14 +27992,14 @@ declare const pageForm: {
         provider: "api";
         read?: {
             url: string;
-            method: "GET" | "PUT" | "POST" | "DELETE" | "PATCH";
+            method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
             headers?: Record<string, string> | undefined;
             params?: Record<string, unknown> | undefined;
             body?: unknown;
         } | undefined;
         write?: {
             url: string;
-            method: "GET" | "PUT" | "POST" | "DELETE" | "PATCH";
+            method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
             headers?: Record<string, string> | undefined;
             params?: Record<string, unknown> | undefined;
             body?: unknown;
@@ -28176,7 +28176,7 @@ declare function reactBlockTagFor(schemaType: string): string;
 
 // ── reportForm (const) ──
 declare const reportForm: {
-    type: "split" | "simple" | "modal" | "drawer" | "tabbed" | "wizard";
+    type: "split" | "drawer" | "modal" | "simple" | "tabbed" | "wizard";
     layout?: "grid" | "inline" | "vertical" | "horizontal" | undefined;
     columns?: number | undefined;
     title?: string | undefined;
@@ -28198,14 +28198,14 @@ declare const reportForm: {
         provider: "api";
         read?: {
             url: string;
-            method: "GET" | "PUT" | "POST" | "DELETE" | "PATCH";
+            method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
             headers?: Record<string, string> | undefined;
             params?: Record<string, unknown> | undefined;
             body?: unknown;
         } | undefined;
         write?: {
             url: string;
-            method: "GET" | "PUT" | "POST" | "DELETE" | "PATCH";
+            method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
             headers?: Record<string, string> | undefined;
             params?: Record<string, unknown> | undefined;
             body?: unknown;
@@ -28396,7 +28396,7 @@ declare function validateActionParams(resolved: ResolvedActionParam[], bag: Reco
 
 // ── viewForm (const) ──
 declare const viewForm: {
-    type: "split" | "simple" | "modal" | "drawer" | "tabbed" | "wizard";
+    type: "split" | "drawer" | "modal" | "simple" | "tabbed" | "wizard";
     layout?: "grid" | "inline" | "vertical" | "horizontal" | undefined;
     columns?: number | undefined;
     title?: string | undefined;
@@ -28418,14 +28418,14 @@ declare const viewForm: {
         provider: "api";
         read?: {
             url: string;
-            method: "GET" | "PUT" | "POST" | "DELETE" | "PATCH";
+            method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
             headers?: Record<string, string> | undefined;
             params?: Record<string, unknown> | undefined;
             body?: unknown;
         } | undefined;
         write?: {
             url: string;
-            method: "GET" | "PUT" | "POST" | "DELETE" | "PATCH";
+            method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
             headers?: Record<string, string> | undefined;
             params?: Record<string, unknown> | undefined;
             body?: unknown;
