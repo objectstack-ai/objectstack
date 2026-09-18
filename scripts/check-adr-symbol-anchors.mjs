@@ -85,7 +85,7 @@ import { dirname, join } from 'node:path';
 
 import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
-import { ANCHOR_GRAMMAR, defineCorpus, sweepCorpus } from './symbol-anchors.mjs';
+import { ANCHOR_GRAMMAR, defineCorpus, extractAnchors, sweepCorpus } from './symbol-anchors.mjs';
 
 /* ── The declared path population (#13519 / check-declared-population-live) ───
  * These literals ARE the population this gate reads, and the self-test holds
@@ -137,11 +137,50 @@ export function runCheck(root = process.cwd()) {
     process.exit(1);
   }
 
-  console.log(
-    `✅ check-adr-symbol-anchors: ${counts.anchors} anchors across ${counts.docs} records resolve — ` +
-      `${counts.symbol} symbol (${counts.declaration} declaration, ${counts.literal} literal), ` +
-      `${counts.fileLevel} file-level, ${counts.crossRepo} cross-repo, ${counts.exempt} exempt, ` +
-      `${counts.continuation} continuation. 0 line anchors survive.`,
+  console.log(summaryLine(counts));
+}
+
+/* ── The verdict may not claim a census wider than the vocabulary it read ──
+ *
+ * This line used to end `0 line anchors survive.` -- full stop, no
+ * qualifier -- and that sentence was measured FALSE while it printed green.
+ * Nine line pointers were live in `docs/adr/**` at the time, in spellings this
+ * corpus does not judge: the path-less bare colon continuation (three in one
+ * record, where the path sat in a different table cell from the number) and the
+ * `L` pin, both bare in prose and written as a markdown link-target fragment
+ * (six across two records). The measurement was true, the SENTENCE was not: the
+ * gate's vocabulary is narrower than the class the #13556 ruling deleted, and
+ * the verdict spoke for the class.
+ *
+ * ⭐ So the repair is the CLAIM, not the reading. The two path-less spellings
+ * live in the shared grammar already and are OPT-IN per corpus
+ * (`scripts/symbol-anchors.mjs#defineCorpus`, `pathlessLineCitations`), and
+ * turning them on HERE was measured before this was written: 17 findings across
+ * 6 records, of which 2 are an ADR's dev-server ports -- correct prose no
+ * author can repair, whose only remedy is the maintainer-only exemption marker.
+ * Widening is therefore a decision with a price tag and not this sentence's to
+ * make; what this sentence owes is to stop reading as though the decision had
+ * already gone the other way.
+ *
+ * ⛔ Do NOT restore the unqualified form. The self-test pins all three halves
+ * -- that the corpus DECLARES the narrower vocabulary, that the shared grammar
+ * really does see the wider one when asked (so the caveat is a measurement and
+ * not a hedge), and that this sentence names both -- so a future author who
+ * flips the declaration is made to re-state the claim in the same edit.
+ */
+export const JUDGED_LINE_SPELLINGS =
+  'path-anchored, backticked continuation, fenced comment header, tilde';
+export const UNJUDGED_LINE_SPELLINGS =
+  'the two path-less spellings, which continue a filename named earlier in the sentence';
+
+export function summaryLine(counts) {
+  return (
+    `✅ check-adr-symbol-anchors: ${counts.anchors} anchors across ${counts.docs} records resolve — `
+    + `${counts.symbol} symbol (${counts.declaration} declaration, ${counts.literal} literal), `
+    + `${counts.fileLevel} file-level, ${counts.crossRepo} cross-repo, ${counts.exempt} exempt, `
+    + `${counts.continuation} continuation. 0 line anchors survive in the ${JUDGED_LINE_SPELLINGS} `
+    + `spellings this corpus judges — ⚠️ NOT a census of the deleted class: ${UNJUDGED_LINE_SPELLINGS}, `
+    + 'are opt-in and are OFF here (#18899).'
   );
 }
 
@@ -177,7 +216,7 @@ function assert(cond, msg) { if (!cond) { console.error(`❌ check-adr-symbol-an
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'check-adr-symbol-anchors self-test': 17,
+  'check-adr-symbol-anchors self-test': 22,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -299,6 +338,37 @@ export function selfTest() {
   //    the ruling ordered recorded (point 5).
   check(CENSUS_13556.rotRateIsLowerBound === true, 'the 72.1% figure is a LOWER bound and must be declared as one');
   check(CENSUS_13556.totalSurface === CENSUS_13556.distinctLineAnchors + CENSUS_13556.continuationAnchors, 'the declared surface must be the sum of its parts');
+
+  // 6. ⭐ The verdict's CLAIM, held against the vocabulary it actually read
+  //    (#18899). The three cases are one argument in three parts, and none of
+  //    them is worth anything without the other two:
+  //
+  //      (a) the narrower vocabulary is this corpus's DECLARATION, not an
+  //          accident of the grammar -- so the caveat names a choice;
+  //      (b) the shared grammar really does see the wider vocabulary when it
+  //          is asked to, on the SAME text -- so (a) is a measurement and the
+  //          caveat is not a hedge against a rule that matches nothing;
+  //      (c) the printed sentence names both halves, and ⛔ no longer ends in
+  //          the unqualified census claim that was measured false.
+  //
+  //    ⚠️ (b) is the light-on-a-literal control, and it is the case that makes
+  //    this battery worth running: without it, (a) and (c) would both hold just
+  //    as well on a day when `pathlessLineCitations` had stopped matching
+  //    anything at all, and the caveat would be documenting a dead rule.
+  const pathlessProbe = 'The mirror of :626 and the pin L198 both continue a filename named earlier.';
+  const asDeclared = extractAnchors(pathlessProbe, { pathlessLineCitations: CORPUS.pathlessLineCitations });
+  const widened = extractAnchors(pathlessProbe, { pathlessLineCitations: true });
+  check(CORPUS.pathlessLineCitations === false,
+    'the narrower vocabulary must be this corpus\'s DECLARATION — flip it and the verdict below must be re-stated in the same edit');
+  check(widened.lineAnchors.length === 2,
+    `the shared grammar must SEE both path-less spellings when asked, or the verdict's caveat documents a dead rule — got ${widened.lineAnchors.length}`);
+  check(asDeclared.lineAnchors.length === 0,
+    `and must not see them under this corpus's declaration, or the caveat is simply wrong — got ${asDeclared.lineAnchors.length}`);
+  const verdict = summaryLine({ anchors: 1, docs: 1, symbol: 1, declaration: 1, literal: 0, fileLevel: 0, crossRepo: 0, exempt: 0, continuation: 0 });
+  check(verdict.includes(JUDGED_LINE_SPELLINGS) && verdict.includes(UNJUDGED_LINE_SPELLINGS),
+    'the verdict must name BOTH the vocabulary it judged and the one it did not');
+  check(!/line anchors survive\.\s*$/.test(verdict),
+    'the verdict must not end in the unqualified claim `0 line anchors survive.` — that sentence printed green while nine pointers of the deleted class were live');
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //
