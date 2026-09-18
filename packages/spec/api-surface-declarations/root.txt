@@ -1859,7 +1859,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
             group: z.ZodOptional<z.ZodString>;
             visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -1871,16 +1871,16 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
             readonlyWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -1892,16 +1892,16 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
             requiredWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -1913,12 +1913,12 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
             conditionalRequired: z.ZodOptional<z.ZodNever>;
             widget: z.ZodOptional<z.ZodString>;
@@ -4081,7 +4081,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                 group?: string | undefined;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -4089,7 +4089,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -4098,7 +4098,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                 } | undefined;
                 readonlyWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -4106,7 +4106,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -4115,7 +4115,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                 } | undefined;
                 requiredWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -4123,7 +4123,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -5235,7 +5235,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                 group?: string | undefined;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -5243,7 +5243,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -5252,7 +5252,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                 } | undefined;
                 readonlyWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -5260,7 +5260,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -5269,7 +5269,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                 } | undefined;
                 requiredWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -5277,7 +5277,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -6390,7 +6390,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                 group?: string | undefined;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -6398,7 +6398,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -6407,7 +6407,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                 } | undefined;
                 readonlyWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -6415,7 +6415,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -6424,7 +6424,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                 } | undefined;
                 requiredWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -6432,7 +6432,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -7544,7 +7544,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                 group?: string | undefined;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -7552,7 +7552,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -7561,7 +7561,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                 } | undefined;
                 readonlyWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -7569,7 +7569,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -7578,7 +7578,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                 } | undefined;
                 requiredWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -7586,7 +7586,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -9052,7 +9052,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                 group: z.ZodOptional<z.ZodString>;
                 visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -9064,16 +9064,16 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                         cron: "cron";
                         template: "template";
                     }>;
-                    source: z.ZodOptional<z.ZodString>;
                     ast: z.ZodOptional<z.ZodUnknown>;
                     meta: z.ZodOptional<z.ZodObject<{
                         rationale: z.ZodOptional<z.ZodString>;
                         generatedBy: z.ZodOptional<z.ZodString>;
                     }, z.core.$strip>>;
+                    source: z.ZodString;
                 }, z.core.$strip>]>>;
                 readonlyWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -9085,16 +9085,16 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                         cron: "cron";
                         template: "template";
                     }>;
-                    source: z.ZodOptional<z.ZodString>;
                     ast: z.ZodOptional<z.ZodUnknown>;
                     meta: z.ZodOptional<z.ZodObject<{
                         rationale: z.ZodOptional<z.ZodString>;
                         generatedBy: z.ZodOptional<z.ZodString>;
                     }, z.core.$strip>>;
+                    source: z.ZodString;
                 }, z.core.$strip>]>>;
                 requiredWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -9106,12 +9106,12 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                         cron: "cron";
                         template: "template";
                     }>;
-                    source: z.ZodOptional<z.ZodString>;
                     ast: z.ZodOptional<z.ZodUnknown>;
                     meta: z.ZodOptional<z.ZodObject<{
                         rationale: z.ZodOptional<z.ZodString>;
                         generatedBy: z.ZodOptional<z.ZodString>;
                     }, z.core.$strip>>;
+                    source: z.ZodString;
                 }, z.core.$strip>]>>;
                 conditionalRequired: z.ZodOptional<z.ZodNever>;
                 widget: z.ZodOptional<z.ZodString>;
@@ -11401,7 +11401,7 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
             group: z.ZodOptional<z.ZodString>;
             visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -11413,16 +11413,16 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
             readonlyWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -11434,16 +11434,16 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
             requiredWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -11455,12 +11455,12 @@ declare const ObjectStackDefinitionSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
             conditionalRequired: z.ZodOptional<z.ZodNever>;
             widget: z.ZodOptional<z.ZodString>;
@@ -23712,7 +23712,7 @@ declare const ObjectStackSchema: z.ZodObject<{
             group: z.ZodOptional<z.ZodString>;
             visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -23724,16 +23724,16 @@ declare const ObjectStackSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
             readonlyWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -23745,16 +23745,16 @@ declare const ObjectStackSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
             requiredWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -23766,12 +23766,12 @@ declare const ObjectStackSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
             conditionalRequired: z.ZodOptional<z.ZodNever>;
             widget: z.ZodOptional<z.ZodString>;
@@ -25934,7 +25934,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                 group?: string | undefined;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -25942,7 +25942,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -25951,7 +25951,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                 } | undefined;
                 readonlyWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -25959,7 +25959,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -25968,7 +25968,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                 } | undefined;
                 requiredWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -25976,7 +25976,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -27088,7 +27088,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                 group?: string | undefined;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -27096,7 +27096,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -27105,7 +27105,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                 } | undefined;
                 readonlyWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -27113,7 +27113,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -27122,7 +27122,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                 } | undefined;
                 requiredWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -27130,7 +27130,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -28243,7 +28243,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                 group?: string | undefined;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -28251,7 +28251,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -28260,7 +28260,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                 } | undefined;
                 readonlyWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -28268,7 +28268,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -28277,7 +28277,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                 } | undefined;
                 requiredWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -28285,7 +28285,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -29397,7 +29397,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                 group?: string | undefined;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -29405,7 +29405,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -29414,7 +29414,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                 } | undefined;
                 readonlyWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -29422,7 +29422,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -29431,7 +29431,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                 } | undefined;
                 requiredWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -29439,7 +29439,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -30905,7 +30905,7 @@ declare const ObjectStackSchema: z.ZodObject<{
                 group: z.ZodOptional<z.ZodString>;
                 visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -30917,16 +30917,16 @@ declare const ObjectStackSchema: z.ZodObject<{
                         cron: "cron";
                         template: "template";
                     }>;
-                    source: z.ZodOptional<z.ZodString>;
                     ast: z.ZodOptional<z.ZodUnknown>;
                     meta: z.ZodOptional<z.ZodObject<{
                         rationale: z.ZodOptional<z.ZodString>;
                         generatedBy: z.ZodOptional<z.ZodString>;
                     }, z.core.$strip>>;
+                    source: z.ZodString;
                 }, z.core.$strip>]>>;
                 readonlyWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -30938,16 +30938,16 @@ declare const ObjectStackSchema: z.ZodObject<{
                         cron: "cron";
                         template: "template";
                     }>;
-                    source: z.ZodOptional<z.ZodString>;
                     ast: z.ZodOptional<z.ZodUnknown>;
                     meta: z.ZodOptional<z.ZodObject<{
                         rationale: z.ZodOptional<z.ZodString>;
                         generatedBy: z.ZodOptional<z.ZodString>;
                     }, z.core.$strip>>;
+                    source: z.ZodString;
                 }, z.core.$strip>]>>;
                 requiredWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -30959,12 +30959,12 @@ declare const ObjectStackSchema: z.ZodObject<{
                         cron: "cron";
                         template: "template";
                     }>;
-                    source: z.ZodOptional<z.ZodString>;
                     ast: z.ZodOptional<z.ZodUnknown>;
                     meta: z.ZodOptional<z.ZodObject<{
                         rationale: z.ZodOptional<z.ZodString>;
                         generatedBy: z.ZodOptional<z.ZodString>;
                     }, z.core.$strip>>;
+                    source: z.ZodString;
                 }, z.core.$strip>]>>;
                 conditionalRequired: z.ZodOptional<z.ZodNever>;
                 widget: z.ZodOptional<z.ZodString>;
@@ -33254,7 +33254,7 @@ declare const ObjectStackSchema: z.ZodObject<{
             group: z.ZodOptional<z.ZodString>;
             visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -33266,16 +33266,16 @@ declare const ObjectStackSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
             readonlyWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -33287,16 +33287,16 @@ declare const ObjectStackSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
             requiredWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -33308,12 +33308,12 @@ declare const ObjectStackSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
             conditionalRequired: z.ZodOptional<z.ZodNever>;
             widget: z.ZodOptional<z.ZodString>;
@@ -44830,7 +44830,7 @@ type PredicateInput = z.input<typeof PredicateInputSchema>;
 // ── PredicateInputSchema (const) ──
 declare const PredicateInputSchema: z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
     dialect: "cel" | "cron" | "template";
-    source?: string | undefined;
+    source: string;
     ast?: unknown;
     meta?: {
         rationale?: string | undefined;
@@ -44842,12 +44842,12 @@ declare const PredicateInputSchema: z.ZodUnion<readonly [z.ZodPipe<z.ZodString, 
         cron: "cron";
         template: "template";
     }>;
-    source: z.ZodOptional<z.ZodString>;
     ast: z.ZodOptional<z.ZodUnknown>;
     meta: z.ZodOptional<z.ZodObject<{
         rationale: z.ZodOptional<z.ZodString>;
         generatedBy: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>;
+    source: z.ZodString;
 }, z.core.$strip>]>;
 
 // ── PredicateSchema (const) ──
@@ -44857,12 +44857,12 @@ declare const PredicateSchema: z.ZodObject<{
         cron: "cron";
         template: "template";
     }>;
-    source: z.ZodOptional<z.ZodString>;
     ast: z.ZodOptional<z.ZodUnknown>;
     meta: z.ZodOptional<z.ZodObject<{
         rationale: z.ZodOptional<z.ZodString>;
         generatedBy: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>;
+    source: z.ZodString;
 }, z.core.$strip>;
 
 // ── RETIRED_DEFS_BY_MAJOR (const) ──
@@ -45064,7 +45064,7 @@ declare function applyConversionsToStoredItem<T>(type: string, item: T, options?
 declare function applyMetaMigrations(stack: Record<string, unknown>, fromMajor: number, toMajor?: number): MigrationChainResult;
 
 // ── cel (function) ──
-declare function cel(strings: TemplateStringsArray, ...values: unknown[]): Expression;
+declare function cel(strings: TemplateStringsArray, ...values: unknown[]): EvaluatedExpression;
 
 // ── classifyRequiredCapability (function) ──
 declare function classifyRequiredCapability(token: string, isInstalled: (pkg: string) => boolean): CapabilityClassification;
@@ -45186,7 +45186,7 @@ declare function expandViewContainer(object: string, container: any): ExpandedVi
 declare function expandViewContainerWithDiagnostics(object: string, container: any): ExpandViewResult;
 
 // ── expression (function) ──
-declare function expression(source: string, dialect?: ExpressionDialect, meta?: ExpressionMeta): Expression;
+declare function expression(source: string, dialect?: ExpressionDialect, meta?: ExpressionMeta): EvaluatedExpression;
 
 // ── findClosestMatches (function) ──
 declare function findClosestMatches(input: string, candidates: readonly string[], maxDistance?: number, maxResults?: number): string[];

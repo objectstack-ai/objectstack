@@ -6479,7 +6479,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -6488,7 +6488,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -6536,7 +6536,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -6669,7 +6669,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -6678,7 +6678,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -6726,7 +6726,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -6859,7 +6859,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -6868,7 +6868,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -6916,7 +6916,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7049,7 +7049,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7058,7 +7058,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7106,7 +7106,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7239,7 +7239,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7248,7 +7248,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7296,7 +7296,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7429,7 +7429,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7438,7 +7438,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7486,7 +7486,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7619,7 +7619,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7628,7 +7628,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7676,7 +7676,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7809,7 +7809,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7818,7 +7818,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7866,7 +7866,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -7999,7 +7999,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8008,7 +8008,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8056,7 +8056,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8189,7 +8189,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8198,7 +8198,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8246,7 +8246,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8379,7 +8379,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8388,7 +8388,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8436,7 +8436,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8569,7 +8569,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8578,7 +8578,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8626,7 +8626,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8759,7 +8759,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8768,7 +8768,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8816,7 +8816,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8949,7 +8949,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -8958,7 +8958,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9006,7 +9006,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9139,7 +9139,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9148,7 +9148,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9196,7 +9196,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9329,7 +9329,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9338,7 +9338,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9386,7 +9386,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9519,7 +9519,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9528,7 +9528,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9576,7 +9576,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9732,7 +9732,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9741,7 +9741,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9789,7 +9789,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9922,7 +9922,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9931,7 +9931,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -9979,7 +9979,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10112,7 +10112,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10121,7 +10121,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10169,7 +10169,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10302,7 +10302,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10311,7 +10311,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10359,7 +10359,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10498,7 +10498,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10507,7 +10507,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10555,7 +10555,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10706,7 +10706,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10715,7 +10715,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10763,7 +10763,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10911,7 +10911,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10920,7 +10920,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -10968,7 +10968,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11116,7 +11116,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11125,7 +11125,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11173,7 +11173,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11306,7 +11306,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11315,7 +11315,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11363,7 +11363,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11496,7 +11496,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11505,7 +11505,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11553,7 +11553,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11686,7 +11686,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11695,7 +11695,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11743,7 +11743,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11876,7 +11876,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11885,7 +11885,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -11933,7 +11933,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12066,7 +12066,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12075,7 +12075,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12123,7 +12123,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12256,7 +12256,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12265,7 +12265,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12313,7 +12313,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12446,7 +12446,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12455,7 +12455,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12503,7 +12503,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12636,7 +12636,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12645,7 +12645,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12693,7 +12693,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12826,7 +12826,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12835,7 +12835,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -12883,7 +12883,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -13016,7 +13016,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -13025,7 +13025,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -13073,7 +13073,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -13206,7 +13206,7 @@ declare const Field: {
         readonly required?: boolean | undefined;
         readonly visibleWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -13215,7 +13215,7 @@ declare const Field: {
         } | undefined;
         readonly readonlyWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -13263,7 +13263,7 @@ declare const Field: {
         readonly accept?: string[] | undefined;
         readonly requiredWhen?: string | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -13803,7 +13803,7 @@ declare const FieldSchema: z.ZodObject<{
     group: z.ZodOptional<z.ZodString>;
     visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
         dialect: "cel" | "cron" | "template";
-        source?: string | undefined;
+        source: string;
         ast?: unknown;
         meta?: {
             rationale?: string | undefined;
@@ -13815,16 +13815,16 @@ declare const FieldSchema: z.ZodObject<{
             cron: "cron";
             template: "template";
         }>;
-        source: z.ZodOptional<z.ZodString>;
         ast: z.ZodOptional<z.ZodUnknown>;
         meta: z.ZodOptional<z.ZodObject<{
             rationale: z.ZodOptional<z.ZodString>;
             generatedBy: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;
+        source: z.ZodString;
     }, z.core.$strip>]>>;
     readonlyWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
         dialect: "cel" | "cron" | "template";
-        source?: string | undefined;
+        source: string;
         ast?: unknown;
         meta?: {
             rationale?: string | undefined;
@@ -13836,16 +13836,16 @@ declare const FieldSchema: z.ZodObject<{
             cron: "cron";
             template: "template";
         }>;
-        source: z.ZodOptional<z.ZodString>;
         ast: z.ZodOptional<z.ZodUnknown>;
         meta: z.ZodOptional<z.ZodObject<{
             rationale: z.ZodOptional<z.ZodString>;
             generatedBy: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;
+        source: z.ZodString;
     }, z.core.$strip>]>>;
     requiredWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
         dialect: "cel" | "cron" | "template";
-        source?: string | undefined;
+        source: string;
         ast?: unknown;
         meta?: {
             rationale?: string | undefined;
@@ -13857,12 +13857,12 @@ declare const FieldSchema: z.ZodObject<{
             cron: "cron";
             template: "template";
         }>;
-        source: z.ZodOptional<z.ZodString>;
         ast: z.ZodOptional<z.ZodUnknown>;
         meta: z.ZodOptional<z.ZodObject<{
             rationale: z.ZodOptional<z.ZodString>;
             generatedBy: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;
+        source: z.ZodString;
     }, z.core.$strip>]>>;
     conditionalRequired: z.ZodOptional<z.ZodNever>;
     widget: z.ZodOptional<z.ZodString>;
@@ -15800,7 +15800,7 @@ declare const ObjectExtensionSchema: z.ZodObject<{
         group: z.ZodOptional<z.ZodString>;
         visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -15812,16 +15812,16 @@ declare const ObjectExtensionSchema: z.ZodObject<{
                 cron: "cron";
                 template: "template";
             }>;
-            source: z.ZodOptional<z.ZodString>;
             ast: z.ZodOptional<z.ZodUnknown>;
             meta: z.ZodOptional<z.ZodObject<{
                 rationale: z.ZodOptional<z.ZodString>;
                 generatedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
+            source: z.ZodString;
         }, z.core.$strip>]>>;
         readonlyWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -15833,16 +15833,16 @@ declare const ObjectExtensionSchema: z.ZodObject<{
                 cron: "cron";
                 template: "template";
             }>;
-            source: z.ZodOptional<z.ZodString>;
             ast: z.ZodOptional<z.ZodUnknown>;
             meta: z.ZodOptional<z.ZodObject<{
                 rationale: z.ZodOptional<z.ZodString>;
                 generatedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
+            source: z.ZodString;
         }, z.core.$strip>]>>;
         requiredWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -15854,12 +15854,12 @@ declare const ObjectExtensionSchema: z.ZodObject<{
                 cron: "cron";
                 template: "template";
             }>;
-            source: z.ZodOptional<z.ZodString>;
             ast: z.ZodOptional<z.ZodUnknown>;
             meta: z.ZodOptional<z.ZodObject<{
                 rationale: z.ZodOptional<z.ZodString>;
                 generatedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
+            source: z.ZodString;
         }, z.core.$strip>]>>;
         conditionalRequired: z.ZodOptional<z.ZodNever>;
         widget: z.ZodOptional<z.ZodString>;
@@ -16526,7 +16526,7 @@ declare const ObjectSchema: z.ZodObject<{
         group: z.ZodOptional<z.ZodString>;
         visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -16538,16 +16538,16 @@ declare const ObjectSchema: z.ZodObject<{
                 cron: "cron";
                 template: "template";
             }>;
-            source: z.ZodOptional<z.ZodString>;
             ast: z.ZodOptional<z.ZodUnknown>;
             meta: z.ZodOptional<z.ZodObject<{
                 rationale: z.ZodOptional<z.ZodString>;
                 generatedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
+            source: z.ZodString;
         }, z.core.$strip>]>>;
         readonlyWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -16559,16 +16559,16 @@ declare const ObjectSchema: z.ZodObject<{
                 cron: "cron";
                 template: "template";
             }>;
-            source: z.ZodOptional<z.ZodString>;
             ast: z.ZodOptional<z.ZodUnknown>;
             meta: z.ZodOptional<z.ZodObject<{
                 rationale: z.ZodOptional<z.ZodString>;
                 generatedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
+            source: z.ZodString;
         }, z.core.$strip>]>>;
         requiredWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -16580,12 +16580,12 @@ declare const ObjectSchema: z.ZodObject<{
                 cron: "cron";
                 template: "template";
             }>;
-            source: z.ZodOptional<z.ZodString>;
             ast: z.ZodOptional<z.ZodUnknown>;
             meta: z.ZodOptional<z.ZodObject<{
                 rationale: z.ZodOptional<z.ZodString>;
                 generatedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
+            source: z.ZodString;
         }, z.core.$strip>]>>;
         conditionalRequired: z.ZodOptional<z.ZodNever>;
         widget: z.ZodOptional<z.ZodString>;
@@ -18753,7 +18753,7 @@ declare const ObjectSchema: z.ZodObject<{
             group?: string | undefined;
             visibleWhen?: {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -18761,7 +18761,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -18770,7 +18770,7 @@ declare const ObjectSchema: z.ZodObject<{
             } | undefined;
             readonlyWhen?: {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -18778,7 +18778,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -18787,7 +18787,7 @@ declare const ObjectSchema: z.ZodObject<{
             } | undefined;
             requiredWhen?: {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -18795,7 +18795,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -19908,7 +19908,7 @@ declare const ObjectSchema: z.ZodObject<{
             group?: string | undefined;
             visibleWhen?: {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -19916,7 +19916,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -19925,7 +19925,7 @@ declare const ObjectSchema: z.ZodObject<{
             } | undefined;
             readonlyWhen?: {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -19933,7 +19933,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -19942,7 +19942,7 @@ declare const ObjectSchema: z.ZodObject<{
             } | undefined;
             requiredWhen?: {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -19950,7 +19950,7 @@ declare const ObjectSchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
