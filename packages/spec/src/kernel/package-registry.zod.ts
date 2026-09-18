@@ -279,9 +279,50 @@ export const InstallPackageRequestSchema = lazySchema(() => z.object({
   /** Optional: user-provided settings at install time */
   settings: z.record(z.string(), z.unknown()).optional()
     .describe('User-provided settings at install time'),
-  /** Whether to enable immediately after install (default: true) */
+  /**
+   * Whether to enable the package immediately after install.
+   *
+   * ## A RESTATEMENT of the install-request key — the one authority is
+   * `PackageInstallRequestSchema` in `src/api/package-api.zod.ts`
+   *
+   * Same type, same default, same meaning: this is a COPY of the request key,
+   * not a second key that happens to share a spelling. The authority is the
+   * request contract bound to the door that actually serves —
+   * `POST /api/v1/packages`, which writes the registry row's `enabled` from
+   * `enableOnInstall ?? true` (`packages/runtime/src/domains/packages.ts`).
+   * ⛔ Never let the two drift: `src/api/package-install-one-authority.test.ts`
+   * parses BOTH over one matrix and reds when they disagree on any cell.
+   *
+   * ## ⚠️ This contract's own implementation does not read the key
+   *
+   * This schema types the in-process protocol primitive
+   * `ObjectStackProtocol.installPackage` (`src/api/protocol.zod.ts`), whose
+   * implementation reads `request.manifest` and `request.settings` and nothing
+   * else (`packages/metadata-protocol/src/protocol.ts`). The HTTP door does
+   * NOT forward the key down this seam either: it calls
+   * `installPackage({ manifest, settings })` and performs the enable/disable
+   * flip itself afterwards, because the durable half must follow the ROW that
+   * door returned rather than the request's intent. So an `enableOnInstall`
+   * spelled on THIS request reaches no code that acts on it — which is why the
+   * `.describe()` says so on the published reference page rather than
+   * repeating the authority's promise a layer that cannot keep it.
+   *
+   * ## ⛔ Why the reference is documentary and not `…Schema.shape.…`
+   *
+   * `PackageInstallRequestSchema` sits ABOVE this module in the import graph —
+   * it is built from `ManifestSchema` and `InstalledPackageSchema`, both
+   * declared here — so a reference from here up to it is an import cycle. It
+   * is not a cycle the `lazySchema` proxy absorbs: under `OS_EAGER_SCHEMAS=1`,
+   * the mode `gen:schema` and `check:authorable-surface` run in, the factory
+   * bodies evaluate at module load and the cycle dies with
+   * `ReferenceError: Cannot access 'InstalledPackageSchema' before
+   * initialization`. Measured in both directions, on this key, before this
+   * doc block was written. ⛔ Do not "fix" this into
+   * `PackageInstallRequestSchema.shape.enableOnInstall` — the pin above is the
+   * mechanical half of the reference, and it is the half that can fail.
+   */
   enableOnInstall: z.boolean().default(true)
-    .describe('Whether to enable immediately after install'),
+    .describe('Whether to enable immediately after install — restates the install-door request key, whose one authority is api/PackageInstallRequest; this protocol primitive does not read it'),
   /**
    * Current platform version for compatibility checking.
    * When provided, the system compares this against the package's

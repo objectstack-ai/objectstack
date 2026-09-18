@@ -282,9 +282,43 @@ export const PackageInstallRequestSchema = lazySchema(() => z.object({
   settings: z.record(z.string(), z.unknown()).optional()
     .describe('User-provided settings at install time'),
 
-  /** Whether to enable immediately after install */
+  /**
+   * Whether to enable the package immediately after install.
+   *
+   * ## ⭐ THE ONE AUTHORITY for this key, and the map to the other two
+   *
+   * `enableOnInstall` is declared in three published schemas. This one is the
+   * authority, because it is the request contract of the door that HONOURS it:
+   * `POST /api/v1/packages` writes the registry row's `enabled` from
+   * `enableOnInstall ?? true`, through the same registry flip and durable
+   * state write `PATCH /packages/:id/disable` uses
+   * (`packages/runtime/src/domains/packages.ts`). A `false` here installs the
+   * package present-but-not-active and survives a restart; `true` and absent
+   * install it enabled, which is this declaration's default.
+   *
+   * The other two are re-read here so a reader never has to guess which of
+   * three identical-looking declarations governs:
+   *
+   * - `InstallPackageRequestSchema` (`src/kernel/package-registry.zod.ts`) —
+   *   **a COPY of this key**, restated on the in-process protocol primitive
+   *   `ObjectStackProtocol.installPackage`. Same type, same default, same
+   *   meaning; its own implementation does not read it, and this door does not
+   *   forward it down that seam. Held to this declaration by
+   *   `package-install-one-authority.test.ts`, not by an import: the authority
+   *   sits above `kernel/` in the module graph, so a `…Schema.shape.…`
+   *   reference from there is a cycle that dies under `OS_EAGER_SCHEMAS=1`.
+   * - `MarketplaceInstallRequestSchema` (`src/marketplace/marketplace.zod.ts`)
+   *   — **not this key at all**. That request's subject is a marketplace
+   *   listing, its door is the control plane's `POST /api/v1/marketplace/install`,
+   *   and its `enableOnInstall` is what a caller asks the marketplace channel
+   *   to request on its behalf, one translation upstream of this one. It stays
+   *   a declaration of its own and says why at its own site.
+   *
+   * ⛔ Never unify the three silently, in either direction: two of them are
+   * one commitment and the third is a different party's.
+   */
   enableOnInstall: z.boolean().default(true)
-    .describe('Whether to enable immediately after install'),
+    .describe('Whether to enable immediately after install — honoured at POST /api/v1/packages: the installed row\'s `enabled` is written from this key'),
 
   /**
    * Opt back in to overwriting an already-installed package id.
