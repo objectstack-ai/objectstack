@@ -253,52 +253,45 @@ describe('DimensionSchema', () => {
 });
 
 describe('CubeJoinSchema', () => {
-  it('should accept valid join with default relationship', () => {
-    const join = CubeJoinSchema.parse({
-      name: 'orders',
-      sql: '{CUBE}.user_id = {orders}.user_id',
-    });
+  // #18612 (ADR-0049 enforce-or-remove, maintainer-ruled batch #154): `sql` and
+  // `relationship` are REMOVED. `name` is the whole contract, and the ON clause
+  // is derived from the declared relationship between the two cubes' objects.
+  it('accepts a join that declares only the object it reaches', () => {
+    const join = CubeJoinSchema.parse({ name: 'orders' });
 
     expect(join.name).toBe('orders');
-    expect(join.relationship).toBe('many_to_one');
+    expect(join).not.toHaveProperty('relationship');
+    expect(join).not.toHaveProperty('sql');
   });
 
-  it('should accept join with explicit relationship', () => {
-    const join = CubeJoinSchema.parse({
-      name: 'line_items',
-      relationship: 'one_to_many',
-      sql: '{CUBE}.id = {line_items}.order_id',
-    });
+  it('refuses an authored ON clause, and the refusal says the clause is DERIVED', () => {
+    const r = CubeJoinSchema.safeParse({ name: 'orders', sql: '{CUBE}.user_id = {orders}.user_id' });
 
-    expect(join.relationship).toBe('one_to_many');
+    expect(r.success).toBe(false);
+    const issues = JSON.stringify(r.error?.issues ?? []);
+    expect(issues).toContain('unrecognized_keys');
+    expect(issues).toMatch(/`joins\.<alias>\.sql`.*removed.*DERIVED from the declared relationship/s);
   });
 
-  it('should accept all valid relationships', () => {
-    for (const rel of ['one_to_one', 'one_to_many', 'many_to_one']) {
-      expect(() => CubeJoinSchema.parse({
-        name: 'target',
-        relationship: rel,
-        sql: '{CUBE}.id = {target}.id',
-      })).not.toThrow();
-    }
+  it('refuses an authored cardinality, and the refusal says it never had an effect', () => {
+    const r = CubeJoinSchema.safeParse({ name: 'line_items', relationship: 'one_to_many' });
+
+    expect(r.success).toBe(false);
+    const issues = JSON.stringify(r.error?.issues ?? []);
+    expect(issues).toMatch(/`joins\.<alias>\.relationship`.*removed.*never had an effect/s);
   });
 
-  it('should reject join with invalid relationship', () => {
-    expect(() => CubeJoinSchema.parse({
-      name: 'target',
-      relationship: 'many_to_many',
-      sql: '{CUBE}.id = {target}.id',
-    })).toThrow();
+  it('refuses the `on` spelling with the derivation rather than a rename to `sql`', () => {
+    const r = CubeJoinSchema.safeParse({ name: 'orders', on: '{CUBE}.id = {orders}.id' });
+
+    expect(r.success).toBe(false);
+    const issues = JSON.stringify(r.error?.issues ?? []);
+    expect(issues).toContain('DERIVED from the declared relationship');
+    expect(issues).not.toContain('→ `sql`');
   });
 
   it('should reject join without required fields', () => {
-    expect(() => CubeJoinSchema.parse({
-      name: 'orders',
-    })).toThrow();
-
-    expect(() => CubeJoinSchema.parse({
-      sql: '{CUBE}.id = {orders}.id',
-    })).toThrow();
+    expect(() => CubeJoinSchema.parse({})).toThrow();
   });
 });
 
@@ -339,8 +332,6 @@ describe('CubeSchema', () => {
       joins: {
         users: {
           name: 'users',
-          relationship: 'many_to_one',
-          sql: '{CUBE}.user_id = {users}.id',
         },
       },
       refreshKey: {

@@ -72,11 +72,14 @@ export const DeliveryCube = defineCube({
       sql: 'assignee',
     },
   },
+  // The ON clause is DERIVED, never authored: the runtime builds a foreign-key
+  // equality from the declared relationship between the two cubes' objects. A
+  // join declares only WHICH object it reaches (#18612 removed `sql` and
+  // `relationship`; before that, the ON clause written here was silently
+  // replaced by exactly this derivation).
   joins: {
     showcase_project: {
       name: 'showcase_project',
-      relationship: 'many_to_one',
-      sql: '${showcase_delivery}.project = ${showcase_project}.id',
     },
   },
   refreshKey: {

@@ -101,8 +101,6 @@
     "data/Cube:sql",
     "data/Cube:title",
     "data/CubeJoin:name",
-    "data/CubeJoin:relationship",
-    "data/CubeJoin:sql",
     "data/CurrencyConfig:currencyMode",
     "data/CurrencyConfig:defaultCurrency",
     "data/CurrencyConfig:precision",

@@ -6674,6 +6674,42 @@ const step18: MigrationStep = {
         + 'widening a local mirror of the enum.',
     },
     {
+      id: 'cube-join-sql-and-relationship-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell.
+      surface:
+        'analyticsCubes[].joins.<alias>.sql / analyticsCubes[].joins.<alias>.relationship — the '
+        + 'authored ON clause and the declared cardinality on a cube join',
+      replacement:
+        'analyticsCubes[].joins.<alias>.name alone. The ON clause is DERIVED from the declared '
+        + 'relationship between the two cubes\' objects, as a foreign-key equality: NativeSQLStrategy '
+        + 'emits the LEFT JOIN and its ON from the dotted member path, and ObjectQLStrategy lowers the '
+        + 'same alias to a relationship traversal with no ON clause at all.',
+      reason:
+        'Not losslessly convertible, because the two keys never had an effect and a mechanical strip '
+        + 'would hide which cube was affected. `sql` was REQUIRED and documented as the ON clause, and '
+        + 'no reader ever consulted it: an authored condition was REPLACED by the synthesised '
+        + 'foreign-key equality and the aggregate came back under a 200, joined on something the '
+        + 'author had not asked for. `relationship` carried a `.default(\'many_to_one\')` that nothing '
+        + 'dispatched on, so `one_to_many` parsed, changed no SQL, and kept the many-to-one arithmetic. '
+        + 'Deleting the keys restores honesty but does not give an author who wanted a non-FK join the '
+        + 'thing they wanted, which is why this is a TODO addressed to them rather than a rewrite '
+        + 'applied on their behalf. A custom join condition is a capability card with its injection / '
+        + 'allow-list boundary decided first, which the ruling deferred deliberately.',
+      acceptanceCriteria:
+        'Delete `sql` and `relationship` from every entry of every cube `joins` map; keep `name`. Then '
+        + 'check two things. (1) Did any deleted `sql` express something OTHER than the foreign-key '
+        + 'equality between the two objects — a filtered join, a non-key column, a literal predicate? '
+        + 'If so, the query you were getting was already the FK-equality answer and not the one you '
+        + 'wrote, so re-read the numbers that join produced before assuming this change moved them; the '
+        + 'fix is to model the relationship on the object, or to open a capability request for an '
+        + 'authorable join condition. (2) Did any deleted `relationship` say anything but '
+        + '`many_to_one`? If so, the aggregate was already computed as many-to-one and still is — this '
+        + 'change alters no result, it only stops the declaration from claiming otherwise. Nothing else '
+        + 'regresses: `joins.<alias>.name` is unchanged, and it is what both the joined table and the '
+        + 'per-object RLS/tenant read scope are resolved from.',
+    },
+    {
       id: 'dashboard-header-modal-target-page-only',
       surface:
         'dashboard `header.actions[]` entries with `actionType: \'modal\'` — an `actionUrl` naming '
@@ -12925,6 +12961,44 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // covered by `memory-persistence-auto-save-interval-to-ms`, which converts both
     // arms in one pass.
     'data/AutoPersistenceConfig:autoSaveInterval',
+    // #18612 — ADR-0049 enforce-or-remove, the same ruling and the same diff as
+    // `data/CubeJoin:sql`. `CubeJoin.relationship` carried a
+    // `.default('many_to_one')` and nothing dispatched on the cardinality, so
+    // `one_to_many` parsed, changed no SQL, and the aggregate silently kept the
+    // many-to-one arithmetic. Two service-analytics fixtures authored
+    // `relationship: 'belongsTo'` — a value the enum never declared — which is its
+    // own evidence that nothing validated or read the key.
+    //
+    // Same route and same registration reasoning as the `sql` entry beside this
+    // one: strict deletion plus a `guidance` prescription on the `strictObject`,
+    // registered under 18, no D2 conversion, the judgement carried by the D3
+    // semantic entry `cube-join-sql-and-relationship-retired`.
+    'data/CubeJoin:relationship',
+    // #18612 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-18, director
+    // batch #154 item 4, letter 2). `CubeJoin.sql` was REQUIRED and described itself
+    // as the `ON` clause, and nothing ever read it: both analytics strategies
+    // SYNTHESISE the join, so an authored condition was not ignored but REPLACED by
+    // a foreign-key equality, returned under a 200 with a plausible number attached
+    // (the #10298 shape). Measured with a positive control — zero reads of a join's
+    // `sql` in any non-test source, against eight reads of the neighbouring
+    // `cube.joins?.[alias]?.name` in native-sql-strategy.ts, objectql-strategy.ts
+    // and analytics-service.ts.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the `data/Metric:filters`
+    // precedent, one shape over in the same file). `CubeJoinSchema` is a
+    // `strictObject`, so the route is strict deletion plus a `guidance` entry
+    // carrying the prescription — no `retiredKey()` tombstone, the key is out of
+    // the walked shape entirely, and its liveness-ledger row left with it.
+    // ⛔ NO D2 conversion covers this surface: the ruling's census found zero
+    // authored cube joins outside this repository, and the one in-repo producer
+    // (examples/app-showcase) was fixed in the same diff. The judgement handed to a
+    // consumer is therefore the D3 SEMANTIC entry
+    // `cube-join-sql-and-relationship-retired`, and the guidance prescription
+    // deliberately carries no `os migrate meta` sentence.
+    'data/CubeJoin:sql',
     // #14478 — maintainer ruling 2026-09-02 ("ruled B"): the unit of a
     // duration-shaped `z.number()` key lives in the key name, and no existing
     // offender is grandfathered. `DriverOptions.timeout` said "Timeout in ms" in

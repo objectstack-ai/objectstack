@@ -31,7 +31,9 @@ describe('showcase gap fill — analytics cube', () => {
     expect(Object.keys(DeliveryCube.dimensions ?? {})).toEqual(
       expect.arrayContaining(['status', 'priority', 'due_date']),
     );
-    expect(DeliveryCube.joins?.showcase_project?.relationship).toBe('many_to_one');
+    // A join declares the object it reaches and nothing else: the ON clause is
+    // derived from the declared relationship (#18612 removed `sql`/`relationship`).
+    expect(DeliveryCube.joins?.showcase_project?.name).toBe('showcase_project');
   });
 });
 

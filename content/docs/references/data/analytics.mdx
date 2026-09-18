@@ -127,7 +127,7 @@ Type: `[string, string]`
 | **sql** | `string` | ✅ | Base SQL statement or Table Name |
 | **measures** | `Record<string, { name: string; label: string; description?: string; type: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'number' \| 'string' \| 'boolean'>; … }>` | ✅ | Quantitative metrics |
 | **dimensions** | `Record<string, { name: string; label: string; description?: string; type: Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>; … }>` | ✅ | Qualitative attributes |
-| **joins** | `Record<string, { name: string; relationship: Enum<'one_to_one' \| 'one_to_many' \| 'many_to_one'>; sql: string }>` | optional |  |
+| **joins** | `Record<string, { name: string }>` | optional |  |
 | **refreshKey** | `{ every?: string; sql?: string }` | optional |  |
 | **public** | `boolean` | optional (default: `false`) |  |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
@@ -164,9 +164,7 @@ Type: `[string, string]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Target cube name |
-| **relationship** | `Enum<'one_to_one' \| 'one_to_many' \| 'many_to_one'>` | optional (default: `"many_to_one"`) |  |
-| **sql** | `string` | ✅ | Join condition (ON clause) |
+| **name** | `string` | ✅ | Target cube name — the object this join reaches. The ON clause is DERIVED from the declared relationship between the two cubes' objects (a foreign-key equality) and is never authored. |
 
 ### Nested Shape: `Cube.refreshKey`
 
@@ -184,9 +182,7 @@ Type: `[string, string]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Target cube name |
-| **relationship** | `Enum<'one_to_one' \| 'one_to_many' \| 'many_to_one'>` | optional (default: `"many_to_one"`) |  |
-| **sql** | `string` | ✅ | Join condition (ON clause) |
+| **name** | `string` | ✅ | Target cube name — the object this join reaches. The ON clause is DERIVED from the declared relationship between the two cubes' objects (a foreign-key equality) and is never authored. |
 
 
 ---
