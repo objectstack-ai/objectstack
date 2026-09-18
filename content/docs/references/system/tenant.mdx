@@ -68,7 +68,7 @@ const result = DatabaseLevelIsolationStrategySchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **strategy** | `Enum<'individual' \| 'consolidated' \| 'on_demand'>` | optional (default: `"individual"`) | Backup strategy |
-| **frequencyHours** | `integer` | optional (default: `24`) | Backup frequency |
+| **frequencyHours** | `integer` | optional (default: `24`) | Backup frequency in hours |
 | **retentionDays** | `integer` | optional (default: `30`) | Backup retention days |
 
 ### Nested Shape: `DatabaseLevelIsolationStrategy.encryption`
@@ -344,7 +344,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **strategy** | `Enum<'individual' \| 'consolidated' \| 'on_demand'>` | optional (default: `"individual"`) | Backup strategy |
-| **frequencyHours** | `integer` | optional (default: `24`) | Backup frequency |
+| **frequencyHours** | `integer` | optional (default: `24`) | Backup frequency in hours |
 | **retentionDays** | `integer` | optional (default: `30`) | Backup retention days |
 
 ### Nested Shape: `TenantIsolationConfig[strategy='isolated_db'].encryption`
