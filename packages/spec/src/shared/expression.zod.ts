@@ -469,7 +469,11 @@ export type PredicateInput = z.input<typeof PredicateInputSchema>;
  * Construct an Expression literal from a CEL source string. Used by DX
  * shorthand (`cel\`...\``) and by codegen tools.
  */
-export function expression(source: string, dialect: ExpressionDialect = 'cel', meta?: ExpressionMeta): Expression {
+export function expression(
+  source: string,
+  dialect: ExpressionDialect = 'cel',
+  meta?: ExpressionMeta,
+): EvaluatedExpression {
   return { dialect, source, ...(meta ? { meta } : {}) };
 }
 
@@ -508,8 +512,22 @@ function renderTemplate(strings: TemplateStringsArray, values: readonly unknown[
   return out;
 }
 
-/** Tagged template — produces a CEL Expression envelope. */
-export function cel(strings: TemplateStringsArray, ...values: unknown[]): Expression {
+/**
+ * Tagged template — produces a CEL Expression envelope.
+ *
+ * Returns {@link EvaluatedExpression}, not {@link Expression}: this helper
+ * ALWAYS sets `source`, so the wider return type was a declaration of
+ * something the function cannot produce. It was harmless only while no slot
+ * required `source` — once the field-rule triad did (ADR-0136 D1), a
+ * ``P`record.status == 'paid'` `` written straight into `visibleWhen` became a
+ * TS2322, and the recommended authoring form for a predicate stopped
+ * type-checking in the one place predicates are written. Fixed at the PRODUCER
+ * (Prime Directive #12) rather than by rewriting the call sites: the return
+ * type now states what the helper emits. Narrowing a return type removes
+ * nothing from a caller — `EvaluatedExpression` is assignable to `Expression`
+ * — so every existing consumer still compiles.
+ */
+export function cel(strings: TemplateStringsArray, ...values: unknown[]): EvaluatedExpression {
   return { dialect: 'cel', source: renderTemplate(strings, values) };
 }
 
