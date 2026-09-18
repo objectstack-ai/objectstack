@@ -322,7 +322,21 @@ const POSITIONS: Record<string, BlockPositions> = {
   kanban: {
     // `columns` here are the fields shown ON a card, not the board's columns:
     // a stale entry leaves one blank line on the card and the board renders.
-    scalars: { groupByField: 'error', summarizeField: 'warning' },
+    //
+    // [#18565] `titleField` takes CALENDAR's level, not the level of the two
+    // siblings that spell the key required. `KanbanConfigSchema` declares it
+    // OPTIONAL (#16894, which copied `CalendarConfigSchema` for this exact key
+    // and names `TimelineConfigSchema` / `GanttConfigSchema` — the two whose
+    // rows below read `error` — as the siblings it deliberately does NOT
+    // copy), and the board resolves a name no record carries through the
+    // ADR-0079 display-name chain: measured in objectui `dda8f3815`,
+    // `resolveKanbanTitleField` returns the written name, the card reads
+    // `rec[titleField]`, finds nothing and falls to `getRecordDisplayName`.
+    // Every card still renders, titled from a value the author did not ask
+    // for — the warning tier's own case (one decoration dropped, the rest
+    // rendered), where `groupByField` above is the error tier's (every card
+    // collapses into one uncolumned lane).
+    scalars: { groupByField: 'error', summarizeField: 'warning', titleField: 'warning' },
     lists: { columns: 'warning' },
   },
   calendar: {
