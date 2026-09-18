@@ -410,6 +410,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'G5: the catch-all, on a changeset carrying no prescription': 1,
   'D-E2E (#17357): the denial heading, END TO END through `scan()`': 6,
   'F-E2E (#17864): the framed MENTION, END TO END through `scan()`': 2,
+  'L-E2E (#18494): the compound-noun label, END TO END through `scan()`': 4,
   'R9: two markers is ambiguous, not "the first one wins"': 2,
   'R10: THE #6419 SHAPE -- a REAL prescription, written in Chinese with -': 4,
   'R11: the same, framed by a HEADING instead of an inline label': 3,
@@ -442,6 +443,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the floors: labels that are NOT mentions, and mentions that ARE evidenced': 9,
   'D1-D9 (#17357): a heading that DENIES a prescription is not evidence of one': 9,
   'F1-F9 (#17864): a framing word between the governor and the placeholder is': 9,
+  'L1-L13 (#18494): a NOUN-PHRASE label is a label, read from the RIGHT': 13,
   'P51-P60: the HARD-WRAPPED mention, and the floors that keep the cure from': 11,
   'P62-P68: the framed region closes at the same or a SHALLOWER heading, not': 7,
   'U1-U12 (#8299): unit pins on the runtime-interface-only primitives': 13,
@@ -1345,6 +1347,59 @@ const FROM_TO_LABEL_G = new RegExp(FROM_TO_LABEL_RE.source, 'gm');
 const GOVERNING_WORD_RE = /(?:[A-Za-z]|的)$/;
 
 /**
+ * Does a COLON close the placeholder -- is this occurrence INTRODUCING the
+ * prescription that follows it? (#18494)
+ *
+ * `GOVERNING_WORD_RE` above reads the one character to the LEFT, and that is the
+ * whole evidence branch 1 had. It is sound for the shapes it was measured on and
+ * it is structurally blind to one family: a label whose own words are a NOUN
+ * PHRASE. `**Schema Migration FROM -> TO:** delete the block` is a label by every
+ * reading a human gives it, and the character left of the framed placeholder is an
+ * ordinary letter, so the occurrence read as a MENTION and a changeset shipping no
+ * rewrite at all was admitted under `no-migration-prescription` -- the
+ * false-NEGATIVE direction, where the cost is not a blocked PR but a break that
+ * reaches consumers with no prescription and no ledger entry.
+ *
+ * The colon is the signal the left side cannot supply, and it is a signal about
+ * USE rather than about grammar: `FROM -> TO:` is the convention's own punctuation
+ * for "what follows is the mapping". A MENTION is the head of a noun phrase inside
+ * a running sentence (`carries its FROM -> TO guide`, `the FROM -> TO is
+ * documented elsewhere`) and a running sentence does not put a colon on its
+ * object. So the two readings are separable from the RIGHT even where the left is
+ * mute, and this predicate is consulted for exactly that case.
+ *
+ * ⚠️ A CLOSED CLASS, derived from the stock rather than invented. Measured over
+ * every tracked `md`/`mdx` file in this repository at `625db0e85` (1322 files, 113
+ * of them carrying the placeholder, 1007 occurrences): 321 occurrences are closed
+ * by a colon, and the markup that may stand between the placeholder and that colon
+ * is exactly three runs -- nothing (295), `)` (25, `Migration (FROM -> TO):`) and
+ * `**` (1, `**FROM -> TO**: a direct-engine caller`). Hence at most two characters
+ * of closing markup, from the class the stock actually writes.
+ *
+ * ⚠️ The full-width colon is this file's ordinary Chinese parity, exactly as
+ * `MIGRATION_FRAMING_RE`, `OLD_COLUMN_RE`, `NEW_COLUMN_RE` and
+ * `REMOVAL_INSTRUCTION` each carry one, and its measured population in this
+ * position is ZERO: it buys no measured true positive today and introduces no
+ * measured false one. It is here so the arm is not shaped by the language the
+ * author happened to write in -- a Chinese author writes the label colon
+ * full-width, and a rule that reads only the ASCII one would make the ADR-0087
+ * disposition turn on the author's keyboard.
+ *
+ * ⚠️ DIRECTION, and why this cannot be a weakening: a colon can only ever make an
+ * occurrence a LABEL, and a label is what the gate REFUSES the catch-all on. No
+ * body that is refused today is admitted because of this predicate, and the
+ * contradiction check it feeds still grants everything
+ * `carriesConcreteRewrite` grants.
+ *
+ * ⚠️ Asked AFTER the heading arm, never before it. A heading is judged on polarity
+ * (`HEADING_DENIAL_RE`), and a denial is the one shape whose punctuation must not
+ * be allowed to overturn its meaning -- reading `## No FROM -> TO: ...` as a label
+ * would re-open exactly the #17357 false positive, in the direction this gate must
+ * not buy.
+ */
+const LABEL_COLON_RE = /^[`*)]{0,2}[:：]/;
+
+/**
  * A migration-framing word sitting immediately before the placeholder FRAMES it; it
  * does not govern it (`Migration FROM → TO`, `迁移 FROM → TO`). Anchored at the end
  * because that is the only position where the distinction can arise.
@@ -1599,11 +1654,20 @@ const VERTICAL_TO_RE = /^\s{0,3}(?:(?:\/\/|#|-|\*|>)\s*)*\**TO\**\s*(?::|—|-|$
  * fence reads as prose, and this predicate is given one line of context rather than
  * the block structure. No stock occurrence has that shape.
  *
+ * ⚠️ And from the RIGHT, where the left is mute: a NOUN-PHRASE label
+ * (`**Schema Migration FROM → TO:** delete the block`) has an ordinary letter
+ * immediately before the placeholder and is a label all the same, so the
+ * adjacency question answers "mention" on a shape no human reads that way. It was
+ * admitted with no rewrite at all (#18494). The colon that closes the placeholder
+ * is what separates the convention's own punctuation from a running sentence, and
+ * `LABEL_COLON_RE` above carries the measured class and the direction.
+ *
  * @param {string} line the line the `FROM` token sits on
  * @param {number} col  its column within that line
  * @param {string} [prev] the line above it, when there is one (#7094)
+ * @param {string} [after] the rest of its line, right of the placeholder (#18494)
  */
-function labelPositioned(line, col, prev) {
+function labelPositioned(line, col, prev, after = '') {
   const prefix = line.slice(0, col).replace(/\s+$/, '');
   // A heading is a label by construction, whatever words it carries -- UNLESS the
   // word governing the placeholder denies it (#17357). A denying heading is not
@@ -1613,6 +1677,14 @@ function labelPositioned(line, col, prev) {
   if (/^\s{0,3}#{1,6}\s/.test(line)) {
     return !HEADING_DENIAL_RE.test(withoutFramingTail(prefix));
   }
+  // A COLON closes the placeholder, so the occurrence is introducing the mapping
+  // that follows it rather than being talked about inside a sentence (#18494).
+  // Asked here rather than above, so a DENYING heading keeps its polarity reading:
+  // punctuation must not overturn the one shape that says there is nothing to
+  // introduce. Asked BEFORE governance, because it is evidence the left side
+  // structurally cannot supply -- a label whose own words are a noun phrase has an
+  // ordinary letter to its left and is a label anyway.
+  if (LABEL_COLON_RE.test(after)) return true;
   // A framing word is transparent HERE exactly as it is in the heading arm above
   // (#17864): it frames the placeholder, so the governance question is asked of
   // whatever stands behind it -- which requires the space it sat behind to come off
@@ -1707,7 +1779,12 @@ export function findMigrationPrescription(body) {
     const at = m.index + m[0].indexOf('FROM');
     const lineStart = body.lastIndexOf('\n', at - 1) + 1;
     const lineNo = body.slice(0, at).split(/\r?\n/).length - 1;
-    if (!labelPositioned(lines[lineNo] ?? '', at - lineStart, lineNo > 0 ? lines[lineNo - 1] : undefined)) {
+    // The text RIGHT of the placeholder, on its own line: the match ends on the
+    // `TO` token (its trailing lookahead consumes nothing), and every alternative
+    // of `FROM_TO_LABEL_RE` is single-line, so the match's end is a column on the
+    // same line the token sits on (#18494).
+    const after = (lines[lineNo] ?? '').slice(m.index + m[0].length - lineStart);
+    if (!labelPositioned(lines[lineNo] ?? '', at - lineStart, lineNo > 0 ? lines[lineNo - 1] : undefined, after)) {
       if (corroborated === null) corroborated = carriesConcreteRewrite(body);
       if (!corroborated) continue;
     }
@@ -4544,6 +4621,36 @@ function selfTest() {
     },
   })), [/contradicts the changeset's own body/, /Evidence \(from-to-label\)/]);
 
+  // ---- L-E2E (#18494): the compound-noun label, END TO END through `scan()` ---
+  //
+  // #18494's own criterion is a COMMITTED probe changeset, not a unit reading: the
+  // body carries `**Schema Migration FROM → TO:** delete the block` and no
+  // concrete rewrite, and claims the catch-all. Before the colon arm the gate read
+  // that label as a mention, found no prescription to contradict the claim, and
+  // admitted a published break with no ledger entry -- exit 0 where exit 1 is owed.
+  // The GREEN half runs too, because a narrowing that refused the mention as well
+  // would have re-opened #17864 while passing the red.
+  battery('L-E2E (#18494): the compound-noun label, END TO END through `scan()`');
+  const NOUN_LABEL = '**Schema Migration FROM → TO:** delete the block';
+  const NOUN_WHY = 'a bare deletion on a non-strict schema refuses nothing and converts nothing';
+  red('L-E2E-R the compound-noun label contradicts the catch-all it claims', run(mk({
+    files: {
+      '.changeset/x.md': CS({
+        body: '**BREAKING** the `x` key is deleted outright.\n\n' + NOUN_LABEL + '\n\n'
+          + '<!-- adr-0087: not-required (no-migration-prescription) ' + NOUN_WHY + ' -->\n',
+      }),
+    },
+  })), [/contradicts the changeset's own body/, /Evidence \(from-to-label\)/]);
+  green('L-E2E-G the same sentence with no colon closing it is still the admitted mention', run(mk({
+    files: {
+      '.changeset/x.md': CS({
+        body: '**BREAKING** the `x` key is deleted outright.\n\n'
+          + 'The Schema Migration FROM → TO is documented in the release notes.\n\n'
+          + '<!-- adr-0087: not-required (no-migration-prescription) ' + NOUN_WHY + ' -->\n',
+      }),
+    },
+  })));
+
   // ---- R9: two markers is ambiguous, not "the first one wins" ---------------
   battery('R9: two markers is ambiguous, not "the first one wins"');
   red('R9 two disposition markers', run(mk({
@@ -6381,6 +6488,75 @@ function selfTest() {
   assert(
     findMigrationPrescription('sys_migration FROM → TO: delete the block\n')?.branch === 'from-to-label',
     'F9: FLOOR -- the repair keys on the SPACE, so an identifier ending in a framing word strips to `sys_` and reads exactly as it did',
+  );
+
+  // --- L1-L13 (#18494): a NOUN-PHRASE label is a label, read from the RIGHT.
+  //
+  // `GOVERNING_WORD_RE` reads the one character to the LEFT, and a label whose own
+  // words are a noun phrase has an ordinary letter there -- so `**Schema Migration
+  // FROM → TO:** delete the block` read as a MENTION and a changeset shipping
+  // no rewrite at all was admitted under the catch-all. That is the false-NEGATIVE
+  // direction: the cost is not a blocked PR but a break reaching consumers with no
+  // prescription and no ledger entry.
+  //
+  // L1-L7 are the RED set under reverse verification (remove the `LABEL_COLON_RE`
+  // arm and all seven go red). L8 is the control that makes L1 a READING rather
+  // than a specimen: one colon is the only difference between them. L9-L13 are the
+  // floors in the dangerous direction -- a widening that read a colon ANYWHERE in
+  // the line as a label, or that let punctuation overturn a denial, shows up there
+  // and not in L1.
+  battery('L1-L13 (#18494): a NOUN-PHRASE label is a label, read from the RIGHT');
+  assert(
+    findMigrationPrescription('**Schema Migration FROM → TO:** delete the block\n')?.branch === 'from-to-label',
+    'L1: THE #18494 SHAPE -- a compound-noun label, with no concrete rewrite in the body to fall back on',
+  );
+  assert(
+    findMigrationPrescription('- Schema Migration FROM → TO: the block goes away\n')?.branch === 'from-to-label',
+    'L2: ...and under a bullet marker',
+  );
+  assert(
+    findMigrationPrescription('Key renames FROM → TO: listed below in prose\n')?.branch === 'from-to-label',
+    'L3: a PLURAL noun immediately before the framing word reads the same way',
+  );
+  assert(
+    findMigrationPrescription('**Required migration FROM → TO:** delete the block\n')?.branch === 'from-to-label',
+    'L4: ...and an ADJECTIVE before it -- the rule is the colon, not a part-of-speech judgement',
+  );
+  assert(
+    findMigrationPrescription('Authoring-key migration FROM → TO:\n')?.branch === 'from-to-label',
+    'L5: ...and a hyphenated compound, which no word-anchoring can separate',
+  );
+  assert(
+    findMigrationPrescription('字段的 迁移 FROM → TO: 删除这一块\n')?.branch === 'from-to-label',
+    'L6: the Chinese spelling of the same label -- the attributive particle governs the framing word, not the placeholder',
+  );
+  assert(
+    findMigrationPrescription('**Removed keys FROM → TO:**\n')?.branch === 'from-to-label',
+    'L7: the same defect ONE WORD SHORTER -- a noun-phrase label with no framing word in it at all (#18494 fairness control)',
+  );
+  assert(
+    !hasMigrationPrescription('the Migration FROM → TO is documented elsewhere\n'),
+    'L8: THE CONTROL L1 IS A READING AGAINST -- the same framed placeholder with no colon closing it is still the #17864 mention',
+  );
+  assert(
+    !hasMigrationPrescription('the FROM → TO mapping is documented elsewhere: see the release notes\n'),
+    'L9: FLOOR -- ADJACENCY on the right, exactly as on the left: a colon later in the LINE closes a clause, not the placeholder',
+  );
+  assert(
+    !hasMigrationPrescription('The checklist requires breaking changesets to carry their FROM → TO migration.\n'),
+    'L10: FLOOR -- P41 unmoved; a governed mention whose line carries no colon at all is untouched by this arm',
+  );
+  assert(
+    findMigrationPrescription('Migration (FROM → TO): delete the block\n')?.branch === 'from-to-label',
+    'L11: FLOOR -- the `)` run the stock measures between the placeholder and its colon',
+  );
+  assert(
+    findMigrationPrescription('**FROM → TO**: a direct-engine caller must pass the flag\n')?.branch === 'from-to-label',
+    'L12: FLOOR -- and the `**` run, the one occurrence of it in the corpus',
+  );
+  assert(
+    !hasMigrationPrescription('## No FROM → TO: this section prescribes nothing\n'),
+    'L13: FLOOR, POLARITY -- a DENYING heading keeps its reading; the colon is asked AFTER the heading arm so punctuation cannot overturn a denial (#17357)',
   );
 
   // --- P51-P60: the HARD-WRAPPED mention, and the floors that keep the cure from
