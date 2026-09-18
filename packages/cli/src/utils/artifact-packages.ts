@@ -47,14 +47,61 @@ import {
 } from '@objectstack/lint';
 
 /**
+ * The leading `collection[N]` of a finding path — the ONE coordinate that
+ * differs between the two views of a single finding. `objects[3].fields.x`
+ * matches `objects[3]`; `manifest.namespace` matches nothing.
+ */
+const TOP_LEVEL_COLLECTION_INDEX = /^([A-Za-z_][A-Za-z0-9_]*)\[\d+\]/;
+
+/**
  * Identity of one finding, for the per-package de-duplication below.
  *
- * Moved here from `compile.ts` unchanged (#18677): the two doors must
- * de-duplicate identically, or "the set the union could not see" means two
- * different things depending on which command the author happened to run.
+ * Moved here from `compile.ts` unchanged (#18677); its POSITIONAL half was
+ * corrected here (#18779). All three doors must de-duplicate identically, or
+ * what survives the filter means a different thing depending on which command
+ * the author happened to run.
+ *
+ * ## Why the top-level collection index is neutralised (#18779)
+ *
+ * `rule`, `where` and `message` say WHICH finding this is; `path` says where
+ * it sits. The inherited key used `path` raw — and `path` is positional, so
+ * one finding judged twice got two keys and the `Set` below never matched
+ * them. A package body re-bases every collection from 0, while the flattened
+ * union numbers that same entry wherever `authoringRuleUnionStack` placed it:
+ * `objects[0].fields.industry` (package-local) and `objects[1].fields.industry`
+ * (union) are ONE finding under two spellings. Measured on
+ * `examples/app-multi-package` before this landed — 1 survivor, 1 echo, 0
+ * genuinely new, and `os build` printed "4 author-time warning(s)" for 3
+ * distinct ones. The de-duplication exists precisely so that "the author
+ * cannot tell a real per-package finding from an echo" would stop being true,
+ * and the positional key is why it stayed true.
+ *
+ * ⛔ The rewrite touches the KEY only — a finding's own `path` is never
+ * modified, so every door still prints the positional location it always
+ * printed. And only the TOP-LEVEL index: nested positions (`.indexes[1]`,
+ * `.columns[0]`) address the author's own document and read identically in
+ * both views, so they stay in the key and keep discriminating.
+ *
+ * ⛔ Not `nameKeyFindingPath` (`@objectstack/lint`'s runtime-gate rewrite of
+ * this same coordinate), for the reason that function's own docblock records:
+ * it is "Applied AFTER the differential, not before it … two stored items that
+ * (illegitimately) share a name must not have their distinct findings merged
+ * or cancelled by the rewrite". A de-duplication key IS that differential, so
+ * name-keying is the one place it rules itself out. Two further readings from
+ * the same docblock: its key set is DERIVED and holds `objects`, `permissions`
+ * and `books` today, so it would leave every other collection's echo standing,
+ * and it is "Exported for the pin, not for callers" — it sits on neither of
+ * that package's entries.
+ *
+ * ⚠️ What this does NOT buy, written down so the next reader does not
+ * re-inflate it: the key becomes position-insensitive, ⛔ not collision-proof.
+ * Two entries that render the same `where` — an illegitimate duplicate name —
+ * still share a key, exactly as they already did whenever their indices
+ * matched too. The claim the pass below is entitled to make is stated there,
+ * and it is narrower than "exactly the set the union could not see".
  */
 const findingKey = (f: { rule: string; where: string; path: string; message: string }): string =>
-  [f.rule, f.where, f.path, f.message].join('\u0000');
+  [f.rule, f.where, f.path.replace(TOP_LEVEL_COLLECTION_INDEX, '$1[]'), f.message].join('\u0000');
 
 /**
  * The artifact's package entries, as `{ index, id, body }` (ADR-0130 D4).
@@ -161,30 +208,55 @@ export function packageBodyAsStack(
  * ## What the asymmetry was, measured
  *
  * `os build` ran this pass; `os validate` ran the union fold and stopped,
- * importing neither seam above. `compile.ts`' own comment says what survives
- * the de-duplication is "exactly the set the union could not see" ⇒ that whole
- * set was findings `os build` reported and `os validate` structurally could
- * not. The direction is FALSE-CLEAN, and on the command an author runs BEFORE
- * shipping — the same direction and the same door #17069 fixed one layer up,
- * which is why `authoringRuleUnionStack` being in both commands did not settle
- * it. `packages/cli/test/build-json-advisory-parity.e2e.test.ts` already
- * asserted "nothing rides in build's `warnings` that validate does not also
- * report"; it stayed green because its fixture declares no `packages[]` at all,
- * so the pass it would have caught never ran there.
+ * importing neither seam above. Every finding this pass yields was therefore
+ * one `os build` reported and `os validate` structurally could not — the
+ * direction is FALSE-CLEAN, and on the command an author runs BEFORE shipping.
+ * Same direction and same door #17069 fixed one layer up, which is why
+ * `authoringRuleUnionStack` being in both commands did not settle it.
+ * `packages/cli/test/build-json-advisory-parity.e2e.test.ts` already asserted
+ * "nothing rides in build's `warnings` that validate does not also report"; it
+ * stayed green because its fixture declares no `packages[]` at all, so the pass
+ * it would have caught never ran there.
  *
- * ## The de-duplication key is the caller's, and it is not perfect
+ * ⚠️ #18779 corrected the SIZE that sentence used to be given, ⛔ not its
+ * direction. #18677 and #18778 both sized this blind spot by quoting
+ * `compile.ts`' claim that the survivors are "exactly the set the union could
+ * not see" — but the key was positional, so part of every survivor set was
+ * ECHO: findings the union run ALSO reported, which means `os validate` was
+ * reporting them all along through its own union run. On
+ * `examples/app-multi-package` the whole of it was — 1 survivor, 1 echo, 0
+ * genuinely new — so `os validate`'s true blind spot on that fixture was ZERO
+ * findings, not one. ⛔ Neither card measured that; both quoted it. The
+ * asymmetry was real and worth closing on every door; its magnitude was
+ * inherited from a sentence nobody had read the definition behind.
  *
- * `findingKey` below is `compile.ts`' key, moved unchanged: `rule`, `where`,
- * `path`, `message`. ⚠️ `path` is POSITIONAL, and a collection index in one
- * package's own body is not the index the flattened top level gives the same
- * item — so a finding on any package whose local index differs from its
- * flattened one survives the filter as an ECHO of a union finding rather than
- * as something the union could not see. Measured on `examples/app-multi-package`
- * (2 packages, `crm_account.industry`): 1 survivor, 0 of them new. ⛔ Not fixed
- * here — changing the key changes what `os build` reports, which is a separate
- * decision from making the two doors agree, and agreeing IMPERFECTLY at one
- * seam is strictly better than disagreeing at two. When it is fixed it is
- * fixed once, for both commands, which is the property this module buys.
+ * ## What the de-duplication key can and cannot promise
+ *
+ * `findingKey` above neutralises the top-level collection index (#18779), so
+ * the two views of one finding now produce one key and an echo is filtered.
+ * What reaches the lists below is therefore the set of per-package findings
+ * whose `rule`, `where`, `message` and NON-top-level position no union finding
+ * already carried.
+ *
+ * ⚠️ That is the whole claim, and it is deliberately narrower than "exactly the
+ * set the union could not see" — ⛔ do not restate it as that sentence. Two
+ * entries rendering the same `where` still collapse (see `findingKey`), and a
+ * rule that reports the same `rule`/`where`/`message` for genuinely different
+ * items distinguished ONLY by their top-level index would collapse with them.
+ *
+ * ⛔ And do not size that residue by quoting the pin next door — that move is
+ * exactly what this card exists to correct. `packages/lint/src/
+ * data-model-rule-where-slot.test.ts` holds something NARROWER than "every
+ * rule names its entity in `where`": it runs the whole registry and fails any
+ * rule that puts a BARE CONFIG PATH in `where`. That forbids the one spelling
+ * which would make the collapse systematic; it does ⛔ not promise that two
+ * entries always render different `where` strings. So the residue is MEASURED
+ * instead — over every example stack in this repo that parses today
+ * (`app-multi-package`'s built artifact, `app-crm`, `app-showcase`,
+ * `app-todo`), 45 registry rules produced 103 findings and 103 distinct
+ * neutralised keys: ZERO groups held two different raw paths. ⛔ Re-measure
+ * rather than re-quote that number — a corpus reading is a count plus the tree
+ * it was taken against, and this one was taken on a43b9d0654.
  */
 export function runPerPackageAuthoringRules(run: {
   /** Which door is asking — the same string its union run passed. */
