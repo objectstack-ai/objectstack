@@ -797,12 +797,13 @@ const INLINE_ENGINE_TYPE = 'inline type literal stating an engine door';
  *
  * ⚠️ Reached ONLY after {@link resolveReceiver} has failed to find an indexed name
  * in the type text, so a named engine type still wins and still reports its own
- * name. The `how` gains an `/inline-door` suffix so `--json` says which rule
- * placed the site.
+ * name. The `how` gains an `/inline-door` suffix for anyone tracing a resolution;
+ * ⛔ `how` is not carried onto a PLACED site, so what `--json` shows for one of
+ * these is its `engineType`, the sentence above.
  */
 function inlineEngineDoorOrOther(typeText, how) {
   if (typeTextDeclaresEngineDoor(typeText)) {
-    return { kind: 'engine', type: INLINE_ENGINE_TYPE, how: `${how}/inline-door`, inlineType: typeText };
+    return { kind: 'engine', type: INLINE_ENGINE_TYPE, how: `${how}/inline-door` };
   }
   return { kind: 'other', type: typeText, how };
 }
