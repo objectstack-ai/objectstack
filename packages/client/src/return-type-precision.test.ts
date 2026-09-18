@@ -1045,9 +1045,22 @@ export async function returnTypePrecisionPins14314(): Promise<void> {
     expectTypeOf((await client.organizations.invitations.accept('i')).invitation.status).toEqualTypeOf<'accepted'>();
     expectTypeOf((await client.organizations.invitations.reject('i')).invitation.status).toEqualTypeOf<'rejected'>();
     expectTypeOf((await client.organizations.invitations.reject('i')).member).toEqualTypeOf<null>();
-    // The two metadata shapes: decoded on the write echo, stored text on the read row.
+    // [#18728] ONE metadata shape now — decoded on the write echo AND on every
+    // read row, because plugin-auth's adapter decodes `sys_organization
+    // .metadata` out of its stored JSON text on the read verbs and omits the
+    // key when the column is unset. Before ruling C's producer fix the second
+    // line read `string | null | undefined`; the pair is kept side by side so
+    // a regression on either end is one diff line.
     expectTypeOf((await client.organizations.update('o', {})).metadata).toEqualTypeOf<Record<string, unknown> | undefined>();
-    expectTypeOf((await client.organizations.delete('o')).metadata).toEqualTypeOf<string | null | undefined>();
+    expectTypeOf((await client.organizations.delete('o')).metadata).toEqualTypeOf<Record<string, unknown> | undefined>();
+    // [#18728] The relay itself, made mechanical: the read wire IS the spec's
+    // `Organization`, so `updatedAt` is the spec's optional ISO string rather
+    // than a member this SDK re-declares. ⚠️ Optional is the ACCEPT set, not a
+    // promise of delivery — measured, better-auth's `transformOutput` emits its
+    // own declared fields only, so this key is absent on every route of the
+    // family even though `sys_organization.updated_at` exists (ruling C's
+    // fallback A). Read it as "may be absent", and expect absent.
+    expectTypeOf((await client.organizations.delete('o')).updatedAt).toEqualTypeOf<string | undefined>();
     // `create.members` is the literal one-element tuple the handler answers.
     expectTypeOf((await client.organizations.create({ name: 'n' })).members).toEqualTypeOf<[OrganizationMemberWire]>();
     // `removeMember.member.user` is conditional on the by-email path.
@@ -1065,18 +1078,16 @@ export async function returnTypePrecisionPins14314(): Promise<void> {
     void (await client.organizations.listMembers('o')).data;
     // @ts-expect-error the wire sends an ISO string; `Date` methods do not exist on it
     void (await client.organizations.leave('o')).createdAt.getTime();
-    // @ts-expect-error `sys_organization.updated_at` never reaches the wire — the adapter walks the vendor schema only
-    void (await client.organizations.delete('o')).updatedAt;
     // @ts-expect-error delete answers the organization ROW, not the id string the vendor's OpenAPI stub declares
     void (await client.organizations.delete('o')).length;
     // @ts-expect-error updateMemberRole answers the member BARE, not `{ member }` as the vendor's stub declares
     void (await client.organizations.updateMemberRole('o', { memberId: 'm', role: 'r' })).member;
     // @ts-expect-error setActive can answer `null` (empty id, no active organization) — narrow before reading
     void (await client.organizations.setActive('o')).id;
-    // @ts-expect-error on the read routes `metadata` is the stored JSON TEXT, not an object
-    void (await client.organizations.get('o'))?.metadata?.plan;
     // @ts-expect-error on the write echo `metadata` is already decoded — it is not a string to parse
     void JSON.parse((await client.organizations.update('o', {})).metadata);
+    // @ts-expect-error [#18728] and on the READ routes too now — the producer decodes it, so there is nothing to parse
+    void JSON.parse((await client.organizations.get('o'))!.metadata);
     // @ts-expect-error updateMemberRole strips the user join; only the joined routes carry `user`
     void (await client.organizations.updateMemberRole('o', { memberId: 'm', role: 'r' })).user;
 }
