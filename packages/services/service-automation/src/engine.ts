@@ -211,6 +211,7 @@ const FLOW_NODE_UNKNOWN_KEY_GUIDANCE: Record<string, Record<string, string>> = {
 import { runIsUnscopedUserMode, flowTouchesData } from './runtime-identity.js';
 import { isGuardRefusal, refuseNode } from './guard-refusal.js';
 import { readPartialSteps } from './partial-steps.js';
+import { isRegionSuspensionRefusal, refuseRegionSuspension } from './region-suspension-refusal.js';
 import { summarizeRun, formatRunSummaryLine } from './run-summary.js';
 // #5660 — the degrade registration reports a FOREIGN failure (a third-party
 // provider factory's text), so it renders it as structured `meta` rather than
@@ -9507,15 +9508,35 @@ export class AutomationEngine implements IAutomationService {
                 }
             } catch (execErr: unknown) {
                 const errMsg = execErr instanceof Error ? execErr.message : String(execErr);
-                steps.push({
-                    nodeId: node.id,
-                    nodeType: node.type,
-                    status: 'failure',
-                    startedAt: stepStartedAt,
-                    completedAt: new Date().toISOString(),
-                    durationMs: Date.now() - stepStart,
-                    error: { code: 'EXECUTION_ERROR', message: errMsg },
-                });
+                // [#18881] ONE region refusal is ONE failure. The refusal names
+                // the region node whose body could not carry the pause, and
+                // that node's own frame records it exactly as any other thrown
+                // failure does. Every ENCLOSING container the unwind passes
+                // through — the `loop` around the `try_catch` in the card's
+                // reproduction — records nothing: it did not fail, it is the
+                // frame a failure is travelling out through, and a step for it
+                // would make `summary.failed` count the NESTING DEPTH rather
+                // than the fault. `summary.failed` is `Σ nodes[].failures`
+                // (#14456), so a second step here reads as a second lost row to
+                // every operator and every #4354 reader.
+                //
+                // Keyed on the refusal's OWN `regionNodeId` rather than on a
+                // mutable "already reported" flag: the identity is decided once
+                // at the boundary that raised it and cannot drift as the error
+                // travels.
+                const enclosingFrameOfRegionRefusal =
+                    isRegionSuspensionRefusal(execErr) && execErr.regionNodeId !== node.id;
+                if (!enclosingFrameOfRegionRefusal) {
+                    steps.push({
+                        nodeId: node.id,
+                        nodeType: node.type,
+                        status: 'failure',
+                        startedAt: stepStartedAt,
+                        completedAt: new Date().toISOString(),
+                        durationMs: Date.now() - stepStart,
+                        error: { code: 'EXECUTION_ERROR', message: errMsg },
+                    });
+                }
 
                 // #13803 — a structured container that DIED mid-body still did
                 // whatever its completed iterations did, and those writes are
@@ -9573,8 +9594,17 @@ export class AutomationEngine implements IAutomationService {
                 // untouched and still decides, alone, which failures a `fault`
                 // edge may carry. Nor is the thrown value touched — `execErr` is
                 // rethrown below exactly as caught.
-                variables.set('$error', { nodeId: node.id, message: errMsg });
-                this.setNodeError(variables, node.id, errMsg);
+                //
+                // [#18881] …and it is published for the SAME frames that record
+                // a step, for the same reason: an enclosing container the
+                // region refusal is travelling out through did not fail, so
+                // `{$error}` naming it would be a false sentence about which
+                // node produced the run's failure. The region node's own frame
+                // publishes, as any failing node does.
+                if (!enclosingFrameOfRegionRefusal) {
+                    variables.set('$error', { nodeId: node.id, message: errMsg });
+                    this.setNodeError(variables, node.id, errMsg);
+                }
 
                 // #3863 — a guard that THROWS is as un-routable as one that
                 // returns: `UnscopedRunDataAccessError` (ADR-0049/#1888) reports
@@ -9997,9 +10027,15 @@ export class AutomationEngine implements IAutomationService {
      * larger seams than an out-parameter the two callers that want it opt into.
      * Callers that do not pass a sink (`loop`, `parallel`) are unaffected.
      *
-     * Durable pause (`suspend`) inside a region is not supported in this
-     * iteration — it is converted into a clear error (mirrors the `subflow`
-     * nested-pause guard).
+     * [#18881] Durable pause (`suspend`) inside a region is not supported —
+     * #3267 ruled that limit 禁, and this boundary is where the run meets it.
+     * The conversion is a NAMED refusal
+     * ({@link FlowRegionSuspensionRefusalError}) carrying the region node, the
+     * suspending node and the sub-flow, ⛔ not the plain `Error` it used to
+     * raise: an enclosing `try_catch` read that one as an ordinary region
+     * failure, ran its catch handler, and the run reported success over a sweep
+     * that had processed nothing. The container executors test for the named
+     * type and re-throw, so no region can contain it.
      */
     async runRegion(
         region: FlowRegionParsed,
@@ -10065,10 +10101,35 @@ export class AutomationEngine implements IAutomationService {
             // this path's contract is (still) to throw.
             tag();
             partialSteps?.push(...regionSteps);
+            // [#18881] A refusal raised at an INNER region boundary is already
+            // the named one, and it is re-thrown untouched. Re-wrapping it here
+            // would rename the region: for `loop { try_catch { map } }` the
+            // author's fault is the try region, and the loop is only the frame
+            // the unwind passes through. Tested before the suspend arm because
+            // this error is not a suspend signal and must not reach the generic
+            // rethrow below with an enclosing region's identity stamped on it.
+            if (isRegionSuspensionRefusal(err)) throw err;
+            // [#18881] The runtime half of #15646's ruling D: a region body
+            // cannot carry a durable pause, and the refusal is now NAMED
+            // (region node, suspending node, sub-flow) instead of a plain
+            // `Error` that an enclosing `try_catch` read as an ordinary region
+            // failure and handed to its catch handler. See
+            // `region-suspension-refusal.ts` for the measurement that is.
+            //
+            // The sub-flow is read off the suspending node's own `config`
+            // (`map` / `subflow` name their child there). The node is looked up
+            // in THIS region's `nodes` because this is the innermost boundary
+            // the signal crosses — a deeper suspension was already converted by
+            // the arm above, so `err.nodeId` always names a node of this body.
             if (isSuspendSignal(err)) {
-                throw new Error(
-                    `durable pause inside a structured region (node '${err.nodeId}') is not supported`,
-                );
+                const suspended = region.nodes.find(n => n.id === err.nodeId);
+                const flowName = (suspended?.config as { flowName?: unknown } | undefined)?.flowName;
+                throw refuseRegionSuspension({
+                    regionNodeId: grouping?.parentNodeId ?? entryId,
+                    regionKind: grouping?.regionKind ?? 'region',
+                    suspendedNodeId: err.nodeId,
+                    ...(typeof flowName === 'string' && flowName ? { subFlowName: flowName } : {}),
+                });
             }
             // [#15788] The refusing `end` node's signal, converted at exactly
             // the same boundary and for the same reason: a control signal must

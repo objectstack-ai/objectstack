@@ -6,6 +6,7 @@ import type { ParallelConfigParsed } from '@objectstack/spec/automation';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { AutomationEngine, StepLogEntry } from '../engine.js';
 import { parseNodeConfig } from './parse-config.js';
+import { isRegionSuspensionRefusal } from '../region-suspension-refusal.js';
 
 /**
  * `parallel` built-in node — a **structured parallel block** with an
@@ -93,6 +94,14 @@ export function registerParallelNode(engine: AutomationEngine, ctx: PluginContex
           ),
         );
       } catch (err) {
+        // [#18881] A durable pause raised inside a BRANCH is refused at the
+        // region boundary and must reach the run, ⛔ not be folded into this
+        // node's returned failure. A returned failure is routable by a `fault`
+        // edge on the `parallel` node, and routing this one would re-open the
+        // silence the card closes: the run would continue past a region that
+        // parked nothing and report success. Re-thrown, so the engine's own
+        // catch path records it once and fails the run.
+        if (isRegionSuspensionRefusal(err)) throw err;
         const message = err instanceof Error ? err.message : String(err);
         return { success: false, error: `parallel '${node.id}': branch failed — ${message}` };
       }
