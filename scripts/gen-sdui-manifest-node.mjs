@@ -24,15 +24,29 @@
  * ## Why plain Node is a valid producer (the browser-only claim is expired)
  *
  * `packages/spec/CHANGELOG.md` records (twice, byte-identically) that only a
- * real browser can enumerate the registry. Measured false on 2026-08-29
- * (objectui#6741) and re-measured on 2026-08-30 against published
- * `@object-ui/*` 17.6.0: all 16 modules import under plain Node once `.css`
- * imports resolve to an empty module — the ONLY failure without the hook is
+ * real browser can enumerate the registry. Measured false on 2026-08-29 and
+ * re-measured on 2026-08-30 against published `@object-ui/*` 17.6.0: all 16
+ * modules import under plain Node once `.css` imports resolve to an empty
+ * module — the ONLY failure without the hook is
  * `ERR_UNKNOWN_FILE_EXTENSION .css` on plugin-dashboard/plugin-map, a loader
  * limitation, not a browser API. 57 configs, 0 lazy stubs, ~4.5 s, no
- * Playwright, no objectui build. The browser route (`pnpm sdui:manifest`)
- * still exists for operators holding an objectui checkout; both routes
- * serialize the same registry through the same adapter.
+ * Playwright, no objectui build. Reproduced independently in review of #18608:
+ * the 17 published `@object-ui/*` 17.6.0 packages installed from npm,
+ * `sdui-parser` bundled, this generator run under plain Node — `sha256
+ * 49211fee7792` / `git hash-object 78f870e42fe9`, `cmp` byte-identical to the
+ * tracked artefact. The browser route (`pnpm sdui:manifest`) still exists for
+ * operators holding an objectui checkout; both routes serialize the same
+ * registry through the same adapter.
+ *
+ * ⛔ Do not put an objectui issue number back on the 2026-08-29 measurement.
+ * The citation this paragraph used to carry resolves to nothing — 404 for both
+ * the issue and the PR at that number, while seven neighbouring objectui
+ * numbers answer 200 as controls, so the zero is that NUMBER, not the endpoint
+ * and not the token — and the readings above stand without one. #18608 dropped
+ * the same citation from the two sibling gate scripts (check-generated.ts,
+ * check-react-blocks-declaration-parity.ts) and left the same number-free
+ * tombstone there; this header is what both of them now send readers to for
+ * the readings.
  *
  * ## Versioning contract
  *
