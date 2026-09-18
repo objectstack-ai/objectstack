@@ -2838,21 +2838,73 @@ function selfTest() {
         !/[A-Za-z_$][\w$]*\s*\./.test(declSites[0][1]),
       JSON.stringify(declSites.map((d) => d[1].replace(/\s+/g, ' ')))
     );
+
+    // ⭐ The VERDICT ORDER is a STATIC property, so it is read here off this
+    // file's own text. The floor prints only when it FAILS, so a passing run's
+    // bytes are identical whichever side of the verdict the floor sits on: no
+    // mutation of a green tree can expose the order and the fleet's injection
+    // probe correctly reports that it observed nothing (#19029). What this pins
+    // is the chain that makes a breach loud -- the floor adds to the same
+    // `failures` the verdict reads, the verdict prints after it, and the
+    // handshake flag is the statement immediately below the verdict -- so the
+    // ordering cannot regress silently back to a success line printed over an
+    // unevaluated floor. ⛔ Filed under the battery opened above: the roster is
+    // frozen, and adding a name to it is not this case's to do.
+    const orderIndex = (re) => {
+      const hits = [...ownSource.matchAll(re)];
+      return hits.length === 1 ? hits[0].index : -1;
+    };
+    const floorAt = orderIndex(/^ {2}const floorFailure = \(message\) => \{$/gm);
+    const verdictAt = orderIndex(/^ {2}process\.stdout\.write\(\n {4}failures === 0$/gm);
+    const flagAt = orderIndex(/^ {2}selfTestReachedVerdict = true;$/gm);
+    const returnAt = orderIndex(/^ {2}return failures === 0 \? 0 : 1;$/gm);
+    const between = (from, to) => (from >= 0 && to > from ? ownSource.slice(from, to) : '');
+    // Comments are stripped before the two ADJACENCY reads below, in both
+    // directions: prose between the verdict and the flag must not red them, and
+    // prose must not be able to hide a statement from them either. ⛔ An
+    // exit spelled `if (x) return 0;` is not caught by a line-anchored
+    // `^return`, so the test is for the TOKEN in the surviving code.
+    const codeOnly = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    const order = {
+      floorBeforeVerdict: floorAt >= 0 && verdictAt > floorAt,
+      floorAddsToTheCounterTheVerdictReads: /failures \+= 1;/.test(between(floorAt, verdictAt)),
+      flagAfterVerdictLine: verdictAt >= 0 && flagAt > verdictAt,
+      nothingExitsBetweenVerdictAndFlag:
+        flagAt > verdictAt && !/\breturn\b|process\.exit\(/.test(codeOnly(between(verdictAt, flagAt))),
+      flagIsTheLastStatement:
+        flagAt >= 0 && returnAt > flagAt
+          && codeOnly(between(flagAt, returnAt)).trim() === 'selfTestReachedVerdict = true;',
+    };
+    t(
+      '⭐ VERDICT ORDER: the battery floor is evaluated ABOVE the verdict line and the handshake flag is '
+        + 'the last statement after it -- so a breached floor prints the FAILED line and returns non-zero, '
+        + 'and no exit between the two can report a run that never evaluated its floor as one that passed',
+      Object.values(order).every(Boolean),
+      JSON.stringify({
+        ...order,
+        anchorsResolvedExactlyOnce: {
+          floor: floorAt >= 0, verdict: verdictAt >= 0, flag: flagAt >= 0, returnStatement: returnAt >= 0,
+        },
+      })
+    );
   }
 
   Object.assign(process.env, savedGitEnv);
-  process.stdout.write(
-    failures === 0
-      ? '\ncheck-system-context-census --self-test: all cases passed\n'
-      : `\ncheck-system-context-census --self-test: ${failures} case(s) FAILED\n`
-  );
-  selfTestReachedVerdict = true;
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
-  // Evaluated after every battery has had its chance and BEFORE the verdict, so
-  // the success line below can only be printed by a run in which the set of
-  // batteries that registered assertions EQUALS the set declared. A set
-  // difference names WHICH battery stopped; a count says only that something did.
+  // Evaluated after every battery has had its chance and BEFORE the verdict, and
+  // the STATEMENT ORDER here is the whole of what makes that sentence true
+  // (#19029: this block used to sit BELOW a verdict that had already printed the
+  // success line and set the handshake, so a breach printed "all cases passed"
+  // and then its own FAIL lines -- a transcript that contradicted itself, and an
+  // early exit anywhere in here left a run that printed success, exited 0 and
+  // never evaluated its floor). `floorFailure` adds to the same `failures` the
+  // verdict below reads, so the success line can only be printed by a run in
+  // which the set of batteries that registered assertions EQUALS the set
+  // declared, and a breached floor can only print the FAILED line and return
+  // non-zero. A set difference names WHICH battery stopped; a count says only
+  // that something did.
   const floorFailure = (message) => {
     failures += 1;
       process.stdout.write(`  FAIL ${message}\n`);
@@ -2894,6 +2946,19 @@ function selfTest() {
     );
   }
 
+  process.stdout.write(
+    failures === 0
+      ? '\ncheck-system-context-census --self-test: all cases passed\n'
+      : `\ncheck-system-context-census --self-test: ${failures} case(s) FAILED\n`
+  );
+  // The handshake (`AGENTS.md`, the `Writing a --self-test` band): the flag is
+  // set as the LAST statement of this function, after the verdict line above has
+  // printed. Every exit ABOVE this line -- including one inside the floor --
+  // therefore leaves it false, and the dispatch SAYS the self-test never reached
+  // its verdict rather than reading a 0 as a pass. ⛔ Nothing may be inserted
+  // between the write above and this line; the ⭐ VERDICT ORDER case pins both
+  // halves of the ordering off this file's own text.
+  selfTestReachedVerdict = true;
   return failures === 0 ? 0 : 1;
 }
 
