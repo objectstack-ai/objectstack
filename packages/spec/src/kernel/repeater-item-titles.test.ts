@@ -31,7 +31,7 @@
 //     shrink.
 //
 // ⛔ Never add an entry to LEDGER to make this file green. An entry is a debt
-// record for a carrier that predates this pin (and, for the four below, one
+// record for a carrier that predates this pin (and, for the five below, one
 // held open by another PR's fence at the time it was written). A NEW untitled
 // repeater is the defect this file exists to catch.
 
