@@ -11879,11 +11879,12 @@ export function residueLines(
 /**
  * The single source of truth for the model tier the PM lane's governance
  * reads — clause ②'s CONTRACT-REVIEW tier: the tier the clause-② REVIEW runs
- * at, both halves of it — the spec seat's review of a card that changes
- * contract accept/reject behaviour or widens the public surface, and the
- * `needs:contract-review` re-review sub-round (its opening self-check reads
- * this). The BUILD of such a card is at the default judgment tier, so this
- * constant is a review tier and never a dispatch mandate. Declared HERE
+ * at, both halves of it — the spec and skills lanes' review of every round
+ * they deliver (a card that changes contract accept/reject behaviour or
+ * widens the public surface is spec-lane work, whichever seat found it), and
+ * the `needs:contract-review` re-review sub-round (its opening self-check
+ * reads this). The BUILD of such a card is at the default judgment tier, so
+ * this constant is a review tier and never a dispatch mandate. Declared HERE
  * and only here, as a constant, so a model upgrade is a one-line change in one
  * file — the clause-① mandate rows below read it, the self-test compares
  * against it, and the PM skill's prose names it, so the model id is spelled as
@@ -11945,12 +11946,22 @@ export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
  *     a file-surface predicate, and exactly what this script takes as argv;
  *   - clause ②, NOT encoded and deliberately not: a card that changes contract
  *     accept/reject behaviour or widens the public surface is built at the
- *     default tier and REVIEWED at `CONTRACT_REVIEW_TIER` — in the spec seat
- *     only, since the 2026-09-10 ruling; every other lane's clause-② review is
- *     that lane's own default-tier review plus the gates, and neither the
- *     triage seat nor the maintainer-summoned director spawns a
- *     contract-review-tier subagent for anything. That is judged from the
- *     card's CONTENT — what the change
+ *     default tier and REVIEWED at `CONTRACT_REVIEW_TIER`. WHO owes that
+ *     review is keyed by LANE — the maintainer's lane rule, keyed by seat on
+ *     2026-09-10, re-keyed by served tier on 2026-09-16 and restated as the
+ *     lane rule on 2026-09-17 (「曾经要求只有 spec 和 skills 需要 fable,其他
+ *     opus 就够了,理论上其他车道不需要契约复审」): the spec and skills lanes
+ *     owe it on every round they deliver — in-seat when the seat's served
+ *     tier is that tier, otherwise by the at-tier review subagent the seat
+ *     spawns (the fastest route, per the maintainer) — and every other lane
+ *     owes NO contract review: its whole bar is the three landing pre-checks
+ *     and the gates, ⛔ no default-tier "self-review" record is demanded of
+ *     it and ⛔ no at-tier subagent is spawned from it (neither the triage
+ *     seat nor the maintainer-summoned director spawns one for anything). A
+ *     clause-② hit outside those two lanes is lane ROUTING, never a review
+ *     demand on the lane that found it: the work is the spec lane's,
+ *     whichever seat found it, and moves there. Clause ② itself is judged
+ *     from the card's CONTENT — what the change
  *     does to the contract — and a path cannot answer it. An ordinary-looking
  *     surface (one package's source file) is the NORMAL shape of a clause-②
  *     card. The closest a path can honestly get is SUSPICION:
@@ -12141,8 +12152,9 @@ export function tierLines(result) {
   }
   const clause2 =
     '  Clause ② is NOT reachable from paths: a card that changes contract accept/reject behaviour or widens the public' +
-    ' surface owes a contract-review-tier REVIEW too (spec seat; default-tier build), judged from the card CONTENT.' +
-    ' This line is a FLOOR, never a clearance.';
+    ' surface owes a contract-review-tier REVIEW too (owed in the spec and skills lanes, in-seat at tier or by the' +
+    ' at-tier subagent; default-tier build; a hit outside those lanes is spec-lane work and moves there), judged from' +
+    ' the card CONTENT. This line is a FLOOR, never a clearance.';
   // The suspicion tail prints only on a hit — unlike the clause-② note above,
   // which prints always: "no suspicion" and "no suspect table" must not share a
   // spelling, and the note is what keeps silence from reading as a clearance.
@@ -12151,7 +12163,7 @@ export function tierLines(result) {
     : [
         `  Clause ② SUSPECT surface — a hint, not a verdict: judge the tier from the card CONTENT as best you can` +
           ` (a card changing contract accept/reject behaviour or widening the public surface is reviewed at ${CONTRACT_REVIEW_TIER}` +
-          ' in the spec seat, built at the default tier);' +
+          ' in the spec lane — a contract-surface hit is spec-lane work whichever seat found it — built at the default tier);' +
           ` whichever tier is dispatched, the PR's actual diff passes the clause-② enqueue gate before the card may enqueue.`,
         ...suspects.map((s) => `    - ${s.path} ⇢ '${s.glob}' — ${s.why}`),
       ];
@@ -24578,6 +24590,13 @@ function selfTest() {
   t('the no-mandate rendering claims no mandate', !plainLines.includes('MANDATORY'));
   t('the no-mandate rendering names the floor and the default, so the judgment call has its band', plainLines.includes(TIER_FLOOR) && plainLines.includes(TIER_DEFAULT));
   t('BOTH renderings state that clause ② is out of reach of paths — a no-mandate line is not a clearance', plainLines.includes('Clause ②') && mandLines.includes('Clause ②'));
+  // The lane key (#18536): the maintainer's lane rule restated — the review is
+  // owed in the spec and skills lanes, in-seat at tier or by the at-tier
+  // subagent, and in no other lane; the 2026-09-10 SEAT key and the
+  // 2026-09-16 TIER key are both retired spellings and must not come back.
+  t('BOTH renderings key the clause-② review by LANE — the spec and skills lanes, in-seat at tier or by the at-tier subagent', [plainLines, mandLines].every((l) => l.includes('spec and skills lanes') && l.includes('at-tier subagent')));
+  t('…and neither spells a retired key — no "spec seat" (2026-09-10) and no default-tier review or self-review (2026-09-16)', [plainLines, mandLines].every((l) => !l.includes('spec seat') && !l.includes('default-tier review') && !l.includes('self-review')));
+  t('…and both say a clause-② hit outside those lanes is spec-lane work that MOVES there — lane routing, never a review demand on the lane that found it', [plainLines, mandLines].every((l) => l.includes('spec-lane work and moves there')));
   t('the no-mandate rendering says how many globs it checked, so an empty table cannot read as a clearance', plainLines.includes(`${MANDATORY_TIER_GLOBS.length} declared glob`));
   // Refusals: a contradiction is not printed, and an ambiguity is not guessed.
   let tierRefused = false;
@@ -24645,6 +24664,7 @@ function selfTest() {
   t('the suspicion rendering sends the seat to the card CONTENT for the tier call', suspectRendered.includes('judge the tier from the card CONTENT'));
   t('the suspicion rendering routes EVERY dispatch through the enqueue gate on the ACTUAL diff', suspectRendered.includes('whichever tier is dispatched') && suspectRendered.includes('enqueue gate'));
   t('the suspicion rendering names the contract-review tier from its single-source constant', suspectRendered.includes(CONTRACT_REVIEW_TIER));
+  t('the suspicion rendering keys the review by LANE — "in the spec lane", the work being the spec lane\'s whichever seat found it — never by seat (#18536)', suspectRendered.includes('in the spec lane') && suspectRendered.includes('whichever seat found it') && !suspectRendered.includes('spec seat'));
   const noSuspicion = fableOf(['packages/runtime/src/kernel.ts']);
   t('an ordinary non-contract surface raises no suspicion', noSuspicion.suspects.length === 0);
   t('no suspicion ⇒ no suspect line — absence and clearance must not share a spelling with a hit', !tierLines(noSuspicion).join('\n').includes('SUSPECT'));
