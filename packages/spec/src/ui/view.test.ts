@@ -2293,8 +2293,10 @@ describe('GalleryConfigSchema', () => {
 
 describe('ListMapConfigSchema (#9340 — the eighth visualization block)', () => {
   it('accepts the full documented renderer surface — every key plugin-map reads, no extras', () => {
-    // Mirrors objectui plugin-map's own MapConfigSchema (ObjectMap.tsx): the
-    // spec block and the renderer's read set are the same seven keys.
+    // Mirrors objectui's own `ObjectMapConfigSchema` (`@object-ui/types`,
+    // imported by `ObjectMap.tsx`): the spec block and the renderer's read set
+    // are the same EIGHT keys. `style` was the eighth and was missing here
+    // until #18406 — see the pin below, which is this test's own repro.
     const map = {
       latitudeField: 'lat',
       longitudeField: 'lng',
@@ -2303,9 +2305,33 @@ describe('ListMapConfigSchema (#9340 — the eighth visualization block)', () =>
       descriptionField: 'address',
       zoom: 12,
       center: [37.7749, -122.4194] as [number, number],
+      style: 'https://tiles.example/style.json',
     };
 
     expect(() => ListMapConfigSchema.parse(map)).not.toThrow();
+    // Every key survives the parse — a declaration that silently dropped one
+    // would still satisfy `not.toThrow()`.
+    expect(ListMapConfigSchema.parse(map)).toEqual(map);
+  });
+
+  it('accepts `style` — the card repro that used to fail, and the key the renderer reads', () => {
+    // #18406, director decision batch #153 item 4 letter 1. The card's repro
+    // verbatim: `getMapConfig` reads `schema.mapStyle || schema.map?.style`
+    // (`ObjectMap.tsx:365` at the `.objectui-sha` pin `53ded82b`) and
+    // objectui's `ObjectMapConfigSchema` declares `style`, so this strict block
+    // refusing it meant a map style could not be declared through the spec's
+    // list-view face at all.
+    expect(ListMapConfigSchema.safeParse({ style: 'https://tiles.example/style.json' }).success).toBe(true);
+    // A style URL alone is enough — the key is independent of the coordinate
+    // binding, exactly as it is on the renderer's own schema.
+    expect(ListMapConfigSchema.parse({ style: 'https://tiles.example/style.json' }))
+      .toEqual({ style: 'https://tiles.example/style.json' });
+    // Still a string, and still NOT the node-level inline CSS record: the
+    // object form `BaseSchema.style` takes is refused here.
+    expect(ListMapConfigSchema.safeParse({ style: { color: 'red' } }).success).toBe(false);
+    // And the neighbouring misspelling stays loud — `style` did not open the block.
+    expect(ListMapConfigSchema.safeParse({ styl: 'https://tiles.example/style.json' }).success).toBe(false);
+    expect(ListMapConfigSchema.safeParse({ mapStyle: 'https://tiles.example/style.json' }).success).toBe(false);
   });
 
   it('accepts the showcase task shape — the exact declaration #9340 exists to make legal', () => {
