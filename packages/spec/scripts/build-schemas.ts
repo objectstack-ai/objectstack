@@ -1558,15 +1558,23 @@ interface GuidanceRoutes {
  * key in it, a union or pipe the probe cannot drive to a single door, or a refusal
  * whose message does not carry the declared text — all read as "no evidence",
  * never as "proved". ⛔ And the verdict for the second half says only THAT the
- * prescription did not arrive, never WHY: on the shipped graph 7 of the 8 defs in
- * that state are unions, where "the door is open" would be a guess this gate has
- * not measured — the mistake this proof's first cut made about
- * `additionalProperties` and must not repeat one layer down.
+ * prescription did not arrive, never WHY: that state holds 9 keys on 4 defs, and
+ * 3 of those 4 defs are unions carrying 7 of the 9 — for a union "the door is
+ * open" would be a guess this gate has not measured, the mistake this proof's
+ * first cut made about `additionalProperties` and must not repeat one layer down.
  *
- * Measured on the shipped graph at #18301 with THIS instrument — see the PR body
- * for the census run: `integration/DataSyncConfig` has NO route (its shape is not
- * a `strictObject` and nothing prescribes for `schedule`), so this proof does not
- * reach the 2026-09-10 ruling that withheld that tombstone.
+ * Every count above was re-measured with THIS instrument on
+ * objectstack-ai/objectstack `88aa326deb` (#18579), and each is written beside
+ * the population it counts, because that is the one thing the first census run
+ * did not do: of the 1527 emitted defs, 258 resolve to exactly one declaration,
+ * and 147 of those 258 name a key the def does not declare; those 147 defs
+ * promise 779 keys, of which 770 are delivered and the 9 above are not. ⛔ Do
+ * not re-derive any of these from the #18301 PR body: its census row gives the
+ * 147 population the 258 count, and a count with no population is the defect this
+ * docblock was corrected for, not a figure to carry forward.
+ * `integration/DataSyncConfig` has NO route (its shape is not a `strictObject`
+ * and nothing prescribes for `schedule`), so this proof does not reach the
+ * 2026-09-10 ruling that withheld that tombstone.
  */
 function computeGuidanceRoutes(): GuidanceRoutes {
   const shapeSignature = (shape: Record<string, unknown>): string =>
