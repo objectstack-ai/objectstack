@@ -298,7 +298,7 @@ model: opus
 - 发布面动了要 changeset;`skip-changeset` 唯一判据是没动:已发布 = 各包 `files[]` 实际发运内容。
 - 快速通道:`docs/adr/**` · `.claude/**` · `scripts/pm/**` · 仓根配置 · 私有包 · 注释,不发布。
 - 其余实测:构建后 grep `files[]` 所列路径找符号,带正控;符号零命中、正控命中 ⇒ 不发布。
-- 本仓库:标签是真实机制,打标签是你的默认步骤,PR 一开出就打;派发词可收窄或禁写。
+- objectstack:标签是真实机制,打标签是你的默认步骤,PR 一开出就打;派发词可收窄或禁写。
 - 范围 = 派发词点名的标签 + 上文判据下的 `skip-changeset`;禁写或交集为空 ⇒ 零写并报告。
 - `needs:contract-review` 归席位,⛔ 不挂不摘不等;报 PR 上有无与 `--pair PR-NUMBER` 退出码作读数。
 - 写入首选加法端点(REST `POST .../issues/<n>/labels`,不碰已有标签);可达性按会话探,先探后用。
@@ -306,8 +306,8 @@ model: opus
 - 读回 diff 现集对 union(读集, 目标),缺者 = 被剥的标签,重挂,清单进报告;收尾再读一次。
 - 读回只检测剥除防不了(size-labeler 整组 PUT),门标签被剥恰成绿灯;加法写同样必要不充分。
 - 关此步骤的是读回不是写入;读回只验写落了,验不出有门在读:幻影门标签读回照样成功。
-- objectui:同名标签对象在,零 workflow/脚本读它、豁免不了任何东西,pin 测试钉着。
-- 那边用空 frontmatter 的 changeset 声明,门禁判定行是权威;⛔ 永不在 objectui 施加该标签。
+- objectui:路径标签归 `labeler.yml`,逐 push 同步;无门禁读你打的标签 ⇒ 派发词未点名即零写。
+- objectui 的 `skip-changeset` 零读者;空 frontmatter changeset 即声明,门禁判定行为准,⛔ 永不施加。
 - 报告在本地验证走完时交付,CI 收敛等待归 PM 不归你:⛔ 不为等 CI 结论推迟报告。
 - 门禁状态如实记录,`in_progress` 是诚实值;PR 开出后 ⛔ 永不 sleep、定时等待或空转轮询 CI。
 - 你报告之后才转红的门禁,会作为同一认领上的补丁轮回来。
