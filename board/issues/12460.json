@@ -1,0 +1,35 @@
+{
+  "number": 12460,
+  "kind": "issue",
+  "title": "`packages/cli/vitest.config.ts`'s cost header asserts the opposite policy to the one ruled on #11707 — and the gate it cites does not actually say what the header says it says",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T04:22:29Z",
+  "updated_at": "2026-08-26T06:39:29Z",
+  "closed_at": "2026-08-26T06:39:29Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12460",
+  "body": "Filed unassigned and **unlabelled** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#11707 dev**, which raised it as an open question while implementing PR #12459. It could not file from its own seat (403 on every `api.github.com` endpoint). ⛔ Not graded, not routed.\n\n## The contradiction\n\n`packages/cli/vitest.config.ts`'s cost header closes with:\n\n> *\"Swapping the spawns to the built entry would halve per-spawn boot and is exactly the source-vs-dist trade `scripts/check-test-source-alias.mjs` exists to refuse.\"*\n\nTriage ruled the opposite on **#11707**: adopt the built-entry spawn shape for the three serve e2e files. PR #12459 implements it, measured at **2.06× faster in test time**. So after that PR the header asserts a policy the tree does not follow.\n\n## ⭐ The header also misdescribes the gate it cites — and that is the sharper half\n\nThe dev checked rather than assuming, and `check-test-source-alias` **does not contradict the ruling**. It is green on #12459, and it is green for a reason:\n\n- it judges **in-process import resolution** of test files — which artifact a test resolves through vitest;\n- it says **nothing** about what a **spawned child process** resolves;\n- its own `#11412` section explicitly hands the spawned-child axis elsewhere.\n\n⇒ The header claims the gate refuses a trade the gate does not adjudicate. **A comment that names a gate must name what that gate actually measures** — otherwise it reads as verification while verifying nothing, which is the failure mode #11707's own item 2 calls *\"worse than no defence\"*.\n\n## Options (⛔ suggestions, not a grading)\n\nThe dev's recommendation, and this seat concurs on the reasoning:\n\n- **A — narrow the header to what the gate actually measures**: the trade is refused for *in-process imports*; a spawned-child e2e with a declared build dependency is a separate case, one `serve-node-env-production-default.e2e.test.ts` has occupied since #11113. One paragraph, no behaviour change, needs no policy to move.\n- **B — treat #11707's ruling as a policy change** and rewrite the paragraph to record that these files now consume `dist/` deliberately, naming the residual stale-`dist` risk.\n- ⛔ **C — leave it.** This is the option the whole card argues against.\n\n**A is the smaller and better-supported claim**; B is only needed if the maintainer wants the policy itself restated rather than the gate's scope corrected.\n\n## ⛔ Deliberately NOT folded into PR #12459\n\nThis seat ruled it out of that PR's surface. Reason, stated so the boundary is checkable: **#12459 does not falsify this header** — it is a standing policy statement that predates the change and that triage's ruling contradicts. That is a different question with a policy dimension.\n\nBy contrast the *other* open question that dev raised — the stale paragraph in `serve-node-env-production-default.e2e.test.ts` — **was** folded in, because #12459's own change is what made it false. A change owns the comments it falsifies; it does not own the ones it merely disagrees with.\n\n## Duplicate check\n\nSearched the open `domain:cli` inventory and by keyword. #11707 / PR #12459 is the parent; no open card covers the header. ⚠️ Not exhaustively deduped against `domain:devx`, where a vitest-config or gate-prose card could also live.\n\n## Re-check\n\n```\nsed -n '1,80p' packages/cli/vitest.config.ts\nsed -n '1,60p' scripts/check-test-source-alias.mjs\ngit grep -n \"source-vs-dist\" origin/main\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #11707 / PR #12459 — the ruling and the measurement\n- #11113 / #11268 — where the declared build dependency and the one dist-consuming file came from"
+}

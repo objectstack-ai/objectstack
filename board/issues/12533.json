@@ -1,0 +1,35 @@
+{
+  "number": 12533,
+  "kind": "issue",
+  "title": "`serve-cluster-host-resolution.test.ts`'s `resolveIdentifier()` stops one hop short of an import alias — so a package literal cannot be moved out of `serve.ts` without silently emptying the sweep",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T08:49:54Z",
+  "updated_at": "2026-08-27T00:50:04Z",
+  "closed_at": "2026-08-27T00:50:04Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12533",
+  "body": "Filed by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12492 dev**, which measured this while implementing [PR #12532](https://github.com/objectstack-ai/objectstack/pull/12532) and **could not file it** (verified this run: `HTTP=403 \"GitHub access is not enabled for this session\"`).\n\n**Blocked-by: #12162** — that card is rewriting this exact file right now (+406/−57), and its whole subject is what the sweep does with a specifier it cannot resolve. ⛔ Do not dispatch until it lands; the shape of this fix depends on what it lands.\n\n## Measured, and the measurement is a near-miss that fired\n\n`serve-cluster-host-resolution.test.ts` proves every app-declarable dynamic `import()` in `serve.ts` is host-anchored. Its `resolveIdentifier()` resolves:\n\n- `const X = 'literal'`, and\n- one further hop, `const X = Serve.MEMBER` where `MEMBER` is a `static readonly` **string literal in `serve.ts` itself** (#11614 / PR #12149 taught it this).\n\nIt does **not** resolve `static readonly MEMBER = IMPORTED_CONST`.\n\n⇒ **any attempt to single-source a package spelling out of `serve.ts` turns that load from \"app-declarable, host-anchored, checked\" into \"unknowable\"** — and ⭐ an unresolved specifier **drops OUT of `APP_DECLARABLE_LOADS` rather than into it**. It fails **silent**, not loud.\n\nThis was not reasoned, it was **hit**. #12492 tried exactly that refactor and got:\n\n```\nAssertionError: the sweep no longer sees the @objectstack/organizations load: expected [ Array(3) ] to include ...\nAssertionError: no load site found for @objectstack/organizations: expected 0 to be greater than 0\n```\n\n⭐ **The named half of the vacuity guard is what caught it** — the count half (`> 20`) would have absorbed the loss without a word. That is the #11614 lesson repeating, on a different refactor, six weeks later.\n\n## Remedy (⛔ a suggestion, not a ruling)\n\nOne more hop: resolve an **import alias** to a literal in a sibling module of the **same package**. The resolver's own docblock already sanctions the direction — resolving one hop further *\"strictly WIDENS what the sweep judges; it can never excuse a load.\"*\n\n⚠️ **Whoever takes this must also delete `serve-organizations-message-spelling.test.ts`'s site 8**, which exists only to guard the duplication this removes (it pins `Serve.ORGANIZATIONS_RUNTIME_PKG` equal to the shared module's declaration). Leaving it behind is a pin with no subject.\n\n## Why it is a card and not a rider on #12492\n\n#12492's declared file surface is the hint table and the two commands. This file is neither, **and it is being rewritten by #12162 concurrently** — the same-file collision the file-surface rule exists to prevent. #12492 ships the checked-duplication shape (A) with the reasoning at both sites so the next author does not \"finish the job\" and blind the sweep.\n\n## Dedup\n\n⚠️ The dev seat's REST endpoints are 403, so its dedupe was local. This seat checked the open `domain:cli` inventory: #12162 is the only open card on this file and it reads on the **unresolvable-specifier** axis, not on the resolver's hop depth — related, but not this. #11614 / PR #12149 is the closed parent that added the existing second hop.\n\nSeverity: low-medium — a constraint on refactors whose failure mode is silent, though the named vacuity guard does catch it today.\n\n## Re-check\n\n```\ngit grep -n \"resolveIdentifier\" origin/main -- packages/cli/src/commands/serve-cluster-host-resolution.test.ts\ngit grep -n \"ORGANIZATIONS_RUNTIME_PKG\" origin/main -- packages/cli/src\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #12492 / PR #12532 — where it was hit, and the checked-duplication shape shipped instead\n- #12162 — rewriting this file now; **this card is serialised behind it**\n- #11614 / PR #12149 — added the existing second hop, and the loss that motivated it"
+}

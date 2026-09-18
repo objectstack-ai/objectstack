@@ -1,0 +1,34 @@
+{
+  "number": 12320,
+  "kind": "issue",
+  "title": "check-driver-conformance: the unbounded import regex still spans two import statements — a locally-imported same-named fixture counts as shared-standard coverage",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T17:55:58Z",
+  "updated_at": "2026-08-25T23:41:30Z",
+  "closed_at": "2026-08-25T23:41:04Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12320",
+  "body": "Observation-class finding, measured while implementing the comment-masking remedy for #12135 (that card's remedy **(2)**). Filed unassigned. This is the residual that remedy **(1)** — \"bound the import scan to one statement\" — would have closed and masking does not. #12135 is being closed by its own PR, so the unchosen remedy is recorded here rather than lost with it.\n\n## The shape\n\n`drivenFrom()` in `scripts/check-driver-conformance.mjs` decides \"is the marker imported from `@objectstack/spec/data`\" with:\n\n```js\nnew RegExp(`import[\\\\s\\\\S]*?\\\\b${symbol}\\\\b[\\\\s\\\\S]*?from\\\\s+['\"]${quoted}['\"]`)\n```\n\n`[\\s\\S]*?` is unbounded on both sides, so the match need not lie inside one import **statement**. Masking comments (the #12135 fix) removes the *prose* assembly path, but not the *cross-statement* one: the `import` keyword, the symbol, and the `from '@objectstack/spec/data'` can come from three different statements of live code.\n\n## Measured\n\nSynthetic, on masked text, against the merged detector:\n\n```js\nimport { AGGREGATION_CASES } from './local-fixture.js';\nimport { TEMPORAL_CASES } from '@objectstack/spec/data';\nfor (const c of AGGREGATION_CASES) {}\n```\n\n`drivenFrom(stripComments(src), 'AGGREGATION_CASES', '@objectstack/spec/data') === true`\n\nThe marker is imported from a **local** module and never from the shared one, yet the cell scores as covered. That defeats the rule the self-test already pins one spelling of — \"a locally re-declared fixture is not the shared standard\" — by importing the local fixture instead of declaring it with `const`.\n\n## Not live on this tree\n\nSwept all 5 driver packages x 9 case-sets after the masking fix: **54 `(file, marker)` import readings, 0 differ** between the unbounded regex and a per-statement read. So this is a latent hole, not a wrong number today — which is why it is a `finding` and carries no `pm:queue`.\n\n## Suggested shape, if picked up\n\nIterate import statements and require the symbol to appear in the clause of the one whose specifier matches, rather than letting the regex roam:\n\n```js\nfor (const m of src.matchAll(/import\\s+([^;]*?)\\s+from\\s+['\"]([^'\"]+)['\"]/g)) { … }\n```\n\nWhoever takes it should re-run the 54-reading sweep first: a bounded read is strictly narrower, so any cell it drops is a cell whose coverage was only ever detected by the loose form, and that is a headline-number change needing a measured DEBT entry rather than a silent absorption.\n\n## Dedup note\n\n⚠️ The duplicate scan could not be completed. The REST list endpoint returned **HTTP 403** — `{\"message\":\"GitHub access is not enabled for this session. …\"}` — the known per-session outage tracked as #12123. **An empty search result here is not evidence that no duplicate exists**, and none is claimed. The local half was done: nothing in `scripts/check-driver-conformance.mjs` and no `.changeset/` entry records this residual. Worth a re-check at triage.\n\nFollow-up to #12135; sibling of #12014.\n"
+}

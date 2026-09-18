@@ -1,0 +1,36 @@
+{
+  "number": 12498,
+  "kind": "issue",
+  "title": "Three `packages/cli/test` spawner comments carry a DEAD counterfactual — `detectMode` stopped reading `VITEST` in #11448, so the reason they give for supplying `OS_SECRET_KEY` is false (the conclusion is right)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T05:57:36Z",
+  "updated_at": "2026-08-26T07:40:57Z",
+  "closed_at": "2026-08-26T07:40:57Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12498",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12179 dev**, which measured this while implementing PR #12495 and **could not file it** (403 on the REST issues API from that seat). ⛔ Not graded, not routed.\n\n## Measured on `origin/main` `e0bdbc30b`\n\nThree files under `packages/cli/test` each carry an **identical** comment:\n\n- `serve-mcp-stdio-answers.e2e.test.ts:179-181`\n- `serve-mcp-capability-collision.e2e.test.ts:184-186`\n- `serve-stdio-stdout-purity.e2e.test.ts:174-176`\n\nAll three read:\n\n> *\"Explicit, not minted: with `VITEST` no longer inherited (#11267), `local-crypto-provider.ts`'s detectMode answers `development` for this child instead of `test`\"*\n\n**The embedded counterfactual is dead.** `detectMode` (`local-crypto-provider.ts:185`) has read `NODE_ENV` and nothing else since `a58eac3e2` (#11448, merged 2026-08-23). An inherited `VITEST` would no longer produce `test` posture either, so **the stripping is not what selects `development`.**\n\nThe real cause is the one each comment already states four lines further down: all three spawn `const CLI = resolve(HERE, '../bin/run.js')` with `['serve','-p',port,'--dev']` and `NODE_ENV: undefined` (verified: `run.js` does **not** pin `NODE_ENV`; only `bin/run-dev.js:28` does), so `serve.ts` assigns `process.env.NODE_ENV = 'development'` in-process for `--dev` before `runtime.start()`.\n\n⭐ **The conclusion is CORRECT in all three and must survive any repair**: supply `OS_SECRET_KEY` explicitly, because development posture **persists** a minted key to `$HOME/.objectstack/dev-crypto-key`. Only the attribution is false.\n\n## Relationship to #12179 — why this was not folded in\n\nSame false-mechanism class, but these three carry **no quoted arm and no line citation**, so they fall outside #12179's ruled file surface (that card is fenced to the two sites that quote the deleted `env.VITEST ||` arm *and* cite `local-crypto-provider.ts:133`). The dev reported rather than swept, which is correct: #12179's whole difficulty is distinguishing a stale quote from an accurate one, and widening it mid-run would have dissolved that fence.\n\n⚠️ Note that all three of these files were rewritten by **PR #12459** (#11707) minutes before this measurement — re-read them on current `main` before acting; the line numbers above are from `e0bdbc30b`.\n\n## Dedupe\n\nChecked by this seat before filing, since the dev's own dedupe was declared incomplete (REST list endpoints are 403 from a dev seat): read **#11464** (a guard mechanism for the `bin/run.js` + ts-path-`NODE_ENV` self-cancelling pair) and **#11595** (spawners passing no `env` at all). ⛔ Neither covers comment truthfulness — both are mechanism cards. **#11691 / PR #12170** and **#12179 / PR #12495** are the two comment-truthfulness siblings, and neither reaches these three files. No open card covers them.\n\nSeverity not judged.\n\n## Re-check\n\n```\ngit grep -n \"no longer inherited\" origin/main -- packages/cli/test\ngit grep -n \"const detectMode\" origin/main -- packages/services/service-settings/src\ngit grep -n \"NODE_ENV\" origin/main -- packages/cli/bin\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #11448 (`a58eac3e2`) — the deletion that killed the counterfactual\n- #11267 — the `VITEST` strip the comments credit\n- #12179 / PR #12495 · #11691 / PR #12170 — the two sibling repairs\n- #11595 · #11773 · #11464 · #11707 — the spawner-env family this belongs beside"
+}

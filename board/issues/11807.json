@@ -1,0 +1,34 @@
+{
+  "number": 11807,
+  "kind": "issue",
+  "title": "`sys_activity.type`'s built-in vocabulary is unreadable outside plugin-audit, so UI pins hand-copy it (and the copy has already drifted)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-24T17:10:48Z",
+  "updated_at": "2026-08-26T00:07:30Z",
+  "closed_at": "2026-08-26T00:01:15Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11807",
+  "body": "Found while implementing objectui#5969 (the open-vocabulary pin for `record:activity`'s feed-kind map, under the 2026-08-24 direction-4 ruling on #11507). Filed unassigned, out of that card's scope.\n\n## What was measured\n\nThe declared `sys_activity.type` select options exist in exactly one place on the platform:\n`packages/plugins/plugin-audit/src/objects/sys-activity.object.ts`. Measured by grepping every\nspelling of the vocabulary across `packages/` and `apps/` — one non-test hit, that file.\n\n`@objectstack/plugin-audit` is a server plugin. The packages objectui depends on are\n`@objectstack/spec`, `@objectstack/client`, `@objectstack/formula` and `@objectstack/lint`, and none\nof them carry the declaration. `@objectstack/spec` publishes `FeedItemType` (the vocabulary the\nrenderer's map values come from) but never the keys. `@objectstack/platform-objects` does not have it\neither — its `src/audit/index.ts` records that `sys_activity` moved to plugin-audit under ADR-0029 K2.\n\nSo a UI-side pin that wants to assert \"the renderer's map covers every built-in activity type\" has no\nlive source to read. objectui's pin holds a hand-typed census instead.\n\n## Why it matters — the drift is not hypothetical\n\nThat census went stale the same day it was needed. #11522 declared `scheduled` on 2026-08-24;\nobjectui's census still had `scheduled` filed under \"undeclared but written\". A hand census cannot go\nred when the platform adds a built-in, which is the exact event such a pin exists to catch.\n\n## The shape of a fix\n\nPublish the built-in set where a consumer can read it — exporting it from `@objectstack/spec`\nalongside `FeedItemType` is the obvious candidate, since both lanes already depend on that package\nand it already owns the paired feed vocabulary. Any route that lets a UI package read the options\nwithout depending on a services plugin closes this.\n\n⚠️ Whatever the route, it must not re-close the vocabulary: #11507 ruled `sys_activity.type`\nauthor-extensible, so what would be published is *the built-in set*, not the column's domain.\n\n## Mitigation already in place\n\nobjectui#5969 lands a fallback presentation, so a newly declared built-in renders through a generic\nbucket instead of vanishing. A stale census now costs a specific icon rather than a stored row —\nwhich is why this is a finding and not a defect."
+}

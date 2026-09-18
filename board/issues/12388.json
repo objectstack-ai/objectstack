@@ -1,0 +1,34 @@
+{
+  "number": 12388,
+  "kind": "issue",
+  "title": "[finding] A third example on `content/docs/api/client-sdk.mdx` reads `err.code` off an untyped `catch` binding — the `automation.execute` block inside the API-surface tour",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T00:00:33Z",
+  "updated_at": "2026-08-26T06:33:09Z",
+  "closed_at": "2026-08-26T06:32:17Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12388",
+  "body": "Found while landing #12342 (PR #12387), which narrowed the two Error Handling\nexamples that card names. Zone 2c of that card's dispatch asked for a count of\nhow many blocks on the page have the shape. The answer is **three**, not two.\n\n## The third one\n\n`content/docs/api/client-sdk.mdx`, inside the large API-surface tour fence\n(around line 431 on `main` at the time of writing):\n\n```typescript\n// A flow that does not run REJECTS — it does not resolve with an inner\n// `{ success: false }`. Branch on `err.code`, not on the resolved value:\ntry {\n  await client.automation.execute('order_approval', { params: { orderId } });\n} catch (err) {\n  err.httpStatus;             // 409 | 422 | 400 | 404\n  err.code;                   // 'FLOW_DISABLED' | 'FLOW_NO_START_NODE' | 'FLOW_FAILED'\n  err.details?.errorMessage;  // the flow author's own text, on a FLOW_FAILED\n  err.details?.summary;       // which node failed, on a FLOW_FAILED\n}\n```\n\nSame defect as #12342: under `strict` — which implies\n`useUnknownInCatchVariables`, the `tsc --init` default since TS 4.4 — `err` is\n`unknown`, so all four reads are `TS18046: 'err' is of type 'unknown'`. A\nreader copying this into their own project gets a compile error, and the\nparagraph above the block is explicitly instructing them to branch on `err.code`.\n\n## Why it was left out of #12342\n\nThat card names two blocks and its dispatch ruling scoped the fix to exactly\nthose two, so this one was deliberately not touched. It also differs in kind:\nthe two Error Handling blocks are short, standalone examples, while this one is\na fragment inside a ~150-line multi-section tour fence whose subject is the\nwhole client surface, not error handling. Narrowing it means either introducing\na guard into the middle of the tour or moving the flow-rejection example out of\nit — a shaping question, not a mechanical edit, which is why this is its own\ncard.\n\n## The narrowing that is true here\n\nPR #12387 established, by reading the client's request seam\n(`packages/client/src/index.ts`, the `!res.ok` branch), what the SDK actually\nattaches to the `Error` it throws: `httpStatus` always, `code` / `category` /\n`retryable` / `fields` only when the server sent them, `details` always. Whoever\ntakes this card should reuse that same shape rather than re-deriving it, and\nshould NOT narrow to the exported `StandardError` — see PR #12387's body for the\nthree measured reasons that type does not describe the thrown object.\n\n## Not in scope here\n\n- `os:check` markers. This page's marker coverage is a separate question and\n  this card does not touch it.\n- The page's TS2304 continuation convention (Quick Start establishes `client`\n  once) — deliberate and documented on the page.\n"
+}

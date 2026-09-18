@@ -2,8 +2,8 @@
   "number": 18987,
   "kind": "issue",
   "title": "[finding] `measure-self-test-floor.mjs`'s early-return probe injects `return;` as the FIRST statement of the dispatched function, so a handshake flag set ABOVE the async verdict block scores HELD while every early exit inside the block is undiagnosed — the 2026-09 self-test shape census cleared `check-single-claim-paths.mjs` that way",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-elon-musk",
@@ -12,18 +12,20 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
+    "pm:done",
     "priority:p1"
   ],
-  "assignees": [
-    "os-elon-musk"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T09:50:46Z",
-  "updated_at": "2026-09-18T12:27:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-18T15:17:09Z",
+  "closed_at": "2026-09-18T15:16:39Z",
+  "closed_by": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

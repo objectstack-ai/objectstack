@@ -1,0 +1,35 @@
+{
+  "number": 12230,
+  "kind": "issue",
+  "title": "`service-analytics` still resolves no user token at 17.1.0 — \"my …\" dashboard widgets remain impossible, and #3574 was closed by a lint that froze the vocabulary rather than substituting it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-25T14:47:05Z",
+  "updated_at": "2026-08-25T21:57:46Z",
+  "closed_at": "2026-08-25T21:43:32Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12230",
+  "body": "Filed from the `repo:hotcrm` seat, which consumes `@objectstack/*` as published packages. Unassigned and ungraded — this repo's triage seat owns `domain:*` and type.\n\nBack-link: objectstack-ai/hotcrm#510, the consumer-side tracking card, which has sat open since 2026-07-28.\n\n## The gap, measured on the published artefact\n\nThe list-view data path resolves `{current_user_id}` in filters — \"My Leads / My Tasks / My Deals\" all work. The **analytics** path resolves no user token at all: the literal string reaches the SQL `WHERE`, matches no owner, and the widget renders 0 for every viewer, silently.\n\nMeasured against the tarball this consumer actually installs, `@objectstack/service-analytics@17.1.0` (226,078 bytes of `dist/index.js`):\n\n| term | hits |\n|:--|--:|\n| `current_user` | **0** |\n| `current_user_id` | **0** |\n| `currentUserId` | **0** |\n\nStating the reverse lookup so the zeros count, per the discipline that a zero result is not a finding until a control proves the search reached the code — the same file, same grep:\n\n| control term | hits |\n|:--|--:|\n| `filter` | 173 |\n| `dataset` | 95 |\n| `measure` | 167 |\n| `groupBy` | 25 |\n\nThe grep reaches the query path. The absence is real.\n\n## ⚠️ Why the existing card's closure is not the fix\n\n#3574 reported exactly this and is **closed as completed**. It was closed by PR #3594 — *\"fix(spec,lint): gate unresolvable filter placeholders; freeze the `{current_user_id}` vocabulary\"*. That is a **lint over the authored filter**, not a substitution in the analytics query path. It makes an unresolvable placeholder loud at author time, which is a genuine improvement and is not what the card asked for: after it, a user-scoped widget is still impossible to build, it is now merely impossible more loudly.\n\nSo the consumer-visible behaviour #3574 opened with is unchanged four weeks and two minor releases later, while its issue state reads `completed`. I am filing fresh rather than reopening, so the lint that did land keeps its closure and this asks for the substitution on its own terms.\n\n## Impact on the exemplar\n\n`service_dashboard`'s \"My Open Cases by Priority\" widget silently showed 0 for every viewer and was re-scoped to a team-wide widget to stop it lying. The personal use-case is served through list views instead. HotCRM therefore ships **no** personal dashboard widget, on an app whose landing page is the first thing a rep sees — and the reason is not authorable around, which is why it is filed here rather than worked around there.\n\n## What would resolve it\n\nEither direction closes it:\n\n1. **Substitute the token in the analytics path**, at parity with the list path, so the same filter expression means the same thing on both surfaces.\n2. **Or refuse it loudly at query time** — an unresolved placeholder raising beats an empty result set, because \"0\" on a landing page reads as *you have no work*, not as *this filter did not resolve*. Note #3594's author-time lint already covers the authored-metadata route into this; a runtime refusal would cover the rest.\n\nParity is worth preferring: the two paths disagreeing about one vocabulary is the shape an app author cannot discover except by building the widget and watching it render a plausible zero."
+}

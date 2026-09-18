@@ -1,0 +1,34 @@
+{
+  "number": 12492,
+  "kind": "issue",
+  "title": "`TENANCY_POSTURE_FIX_HINTS` is duplicated WHOLE between `serve.ts` and `doctor.ts` — the `single` and `group` entries are byte-identical too, and only the `isolated` one is covered by a card",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T05:32:03Z",
+  "updated_at": "2026-08-26T09:40:39Z",
+  "closed_at": "2026-08-26T09:40:39Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12492",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12464 dev**, which measured this while working that card and **could not file it** (403 on the REST issues API from that seat). ⛔ Not graded, not routed.\n\n## Measured on `origin/main` `e0bdbc30b`\n\n`packages/cli/src/commands/serve.ts:4273-4279` and `packages/cli/src/commands/doctor.ts:531-537` **each** declare a `TENANCY_POSTURE_FIX_HINTS` table. Two of the three entries are **byte-identical across the two files**, under no cross-check of any kind:\n\n- `single` — *\"one organization, no organization wall — the default\"*\n- `group` — *\"organization wall enforced by the open engine, one shared database\"*\n\n#12464 covers **only** the `isolated` entry, because only that one carries a package literal the spec-owned roster can be pinned against.\n\n## ⭐ Why the uncovered two are the worse half\n\nA reword of `single` or `group` in either command drifts from the other **silently** — the same every-gate-green class as #12464, except with **no roster involved and therefore no existing pin that could ever notice**. #12464's `isolated` entry at least has `PLATFORM_PLUGIN_WIRED_RUNTIMES` to be pinned against; these two have nothing.\n\n## Why this widens #12464's option space\n\nA **shared hint table** would single-source all three lines *and* the package name at once — which is strictly better than what #12464 can reach inside its own declared file surface (that card is ruled to **B**: a module-local const in `doctor.ts` plus a two-legged rendered pin, explicitly *not* single-sourcing, explicitly a step toward this).\n\n⚠️ But a shared table needs **a home outside both commands**, and that is a larger call than #12464's file surface — which is exactly why it is filed here rather than folded there. If this lands, #12464's `doctor.ts` const is deleted with it; that deletion condition is recorded in the const's own docblock by ruling.\n\n## Severity\n\n**Low**, on the same grading basis #12464 records for itself: a diagnostic / refusal fix-list hint, not an instruction an operator acts on mid-outage. ⛔ Recorded explicitly so the grading is **not** inherited from #12151's fatal-path sites.\n\n## Re-check\n\n```\ngit grep -n \"TENANCY_POSTURE_FIX_HINTS\" origin/main -- packages/cli/src\ngit grep -n \"no organization wall\" origin/main -- packages/cli/src\ngit grep -n \"one shared database\" origin/main -- packages/cli/src\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Duplicate check\n\nThe dev listed open `domain:cli` (31 open) and open `domain:devx` (91 open) this round; no open card covers the hint-table duplication. ⚠️ Both listings were read through the MCP list path — the REST list endpoint returns 403 from a dev seat — so the dedupe is as good as that path, not better.\n\n## Refs\n\n- #12464 — the `isolated` entry, ruled to B; this card is the option that would supersede it\n- #12151 / PR #12463 — the parent that single-sourced `serve.ts`'s own occurrences"
+}

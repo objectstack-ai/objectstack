@@ -1,0 +1,34 @@
+{
+  "number": 12273,
+  "kind": "issue",
+  "title": "[finding] check-half-states self-test: 111 bare `.includes()` on nullable predicate returns turn a mutation into a TypeError that ABORTS the suite instead of a named failing case",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T15:34:40Z",
+  "updated_at": "2026-08-26T00:34:45Z",
+  "closed_at": "2026-08-26T00:34:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12273",
+  "body": "**Finding — recording only, unassigned.** Hit live on 2026-08-25 while reverse-verifying #12090 (PR #12272); filed rather than fixed there because it is a different defect class (self-test harness robustness vs. claim-separator visibility) and the right shape is a judgement call, not pinned by existing evidence.\n\n## Measured\n\n`scripts/pm/check-half-states.mjs`'s self-test asserts a row's TEXT with the shape\n\n```js\nt('H33: …and it names both stamps', h33ClaimPredatesRuling(dispatched33(), [claimRow33, rulingRow33]).includes(RULING_AT), true);\n```\n\nEvery one of these predicates is **three-valued by design** — `null` when clean, a string when it fires. So `.includes(...)` on the return value throws `TypeError: Cannot read properties of null (reading 'includes')` the moment a change makes that predicate go clean.\n\nCounted over the self-test body only (`selfTest()` through the assertion loop), grouped by predicate:\n\n| predicate | bare `.includes()` call sites |\n|---|---|\n| `h9OnHoldNoRestartWhen` | 14 |\n| `h14BlockingCacheIncoherent` | 14 |\n| `h16StuckMergeConflict` | 12 |\n| `h22ClosedCardPmResidue` | 8 |\n| `h4BlockedNoBlockedBy` | 8 |\n| `h8MergedPrStillDispatched` | 8 |\n| `h18RetriageAged` | 7 |\n| `h11ImportantParked` · `h19BlockOutlivedBlocker` · `h26BlockOnIndefiniteTarget` | 6 each |\n| `h13DomainWithoutPmState` · `h24QueuedWithAssignee` | 5 each |\n| `h25AwaitingMaintainerExclusivity` · `h32SeatIdleOverQueue` | 3 each |\n| `h12OrphanLanding` · `h7PartOfWithClosingKeyword` | 2 each |\n| `h10StaleUnclaimedP0` · `h33ClaimPredatesRuling` | 1 each |\n| **total** | **111 across 18 predicates** |\n\n## What it costs — measured, not hypothesized\n\nReverse-verifying a new row in this file means mutating a predicate and reading which cases go red. Observed on the first ablation leg (widening `CLAIM_COMMENT_MARKER`, a mutation that legitimately makes several rows go clean):\n\n```\nTypeError: Cannot read properties of null (reading 'includes')\n    at selfTest (…/check-half-states.mjs:11117:121)\nNode.js v22.22.2\n```\n\nThree separate costs, all in the direction that hides information:\n\n1. **The suite aborts at the first such line.** Every case after it never runs, so the run reports *nothing* about the rest of the file — including cases that would have gone red for the real reason.\n2. **The output names a TypeError, not a row.** `failing cases: 0` is what a `grep '✗'` count reads, next to a non-zero exit — a shape that reads like a harness problem rather than a predicate verdict, and sends the reader to debug the test harness instead of the change.\n3. **It is silently order-dependent.** Which cases you learn about depends on which fragile line the mutation happens to reach first.\n\n⚠️ The direction matters: this never makes a red run look green, so nothing has shipped wrong because of it. What it degrades is the *ablation* discipline this file's own headers lean on repeatedly (\"that a check reports nothing today is worth distinguishing from a check that CANNOT report anything\") — the cheapest way to prove a new row is failable is exactly the operation this shape breaks.\n\n## Shape of a fix — ⛔ not decided here\n\nThe one used in PR #12272 for the new row's own cases, as a local precedent rather than a proposal for the other 111:\n\n```js\nconst h34row = (...args) => String(h34ClaimShapedNonCanonicalSeparator(...args) ?? '');\n```\n\n…so a nulled row reports `(got false, want true)` under the row's own case name and the suite runs to completion. Alternatives triage should weigh: a shared `rowText(fn, ...args)` helper used by all 18 (one import, but it re-spells 111 lines); or a `t()` overload that stringifies nullable actuals centrally (touches the harness, not the cases, but makes every case's failure text less literal). Not obvious which is right, and the third option — leave it, on the ground that a crash is loud and the shape only bites during deliberate mutation — is defensible enough that it should be ruled on rather than assumed.\n\nNot measured here: whether sibling patrol scripts under `scripts/pm/` carry the same shape in their own self-tests. Worth a companion sweep if this lands.\n"
+}

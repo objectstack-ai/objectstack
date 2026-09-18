@@ -1,0 +1,35 @@
+{
+  "number": 12612,
+  "kind": "pull_request",
+  "title": "feat(spec,plugin-security): export the kernel platform-admin capability declaration from @objectstack/spec (#11663 Choice 6A, leg L1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T20:17:27Z",
+  "updated_at": "2026-08-26T21:05:06Z",
+  "closed_at": "2026-08-26T21:05:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-26T21:05:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12612",
+  "body": "Fixes #11965\n\nLeg **L1** of the accepted platform-admin re-anchor design (#11663 stays open — it is the coordination parent, out of scope here; design doc = #11663 comment 5394453215 §4 Choice 6 / §6 row L1; maintainer acceptance = comment 5404675670, 2026-08-25, bundle 1A/2B/3A/4A/5A/6A/7A).\n\n## What\n\n- `@objectstack/spec` now exports **`ADMIN_FULL_ACCESS_CAPABILITIES`** — the kernel platform-admin capability declaration (the `objects` wildcard grants + `systemPermissions` previously inlined in plugin-security's `admin_full_access` declaration). Placed in `packages/spec/src/identity/eval-user.zod.ts` directly beside `ADMIN_FULL_ACCESS` (the precedent: core already imports that constant from the spec root), exported from the root entry via the same `index.ts` block. The #3544/#8681 export-axis rulings (no `allowExport` on the wildcard) travel verbatim with the declaration to its new home.\n- `@objectstack/plugin-security`'s `admin_full_access` declaration in `objects/default-permission-sets.ts` now **imports** that list (`name: ADMIN_FULL_ACCESS`, `...ADMIN_FULL_ACCESS_CAPABILITIES`) — exactly one copy exists.\n- Regenerated baselines: `packages/spec/api-surface/{root,identity}.json`, `packages/spec/export-origins/{root,identity}.json` (2 exports added, 0 breaking). **Authorable-surface: unmoved** — `check:authorable-surface` green with no baseline change, confirming the design's \"no new authorable key\" premise on the tree.\n\n## Acceptance criterion (from the card)\n\n`git grep -n ADMIN_FULL_ACCESS packages/spec/src packages/plugins/plugin-security/src` now shows the capability list declared once (`eval-user.zod.ts:83`) and imported — not duplicated — by plugin-security (`default-permission-sets.ts:6,132`). The remaining `ADMIN_FULL_ACCESS` hits in `vama-write-path-convergence.test.ts` are a test-local fixture variable, not a second declaration.\n\n## Behaviour-neutrality (pinned)\n\nNew test in `default-permission-sets.test.ts` parses the **exact pre-move inline literal** and asserts the current declaration deep-equals it, plus a no-local-fork assertion against the imported constant. New spec-side test `platform-admin-capabilities.test.ts` pins: exactly the two capability-bearing fields; strict-parse composition under the canonical name; #8681 no-export pin at the new home; every granted system permission resolves in the ADR-0066 `PLATFORM_CAPABILITY_NAMES` registry.\n\n## Verification (at merged head `0bc6a4803` = this PR's head; origin/main merged immediately before opening)\n\n- `pnpm --filter @objectstack/spec exec vitest run src/identity/platform-admin-capabilities.test.ts` — 4/4 passed\n- `pnpm --filter @objectstack/plugin-security exec vitest run src/objects/default-permission-sets.test.ts src/bootstrap-platform-admin.test.ts src/bootstrap-seed-round-trips.test.ts src/bootstrap-declared-permissions.test.ts` — 76/76 passed\n- `pnpm --filter @objectstack/spec typecheck` (incl. `check:test-typecheck`: \"OK — test layer compiles\") and `pnpm --filter @objectstack/plugin-security typecheck` — both green. Note: plugin-security's tsc excludes `**/*.test.ts`, so its edited test file is measured by vitest execution, not tsc.\n- Gates (derived via `scripts/pm/dispatch-gates.mjs` from the real changeset, re-run on `0bc6a4803`): `check:authorable-surface` (\"1255 default(s) unchanged\"), `check:api-surface` (\"public API surface + factory signatures unchanged ✓\" after regen), `check:export-origins` (\"5181 exports across 17 entry points resolve exactly as recorded\"), `check:engine-double-contract`, `check:where-matcher`, `check:i18n` (\"all bundles in sync\"), `check:i18n-stale-fill`, `check:query-options-erasure`, `check:type-check-coverage`, `check:type-check-debt` (\"31 ledger entr(ies) re-measured … none above its recorded number\"), `check:nul-bytes`, plus the full derived lint batch (changeset gates, cross-package-test-inputs, doc-authoring, merge-driver, published-files, slot-lookup, spec-parsed-alias, test-source-alias, type-source-resolution, spec liveness/empty-state/strictness-ledger/variant-docs, ADR-0087, plugin-teardown-shape, dev-prereqs after full closure build) — all green.\n- `scripts/pm/check-governed-queue-guard.mjs` is CI-context-only (reads `GITHUB_EVENT_PATH`): NOT MEASURED locally; runs on this PR in CI (`packages/spec/src/index.ts` is a governed surface — clause-② applies per dispatch).\n\nOut of scope by design: L2+ legs (core derivation is `Blocked-by:` this card). #11504 / #12610 / #12606 / #12515 surfaces are disjoint from this diff. Draft by dispatch contract (clause-②): stop at draft, no ready-flip.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012xGvxcwPRTJfA7RfjXEYA4)_"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 12513,
+  "kind": "pull_request",
+  "title": "pm-dispatch: state that `Unlock-action:` admits only its canonical value",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T07:01:08Z",
+  "updated_at": "2026-08-26T09:47:00Z",
+  "closed_at": "2026-08-26T09:46:58Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-26T09:46:58Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12513",
+  "body": "Closes #12449\n\n## The ruling\n\nMaintainer, 2026-08-26, verbatim and untranslated: 「**这个应该更新skill吧**」 — accepting the\ncard's **option B**: state the rule in the instruction text. ⛔ Option A (closed enumeration +\npatrol rejection) is **not** taken: no new predicate, no reader-side change, no new vocabulary,\nno enumeration list to maintain. `scripts/pm/check-half-states.mjs` is untouched.\n\n## What the text now says\n\n`Unlock-action:` is a two-valued switch on the unlock scan's exit path, but nothing said so and\nnothing rejects a sentence written after the colon. A prose `Unlock-action:` line neither fires\nnor errors — the card silently takes the DEFAULT exit (re-dispatch), which for a finished-work\ncard is exactly the ⛔ the slot exists to prevent. Measured on the live board and recorded on the\ncard: the slot is used by exactly 1 of 68 open `pm:blocked` cards in this repo, and that one\ninstance is prose; the PM's own earlier use was prose too and only \"worked\" because a human\nreturned to execute it by hand.\n\nBoth mentions now name the canonical literal and mark it as the only value read:\n\n- `references/state-machine.md` (the slot's spec home) — the `pm:blocked` bullet now reads\n  `` `Unlock-action: re-check PR #M` ``(**只认此一值**,别的静默回落重派,散文另起行). The\n  prose-on-its-own-line half deliberately echoes the `Blocked-by:` rule stated two lines above in\n  the same section (指令是行,提及是散文), so the reader sees one rule and not two.\n- `SKILL.md` state table — the `pm:blocked` row spelled the slot as `` `Unlock-action:` 行改写解锁动作 ``,\n  which is itself the invitation the card diagnosed (\"the slot *looks* like a place to write what\n  to do, because that is what its name says\"). It now carries the canonical literal plus\n  **只认此一值**,别的写法静默回落默认重派, and keeps its pointer at the reference file.\n\n## Paid in place — no ceiling raised, nothing thinned\n\nBoth ceilings are unchanged, and the ratchet's own verdict lines at the final commit (`80694fa02`)\nconfirm it:\n\n```\n✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/references/state-machine.md is 44 lines (ceiling 44; headroom 0).\n✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/SKILL.md is 1004 lines (ceiling 1005; headroom 1).\n✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/SKILL.md: widest table row is 765 bytes (pin 765; headroom 0).\n```\n\n`state-machine.md` had **zero** headroom and every bullet already at its minimum line count under\nthe 120-byte cap, so the added clause was paid by compressing the same bullet, byte for byte:\n\n| | before | after |\n|---|---|---|\n| bullet bytes (3 lines, cap 360 incl. 2 continuation indents) | 337 | 357 |\n| file lines | 44 | 44 |\n\nThe 20 net bytes came from four content-preserving compressions inside that bullet, each checked\nagainst the fact it carries:\n\n- `` `Blocked-by:` 指向门禁缺陷卡 `` → `指向门禁卡` — the short form the bullet's own last clause\n  already uses. (An earlier draft read `指向该卡`; PM review caught that `该卡`'s nearest antecedent\n  is the blocked card at the head of the same sentence, so it read as `Blocked-by:` pointing at\n  itself. Corrected in `a46a3872a`, paid in the same bullet by `的卡同用本态` → `者同用本态`.)\n- `正文另加机器可读行` → `正文加机器可读行`.\n- `的卡同用本态` → `者同用本态`.\n- `解锁扫描把解锁动作从「回队重派」换成「重查该 PR 落地」` → `解锁扫描改出口为「重查该 PR 落地」` —\n  the default exit's name (重派) did not disappear; it moved into the new clause, where it is now\n  stated as the thing a non-canonical spelling falls back to.\n\nEvery other clause of the bullet survives verbatim: 同用本态 · ⛔ 不设新标签 · ⛔ 永不给完工卡重派 dev ·\n停放 PR 正文须点名门禁卡. `SKILL.md`'s edit is inside an existing table row (281 → 360 bytes), so it\ncosts no line and leaves the widest-row pin (765) untouched.\n\n## Gates\n\nDerived with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` against the\nreal change set, and re-derived at the final commit (same nine families). Exit codes\ncaptured before any pipe; verdict lines are each gate's own. The table below is the union run at `80694fa02`; after the PM-review\ncorrection in `a46a3872a` the ratchet and id-lint were re-run at that head and both stayed green — `✓ check-skill-line-ratchet: ... state-machine.md is 44 lines (ceiling 44; headroom 0).`, `✓ ... SKILL.md is 1004 lines (ceiling 1005; headroom 1).`, `✓ ... SKILL.md: widest table row is 765 bytes (pin 765; headroom 0).`, `✓ check-skill-id-lint: 22 file(s) clean (pattern /#[0-9]{3,}/g).`\n\n| gate | verdict at `80694fa02` |\n|---|---|\n| `check:pm-skill-ratchet` | ✓ both edited files at their unchanged ceilings (quoted above) |\n| `check:pm-skill-id-lint` | `✓ check-skill-id-lint: 22 file(s) clean (pattern /#[0-9]{3,}/g).` — no issue numbers written into either file |\n| `check:pm-governed-prose` | `✓ check-governed-prose: 2 instruction surface(s) name all 5 registered governed surfaces … and claim no others.` |\n| `check:pm-governed-merges` | `✓ check-governed-merges --self-test: 159 assertions …` |\n| `check:skill-frame-sync` | `✓ check-skill-frame-sync: 4 copies of the decision frame are structurally isomorphic across 3 files` |\n| `check:doc-authoring` | `✓ doc authoring guard: 390 files clean — no bare metadata literals.` · `✓ doc authoring guard: 48 published skill files clean — no internal issue-id references.` |\n| `check:agent-test-spelling` | `✓ check-agent-test-spelling: 0 violations — 386 file(s) …` |\n| `check:doc-formula-expressions` | exit 0 (needed `@objectstack/formula` + `@objectstack/lint` built first — its own preflight said so, and nothing was measured until they were) |\n| `check-governed-queue-guard` | not locally runnable — it reads `GITHUB_EVENT_PATH` and refuses to exit 0 without a workflow event payload. CI runs it. |\n\nNo changeset: `.claude/**` only, nothing published — `skip-changeset`.\n\nDraft, `.claude/**` is a governed surface: human merge, never flipped ready from here.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01RMTpSRF5CjMmQBFfPtPCwJ)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RMTpSRF5CjMmQBFfPtPCwJ)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

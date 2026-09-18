@@ -1,0 +1,35 @@
+{
+  "number": 12160,
+  "kind": "issue",
+  "title": "L6: action disable — dispatch-time consult on the same ledger (ADR-0126 §8.2, amendment ruling 3)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T11:27:32Z",
+  "updated_at": "2026-08-25T21:05:59Z",
+  "closed_at": "2026-08-25T21:05:59Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12160",
+  "body": "Part of #12150 (Epic: ADR-0126 implementation, v17 line — 17.x minor, maintainer-ruled).\nBlocked-by: #12157\nBlocked-by: #12158\nDispatch: coordinated under the #12150 program — ⛔ not from the general queue; the program dispatches on unlock (maintainer anti-preemption instruction, 2026-08-25, PM session `session_01KWRU3s15AJz7PGW7a7wdCh`). Contract: **ADR-0126 §8 item 2 (amended)** + amendment ruling 3, maintainer verbatim: 「动作 可能是需要开关的，因为有的 action 我不想启用。」 (ruling record: #12049 comment 5408117664 — first-party pull for the disable half).\n\n## Deliverable\n\nGeneralize the flow disable machinery to **actions**:\n\n- Ledger rows `metadata_type: 'action'` in the same `sys_metadata_activation` object — no schema change.\n- **Consult point at action dispatch** (the action-execution seam analog of L3's `execute()` consult); loud refusal reusing the established disable code/message shape.\n- Same §5 write authority (install-level, operator-gated in multi-org postures).\n- Surface row: packaged actions with on/off on the L5 Setup surface (or its actions sibling — follow the shape L5 lands; coordinate, don't fork).\n- ⛔ **Action-clone is NOT chartered** — disable only; authoring new sibling actions stays as today.\n\n## Acceptance\n\n- Disabled packaged action refuses at dispatch on every invocation path; enabled-by-absence unchanged.\n- Posture-matrix write tests as L2.\n- No new ledger columns, no clone machinery.\n\nRefs: ADR-0126 §8 · #12049 comment 5408117664 · L2/L3 (the mechanism this generalizes)"
+}

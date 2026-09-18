@@ -1,0 +1,32 @@
+{
+  "number": 12452,
+  "kind": "issue",
+  "title": "MCP server has no metadata-authoring tools: an AI client cannot create or update a flow through MCP (data-plane only)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-26T03:36:14Z",
+  "updated_at": "2026-08-26T05:54:32Z",
+  "closed_at": "2026-08-26T05:54:32Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12452",
+  "body": "## Observation (objectstack 17.1.0, via hotcrm @ `ec4c5ac`, `objectstack dev -p 4001`)\n\n`tools/list` on the built-in MCP server (`/api/v1/mcp`) returns 11 tools, all data-plane: `list_objects`, `describe_object`, `query_records`, `aggregate_records`, `get_record`, `create_record`, `update_record`, `delete_record`, `list_actions`, `run_action`, `validate_expression`. The server describes itself as operating on the app's **data objects**.\n\nThere is no tool that reads or writes **metadata**. In particular, an AI client connected through the advertised path (the dev banner's `claude mcp add --transport http … /api/v1/mcp`) cannot author a flow.\n\nMeanwhile the flow designer's own save path is a plain metadata endpoint: `PUT /api/v1/meta/flow/<name>?mode=draft&package=<writable-pkg>` persists a draft (visible in Studio as an unpublished change, `_diagnostics.valid=true`), and package-level `POST /api/v1/packages/<pkg>/publish-drafts` (Studio's Publish) makes it live immediately, no restart. Verified end-to-end: an AI writing that endpoint produces a flow a human can open, edit, and publish in the designer, and the published flow really fires (a pending approval request is created on a matching record change). So the platform capability exists — it is just not reachable over MCP; an AI has to fall back to raw REST with session auth.\n\n## Why it matters\n\nThe BYO-AI story routes external AI clients through MCP. For metadata work — \"the AI writes the same artifact a human draws in the designer\" — MCP currently offers nothing, so AI clients need bespoke REST plumbing and auth instead of the standard MCP connection.\n\n## Minimal capability ask\n\nExpose metadata authoring over MCP while keeping the existing safety shape:\n\n- a draft-write tool (e.g. `upsert_flow_draft` or a scoped `put_metadata`) targeting a writable package, `mode=draft` only;\n- either a publish tool mapping to package-level `publish-drafts`, or an explicit, documented boundary that publishing stays with humans in Studio (also a reasonable design — then say so);\n- the same permission checks as the equivalent REST calls.\n\nFlows alone would unlock the story; not asking for an arbitrary metadata surface in v1.\n\n## Context\n\nFound while producing promo video steedos-labs/video-studio#67 (internal). **Not blocking** that production — the REST metadata path suffices for filming — so no priority claim; filed as a capability finding."
+}

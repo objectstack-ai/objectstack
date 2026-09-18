@@ -1,0 +1,29 @@
+{
+  "number": 19061,
+  "kind": "issue",
+  "title": "Retire the in-seat clause-② contract review — the rule, its gate label, and the 9k-line checker's gate role",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T14:49:29Z",
+  "updated_at": "2026-09-18T14:49:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19061",
+  "body": "**Ruling (maintainer, 2026-09-18, live chat, verbatim and untranslated):**\n\n> 不需要 AI 不能自审契约改动 这种\n\nand, on the disposition proposed for the checker:\n\n> 同意你的建议\n\nSo this is not \"fix the checker\" — the **rule itself is withdrawn**: there is no longer a requirement that a contract-affecting change be reviewed by a seat other than the one that wrote it. What goes with it is the machinery built to enforce that rule.\n\n## What made the case — measured on `main`, not recalled\n\n| measurement | value |\n|---|---|\n| Is `scripts/pm/check-clause2-carriers.mjs` in any CI workflow? | **No** — zero hits across `.github/workflows/` |\n| Its size | **9,132 lines / 619 KB** |\n| Code that actually imports it | **2 files, one symbol**: `readClause2Line`, imported by `scripts/check-changeset-no-major.mjs` and `scripts/check-adr-0087-registration.mjs` |\n| Are those two in CI? | **Yes** — `lint.yml`, `pr-automation.yml`, `cut-rc.yml`, `release.yml` |\n\nSo CI depends on roughly forty lines of that file and runs none of the rest.\n\nTwo failure modes were also measured live on PR #18420, and both are about the instrument rather than the diff:\n\n1. **It cannot judge a PR whose branch was not named by PM dispatch.** `CLAIM_BRANCH_SHAPE` is `/claude\\/issue-\\d+-[A-Za-z0-9][A-Za-z0-9._-]*/g`; a session-assigned branch (`claude/zealous-mendel-o0o6aq`) parses to zero branches, the claim cannot be resolved, and `--pair` exits 2 (UNJUDGED) — which by its own rules is ⛔ never \"clean\". Systematic, not a one-off.\n2. **Its \"review of record on the head\" limb self-invalidates on every base merge.** Sync the branch with `main` and the recorded verdict names a superseded head.\n\n## Scope — what comes out, what must NOT\n\n**Out:**\n\n- The rule text in `.claude/skills/pm-dispatch/SKILL.md` (clause ② in 〈入队与落地〉 and the landing pre-check item ②; hits at lines ~76, 152, 338, 474-477, 512-522, 635-646, 672, 766 at time of filing).\n- `.claude/skills/pm-dispatch/references/contract-review.md` in full (60 lines), plus the mentions in `references/platform-readings.md`.\n- The `needs:contract-review` gate label and its hang/clear discipline.\n- In `scripts/pm/check-clause2-carriers.mjs`: the C4 (independence pair), C6 (review of record) and C7 (`Served-tier:`) rows, and the `--pair` landing pre-check role.\n\n**Must survive — measure before deleting anything:**\n\n- `readClause2Line` and the `Clause-②: yes | no` **declaration** line itself: the two CI gates above read it for semver level and ADR-0087 disposition, which is a different job from who reviewed the diff. Extract it to a small module (~40 lines) so those gates stop hanging off a 9k-line file.\n- `CONTRACT_REVIEW_TIER` in `scripts/pm/dispatch-gates.mjs`: it also mandates a model tier for **path**-based clause ① work (the pm-dispatch skill surfaces, the published `skills/**` catalog). Only its review role retires.\n- ⚠️ `needs:contract-review` is named in `packages/spec/src/api/error-code-ledger.zod.ts` and its generated reference page — a **published** surface. Measure what that row does before touching it; removing a published ledger row is its own decision, not a rider on this one.\n- Whatever `check-half-states.mjs`, `check-governed-queue-guard.mjs`, `check-widening-tells.mjs`, `check-label-desc-cap.mjs`, `check-skill-line-ratchet.mjs` and `ensure-pm-labels.sh` do with the label — each needs its own reading; several only name it in prose.\n\n## If the hazard is still wanted later\n\nThe thing the rule guarded against is an AI seat approving its own contract change and queueing it. If that is ever wanted again, the cheap form is GitHub's own **required reviews / CODEOWNERS** — platform-enforced, zero lines of comment archaeology — rather than a checker that is not in CI and reads two lines out of a comment body. Recorded here so a later reader knows the alternative was considered and not merely forgotten.\n\n## Sequencing\n\n- ⛔ Governed surface (`.claude/**`, `skills/**`): the authoring seat never self-queues this one.\n- Independent of [#19054](https://github.com/objectstack-ai/objectstack/issues/19054) and of PR #18420.\n- Suggested order: extract `readClause2Line` and prove the four CI workflows still green **first**, then remove the rule text and the gate role, then the label.\n\n## Dedup terms\n\n`clause-②` · `needs:contract-review` · `check-clause2-carriers` · `contract-review.md` · `independence pair SELF-REVIEW`"
+}

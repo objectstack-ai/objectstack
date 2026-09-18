@@ -1,0 +1,35 @@
+{
+  "number": 12392,
+  "kind": "issue",
+  "title": "[finding] The published-skills TOKEN ratchet prices only SKILL.md — 37% of the shipped bundle (68,390 tokens) carries no ceiling",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T00:10:06Z",
+  "updated_at": "2026-08-26T02:44:38Z",
+  "closed_at": "2026-08-26T02:44:38Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12392",
+  "body": "Filed unassigned while implementing #12201 (the skill-reference `Exports:` fallback ranking). Out of that card's scope: that card's surface is `packages/spec/scripts/build-skill-references.ts` plus three regenerated `references/_index.md` rows; this is an observation about `scripts/check-skills-token-ratchet.mjs`'s population.\n\nSurfaced because #12201's dispatch required a \"whole-tree `skills/**` token delta from `node scripts/check-skills-token-ratchet.mjs`\" as acceptance evidence — and the gate cannot produce one. Its reading was byte-identical before and after a diff that changed three published files.\n\n## Measured\n\nOn `main` at `7986d973f`, walking `skills/` off the filesystem, same convention the gate uses (`ceil(utf8 bytes / 4)`):\n\n| population | files | tokens | ratcheted? |\n| --- | --- | --- | --- |\n| `skills/<name>/SKILL.md` | 11 | 117,848 | yes |\n| `skills/<name>/references/**` | ~12 | 25,620 | **no** |\n| everything else in the bundle (`rules/`, `evals/`, `contracts/`) | ~26 | 42,770 | **no** |\n| **bundle total** | 49 | **186,237** | 63% priced |\n\nThe gate enumerates `skills/<name>/SKILL.md` off the filesystem and reds on a discovered file with no ceiling — so a twelfth *skill* cannot land unpriced. A twelfth *file inside an existing skill* can, and 38 already have.\n\nThe largest unpriced files are not small:\n\n```\n12611 tok  skills/objectstack-data/references/data-hooks.md\n 5350 tok  skills/objectstack-ui/contracts/react-blocks.contract.json\n 3778 tok  skills/objectstack-data/rules/relationships.md\n 3584 tok  skills/objectstack-data/rules/field-types.md\n 3241 tok  skills/objectstack-data/rules/indexing.md\n 3150 tok  skills/objectstack-ui/references/react-blocks.md\n 3024 tok  skills/objectstack-data/rules/validation.md\n```\n\n`data-hooks.md` alone is larger than **nine of the eleven** ratcheted `SKILL.md` ceilings.\n\n## Why it may matter\n\nThe gate's own header states the cost curve it prices, and the rationale does not distinguish by filename:\n\n> `skills/` is loaded WHOLE into customer agent context windows. Its length is therefore not a repo-hygiene question: it is a per-token cost paid again in every customer session, in every customer project, forever.\n\nIt also states the hole it was built to close — \"A hand-maintained list would let the twelfth published skill land unpriced… the bundle grows by a whole file, and every existing ceiling stays green.\" The same sentence describes `rules/` and `references/` today, one level down. And the maintainer ruling it enforces (2026-08-21, verbatim, untranslated) is about the bundle, not about one filename: 「10402 需要整体考虑 skills 的长度,不能为了一个小功能扩写很多。」\n\nPractical consequence: the \"net expansion budget\" convention that dispatches quote at agents (\"report the whole-package before/after — the sum of all SKILL.md in the published directory\") is measured against 63% of what ships. An agent can add 3,000 tokens of `rules/*.md` and report a truthful `+0` package delta.\n\nHonest counter-arguments, which is why this is filed as an observation rather than a defect:\n\n1. **Some of it is generator-owned.** `references/_index.md` (×9) and `references/react-blocks.md` + `contracts/react-blocks.contract.json` are generated; a ceiling on a generated file reds on a legitimate regeneration rather than on authoring, which is the wrong actor to stop. That is an argument for scoping any extension to hand-authored files (`rules/**`, `evals/**`, `references/data-hooks.md`), not for the current boundary.\n2. **The unit may not transfer.** The ceilings were set per-`SKILL.md` from a measured pass; extending to 38 more files is a real authoring cost and a policy call, not a mechanical widening.\n3. `#9923` settled the sibling question for the `.claude/**` LINE ratchet by **documenting** the boundary rather than extending coverage (PR #9962). The cheapest honest answer here may be the same one.\n\nIf the answer is \"deliberately only SKILL.md\", the gate's header is the place to say so — it currently reads as though it prices the published bundle as a category, and the `## Enumeration, never a hand list` section actively invites the reader to believe nothing in `skills/` can land unpriced. A reader cannot see the boundary without diffing the population against the filesystem.\n\nRelated: #9923 and PR #9962 (the same shape, resolved by documenting the boundary, for the `.claude/**` line ratchet); #9473; #10473 (this gate's own card); #12201 (where this surfaced).\n\n_Generated by [Claude Code](https://claude.ai/code/session_01RMTpSRF5CjMmQBFfPtPCwJ)_\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 11658,
+  "kind": "issue",
+  "title": "`record:activity`'s authorable `types` filter is a CLOSED enum over a vocabulary #11507 just ruled open",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T10:53:04Z",
+  "updated_at": "2026-08-26T03:20:07Z",
+  "closed_at": "2026-08-26T03:05:57Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11658",
+  "body": "Found while executing the 2026-08-24 ruling on #11507 (declaration half, `domain:services` lane). Filed unassigned — **not touched there**, because the fix is a `packages/spec` change and that is another seat's call (fences on that card: no `packages/spec/**`, no objectui).\n\n## What was measured\n\n`packages/spec/src/ui/component.zod.ts:1088` — `RecordActivityProps`:\n\n```ts\ntypes: z.array(FeedItemType).optional().describe('Feed item types to show (default: all)'),\n```\n\n`FeedItemType` (`packages/spec/src/data/feed.zod.ts:20`) is a closed `z.enum` of 13 UI kinds (`comment`, `field_change`, `task`, `event`, `email`, `call`, `note`, `file`, `record_create`, `record_delete`, `approval`, `sharing`, `system`). It is the vocabulary the renderer maps `sys_activity.type` **onto**: objectui's `packages/plugin-detail/src/renderers/recordActivityFeed.ts` keys its feed-kind map on the activity type and emits a `FeedItemType`.\n\nThe maintainer ruled on 2026-08-24 (#11507, direction 4) that `sys_activity.type` is an **open, author-extensible** vocabulary — the declared options are the platform built-in set, ADR-0052 §5b.2 stays a sanctioned author write path — and, verbatim: *\"every closed map over this vocabulary is now the bug\"*.\n\nThis is that closed map one level removed, and it is **authorable surface**, not just renderer internals: an author who contributes an activity type (say `scheduled`, which hotcrm writes today) cannot name it in `types: [...]`. The best the renderer can do is fold it into some built-in kind, at which point the filter cannot separate it from the rows that genuinely are that kind.\n\n## Why it is filed separately rather than fixed in the #11507 PR\n\n- The declaration half (#11507) lives in `@objectstack/plugin-audit` and is deliberately fenced out of `packages/spec` — split precedent #10413 → #10576, #10025 → #11504.\n- The **renderer** half (open vocabulary + unknown-value fallback rendering, completing what objectstack-ai/objectui#5840 un-pinned) is already a card in the objectui lane per the ruling.\n- This is the third piece: the **author-facing filter contract**, in spec, which neither of the other two can reach.\n\n## Options, unranked — this needs the spec seat's judgement, not mine\n\n1. Leave `types` closed and document it as \"built-in kinds only\" — cheapest, and honest only if authors genuinely never need to filter on their own kinds.\n2. Widen the element type to `z.union([FeedItemType, z.string()])` (or a branded open string) so an author-contributed kind is nameable — the shape the ruling's logic points at, at the cost of losing the named rejection on a typo'd built-in.\n3. Keep the closed enum but declare a documented `other`/fallback member so unknown source types have a nameable bucket.\n\n## Not measured\n\n- Whether any shipped app authors `record:activity` `types` at all (this repo's examples were not swept for it).\n- What the objectui renderer does with an unknown type **today** — read from the #11507 card and objectui#5840, not measured here; this repo cannot import objectui.\n\nRefs: #11507 (the ruling) · ADR-0052 §5b.2 (the author write path) · objectstack-ai/objectui#5840\n"
+}

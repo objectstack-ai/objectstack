@@ -1,0 +1,35 @@
+{
+  "number": 11624,
+  "kind": "issue",
+  "title": "[finding] `os lint` now demands `flows.*` translation keys and warns the author for writing them — #11615's new bucket collides with the `planned` liveness row's `authorWarn`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T09:45:41Z",
+  "updated_at": "2026-08-26T03:49:25Z",
+  "closed_at": "2026-08-26T03:49:25Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11624",
+  "body": "Introduced by #11615 (card #11485), merged 2026-08-24T09:41:46Z. Filed unassigned, for grading.\n\n## Two rules in the same `os lint` run point opposite ways\n\n| the author does | which rule fires | what it says |\n|---|---|---|\n| **omits** `flows.<flow>.…` from the bundle | `i18n/missing-flow` (new in #11615) | the key is missing a translation for locale X |\n| **adds** it (e.g. from `os i18n extract`, also new in #11615) | `lintLivenessProperties` | the `flows` group is `planned` — nothing reads it |\n\nThere is no third option. Both are `warning`, so nothing is broken today, but under `--i18n-strict`\nthe missing side becomes an **error** — so a project can be forced to author keys that then draw the\nplanned-group warning.\n\n## Measured at `origin/main`, not inferred\n\n**The demand side** — `packages/cli/src/utils/i18n-extract.ts`'s `walkScreenFlows` (added by #11615)\nharvests `flows.<flow>.label`, `flows.<flow>.screens.<node>.title` and\n`.fields.<field>.{label,placeholder}`; `COVERAGE_SOURCE` maps them to the `flow` bucket, reported as\n`i18n/missing-flow` per locale. `os i18n extract` scaffolds the same skeleton.\n\n**The warn side** — `packages/spec/liveness/translation.json:63`:\n\n```json\n\"flows\": {\n  \"status\": \"planned\",\n  \"authorWarn\": true,\n  \"authorHint\": \"No shipped screen-flow runner reads this group yet — until the objectui half of #7646 lands, a `type: 'screen'` flow renders the strings authored on the flow (`config.title`, `fields[].label`, `fields[].placeholder`) in every locale.\"\n}\n```\n\n**And the warn side genuinely reaches authored bundles** — this is the part that makes the collision\nlive rather than theoretical. `packages/lint/src/lint-liveness-properties.ts:387` reads\n`const bundles = asArray(stack.translations);`, walking the locale-keyed bundle shape apps actually\nauthor. That is **#11288's fix** (closed): before it, the whole translation ledger warned nobody, so\n`authorWarn: true` on this row was inert. It is not inert now.\n\n`packages/lint/src/authoring-rules.ts:1081` registers `lintLivenessProperties` with `commands: ALL`\nand `surfaces: CLI_ONLY` — the same command the new bucket reports from.\n\n## Why this is #11615's to answer rather than a pre-existing tension\n\nBefore #11615, `os lint` could not report a screen-flow copy gap **at all** — that absence was the\nwhole defect #11485 fixed. So the demand side did not exist and there was nothing to collide with.\nThe fix is right; the interaction was not considered.\n\n## Suggested shape — an input, ⛔ not a ruling\n\nThe mechanism to resolve it is already present on both sides: the `flows` row's own `status`.\n**Gate the `flow` coverage bucket on that row being `live`.** It then turns itself on the day the\nobjectui runner half of #7646 lands and the row flips — which is the same event the ledger's note\nalready names as the flip condition (*\"Flip to `live` with an objectui screen-flow-runner evidence\npointer when the downstream consumer card lands\"*).\n\n⛔ Dropping `authorWarn` from the row is **not** the fix: the warning is true. No shipped runner reads\nthe group, so a translated wizard string is still stored and never shown — exactly the failure mode\n`validationMessages` was removed in 17.0.0 for.\n\n⚠️ Whoever takes this should check whether the same collision exists for any other `planned` +\n`authorWarn` group the coverage walker harvests. This finding measured `flows` only.\n\n## Doc half\n\n`content/docs/ui/translations.mdx:255` (\"Current boundaries\") is now **incomplete** rather than\nfalse. It still correctly says the group is declared, not applied, and that the compile lint warns\nwhen you author it — but an author reading it has no way to know that `os lint` will now also report\nthe keys as *missing*. Whatever this card resolves to, that paragraph needs the other half.\n\n## Review note\n\nThis was missed at review. The accepting seat checked #11615's Clause-② determination, the ratchet\nbump against the script's own precedent, the ablation, the public surface and the cross-repo\nconsequence, and did not check the **liveness status of the group the new bucket now demands keys\nfor** — despite the PR body naming `flows` as spec-settled by #11287. Recording it so the next review\nof a \"new coverage bucket\" card has the question in hand: *what does the ledger say about the group\nthis bucket now asks authors to fill in?*"
+}

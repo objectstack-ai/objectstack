@@ -1,0 +1,35 @@
+{
+  "number": 12499,
+  "kind": "issue",
+  "title": "`packages/cli/vitest.config.ts`'s suite-cost section is a 2026-08-20 measurement whose population changed under it — and it carries two inconsistent file/test vintages in adjacent sections",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T05:57:51Z",
+  "updated_at": "2026-08-26T09:00:54Z",
+  "closed_at": "2026-08-26T09:00:54Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12499",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12460 dev**, which measured this while implementing PR #12494 and **could not file it** (403 on every `api.github.com` endpoint from that seat). ⛔ Not graded, not routed.\n\n## The stale population\n\n`packages/cli/vitest.config.ts`'s suite-cost section is a measurement dated **2026-08-20**. Its figures were all taken while **all 20** spawner files ran the source entry:\n\n- *\"top 20 files = 87.7% of the wall\"*\n- the 20 spawner files at *\"56.1% of the file wall (300.1s) while carrying 177 of 1498 tests\"*\n- the per-spawn floor: `tsx bin/run-dev.js --version` **6.5–6.8s** vs `node bin/run.js --version` **2.9–3.2s**\n\n**#11707 (PR #12459) moved three of them to `node bin/run.js`**, at a measured **2.06× in test time**. So the split now describes a tree that no longer exists.\n\nPR #12494 **tenses** those sentences and states explicitly that the split **has not been re-measured**. It deliberately does not re-measure them: out of that card's surface, and a re-measure is a ~10-minute instrumented run. This card is that re-measure.\n\n## ⭐ The second half, which is cheaper to fix and worth doing either way\n\nThe file carries **two inconsistent vintages of its own counts in adjacent sections**: *135 files / 1470 tests* in one, *137 / 1498* in the next. A re-measure would refresh both to one number. Until then, a reader cannot tell which section is current — and neither can be checked against anything.\n\n## Why it is worth a card rather than a shrug\n\nThis header is the document an author reads before deciding whether a `test` block, a pool change, or a spawn-shape change is the lever. Its whole value is that its numbers are *measured*. A measurement whose population silently changed is the one kind of stale comment that still reads as authoritative, because the figures look precise.\n\n## Dedupe\n\nThe dev enumerated **all 90 open `domain:devx`** and **all 32 open `domain:cli`** cards. Nothing covers the CLI suite cost split — the nearest, **#12337**, is the cold *closure build* cost, a different quantity. **#12460 / PR #12494** is the parent (the gate-scope correction in the same file).\n\nSeverity not judged.\n\n## Re-check\n\n```\ngit grep -n \"56.1%\" origin/main -- packages/cli/vitest.config.ts\ngit grep -n \"1498 tests\" origin/main -- packages/cli/vitest.config.ts\ngit grep -n \"1470 tests\" origin/main -- packages/cli/vitest.config.ts\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #12460 / PR #12494 — tensed these sentences and declared the non-re-measure\n- #11707 / PR #12459 — the change that moved the population\n- #11462 — where the per-spawn floor numbers came from"
+}

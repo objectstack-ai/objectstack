@@ -1,0 +1,36 @@
+{
+  "number": 12531,
+  "kind": "issue",
+  "title": "[finding] `enclosingFunctionName` reports `(top-level)` for any call inside an `it`/`beforeAll` arrow, so two DELIBERATE registry entries in one file collide — one declaration would silence both",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-26T08:42:17Z",
+  "updated_at": "2026-08-26T10:06:39Z",
+  "closed_at": "2026-08-26T10:06:39Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12531",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#11595 dev**, which measured this while implementing [PR #12530](https://github.com/objectstack-ai/objectstack/pull/12530) and **could not file it** (the issues API answers *\"GitHub access is not enabled for this session\"* from that seat). ⛔ Not graded, not routed.\n\n## Measured, not supposed\n\n`scripts/check-cli-test-child-env.mjs`'s `enclosingFunctionName()` walks up for a `FunctionDeclaration`, a `MethodDeclaration`, or an arrow/function expression whose **parent** is a `VariableDeclaration` or a `PropertyAssignment`.\n\nAn arrow passed **directly as a call argument** — `it('...', async () => { … })`, `beforeAll(async () => { … })`, `describe(…)` — matches none of those. The walk runs past it to the source file, and the site is attributed to **`(top-level)`**.\n\nOn the #11595 branch, **5 of the 8** env-less sites printed `[(top-level)]` while sitting inside `beforeAll`/`it` callbacks — e.g. `packages/cli/test/cloud-login-json-ndjson.e2e.test.ts:311`, which is inside `beforeAll(async () => {`.\n\n## ⭐ Why it is not cosmetic\n\n`siteKey(row)` is `file + '::' + fn`, and the **DELIBERATE registry** — the declaration registry for bulk copies that are deliberate — is keyed by it.\n\n⇒ Two deliberate bulk copies in two different `it()` blocks of the **same file** both key to `'<file>::(top-level)'`. **One entry would silence BOTH**, and the second would never be reviewed as part of the PR that needed it.\n\nThat is precisely **the carve-out-by-accident shape the gate's own header says the registry exists to prevent.**\n\n## Latent today, not live\n\nBoth current DELIBERATE entries name real functions (`childEnv`, `leakedEnv`), so nothing is mis-keyed right now. ⇒ this is **the next entry's problem**, which is why it was reported rather than folded in.\n\n## Possible repair (⛔ a suggestion, not a ruling)\n\nWhen the arrow's parent is a `CallExpression` whose callee is an identifier, name the site after that callee **plus its first string-literal argument** — or at minimum after the callee — so sibling blocks in one file stay distinguishable.\n\n## ⛔ Deliberately out of scope for #11595\n\nThat card added **rule 2** (a spawn must declare its child's `env`), which has **no registry at all**. This is **rule 1's registry keying** — a different defect class in the same file. ⚠️ Note `scripts/check-cli-test-child-env.mjs` is held by open [PR #12530](https://github.com/objectstack-ai/objectstack/pull/12530) until it merges.\n\n## Dedup\n\n⚠️ The dev seat's REST list endpoints are 403, so its dedupe was local. This seat found no open card on the gate's site-keying. #11341 is the gate's parent (bulk-copy rule + the DELIBERATE registry); #11595 / PR #12530 is the sibling that added rule 2.\n\nSeverity not judged.\n\n## Re-check\n\n```\ngit grep -n \"enclosingFunctionName\" origin/main -- scripts/check-cli-test-child-env.mjs\ngit grep -n \"siteKey\" origin/main -- scripts/check-cli-test-child-env.mjs\ngit grep -n \"DELIBERATE\" origin/main -- scripts/check-cli-test-child-env.mjs\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #11341 — the gate, rule 1, and the DELIBERATE registry\n- #11595 / PR #12530 — the sibling that added rule 2, and where this was measured"
+}

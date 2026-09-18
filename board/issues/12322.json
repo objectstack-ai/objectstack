@@ -1,0 +1,33 @@
+{
+  "number": 12322,
+  "kind": "issue",
+  "title": "finding: dispatch-gates never names check:objectql-double-limit for an edited test file — the same whole-corpus shape as its listed sibling check:where-matcher",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T18:01:17Z",
+  "updated_at": "2026-08-26T05:55:42Z",
+  "closed_at": "2026-08-26T05:55:42Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12322",
+  "body": "## What this is\n\nThe companion sweep #11199 asked for and did not measure: *\"whether any other currently-unlisted gate in `lint.yml` shares this same 'scans every test file's content' shape and is missing from the same list for the same reason.\"* Measured while working #11199; **not fixed there** — that card's declared surface is the one entry, and widening other gates' entries is a separate judgement.\n\n## Method\n\nFor every check family the workflows discover, hint-route coverage was computed over the whole tracked test corpus (`coveringKey(entry, path)` — the same key `derive` uses), then intersected with the gates whose own source **selects** test files into a population (as opposed to excluding them).\n\nCorpus: 2773 tracked `*.{test,spec}.*` files at `355a742747`.\n\n| gate | in `CHANGE_KIND_GATES[0]`? | hint route over the test corpus |\n| --- | --- | --- |\n| `check:query-options-erasure` | listed | 0 / 2773 |\n| `check:engine-double-contract` | listed | 0 / 2773 |\n| `check:where-matcher` | listed | 0 / 2773 |\n| `check:type-check-coverage` / `-debt` | listed | 91 / 2773 (3.3%) |\n| `check:cross-package-test-inputs` | listed | 2760 / 2773 (99.5%, and inherited — see #11199) |\n| **`check:objectql-double-limit`** | **unlisted** | **0 / 2773** |\n| `check:parse-guard` | unlisted | 0 / 2773 |\n| `scripts/check-test-completeness.mjs` (`ci.yml`) | unlisted | 0 / 2773 |\n| `check:driver-conformance` | unlisted | 257 / 2773 (9.3%) |\n\n## The strong instance: `check:objectql-double-limit`\n\nIt is `check:where-matcher`'s twin, and that gate is listed:\n\n- same walk idiom, in its own source — `testFilesUnder(...)`, `else if (/\\.test\\.ts$/.test(entry)) acc.push(p);`\n- same population — every `*.test.ts` in the tree, judged for a hand-written ObjectQL double\n- same repair posture — a shrink-only per-file baseline (`scripts/objectql-double-limit.baseline.json`), so a late red is not repaired by a line\n- same CI job — `lint.yml`'s \"Lint & Repo Gates\"\n- a new fake `find()` double, or a new test file carrying one, moves it\n\nIts declared population **is** written down — `\"…a function bound to a property named find … in packages/**/*.test.ts\"` — but that sentence lives in a **comment**, which `extractWatchHints` masks by design. So the derivation reaches it for 0 of 2773 test files, and a dev who adds a test double runs a full green union with no local signal that this gate exists to fail.\n\nNote #11525 (closed) converted a measured population of 40 blind / 44 live-bound doubles behind this gate: the class where a late discovery is expensive rather than cosmetic.\n\n## Suggested fix, not asserted as the only one\n\nAdd `check:objectql-double-limit` as a seventh entry under `CHANGE_KIND_GATES[0]`, alongside `check:where-matcher`, whose `why` already records that the two gates ride the same test code. Cheap, no new machinery, and the entry carries a stated deletion criterion like its siblings.\n\n## Weaker candidates, recorded rather than proposed\n\n- `check:parse-guard` — test files enter its census with their own tier (`const isTest = /\\.(?:test|spec|pin\\.test)\\.[cm]?[jt]sx?$/.test(rel)`), 0/2773 on the hint route. Whether a new test file can actually move its verdict was not measured here.\n- `scripts/check-test-completeness.mjs` (a `ci.yml` direct invocation) — 0/2773; a package's *first* test file plausibly moves it.\n- `check:driver-conformance` — 9.3%; its real population is the driver suites, so its hints may already be proportionate.\n\n## Explicitly NOT candidates (checked, cleared)\n\nGates whose test-file regex **excludes** tests rather than selecting them: `check:cli-command-ids`, `check:published-files`, `check:error-status-conformance`, `check:meta-type-normalized`, `check:resume-authority-declared`, `check:verify-stand-in`, `check:dispatcher-error-vocabulary`, `check:runtime-services-index`, `check:org-identifier`. Also cleared: `scripts/partition-test-shards.mjs --self-test` (a self-test family follows no population, per #11404), and `check:test-source-alias` / `check:page-declaration-shape` / `check:published-files`, whose hints already cover 2773/2773."
+}

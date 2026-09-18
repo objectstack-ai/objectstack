@@ -1,0 +1,34 @@
+{
+  "number": 19055,
+  "kind": "pull_request",
+  "title": "docs(api): sort spellings are slot-specific, not equivalent across routes",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-try-charles",
+    "id": 313893388,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T14:41:36Z",
+  "updated_at": "2026-09-18T15:34:08Z",
+  "closed_at": "2026-09-18T15:34:06Z",
+  "closed_by": {
+    "login": "os-try-charles",
+    "id": 313893388,
+    "type": "User"
+  },
+  "merged_at": "2026-09-18T15:34:06Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19055",
+  "body": "Fixes #19027\n\nClause-②: no\n\n## What the page said, and what the runtime does\n\n`content/docs/api/data-api.mdx` taught three `POST /data/:object/query` sort\nspellings as \"all equivalent\". Reproduced at the exact input `rest-server.ts`\nbuilds — `FindDataRequestSchema.safeParse({ object, query: { ...body, object } })`\n— and again over real HTTP against a booted `examples/app-crm`:\n\n| documented bag | schema-level | over HTTP |\n|:---|:---|:---|\n| `{\"orderBy\": [{\"field\": \"created_at\", \"order\": \"desc\"}]}` ⭐ lit control | `success: true` | **200**, rows descending |\n| `{\"orderBy\": [\"-created_at\"]}` | `query.orderBy.0` · `invalid_type` · \"expected object, received string\" | **400** `VALIDATION_FAILED` |\n| `{\"orderBy\": {\"created_at\": \"desc\"}}` | `query.orderBy` · `invalid_type` · \"expected array, received object\" | **400** `VALIDATION_FAILED` |\n\nThe lit control returns 200, so the instrument is sound and the defect is the\npage's, as the card diagnosed.\n\n## Where the card's diagnosis needed correcting\n\nThe card says the record map and the shorthand array \"are transport-slot values\n— they have to arrive on `$orderby` / `sort`\". Measured, that holds for the map\nand **not** for the shorthand array. Every POST-body slot, one tree:\n\n| body value | `orderBy` | `$orderby` | `sort` |\n|:---|:---|:---|:---|\n| `[{\"field\": \"created_at\", \"order\": \"desc\"}]` | 200 | 200 | 200 |\n| `{\"created_at\": \"desc\"}` (and `1` / `-1`) | 400 | 200 | 200 |\n| `[\"-created_at\"]` | 400 | 400 | 400 |\n| `\"-created_at\"` (bare string) | 400 | 400 | 400 |\n\n`QueryTransportParamsSchema.$orderby` is `DataEngineSortSchema`, which declares\nthe record map and `SortNode[]` and no string form at all. So the shorthand\nstring is not a transport-slot value on this route either — it is a\n**querystring** spelling, read by `normalizeSortNodes` at the ingress. Measured\non the querystring: `?sort=-created_at`, `?$orderby=-created_at` and\n`?orderBy=-created_at` all sort; the two JSON shapes sent there are\n`400 INVALID_SORT`, because that route parses no JSON in this slot and reads the\nwhole value as one field name.\n\nHad the page simply been trimmed to the card's diagnosis, a reader sent to\n`{\"$orderby\": [\"-created_at\"]}` would have got the same 400 from a different\nline.\n\n## The fix\n\nThe sentence is replaced by a per-route, per-slot table plus two short\nparagraphs. Every cell in it is a measurement, not a reading of the schema.\nThe page's only mention of `POST /data/:object/query` was inside the sentence\nbeing replaced, so the table is also now that route's only description here.\n\nThe status-code split is stated per route as well: a wrong *shape* in a body is\n`400 VALIDATION_FAILED` with the path in `fields` (`query.orderBy.0`,\n`query.orderBy.0.order`) and never reaches the field check, while an unknown\nfield name is `400 INVALID_SORT` on either route.\n\n## Verification\n\n* **Reproduction, schema level** — the three bags at the rest-server input, plus\n  the full slot matrix above and the malformed-shape cases.\n* **Reproduction, HTTP level** — `pnpm dev:crm -- --fresh -p PORT` (a random high port), signed in\n  as the seeded dev admin, `GET /data/crm_account` and\n  `POST /data/crm_account/query`. Ascending/descending row order is the lit\n  control on every 200 cell: `['Acme Corp','Globex Ltd','Initech']` vs\n  `['Initech','Globex Ltd','Acme Corp']`, so an accepted-but-unapplied sort\n  could not read as a pass.\n* **Post-condition probe, written before the edit** — it parses the new table\n  and asserts each cell's verdict token equals the measured one, that the four\n  spellings are still *shown* (so deleting them would fail it), and that no\n  cross-route equivalence wording survives. It reports 8 failures against the\n  pre-edit page and passes against the edited one; both legs were run with the\n  same scoped instrument.\n* **Derived gates** — `node scripts/pm/dispatch-gates.mjs --commands --repo\n  objectstack-ai/objectstack`, 39 commands, all run; exits in the report.\n\n## No changeset — measured, not asserted\n\nNo published package contains `content/docs/api/data-api.mdx`: over the 70\nnon-private manifests in the tree, zero sit at or above that path. Positive\ncontrol, same method: `packages/spec/dist/index.js` resolves into\n`@objectstack/spec`, whose `files[]` ships `dist`. `apps/docs`, which renders\nthis tree, is `private: true`. So nothing published moves and the change takes\n`skip-changeset`.\n\n## Acceptance notes\n\n* `#18977` is not addressed here, and `PR #19018` is untouched by this diff —\n  this PR edits one file, that one edits four, and they do not overlap. No\n  `packages/spec/**` path is in this diff: the measurement showed the defect is\n  the documentation's, which is the branch the dispatch reserved for staying on\n  this page.\n* Noted, not filed: `packages/spec/src/api/odata.zod.ts` already carries the\n  correct account of this split in a schema comment (the `#18977`\n  cross-reference), including the sentence that the string forms are served by\n  `normalizeSortNodes` and not by the body door. The customer-facing page had\n  no pointer to it in either direction. Successor: the next PR to touch that\n  schema comment or this page.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017ef78bLdybu3AffehKkhfk\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017ef78bLdybu3AffehKkhfk)_"
+}

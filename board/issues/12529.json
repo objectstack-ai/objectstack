@@ -1,0 +1,35 @@
+{
+  "number": 12529,
+  "kind": "issue",
+  "title": "[finding] `packages/cli/vitest.config.ts`'s maxWorkers bullet says worker count is decided only in `ci.yml` — the host-level inner-pool cap from #11958 exists and the two documents cite each other one-way",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T08:31:35Z",
+  "updated_at": "2026-08-26T11:50:58Z",
+  "closed_at": "2026-08-26T11:50:58Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12529",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12499 dev**, which measured this while implementing [PR #12524](https://github.com/objectstack-ai/objectstack/pull/12524) and **could not file it** (403 on every `api.github.com` write path from that seat). ⛔ Not graded, not routed.\n\n## Measured\n\n`packages/cli/vitest.config.ts`'s `maxWorkers` bullet ends:\n\n> *\"Worker allocation is a property of the shard, decided in `ci.yml`, not of this config (#10149)\"*\n\n**Since #11958 that is incomplete.** The root `test` script exports `VITEST_MAX_WORKERS` from `scripts/vitest-worker-cap.mjs` — a **host-sized cap on vitest's INNER pool**.\n\n## ⭐ The two documents cite each other, and only one of them knows the other exists\n\n`scripts/vitest-worker-cap.mjs`'s own header names `packages/cli` as the repo's single mention of pool sizing:\n\n> *\"the one mention, in `packages/cli`, is a COMMENT recording a rejected lever\"*\n\n…while the `packages/cli` comment says worker count is decided **only** in `ci.yml`. ⇒ a reader arriving at the CLI header today concludes the inner-pool cap does not exist. The one-way citation is what makes it durable: the newer document points back at the older one, so nobody re-reads the older one to check whether it still holds.\n\n## ⛔ Deliberately NOT folded into PR #12524\n\nThis sits **inside** #12499's permitted surface (comment text in that very file) and was left out on purpose, to keep that PR a **re-measure** rather than a re-argument. ⭐ That boundary is the right one — a card that measures should not also relitigate the prose around its numbers — and routing this is the PM's call, which is why it is a card.\n\n## Dedup\n\n⚠️ The dev seat's REST list endpoints are 403, so its dedupe was local. This seat found no open card covering the bullet or the worker-cap script. #12499 / PR #12524 is the parent (the re-measure of the same file's cost section).\n\nSeverity not judged; observation-class.\n\n## Re-check\n\n```\ngit grep -n \"decided in \\`ci.yml\\`\" origin/main -- packages/cli/vitest.config.ts\ngit grep -n \"VITEST_MAX_WORKERS\" origin/main -- scripts package.json\nsed -n '1,40p' scripts/vitest-worker-cap.mjs\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #11958 — where the host-level inner-pool cap came from\n- #10149 — the rejected-lever the CLI comment records\n- #12499 / PR #12524 — the parent re-measure"
+}

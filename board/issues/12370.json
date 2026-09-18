@@ -1,0 +1,33 @@
+{
+  "number": 12370,
+  "kind": "pull_request",
+  "title": "fix(devx): bound check-driver-conformance's import scan to one statement",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T20:21:04Z",
+  "updated_at": "2026-08-25T23:41:04Z",
+  "closed_at": "2026-08-25T23:41:03Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T23:41:03Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12370",
+  "body": "Fixes #12320\n\n`drivenFrom` in `scripts/check-driver-conformance.mjs` decided \"is this marker imported from `@objectstack/spec/data`\" with a regex whose two `[\\s\\S]*?` runs were unbounded on both sides of the symbol. The three parts it wants — the `import` keyword, the symbol, and the matching specifier — never had to come from the same import **statement**. #12135's comment masking closed the *prose* assembly path; this is the *cross-statement* one, and it survived it.\n\nA marker imported from a **local** module scored as shared-standard coverage by borrowing a sibling statement's specifier:\n\n```\nimport { AGGREGATION_CASES } from './local-fixture.js';\nimport { TEMPORAL_CASES } from '@objectstack/spec/data';\nfor (const c of AGGREGATION_CASES) {}\n```\n\nThat defeats the rule the self-test already pinned one spelling of — a locally re-declared fixture is not the shared standard — by *importing* the local fixture instead of declaring it with `const`.\n\n## Live or latent: measured, with a positive control\n\nSwept all 5 driver packages x 9 case-sets, comparing the roaming rule against a per-statement read on masked text:\n\n| reading | count |\n|---|---|\n| `(file, marker)` pairs swept | 2664 |\n| ...of which the marker appears in code at all (the card's 54) | 54 |\n| readings where the two rules **differ** | **0** |\n| covered cells, roaming -> bounded | 45 -> 45 |\n| cells whose covering-file **set** differs | 0 |\n\nThe zero is load-bearing, so it carries a control: the synthetic above was run through the same comparison and reads `loose=true bounded=false`. The sweep **can** see the shape — a zero means \"none present\", not \"my search was wrong\". A genuine shared import reads `true` in both.\n\n**So the defect is LATENT, not live.** No cell is dropped, the gate's full output is byte-identical before and after, and no DEBT entry is owed.\n\n## Why a bounded regex and not a real parse\n\nAn AST read via `scripts/ts-parse.mjs` was prototyped and measured before choosing, not waved off: it is correct (refuses the synthetic, accepts a genuine import) and found 0 unparseable files among the 296 driver sources. It was rejected on cost — not the 911ms per pass against ~0.4s for this whole gate, but that `ts-parse.mjs` imports `typescript`, so adopting it trades a gate that runs in a **fresh worktree with no `node_modules`** for one that refuses until `pnpm install` has run.\n\nThe objection a bounded regex must answer is that it is a second roaming regex beside the first. It is not: the clause class `[^;'\"]` cannot cross a statement terminator **or a string literal**, so a match starting at one `import` cannot reach a later statement's `from` — every intervening specifier is quoted. It is also the **only** import matcher left in the file; the reference half carried its own roaming `import[\\s\\S]*?from…` for stripping, and leaving that would have left the smell this change exists to remove.\n\nTwo deliberate narrowings, both measured to move no cell: a bare re-export (`export { X } from …` — re-exporting the cases is not running them), and a side-effect import (no clause, no symbol).\n\n## Proven red, not merely narrowed\n\nReverse-verified by ablation on the committed fix: the import half was reverted to the roaming form, the mutation confirmed on disk three ways (the anchor text gone, the mutated `drivenFrom` printed from disk, and the blob moving `e51329eab4` -> `5c664f1e37`), and the self-test then failed on **exactly** the two `#12320` cases and nothing else. The restore leg returned the blob byte-identical to `e51329eab4`, under a `trap … EXIT INT TERM`.\n\n## A pin this would have quietly weakened, repaired\n\n#12135's falsifiability probe was written as `drivenFrom(proseOnly, …)` — it asserted \"the unmasked rule accepts this fixture\" by calling the live detector. The statement bound makes that fixture red for a *second, independent* reason, so the probe stopped being a statement about masking and became one about the bound: a stronger tree, but a **weaker pin**.\n\nRepaired rather than absorbed. The probe now asserts against the superseded rule spelled out as text (so it keeps measuring what it is about), and a new fixture keeps masking itself falsifiable on the shape where the two rules come apart — a marker **genuinely imported** from the shared module whose only mention is a docblock. Measured: unmasked it is coverage, masked it is not.\n\n## Verification\n\nAll 12 gates green at `bfa9860e0a`, the final commit — the 10 derived by `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` from the real change set, plus `check:nul-bytes` and the gate's own `--self-test`. Exit codes captured before any pipe.\n\nNo changeset: this is an internal CI gate script and publishes nothing user-visible.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01UjM2ia8Av1v5NqfqQEQmC6)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UjM2ia8Av1v5NqfqQEQmC6)_"
+}

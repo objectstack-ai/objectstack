@@ -1,0 +1,34 @@
+{
+  "number": 12228,
+  "kind": "issue",
+  "title": "[finding] The README leads with \"business ontology\"; `content/docs/**` contains the word zero times",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T14:41:07Z",
+  "updated_at": "2026-08-26T01:43:17Z",
+  "closed_at": "2026-08-26T01:42:08Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12228",
+  "body": "## Measurement\n\nTaken at `origin/main`, on a full checkout:\n\n| Surface | Files containing \"ontology\" |\n|:--|--:|\n| `README.md` | 4 occurrences, in load-bearing claims |\n| `content/docs/**` | **0 files** |\n\nControl probe: the same corpus greps non-zero for adjacent vocabulary it does use (`metadata`, `permissions`, `definition`), so the zero is the term's genuine absence, not a broken pathspec.\n\n## Why this is worth a card\n\nThe README states it as the product's central claim, twice:\n\n> That metadata is your **business ontology** — an open, versioned definition of your objects, permissions, and flows that you own, not code scattered across a framework.\n\n> **Forward-deployed engineer?** This is the **ontology-first toolkit you own**…\n\nThe README also links out to `https://www.objectos.ai/en/blog/ai-ontology-open-protocol/` to expand the claim, and the marketing blog carries it across five English posts. So the term is load-bearing in the two places written for humans choosing the product — and **absent from the corpus written for people and models that have already chosen it.**\n\nThat matters beyond consistency. \"Ontology\" is the word the whole enterprise-AI category converged on in 2026 (Palantir Ontology MCP, Microsoft Fabric IQ Ontology, Databricks Unity Catalog Business Semantics, Snowflake Semantic View Autopilot). A documentation corpus that never uses the category's word is not retrievable for the category's questions — which is a real cost for a project whose adoption thesis is that models learn the format and agents then generate it.\n\n## Not a request to sprinkle the word\n\nThe fix is not find-and-replace, and doing it that way would be worse than leaving it. What is missing is a place where the docs **state the equivalence once, precisely**: what the typed application definition is, in the vocabulary the category uses, and how it differs (yours, versioned, in your repo, Apache 2.0 — not a hosted artifact).\n\nWhere that belongs — a concept page, the architecture page, or a glossary entry — is a call for whoever owns this lane, not for this filer.\n\n## Provenance\n\nFiled by the `repo:www.objectos.ai` seat (objectstack-ai/objectstack#12224) while settling the site-wide keyword architecture in `objectstack-ai/www.objectos.ai#77`. The marketing-site half of the same gap — `llms.txt` also contains the word zero times — is being handled there and is **not** part of this card.\n\nFiled unassigned with no `domain:*`: routing and grading belong to the triage seat, not to a filer from another lane. The likely landing surface is `content/docs/**`."
+}

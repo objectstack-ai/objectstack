@@ -1,0 +1,32 @@
+{
+  "number": 11992,
+  "kind": "issue",
+  "title": "spec: `ActionParam` carry-over declaration — carried from the row, rendered read-only, submitted verbatim (#11753 ruling, spec half)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T03:59:00Z",
+  "updated_at": "2026-08-26T22:29:21Z",
+  "closed_at": "2026-08-26T22:28:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11992",
+  "body": "Spec half of the #11753 ruling (maintainer, 2026-08-25, verbatim 「同意」 on recommendation A; full record = #11753 comment 5404887360). Filed by PM session `session_01KWRU3s15AJz7PGW7a7wdCh` per the confirmed checklist. Parent: #11753 (tracking).\n\n**Pre-measurements FIRST — both named by the parent card, and they gate the design**:\n1. Can objectui's `ActionParamDialog` carry a read-only-summary render for a param it must still **submit**? Measure before fixing the key's shape. If this needs renderer surgery beyond honouring a declaration, ⛔ stop and report — fallback B (objectui-only collapsed summary) is decided on #11753, never taken silently.\n2. Sweep every shipped action's `defaultFromRow` params bound to JSON-serialized columns — the population this key serves. Report identities, not counts.\n\n**Content**: add the authorable key to `ActionParamSchema` (`packages/spec/src/ui/action.zod.ts`) expressing *carry this value through: seed from the row, render as a non-editable summary, submit verbatim*. Naming/shape is this leg's design. Measured constraint from the parent: `visible` is NOT the answer — it omits the param from submission entirely. Exemplar usage: the five `clone_permission_set` facet params in `packages/plugins/plugin-security/src/objects/sys-permission-set.object.ts` declare the key.\n\n**Discipline**: Clause-②: **yes** (widens the authorable public surface) — contract-review tier; ⛔ spec seat only (`packages/spec` sole owner; the plugin-security exemplar edit rides the same PR or splits per the seat's judgment).\n\n**Acceptance criterion**: the schema accepts the new key; the five clone params declare it; a pin asserts a declared carry-over param is still submitted verbatim (#11703's pin 6 — the send-side contract — stays green).\n\n**Downstream**: the objectui renderer leg is `Blocked-by:` this card. Cross-repo unlock criterion: the consumer repo must be able to **install** the change (objectui refresh/pin flow picks it up), not merely see it merged."
+}

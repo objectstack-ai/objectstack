@@ -1,0 +1,36 @@
+{
+  "number": 12526,
+  "kind": "issue",
+  "title": "Three `serve-mcp-*` / `serve-stdio-*` spawners still fail port contention with the generic \"serve exited 1\" — they get #12441's probe but not its named error",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "tests"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T08:26:55Z",
+  "updated_at": "2026-08-26T10:47:45Z",
+  "closed_at": "2026-08-26T10:47:45Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12526",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12441 dev**, which measured this while implementing [PR #12523](https://github.com/objectstack-ai/objectstack/pull/12523) and **could not file it** (403 on every GitHub write from that seat). ⛔ Not graded, not routed. ⛔ Reported, not swept — the three sites sit outside #12441's ruled three-site surface.\n\n## Measured\n\n- `packages/cli/test/serve-mcp-stdio-answers.e2e.test.ts:280`\n- `packages/cli/test/serve-mcp-capability-collision.e2e.test.ts:315`\n- `packages/cli/test/serve-stdio-stdout-purity.e2e.test.ts:288`\n\n**They DO get #12441's fix ①** — all three call `randomPort()` from the shared helper, so the bind-probe reaches them for free once PR #12523 lands.\n\n**What they do not get is fix ④, the legible failure.** Each spawns `bin/run.js` directly with `childEnv()` rather than routing through `runServe()`, and #11707 (PR #12459) left `NODE_ENV` **unset** in all three — production posture. So `serve.ts`'s no-auto-select branch fires and a taken port is a hard `exit 1`, surfacing as the generic:\n\n```\nError: serve exited 1 before \"Server is ready\"\n```\n\n⇒ same measured shape as #12441's own file, still costing a reader the round it takes to connect an unreproducible red to a port.\n\n## Why it is worth a card rather than a sweep\n\n⭐ These three are in the **loud** column (production posture ⇒ a lost race is an error, not a silent drift — contrast the sibling finding on `runServe()`), so the failure is real and correct; only its *message* is uninformative. That makes this the cheap, safe half of the family: no behaviour to decide, nothing shared to change.\n\n## Shape of a fix (⛔ a suggestion, not a ruling)\n\nMechanical: call `portContentionError(out + err, …)` before building the generic error, exactly as `serve-node-env-production-default.e2e.test.ts` does after PR #12523. ⚠️ Read that file first — the detector reads the port out of the **child's own diagnostic**, not out of what the harness thought it reserved, and that distinction is the point.\n\n⚠️ **Blocked-by [PR #12523](https://github.com/objectstack-ai/objectstack/pull/12523)** — `portContentionError()` does not exist until it lands. Also note all three files were rewritten twice today (PRs #12459 and #12504), so re-read them on current `origin/main`.\n\n## Dedup\n\nThe #12441 dev deduped the REST-free way (local grep over `packages/cli/test` for every port draw and spawn site; the REST list endpoints are 403 from a dev seat). #12498 / PR #12504 touched these same three files on a different axis (a dead `VITEST` counterfactual in their comments) and is merged. ⚠️ Not exhaustively deduped against `domain:devx`.\n\nSeverity not judged — S, mechanical.\n\n## Refs\n\n- #12441 / PR #12523 — where `portContentionError()` comes from, and the shape to copy\n- #11707 / PR #12459 — put these three into the production-posture column\n- #12498 / PR #12504 — the previous card on these same three files"
+}

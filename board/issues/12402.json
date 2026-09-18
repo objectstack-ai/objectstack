@@ -1,0 +1,34 @@
+{
+  "number": 12402,
+  "kind": "pull_request",
+  "title": "os-dev contract: probe-first dedup route, never-drop findings, and the edited gate script's own pin suite",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T01:38:45Z",
+  "updated_at": "2026-08-26T02:06:13Z",
+  "closed_at": "2026-08-26T02:06:12Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-26T02:06:12Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12402",
+  "body": "Fixes #12367\n\nGoverned surface (`.claude/agents/os-dev.md` only): draft PR, human merge — never queued, never armed, never flipped ready (triage constraint on the card).\n\n## Update 1 — the dedup route, brought to measured reality\n\nThe old clause prescribed \"REST list endpoints + local grep, never MCP `list_issues`/`search_issues`\". Measured 2026-08-25 on three dev containers: every repo-scoped REST endpoint 403s and `gh` is absent, while the MCP tools work. Measured again on THIS container (2026-08-26, dispatched dev seat): repo-scoped REST reads return **200** and `gh` is absent — so the channel varies **per container**, not per role. The new text therefore codifies probe-first rather than a role-based rule:\n\n- probe one repo-scoped REST read in-container; where it works, the standing REST-list + local-grep route stays (the `rest-channel.md` pointer is kept, its checkmarks noted as per-seat measurements);\n- where it 403s (failure shape named: whole repo-scoped class 403, `gh` absent, MCP working), use **one targeted MCP `search_issues`** and declare the reroute in the report;\n- the GraphQL-pool prohibition survives as its intent: **no broad list sweeps on any channel** (no full pagination, no wide search — one targeted call is the ceiling).\n\nFolded into the same clause, per the sibling finding's two dispositions (PM-directed, same clause, no surface widening — the sibling card remains open for the PM to judge against this text):\n\n- **hand-over is first-class**: a finding that cannot be filed goes into the report with the reason, for the PM to file;\n- **never-drop**: filing blind and silent dropping are both named forbidden — a finding never disappears because the dedup channel broke.\n\n## Update 2 — the edited gate script's own pin suite\n\n\"Run the derived gate families\" is structurally blind to a gate script's own test files: derivation answers \"which gates read your changed files\", never \"which tests test this script\". Measured: a gate-script edit ran the full derived battery green while the script's own vitest pin suite never executed, and CI caught three hijacked pins. New step 5 in the local-verification scope: when the diff edits a gate/tooling script, running that script's **own** pin/test suite (sibling `*.test.ts` naming it, plus same-package test-tree `git grep` hits on the script's filename) is an explicit, non-optional step alongside the derived families.\n\n## Budget and constraints\n\n- Dispatch-prompt deviation, measured: a line ratchet **does** exist on this file (`CEILINGS['.claude/agents/os-dev.md'] = 470` in `scripts/pm/check-skill-line-ratchet.mjs`); the prompt said none does. The diff lands at **468 lines (headroom 2)** — verdict line: `check-skill-line-ratchet: .claude/agents/os-dev.md is 468 lines (ceiling 470; headroom 2)`.\n- No issue numbers in the new operative text (`check-skill-id-lint: 22 file(s) clean`).\n- `.claude/`-only diff: no changeset; `skip-changeset` label applied via the additive endpoint and read back.\n\n## Verification (all at head `759f6d3e`, after the final commit)\n\nDerived via `node scripts/pm/dispatch-gates.mjs` (no paths; derivation banner named this repo at `cdbd920`): 10 families matched. Run under `os-verify-lock`, exit captured before any pipe:\n\n- `check:agent-model-declared` — `1 agent definition(s) under .claude/agents/ all declare a model`\n- `check:agent-test-spelling` — `0 violations — 386 file(s)`\n- `check:doc-authoring` — `390 files clean — no bare metadata literals`\n- `check:doc-formula-expressions` — `22 record-scoped formula example(s) across 422 files / 1449 TS blocks judged clean` (prerequisite `@objectstack/formula` + `@objectstack/lint` built first)\n- `check:nul-bytes` — `OK (scanned 6868 text file(s) …)`\n- `check:pm-governed-merges` — self-test 159 assertions + `live: the real generator declared 9 output(s) and certified this tree`\n- `check:pm-skill-id-lint` — `22 file(s) clean (pattern /#[0-9]{3,}/g)`\n- `check:pm-skill-ratchet` — os-dev.md `468 lines (ceiling 470; headroom 2)`, widest table row pin green\n- `check:skill-frame-sync` — `4 copies of the decision frame are structurally isomorphic across 3 files`\n- `check-governed-queue-guard.mjs` — NOT MEASURED locally (reads `GITHUB_EVENT_PATH`; CI-event-only guard), exercised in CI\n\nNo package source touched, so no vitest suite or package typecheck applies to this diff.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JANH3y7qe3MD8aLaLXci8N)_"
+}

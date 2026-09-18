@@ -1,0 +1,32 @@
+{
+  "number": 12588,
+  "kind": "issue",
+  "title": "[finding] the published bundle `json-schema/objectstack.json` declares `x-schema-count: 1596` but carries 1585 definitions — and a docs page publishes that field as \"the total number of definitions\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-26T12:57:46Z",
+  "updated_at": "2026-08-26T19:50:26Z",
+  "closed_at": "2026-08-26T19:50:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12588",
+  "body": "**Origin**: measured by the os-dev run for #12315 (named-$ref link branch) while surveying the emitted `packages/spec/json-schema/**` tree. Filed on the dev's behalf — recording only, unassigned, awaiting triage. Not fixed under #12315's claim (out of scope: that card is the reference renderer's link branch).\n\n## Measurement\n\nAt `origin/main` `7bd6447f413d`, after `pnpm --filter @objectstack/spec gen:schema`:\n\n```\nbundle x-schema-count: 1596\nbundle $defs actual:   1585\ndelta:                 11\nper-schema files on disk (excl. objectstack.json): 1585\n```\n\nThe generator's own console agrees with both halves and with the disagreement:\n\n```\nGenerated: 1596 (124 as input shape)\n✅ Generated bundled schema: objectstack.json (1585 definitions)\n✅ Successfully generated 1596 schemas.\n```\n\n## Mechanism\n\n`packages/spec/scripts/build-schemas.ts` increments `count` once per emitted schema, but records each one into `generatedSchemas` keyed by `` `${categorySlug}/${schemaName}` `` (~line 427), and the bundle's `$defs` is assembled from that map (~line 2546):\n\n```ts\n'x-schema-count': count,          // 1596 — one per emit\n...\nfor (const [defKey, schema] of generatedSchemas) defs[defKey] = schema;   // 1585 — one per KEY\n```\n\nSo 11 emits share a def key with an earlier emit and are overwritten. The disk count (1585 files) matches `$defs`, not `count` — the same overwrite happens at the file level. `findDefKeyCollisions` does not stop these; per the in-source note, a **self-alias is exempt** from that gate (`lib/def-key-collisions.ts`), which is the most likely population here.\n\n## Why it's worth a card\n\n1. **The field is wrong in a published artifact.** `json-schema/**` ships in the tarball — 1586 of 1859 files in `npm pack --dry-run` — so the overstatement is on the consumer's disk, not just in a build log.\n2. **A published docs page states the false reading.** `content/docs/deployment/troubleshooting.mdx:438` — \"its `x-schema-count` field reports the total number of definitions\". It does not; it reports emit attempts, and is high by 11.\n3. **It masks the exempt-collision population.** The delta is currently the only externally visible signal that 11 emits are being silently overwritten. Whether those overwrites are all benign self-aliases is itself unverified here — the count discrepancy is the symptom, and the resolution should establish which it is.\n\nTwo honest resolutions for whoever takes it: set `x-schema-count` from `Object.keys(defs).length` so the artifact describes itself (and decide separately whether 11 overwritten emits deserve their own report line), or keep the emit count and rename/redocument the field. The first looks right — a self-describing artifact should count what it contains — but the overwrite population should be identified either way rather than left implied.\n\n**Dedup** (searched 2026-08-26, MCP `search_issues` + local grep for `x-schema-count`): #8133, #9659, #11503, #11709 (spec packaging/bundling, all different faces), #9803 (an unverified *figure* in a doc, closest in shape but a different artifact and number). No open card covers this field."
+}

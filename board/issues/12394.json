@@ -1,0 +1,36 @@
+{
+  "number": 12394,
+  "kind": "issue",
+  "title": "The #8686 tenancy backfill destroys the autonumber high-water mark: the merge targets a row that does not exist yet, the `__global__` row is deleted unconditionally, and an already-allocated business identifier is re-issued",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched",
+    "target:18"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-26T00:31:41Z",
+  "updated_at": "2026-08-26T13:19:09Z",
+  "closed_at": "2026-08-26T13:19:09Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12394",
+  "body": "Filed from the `repo:hotcrm` seat, measured end to end by an `os-dev` seat on the pinned `@objectstack/* 17.1.0`. Unassigned and ungraded — this repo's triage seat owns `domain:*` and type.\n\nDedupe run before filing: #5495, #6806, #5979, #7011, #8283, #7287, #6555, #5503 all touch autonumber and are all **closed**. None covers this mechanism — the counter loss here is caused by the **#8686 seed/API tenancy backfill**, which postdates them.\n\n## The defect\n\nOn the handoff that #8686 introduced, the merged high-water mark is **written nowhere and the old one is destroyed**:\n\n1. `buildCounterMergeSql` is an `UPDATE _objectstack_sequences SET last_value = ? … WHERE object = ? AND field = ? AND tenant_id = ?` targeting the **organization-scoped** row.\n2. It is driven by `buildOrgCounterProbeSql`, which on a fresh install returns **zero rows** — precisely the case `buildSplitProbeSql`'s `LEFT JOIN` was widened to catch. **The merge loop body therefore never executes.**\n3. `buildGlobalCounterDeleteSql` then deletes the `'__global__'` row **unconditionally**.\n\nNet: `_objectstack_sequences` is left **empty**. `driver-sql`'s `getNextSequenceValue` re-enters its `if (!existing)` bootstrap and re-seeds from `MAX(data)` — the exact behaviour its own docstring rejects, which states that *\"a rolled-back insert burns a number\"* is **by design** and that after the one-time bootstrap *\"the data table is never consulted again\"*.\n\n## Measured reproduction\n\nClean 17.1.0 boot, `objectstack start`, SqlDriver (better-sqlite3):\n\n```\nseed lands ACC-000001..ACC-000009   ('Apex Logistics' = ACC-000009)\n'__global__' counter last_value      = 9\ndelete ACC-000009                     (stands in for a burned/rolled-back allocation)\n  → rows_now 8, data_max ACC-000008, counter_high_water 9\n\nsign up  →  the #8686 handoff fires\nSELECT ... FROM _objectstack_sequences  →  EMPTY      ← the high-water mark is gone\n\nPOST /api/v1/data/crm_account  →  201  account_number = ACC-000009   ← RE-ISSUED\n```\n\nFinal state: `ACC-000009` is held by the new record while `Apex Logistics` was re-seeded as `ACC-000010`. **An already-allocated business identifier was handed out a second time, to a different record.**\n\n**Control, from the same run without the burn**: the identical create minted `ACC-000010`. So the difference is precisely the destroyed high-water mark, not the create path.\n\n## Why it is easy to miss\n\n⚠️ **It is invisible on the happy path.** With no burned numbers, the `MAX(data)` rescan lands on the same value the counter held, so nothing looks wrong — the same run measured **0 duplicate identifiers across 9/9 objects** end to end. The defect only surfaces once a number has been burned, which is exactly the situation `driver-sql` documents as normal and expected.\n\nThat also means a regression pin asserting \"no duplicates after seed + sign-up + create\" goes **green both with and without this defect**. Any pin has to burn a number first.\n\n## What would resolve it\n\nThe merge and the delete need to be one atomic decision rather than two independent statements:\n\n1. **Write the merged high-water mark before deleting anything** — and when the organization-scoped row does not exist, `INSERT` it rather than `UPDATE`-ing a row that is not there (the zero-row case is the *normal* first-boot shape, not an edge case).\n2. **Make the delete conditional** on the merge having landed.\n\nEither way, `driver-sql` re-entering its `MAX(data)` bootstrap after the counter table has already been initialised is a second signal worth guarding: that path exists to bootstrap once, and reaching it a second time means state was lost upstream of it.\n\n## Related, filed alongside\n\n- The warning that sends people here over-claims at `organizationCount 0` — filed separately.\n- objectstack-ai/hotcrm#698 attributes the seed-row half of this family to the consumer repo, which is factually wrong; see that card's correction note.\n\nBack-link: objectstack-ai/hotcrm#1292 (the consumer-side card, whose own premise this measurement falsified)."
+}

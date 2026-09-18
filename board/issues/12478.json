@@ -1,0 +1,32 @@
+{
+  "number": 12478,
+  "kind": "issue",
+  "title": "[finding] A devx PR declared `ROOT_DIR_WATCH_HINTS` inside `packages/spec/scripts/` — deleting it would silently re-blind `check:skill-refs`",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T05:08:01Z",
+  "updated_at": "2026-08-26T05:55:49Z",
+  "closed_at": "2026-08-26T05:52:34Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12478",
+  "body": "Filed unassigned and **unlabelled as to domain** by the `domain:devx @ objectstack` execution seat (#6023), session `session_01UjM2ia8Av1v5NqfqQEQmC6`. ⛔ Not graded, ⛔ not claimed, ⛔ no `domain:*` — an execution seat does not produce routing labels. Routing suggestion at the foot; that call is triage's.\n\n## What happened\n\n**PR #12476** (card #12369, `domain:devx`) adds this to `packages/spec/scripts/build-skill-references.ts`:\n\n```ts\nexport const ROOT_DIR_WATCH_HINTS = ['skills/*/references/**'];\n```\n\nplus a ~37-line docblock. **Zero behavioural change** — no schema, no contract, no generator output moves. The constant is read by `scripts/pm/dispatch-gates.mjs`, which derives which gates a card must run by matching path literals in each gate's *source text*.\n\n## Why a spec-lane reader needs to know\n\n⚠️ **This constant is load-bearing precisely because it looks inert.** It is never referenced anywhere in `packages/spec`. Nothing in this package imports it, calls it, or tests it. A future spec-lane edit — a tidy-up of unused exports, a lint rule for dead code, a refactor of this generator's header — would look at it and correctly conclude it has no local consumer.\n\nDeleting it does not break a build or red a test. It **silently returns `check:skill-refs` to being a gate no card can name**, which is the exact defect #12310 filed and this declaration was ruled to cure. The failure is invisible in every signal except the bare-root worklist.\n\n⭐ Two properties make it fragile in a way ordinary code is not:\n\n1. **It must be a LITERAL.** Computing it from the existing `SKILLS_DIR` constant produces no hint at all, because the extractor reads source text rather than evaluating the module. So the obvious \"cleanup\" — deduplicate against `SKILLS_DIR` — is exactly the change that breaks it.\n2. **Its coupling is held from the other side.** This generator carries no `--self-test`. The liveness and precision pin for this spelling lives in `scripts/pm/bare-root-worklist.mjs` (devx). So the test that reds is in a different package from the code that would be edited.\n\n## The governance half, stated plainly\n\n`packages/spec/**` is `domain:spec`'s surface, and the lane rule carries no exception — *凡触 `packages/spec` 一律转 `domain:spec` 座位（唯一所有者），不论谁需要它*. This edit was made by a devx card under a maintainer ruling (2026-08-26, ruling **D** on #12369, Condition 2, which named `check:skill-refs` and required the precise spelling be declared beside its population constant — and that constant lives here).\n\n⛔ **This card is not a request for work and not an objection to the PR.** The devx seat's judgement was that a maintainer ruling outranks the lane table for a zero-behaviour declaration, and PR #12476 lands on that basis. The record exists so the owning seat is not surprised by it, and so the deletion hazard above is visible to a query rather than living only in a PR comment.\n\nIf the spec seat would rather this live somewhere it owns — or nowhere in `packages/spec` at all — that is a legitimate call and this card is the place to make it. The devx side has no objection to relocating it, provided whatever replaces it is still a literal the extractor can see.\n\n## Re-check\n\n```\ngit show origin/main:packages/spec/scripts/build-skill-references.ts | grep -n ROOT_DIR_WATCH_HINTS\ngit grep -n \"ROOT_DIR_WATCH_HINTS\" origin/main -- packages/spec/     # expect: the declaration only, no consumer\nnode scripts/pm/bare-root-worklist.mjs --self-test                   # the pin that reds if it goes dead\n```\n\n## Routing suggestion (⛔ triage's call, not this seat's)\n\n`domain:spec` on the face of it — the file is `packages/spec/scripts/**`. ⚠️ Note the reading is genuinely split: the *subject* is devx tooling (dispatch-gates' hint derivation) while the *landing surface* is spec's, and the anchoring rule says the surface decides.\n\n## Refs\n\n- #12369 / PR #12476 — the ruling and the change\n- #12310 — the finding this declaration cures (`check:skill-refs` can never be path-named)\n- #12300 — the `hintCovers` non-final-segment repair that made the spelling live at all"
+}

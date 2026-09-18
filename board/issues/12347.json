@@ -1,0 +1,33 @@
+{
+  "number": 12347,
+  "kind": "pull_request",
+  "title": "fix(pm): fail the bare-root worklist self-test when a recorded verdict sits on a REACHABLE row",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T19:24:20Z",
+  "updated_at": "2026-08-25T19:52:00Z",
+  "closed_at": "2026-08-25T19:51:58Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": "2026-08-25T19:51:58Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12347",
+  "body": "Fixes #12064\n\nThe worklist prints a live `state` derived from the tree beside a `verdict`\nrecorded in `TRIAGE`. When a gate carrying a refusal later declares a watch\nhint, the state flips to `REACHABLE` while the refusal stays put, and the row\nasserts both that its population is reachable by declaration and that it cannot\nbe spelled. `--self-test` exits 0 through it.\n\n## Why neither existing assertion sees it\n\nBoth audit the **key set**. A row whose gate declares its root is still a row,\nso its verdict is not `STALE`; and it has left `open`, so it is not `FRESH`.\nBoth halves stay satisfied. This was predicted in #11155's dev report and then\nmeasured on PR #12061; it is reproduced below on this branch's own base.\n\n## What this adds\n\nOne assertion in `--self-test`: a recorded verdict may not sit on a row the\nsweep finds `REACHABLE`, naming the offending row and its recorded verdict. No\n`TRIAGE` row's `why` or `verdict` is touched, and no row is added or removed —\nthe map is shrink-only and this card adds a guard, it does not adjudicate rows.\n\n## Two deviations from the remedy as proposed, both measured\n\n**1. The pairing is general, not restricted to `REFUSE-*`.** Every verdict this\nfile defines presupposes an uncovered row: the two refusals say a declaration\nwas refused, and `DECLARED-NARROWER`'s own definition says the bare root is\nstill not covered.\n\n**2. `DECLARED-NARROWER` is not the destination.** The card proposed that a\nflipped row \"moves to `DECLARED-NARROWER`\". Measured, that is not available.\n`covered` asks whether a hint reaches an *arbitrary file at the top* of the\nroot, so it turns true only for spellings that collapse back to the bare word:\n\n| declared spelling | `collapseHint` | covers `ROOT/probe.file` | covers a nested file |\n|---|---|---|---|\n| bare word | bare word | false | false |\n| word + separator | bare word | **true** | true |\n| word + `*` | bare word | **true** | true |\n| word + `**` | bare word | **true** | true |\n| a narrower subtree | that subtree | false | true |\n| a deeper segment filter | segment prefix | false | true |\n\nEvery genuinely narrower subtree leaves the row **uncovered**. So a covered row\nis the bare root wearing a glob — precisely what `DECLARED-NARROWER` states it\nis not — and that holds for a `REFUSE-WIDE` row taking the escape too, whose\ndeclaration is *true* of its population and narrower than nothing. The failure\ntext therefore names the two honest resolutions (withdraw the declaration, or\nwithdraw the verdict) and picks neither, since choosing re-decides a verdict.\n\n## Evidence\n\nAblation, on the shape PR #12061 measured — declaring a hint on a gate carrying\n`REFUSE-UNSPELLABLE`. Mutation confirmed on disk by anchored `grep -c` and by\n`git hash-object` before/after, restored under `trap … EXIT INT TERM`, and the\nrestore proven byte-identical (`a41147efe985…` both sides). No build is involved:\nthe sweep reads gate sources from disk, so there is no `dist/` leg to rebuild.\n\n| tree | self-test |\n|---|---|\n| base `cf99875ea8`, guard absent, gate unmutated | exit 0 — `46 live row(s), 39 unreachable as spelled, 39 recorded verdict(s) — none stale, none missing` |\n| base `cf99875ea8`, guard absent, **gate mutated** | **exit 0** — `46 live row(s), 38 unreachable as spelled, 39 recorded verdict(s) — none stale, none missing` ← the defect, reproduced |\n| this branch, guard present, gate unmutated | exit 0 — identical to the base line |\n| this branch, guard present, **gate mutated** | **exit 1** — `CONTRADICTED: check:ratchet-remedy-authority SCRIPTS_DIR scripts [recorded REFUSE-UNSPELLABLE]` |\n\nOn the mutated tree the report printed the card's exact defect: `REACHABLE`\nabove `The idiom has no non-recursive spelling`.\n\nThe guard is **green on the tree as it stands** — no row is currently in the\ncontradictory state. Verified rather than inferred: all 7 reachable rows carry\nno verdict, and the 39 verdicts sit on the 39 open rows. The live run's output\nis byte-identical before and after this change.\n\nGate union re-derived at the final commit `c5e46219a1` with\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (no stale\ntree; `check:bash32-floor` present and run). All 10 derived families green, plus\n`check:nul-bytes`, each exit code captured before any pipe. Repo-wide\n`eslint . --no-inline-config` ran the full population — 5161 files by eslint's\nown `--format json` count, 0 errors, 0 warnings, this file included — so there\nis no narrowing to declare.\n\n## Scope\n\n`scripts/pm/bare-root-worklist.mjs` only. This card does **not** reach the class\nreported in #12328, and is not described as doing so: those four rows never flip\nto `REACHABLE`, because `covered()` probes a top-of-root path that none of their\nspellings match, so this guard never fires on them. #12328 remains open, as does\n#12289.\n\nNo changeset: `scripts/` is not a workspace member and no published package's\n`files` field ships it, so this PR releases nothing — route 2 of the\nchangeset-check step, the `skip-changeset` label.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UjM2ia8Av1v5NqfqQEQmC6)_"
+}

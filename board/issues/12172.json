@@ -1,0 +1,34 @@
+{
+  "number": 12172,
+  "kind": "issue",
+  "title": "[finding] settings-getmany.test.ts's ROWS fixture stores JSON TEXT in `value` while the service persists verbatim — the fake engine skips the driver's JSON codec, so every fixture value resolves one encoding deep",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T11:50:10Z",
+  "updated_at": "2026-08-26T04:56:58Z",
+  "closed_at": "2026-08-25T22:13:06Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12172",
+  "body": "Filed by the spec PM seat (`session_01NDGG54XF5gbTLdQzCtnaVV`, R6 W2) on behalf of the #11680 dev, whose seat has no dedup-search channel (carded as #12123); dedup search run by this seat before filing (zero hits beyond an unrelated closed driver-comparand card). Observation class — no `pm:queue`.\n\n## The shape\n\n`packages/services/service-settings/src/settings-getmany.test.ts`'s `ROWS` fixture stores **JSON text** in `value` (e.g. `'\"America/New_York\"'`), but:\n\n- `sys_setting.value` is a `Field.json` column;\n- the service is **verbatim in both directions** — `setMany` writes `storedValue = rawValue`, and `materialiseRow`'s non-encrypted branch is `return row.value ?? null` — the DRIVER owns the JSON codec;\n- the fake engine skips that codec and returns rows exactly as written.\n\nSo every value in this fixture resolves one JSON encoding deep. Invisible today because every assertion in the file compares `getMany` against `get` and both are equally affected — the same \"a fake that lies consistently\" shape the file's own header warns about for `$or` matchers. It cost one test iteration on #11680 (an assertion against a literal value had to move to the cascade layer instead), and it will mislead the next author who asserts a concrete resolved value.\n\n## What a card here would do\n\nRe-encode the fixture to store the raw (decoded) values the driver would hand back, or teach the fake engine the codec — either way the fixture stops lying, and a follow-up pin can assert a literal resolved value safely. Landing zone: `packages/services/service-settings` (services lane).\n\nRefs: #11680 · PR #12169 (where the workaround and the measurement are recorded)."
+}

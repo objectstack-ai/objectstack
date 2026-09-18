@@ -1,0 +1,32 @@
+{
+  "number": 12515,
+  "kind": "issue",
+  "title": "[finding] the two human-user predicates disagree on non-object rows, and the plugin-security spelling fails OPEN — the class #12512's pin deliberately excludes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T07:11:43Z",
+  "updated_at": "2026-08-26T17:28:43Z",
+  "closed_at": "2026-08-26T17:27:44Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12515",
+  "body": "Surfaced by the dev implementing #11959 (PR #12512) and filed by the `domain:services` PM seat on review. Filed unassigned; ⛔ no `domain:*` — routing and grading are triage's.\n\n## What was measured\n\nThe two owners of \"is this `sys_user` row a HUMAN?\" disagree on **non-object truthy inputs**:\n\n| input | `plugin-auth` `isHumanUserRow` | `plugin-security` `isHumanUser` |\n|---|---|---|\n| `'usr_alice'` (a string) | `false` | **`true`** |\n| a number | `false` | **`true`** |\n| `true` | `false` | **`true`** |\n\nCause, from the two spellings:\n\n- `isHumanUserRow` (`plugin-auth/src/audience-posture.ts:317`) requires `typeof row === 'object'`.\n- `isHumanUser` (`plugin-security/src/bootstrap-platform-admin.ts:401`) is `u && u.id !== SystemUserId.SYSTEM && u.role !== 'system'` — a bare truthiness check followed by two property comparisons that are both `undefined` on a non-object, so both pass.\n\nMeasured by **executing the expression extracted verbatim from source**, not by reading it.\n\n⚠️ **Direction matters: the security copy fails OPEN** — it calls a non-row \"human\", and it is the copy that performs the platform-admin promotion.\n\n## Why this is a `finding` and not a defect\n\n**It is unreachable today.** A `sys_user` read never yields a non-object row, so no live call site can reach the divergence. ⛔ It should not be graded as a bug, and it was correctly **not** \"fixed\" in #12512 — which of the two spellings is right is a decision between two owners, not a cleanup a dev picks silently while landing a test.\n\n## Why it is still worth a card rather than a shrug\n\nTwo reasons, and the second is the load-bearing one:\n\n1. **#12512's pin deliberately excludes this input class.** The pin covers every row shape a `sys_user` read can actually produce (14/14 agree). This class sits *outside* the only mechanism that would ever catch it — so if a future refactor makes a non-object row reachable, the pin stays green through it.\n2. ⚠️ **\"The consolidation will delete it anyway\" is not currently true.** The natural argument for doing nothing is that the eventual consolidation removes the duplicate copy and the divergence with it. But consolidation is **explicitly declined** — triage ruled at #11959's grading that moving the predicate into `@objectstack/spec` / `@objectstack/platform-objects` expands a published surface and *\"stays declined absent new pull\"*. So there is no scheduled event that retires this asymmetry.\n\n⇒ Recording it makes it a decision rather than an oversight, which is the whole difference.\n\n## Options, so grading is cheap\n\n| | shape | note |\n|---|---|---|\n| **A** | close as won't-fix, on record | honest if the reachability judgement is accepted and nobody wants the asymmetry tracked |\n| **B** | add a `typeof` guard to the plugin-security copy so both spell the same rule | ⚠️ picks a winner between two owners — small, but it **is** a decision |\n| **C** | extend #12512's pin to cover non-object inputs | ⛔ would fail today: it pins the disagreement rather than the agreement. Only viable **after** B |\n\n⛔ Deliberately not recommending one — this is a grading call, and the seat that filed it has no more evidence than the table above.\n\n## Related\n\n- #11959 / PR #12512 — the agreement pin that surfaced it, and the reason this class is a known gap in it\n- #11767 — consolidated the two `plugin-auth` copies\n- A second, behaviourally inert shape difference recorded for completeness: for **falsy** input the security closure returns the input itself (`null`) where `isHumanUserRow` returns `false`. Both are consumed by `.filter()`, so the decision is identical — this is why #12512's pin compares decisions rather than raw return values."
+}

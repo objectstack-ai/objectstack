@@ -1,0 +1,35 @@
+{
+  "number": 11999,
+  "kind": "issue",
+  "title": "`projectResolution: 'none'` is shipped by `@objectstack/runtime` and forwarded by `os serve`, but `RestApiConfigSchema` declares only `required|optional|auto` — accepted only because the schema was never executed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-25T04:19:57Z",
+  "updated_at": "2026-08-26T04:30:58Z",
+  "closed_at": "2026-08-26T04:30:58Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11999",
+  "body": "Found while implementing #11637 (making `RestServer.normalizeConfig` parse `config.api` instead of casting to it). Filed, not fixed — the repair is either a `packages/spec` enum change (`domain:spec`'s single-owner surface) or a project-scoping semantics change in `@objectstack/runtime`, and #11637 owns neither.\n\n**Three packages disagree about this key's vocabulary, and they have disagreed silently for exactly as long as nothing executed the schema.** CI on PR #11985 is what made it visible: five `packages/cli` e2e boots died at `Plugin startup failed: com.objectstack.rest.api` the moment the parse started running.\n\n## What was measured\n\nOn `origin/main` @ `7899f5745`.\n\n**The declaration** — `packages/spec/src/api/rest-server.zod.ts:113`:\n\n```ts\nprojectResolution: z.enum(['required', 'optional', 'auto']).default('auto')\n  .describe('Project ID resolution strategy'),\n```\n\n**The producer** — `packages/runtime/src/standalone-stack.ts`. Not a stray literal: the value is in the *declared return type*, `:247`:\n\n```ts\nexport interface StandaloneStackResult {\n    plugins: any[];\n    api: { enableProjectScoping: false; projectResolution: 'none' };\n```\n\nand emitted at `:760-763`:\n\n```ts\n    return {\n        plugins,\n        api: {\n            enableProjectScoping: false,\n            projectResolution: 'none',\n        },\n```\n\n**The consumers** — `packages/cli/src/commands/serve.ts`:\n\n```ts\n:3086   const apiConfig = (config as any).api ?? {};\n:3088   const projectResolution = apiConfig.projectResolution ?? 'auto';   // 'none' is not nullish — it survives\n:3139   createRestApiPlugin({ api: { api: { enableProjectScoping, projectResolution } } as any }),   // → the REST plugin\n:3160   scoping: { enableProjectScoping, projectResolution },                                        // → the Dispatcher plugin\n```\n\nSo `'none'` reaches **two** plugins. `packages/cli/src/utils/merge-boot-config.ts:12` documents the same block as the boot default, and `merge-boot-config.test.ts:7` pins it as `const BOOT_API = { enableProjectScoping: false, projectResolution: 'none' } as const`.\n\n**Why nobody noticed.** `RestServer` cast this config rather than parsing it, so the enum never executed on any deployment path (#11637's whole subject). `'none'` was accepted because nothing checked. Downstream, `rest-server.ts` only ever compares `projectResolution === 'required'`, and `direct-mount-composition.ts:91` does `composition.projectResolution ?? 'auto'` — so an unrecognised value silently behaves like `'auto'` without ever being named as such.\n\nEvery other `projectResolution` value in the repo is legal: a repo-wide census of literals (173 files, 316 `api: { … }` blocks) found `'auto'`, `'optional'`, `'required'` and `'none'`, and `'none'` only on this boot path.\n\n## Why it is a defect either way\n\n`'none'` and `'auto'` are not synonyms in intent. `'none'` reads as \"no environment scoping at all\"; `'auto'` is declared as *\"backward compatible — accepts both scoped and unscoped routes\"*. A standalone host currently declares the first and gets the second's behaviour by fallthrough. So this is not merely a spelling mismatch to paper over — either the enum is missing a member the platform genuinely uses, or the runtime is shipping a value it does not mean.\n\n## Not prejudged\n\n- **Teach the enum `'none'`** (`z.enum(['required', 'optional', 'auto', 'none'])`) and give it an explicit branch wherever `projectResolution` is read, so \"no scoping\" stops being expressed as an unrecognised string that falls through to `'auto'`. This is the shape that keeps the runtime's stated intent.\n- **Migrate the runtime to a declared value.** If `'none'` and `'auto'` really are the same behaviour for a standalone host with `enableProjectScoping: false`, change `StandaloneStackResult` to `'auto'` and delete the divergence. Note `enableProjectScoping: false` already makes the resolution strategy moot on that path, which is evidence for this option — worth confirming before choosing.\n- Either way the fix wants a pin that the CLI's real boot config parses against the declared schema, which is the check that did not exist and is why this survived.\n\n⚠️ Until this is settled, `#11985` `.omit()`s `projectResolution` from the parse it runs, exactly as it does for the retired `api.requireAuth` — so the key is *still* unvalidated at that seam. Closing this issue is what lets the omit be removed.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019siH5jDmk5hrayvfyojUqR)_\n"
+}

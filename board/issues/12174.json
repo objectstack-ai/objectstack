@@ -1,0 +1,32 @@
+{
+  "number": 12174,
+  "kind": "issue",
+  "title": "spec/ui: FormField minLength/maxLength (and the number-constraint quartet) still carry the pre-#11566 shape — z.number().optional(), no integer/positivity validation",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T11:53:43Z",
+  "updated_at": "2026-08-26T05:24:52Z",
+  "closed_at": "2026-08-26T05:05:00Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12174",
+  "body": "Found while implementing #11949 (`minLength` tightening on `data/field.zod.ts`). Filed unassigned — same defect class, different surface, and the applicability story differs enough that it is not a mechanical rider.\n\n## What\n\n`FormFieldBaseSchema` (`packages/spec/src/ui/view.zod.ts`, the form-designer field row) declares its own text/number constraint keys:\n\n- `maxLength: z.number().optional()` — \"Maximum character length (for text/textarea/email/url/phone)\"\n- `minLength: z.number().optional()` — \"Minimum character length\"\n- `min` / `max` / `precision` / `scale` — all bare `z.number().optional()`\n\nSo `maxLength: 0`, `minLength: -5`, `scale: 2.5` all parse cleanly on a form field — the exact shapes #11566 (data `maxLength`), #11949 (data `minLength`) and #8321 (data `scale`/`precision`) now refuse on the object-field surface, for the same \"a malformed count has no defined meaning\" argument.\n\n## Why it is not a mechanical copy of #11949\n\n1. **Applicability is a different question here.** A form field row references an object field by `field` name and carries only an optional `type` override, so \"refuse the key outside `BOUNDED_STRING_FIELD_TYPES`\" has no direct analogue when `type` is omitted (the common case) — the referenced object field's type is not visible to this schema at parse time.\n2. **Enforcement liveness is unverified.** The liveness ledger's FormField subtree row is a blanket undrilled verdict (`packages/spec/liveness/view.json`, the FormField note). Whether any renderer/validator reads the form-level `minLength`/`maxLength` at all needs measuring before choosing between the #11566 template (tighten the shape) and ADR-0049 enforce-or-remove (the keys may be declared-but-inert on this surface entirely).\n\n## Decision this needs\n\nMeasure the readers first (objectui form renderer, public-form resolve path), then either: (a) shape-tighten in place (`z.number().int().min(1)` for the length pair, `int().min(0)` for `precision`/`scale`) if the keys are live; or (b) retire them from the form-field surface if nothing reads them (the object field already declares the same constraints authoritatively — two declarations of one bound is the drift shape #12017 names).\n\nDedup note: searched by local grep (liveness ledger, audits, `view.zod.ts` comments — no tracking card referenced). The container's REST issue-list channel was unavailable this session (proxy 403), so the open-issue keyword sweep could not be run; PM triage should dedup before queueing."
+}

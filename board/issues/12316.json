@@ -1,0 +1,32 @@
+{
+  "number": 12316,
+  "kind": "issue",
+  "title": "[finding] 28 multi-shape property rows keep the collapsed signature cell after #11601 — their nested describes remain unreachable by design",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T17:31:31Z",
+  "updated_at": "2026-08-26T14:59:51Z",
+  "closed_at": "2026-08-26T14:48:47Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12316",
+  "body": "**Origin**: the designed-and-measured remainder of #11601 (PR #12309). Filed by the PM on the dev's behalf (recording only — unassigned, awaiting triage).\n\n**What is left**: PR #12309's nested-shape sub-tables deliberately refuse a property row that opens **two or more** object shapes (no single shape to name — mirroring `formatPropertyType`'s refusal to relocate out of an array-of-enum). Census: **28 such rows**, e.g. `ui/App.navigation` (9 variants), `ui/NavigationArea.navigation`, `ui/NavigationContribution.items`, `data/ConditionalValidation.then` / `.otherwise` (5 each). Their nested `.describe()` text still never reaches the reference page.\n\n**Shape of a follow-up**: render one sub-table per variant under a variant-indexed heading (the accessor grammar PR #12309 introduced extends naturally — e.g. a discriminant-keyed spelling). Cost is bounded by the census: 28 rows repo-wide. Also adjacent, recorded on the same run: describes below level 1 stay unreachable by design (`SHAPE_DEPTH_LIMIT=1`; unbounded contrast reading: 22,459 occurrences vs the 7,502 level-1 ones #12309 publishes) — a depth widening is a separate, bigger decision and is NOT what this card proposes.\n\n**Dedup** (searched 2026-08-25): only #11601 itself matches; no open card covers the multi-shape remainder."
+}

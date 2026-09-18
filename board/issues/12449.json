@@ -1,0 +1,34 @@
+{
+  "number": 12449,
+  "kind": "issue",
+  "title": "[finding] `Unlock-action:` has exactly one canonical value and no reader-side rejection — 1 of 68 blocked cards uses it, and that one is prose the scan cannot parse",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T03:32:04Z",
+  "updated_at": "2026-08-26T09:47:40Z",
+  "closed_at": "2026-08-26T09:47:00Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12449",
+  "body": "Filed unassigned, recording only. Measured 2026-08-26 during the blocked-population sweep (#12448), by the skills seat (session `session_01RMTpSRF5CjMmQBFfPtPCwJ`). Skills-lane subject: the state-model vocabulary is `.claude/skills/pm-dispatch/references/state-machine.md`.\n\n## The spec as written\n\n`references/state-machine.md`, `pm:blocked` section — the slot has exactly **one** documented value:\n\n> 工已完、PR 被外部门禁缺陷卡住的卡同用本态… `Blocked-by:` 指向门禁缺陷卡,正文另加机器可读行 `Unlock-action: re-check PR #M`,解锁扫描把解锁动作从「回队重派」换成「重查该 PR 落地」,⛔ 永不给完工卡重派 dev\n\nSo the slot is a **two-valued switch on the unlock scan's exit path** — absent means \"re-dispatch\", `re-check PR #M` means \"the work is done, only re-check the PR\". It is not a free-text field, and the ⛔ it protects (never re-dispatch a finished card) is real.\n\n## Measured, on the live board\n\nOver all **68** open `pm:blocked` cards in this repo (bodies read from the same `list_issues` response):\n\n| reading | count |\n|---|---|\n| cards carrying an `Unlock-action:` line at all | **1** |\n| …of those, written in the canonical form | **0** |\n\nThe single instance is **#11042** (`domain:devx`), whose line begins `Unlock-action: re-run the cross-domain in-flight check against the …` — a sentence, not the switch. A scan grepping the canonical form does not see it; a scan that accepted anything after the colon could not tell which exit path to take.\n\n⭐ **And I did the same thing yesterday, which is why this is a spec problem rather than one seat's slip.** On #12201 I wrote `Unlock-action: when PR #12202 merges, re-dispatch this card on the new main with ranking A and the three-file scope`. It \"worked\" only because I personally returned and executed it by hand; to any machine reader it was a dead letter. The canonical shape for that card was `Blocked-by:` pointing at a card that closes at the unlock moment, **no** `Unlock-action:` (absent = re-dispatch), and the changed charter as ordinary prose on its own line.\n\nBoth instances share a cause: the slot *looks* like a place to write what to do, because that is what its name says, and nothing rejects a sentence.\n\n## Why it is worth a card rather than a wording tweak\n\nThe failure is silent and in the expensive direction. A prose `Unlock-action:` neither fires nor errors — the card simply takes the DEFAULT exit (re-dispatch) when the scan runs, which for a finished-work card is exactly the ⛔ the slot exists to prevent: a dev re-dispatched onto work already delivered.\n\n## Two shapes, ⛔ not choosing here\n\n- **A — closed enumeration + reader-side rejection.** Fix the legal values (today: `re-check PR #M`), and have the patrol report any `Unlock-action:` line that is not one of them, the way `Blocked-by:`'s bare-id discipline is already policed. Costs a new predicate; makes the malformed spelling loud at the moment it is written.\n- **B — spell the rule instead.** State in `state-machine.md` that the slot admits ONLY the canonical value and that everything else is prose on its own line — structurally identical to the `Blocked-by:` rule already recorded there (「指令是行,提及是散文」), and zero new vocabulary, zero new predicate. Nothing becomes loud; the next seat is simply told.\n\n⚠️ Whichever is taken, this is a governed instruction file, so it lands draft + human merge. The line-ratchet ceiling on `state-machine.md` is currently 44 (raised 43→44 by #11705's ruling), headroom 0 — B costs its own line and must be paid in place or ruled.\n\nDedup: searched the open board for `Unlock-action` / 解锁动作 / unlock scan cards — #12448 (today's blocked-population sweep) records the same 1-of-68 count as context but is about zombie blocks, not this slot; no other open card covers it."
+}

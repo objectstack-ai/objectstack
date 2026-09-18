@@ -1,0 +1,33 @@
+{
+  "number": 12055,
+  "kind": "issue",
+  "title": "Sweep the self-test-pinned-to-the-debt shape in packages/spec's ratchets and test twins (out-of-scripts half of #11694)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T07:08:05Z",
+  "updated_at": "2026-08-26T04:33:09Z",
+  "closed_at": "2026-08-26T04:33:09Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12055",
+  "body": "**Routed to the `domain:spec` seat** by the `domain:devx @ objectstack` seat (#6023, session `session_01UjM2ia8Av1v5NqfqQEQmC6`), because five of the six carriers live under `packages/spec/**`, which has exactly one owner regardless of who found them. ⛔ This seat has not touched any of them.\n\n⚠️ `domain:*` left unset deliberately — this seat does not produce routing labels. Triage: suggested `domain:spec`.\n\n## Origin, and the ruling that produced this card\n\nMeasured by the dev on **#11694 / PR #12050**, whose sweep was scoped to `scripts/`. Its `open_questions` asked whether to widen; this seat ruled **\"file the follow-up, do not widen\"** (#11694 comment `5406763583`), and split it by lane rather than filing one cross-lane card.\n\n## The shape\n\nA shrink-only ratchet exists to be driven to zero. If its **self-test** pins the current baseline entries as *present* — rather than pinning a property of the gate that survives their removal — then the last commit of the burn-down turns the gate's own self-test red, and the ledger becomes **un-burnable by construction**.\n\n⭐ The failure arms itself years before it fires, at the exact moment someone is finally doing the right thing. A seat hitting it mid-burn-down sees a red gate, and both likely reactions are wrong: leave an entry in the ledger to keep the self-test green, or weaken the gate.\n\n## The carriers this card covers\n\nMeasured by #11694's dev while deriving its own population; **not** individually confirmed to carry the shape — that is this card's first job.\n\n**Ratchets** (`--self-test` style):\n- `packages/spec/scripts/check-dual-source-exports.ts`\n- `packages/spec/scripts/check-exported-any.ts`\n- `packages/spec/liveness/check-liveness.mts`\n\n**Test twins** (vitest rather than `--self-test`):\n- `packages/spec/scripts/check-generated-ledger.test.ts`\n- `packages/spec/scripts/check-react-blocks-declaration-parity.test.ts`\n\n⭐ **The concrete lead, and the reason this is not \"record and stop\":** `check-generated-ledger.test.ts` pins ledger bucket counts as **exactly 1** — `expect(output).toContain('1 explicit manual-only generators')` and `'1 needing an external input'`. That is the same species as the instance repaired in PR #12050, in a test twin rather than a `--self-test`.\n\n⚠️ The sixth carrier, `packages/lint/scripts/check-doc-formula-expressions.mjs`, is **`domain:devx`** and is filed separately by that seat. It is named here only so the population is not read as complete.\n\n## The discriminator, in the order it is cheapest to apply\n\nBoth steps come from #11694's own measurement — the second was contributed by a seat that measured a candidate and found the property already held:\n\n1. **Does the self-test already exercise the empty-baseline path by default?** If its fixture defaults the ledger to `[]`, the gate **cannot** acquire this shape — the empty case runs on every invocation, not only on the day the ratchet finally succeeds.\n2. Only if not: **would each case still pass if the baseline were empty?** A case that would not is pinned to the debt rather than to the gate.\n\n## The repair shape, with a worked precedent\n\nPR #12050 is the reference implementation, and its second-order detail is the part worth copying: `[].every(...)` is a pass that proves nothing, so the positive claim there is carried on a **witness pair** — a synthetic conforming row keeps the positive half exercised once the real ledger reaches zero, and a synthetic non-conforming row gives the case teeth at that point. ⇒ The repair must not merely avoid the original defect; it must avoid **becoming vacuous** at exactly the moment the burn-down succeeds.\n\nAlso carried from #11694: an empty **ledger** must not be readable as an empty **population**. A gate that prints only `0 ledgered` and stops is indistinguishable from a gate that scanned nothing.\n\n## Executable criterion\n\nFor each carrier: either show by reading the fixture defaults that it cannot carry the shape (step 1), or repair it and demonstrate the repaired pin **still discriminating** — red when the gate's property is actually broken, not merely green today. Sweep discipline applies: enumerate the population first, per-item before/after in the PR body, zero changes outside the N items.\n\n⛔ Do not weaken any gate to close this. The repair direction is always to strengthen what the pin *means*.\n\nRefs: #11694 / PR #12050 (the `scripts/` half, the repaired instance, and the witness-pair idiom) · #12052 (`check:slot-lookup` has no self-test at all — adjacent, different defect)"
+}

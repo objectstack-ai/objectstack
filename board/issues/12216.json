@@ -1,0 +1,32 @@
+{
+  "number": 12216,
+  "kind": "issue",
+  "title": "[finding] unregistered dogfood proof tag `admin-platform-admin-standing` — pre-existing check:liveness warning, recurrence of #10773's class",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T13:44:42Z",
+  "updated_at": "2026-08-26T11:38:06Z",
+  "closed_at": "2026-08-26T11:21:33Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12216",
+  "body": "**Origin**: pre-existing `check:liveness` warning observed by the os-dev run for #11457 (PR #12214) at its base commit 22c42c9 — present before that PR's changes, not introduced by them. Filed by the PM on the dev's behalf (recording only — unassigned, awaiting triage).\n\n**Symptom**: the dogfood proof tag `admin-platform-admin-standing` is referenced by the dogfood test tree but is not registered in `proof-registry.mts`, so `check:liveness` emits a warning for it.\n\n**Lineage**: this is a recurrence of the class closed as #10773 (\"proof-registry.mts lags the dogfood test tree\"). That card fixed the then-known instances; this tag either post-dates the fix or was missed. The recurrence suggests the class-level question is still open: a warning that never turns red does not stop new instances — the eventual card should consider whether registration drift ought to fail the check rather than warn.\n\n**Dedup** (searched 2026-08-25): #10773 is closed; no open card covers this tag or the registration-drift class."
+}

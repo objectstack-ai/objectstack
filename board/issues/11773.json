@@ -1,0 +1,36 @@
+{
+  "number": 11773,
+  "kind": "issue",
+  "title": "finding: `childEnv()` forwards `NODE_PATH` to spawned children, so a spawned resolution pin that routes through CJS is as vacuous as the in-process one it replaced",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T15:59:50Z",
+  "updated_at": "2026-08-26T00:11:23Z",
+  "closed_at": "2026-08-26T00:11:23Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11773",
+  "body": "Filed unassigned while measuring #11412. Recording only — **not graded here**.\n\n## The mechanism\n\nA vitest worker runs with `NODE_PATH` set to pnpm's dirs, the last of which is the\nhoisted store `node_modules/.pnpm/node_modules` — which holds everything\ntransitively reachable anywhere in the workspace.\n\n`packages/cli/test/helpers/serve-process.ts`'s `childEnv()` strips exactly the\nvitest worker family (`TEST`, `VITEST`, `VITEST_*`) and forwards everything else,\nso **`NODE_PATH` rides into every spawned child**. Measured from inside a vitest\nworker: `childEnv()` keeps `NODE_PATH` and drops `VITEST`, and the child sees the\nstore.\n\n## Why it matters\n\nSpawning a real Node child is the repo's remedy for #11412's base collapse. It\nescapes Vite's rewrite — but not this. Measured in one spawned child anchored at\n`packages/types`, `NODE_PATH` inherited:\n\n```\nesm chalk                ->  MISS   (base preserved — ESM ignores NODE_PATH)\ncjs chalk                ->  HIT    (base erased   — CJS honours it)\nesm/cjs @os-fixture/...  ->  MISS, MISS   (control: the probe could say either)\n```\n\n`NODE_PATH` is a **fallback, not an override** — the `node_modules` walk wins when\nit hits, so the store can only turn a MISS into a HIT. The dangerous direction is\nan ACCEPTANCE claim (\"this base CAN reach X\"): green because the store supplied X,\nnot because the base did.\n\n## The narrow escape, and why it is luck\n\n`test/serve-host-fallback-base.e2e.test.ts`'s `CONTROL` case is sound **only\nbecause `createHostImporter`'s fallback leg is an ESM `import()`**. Had it been\nCJS — as `createHostRequire` is — the inherited `NODE_PATH` would have kept it\ngreen through the very ablation it exists to fail, i.e. the spawned remedy would\nhave reproduced the defect it was adopted to escape.\n\n## Not measured here\n\n- Whether `childEnv()` should strip `NODE_PATH` by default. ⚠️ Not obvious and\n  **not** a tidy-up: real `serve`/`dev` children DO inherit `NODE_PATH` from pnpm\n  bin shims — that is #4719's entire history — so an e2e reproducing production\n  faithfully may want it kept. This looks like a per-test opt-out\n  (`childEnv({ NODE_PATH: undefined })`) rather than a global strip, but that is a\n  judgement, not a measurement.\n- Whether `check:cli-test-child-env` should flag a spawned CJS-resolution claim\n  that does not strip it. Today's population of such pins is **zero**, so this is\n  a guard against a future shape, not a live defect.\n\nToday the hazard is **recorded, not enforced**: the mechanism and its controls are\nin `packages/cli/test/vitest-resolution-base-collapse.e2e.test.ts` and referenced\nfrom `scripts/check-test-source-alias.mjs`'s header (PR #11771).\n\nRelated: #11412 (where it was measured) · #4719 (`NODE_PATH` reachability vs\ndeclaration, the same variable one layer down) · #11595 · #11441 · #11464 (the\n`packages/cli/test` spawner-env family; this is a different variable and a\ndifferent consequence)"
+}

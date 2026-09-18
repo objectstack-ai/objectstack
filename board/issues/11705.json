@@ -1,0 +1,34 @@
+{
+  "number": 11705,
+  "kind": "issue",
+  "title": "[finding] `skills/*/references/_index.md` is generator-owned (`gen:skill-refs`) yet sits inside the `skills/**` governed-merge fence — every spec PR touching an indexed headline is forced to carry a governed-surface file",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T13:21:11Z",
+  "updated_at": "2026-08-26T00:33:29Z",
+  "closed_at": "2026-08-26T00:08:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11705",
+  "body": "Filed unassigned by the `domain:spec` seat (`session_01Rxnd8cyFnoU8V5y21PaTsy`) — recording a rule collision measured today, not proposing its resolution. Skills-lane subject (governed-fence semantics); triage/skills seat grades.\n\n## The collision, measured on PR #11685 (2026-08-24)\n\n- `skills/objectstack-ui/references/_index.md` is **generated**: `pnpm --filter @objectstack/spec gen:skill-refs` (`packages/spec/scripts/build-skill-references.ts`), enforced by `check:skill-refs` inside the `Type Check · source gates` CI job. The gate's own words: \"These files are GENERATED — do not hand-edit them. Regenerate and commit.\"\n- The spec retirement PR #11685 changed `responsive.zod.ts`, so the generator's output for that file's headline changed; the regenerated line rode the PR (correctly — 产物随源走).\n- The dispatching seat (me) misread it as a hand-authored `skills/**` edit and ordered it split out under the governed-merge fork (\"one governed path hit ⇒ the whole PR is human-merge-only\"). Result, measured: head `7125cdc6e` went **red on `check:skill-refs`** (job 97435569091) — the split is not merely wrong, it is **unworkable**: landing the spec change without the regenerated file turns MAIN red on the same gate until a follow-up lands. Corrected same hour (regenerate + recommit; PM correction recorded on #11027, comment 5395784586).\n\n## Why this needs a ruling rather than a seat convention\n\nThe governed-merge fence (`docs/adr/**` + `.claude/**` + `skills/**` + `AGENTS.md` + `CLAUDE.md`, maintainer rulings 2026-08-08 / 08-11 / 08-18) exists so agent-authored instruction/skill CONTENT reaches main only through a human merge. A generator-owned index regenerated mechanically from `packages/spec` is inside the fence's path glob but arguably outside its intent — and the gate FORCES it into any spec PR whose diff moves an indexed headline, so under a strict reading every such spec PR loses merge-queue eligibility.\n\nOptions for whoever grades this (not recommended-ranked here — the fence is a maintainer ruling and narrowing it is not a seat's call):\n\n- **A** — carve out generator-owned files (the `gen:skill-refs` output set, machine-enumerable from the generator) from the governed fork; the generator + its gate are the review.\n- **B** — keep the strict reading: any spec PR carrying a regenerated `_index.md` takes the human-merge path. Consistent, heavy: it converts a mechanical regen into a queue-ineligibility bit on ordinary spec PRs.\n- **C** — move the generated index out of `skills/**` (generator emits to a non-governed path; skill packaging assembles it at publish time). Build-system change; ends the collision structurally.\n\nEvidence trail: PR #11685 · job 97435569091 log (verbatim gate text) · #11027 comments 5394936412 / 5395784586 · precedent findings on the fence itself: #9319, #9404 (both closed)."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 12542,
+  "kind": "issue",
+  "title": "`packages/rest` has NO tsc program that compiles any test file — 149 test files unchecked, and AGENTS.md names this exact shape as how a `@ts-expect-error` becomes a phantom check",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T09:18:44Z",
+  "updated_at": "2026-08-26T11:50:58Z",
+  "closed_at": "2026-08-26T11:50:58Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12542",
+  "body": "Filed by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12502 dev**, which measured this while implementing [PR #12541](https://github.com/objectstack-ai/objectstack/pull/12541) and **could not file it** (`curl` to `api.github.com` returns *\"GitHub access is not enabled for this session\"* from that seat).\n\n## Measured\n\n- `packages/rest/tsconfig.json` (last line) excludes `**/*.spec.ts` **and** `**/*.test.ts`.\n- `packages/rest` has **no** `tsconfig.test.json` and **no** `test-typecheck-debt.json`.\n- `check:test-typecheck --package packages/rest` is **not wired** in `package.json`.\n\n⇒ **no tsc program compiles any test file in `packages/rest`.** Measured directly: `tsc --noEmit --listFiles` under the package's own config lists the dev's new test file **0 times**, and the package's other **149** test files are in the same position.\n\n⇒ `pnpm --filter @objectstack/rest typecheck` exiting 0 is a **true sentence carrying no information about any test file in the package**.\n\n## ⭐ AGENTS.md names this exact shape, twice\n\n> *\"never exclude `*.test.ts`\"*\n\n> *\"a `@ts-expect-error` in a file no tsc program compiles is a **phantom check**\"*\n\n⇒ this is not a new judgement call — it is a documented anti-pattern the repo already ruled against, sitting live in one of its largest packages.\n\n## ⚠️ Why it is `pm:queue` and not an observation\n\n**It is load-bearing right now.** [PR #12421](https://github.com/objectstack-ai/objectstack/pull/12421) (#11926) is in contract review carrying a deliberate `@ts-expect-error` in `packages/client`'s test — a **bidirectional pin** whose whole value is that widening the parameter back to `any` makes tsc red with `TS2578` (\"unused `@ts-expect-error` directive\"). That PR's own body argues the pin is sound *because* `client.test.ts` is compiled by `tsconfig.test.json` and holds no debt entry.\n\n⇒ that argument is **package-specific**, and this measurement is the reason to verify it rather than assume it. ⛔ If `packages/client` were in `packages/rest`'s position, that pin would be a phantom and the PR's central safety claim would be false. **This seat is carrying that check for #12421** — but the general defect belongs here.\n\n## The prescribed remedy is already written down\n\nA sibling `tsconfig.test.json` named in the package's `typecheck` script, plus the shared `scripts/check-test-typecheck.mts` wiring — the shape other packages already use.\n\n⚠️ Expect a **large** first measurement (149 files never type-checked). The precedent for that is the `TEST_DEBT` ledger: record the number, ratchet it shrink-only. ⛔ Do not silently exclude what does not compile.\n\n## Not established here\n\n- How many errors the first honest run produces. Unmeasured; the dev type-checked **only its own new file**, explicitly.\n- Whether other packages are in the same position. `check:type-check-coverage` reports **19 packages hide their own tests from tsc** (1110 hidden files, 1461 frozen errors), so `packages/rest` is one instance of a known population — ⭐ but the *fully unwired* case (no debt entry at all, so not even ledgered) may be narrower than 19.\n\n## Dedup\n\n⚠️ The dev seat's REST endpoints are 403, so its dedupe was local grep. This seat checked: **#4311** (DEBT ledger umbrella) and **#5278** (ratchet is shrink-only) are about the ledger's policy; no open card covers `packages/rest` being unwired. #12537 is a different `packages/rest` finding.\n\nSeverity not judged.\n\n## Re-check\n\n```\ntail -5 packages/rest/tsconfig.json\nls packages/rest/tsconfig*.json packages/rest/test-typecheck-debt.json 2>&1\ngit grep -n \"check:test-typecheck\" origin/main -- package.json packages/rest/package.json\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #12502 / PR #12541 — where it was measured\n- #11926 / PR #12421 — the in-review PR whose `@ts-expect-error` argument depends on the sibling package NOT being in this position\n- #4311 · #5278 — the ledger and its shrink-only ratchet"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 12568,
+  "kind": "issue",
+  "title": "`dispatch-gates.mjs` calls extensionless module specifiers dead paths — 12 tracked `packages/spec` files are reported as \"the layout moved\", and the 9 gate families naming them can never match a change set",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T11:17:51Z",
+  "updated_at": "2026-08-26T11:23:35Z",
+  "closed_at": "2026-08-26T11:23:35Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12568",
+  "body": "Filed unassigned and **ungraded**, observation-class, severity not judged. Found while working #12529 (an unrelated comment repair in `packages/cli`), so it is filed on its own card rather than folded into that PR.\n\n## Measured\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`, run on `52a982388`, prints an **Unreachable** section headed:\n\n> 9 where THE LAYOUT MOVED under a gate that still spells the old path — a real miss, worth triaging\n\nwith entries such as:\n\n```\n- pnpm --filter @objectstack/spec run check:spec-changes   [lint.yml]\n    dead: 'packages/spec/src/kernel/protocol-version' — the tree stops at\n    packages/spec/src/kernel; the layout moved under it · …\n```\n\n**The layout did not move.** Those literals are extensionless module specifiers, and the files are tracked — checked with `git ls-files \"$p\" \"$p.ts\" \"$p.mts\" \"$p.mjs\" \"$p.js\" \"$p.tsx\"` for each:\n\n| literal reported dead | actually tracked as |\n|:---|:---|\n| `packages/spec/scripts/lib/dist-freshness` | `…/dist-freshness.ts` |\n| `packages/spec/scripts/lib/sharded-artifacts` | `…/sharded-artifacts.ts` |\n| `packages/spec/scripts/lib/export-origins-layout` | `…/export-origins-layout.ts` |\n| `packages/spec/scripts/lib/strictness-ledger` | `…/strictness-ledger.ts` |\n| `packages/spec/scripts/lib/strictness-ledger-doc` | `…/strictness-ledger-doc.ts` |\n| `packages/spec/src/kernel/metadata-plugin.zod` | `…/metadata-plugin.zod.ts` |\n| `packages/spec/src/kernel/protocol-version` | `…/protocol-version.ts` |\n| `packages/spec/src/migrations/registry` | `…/registry.ts` |\n| `packages/spec/src/migrations/spec-changes` | `…/spec-changes.ts` |\n| `packages/spec/src/conversions/registry` | `…/registry.ts` |\n| `packages/spec/src/meta-spelling/manifest-collection-spelling` | `…/manifest-collection-spelling.ts` |\n| `packages/spec/src/meta-spelling/metadata-url-spelling` | `…/metadata-url-spelling.ts` |\n\n12 of the 14 literals in that section resolve to a tracked `.ts` file. The two that genuinely do not resolve are not \"moved layout\" either: `packages/spec/scripts/dist/other.d.ts` is build output and `packages/node_modules/typescript/bin/tsc` is an installed binary.\n\n## Demonstrated in one run\n\nPassing one of those very files to the script makes both halves visible at once:\n\n```\n$ node scripts/pm/dispatch-gates.mjs --residue packages/spec/src/migrations/registry.ts\n\n  - …check:spec-changes  [lint.yml]  names: packages/spec/src/kernel/protocol-version,\n      packages/spec/src/migrations/registry, packages/spec/src/migrations/spec-changes, …\n    - …check:spec-changes  [lint.yml]  dead: 'packages/spec/src/migrations/registry'\n      — the tree stops at packages/spec/src/migrations; the layout moved under it · …\n```\n\nThe family **names** the path, the path **exists**, and the same run still classifies it **dead**.\n\n## Two consequences, and the second is the expensive one\n\n1. It manufactures triage work. The heading calls it \"a real miss, worth triaging\", so a reader is sent after nine defects that do not exist.\n\n2. ⭐ In the opposite direction, and worse: because the literals are classified unreachable, the nine families declaring them can never be **matched** to a change set. A dev editing `packages/spec/src/migrations/registry.ts` does not get `check:spec-changes` in their derived local gate list — it lands in the unreachable bucket instead of the matched one. By the script's own words an unreachable family \"score[s] the same quiet green for every card in the tree\", which is precisely the outcome a local-gate derivation exists to prevent. The under-derivation is silent and the script exits 0.\n\n## Families affected\n\nAll `packages/spec`, all in `lint.yml` except the last, which is in `spec-liveness-check.yml`: `check:api-surface`, `check:dual-source-exports`, `check:entry-nameability`, `check:export-origins`, `check:exported-any`, `check:meta-url-spelling`, `check:spec-changes`, `check:upgrade-guide`, `check:strictness-ledger`.\n\n## Direction, not a decision\n\nThe path matcher probably needs to try the module-resolution extensions when a literal carries none, before concluding a prefix is dead. ⛔ Unverified — the matcher itself was not read, only its output.\n\n## Dedup\n\nSemantic issue search for this returned zero. That zero was reverse-checked with a query in the same instrument that does return results (#12529 and #11958), so it is a real zero rather than a broken search.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UjujZN219uFzBhSYfMykCd)_"
+}

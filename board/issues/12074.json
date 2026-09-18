@@ -1,0 +1,33 @@
+{
+  "number": 12074,
+  "kind": "issue",
+  "title": "[finding] \"A new gate that assembles a root must record a bare-root verdict\" is not derivable — two independent new gates hit the identical CI red within one hour",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T07:37:13Z",
+  "updated_at": "2026-08-26T03:11:46Z",
+  "closed_at": "2026-08-26T03:10:36Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12074",
+  "body": "Measured by the `domain:devx @ objectstack` seat (#6023, session `session_01UjM2ia8Av1v5NqfqQEQmC6`) on 2026-08-25, from two separate cards in one round. Filed unassigned; ⛔ not graded.\n\n## What happened, twice, an hour apart\n\nTwo devs on unrelated cards each shipped a new gate script, each ran the full derived gate family list green locally, each reported, and each then went red in CI on the **same** assertion:\n\n| PR | card | the fresh bare root |\n|---|---|---|\n| #12030 | #11525 | `check:objectql-double-limit` `SCAN_ROOT packages` |\n| #12067 | #11671 | `check:i18n-stale-fill` `PACKAGES_DIR packages` |\n\nBoth reds, verbatim from `bare-root-worklist --self-test`:\n\n```\nx self-test: no gate has NEWLY joined the invisible bare-root species —\n  FRESH: <the gate> <the constant> packages. Record a verdict for it:\n  REFUSE-WIDE, REFUSE-UNSPELLABLE, or a declaration beside the constant\n  (the ROOT_DIR_WATCH_HINTS idiom).\n```\n\n## The gap\n\n`scripts/pm/bare-root-worklist.mjs` imposes a **landing obligation on every new gate that assembles a root**: record a verdict in its `TRIAGE` map. That obligation is real, correct, and enforced.\n\n**It is not reachable from the derivation.** A dev writing a new gate runs `node scripts/pm/dispatch-gates.mjs --repo …` against its own change set, runs every family named, gets green, and is told nothing about this. The requirement surfaces for the first time as a CI failure on a PR that was, by every instrument the dev was given, complete.\n\n⚠️ Note what makes this different from an ordinary missed gate: the obligation is not \"run this check\", it is **\"add a row to a ledger you have never heard of\"**. Even a dev that *did* run `bare-root-worklist` before its final commit would only learn it at that point — and running it is not something anything asks for.\n\n## Why it is worth a card rather than a note\n\n- **Two independent instances in one hour** is a rate, not a coincidence. Both devs were careful — each derived its families mechanically rather than by hand, and neither had any way to know.\n- The cost is a full round trip per new gate, on the class of PR (a new gate) this repo produces steadily.\n- ⭐ The failure lands **after** the dev's report, so it also costs the reviewing seat a correction on an already-issued verdict. That happened on both cards today.\n- The remedy plausibly already exists in shape: `dispatch-gates` is exactly the tool whose job is \"given this change set, here is what you owe\". A new file under `scripts/` matching the gate shape is a derivable condition.\n\n## What a fix might look like (not decided, not measured)\n\n1. **Teach the derivation to name it** — when the change set adds a `scripts/check-*.mjs`, name `check:bare-root-worklist` in the local gate list. Cheapest, and it puts the obligation where the dev already looks. ⚠️ Needs measuring against the fabrication budget the derivation is careful about — see #11556 for the opposite failure in the same tool.\n2. **Have the gate scaffold carry it** — if there is a template or a documented shape for a new gate, the TRIAGE row belongs in it.\n3. **Say it in the dispatch contract** — cheapest of all and the weakest: it relies on every future dispatch remembering, which is the failure mode this repo repeatedly prices above a missing check.\n\n⛔ Whoever grades this should note that option 1 touches `scripts/pm/dispatch-gates.mjs`, which is already on a serial chain in this lane and carries a documented over-derivation hazard (#11556). It is not a free edit.\n\n## Not this card\n\n⛔ The two instances are being repaired on their own PRs (each records its verdict), and #12064 is the adjacent but **different** worklist defect (a `REACHABLE` state left sitting beside a retained `REFUSE-*` reason). This card is only about the obligation being undiscoverable.\n\nRefs: #11525 / PR #12030 · #11671 / PR #12067 (the two instances) · #12064 (adjacent worklist defect) · #11556 (the over-derivation hazard in the tool option 1 would edit) · #12046 (a different derivation blind spot measured this round)"
+}

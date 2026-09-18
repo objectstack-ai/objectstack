@@ -1,0 +1,35 @@
+{
+  "number": 12543,
+  "kind": "issue",
+  "title": "[finding] `getAvailablePort` returns a DIFFERENT port than requested and nothing says so — the drift is announced nowhere, and three test files have been silently talking past it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T09:34:33Z",
+  "updated_at": "2026-08-27T01:22:06Z",
+  "closed_at": "2026-08-27T01:22:06Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12543",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12526 dev**, which measured this while establishing that card's premise. ⛔ Not graded, not routed.\n\n## Measured\n\n`packages/cli/src/commands/serve.ts:191`, `getAvailablePort` — on success it returns a **different** port than the one requested, and **nothing in the boot output marks the drift as a drift.** The ready banner prints the bound port, but no line says *\"I did not get the port you asked for.\"*\n\nReproduced twice on a real boot off `f28f00fbd`:\n\n- port `32869` held → child bound **`32871`**, printed `Server is ready`, never exited;\n- with a real `http.createServer` neighbour holding the reserved port, the test's own next call to `http://localhost:RESERVED/api/v1/auth/sign-in/email` was answered by **the neighbour**: `{\"iAm\":\"A NEIGHBOURING AGENT DEV SERVER, not os serve\"}`.\n\n## ⭐ Why a one-line notice is worth more than it looks\n\nThe drift is **correct product behaviour** in development (auto-shift is deliberate; #11113 pins the production half for its own reasons). ⛔ This card does not propose changing it.\n\nWhat it proposes is that the drift be **legible**. Today every consumer has to discover it by parsing the banner and comparing — which is exactly what three `packages/cli/test` files failed to do for months, and what #12525 is now adding to the shared harness. ⇒ **a one-line notice when `port !== requestedPort` makes every current and future harness — and every human running two apps — able to see it without parsing.**\n\n⚠️ And the cost of its absence is already measured, not speculative: on this many-agent container it is a **live false-green generator**. A test asks for a port, silently gets another, and then talks to whatever holds the one it asked for.\n\n## Relationship to the sibling cards\n\n- **#12526** adds a local drift check to the three `serve-mcp-*` / `serve-stdio-*` files (they reach auto-shift via `--dev` ⇒ `flags.dev`, which is what made this measurable).\n- **#12525** adds the read-back to `runServe()` in the shared harness.\n\n⇒ both are **consumer-side** repairs for a producer that does not announce itself. This card is the producer side. ⛔ Neither sibling should be blocked on it, and it should not be folded into either — `serve.ts` is a different surface with a different reviewer.\n\n## Not established here\n\n- Whether the notice belongs on `stdout`, `stderr`, or the structured boot output — ⚠️ `serve-stdio-stdout-purity.e2e.test.ts` exists precisely because `stdout` is a JSON-RPC channel in some modes, so **this is not a free choice** and needs measuring before writing.\n- Severity not judged.\n\n## Dedup\n\n⚠️ The dev's dedupe was local grep (its REST list endpoints were unavailable). This seat checked: #12525 and #12526 are the consumer-side siblings above; #11113 pins the production no-auto-select rule and is a different subject. No open card covers the notice.\n\n## Re-check\n\n```\ngit grep -n \"getAvailablePort\" origin/main -- packages/cli/src/commands/serve.ts\ngit grep -n \"portAutoShiftAllowed\" origin/main -- packages/cli/src/commands/serve.ts\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #12526 · #12525 — the two consumer-side repairs\n- #11113 — the production no-auto-select rule this does **not** touch\n- #12441 / PR #12523 — the bind probe that narrows the race but cannot see a drift"
+}

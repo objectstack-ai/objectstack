@@ -1,0 +1,35 @@
+{
+  "number": 12369,
+  "kind": "issue",
+  "title": "[Decision] 17 of 39 bare-root-worklist verdicts carry REFUSE-UNSPELLABLE whose definitional basis is now false — declare, re-name, or re-price?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T20:20:37Z",
+  "updated_at": "2026-08-26T05:55:01Z",
+  "closed_at": "2026-08-26T05:54:28Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12369",
+  "body": "Raised by the `domain:devx @ objectstack` seat (#6023) from the #12328 dispatch, which **stopped without editing anything** under its own falsification clause. ⛔ This seat picks among none of these options — execution seats never adjudicate.\n\nSplit out of #12328 because that card scopes **4 rows** and the measured class is **17**.\n\n## What was measured\n\n`scripts/pm/bare-root-worklist.mjs` defines the verdict at `:109-111`:\n\n> `REFUSE-UNSPELLABLE` — the population is a file-KIND or FILENAME filter inside the root. The subtree idiom can only say \"all of it\", at the precision quoted.\n\nSo the verdict asserts **no precise spelling exists**. #12300 (`783111d252`, +186/−6, all in `dispatch-gates.mjs`) added `if (globInNonFinalSegment(hint)) return triggerCovers(hint, inputPath);` ahead of the collapse. ⭐ **That retirement is general, not specific to the 4 rows whose prose happens to cite the collapse.** Only 5 rows cite it in prose; the definitional basis moved under **17**.\n\nEach of the 17 now has a measured, 100%-precise live spelling — driven through the real `hintCovers`/`trackedFiles`, never `collapseHint` alone, and cross-checked against the tree's corpus:\n\n| spelling | covers / corpus | rows held |\n|:--|--:|--:|\n| `packages/**/*.test.ts` | 2736 / 2736 | 1 |\n| `packages/**/package.json` · `apps/**/package.json` · `examples/**/package.json` | 74/74 · 1/1 · 4/4 | 9 |\n| `packages/**/scripts/i18n-extract.config.ts` | 9 / 9 | 3 |\n| `skills/*/SKILL.md` | 11 / 11 | 1 |\n| `skills/*/references/**` | 12 / 12 | 1 |\n| `examples/*/objectstack.config.ts` | 3 / 3 | 1 |\n| `skills/*/SKILL.md` (+`skills/README.md`) | 11 of 12 with one hint | 1 |\n\nVerified independently by this seat at `origin/main`: `skills/*/references/` = **12** tracked files; the TRIAGE map holds **39** verdicts, **26** of them `REFUSE-UNSPELLABLE` — so a 17-row subset is arithmetically consistent.\n\n⚠️ **The contrast set matters**: three refusals stay *alive* and correct, because `**` in a non-final segment matches **one or more** segments, never zero. That is #12329, already open.\n\n## 四维分析\n\n**① 实际业务需求.** 下游拉力是**实测的，但只覆盖 2 个门禁**：#12310 点名 `check:skill-refs`，#12322 点名 `check:objectql-double-limit`。其余 15 行（package.json 三连、i18n 三连等）**没有任何地方要求它们被命名**。把 17 行全部声明出去，是在需求之前扩张能力面。\n\n**② 平台长远合理性.** 这一维**直接排除选项 C**。让一个叫「unspellable」的裁决去描述一个 idiom 现在能精确拼出的population，等于把裁决名字变成谎言 —— 「拼不出来」退化成「我们选择不拼」。这正是本仓在消费侧一贯拒绝的容忍,只是上移了一层。台账的全部价值就是每一行都诚实。\n\n**③ 避免 AI 写代码犯错.** 只有 B 的机械 pin 能关掉**这个类**。本次缺陷的实质是:一个裁决悄悄地不再描述这棵树,而 `--self-test` 全程绿着。#12347(可达性半边)与 #12330(单行机制)是两个先例 —— 都用 pin 而不是重写散文。A 单独做只修好 17 行、一个 pin 都不留,下一次推导变更会把同一个洞重新打开。\n\n**④ 创业阶段不扩散需求.** 一个 PR 里跨 12 个门禁脚本写 17 处声明,正是要避免的无焦点扩张。⚠️ 而且 `packages/**/*.test.ts` 一行就给推导加了 2736 个文件 × 门禁。\n\n⭐ **四维并不同向到同一个选项** —— ② 排除 C,③ 指向 B,①④ 指向「只在有拉力处声明」。这正是必须人工决裁的形状。\n\n## Options\n\n- **A. 为全部 17 行在各自门禁的 population 常量旁声明精确拼法**(`ROOT_DIR_WATCH_HINTS` idiom),然后逐行撤销裁决。最贴近树的真相,也是 #12310/#12322 要的。⚠️ 但要动约 12 个门禁脚本,远超任何单卡的申报面。**并且声明并不会把行从 sweep 里清掉** —— `covered()` 探的是 `hintCovers(h, '<root>/probe.file')`,对全部 17 种拼法都是 false,所以每行仍需**单独**撤销裁决。\n- **B. 新增第四个词表值**(如 `SPELLABLE-UNDECLARED`),记录「存在精确的活拼法;声明被推迟,理由如下」,17 行全部迁入。单文件、在申报面内、不改推导。⚠️ 风险:新值烂成 #10840 点名拒绝过的 allowlist —— 除非 `--self-test` 把每条记录拼法的**存活性与精确度**按 `hintCovers` 的话术 pin 住,这是可机械化的,也正是 #12330 已经为 runner-env-posture 那行落过的形状。\n- **C. 裁定「活的但未命名的拼法仍不值得声明」**,保留 `REFUSE-UNSPELLABLE`,重新定价 17 条理由。改动最小。⚠️ 但②说明它让裁决的**名字**变假。\n- **D. 拆分**:15 行(无记录消费者)走 B 作词表底座,2 行(有实测下游拉力:#12310 → `check:skill-refs`,#12322 → `check:objectql-double-limit`)走 A。⚠️ 需要为那两个门禁脚本另开写手位,并需一条「在 shrink-only 的 map 上重决 17 行是被授权的」裁定。\n\n**dev 的建议是 D**,四维推理如上。⛔ 本座位不背书任何一个 —— 记录在此供裁决。\n\n## 为什么现在必须决,不能顺手做掉\n\n`TRIAGE` 是 **shrink-only** 的 map,而重决 17 行(全表的三分之一)是一次重新裁决,不是一次修复。#12328 的派发令、#12289 本身、以及该文件自己的 docblock 三处都把它保留给上层。dev 遇到边界就停了 —— 这是正确动作。\n\nRefs: #12328(被拆分的卡,现 blocked) · #12289(其 row 2 属于本类) · #12300(使裁决基础失效的变更) · #12330(单行先例) · #12347(可达性半边) · #12329(存活的对照集) · #12310 · #12322(两处实测下游拉力) · #10840(B 必须避开的 allowlist 形状)"
+}

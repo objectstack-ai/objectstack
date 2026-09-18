@@ -2,7 +2,7 @@
   "number": 19040,
   "kind": "pull_request",
   "title": "docs(spec): the connector header no longer teaches retryConfig as the rate-limit remedy",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -19,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T13:11:47Z",
-  "updated_at": "2026-09-18T13:54:02Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-18T14:42:44Z",
+  "closed_at": "2026-09-18T14:42:43Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": "2026-09-18T14:42:43Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/19040",

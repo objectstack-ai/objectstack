@@ -1,0 +1,34 @@
+{
+  "number": 12161,
+  "kind": "issue",
+  "title": "L7: correct the two \"customize in Studio\" promise pages to per-regime truth (ADR-0126 §8.4)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T11:27:55Z",
+  "updated_at": "2026-08-25T20:47:41Z",
+  "closed_at": "2026-08-25T20:47:41Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12161",
+  "body": "Part of #12150 (Epic: ADR-0126 implementation, v17 line — 17.x minor, maintainer-ruled). Docs lane.\nBlocked-by: objectstack-ai/objectui#6301\nDispatch: coordinated under the #12150 program — ⛔ not from the general queue; the program dispatches on unlock (maintainer anti-preemption instruction, 2026-08-25, PM session `session_01KWRU3s15AJz7PGW7a7wdCh`). Contract: **ADR-0126 §1.3 + §8 item 4** (merged `28b47a93`).\n\n## Deliverable\n\nThe two shipped promise pages measured by the survey (#12049 comment 5406807988 §5) are corrected to promise **what each regime actually delivers**:\n\n- `content/docs/capabilities/integrations.mdx:17` — \"install complete apps … **then customize in Studio**\"\n- `content/docs/build-without-code.mdx:37` — \"**ready to customize in Studio**\"\n\nRewrite to the three-regime truth: views/dashboards/reports/translations/email templates → edit or overlay directly; packaged flows (and later actions) → **switch off and clone your own**; objects → extend with your own fields via an extension package; everything else packaged → author new siblings. The honest-negative style of `import-mappings.mdx:85` is the house voice to match.\n\n⛔ **Timing is the contract**: only after the L5 surface exists — correcting earlier trades an over-promise for a differently-shaped one (ADR §8.4). ⛔ Never touch `content/docs/releases/**` on this card.\n\n## Acceptance\n\n- Both pages promise only shipped behavior, per regime; no other doc pages widened.\n- Doc gates green (`check:doc-authoring`, link check).\n\nRefs: ADR-0126 §1.3, §8.4 · survey §5"
+}

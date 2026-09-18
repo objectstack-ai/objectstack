@@ -1,0 +1,32 @@
+{
+  "number": 12563,
+  "kind": "issue",
+  "title": "The flow-shadowing operator sentence is written three times with nothing holding the copies equal — and the two pre-existing copies already disagree on quoting AND on absent-id handling",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T10:54:38Z",
+  "updated_at": "2026-08-26T19:38:46Z",
+  "closed_at": "2026-08-26T19:35:18Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12563",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12028 dev**, which measured this while implementing [PR #12562](https://github.com/objectstack-ai/objectstack/pull/12562). ⛔ Not graded, not routed.\n\n⚠️ The seat re-measured it and it is **worse than reported** — the divergence has two axes, not one.\n\n## Measured on `origin/main` @ `5fbd58e0d` (plus the PR ref for the third site)\n\nOne event — a flow name claimed by more than one definition — described to an operator in three places, each rendering the contender's provenance with its own private helper:\n\n| site | `package` spelling | absent `packageId` |\n| :--- | :--- | :--- |\n| `packages/services/service-automation/src/flow-precedence.ts:151` | `` package \"${c.packageId}\" `` — **DOUBLE** quotes | interpolates `undefined` |\n| `packages/services/service-automation/src/plugin.ts:1139` | `` package '${c.packageId}' `` — **SINGLE** quotes | interpolates `undefined` |\n| `packages/cli/src/utils/format.ts:769` (added by [PR #12562](https://github.com/objectstack-ai/objectstack/pull/12562)) | `` package '${c.packageId}' `` — single | `'a code-shipped package (id unknown)'` |\n\nBoth pre-existing copies are `const describe = (c) => ...` declared **inside** the function that uses them. The two of them are the same sentence about the same event, in the same package, and they **already** disagree.\n\n## ⭐ The trap, and why nobody folded them\n\n`describeFlowContender` **is** exported from `@objectstack/service-automation` (`flow-precedence.ts:73`) and reads like the shared renderer. It is not. It is a **classifier** — unknown body → `FlowContender` — with no prose in it at all. So there is nothing to reuse, and each caller writes its own sentence while an export sits next to them looking as though it were the single source.\n\n⚠️ That is the durable part. A missing shared renderer is a gap someone fills; a **misleading** one is a gap that keeps getting re-filled privately, which is exactly what the third copy is.\n\n## Why the third copy is not the defect\n\n⛔ Do not read this as a complaint about [PR #12562](https://github.com/objectstack-ai/objectstack/pull/12562). Its copy is deliberately worded to match `plugin.ts` so an operator seeing both at `--log-level info` reads one story, and it is the only one of the three that handles an absent `packageId` rather than interpolating `undefined`. With no renderer to share, matching the neighbour is the best available act. The card is that there is nothing to share.\n\n## Not established here\n\n- **Which quoting is correct.** ⚠️ Not a free pick — `packageId` values may contain characters that make one spelling safer, and the repo may already have a convention for quoting identifiers in operator prose. Measure before choosing; ⛔ do not pick by majority vote of three sites.\n- **Whether the absent-id branch is reachable at the two engine sites.** The #12028 dev checked and **disproved** it: `isCodeArtifactBody` (`packages/objectql/src/registry.ts:1137`) returns false on a falsy `_packageId`, so `describeFlowContender`'s `String(packageId)` cannot render `package 'undefined'` today. ⭐ Recorded so the next reader does not re-derive the CLI helper's defensive branch as evidence of a live bug — but note that unreachability is a property of *today's* callers, not of the helper.\n- Severity not judged; observation-class.\n\n## Suggested shapes (⛔ not chosen here)\n\n- **A** — export a prose renderer beside the classifier, and have all three call it. Ends the class.\n- **B** — pin the copies equal with a test, leaving three renderers. Cheaper, and keeps a defect that a fourth caller reintroduces.\n\n⚠️ **A crosses a package boundary**: `packages/cli` would take a value (not type) import from `@objectstack/service-automation`. [PR #12562](https://github.com/objectstack-ai/objectstack/pull/12562) deliberately kept its engine reads **structural and feature-detected** so a host on an older automation package still boots its banner — a nominal renderer import would state a guarantee that runtime does not make. ⭐ **So A is not free, and whoever takes this must answer that before writing it**, not after.\n\n## Dedup\n\n⚠️ The dev's GitHub-side dedupe could not run (raw REST is 403 from that seat — measured this round: the env token is 14 chars and is not the working credential). It grepped the tree for TODO/issue references at the three sites and found none. This seat found no open card covering the renderer.\n\n⚠️ **Correction owed to that dev and to the round**: MCP GitHub writes and reads **do** work from a dev seat; only raw REST/`curl` is 403. Earlier dispatch orders from this seat said otherwise and cost several devs their own filings.\n\n## Re-check\n\n```\ngit grep -n \"is claimed by\" origin/main -- packages/services/service-automation/src\ngit grep -n \"runtime-authored row\" origin/main -- packages\ngit grep -n \"describeFlowContender\" origin/main -- packages\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #12028 / [PR #12562](https://github.com/objectstack-ai/objectstack/pull/12562) — where the third copy was added, and why it was added rather than shared\n- #11997 — where the engine receipt (`getShadowedFlows`, `armedFrom`/`shadowed`) came from\n- ADR-0005 — the overlay precedence all three sentences describe"
+}

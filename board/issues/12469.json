@@ -1,0 +1,34 @@
+{
+  "number": 12469,
+  "kind": "pull_request",
+  "title": "docs(client-sdk): state the two-tier error-code vocabulary and add the VALIDATION_FAILED row",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T04:45:51Z",
+  "updated_at": "2026-08-26T05:22:07Z",
+  "closed_at": "2026-08-26T05:22:06Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": "2026-08-26T05:22:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12469",
+  "body": "Fixes #12389\n\n## What the table was, measured before writing a row\n\nThe card asks for a `VALIDATION_FAILED` row. Before adding one I established\nwhat the `### Error Codes` table is a table **of**, because if its contract were\n\"the `StandardErrorCode` enum\" then adding a ledger-registered code would make\nthe table *false* and the honest deliverable would be the opposite finding.\n\nMeasured on this branch's base (`68c5dbaab2`):\n\n| Fact | Value |\n|:---|:---|\n| `StandardErrorCode` members (`packages/spec/src/api/errors.zod.ts`) | 50 |\n| Rows in the page's table | 9 |\n| Rows that are enum members | 9 / 9 |\n| `VALIDATION_FAILED` in `StandardErrorCode` | **no** |\n| `VALIDATION_FAILED` in `ERROR_CODE_LEDGER` | yes (`@objectstack/rest`, `@objectstack/objectql`, …) |\n| `ERROR_CODE_LEDGER` codes | 245 |\n\n**9 of 50 refutes \"the table is the enum.\"** The table was a curated subset with\nan *unstated* contract — which is exactly why a reader mistakes it for the\nauthority. So the fix is the contract **plus** the row, not the row alone; that\nmatches what the card itself calls \"arguably the real fix.\"\n\n## Changes — confined to the `### Error Codes` section\n\n1. **State the two-tier vocabulary** (ADR-0112): the closed `StandardErrorCode`\n   catalog, the per-package `ERROR_CODE_LEDGER`, the exported `ErrorCode` schema\n   as their union, and `packages/spec` as the authority for the full set. No\n   ledger dump — that is the sync-drift shape this page keeps paying for.\n2. **A `Tier` column**, so every row says which set it comes from and the table\n   can hold both tiers without lying.\n3. **The `VALIDATION_FAILED` row** — ledger, 400, carries `fields[]`.\n4. **Sharpened `VALIDATION_ERROR`'s description** to the distinction that\n   actually holds, since a reader picking the wrong one of the two is the\n   defect. Both codes are live and they are not synonyms:\n   - `VALIDATION_ERROR` — request-shape refusals: repeated query parameter\n     (`query-multiplicity.ts:140`, `package-routes.ts:752`), a filter outside\n     the allowlist (`query-allowlist.ts:196`), malformed arguments\n     (`storage-service.ts:120`, `metadata-service-contract.ts:105`).\n   - `VALIDATION_FAILED` — record-level validation on a write, carrying\n     `fields[]` (`error-response.ts:631`, `rest-server.ts:9671` → 400).\n5. **A note that `Category`/`Retryable` are semantic, not wire guarantees** —\n   `grep -rn \"category:\" packages/rest/src/error-response.ts` returns nothing,\n   so the per-field envelope sends neither. This closes the gap between the\n   table's columns and the narrowing example's \"optional — set only when the\n   server sent it\".\n\n## Every other code this page's examples use is also a ledger code\n\nCounted across the whole page (dispatch Zone 2c). Codes appearing outside the\ntable: `VALIDATION_FAILED` (:619, :632, :655), `ROLLED_BACK` / `NOT_ATTEMPTED`\n(:579-580, batch rows), `FLOW_DISABLED` / `FLOW_FAILED` / `FLOW_NO_START_NODE`\n(:436-438, the automation example). **All six are ledger-registered and none is\nin `StandardErrorCode`** — which is itself the argument for the union note\nrather than a row-by-row catch-up. Their omission is no longer misleading once\nthe table declares itself a subset, so no further rows were added.\n\n## ⚠️ Nothing verifies this table\n\nStated plainly rather than implied: the table's rows are hand-authored prose.\nThere is no generated source for the `Category`/`Retryable` columns anywhere in\n`packages/spec`, and this PR deliberately adds **no `os:check` markers** — that\nis the subject of #11942, which is `pm:blocked`. The row is measured against the\nspec by hand, and nothing in CI will notice if it drifts.\n\n## Verification\n\nDocs-only; no changeset (this PR publishes nothing — `skip-changeset`).\n\nGate union re-derived from the real change set with\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`\n(23 families) and run at the final commit **`5b76c2b049`**, plus\n`check-nul-bytes` — 24/24 green, exit codes captured before any pipe. Verdict\nlines from the gates themselves:\n\n```\n✓ check-docs-single-h1: 180 page(s) under content/docs/ carry no body-level `# ` heading\n✅ check-doc-anchors: 278 internal fragment link(s) across 408 source file(s) all resolve to a real heading\n✓ doc authoring guard: 390 files clean — no bare metadata literals.\n✓ check-doc-frontmatter: 2 content root(s) verified, each against its own floor — content/docs 403, content/blog 3.\n✅ 229 generated files in sync with packages/spec        (spec check:docs)\n   260 marked example(s) across 101 file(s), 3 surface(s)  (spec check:skill-examples, green)\nTOTAL FAILED=0\n```\n\nRepo-wide `pnpm lint` was **narrowed, and the narrowing is measured, not\nassumed**: `eslint.config.mjs` contains the string `mdx` zero times and no\n`files` glob covers `.mdx`, so ESLint's own population excludes the one file\nthis PR touches — `pnpm exec eslint content/docs/api/client-sdk.mdx\n--no-inline-config --format json` reports 1 file, `errorCount: 0`, message\n`\"File ignored because no matching configuration was supplied.\"` No type-aware\nlinting is configured, and this diff changes no ESLint config, so it cannot\nmove a verdict on any untouched file either. CI runs the full farm regardless.\n\n## Scope\n\nOnly the `### Error Codes` section is touched (35 insertions, 11 deletions, one\nfile). The example blocks are untouched — the remaining one belongs to #12388 —\nand `content/docs/releases/**` is not involved.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01UjM2ia8Av1v5NqfqQEQmC6)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UjM2ia8Av1v5NqfqQEQmC6)_"
+}

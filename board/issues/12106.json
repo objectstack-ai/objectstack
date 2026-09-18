@@ -1,0 +1,32 @@
+{
+  "number": 12106,
+  "kind": "issue",
+  "title": "Four SDK metadata methods build compound-name URLs against routes mounted in one arity only — measured 404, and getHistory/deleteItem encode while getAudit/getReferences/diffItem/rollbackItem do not",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cli"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-25T09:03:52Z",
+  "updated_at": "2026-08-25T23:29:46Z",
+  "closed_at": "2026-08-25T23:29:46Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12106",
+  "body": "Blocked-by: #12176\n\nMeasured while mounting the compound-name promotion door (#11932 / PR #12105). Filed rather than folded: #11932 is one route; this is four SDK methods aimed at an arity the server does not mount, and the split that produces it.\n\n**2026-08-25 maintainer ruling (recorded in the comments): the option-1/option-2 fork below is SUPERSEDED — metadata item names are ruled to not contain `/`, so the compound-name convention itself is being retired via #12176's staged plan. This card waits on that card; the defect dissolves at its re-addressing stage.**\n\n## What was measured\n\nDriven through the real registered server — `new RestServer(new HonoHttpServer(0), …).registerRoutes()` — and asked of the LIVE router which registration would answer each path (`IHttpServer.resolveMountedRoute`, the same observation the #7526 dogfood parity gate reads). `views/all_leads` is the compound name the SDK's own doc comments use.\n\n```\nGET    /api/v1/meta/view/views/all_leads/references  -> undefined      client.meta.getReferences\nGET    /api/v1/meta/view/views/all_leads/audit       -> undefined      client.meta.getAudit\nGET    /api/v1/meta/view/views/all_leads/diff        -> undefined      client.meta.diffItem\nPOST   /api/v1/meta/view/views/all_leads/rollback    -> undefined      client.meta.rollbackItem\n\nGET    /api/v1/meta/view/views%2Fall_leads/history   -> GET /api/v1/meta/:type/:name/history    client.meta.getHistory\nDELETE /api/v1/meta/view/views%2Fall_leads           -> DELETE /api/v1/meta/:type/:name         client.meta.deleteItem\nGET    /api/v1/meta/view/views/all_leads/published   -> GET /api/v1/meta/:type/:section/:name/published\nPOST   /api/v1/meta/view/views/all_leads/publish     -> POST /api/v1/meta/:type/:section/:name/publish\n```\n\nLive, through the real Hono app:\n\n```\nPOST /api/v1/meta/view/views/all_leads/rollback -> status 404, body \"404 Not Found\"\nGET  /api/v1/meta/view/views/all_leads/audit    -> status 404, body \"404 Not Found\"\n```\n\nThat is Hono's `notFound`, byte-identical to an unmounted path — not a handler answer.\n\n## The root cause is a split inside the SDK, not four separate oversights\n\n`packages/client/src/index.ts` builds these URLs two different ways, and nothing states which is the rule:\n\n| method | spelling | result for a compound name |\n| --- | --- | --- |\n| `getReferences` | `${route}/${type}/${name}/references` | extra path segment, no route matches, 404 |\n| `getAudit` | `${route}/${type}/${name}/audit` | 404 |\n| `diffItem` | `${route}/${type}/${name}/diff` | 404 |\n| `rollbackItem` | `${route}/${type}/${name}/rollback` | 404 |\n| `getHistory` | `${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/history` | one segment, resolves, works |\n| `deleteItem` | `${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}` | resolves, works |\n| `getItem` / `saveItem` / `getPublished` / `publishItem` | unencoded | works — the server mounts the compound arity for these four |\n\nSo the unencoded spelling is correct exactly where a compound arity is mounted, and silently wrong everywhere else. Two methods that reach the same family of doors (`getHistory` vs `getAudit`) sit on opposite sides of the split, one line apart in the same file.\n\n`meta.publishItem`'s own doc comment says \"Compound names pass through unencoded, like `getItem`\" — that sentence was true of the URL and false of the server until #11932 mounted the route. The same sentence is implied by the four methods above and is still false for them.\n\n## Why the existing guards cannot see this\n\n#3642's reverse guard matches the URL a client method CONSTRUCTS against the ledger patterns. A compound name is interpolated into the same `${name}` slot the single-arity pattern declares, so the guard sees `/meta/:type/:name/audit`, finds the row, and passes. The extra segment only exists at call time. #7526's live-mount parity gate probes ledger rows against the router and would catch an unmounted *declared* route — but no row declares the compound arity of these four, so there is nothing for it to probe. Both guards are green on this class by construction, which is the same shape #7526 was filed about.\n\n## Two dispositions, not one — the fork belongs to a maintainer\n\n1. **Encode in the SDK** (`getHistory`'s spelling) — four one-line changes, no new public surface, and it makes these methods work for compound names today. But it makes the *transport* spelling inconsistent with `getItem` / `saveItem` / `getPublished` / `publishItem`, which deliberately pass through unencoded because the server mounts a compound arity for them.\n2. **Mount the compound arity** for `/references`, `/audit`, `/diff` and `/rollback` (and decide about `/layers`, which is `server-only`) — consistent with the direction #7526 and #11932 took, and it makes one spelling correct everywhere. But it is four new public routes, so it is a Clause-② surface expansion and wants the contract-review tier.\n\nNot proposing which. What is not in doubt is that the current state is neither: an SDK method that constructs a URL nothing serves, answering 404 with no diagnostic.\n\n## Scope note\n\n`GET /api/v1/meta/:type/:name/layers` is `server-only` in `rest-route-ledger.ts` and has no SDK method, so it is listed for completeness rather than as part of the defect.\n\nMeasured on `origin/main` at `1e79aa4f8` plus PR #12105 (`efd007b73`); the two mounted-compound controls in the first block are `/published` (#7526) and `/publish` (that PR).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019siH5jDmk5hrayvfyojUqR)_"
+}

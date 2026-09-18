@@ -1,0 +1,34 @@
+{
+  "number": 12480,
+  "kind": "pull_request",
+  "title": "docs(deployment): name the environment as what `os environments bind --build` updates",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T05:19:43Z",
+  "updated_at": "2026-08-26T06:06:46Z",
+  "closed_at": "2026-08-26T06:06:45Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": "2026-08-26T06:06:45Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12480",
+  "body": "Fixes #12433\n\n`content/docs/deployment/cli.mdx:1532` still read \"before updating the project\" — the one\nsite on that page the v5.0 `project` -> `environment` rename (ADR-0006, no aliases) never\nreached, while the page's own **Cloud Environments** command table directly above it\n(1505-1509) already uses the post-rename vocabulary. Because the page is not uniformly\nstale, a reader has no cue that this sentence is the old one.\n\n```diff\n-`--build` runs `objectstack compile` before updating the project. `--reseed`\n+`--build` runs `objectstack compile` before updating the environment. `--reseed`\n```\n\n## The noun is verified against behaviour, not against the neighbouring text\n\nThe neighbouring table would have justified `environment` on consistency alone, which is\nexactly the reasoning that produces a mechanically-renamed-but-wrong noun. So the\nreplacement was checked against what the command actually does, in\n`packages/cli/src/commands/environments/bind.ts`:\n\n1. `--build` spawns `compile --output <artifactAbs>` — this **produces** the artifact.\n2. The artifact's existence is asserted.\n3. The write that follows is `client.projects.update(<environment-id>, { metadata })` —\n   a PATCH of the **environment** record, setting `metadata.artifact_path`.\n\nThe thing updated *after* the compile is the environment, so `environment` is the accurate\nnoun and not merely the renamed one. The flag's own help text agrees in the other\ndirection (\"Run `objectstack compile` before binding\"), and ADR-0006 confirms the\ncontrol-plane object is `sys_environment`.\n\n## Census — two sites on this page, one of them deliberately left\n\n`git grep -n 'the project\\b' -- content/docs/deployment/cli.mdx` returns exactly two:\n\n| site | text | disposition |\n|---|---|---|\n| `:1532` | \"before updating **the project**\" | ⬅ **fixed here** — the renamed noun |\n| `:518` | \"trust: **the project** this page scaffolds in\" | ⛔ **left deliberately** |\n\n`:518` is the **other sense** of the word — a scaffolded project directory, the npm/monorepo\nsense AGENTS.md preserves (\"'Project' now only means the npm/monorepo sense\"). Renaming it\nwould be a wrong repair dressed as consistency. It was seen and measured, not missed.\n\nNo other vocabulary on the page was swept: #11042 owns the internal-spelling sweep and\n#12366 owns the stale repo-name links. Those two cards remain open and are not addressed\nhere.\n\n## Verification\n\nGate union derived from the change set itself via\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (the script reads\nits own change set from the merge base — no hand-built path list), then run at\n**`19f21cdb0b`**, which is this branch's final commit with a clean working tree. All 23\nderived families plus `check:nul-bytes` are green; exit codes were captured before any\npipe. Representative verdict lines, quoted from the gates' own output:\n\n```\n✅ check-doc-anchors: 278 internal #fragment link(s) across 408 source file(s) all resolve to a real heading\n✓  doc authoring guard: 390 files clean — no bare metadata literals.\n✓  route-spelling guard: population clean — every shape-matched literal spells its ledger row.\n✅ 260 prose examples type-check across 3 surface(s)\n✅ 26 ObjectSchema.create example(s) in 230 marked block(s) across 237 prose file(s) in 2 root(s) carry an os validate-clean security posture\n```\n\nThree of them (`check:doc-formula-expressions`, `check:doc-security-posture`,\n`check:skill-examples`) first returned `PREREQUISITE NOT MET — nothing was measured`\nbecause `@objectstack/lint`, `@objectstack/client` and `@objectstack/client-react` were\nunbuilt. That is a refusal to measure rather than a finding, so the closure was built\n(`dist/index.js` and `dist/*.d.ts` presence asserted) and all three re-run green.\n\n**Repo-wide `pnpm lint`:** not narrowed — out of population, measured from eslint's own\nconfig rather than assumed. `eslint --no-inline-config --format json` on the changed file\nreports `File ignored because no matching configuration was supplied`, i.e. `.mdx` is not\nin eslint's population at all (population: eslint's own flat-config resolution; count: 1\nchanged file, 0 in population, `errorCount: 0`; invariance: no eslint config is touched\nand the sole changed file is unlinted, so no untouched file's verdict can move).\n\n**No changeset:** docs-only, releases nothing — `skip-changeset`, matching this repo's\nstanding practice for `content/docs/**` corrections (the last seven `docs(...)` merges to\n`main` carry zero changesets).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UjM2ia8Av1v5NqfqQEQmC6)_"
+}

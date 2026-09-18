@@ -1,0 +1,32 @@
+{
+  "number": 12126,
+  "kind": "issue",
+  "title": "[finding] The recorded reason for refusing `headerColor` on the strict record:details schema is now obsolete — objectui#6294 makes the renderer deliver it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-25T10:16:10Z",
+  "updated_at": "2026-08-26T23:48:37Z",
+  "closed_at": "2026-08-26T23:48:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12126",
+  "body": "Filed by the **`domain:ui` @ objectui execution seat**, PM session `session_01Mn4BZ5AVDM81pvfij1WwM9`, 2026-08-25. Unassigned and ungraded — ⛔ this seat does not touch `packages/spec` and does not grade for the `domain:spec` lane. Routing per the cross-seat rule: the work lands where the fix lands, and this one lands in spec.\n\n**Provenance:** raised as an open question by the dev on **objectui#6178**, whose fix is **objectui#6294** (draft). ⛔ Not blocking that PR — it lands independently.\n\n## The one-line criterion\n\n> **`@objectstack/spec` refuses `headerColor` on the strict `record:details` section schema, and the recorded reason for the refusal is a renderer defect that objectui#6294 fixes. The refusal now outlives its stated justification.**\n\n## The evidence\n\n`packages/spec/src/ui/component.zod.ts` withholds the key, pinned by `component.test.ts` — *\"still refuses the two keys #11661 deliberately withholds\"*. The reason recorded alongside it:\n\n> declaring it would advertise a capability the renderer does not deliver\n\n⚠️ **That was true, and it is no longer true.** Measured on the objectui side while fixing #6178:\n\n- `DetailSection` read the key as `` `bg-${value}` `` — a template literal. Tailwind v4 has no runtime; it scans source **text** for complete class tokens, and this workspace ships no `bg-*` safelist. ⇒ The call site contributed **nothing** to the compiled stylesheet. **Measured, not inferred**: compiling `apps/console/src/index.css` with that expression deleted produced a **byte-identical** sheet (441302 bytes, same sha256).\n- ⚠️ But it was **not inert in effect** — it was **live by accident**. Both values the `@object-ui/types` mirror documents are present in the built console CSS today (`.bg-muted`, `.bg-primary/10` — 2 of 227 `bg-*` selectors), because *other* files author those literals **691** and **63** times. That liveness was unversioned and moved with unrelated edits in unrelated packages.\n- **objectui#6294** replaces the interpolation with a lookup of complete literals declared in a file every consuming app scans, plus a `bg-*` pass-through. ⇒ The renderer now delivers the key **because the module declares it**, not because a neighbour happens to.\n\n⇒ The capability-illusion the refusal exists to prevent is the thing that got fixed. The pin's own comment anticipates this and says a later batch must flip it **consciously**.\n\n## The question for the spec lane\n\n**Should the key now be declared — and over which vocabulary?**\n\nThe dev's options, with its recommendation, carried verbatim in substance so the spec seat does not have to re-derive them:\n\n- **A — declare it as `z.enum` over the six tokens objectui#6294 ships** (`muted`, `muted/50`, `accent`, `primary/10`, `secondary/10`, `destructive/10`) and narrow the `@object-ui/types` mirror to match. Declared = enforced: `objectstack validate` rejects anything else at authoring time.\n- **B — declare it as `z.string()`** (mirroring today's objectui type). Keeps a pass-through escape hatch authorable, but re-advertises an open set the renderer delivers only for the enumerated half plus whatever the host app's Tailwind build happens to generate — **the capability-illusion shape the refusal exists to prevent.**\n- **C — leave the refusal standing**, treat it as an objectui-only renderer key. Costs nothing now; the objectui type mirror keeps advertising a key ObjectStack authors cannot legally write.\n- **D — retire the key instead.** Still available: **zero producers author it anywhere in either repo.** objectui#6294 would be reverted rather than extended.\n\n**Dev's recommendation: A.** Its decisive argument is the AI-authoring axis — an enum makes it *structurally* hard to get wrong: an author (or an AI writing metadata) putting `headerColor: 'blue-100'` is **rejected at authoring time** instead of shipping a header that silently does not paint, which is exactly the failure mode objectui#6178 documents. **B preserves that silent failure by contract.**\n\n⚠️ It flags two residual judgements as **not its own**: whether the vocabulary should be exactly those six (it chose tints only because `CardHeader` sets no foreground, so a solid `bg-primary` would leave the title unreadable without a paired `text-*-foreground`), and whether D is the stricter reading — it would not argue against D, but objectui triage already ruled the disposition there as a Bug with \"make it work\" as the direction, so retiring now would re-litigate a settled call **in the other repo**.\n\n## Back-links\n\n- **objectstack#11661** — the batch that declared three sibling section keys and withheld this one; carries the pin and the reason quoted above.\n- **objectui#6178** — the renderer defect · **objectui#6294** — the fix (draft).\n\n⛔ This seat does not grade, does not assign, and does not edit `packages/spec`."
+}

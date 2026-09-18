@@ -1,0 +1,36 @@
+{
+  "number": 12354,
+  "kind": "issue",
+  "title": "docs site: `gitConfig.repo` is the pre-rename `framework`, so every GitHub link (and now `codeRepository`) rides a redirect",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T19:46:25Z",
+  "updated_at": "2026-08-25T20:42:29Z",
+  "closed_at": "2026-08-25T20:42:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12354",
+  "body": "## One-liner\n\n`apps/docs/lib/layout.shared.tsx` declares `gitConfig.repo = 'framework'`, but this repository is `objectstack-ai/objectstack`. Every GitHub URL the docs site emits therefore relies on GitHub's rename redirect.\n\n## Measured\n\n```\n$ gh api /repos/objectstack-ai/framework --jq '.full_name'\nobjectstack-ai/objectstack\n```\n\nThe old name still resolves — GitHub keeps a permanent redirect after a rename — so nothing is visibly broken today. What is emitted:\n\n- the nav bar's GitHub link (`baseOptions().githubUrl`)\n- the homepage hero's GitHub button\n- every doc page's \"Edit on GitHub\" link, `…/framework/blob/main/content/docs/<path>`\n- as of #12240, `SoftwareSourceCode.codeRepository` in the homepage JSON-LD\n\n## Why it is worth a line of code\n\nThe first three are redirects a user never notices. The fourth is different: `codeRepository` is a machine-readable identity claim, and a consumer that resolves it gets a 301 to a different name than the one asserted. Redirects are also revocable — a future org that creates a *new* repo named `framework` silently repoints every one of these links.\n\n## Fix\n\nOne line: `repo: 'objectstack'` in `apps/docs/lib/layout.shared.tsx`. Worth a rendered check of one doc page's edit link afterwards, since that URL is assembled from `user`/`repo`/`branch` plus `page.path`.\n\n## Source\n\nFound while implementing #12240 — the JSON-LD needed a `codeRepository`, and reusing the site's own constant meant checking what it points at."
+}

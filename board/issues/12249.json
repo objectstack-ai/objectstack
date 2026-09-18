@@ -1,0 +1,34 @@
+{
+  "number": 12249,
+  "kind": "issue",
+  "title": "docs content: the 38 generated reference pages still render two `<h1>` — the heading comes from a spec JSDoc header via build-docs.ts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "repo:objectstack"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T15:04:04Z",
+  "updated_at": "2026-08-26T11:15:46Z",
+  "closed_at": "2026-08-26T10:56:28Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12249",
+  "body": "## One-liner\n\n38 generated pages under `content/docs/references/**` still render two `<h1>`. The heading is not in the MDX — it comes from a JSDoc file header in `packages/spec/src/**`, copied verbatim into the page by `packages/spec/scripts/build-docs.ts`. #12236 could not fix them and carved the tree out of its new gate.\n\n## Measured on `origin/main` at 20b0fdb56\n\n```\npages under content/docs/** with a body-level `# ` heading   195\n  of which generated (carry the AUTO-GENERATED marker)        38\n  body `# ` headings inside those 38 pages                    43   (41 distinct texts)\n```\n\nTwo examples, and where the text really lives:\n\n```\ncontent/docs/references/data/context-tokens.mdx:11   # Why this lives in `spec`\n  <- packages/spec/src/data/context-tokens.zod.ts:10   * # Why this lives in `spec`\n\ncontent/docs/references/kernel/*.mdx                 # <Name> Protocol\n  <- the same JSDoc file header, rendered by renderFileDescription()\n```\n\n`build-docs.ts` line ~422 inserts `fileDesc` into the page with no heading-level\nnormalisation:\n\n```\nif (fileDesc) {\n    md += `${fileDesc}\\n\\n`;\n}\n```\n\n## Why #12236 could not do it\n\n1. Hand-editing the 38 MDX files is reverted by the next generator run, and `check:docs` (`pnpm --filter @objectstack/spec check:docs`, a **required** step in `Lint & Repo Gates`) regenerates the tree and fails on any difference — so the hand-fix would have shipped CI-red.\n2. The real fix is in `packages/**`, which epic #12243 declares out of territory.\n\n## Options\n\n- **A — normalise in the generator.** Demote every ATX heading in `fileDesc` by one level at emit time in `build-docs.ts`. One place, fixes all 38 and every future one, regenerates 38 tracked files. Note `## TypeScript Usage` is already emitted at level 2, so a plain `#`→`##` demotion lands the file-description headings as its siblings, which is the right level for them.\n- **B — fix the JSDoc sources.** 41 headings across `packages/spec/src/**`. Same output, distributed edit, nothing stops the next one.\n\nA is the contract-first shape: the generator owns the page's heading levels, so the level rule belongs where the page is emitted, not in every comment that feeds it.\n\n## Acceptance\n\n- [ ] no page under `content/docs/references/**` contains a body-level `# ` heading\n- [ ] `pnpm --filter @objectstack/spec check:docs` is green with the regenerated tree committed\n- [ ] the `content/docs/references/**` carve-out is deleted from `scripts/check-docs-single-h1.mjs` — that gate FAILS when an excluded tree becomes clean, so this is mechanical, not a thing to remember"
+}

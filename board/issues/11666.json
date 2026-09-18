@@ -1,0 +1,35 @@
+{
+  "number": 11666,
+  "kind": "issue",
+  "title": "[finding] a refused `POST /automation/:name/toggle` is told \"Authoring automation flows requires …\" — the shared deny message names a verb the caller did not use",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T11:02:15Z",
+  "updated_at": "2026-08-26T00:46:09Z",
+  "closed_at": "2026-08-26T00:46:09Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11666",
+  "body": "Raised by the dev seat on #10243 / PR #11660 as an open question, and filed here rather than ridden\ninto that PR: it is a **user-visible copy change the maintainer's ruling did not ask for**, and the\nruling was specifically \"one predicate, no new capability name\". Filed unassigned.\n\n## What a caller sees after #10243\n\n`POST /api/v1/automation/:name/toggle` now requires `manage_metadata` (maintainer ruling on #10243,\noption A). A caller without it is refused with the shared constant:\n\n> `Authoring automation flows requires the \\`manage_metadata\\` capability.`\n\nThey were **disabling** a flow, not authoring one. The sentence is accurate about the *policy* — the\nruling classified toggle into the authoring write set — but it names a verb the caller did not use.\n\n## Why it was not fixed in #11660, and why that was right\n\n- The ruling authorized one arm on one predicate. A second refusal constant is new surface, however\n  small, and #11660 was already carrying a breaking change (200 → 403) plus seven moved surfaces.\n- The message satisfies #7450's actual requirement: it names the capability that **would** admit the\n  caller. It is unhelpful, not wrong, and not a security defect.\n\n## The shape, if this is graded as work\n\nThe dev seat laid out three and recommended keeping A for that PR:\n\n| | option | cost |\n|---|---|---|\n| **A** | keep the single shared message (**shipped in #11660**) | zero; one predicate, one refusal vocabulary |\n| **B** | a toggle-specific sentence with the **same** code and status | one constant + one arm in `refuseUngrantedFlowWrite` |\n| **C** | reword the shared message to cover both (\"Authoring or enabling …\") | one edit, but slightly degrades the message for the three definition writes |\n\n⭐ **B has an in-domain precedent one screen over**: `SCREEN_READ_DENY_MESSAGE` sits beside\n`RUN_READ_DENY_MESSAGE` in this very file (#7968) — a different question asked, a different sentence\nreturned. That is the argument for B being the long-term shape rather than a nicety.\n\n⛔ Whichever way this is graded, the `code` and `status` must not move. `PERMISSION_DENIED` / 403 is\nwhat #11660's pins and the ADR-0112 vocabulary assert; only the human-readable prose is in question.\n\n## Related\n\n- #10243 — the ruling and the capability change.\n- PR #11660 — where the shared message is now reached by the toggle path.\n- #7968 — the precedent for a per-question refusal sentence in the same file.\n- #7450 — the requirement the current message already satisfies (name what would admit the caller)."
+}

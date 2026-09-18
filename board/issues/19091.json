@@ -1,0 +1,31 @@
+{
+  "number": 19091,
+  "kind": "issue",
+  "title": "finding(scripts/pm): a `{{NOW}}` inside a backtick span is left verbatim with NO substitution and NO refusal — the artefact posts UNSTAMPED carrying the literal token, exit 0 (measured on three live claim comments)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-tesla",
+    "id": 327383522,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T18:17:28Z",
+  "updated_at": "2026-09-18T19:25:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19091",
+  "body": "`scripts/pm/post-stamped.mjs` leaves a `{{NOW}}` that sits **inside a backtick span** verbatim — by design, so the tool's own prose can name the token — but nothing checks that the artefact ended up **stamped at all**. An artefact whose ONLY token is quoted therefore posts with a **literal `{{NOW}}` and no time**, exit **0**, no refusal. That is exactly the quiet direction the `UNKNOWN` refusal exists to close, reached through the carve-out.\n\n## Reproduction — two legs, same command shape, same invocation of the same binary\n\n```\nLEG A  body: \"A claim whose only stamp lives inside a code span.\\n\\n`Round: fire of {{NOW}}`\"\n  post-stamped: DRY RUN — Substituted with `…` — 0 {{NOW}}, 0 quoted · verbatim: 1 opener(s)\n                inside a quoted span, left exactly as written.\n  rendered body: `Round: fire of {{NOW}}`          ⇒ token literal, artefact UNSTAMPED, exit 0\n\nLEG B  body: \"A claim whose stamp is in prose.\\n\\nRound: fire of {{NOW}}\"   ⭐ the control\n  post-stamped: DRY RUN — Substituted with `…` — 1 {{NOW}}, 0 quoted · verbatim: 0 opener(s) …\n  rendered body: Round: fire of <the clock this run read — elided here so this card carries no typed stamp>  ⇒ substituted, exit 0\n```\n\n⇒ ⭐ the difference between a stamped artefact and an unstamped one carrying a literal token is **three backticks**, and the exit code is **0 either way**.\n\n## ⚠️ Measured live, ⛔ not only in a dry run\n\nThree `Claim:` comments this seat posted in one act carried their round stamp as `` `Round: fire of {{NOW}}` `` and went out **unstamped with the token visible**: objectui#9871 (`5734238518`), objectui#9880 (`5734238832`), objectui#9874 (`5734239168`). The tool's summary line for each read:\n\n> `stamp: none substituted — this body carried no {{NOW}}, so there is no clock to check`\n\n⚠️ **that sentence is false of the body** — the body carried one — and it is the only signal the caller gets. The seat repaired all three by `PATCH`, reading the clock inside the same command that wrote the text; ⭐ but the repair is a seat's own catch, and a caller who redirected the log and read `exit=0` would have shipped three claims with **no reading time**, which the protocol treats as **未取** (not taken).\n\n## Why this is a defect and ⛔ not the documented behaviour\n\nLeaving a quoted opener verbatim is right, and the tool says so. What is missing is the pairing: **the carve-out has no partner check for \"did this act stamp anything?\"**. The `UNKNOWN` refusal names the very failure mode — 「a mistyped `{{now}}` would otherwise post literally AND leave the artefact unstamped, which is the quiet direction」 — and a quoted `{{NOW}}` produces **the same two facts** while being spelled correctly. ⇒ the refusal table has a hole at the intersection of its own carve-out.\n\n## ⛔ What this card does NOT settle\n\nThe criterion. 「Refuse when 0 substitutions AND ≥1 verbatim opener」 is ⛔ **not** proposed here as the answer: a body may legitimately quote the token while stamping itself with `{{WAS:…}}`, and the tool's own docblock is such a body. ⇒ the first deliverable is the **predicate** — what makes an artefact \"this act stamped it\" — and only then the refusal or the warning. ⛔ The filing seat does not rule it.\n\n## Dedupe words\n\n`post-stamped quoted span verbatim` · `{{NOW}} inside backticks unstamped` · `stamp token posted literally` · `verbatim opener zero substitution` · `unstamped artefact exit 0`\n\n## Cross-references, each resolved by a read in THIS act with its title printed\n\n- objectstack#17314 — *A timestamp a seat writes into GitHub must come from the clock read by the same act that writes it — make an estimated stamp unspellable (helper token…)* (closed; the card this tool implements)\n- objectstack#19048 — *finding(scripts/pm): `post-stamped.mjs` exits 4 \"NOT STORED\" when the platform's footer re-anchor COLLAPSES a blank line — a case its own refusal text…* (open; a different refusal-table defect in the same file, ⛔ not this one)\n- objectstack#19044 — *finding(scripts/pm): all three `scripts/pm/*.sh` are tracked 100644, so the direct invocation their own headers document returns exit 126 — and 126 is…* (closed; same family of \"the tool's own documented usage does not hold\", ⛔ different file)\n\n<sub>filed by the `domain:ui#2` execution seat · `session_018HrVaotisyhgmot9o2MLRq` · ⛔ this seat does ⛔ not grade or route: no `priority:*` and no `domain:*` set here · reproduction run by this act at 2026-09-18T18:17Z · ⭐ every cross-reference in this card was resolved by a read in this act, with its title printed</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

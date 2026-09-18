@@ -1,0 +1,34 @@
+{
+  "number": 12064,
+  "kind": "issue",
+  "title": "[finding] bare-root-worklist prints REACHABLE beside a REFUSE-* reason when a gate takes the escape, and --self-test stays green — the contradiction lands silently",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T07:24:38Z",
+  "updated_at": "2026-08-25T19:52:47Z",
+  "closed_at": "2026-08-25T19:51:59Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12064",
+  "body": "Measured on PR #12061 while implementing #11935. Filed unassigned — out of that card's declared file surface (`scripts/check-ratchet-remedy-authority.mjs`), and it is a defect of the worklist rather than of the gate.\n\nThis is **not** the same defect as #11277. That one is about a `why` string stating a wrong measurement, and correctly observes that a prose assertion cannot be mechanised. This one is a **state/verdict contradiction**, which is mechanisable — the two fields disagree structurally, not in prose.\n\n## The shape\n\n`scripts/pm/bare-root-worklist.mjs` prints, per row, a **state** derived from the live tree beside a **recorded verdict** from its `TRIAGE` map. When a gate that carries a `REFUSE-*` verdict later takes the watch-hint escape, the state flips to `REACHABLE` while the recorded refusal reason stays put. The row then asserts both that the population is now reachable and that it is unspellable.\n\nReproduced by declaring `ROOT_DIR_WATCH_HINTS = ['scripts/*']` on `scripts/check-ratchet-remedy-authority.mjs` (the change on PR #12061):\n\n```\n# unmodified tree (1e79aa4f8)\nREFUSE-UNSPELLABLE  check:ratchet-remedy-authority SCRIPTS_DIR scripts\n                      reads the TOP LEVEL of the root only, and only two extensions — 115 of 226 (51%).\n                      The idiom has no non-recursive spelling: a subtree hint claims every nested directory too\n\n# with the declaration (36c15e682)\nREACHABLE           check:ratchet-remedy-authority SCRIPTS_DIR scripts\n                      reads the TOP LEVEL of the root only, and only two extensions — 115 of 226 (51%).\n                      The idiom has no non-recursive spelling: a subtree hint claims every nested directory too\n```\n\n`node scripts/pm/bare-root-worklist.mjs --self-test` exits **0** on both trees (`OK  self-test: 41 live row(s), 34 unreachable as spelled, 35 recorded verdict(s) — none stale, none missing`). The production run exits 0 on both as well.\n\n## Why the STALE assertion does not fire\n\nThe self-test audits `TRIAGE` keys against **all** sweep rows in both directions — a key with no row is STALE, a row with no key is missing. A row that is still present but whose *state* has moved out of the refusal classes satisfies both halves, so nothing fires. The map already has a verdict for a gate that took the escape — `DECLARED-NARROWER` — so the vocabulary to express the correct post-escape state exists; nothing checks that a row actually moved to it.\n\nThis was **predicted** in #11155's dev report (\"its self-test will NOT catch that, because the STALE assertion tests TRIAGE keys against ALL sweep rows, not just uncovered ones, so the contradiction would land silently\"). It is now measured rather than predicted, which is why it is worth its own card.\n\n## Why it matters\n\nThe worklist is a governance record whose value is that its rows are trustworthy — its own triage docblock insists every percentage was measured rather than estimated. A row that reads `REACHABLE … has no non-recursive spelling` is worse than a wrong measurement: it is self-refuting, and the next reader cannot tell which half is stale. It also silently converts a *deliberate, adjudicated refusal* into something that reads like an oversight.\n\nThe trigger is not hypothetical or specific to this gate: **any** row whose gate later declares a watch hint lands it, and taking the escape is exactly what the ledger exists to encourage.\n\n## Suggested remedy (not applied here)\n\nAssert, in `--self-test`, that a row's live state and its recorded verdict class are consistent — a `REFUSE-*` verdict must not sit on a row the sweep now finds `REACHABLE`; such a row should either move to `DECLARED-NARROWER` or fail naming itself. That is a mechanical pairing of two fields the tool already computes, and it fails at authoring time rather than landing quietly.\n\n## Refs\n\n#11155 (where it was predicted) · #11277 (the adjacent, different `why`-accuracy defect) · #11935 / PR #12061 (where it was measured) · `scripts/pm/bare-root-worklist.mjs` `TRIAGE`\n"
+}

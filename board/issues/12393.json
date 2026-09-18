@@ -1,0 +1,36 @@
+{
+  "number": 12393,
+  "kind": "issue",
+  "title": "Add a VALUE_ROUNDTRIP case-set to the driver-conformance census — \"what you wrote is what you read back\", enforced per driver per dialect (#12380 route D)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T00:18:23Z",
+  "updated_at": "2026-08-26T17:09:13Z",
+  "closed_at": "2026-08-26T17:09:13Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12393",
+  "body": "Follow-up to #12380, **ruled in by the maintainer 2026-08-26** alongside route A. Filed separately for sequencing reasons stated below.\n\n⛔ **Do not start until #12380's route-A fix has landed.** This card would otherwise ship a gate that is red on SQLite by construction.\n\n## Why this exists — measured, not proposed\n\nWhile investigating #12380, the dev was asked whether #12136's freshly-landed dialect axis had an opinion about a value-storage round-trip defect. The answer:\n\n> `check-driver-conformance` is green at **9 of 9** dialect-scored cells matrix-routed after #12136's `MATRIXED` invariant, but **none of its nine case-sets is about value storage round-trip** — so that green is **not weak evidence about this defect, it is no evidence at all**, and it would stay green forever with the defect in place.\n\nThe nine existing case-sets cover **filters, temporal, pagination and aggregation**. Nothing covers *\"what you wrote is what you read back.\"* That is why this family keeps arriving one card at a time:\n\n| card | the same question, one instance at a time |\n|---|---|\n| #12380 | SQLite `Field.json` is not round-trip faithful; PG/MySQL disagree |\n| #11535 | an array stored and read back as the string `'[\"x\",\"y\"]'` |\n| #11065 / #11151 | `avg`/`sum` over a boolean lowered to `null`/`0`, one driver over |\n| #9276 | a driver returning a declared field as an own key holding `undefined` |\n\n## The route\n\nAdd a `VALUE_ROUNDTRIP` case-set to `packages/spec/src/data/*-conformance.ts` so the census's existing `CLASSIFIED` + `MATRIXED` invariants force **every driver, on every dialect** to answer the round-trip question. ⭐ This **reuses machinery the census already has** rather than building new — that is the main argument for it over a bespoke suite.\n\n## ⚠️ Two constraints that shape this card\n\n1. **It is cross-driver by design**, so it will ask `driver-memory` and `driver-mongodb` the same question. ⛔ **#5499 froze investment in both** (maintainer ruling 2026-08-05, cross-card anchor). Read that ruling first and scope against it — the honest options are to ledger those drivers' cells with a reason, or to scope the case-set to drivers not under the freeze. **Do not quietly start fixing frozen drivers**, and do not let the freeze become an excuse to make the case-set vacuous.\n2. **A gate that ships red is worse than one that ships honest** — this seat's own ruling on #12136. Whatever this surfaces must be either fixed, ledgered with a named reason, or scoped out explicitly. ⚠️ And per #12136, a `DIALECT` ledger row deliberately does **not** clear `MATRIXED`; check whether the same should hold for whatever ledger this needs, rather than re-opening an escape hatch that was just narrowed.\n\n## Sizing\n\n⛔ **Unknown, deliberately.** #12380's route-A work will measure how many round-trip cells actually diverge on the SQL family; that number should size this card, exactly as #12014's number sized #12136 (which came out at 2). **Re-measure at claim time rather than guessing here.**\n\n## Clause ②\n\n**No** — a census case-set plus its invariant. No shipped behaviour, no public surface. ⚠️ But note it *will* change what the census refuses, so any driver it newly reds is a real finding to route, not a number to tune away.\n\n## Refs\n\n#12380 (parent; route A is the codec fix) · #12136 / #12014 (the dialect axis and `MATRIXED` this builds on) · #5499 (the driver-memory / driver-mongodb investment freeze) · #11535 · #11065 · #11151 · #9276 (the family this would close as a class)"
+}

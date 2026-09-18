@@ -1,0 +1,36 @@
+{
+  "number": 11775,
+  "kind": "issue",
+  "title": "finding: `server.deps.external` restores the Node resolution anchor and does NOT conflict with `check:test-source-alias` — the tension #11412 assumed may not exist",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T16:00:13Z",
+  "updated_at": "2026-08-25T20:29:19Z",
+  "closed_at": "2026-08-25T20:29:19Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11775",
+  "body": "Filed unassigned while measuring #11412. Recording only — **not graded here**, and\n⛔ **no config change was made**: #11412's triage was explicit that this trade-off\ngoes to a decision rather than into a config edit. This card exists so the decision\nstarts from measurements instead of the assumption.\n\n## What #11412 assumed\n\nThat restoring the Node anchor via `server.deps.external` \"may be in tension\" with\nthe source-resolution invariant `check:test-source-alias` enforces, and that the\ntwo goals might be irreconcilable.\n\n## What was measured\n\nIn `packages/cli/vitest.config.ts`, temporarily:\n\n```\ntest: { server: { deps: { external: [/packages[\\/]types[\\/]dist/] } } }\n```\n\n- **It works.** `createHostImporter`'s body loses `__vite_ssr_dynamic_import__`,\n  and the no-base importer THROWS on a CLI-declared package exactly as it does\n  under real Node — the anchor is back.\n- **`pnpm check:test-source-alias` stays green** (72 packages scanned).\n- **No test cost:** the 11 `packages/cli` test files that consume\n  `@objectstack/types` pass identically with and without it — 103/103 both ways.\n\n## Why there may be no tension at all\n\n`@objectstack/types` is already registered in that gate's shrink-only\n`KNOWN_UNALIASED_TEST_IMPORTS['@objectstack/cli']`, i.e. it already resolves\nthrough `exports` to `dist/`. Externalising does not move it off source — it was\nnever on source.\n\nMore generally, and this is the part worth arguing with: **an external pattern\nanchored on `/dist/` cannot match a package aliased to source**, because an\naliased import resolves into `src/`. The two mechanisms address disjoint sets by\nconstruction. If that holds, \"externalise by dist realpath\" and \"alias to source\"\nare complementary rather than competing.\n\n## ⚠️ The trap that made this read the other way first\n\nThe pattern must match the module's **realpath**. A pnpm-linked workspace package's\nrealpath is the package directory — `packages/types/dist/node.mjs` — which contains\nneither `/node_modules/` nor the package NAME. A natural-looking\n`/@objectstack[\\/]types/` pattern therefore **matches nothing, silently**, and the\nexperiment reads as \"externalising does not help\". First measured wrong here for\nexactly that reason. (It is also why every workspace package is inlined by default:\nvitest's default `external` is `[/\\/node_modules\\//]`, evaluated against that same\nrealpath.)\n\n## Not measured here\n\n- The full `packages/cli` suite under the entry (1498 tests) — only the 11\n  `@objectstack/types` consumers were run.\n- Any package other than `packages/cli`.\n- The second-order costs of externalising: `vi.mock` of an externalised package\n  stops working, and coverage instrumentation of it is lost. Neither bites the 11\n  files measured; both would need checking before any repo-wide policy.\n- Whether this should be per-package, or a shared vitest preset.\n\nRelated: #11412 · #7849 · #8249 · #8180 (the source-vs-dist axis this one is\nadjacent to but distinct from)"
+}

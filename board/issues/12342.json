@@ -1,0 +1,34 @@
+{
+  "number": 12342,
+  "kind": "issue",
+  "title": "[finding] The two error-handling examples on `content/docs/api/client-sdk.mdx` read `error.code` off an untyped `catch` binding — they do not compile in a reader's own strict project",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T19:14:00Z",
+  "updated_at": "2026-08-26T01:52:54Z",
+  "closed_at": "2026-08-26T01:52:39Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12342",
+  "body": "Measured while landing #12048 (PR #12339), which gives the SDK docs pages a resolution environment that can see `@objectstack/client`. That change is what makes this measurable at all — before it, every fence on this page red with TS2307 and nothing downstream of the import was ever reached.\n\n⛔ Not a marker/coverage question, and deliberately **not** filed as part of #11942's remaining scope in that sense: this is about what the examples *teach*, and it is true whether or not the blocks are ever marked.\n\n## The defect\n\nTwo blocks on the page — \"Error Handling\" (around line 582) and \"Per-field validation errors\" (around line 609) — are written:\n\n```typescript\ntry {\n  await client.data.create('todo_task', { subject: '' });\n} catch (error) {\n  console.error(error.code);       // 'VALIDATION_FAILED'\n  console.error(error.httpStatus); // 400\n  // ...\n}\n```\n\nUnder `strict` (which implies `useUnknownInCatchVariables`), `error` is `unknown`, so every one of those reads is `TS18046: 'error' is of type 'unknown'`. A reader who copies this into their own strict project — the default for `tsc --init` since TS 4.4, and what this repo's own packages use — does not get working code; they get a compile error, with no hint on the page that narrowing is required.\n\n## Measurement\n\nWith all 13 fences on the page temporarily marked and the gate run against the post-#12048 surface (tree reverted afterwards), these two blocks produced **10 of the 114 diagnostics**:\n\n| block | diagnostics |\n|:--|:--|\n| `582` Error Handling | 6 — 1× TS2304 `client`, 5× TS18046 `'error' is of type 'unknown'` |\n| `609` Per-field validation errors | 4 — 1× TS2304 `client`, 2× TS18046, 1× TS2304 `showFieldError` |\n\nThe TS2304s are the page's deliberate continuation-fragment convention (Quick Start establishes `client` once) and are not this card. The **TS18046s are not** — they would fire in a reader's file too, where `client` is defined.\n\n## Why it is worth fixing rather than accepting\n\nThis is the page a customer opens to learn the SDK, and error handling is the part they copy most literally. The fix is also what the page should teach anyway: the SDK throws a typed error, and the example should show the reader how to reach it — a narrowing helper or type guard exported from `@objectstack/client`, or at minimum an `instanceof` / shape check in the example. Whether such a guard exists and is exported is the first thing to check; if it does not, the honest reading is that the SDK has no supported way to narrow a caught error, which is a bigger finding than the docs page.\n\nOnce the examples narrow honestly they become self-contained enough to carry an `os:check` marker (the remaining TS2304 `client` is the page's separate continuation convention), so this also converts two more fences from unverifiable to gated.\n\n## Not in scope here\n\n- The nine continuation-fragment blocks that read Quick Start's `client`. That is a deliberate, documented convention on the page and a separate question (#11942).\n- `showFieldError` in the second block — an illustrative UI callback, correct as prose.\n\nRefs: #12048 / PR #12339 (the surface fix that made this measurable) · #11942 (the page's coverage card) · #8140 (the narrowing that falsified two other examples on this page)\n"
+}

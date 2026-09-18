@@ -1,0 +1,35 @@
+{
+  "number": 12136,
+  "kind": "issue",
+  "title": "Resolve the 2 DIALECT_LEDGER rows, then promote \"every dialect-scored cell has a matrix-routed suite\" to an invariant (#12014 follow-up)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "tests"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T10:35:44Z",
+  "updated_at": "2026-08-25T23:30:50Z",
+  "closed_at": "2026-08-25T17:56:37Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12136",
+  "body": "Follow-up to #12014 (PR #12134), sized by that card's own measurement as its dispatch required. **The number is 2.**\n\n⛔ Do not start until PR #12134 has landed — this card edits the ledger it creates.\n\n## Route is RULED — do not re-open it\n\n`domain:engine` PM seat, 2026-08-25, on [#12014's ACCEPT](https://github.com/objectstack-ai/objectstack/issues/12014#issuecomment-5409163533). Both halves were measured on `origin/main`, not argued:\n\n### 1. Convert `sql-driver-comparand-type-conformance.test.ts` to the dialect matrix\n\n`FILTER_COMPARAND_TYPE_CASES` is **the only dialect-scored cell with no matrix-routed suite at all**, and its own case-set entry claims universality it does not measure — `scripts/check-driver-conformance.mjs:231`, verbatim:\n\n> `the comparand-type door: the six accepted types compile everywhere, everything else is refused loudly — #7872`\n\n\"Compile everywhere\", measured on one dialect. That is #12014's thesis one level in, and it is why this conversion is *earned* rather than tidy.\n\n⚠️ **Expect this to find something.** #7872's door is about which comparand types are accepted; whether all six really do compile on Postgres and MySQL is exactly what has never been checked. If a type turns out not to compile everywhere, **that is a real finding — stop and report it, do not narrow the case-set to make the suite pass.**\n\n### 2. Mark `sql-driver-icontains-and-retired-operators.test.ts` as `dialectCell('sqlite')`\n\nMeasured: `sql-driver-text-case-conformance.test.ts` mentions `icontains` **16 times** and routes through the testkit, so `FILTER_TEXT_CASES` **is** genuinely covered on all three dialects by that suite. This one is a second pass over covered ground; declaring it a deliberate single cell loses no coverage.\n\n⚠️ Verify that before marking. If the matrix suite turns out not to cover the same operators this one does, marking it hides a real gap — measure by operator, not by file, and report if the coverage does not actually overlap. #6518 records that `FILTER_TEXT_CASES` answers differ by dialect (GLOB on SQLite, LIKE on Postgres, LIKE over `CAST(.. AS BINARY)` on MySQL), so a wrong call here is expensive.\n\n⛔ **Both options were weighed and B (\"convert both\") was rejected on measurement**, not taste: converting the icontains suite would add no dialect coverage, because its cell is already matrix-covered.\n\n### 3. Then promote the invariant — this card's closing step\n\nWith the ledger empty, promote *\"every dialect-scored cell has at least one matrix-routed suite\"* from a printed measurement to an **enforced invariant**, and empty `DIALECT_LEDGER`. This is what makes the census enforce ADR-0053 D-A3 (`driver {SQLite, Postgres at minimum}`) rather than report it.\n\nIt could not be done inside #12014 because promoting it there would have redded exactly one cell, and clearing that red needs a test-file edit — the gate-change/test-change coupling that card's scope ruled out. Once steps 1–2 land the population is zero and the promotion is free. ⛔ Do not promote before the ledger is empty; a gate that ships red is worse than one that ships honest.\n\n## Clause ②\n\n**No** — test coverage plus a gate invariant. No shipped behaviour, no public surface. ⚠️ But note this card **does** change what suites assert, which #12014 deliberately would not: that is the whole reason it is a separate card, and it is why the conversion in step 1 may surface a genuine dialect divergence.\n\n## Surface\n\n- `packages/drivers/driver-sql/src/sql-driver-comparand-type-conformance.test.ts`\n- `packages/drivers/driver-sql/src/sql-driver-icontains-and-retired-operators.test.ts`\n- `scripts/check-driver-conformance.mjs` (the ledger and the promotion)\n\n⚠️ Re-check the in-flight ledger at claim time — several `sql-driver.ts` bands and test files were held by concurrent cards on 2026-08-25.\n\n## Refs\n\n#12014 (parent, the axis) · PR #12134 · #7872 (the comparand-type door) · #6518 (why `FILTER_TEXT_CASES` diverges) · ADR-0053 D-A3 · #12135 (a neighbouring `consumes()` defect in the same script)"
+}

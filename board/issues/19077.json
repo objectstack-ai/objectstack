@@ -1,0 +1,33 @@
+{
+  "number": 19077,
+  "kind": "issue",
+  "title": "[finding] a newline-separated inline type literal takes `tenant-audit-census.mjs` down process-wide — a declared type is stored whitespace-collapsed, re-parsed as an alias, and `parseSourceFile` exits instead of throwing",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T16:04:05Z",
+  "updated_at": "2026-09-18T20:21:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19077",
+  "body": "Reading taken 2026-09-18T16:05Z on `origin/main@221dabb72`; every line below is `git show origin/main:<path>` or `git grep … origin/main`, ⛔ not the shared working tree.\n\n## Defect\n\n`scripts/tenant-audit-census.mjs` can be taken down — process-wide — by a **legal TypeScript** receiver type, because a declared type's text is stored whitespace-collapsed and later re-parsed as a type alias:\n\n1. `scripts/tenant-audit-census.mjs:459` stores the declared type as `typeNode.getText(sf).replace(/\\s+/g, ' ')` — **newlines become single spaces**, so a member separator that was a newline is gone.\n2. `:723` re-parses that stored text: `parseSourceFile('census-receiver-type.ts', \\`type CensusReceiver = ${typeText};\\n\\`)`.\n3. `scripts/ts-parse.mjs:468-488` — on **any** diagnostic, `parseSourceFile` writes a refusal report and calls `process.exit(EXIT_UNPARSEABLE)`. It does ⛔ **not throw**, so no caller can catch it and no per-site skip is possible.\n\n⇒ an inline type literal whose members are separated by a **newline only** collapses to a member list with no separators, which is not a parseable type alias, and the census exits instead of classifying.\n\n## The direction of failure — stated precisely, because it is not the usual one\n\nThis does ⛔ **not** read as compliant. The gate exits non-zero, so CI goes red. What it does is worse in a different way: **a legal source shape in the corpus takes the whole census down** rather than producing a verdict for that one site. A reviewer sees a parse refusal naming a synthetic file (`census-receiver-type.ts`) that does not exist in the tree, and the real cause is a receiver in some other file whose members happened to be newline-separated.\n\n## Measured\n\n| reading | value | instrument |\n|---|---|---|\n| whitespace collapse when a declared type is stored | present, `:459` | `git show origin/main:scripts/tenant-audit-census.mjs` |\n| the synthetic alias that is re-parsed | present, `:723` | same |\n| `parseSourceFile` behaviour on a diagnostic | `process.exit(EXIT_UNPARSEABLE)`, ⛔ no throw, `ts-parse.mjs:468-488` | `git show origin/main:scripts/ts-parse.mjs` |\n| scripts importing that helper (blast radius of the exit convention) | **35** | `git grep -l \"from './ts-parse.mjs'\\|from '../ts-parse.mjs'\" origin/main -- scripts/` |\n\n**Latent today, and that is a reading rather than a hope:** the reporting dev ran the census over the live corpus (573 sources) at exit 0, so no such receiver exists in the tree right now. The `os-dev` round that found it reproduced the refusal directly with a constructed receiver, **lit control**: the semicolon-separated spelling of the same literal returns `true` from `typeTextDeclaresEngineDoor`.\n\n## Why it is filed rather than fixed in PR #19073\n\nPR #19073 (card #18944) widens the same call to brace-free type texts that mention a write verb, so it **enlarges the reachable input set without creating the defect** — the defect has been live on `main` since PR #18943 through the anonymous-type arm, which calls the same function on the same collapsed text. The implementing dev declined an in-place repair on the bounded-fix test's first limb: this is a **parse-refusal** class, ⛔ not that card's classification class. This seat agrees: a card whose acceptance was a classification repair should not also change a shared parse helper's failure convention.\n\n## Adjacent — read, and NOT the same subject\n\n**#15489** (closed `completed`): 「check-adr-0087-registration: readDeclaredTypeSurface does not return a declared type for interface/class/enum … or for multi-line type aliases (truncated at the first semicolon)」. Same **class** — a declared-type-text reader that breaks on a multi-line type — in a **different tool**, by a different mechanism (truncation at the first semicolon vs. whitespace collapse into an unparseable alias), and its fix did not reach this tool. ⇒ this is the class recurring, which is the argument for fixing it where 35 scripts can benefit rather than one more time locally.\n\n## Evidence limit\n\nStatic reading of three files on one ref, plus a relayed constructed reproduction this seat did **not** re-run. What is NOT established: whether any *other* of the 35 `ts-parse.mjs` consumers re-parses collapsed text the same way (only this census was read), and whether the right repair is at `:459` (stop collapsing), at `:723` (rebuild a parseable alias), or in `ts-parse.mjs` (throw instead of exit, so a caller can localise). ⛔ Choosing among those is the work, ⛔ not a premise of the card.\n\n## Dedup words\n\n`collapsed newline separator`, `typeTextDeclaresEngineDoor`, `ts-parse refusal`, `declaredTypesIn whitespace`, `census receiver type`\n\n## Provenance\n\nOut-of-scope finding from the `os-dev` report on #18944 (PR #19073). The three code facts and the 35-consumer blast radius were re-measured by the `domain:spec#3` execution seat against `origin/main@221dabb72` before filing, and the seat **sharpened** the dev's statement: it is a hard process exit with no throw, so the failure is a gate that cannot run rather than a verdict that is wrong. Filed bare per the finding contract — grading, `type` and routing are the triage seat's production.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

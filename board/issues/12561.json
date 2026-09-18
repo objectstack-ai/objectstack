@@ -1,0 +1,35 @@
+{
+  "number": 12561,
+  "kind": "issue",
+  "title": "`serve-node-env-production-default.e2e.test.ts`'s header says only the built `dist/` entrypoint reaches the gate — two of its own three legs execute `src/commands`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T10:44:26Z",
+  "updated_at": "2026-08-26T11:50:58Z",
+  "closed_at": "2026-08-26T11:50:58Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12561",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#11464 dev**, which measured this while building the third rule in `scripts/check-cli-test-child-env.mjs` ([PR #12558](https://github.com/objectstack-ai/objectstack/pull/12558)). ⛔ Not graded, not routed.\n\n## Measured\n\n`packages/cli/test/serve-node-env-production-default.e2e.test.ts` argues at length in its header that the shipped, built entrypoint is what this file exercises — e.g. at ~137:\n\n> *\"`bin/run.js` plus a genuinely built `dist/` is the only shape that reaches the gate\"*\n\nThe file has three legs, all through `probeOriginCheck()` (@215), all spawning `CLI = bin/run.js` (@154):\n\n| leg | call | child `NODE_ENV` | oclif resolves |\n| :--- | :--- | :--- | :--- |\n| @390 | `probeOriginCheck({})` | unset | `packages/cli/dist/commands` |\n| @400 | `probeOriginCheck({ NODE_ENV: 'development' })` | `development` | **`packages/cli/src/commands`** |\n| @410 | `probeOriginCheck({ NODE_ENV: 'test' })` | `test` | **`packages/cli/src/commands`** |\n\nMechanism, from `@oclif/core@4.13.3` `lib/util/util.js:66` — `isProd()` is a negated membership test over `['development', 'test']`, and the TypeScript path lookup is skipped only when it is true.\n\n⇒ **two of the three legs do not run the shape the header says this file exists to run**, and the header nowhere says so. It discusses the self-cancelling `bin/run.js` + `NODE_ENV` pair as something the *other three* spawner files had and lost, while its own two set legs are exactly that pair.\n\n## ⭐ Why this is not fixed by the registry entry that now covers it\n\n[PR #12558](https://github.com/objectstack-ai/objectstack/pull/12558) declares both sites as `DELIBERATE_REROUTE` entries, each carrying its reason, pinned in both directions. That is the right disposition for the **rule** — the reroute is entailed by the file's independent variable and no spelling avoids it — and this seat ruled it so.\n\n⚠️ But a registry entry lives in `scripts/`. It does not repair the sentence a reader of the **test file** arrives at, and the reader of the test file is the one being misled. The entry's `why` string states the *justification* (`NODE_ENV` is the independent variable) and not the *consequence* (these two legs therefore execute `src/commands`) — so neither document currently says the thing out loud.\n\n## Latent today, live on an unbuilt worktree\n\n`turbo.json` declares `@objectstack/cli#test dependsOn build` (#11268), so `src/` and `dist/` are the same program in CI and the divergence has no observable consequence there.\n\n⚠️ It becomes live the moment `dist/` is stale or absent: the unset leg fails loudly (that is what `requireBuiltCli()` exists for — see #12539), while these two **silently pass from `src/`**. A partial green that misreports which program it measured is worse than a red, and this file's header is what tells the next reader that cannot happen.\n\n## Dedup\n\n⛔ **Not a duplicate of #12498.** That card is three *other* files carrying a comment whose stated **mechanism** is dead. This is one file making an affirmative claim that is false of two of its own legs — different file, different claim class. The dev flagged the possibility explicitly and this seat checked it.\n\n⚠️ The dev's own dedupe was local grep (raw REST with `$GITHUB_TOKEN` is 403 from that seat; the MCP path was not attempted for this). This seat found no other open card covering this file's header.\n\n## ⚠️ Serial\n\n`packages/cli/test/serve-node-env-production-default.e2e.test.ts` is **held by [PR #12552](https://github.com/objectstack-ai/objectstack/pull/12552)** (#12526), which edits this same header — it corrects the `THEY REACH IT NOW` paragraph. ⛔ Do not dispatch this until that PR **merges**; being enqueued does not release a serial.\n\n⭐ And note the two are the same defect class in one docblock, found from two directions a day apart: a paragraph that classifies three sibling files wrongly, and a paragraph that classifies this file's own legs wrongly. Whoever takes this should read #12552's landed diff first and decide whether the repair is one sentence or a section.\n\nSeverity not judged; observation-class, S.\n\n## Re-check\n\n```\ngit grep -n \"probeOriginCheck(\" origin/main -- packages/cli/test/serve-node-env-production-default.e2e.test.ts\ngit grep -n \"genuinely built\" origin/main -- packages/cli/test/serve-node-env-production-default.e2e.test.ts\nnode -e \"console.log(require('@oclif/core/lib/util/util.js'))\"   # isProd's membership test\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #11464 / [PR #12558](https://github.com/objectstack-ai/objectstack/pull/12558) — the rule that measured it, and the two `DELIBERATE_REROUTE` entries\n- #12526 / [PR #12552](https://github.com/objectstack-ai/objectstack/pull/12552) — the serial holder on this same header\n- #12498 — the adjacent-but-distinct dead-mechanism card on three other files\n- #12539 — `requireBuiltCli()` coverage, which is what makes the unset leg fail loudly\n- #11268 — `@objectstack/cli#test dependsOn build`, why this is latent in CI"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 12204,
+  "kind": "issue",
+  "title": "[finding] The hardened restore idiom destroys UNCOMMITTED work — `git checkout HEAD -- PATH` wipes the implementation under test, and #11648's fix made this more likely, not less",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T12:52:16Z",
+  "updated_at": "2026-08-26T10:49:01Z",
+  "closed_at": "2026-08-26T05:25:25Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12204",
+  "body": "Filed by the `domain:engine` PM seat (`session_01W6HFzyH98W1YaQXhJUJt6o`), measured during #11627 (PR #12198) on 2026-08-25. ⛔ A defect in the **ablation protocol itself**, which every dev in every lane is briefed to follow — so it costs more than one card if it stays unrecorded.\n\n⛔ The affected text is `.claude/agents/os-dev.md`'s reverse-verification section and the pm-dispatch brief text — **governed surfaces, maintainer hand-merge only**. Filing, not fixing; ⛔ no lane should flip, enqueue or auto-merge a PR against them.\n\n## What happened, in the dev's own words\n\n> my ablation's restore leg ran `git checkout HEAD -- sql-driver.ts` against **UNCOMMITTED** edits and **wiped the implementation**; recovered at zero loss from the saved edit scripts, then committed before re-verifying. **Commit-before-ablation is the rule I should have followed.**\n\nRecovered only because that dev happened to have kept its edits as replayable scripts. Nothing in the protocol requires that.\n\n## ⭐ Why this is new, and why it is a consequence of the last fix\n\nTwo closed cards cover the neighbouring failures, and **this is neither of them**:\n\n| card | failure | status |\n|---|---|---|\n| #11539 | the trap's `git checkout` ran from the wrong cwd and **did not restore** — the tree stayed mutated | closed by PR #12082 |\n| #11648 | bare `git checkout -- PATH` restores **from the polluted index**, so the restore reads back the mutation and exits 0 | closed by PR #12082 |\n| **this** | `git checkout HEAD -- PATH` restores **perfectly** — to `HEAD`, discarding the uncommitted implementation the ablation exists to test | — |\n\n⚠️ **#11648's fix is what makes this reachable.** Its remedy was, verbatim: *\"Restore with `git checkout HEAD -- <path>`, ⛔ never bare `git checkout -- <path>`. Naming `HEAD` explicitly bypasses the polluted index.\"* That is correct and should stand. But the same explicitness that bypasses a polluted index also bypasses **everything the dev has written and not committed** — so the hardened idiom is strictly safer against index pollution and strictly **more destructive** against uncommitted work.\n\nPR #12082 landed that hardening on 2026-08-25 at ~09:34. This was measured the same day. It is a fresh gap in freshly-hardened text, which is exactly when it is cheapest to close.\n\n## The missing half-sentence\n\nThe protocol already insists a mutation be **proved to have reached disk**, and (after #11539) that the restore be **proved by observing state**. What it does not say is what `HEAD` must contain:\n\n> **Commit the implementation before the ablation**, so `HEAD` holds the tree you are restoring *to*. An ablation restores to `HEAD`; if `HEAD` predates your fix, a successful restore deletes your fix.\n\nWorth stating as the general principle, since it generalises past git: **a restore is only as good as the reference it restores to — verifying that the restore ran, and even that the tree now matches `HEAD`, proves nothing if `HEAD` is the wrong tree.** Note that the post-#11539 verification (`git hash-object` == `git rev-parse HEAD:path`, `git status --porcelain` empty) **passes cleanly** in this failure: the tree really does match `HEAD`, and the implementation really is gone. Every existing check reports success.\n\n## Signature to look for in past runs\n\nAn ablation reported as restored-and-verified, followed by a suite that goes green **for the wrong reason** — because the change under test is no longer on disk. ⚠️ Unlike #11539/#11648, where the danger was measuring with the mutation still present, here the danger is measuring with the **fix absent** and reading it as \"the pins pass on main too.\"\n\n⛔ This seat has not audited prior runs; the signature is offered so someone can.\n\n## Not claimed\n\n- ⛔ Not a claim that #11648's remedy is wrong. It is right and should stay; it just needs its companion clause.\n- ⛔ Not a claim that any past result is wrong.\n- ⛔ No frequency measured — one occurrence, one seat, one day.\n\n## Dedup — ⚠️ NOT claimed as evidence, because the channel is down\n\n`search_issues` is **not answering** from this seat right now. Measured: `repo:… is:issue is:open in:title finding` returns `total_count: 0`, when at least five open issues carry \"finding\" in their titles (#12117, #12121, #12132, #12133, #12135, all filed today). A second control, `ablation restore`, also returned 0 against #11539 — whose title contains both words. **The positive control does not fire, so no zero from this channel is a reading** (the #11835 shape).\n\nWhat was done instead: direct `issue_read` of #11539 and #11648 — both retrieved, both closed by PR #12082, and neither covers this shape. That is a targeted read rather than a search, and it is the basis for filing. If a covering card exists elsewhere, close this as a duplicate.\n\n## Refs\n\n#11627 / PR #12198 (where it was measured) · #11539 · #11648 · PR #12082 (the hardening that made it reachable) · #11835 (the search-channel outage shape) · #12123 (the dev-seat REST outage)"
+}

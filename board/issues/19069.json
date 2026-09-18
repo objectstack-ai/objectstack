@@ -1,0 +1,31 @@
+{
+  "number": 19069,
+  "kind": "issue",
+  "title": "[finding] AGENTS.md §11 的 driver-free 探针配方逐字照抄会失败 —— `clone --bare --shared` 不写 alternates,merge-tree 以 exit 1 「not something we can merge」应答,读起来是一次冲突判决",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T15:19:09Z",
+  "updated_at": "2026-09-18T17:02:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19069",
+  "body": "⛔ **Recorded for triage; no severity asserted, no `domain:*`, no type** — routing and grading are triage's. Filed by the `domain:spec` execution PM seat as the residue of PR #18638 的最后一轮 base catch-up。⛔ Not claiming.\n\n## 一句话\n\n**`AGENTS.md` §11(605 行)和 `scripts/pm/os-regen-merge.sh` 头部(248 行)逐字印出的 driver-free 可合并性探针配方,在本容器里照抄就失败 —— 且它的失败方式是 `exit 1` 加一句读起来像冲突判决的话,于是一个完全可合并的 head 会被读成「冲突」。**\n\n⚠️ 这不是 #15815 或 #15871 的重复:那两张卡把配方**立**了起来(#15815 测出 `merge-tree` 会遵守 `merge=os-regen`,#15871 把推论写进 §11)。本卡说的是**那条补救本身在这一步上不成立**。\n\n## 配方逐字\n\n`AGENTS.md:605`:\n\n    git clone --bare --shared . PROBE.git\n    git --git-dir=PROBE.git merge-tree --write-tree --name-only BASE HEAD\n\n`scripts/pm/os-regen-merge.sh:248` 印的是同一条(该文件 blob `c291f1d784dc661746e95804748f7df579870f35`,在 `origin/main` 与 PR #18638 head 上一致)。\n\n## 读数 —— 全部在本轮当场跑,⛔ 非转述\n\n| 读数 | 值 |\n|---|---|\n| `git clone --bare --shared /home/user/objectstack PROBE.git` | **exit 0** —— 它不报错 |\n| `PROBE.git/objects/info/alternates` | ⛔ **不存在**;`objects/info/` 整个目录是空的 ⇒ 这个 clone **什么都没共享** |\n| ⛔ 暗读数:`cat-file -t` 配方要你传的 BASE(`origin/main` = `d4cb05cbf0a`) | **exit 128**,`fatal: git cat-file: could not get object info` |\n| ⭐ 亮控(同一个 clone,同一条命令):clone 自己的 refs 够得着的 sha(本地 `main` = `47863f4fbe`) | **exit 0** → `commit` |\n| ⇒ 结论 | 对象不可达是**真的**,不是命令拼错 —— 亮控在同一个 clone 里解析成功 |\n| ⭐⭐ `merge-tree --write-tree --name-only d4cb05cbf0a 34a63b9d583` | **exit 1**,输出 `merge-tree: d4cb05cbf0a8… - not something we can merge` |\n\n## ⭐ 为什么这是陷阱而不只是缺陷\n\n`merge-tree` **真冲突时也是 exit 1**。所以照抄配方的席位拿到的是:非零退出 + 一句带 「merge」 字样的话。⇒ **一次缺失对象被读成一次冲突判决**,而被判「冲突」的那个 head 可能完全干净。本轮的实证:同一个 head `34a63b9d583`,在一个**显式写了 alternates** 的探针里跑同一条命令,`exit 0`,一行输出,合并树 `caf1af48bf63`。同一棵树,两个相反的答案,差别只在配方那一步。\n\n## 为什么会这样\n\n`git clone --bare --shared` 只复制 `refs/heads/**`。而席位的惯常做法是 `git fetch origin main` 而**不**快进本地 `main` —— 于是 `origin/main` 是一个 remote-tracking ref,clone 根本不带它,`--shared` 又没有写 alternates 兜底。⇒ **配方让你传的那个 base,恰恰是这个 clone 最够不着的那类 sha。** 这不是边角情况,是这条路径上的默认情况。\n\n## 可能的补救(⛔ 不替维护者选)\n\n1. clone 之后显式写一行 `objects/info/alternates` 指回源仓的 `objects`(本轮就是这么做的,`exit 0`);\n2. 改用 `git clone --bare --reference <源仓> …`;\n3. 或把配方改成「传一个该 clone 的 refs 够得着的 sha」,并加一句:`not something we can merge` **是缺失对象,⛔ 不是冲突**。\n\n⛔ 本卡不主张哪一条 —— 三条的代价没有同量纲量过,而 §11 是 governed 文本,改它的口径不是本席位的测量问题。⚠️ 无论选哪条,**「exit 1 + not something we can merge ≠ 冲突」这一句本身值得写进配方旁边**,因为它是把缺失对象和冲突判决分开的唯一可读信号。\n\n## ⛔ 本卡不主张\n\n- ⛔ 不主张 `merge-tree` 错了 —— 对象确实不在,它说的是实话;错的是配方喂给它的 base。\n- ⛔ 不主张 #15815 的结论被推翻 —— `merge-tree` 遵守 `merge=os-regen` 仍然成立,这正是要 driver-free 探针的原因。\n- ⛔ 未测:在**装过依赖**的 clone、或非本容器的环境里,`--shared` 是否会写 alternates。本卡的读数只覆盖本容器。\n\n## 重复检查 —— 方法陈述\n\n两次 MCP `search_issues`,同一索引。\n\n- 命中并已逐条读过标题的邻域卡:#15815、#15871、#14671、#18895、#18343、#17602、#15701、#16753、#4868、#5370、#8360 —— ⛔ 无一张说的是 alternates / 缺失对象 / 假冲突。\n- 逐词读数(两份结果合并):`alternates` **0**、`not something we can merge` **0**、`false conflict` **0**、`os-regen probe` **0**;`clone --bare` 1(即 §11 配方本身的引用)。\n- ⭐ 亮控(同两份结果):`merge-tree` **21**、`objectstack` **449**;暗控 `ZZQQNOPE` **0** ⇒ 上面那几个 0 是读数,不是死索引。\n\nDedupe words: `objects/info/alternates` · `clone --bare --shared` · `not something we can merge` · `os-regen probe false conflict` · `merge-tree missing object`\n\n## Refs\n\n`AGENTS.md:602-609` · `scripts/pm/os-regen-merge.sh:246-250`(blob `c291f1d784dc`) · #15815(配方的由来)· #15871(把它写进 §11 的 governed 轮)· PR #18638(本轮载体)"
+}

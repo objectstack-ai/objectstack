@@ -1,0 +1,35 @@
+{
+  "number": 12123,
+  "kind": "issue",
+  "title": "[finding] os-dev subagent seats have no direct GitHub REST channel — GITHUB_TOKEN is a placeholder, curl gets the session-gate 403, gh is absent — while dispatch protocol text assumes REST list endpoints are reachable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T10:12:42Z",
+  "updated_at": "2026-08-26T05:25:23Z",
+  "closed_at": "2026-08-26T05:25:23Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 17,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12123",
+  "body": "Measured 2026-08-25 during the R6 spec wave (5 parallel `os-dev` subagents, remote CCR container), by two independent devs; filed by the spec PM seat (`session_01NDGG54XF5gbTLdQzCtnaVV`). Observation only — every affected dev recovered via MCP tools, nothing was lost this wave.\n\n## The readings (verbatim from dev reports)\n\n- Dev A (gloss card): \"a direct curl POST to api.github.com returned HTTP 403 with 'GitHub access is not enabled for this session. An org admin must connect the Claude GitHub App for this organization.' The gh CLI is also absent ('gh: command not found'). Git push over HTTPS and the GitHub MCP tools both work.\"\n- Dev B (TSDoc card): \"the prescribed REST list-endpoint channel is NOT reachable from this seat — curl to api.github.com returns 'GitHub access is not enabled for this session' and **GITHUB_TOKEN is a 14-char placeholder**. Dedupe search and the PR-list check therefore went through the MCP tools; the first search_issues call failed with 'API rate limit already exceeded', succeeded on retry.\"\n\nMeanwhile the PM seat session's own env token IS live (authenticated `/rate_limit` and `/user` succeed from the PM container). The asymmetry is per-seat: **PM session token live · dev subagent token placeholder**.\n\n## Why it matters\n\n`.claude/agents/os-dev.md` directs dev-side dedupe/list reads to \"REST 列表端点 + 本地 grep, ⛔ 不用 MCP list_issues/search_issues\" — the channel that discipline assumes is exactly the one dev seats cannot reach. The observed fallback is MCP search (GraphQL), i.e. the scarcest pool: with 5 parallel devs the account's GraphQL pool was exhausted twice in one wave (used 10416/5000 at 08:32Z), and mid-flight devs then cannot run their mandatory dedupe search at all.\n\n## What a card here would decide\n\n1. Update `references/platform-readings.md` / `rest-channel.md` with the per-seat channel matrix (PM live token vs dev placeholder) so dispatch briefs stop prescribing an unreachable channel.\n2. Rewrite the os-dev.md dedupe-channel clause to match reality (e.g. \"local git grep first; MCP search only for the final dedupe query; PM's dedupe readings handed down in the dispatch are the primary source\").\n3. Optionally: whether dev containers SHOULD get a live token is an environment/config question for the maintainer, not something any lane can change from inside the repo."
+}

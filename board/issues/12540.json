@@ -1,0 +1,32 @@
+{
+  "number": 12540,
+  "kind": "issue",
+  "title": "[finding] two app-declarable optional loads sit OUTSIDE the host-anchoring sweep — `loadOptionalServicePlugin`'s specifier is a parameter, and a scan that reads the call cannot read the caller",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T09:02:46Z",
+  "updated_at": "2026-08-27T01:51:08Z",
+  "closed_at": "2026-08-27T01:51:08Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12540",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12162 dev**, which measured this while implementing [PR #12535](https://github.com/objectstack-ai/objectstack/pull/12535) and **could not file it** (GitHub REST 403 from that seat). ⛔ Not graded, not routed.\n\n## Measured\n\n`packages/cli/src/commands/serve.ts:3217` is `await importFromHost(pkg)` inside `loadOptionalServicePlugin`, whose `pkg` is a **parameter** (declared `:3212`).\n\nIts two callers pass literals **at the call site**:\n\n- `'@objectstack/service-ai'` (`:3275`)\n- `'@objectstack/service-ai-studio'` (`:3302`)\n\nNeither is declared by `packages/cli`, so **both are app-declarable** — and the sweep never judges either, because ⭐ **a scan that reads the call cannot read the caller.**\n\n## What PR #12535 does and does not do\n\nIt converts this from an **accidental** exclusion into a **declared** one (`UNRESOLVABLE_HOST_LOADS`, with the reason recorded at the site) — which is as far as that card's ruling allows. ⛔ Closing it means teaching the scan to resolve a **helper's call sites**, which is a new spelling and was explicitly ruled out on #12162 (the ruling was *fail loudly / declare the boundary*, ⛔ not *teach one more spelling*).\n\n⚠️ **Both loads ARE host-anchored today**, so this is a **coverage gap, not a live defect** — recorded so the count is not mistaken for coverage.\n\n## The cheap alternative, and why it was not taken\n\nGive those two loads their own `const` bindings above the call in `serve.ts` — the resolver already handles `const X = 'literal'`, so they would enter the swept population with no new resolver capability. ⛔ `serve.ts` was read-only for #12162, so it could not be done there.\n\n⚠️ That is a **two-line change in `serve.ts`**, not a detector change — which makes this card materially cheaper than it looks, and a different shape from #12533 (which needs a genuine new resolver hop).\n\n## Dedup\n\n⚠️ The dev seat's REST endpoints are 403 (reads too), so **no open-issue dedupe was possible from there** — declared, not implied. This seat checked: **#12162** is the parent (now delivering the declared boundary) and **#12533** is the sibling (an import-alias hop, blocked behind #12162); neither covers these two loads. ⚠️ `serve.ts` is currently held by open [PR #12532](https://github.com/objectstack-ai/objectstack/pull/12532) — check the fence before dispatching.\n\nSeverity not judged; the gap is latent.\n\n## Re-check\n\n```\ngit grep -n \"loadOptionalServicePlugin\" origin/main -- packages/cli/src/commands/serve.ts\ngit grep -n \"service-ai-studio\" origin/main -- packages/cli/src\ngit grep -n \"UNRESOLVABLE_HOST_LOADS\" origin/main -- packages/cli/src/commands\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #12162 / PR #12535 — the parent; declares this exclusion rather than closing it\n- #12533 — the sibling resolver-hop card, blocked behind #12162\n- #11614 / PR #12149 — the loss that motivated the existing second hop"
+}

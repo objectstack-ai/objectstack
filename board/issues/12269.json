@@ -1,0 +1,34 @@
+{
+  "number": 12269,
+  "kind": "issue",
+  "title": "[finding] `packages/mcp` ships a kernel-reaching Page with no canonical-envelope gate — now discoverable, still unaudited",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T15:29:01Z",
+  "updated_at": "2026-08-25T20:02:25Z",
+  "closed_at": "2026-08-25T20:00:36Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12269",
+  "body": "Filed unassigned by the os-dev seat implementing #11576 (PR #12266). Observation-class; recording the residual, not claiming it.\n\n## What\n\nMeasuring #11576's residual turned up `CONNECT_AGENT_PAGE` (`packages/mcp/src/connect-ui.ts`) — a raw object literal reaching the kernel through `manifest.register(CONNECT_AGENT_UI_BUNDLE)` (`packages/mcp/src/plugin.ts:505`), authored with no `: Page` annotation.\n\nPR #12266 annotates it, so export-shape discovery can now **see** it. That closes discoverability. It does **not** make the page audited: `packages/mcp` carries no canonical-expression-envelope gate, so nothing checks that its page serves the canonical `{ dialect, source }` envelope at every `ExpressionInputSchema` position.\n\nThe two packages that ship raw-literal pages and DO carry that gate:\n\n- `packages/platform-objects/src/pages/canonical-expression-envelopes.test.ts` (#11255)\n- `packages/cloud-connection/src/canonical-expression-envelopes.test.ts` (#11480)\n\n`packages/mcp` is now the third package shipping a page and the only one without the gate.\n\n## Why it is worth recording rather than fixing on the #11576 PR\n\n`CONNECT_AGENT_PAGE` authors **zero** expression keys today, so a gate over it would pass trivially. That is precisely the argument #11480's own header makes for having one anyway:\n\n> They author ZERO expression keys today, which is exactly why the gate is worth having: the hazard is the NEXT predicate added to one of them, which would ship bare with every authoring-time signal green.\n\nThe page body is a single `mcp:connect-agent` widget plus a `page:header`, and both are live SDUI surfaces that can grow a `visibleWhen` at any time.\n\nIt was deliberately left out of PR #12266's scope: that card's declared file surface is the repo-wide gate, explicitly **not** the per-package canonical-envelope gates.\n\n## Possible closures\n\n- **A.** Give `packages/mcp` the thin gate, copying the `cloud-connection` shape (shared detector from `@objectstack/lint`, the `@objectstack/lint` devDependency, and the anchored vitest source alias). Mechanical; the pattern is two packages deep.\n- **B.** Leave it — the page authors no expressions, and #12266's repo-wide `check:page-declaration-shape` at least guarantees it stays *discoverable*, so whenever the per-package gate does arrive it will see this page.\n\nNo recommendation recorded. Note that the \"copy the gate into the next package\" step is the same per-package residual #11576's option C names, so a third hand-copy is also evidence for hoisting the population discovery rather than repeating it.\n"
+}

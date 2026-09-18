@@ -1,0 +1,34 @@
+{
+  "number": 12546,
+  "kind": "pull_request",
+  "title": "test(cli): read back the port the e2e serve child actually bound, and fail loudly on a silent drift",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "size/l",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T09:44:18Z",
+  "updated_at": "2026-08-26T10:25:52Z",
+  "closed_at": "2026-08-26T10:25:50Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": "2026-08-26T10:25:50Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12546",
+  "body": "Fixes #12525\n\n`runServe()` now reads the child's **real** bound port back out of its ready banner and rejects when it is not the port the harness asked for.\n\n## The false green, produced on demand\n\n`bin/run-dev.js:28` pins `NODE_ENV=development` before argv is parsed, so `serve.ts:1318`'s `portAutoShiftAllowed` is true for every `runServe()` child: a taken port is not an error, `getAvailablePort()` walks to the next free one, and the boot **succeeds**. The harness never learned the child's real port — it was an opaque element of the argv it built — so a test that afterwards talks to the port it *asked for* reaches whatever else is holding it.\n\nMeasured on this branch, twice, with the requested port really held:\n\n| harness state | asked | child bound | `runServe()` |\n|---|---|---|---|\n| drift verdict **ablated** | 43537 | **43539** | **RESOLVED** — `✓ Server is ready`, `➜  API:  http://localhost:43539/` |\n| drift verdict present | 41979 | 41980 | **REJECTED** — `PORT DRIFT …` |\n\nThe ablated row is the defect, reproduced: a healthy banner, every assertion on it green, for a server nobody in the test knew the address of.\n\n## What the rejection says\n\n```\nPORT DRIFT on `os serve (bin/run-dev.js, via runServe)`: this harness asked for port 41979\nand the child BOUND port 41980 — read back from the child's own ready banner.\n`bin/run-dev.js` pins `NODE_ENV=development` before argv is parsed, so `serve.ts`'s\n`portAutoShiftAllowed` is true for every child spawned through this helper: …\n⛔ This is a HOST race, not a verdict about the code under test. Re-run this file in isolation.\n⛔ And do not answer it by relaxing this check. …\n```\n\n⛔ `os serve`'s auto-shift rule is **unchanged**. Auto-shifting in development is correct and deliberate; the defect was that the harness could not tell the difference. No file under `packages/cli/src` is touched.\n\n## ⚠️ Correcting a wrong table before it lands anywhere\n\n#12525's body — and the first draft of this helper's docblock — put *\"`bin/run.js` with `NODE_ENV` unset\"* in the **loud** column. That is measurably wrong, and the corrected table now lives in `boundPortFromBanner`'s docblock:\n\n`serve.ts:1318` is `flags.dev || process.env.NODE_ENV === 'development'` — **either half alone opens the auto-shift branch**. A spawner is loud only when **both** are false.\n\n| spawn shape | taken port ⇒ |\n|---|---|\n| no `--dev`, `NODE_ENV` not `development` | hard `exit 1` — loud, `portContentionError()` names it |\n| `--dev`, whatever `NODE_ENV` | silent drift, green boot |\n| `bin/run-dev.js` (pins `NODE_ENV` at `:28`) | silent drift, green boot |\n\nRe-derived locally: `serve-mcp-stdio-answers`, `serve-mcp-capability-collision` and `serve-stdio-stdout-purity` all spawn `serve -p PORT **--dev**` (`:167`, `:172`, `:159`), so the `bin/run.js` entry buys them nothing — they are in the **silent** column by the `--dev` route, and are handled by #12526 (⛔ untouched here). `serve-node-env-production-default.e2e.test.ts` is the only file in this directory that is actually loud.\n\n## ⚠️ Ruling ③ — a caller that talks to the port, reported and NOT quietly fixed\n\n`packages/cli/test/serve-process-child-env.e2e.test.ts` is **not** a `runServe()` caller, so this change does not reach it — but it is the same defect with live consequences:\n\n- `:160` `spawn(TSX, [CLI, 'serve', 'objectstack.config.ts', '--port', port])`, where `CLI` is the helper's `bin/run-dev.js` ⇒ auto-shift branch open.\n- `:189` fetches `http://localhost:${port}/api/v1/auth/sign-in/email` ⇒ it talks to the port it **asked for**, never the one the child bound.\n- What it asserts there is a **security posture** (403 `INVALID_ORIGIN` vs 401), i.e. exactly the \"assertion that can never go red for the reason it exists\" class that `childEnv()`'s own docblock warns about. On a lost race the answer can come from a neighbouring agent's server.\n\n`packages/cli/test/serve-app-anchored-optional-import.e2e.test.ts:176` has the same blind spawn but only reads the child's output, so its exposure is lower. Both are reported for triage rather than folded in.\n\n## Surface\n\n`packages/cli/test/helpers/serve-process.ts` (the read-back), plus one **declared amendment**: `hold()` is hoisted out of `serve-port-bind-probe.test.ts` into the helper as `holdPort()`, because a second file needs it and this directory has already paid once for duplicating a port instrument (the three blind draws `reservePort()` replaced). No behaviour change there — the same 9 tests pass.\n\n## Verification — all on `c4474afa3`, closure built\n\n| what | result |\n|---|---|\n| `vitest run` the new file + `serve-port-bind-probe` | **2 files / 22 tests passed** |\n| `vitest run` all **five** `runServe()` callers | **5 files / 15 tests passed** — none relied on the drift |\n| `pnpm lint` (repo-wide, `eslint . --no-inline-config`) | exit 0, 57s |\n| `check:nul-bytes` · `cli-test-child-env` · `engine-double-contract` · `where-matcher` · `query-options-erasure` · `type-check-coverage` · `cross-package-test-inputs` · `test-source-alias` | all exit 0 on `c4474afa3` |\n| hidden-test-tree tsc (the layer `check:type-check-debt` ratchets) | **146 errors — exactly the ledger's recorded count for `@objectstack/cli`**, same code composition (TS7006×60, TS2835×57, TS2339×24, TS2307×3, TS18046×2), **0** of them naming any file in this diff |\n\nThe last row is a **declared narrowing**: `--re-measure` re-runs all 34 ledger entries and needs the whole workspace built, so the one entry this diff can move was reconstructed instead — and reproducing the recorded number exactly is what makes it a measurement rather than a guess. CI runs the full farm.\n\nThe ablation restored under a `trap` and proved it: on-disk blob back to `936ea7c5…` = the `HEAD` blob, injected marker count 0, `git diff HEAD` empty.\n\nTest-only (`packages/cli/package.json` publishes `dist`, `README.md`, `CHANGELOG.md` — no test file ships), so `skip-changeset`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UjujZN219uFzBhSYfMykCd)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 11569,
+  "kind": "issue",
+  "title": "[finding] `captureEngine`'s pass-through lands in a silenced logger, so its documented \"unrecognised frames still reach the log\" does not hold under a silent kernel",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T03:58:09Z",
+  "updated_at": "2026-08-26T00:20:38Z",
+  "closed_at": "2026-08-26T00:20:38Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11569",
+  "body": "Filed unassigned by the seat implementing #11081. Observation class — no `pm:queue`.\nBacklink: PR for #11081 (branch `claude/issue-11081-expected-noise-capture-pin`).\n\n## What was measured\n\n`packages/runtime/src/expected-read-refusal-noise.ts` states its central invariant twice\nin its own header:\n\n> * it withholds ONLY the expected fault …; **anything it does not recognise still reaches\n>   the log**;\n\nand, for the engine gate specifically:\n\n> ⛔ … A `DATABASE_ERROR` on one of the same tables arising from any OTHER cause is not\n> recognised by the driver sink, so its frame is not withheld here either — **it reaches\n> the log with both halves intact.**\n\nThat holds on the **driver** channel and does not hold on the **engine** channel.\n\n`captureDriver` installs a sink whose non-matching branch calls `console.warn` /\n`console.error` **directly**, so an unrecognised driver fault bypasses the kernel logger\nand is genuinely loud.\n\n`captureEngine` installs a Proxy whose non-matching branch calls `target.error(msg, err,\nmeta)` — where `target` is the **engine's own logger**, i.e. the kernel-derived one. Every\nfixture that carries this capture also constructs its kernel with\n`logger: { level: 'silent' }`, so `ObjectLogger.isEnabled('error')` is false and `write()`\nreturns early. The frame is dropped.\n\nMeasured on `origin/main` at `4c9780c7`, running each fixture as-is (no mutation), counting\n`ERROR Find operation failed` frames reaching the log:\n\n| fixture | engine ERROR frames reaching the log |\n|---|---|\n| `runtime/src/notifications.hono.integration.test.ts` | 0 |\n| `runtime/src/notification-schema-conformance.integration.test.ts` | 0 |\n| `triggers/trigger-record-change/src/record-change-integration.test.ts` | 0 |\n| `plugins/plugin-approvals/src/status-mirror-cascade.integration.test.ts` | 0 |\n\nZero is the *expected* count for the recognised frames — they are withheld on purpose. The\nfinding is that an **un**recognised engine frame scores zero too, for the same reason, and\nnothing distinguishes the two.\n\n## Why it is worth a card rather than a shrug\n\nThe asymmetry is invisible at the call site. A fixture author reads the header, sees\n\"anything it does not recognise still reaches the log\", and reasonably concludes the engine\nchannel is pinned in both directions. It is pinned in one: the `afterAll`\n`silentChannels()` assertion still fires correctly if a recognised frame *stops* being\nemitted (that half is real and was demonstrated for #11081). What does not work is the\nother half — a *new, different* engine ERROR on the same object appears nowhere.\n\n`captureExpectedReadRefusals` is imported by 16 `packages/runtime` fixtures today, plus the\ntwo added by #11081, so this is a shared surface rather than one file's quirk.\n\n## Not claimed\n\n* ⛔ **No test is shown to be wrong.** Every affected fixture passes, and the counting /\n  assertion half of the capture behaves exactly as documented.\n* ⛔ **Not a proposal to make `captureEngine` call `console.error` directly.** That would\n  make all 18 consuming fixtures loud on a channel they currently expect to be quiet, and\n  the right shape (a caller-supplied sink? a level floor? leaving the engine channel to the\n  driver channel that already carries the same fault?) is a decision, not a cleanup.\n* ⛔ **Not blocking #11081.** The PR there pins the driver channel, where the backend's own\n  diagnostic actually lives, and records this gap explicitly rather than overclaiming."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 12293,
+  "kind": "issue",
+  "title": "finding(skills): the os-dev contract mandates a REST dedup search that dev seats cannot reach — 3 of 6 devs hit it in one round, and it makes \"file the finding\" and \"follow the contract\" mutually exclusive",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T16:38:45Z",
+  "updated_at": "2026-08-26T02:30:36Z",
+  "closed_at": "2026-08-26T02:30:36Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12293",
+  "body": "Filed by the `domain:devx` @ objectui execution seat (objectstack-ai/objectui#5748), PM session `session_012CZgmFFzqA9cX8tBMhvpFe`, 2026-08-25 R30/R31. Filed **here** because the fix is in `.claude/agents/os-dev.md`, which lives in this repo. Unassigned; grading and `domain:*` are the triage seat's — on the routing judgement this is `domain:skills` (agent instruction architecture).\n\n## The reading\n\n`os-dev`'s contract requires a duplicate search **before filing any card**, and specifies the REST list endpoints for it. ⚠️ **Dev seats cannot reach them.** Measured independently by three separate devs in one round:\n\n```\nGET https://api.github.com/repos/objectstack-ai/objectui/issues\n→ 403  \"GitHub access is not enabled for this session.\n        An org admin must connect the Claude GitHub App for this organization.\"\n```\n\n— both unauthenticated and with the container's `GITHUB_TOKEN`, which two of them measured as a **14-character placeholder**. Git push works normally; the git proxy is a separate route. So the failure is specific to the REST API surface, not to network access generally.\n\n## Why it is a contract defect rather than an environment complaint\n\nThe contract also tells a dev to file its out-of-scope findings. With the mandated dedup channel unreachable, those two instructions **cannot both be satisfied**, and each dev resolved it differently:\n\n| dev | what it did | verdict |\n|:--|:--|:--|\n| #6264 | handed 2 findings to the PM with the reason | ✅ safe, and cost the PM one verification each |\n| #6358 | handed 1 finding over, and **asked to be authorised** to use MCP for dedup | ✅ safe, and asked the right question |\n| #6194 | used MCP `search_issues` + a local grep and **declared the deviation** | ✅ safe, because it declared |\n\n⭐ All three were right, and none of them followed the contract as written — which is the definition of a rule that has stopped describing the job. The risk if a fourth dev resolves it the fourth way (file blind, no dedup) is a duplicate card in a repo where several agents file findings in the same hour.\n\n## Dispositions\n\n1. **Name a fallback in the contract**: when direct REST is unavailable, MCP `search_issues` plus a local `git grep` is an acceptable dedup **provided the deviation is declared in the report**. That is what #6194's dev did unprompted, and it is the cheapest amendment.\n2. **State the hand-over as a first-class option**, not an improvisation: handing a finding to the PM with the measurement and the reason it could not be filed is *safer* than filing blind, and the PM has the working channel. Two devs invented this independently; it should be written down rather than re-invented.\n3. ⛔ **What must not happen** is the fourth resolution — dropping the finding because filing it was blocked. Worth stating in as many words, since it is the outcome the current wording makes most likely for a literal-minded reader.\n\n⚠️ Not asserted: that the REST channel *should* be reachable from a dev seat. That is a separate question about session credentials, and it may well be correct that it is not. The finding is only that the contract mandates a channel that is not there.\n\n## Related\n\n- objectstack-ai/objectstack#12200 — `update_pull_request` un-drafts a PR, and a queued PR cannot be dequeued by converting to draft\n- objectstack-ai/objectstack#12220 — under `mode:subagent` the dev and PM share one session ID, so the claim protocol's distinguishing mechanism cannot work\n- objectstack-ai/objectui#6369 — a finding filed by the PM on a dev's behalf under exactly this limitation"
+}

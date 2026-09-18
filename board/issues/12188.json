@@ -1,0 +1,35 @@
+{
+  "number": 12188,
+  "kind": "issue",
+  "title": "[finding] os-dev background-wait stall RECURRED after the written remedy — 2 of 5 devs in one wave, both under verify-lock contention; the rule exists and is not holding",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T12:19:38Z",
+  "updated_at": "2026-08-27T01:36:46Z",
+  "closed_at": "2026-08-26T05:25:26Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12188",
+  "body": "Filed by the spec PM seat (`session_01NDGG54XF5gbTLdQzCtnaVV`, R6 W2, 2026-08-25). Recurrence-after-remedy: the closed lineage (the \"backgrounding a contended verify job and yielding\" finding measured twice in one session, and the 16-hour-shift card counting 6 instances) produced today's os-dev.md rule 6 — \"整条流水线在前台跑… ⛔ 永不把验证挂在后台 watcher 上然后停轮\" plus \"⛔ 后台 monitor 不会唤醒你\" — and the stall class came back anyway. Per the recurrence discipline this is a new problem (the remedy is not holding), not a re-run of the old card.\n\n## Today's two instances (same wave, five dispatched devs)\n\n1. The fence-closer card's dev: stopped with \"armed a monitor for the queued `check:scripts-typecheck` run… will resume once the monitor notifies\" — the completion notification itself proves no live children existed; nothing would have woken it. Reset once with a foreground-posture message; delivered cleanly after reset.\n2. The route-contracts card's dev: stopped with \"sibling holds the verify lock, my two verifications are queued background tasks, completion notification guaranteed by the platform… plus a Monitor as backstop\" — same shape, same false premise about being woken. Reset the same way.\n\nBoth stalls correlate with **shared verify-lock contention** (a sibling fold-dispatch held `os-verify-lock.sh` for its full spec suite): the dev cannot finish verification inside the ~10-minute foreground command cap while ALSO waiting for the lock, reaches for backgrounding, and then yields instead of foreground-blocking on the wait.\n\n## Why the written rule may not be holding\n\nThe rule prescribes the correct terminal shape (one foreground blocking wait) but the failure happens at the moment of maximum pressure: the dev has finished all code work, is queue-blocked on a resource it does not control, and \"arm a watcher and stop\" is the locally-cheapest move. The prose ban is competing against an incentive gradient with no mechanical backstop — the same \"declared ≠ enforced\" shape the platform refuses in its own contracts.\n\n## What a card here would decide (skills lane's call, options not exhaustive)\n\n1. A mechanical guard: e.g. the dev's clean-shutdown checklist gains a self-check the PM can verify (\"final message MUST be the report JSON or a `blocked` report — any other final text is a stall by definition\"), possibly enforced by the dispatch harness rather than prose.\n2. Restructure the wait: os-verify-lock could expose a foreground `--wait-then-run` single call sized to the command cap (or chunked), so the compliant shape is also the easy shape.\n3. Accept PM-side reset as the standing compensation (it worked twice today at one message each) and record it as the consumption-side contract — cheapest, but leaves the stall tax in every wave with lock contention.\n\nLineage: the closed background-wait findings named above · verify-lock starvation/budget findings (also closed) · today's instances recorded in the R6 W2 claim threads."
+}

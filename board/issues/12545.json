@@ -1,0 +1,36 @@
+{
+  "number": 12545,
+  "kind": "issue",
+  "title": "[finding] `callbackSiteName()` still reports `(top-level)` for `it.skip` / `it.only` / `it.each` — the modifier family needs a targeted unwrap, and a blanket widening would be worse",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T09:41:42Z",
+  "updated_at": "2026-08-26T18:25:53Z",
+  "closed_at": "2026-08-26T18:25:53Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12545",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12531 dev**, which measured this while implementing [PR #12544](https://github.com/objectstack-ai/objectstack/pull/12544). ⛔ Not graded, not routed.\n\n## Measured\n\n`scripts/check-cli-test-child-env.mjs`'s new `callbackSiteName()` (introduced by PR #12544) names a site after a **bare-identifier** callee plus its first string literal. Its docblock states that limit, and the self-test **pins** it:\n\n> *\"an `it.skip()` callee is a property access, not an identifier, so it still reads `(top-level)`\"*\n\n⇒ the site key is still `(top-level)` for `it.skip('x', fn)`, `it.only`, `it.each(table)('x', fn)`, `describe.each(…)`.\n\n**24 such spellings exist today** under `packages/cli/test/**` (`grep -E` on `it|test|describe` followed by `.skip|.only|.each|.todo|.concurrent|.sequential|.fails`), **none of them currently at a bulk-copy or env-less site**.\n\n⇒ ⭐ **latent in exactly the way the parent card's own defect was latent** — it is the *next* deliberate entry's problem, if that entry lands in an `it.each` block.\n\n## ⛔ Why a blanket widening is the wrong fix\n\nWidening `callbackSiteName()` to accept **property-access callees** in general would also capture `promise.then(cb)` and `rows.map(cb)` — ⭐ **whose callee is a WORSE site name than the enclosing test block the walk reaches today.** A general fix makes some sites less identifiable, not more.\n\n⇒ the correct closure is a **targeted unwrap of the vitest modifier/table family**: `it` / `test` / `describe` followed by a modifier, plus the curried `it.each(table)(…)` shape. That is a design choice with a decision in it, which is why it is a card rather than a rider on #12531.\n\n## ⚠️ Fence\n\n`scripts/check-cli-test-child-env.mjs` is held by open [PR #12544](https://github.com/objectstack-ai/objectstack/pull/12544) until it merges, and **#11464 is already serialised behind that PR** on the same file. ⇒ this is **third** in that queue. ⛔ Do not dispatch it alongside either.\n\n## Dedup\n\n⚠️ The dev seat's REST list endpoints are 403 (reads too), so its dedupe was local. This seat checked: #11341 is the gate's parent (rule 1 + the DELIBERATE registry), #11595 / PR #12530 added rule 2, #12531 / PR #12544 introduced the helper this refines, #11464 is the queued sibling. No open card covers callee unwrapping.\n\nSeverity not judged; latent.\n\n## Re-check\n\n```\ngit grep -n \"callbackSiteName\" origin/main -- scripts/check-cli-test-child-env.mjs\ngit grep -cE \"(it|test|describe)\\.(skip|only|each|todo|concurrent|sequential|fails)\" origin/main -- 'packages/cli/test/**'\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #12531 / PR #12544 — introduced `callbackSiteName()` and pinned this limit deliberately\n- #11341 — the gate, rule 1 and the DELIBERATE registry whose keying this affects\n- #11464 — serialised ahead of this on the same file"
+}

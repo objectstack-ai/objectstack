@@ -1,0 +1,37 @@
+{
+  "number": 12255,
+  "kind": "issue",
+  "title": "[finding] docs site: apps/docs/app/page.tsx is a shadowed route — the proxy rewrites / to /en, so it never runs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T15:13:53Z",
+  "updated_at": "2026-08-25T20:42:29Z",
+  "closed_at": "2026-08-25T20:42:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12255",
+  "body": "## One-liner\n\n`apps/docs/app/page.tsx` is a shadowed route. It redirects to `/docs`, but the runtime\nnever runs it: `proxy.ts` rewrites `/` to `/en`, so the homepage is always served by\n`app/[lang]/page.tsx`. `grep` finds a root page that says \"the root redirects to the\ndocs\"; the site does not do that.\n\nObservation class (dead code), not a user-visible bug. Filed unassigned for triage.\n\n## Measured — 2026-08-25, production build of `apps/docs` served with `next start`\n\n```\n$ curl -s -o /dev/null -w \"%{http_code} %{content_type}\\n\" http://localhost:38413/\n200 text/html; charset=utf-8\n```\n\nA 200 with the homepage. If `app/page.tsx` ran, this would be a 307 to `/docs`.\n\nBoth routes are built — the route table from the same `next build` lists them side by\nside:\n\n```\n┌ ○ /\n├   /[lang]\n│ └ ● /en\n```\n\nMechanism: `proxy.ts`'s matcher is\n`'/((?!api|_next/static|_next/image|favicon.ico|.*\\\\..*).*)'`. For `/` the capture group\nis the empty string, the dotted-path lookahead does not fire, so the proxy matches and\nrewrites `/` to `/en` — `app/[lang]/page.tsx`, the real homepage. Nothing reaches\n`app/page.tsx`.\n\n## Why it is worth recording\n\nAGENTS.md \"Route & surface ownership\" rule 1 names exactly this shape: a shadowed\nduplicate is \"code that `grep` finds and the runtime never runs — the exact input that\nmakes an agent (or a human) reason confidently from dead code\".\n\nConcretely: the docs-site indexability epic #12243 has cards that add `metadataBase`,\ncanonical links and JSON-LD to the homepage (#12234, #12240). An agent that puts the\nhomepage's canonical link in `app/page.tsx` will ship a green PR that changes nothing\nserved.\n\n## Options for whoever picks this up\n\n1. **Delete `app/page.tsx`** — the proxy owns `/`. Simplest, and makes the ownership\n   obvious. Check first that Next still builds with no root `page.tsx` (there is a\n   root `app/layout.tsx`).\n2. **Keep it and say so** — if it is a deliberate no-proxy fallback (a deployment where\n   middleware does not run), the file should carry a comment saying that, since its\n   current comment (\"Middleware should handle locale routing\") reads as if the file were\n   live.\n\nEither way the fix is one file. Do not change the proxy matcher as part of this — that\nmatcher is load-bearing for #12233 and belongs to that card.\n\n## Source\n\nNoticed while implementing #12232 (robots.txt / sitemap.xml) against `apps/docs`;\noutside that card's file surface, so recorded rather than fixed.\n"
+}

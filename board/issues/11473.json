@@ -1,0 +1,35 @@
+{
+  "number": 11473,
+  "kind": "issue",
+  "title": "The environment-scoped `/meta` mount is a second, entirely unpinned copy of every metadata write door",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T21:11:16Z",
+  "updated_at": "2026-08-26T04:31:50Z",
+  "closed_at": "2026-08-26T04:31:50Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11473",
+  "body": "Observation recorded while measuring #11373 (server-side half of objectstack-ai/objectui#5828). Not a live defect on a default deployment — filed so it is not rediscovered from scratch. Duplicate-checked this session: no open card on scoped-`/meta` anonymous coverage.\n\n## What was measured\n\n`RestServer.registerRoutes` calls `registerForBase(...)` **once per base**: the unscoped `/api/v1`, and — when `api.enableProjectScoping` is true with `projectResolution` `optional` / `auto` — also `/api/v1/environments/:environmentId`. `registerMetadataEndpoints` runs for each, so a scoping deployment mounts **two** copies of all six metadata write doors.\n\nStructurally both copies inherit the same umbrella gate: the guarded registrar wraps whatever `registerMetadataEndpointsInner` registers, and that body runs for both bases. So this is a **coverage** observation, not a measured hole.\n\nProbed on the booted showcase (`bootStack(showcaseStack)`, platform default), 2026-08-23:\n\n```\n--- scoped mount: anonymous PUT /environments/default/meta/object/anon_probe_obj ---\n  -> 404 {\"success\":false,\"error\":{\"code\":\"ENDPOINT_NOT_FOUND\",\"message\":\"Not found\"}}\n```\n\n`enableProjectScoping` defaults to `false` (`rest-server.ts`, `api.enableProjectScoping ?? false`), so the scoped mount does not exist on a default boot. The scoped copy is therefore **latent, not live** — nothing anonymous can reach it unless a deployment opts in.\n\n## Why it is worth a card anyway\n\nNothing anywhere exercises the scoped copy's refusal, and the one artifact that looks like it would does not:\n\n- `packages/rest/src/meta-write-door-capability-enumeration.test.ts` is the repo's anti-drift assertion for \"the metadata write doors are a CLOSED, enumerated set\". It derives the door list from the composed server's own route table — but filters `r.path.startsWith('/api/v1/meta')`. A scoped door's path starts `/api/v1/environments/:environmentId/meta/...` and would not match. The test boots without project scoping, so its filter is complete *for that boot* and the gap is invisible from inside it.\n- `packages/qa/dogfood/test/showcase-anonymous-deny-surfaces.dogfood.test.ts` (extended by #11373 to drive the six write doors as real HTTP) boots the same non-scoping default, so it covers the unscoped mount only.\n\nThe shape to avoid is the one #11373 itself found on the unscoped mount: a refusal that is real but pinned in a layer that cannot see whether the composed app routes a real request into it. Here it is one step further out — a whole mount that no boot in the suite brings up.\n\n## Possible resolutions (for triage, not a recommendation)\n\n1. Boot one fixture with `enableProjectScoping: true` and run the same anonymous write-door sweep against the scoped base.\n2. Or make the #8919 enumeration base-agnostic (match on the `/meta/` segment rather than a `/api/v1/meta` prefix) and boot it with scoping on, so a scoped-only door cannot arrive unenumerated.\n\nWhether this is worth a fixture at all is a scope-discipline judgement: it protects a configuration the framework ships as off-by-default, and no evidence was gathered here about whether any real deployment turns it on.\n\n## Refs\n\n- #11373 — the measurement that surfaced this (PR #11472)\n- objectstack-ai/objectui#5828 — the client-side observation upstream of it\n"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 12448,
+  "kind": "issue",
+  "title": "[finding] 11 `pm:blocked` cards name a blocker that is already CLOSED — the unlock scan has not returned them to the queue",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T03:31:34Z",
+  "updated_at": "2026-08-26T03:58:40Z",
+  "closed_at": "2026-08-26T03:57:13Z",
+  "closed_by": {
+    "login": "os-trump",
+    "id": 320910073,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12448",
+  "body": "Filed unassigned, recording only — ⛔ no grading, and ⛔ this seat did not touch any of the cards below: none is `domain:skills`. Measured 2026-08-26 03:2x–03:3xZ by the skills seat (session `session_01RMTpSRF5CjMmQBFfPtPCwJ`) on a maintainer's ask to sweep the blocked population.\n\n## Method (so the numbers are re-derivable)\n\n`list_issues` over `objectstack` for `pm:blocked` open (68 cards, bodies arrive in the same response), plus the full open-issue id set (348, four cursor pages) as the resolver. A card's blocker is CLOSED iff its id is absent from that set. Every `Blocked-by:` value was read with the line-anchored form the unlock scan itself greps.\n\n⚠️ **Instrument validated before any zero was believed**: of the 68, **25 carry a body-anchored `Blocked-by:`** and 2 more mention it unanchored (prose — deliberately not a marker, per the state model), so the anchor demonstrably fires. \n\n## The finding — 11 cards whose blockers are ALL closed\n\n| card | lane | `Blocked-by:` | blocker state |\n|---|---|---|---|\n| #9592 | devx | #11501 | CLOSED |\n| #11042 | devx | #11930 | CLOSED |\n| #11330 | spec | #10812 | CLOSED |\n| #11331 | spec | #10812 | CLOSED |\n| #11332 | spec | #10812 | CLOSED |\n| #11333 | spec | #10812 | CLOSED |\n| #11459 | spec | #11195 | CLOSED |\n| #11520 | services | #11518 | CLOSED |\n| #11969 | *(no `domain:*`)* | #10348 | CLOSED |\n| #12028 | cli | #11997 | CLOSED |\n| #12057 | spec | #12049 | CLOSED |\n\nTwo further cards are **partially** unblocked and correctly still parked — #11970 (`#10348` closed, `#11965` open) and #11971 (`#10348` closed, `#11968` open); they are listed so the count is legible, not as findings.\n\n17 body-anchored pairs point at blockers that are genuinely still open — the healthy majority. One is cross-repo and unjudged this round: #12039 → `objectstack-ai/objectui#6302`.\n\n⛔ **The remaining 41 cards are UNJUDGED, not orphaned.** They carry no `Blocked-by:` in the BODY, but `h4BlockedNoBlockedBy`'s own text says a line parked in a COMMENT discharges the duty (\"seats park the line in a comment on purpose, because rewriting a body through the MCP escaping hazard (#8813) is the riskier write\"), and sampling confirms it live: #11617 carries `Blocked-by: objectstack-ai/objectstack#11624` in a triage-seat comment written 2026-08-25T19:59Z, with two verified reasons. Judging that bucket needs 41 thread reads and was not done here. An unreadable channel is not an absent one (#4690).\n\n## Not diagnosed here, but worth the next reader's first question\n\nThe half-state patrol is **report-only by construction** — it never writes a label. The write that returns a card to the queue is the triage Routine's unlock scan. `trig_01JfMEQ8ez7qFRWN46jr9JXk` (`pm trage`) was measured stalled at `next_run_at` 2026-08-25T06:09Z earlier the same day (#12099), and agents cannot re-arm it (created via `http_api`; creator-only). Whether these 11 are a direct consequence of that stall, or were already parked before it, is not established by this measurement — the cards' transition timestamps would settle it.\n\n## Scope\n\n`objectui` carries **44** open `pm:blocked` cards; they were counted but not judged (bodies were not fetched). `cloud` and `objectos` were not swept this round."
+}

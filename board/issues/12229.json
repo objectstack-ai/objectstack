@@ -1,0 +1,35 @@
+{
+  "number": 12229,
+  "kind": "issue",
+  "title": "[finding] Dev agents conclude \"no browser available\" after `playwright install` 403s — Chromium is pre-installed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T14:46:14Z",
+  "updated_at": "2026-08-26T05:25:24Z",
+  "closed_at": "2026-08-26T05:25:24Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12229",
+  "body": "## What happened\n\nA dev agent on a homepage layout card reported two acceptance criteria as **unverified**, with this reasoning in its PR body:\n\n> This container has no browser and cannot obtain one: no Chrome/Chromium/Firefox binary is installed, and `playwright install chromium` is refused by the egress policy —\n> `403 'request blocked: no rule or allowlist entry allows host \"cdn.playwright.dev\"'`\n\nThe 403 is real. The conclusion is false. Verified from the same container:\n\n```\nPLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers\n/opt/pw-browsers/chromium -> /opt/pw-browsers/chromium-1194/chrome-linux/chrome\n/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell\n```\n\nChromium is pre-installed and `PLAYWRIGHT_BROWSERS_PATH` already points at it. The environment brief also states outright that `playwright install` must **not** be run — so the agent's first move was the one action guaranteed to fail, and the resulting denial was read as proof of absence.\n\n## Why this is worth preventing rather than absorbing\n\nThe failure is well-shaped to recur and expensive when it does:\n\n- **The 403 is genuinely persuasive.** It is a real policy denial, correctly reported rather than routed around, which is the right instinct applied to the wrong premise. An agent doing everything else correctly still lands here.\n- **It is silent in the good direction.** The report was honest — \"unverified, not passing, not failing\" — so nothing looks broken. The cost is invisible unless a reviewer independently checks whether a browser exists.\n- **It will recur on every visual card.** `objectstack-ai/www.objectos.ai` AGENTS.md *requires* in-app browser verification for visual and content changes, so every such card in that lane meets this wall.\n- **It hits precisely the checks nothing else covers.** On the card that surfaced this, the two unverified criteria were \"video above the fold\" and \"no horizontal overflow at mobile width\" — exactly the class of defect that static gates, type checks and build output cannot see. Losing browser verification loses the only check that was going to catch them.\n\n## Suggested fix\n\nOne line, in whichever of these the owning seat judges correct — the agent role file is the likely home, since it is where unconditional per-run facts belong:\n\n> Chromium is pre-installed at `/opt/pw-browsers/chromium` and `PLAYWRIGHT_BROWSERS_PATH` is set. **Never run `playwright install`** — it is blocked by egress policy, and a 403 from `cdn.playwright.dev` is not evidence that no browser exists. Launch with `executablePath: '/opt/pw-browsers/chromium'`.\n\nThe generalizable half is worth stating too, and may belong in the platform-readings fact table rather than the role file: **a blocked download is not proof of absence.** Check for the artifact before concluding it cannot be obtained — the same shape as the existing rule that a zero grep result does not stand without a control probe.\n\n## Provenance\n\nFound by the `repo:www.objectos.ai` seat (objectstack-ai/objectstack#12224) while reviewing PR `objectstack-ai/www.objectos.ai#96`. The dev was sent the correct path in a patch round rather than being asked to redo the work; this card is about stopping the next agent from paying the same cost.\n\nFiled unassigned with no `domain:*` — routing and grading belong to the triage seat. Likely landing surface is `.claude/agents/os-dev.md`, or the pm-dispatch platform-readings reference."
+}

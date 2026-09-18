@@ -1,0 +1,35 @@
+{
+  "number": 12024,
+  "kind": "issue",
+  "title": "AGENTS.md: make \"push a WIP commit before any minutes-long step\" an ordering rule — the one lesson from the 2026-08-25 restart that is not already covered",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T05:29:35Z",
+  "updated_at": "2026-08-26T02:44:38Z",
+  "closed_at": "2026-08-26T02:44:38Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12024",
+  "body": "Filed unassigned, recording only.\n\nA container restart on 2026-08-25 killed five in-flight `os-dev` agents. Four of tonight's five lessons turned out to be **instances of rules the repo already has**, and are recorded as findings rather than as new doctrine. This card is the one that is genuinely missing.\n\n## The gap, measured\n\n`AGENTS.md` carries **no** rule about committing before a long-running step. Verified with a working control:\n\n```\ngrep -niE 'commit before|before you wait|wip commit|push.*before' AGENTS.md   → 0 hits\ngrep -ncE 'git stash' AGENTS.md                                              → 2 hits   (control: the grep works)\n```\n\nThe nearest thing that exists is #11463, whose framing is **parking**: an agent that decides to wait should commit first. The restart showed that framing is too narrow — the rule has nothing to do with parking.\n\n## What the restart measured\n\n| card | ran for | committed? | outcome |\n|:--|:--|:--|:--|\n| #11694 | ~14 min | no | branch pushed **empty** (0 commits ahead), worktree clean — total loss |\n| #11942 | ~14 min | no | branch pushed **empty**, worktree clean — total loss |\n| **#11525** | **hours** | **no** | ⭐ **2081 lines uncommitted** — a 1194-line gate, an 864-line baseline, `lint.yml` +22, `package.json` +1 |\n| #9165 step 2 | hours | no | scratch instruments survived on disk; the analysis died with the context |\n| #9298 | hours | n/a | worktree clean, nothing to recover |\n\nOnly luck saved #11525: the worktrees outlived the processes, so a rescue dispatch could commit and push the work (`f7e038cda`). This environment documents that it reclaims the filesystem — so that luck is not repeatable.\n\n## ⭐ Why the current phrasing cannot reach the agents that need it\n\n**The cost of not committing is inversely related to how well the agent is behaving.** An agent that finishes fast commits soon and risks little. An agent deep in a hard card — measuring, ablating, re-deriving — defers committing *because it is not done yet*, and so accumulates the largest uncommitted surface exactly where the work is most expensive to reproduce. #11694 and #11942 lost 14 minutes each. #11525 lost hours **because it was doing the card properly**.\n\nSo the population that most needs the rule is the population least likely to be reached by it: \"commit before you wait\" does not fire for an agent that is not waiting — it is working.\n\n## The proposed rule\n\nChange the trigger from *\"before you wait\"* to *\"before anything that is not the next edit\"* — before a build, a full test run, a gate sweep, an ablation, any step measured in minutes.\n\n> **Push a WIP commit before every step that takes minutes — a build, a full test run, a gate sweep. Not because you are about to wait: because you are about to stop being the only copy.**\n\n#11463 already establishes that *ordering* rules are the instructable kind (*do-not-end-the-turn* survived three escalating strengths; *commit-before-you-wait* did not need to). Tonight's rescue is a second confirmation: told **\"commit and push before reading anything else,\"** the agent did exactly that, and 2081 lines were safe on `origin` before it began verifying anything.\n\n## ⚠️ The cost, measured — this needs paying for, not just writing\n\n`AGENTS.md` is **1149 lines against a ceiling of 1149 — headroom 0**, and `scripts/pm/check-skill-line-ratchet.mjs` is shrink-only: raising a ceiling *\"requires a maintainer ruling quoted in the raising PR's body\"* and wants *\"its own card\"*.\n\nSo this is not a one-line edit. Two routes, and the first is preferred:\n\n1. **Pay by in-place compression** — the established idiom in this repo (see PR #11987, *\"…paid by in-place compression\"*). Preferred: it keeps the ratchet honest and needs no ruling.\n2. If compression cannot pay for it, this needs a ceiling ruling and should be re-labelled `needs-user-decision` rather than raising the ceiling quietly.\n\n⚠️ Note that #11910 is an **open, unresolved decision about this same ceiling family**. Whoever takes this card should read it first — the two may want deciding together rather than separately.\n\n## Deliberately NOT filed as cards — already covered\n\nRecording these so nobody re-files them as new doctrine. Each is a **worked example of a rule the repo already has**, and paying compression to restate an existing rule is negative value:\n\n- Guessed script paths were wrong twice (`scripts/ci-failure.mjs`, `scripts/affected-docs.mjs`; real: `scripts/pm/`, `scripts/docs-audit/`). `dispatch-gates.mjs` printing *\"absent from this tree\"* is the tell. → instance of **a zero needs a positive control**.\n- A code-block extraction by name pattern returned **0 lines on both sides**, so a byte-comparison reported \"identical\" while measuring nothing. → same rule.\n- `list_issues` treats `labels` as OR, not AND → already #11559.\n- GraphQL-backed MCP writes are quota-blocked while REST writes succeed → already #11742, with tonight's reproduction posted there.\n\n## Related\n\n- #11463 — the parking finding this generalises (full analysis in its latest comment).\n- #11987 — the compression idiom.\n- #11910 — the open ceiling decision in the same family."
+}

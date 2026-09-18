@@ -1,0 +1,34 @@
+{
+  "number": 11520,
+  "kind": "issue",
+  "title": "The DERIVED half of `bootstrapSystemCapabilities` is still per-item, and batching it is a ruling, not a refactor — it trades away #8751's `platformStampedInOrg` signal or reverses part of #8552",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T02:15:13Z",
+  "updated_at": "2026-08-26T10:49:37Z",
+  "closed_at": "2026-08-26T10:06:56Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11520",
+  "body": "The residue of #11451. That card batched the CURATED half (one `$in` carrying the #8470 predicate) and equality-gated the reconcile for both halves. The derived half's **existence read** is untouched, and this is the write-up of why, so the next attempt starts from the analysis rather than repeating it.\n\n## What the derived half's read actually is\n\n`packages/plugins/plugin-security/src/bootstrap-system-capabilities.ts`:\n\n```ts\nrow = (await tryFind(ql, 'sys_capability', { name: def.name }, 1))[0];\n```\n\nUnscoped and cross-organization by construction (`SYSTEM_CTX` carries no `tenantId`), so under #4363's `ORDER BY id ASC` tie-breaker this is **the lowest-`id` row for the name, installation-wide**. Call it `X`. Everything the half then does is a function of `X`:\n\n- `derivedRowIsOurs = X.managed_by === 'platform' && X.organization_id == null` (#8751);\n- `skippedAuthored` counts the passes where `X` is not ours;\n- `platformStampedInOrg` counts the subset where `X` wears the platform stamp while sitting inside an organization;\n- only on that branch is the NULL-organization bucket read at all, and only then can `unseededDerived` and its warning fire.\n\n## Why it cannot simply be batched\n\n**Unnarrowed** — `{ name: { $in: … } }` — the result set is one row per organization per name, bounded only by the number of organizations, against a page capped at one row per name. It truncates, and a truncated page reads as \"absent\", which inserts. (That cap is a defect in its own right for the callers already using it: #11518.)\n\n**Narrowed to the platform bucket** — `{ name: { $in: … }, organization_id: null }` — is bounded and cheap, and answers a **different question**. Let `B` be the bucket occupant (at most one, by the declared key `(COALESCE(organization_id, '__global__'), name)`). `B` and `X` differ whenever an organization's row has a lower `id`, and the two divergences both land on ruled ground:\n\n1. **`B` is ours, `X` is an organization's row.** Today: skip branch — `skippedAuthored++`, `platformStampedInOrg++` if `X` carries the platform stamp, then a bucket read sees our placeholder and `continue`s. Under a bucket-scoped read: the update branch. The `UPDATE` itself is now a no-op (the placeholder already holds `humanize(name)`, and #11451 gated the write on inequality) — so the whole observable difference is that **#8751's anomaly signal stops firing whenever our own bucket row also exists**, which is precisely the case its doc says it is counted for: \"counted even when the platform bucket IS properly occupied and nothing is missing\".\n2. **The bucket is FREE and an organization holds the name.** Today the seeder declines to seed and says so, quoting the ruling in its own remediation text: \"the platform bucket is left empty deliberately, and adopting or backfilling it was rejected in #8552.\" A bucket-scoped read reads `absent` and **inserts**. That is the #8552 ruling reversed by a read shape.\n\nBoth are pinned: `bootstrap-system-capabilities.test.ts` asserts `platformStampedInOrg` at the fixture for (1), and the #8552 posture at the fixture for (2).\n\n## The options, so they are not re-derived\n\n1. **Truncation-detecting batched read** (see #11518): read `{ name: { $in: … } }` with a generous cap; if the page comes back full, treat it as \"could not answer\" and degrade to per-item, reusing the machinery `readNamePage` already has for a driver without `$in`. Bounded, behaviour-preserving — a complete page holds every row for every name in the chunk, so the first row per name IS `X`. Costs new machinery in a file four callers now share, and overlaps #11518.\n2. **Bucket-scoped batched read**, accepting the two divergences above. Cheapest; needs a maintainer ruling on both, because each undoes a decision that was made explicitly.\n3. **Leave it.** Note the derived set is EMPTY on a stock installation — the platform's own permission sets grant only names already in `KNOWN_CAPABILITIES`, and package-declared names are excluded via `materializedCapabilityNames`. It grows only for an app whose `defaultPermissionSets` grant capability strings that nothing declares.\n\nRecommendation: **1**, folded into #11518 rather than done twice, and only if #11518 is being repaired anyway. Option 3 is defensible on its own until an installation is measured paying for it — the growth axis is real but the stock cost is zero, and options 1 and 2 both spend a shared file's complexity or a ruling to buy it.\n\n## Not measured\n\nThe slope of this axis has never been measured. The hosted `bootstrap-curve.mjs` rig lives in `objectstack-ai/cloud` and its axes are permission sets / positions / objects. What is established in-repo is the round-trip count, pinned in `bootstrap-seed-round-trips.test.ts` — where the derived half's residue is stated as `1 + derived` reads rather than hidden.\n\nRefs #11451 (parent) · #11518 (the page cap) · #8470 · #8751 · #8552 · #5876 · #10946 · #11096\n\nBlocked-by: #11518\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

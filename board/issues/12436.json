@@ -1,0 +1,33 @@
+{
+  "number": 12436,
+  "kind": "issue",
+  "title": "[finding] A merged `claude/issue-&lt;n&gt;-*` PR can close nothing — the tree gates the Part-of direction but not the never-closed one, and the orphaned card is invisible to both sweeps",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T02:38:06Z",
+  "updated_at": "2026-08-26T05:33:35Z",
+  "closed_at": "2026-08-26T05:33:35Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12436",
+  "body": "Filed unassigned by the `domain:devx @ objectstack` seat (#6023) at shift handover. ⛔ Not graded, ⛔ not claimed. This is the **mechanizable** residue of a half-state the seat created and corrected today — the only category of shift lesson the protocol accepts as a card.\n\n## The measured instance\n\nPR **#12372** merged as `833fd1cede` and implemented card **#12307**'s closure A in full. The card did **not** close:\n\n```\n#12307   state: open\n         closed_by_pull_requests: total_count = 0\n```\n\nThe PR carried no closing keyword for it, so GitHub never linked them. The seat then stripped the card's residual `pm:dispatched` **on the assumption the merge had closed it**, leaving the card `open` + `assigned` + `domain:devx` with **no `pm:*` state at all** — the half-state shape the protocol forbids leaving overnight, and one that is invisible to both the queue view (no `pm:queue`) and the in-flight view (no `pm:dispatched`).\n\nIt was caught only because a handover sweep listed open `domain:devx` issues and the card appeared where it should not have been.\n\n## Why this is the missing direction, not a duplicate\n\nThe tree already gates the **opposite** direction, twice:\n\n- `check:partof-closing-keyword` (`scripts/check-partof-closing-keyword.mjs`)\n- the `Part-of PR must not also close its card` workflow job\n\nBoth refuse a PR that says `Part of #N` while also carrying a keyword that would close `#N`. ⭐ **Nothing checks the other way**: a PR whose branch declares it is implementing `#N` — the fleet-wide `claude/issue-<n>-<slug>` convention — that merges having closed nothing.\n\nSo the existing pair guards against closing a card too eagerly, and the gap is closing it not at all.\n\n## Why the cost is not \"one stale label\"\n\nThe seat's `pm:dispatched` strip is **read-modify-write with read-back**, and the read-back passed — the labels were exactly what was written. The read-back cannot catch this, because the thing that was wrong was not the label write but the **premise** for doing it. That makes it the same species this lane keeps pricing: an instrument that confirms what it measured while the question it was asked to answer went unmeasured.\n\nDownstream, a card in this state is worse than either honest state:\n- the queue sweep does not see it (no `pm:queue`), so it is never re-dispatched;\n- the in-flight sweep does not see it (no `pm:dispatched`), so nobody chases it;\n- the assignee makes it read as taken to any seat that does look.\n\n## Possible shapes (not a decision, not measured)\n\n1. **Extend the existing gate** — `check-partof-closing-keyword.mjs` already parses PR bodies for closing keywords and already knows the `Part of` form. Adding \"a `claude/issue-<n>-*` branch must carry either a closing keyword for `#n` or an explicit `Part of #n`\" reuses the parser. ⚠️ It would need the branch name, which that gate may not currently read — measure before assuming.\n2. **A PM-side read-back** — require the seat to read the card's `state` before stripping a residual label, rather than inferring closure from the merge event. Cheapest, and the weakest: it relies on every future seat remembering, which is the failure mode this repo repeatedly prices above a missing check.\n3. **Leave it** — accept that a merged PR occasionally orphans its card, and that handover sweeps catch it.\n\n⚠️ **Not measured, and it decides between 1 and 3**: how often this actually happens. One instance is not a rate. Whoever grades this should count, across merged `claude/issue-*` branches, how many left their card open — that number is cheap to get and this card should not be dispatched without it.\n\nRefs: #12307 (the instance) · PR #12372 / `833fd1cede` (the merge that did not close it) · `scripts/check-partof-closing-keyword.mjs` (the gate for the opposite direction)"
+}

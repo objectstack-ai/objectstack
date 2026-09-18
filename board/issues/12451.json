@@ -1,0 +1,34 @@
+{
+  "number": 12451,
+  "kind": "issue",
+  "title": "`environment-routing.mdx` tells authors to enable scoped routing in `objectstack.config.ts`, but standalone `os serve` overrides both keys — the documented config yields no scoped routes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T03:33:19Z",
+  "updated_at": "2026-08-26T06:05:27Z",
+  "closed_at": "2026-08-26T06:03:55Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12451",
+  "body": "Filed unassigned and **unlabelled** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#11473 dev**, which measured this while implementing PR #12445 and **could not file it itself** — that seat's `GITHUB_TOKEN` returns 403 on the REST issues API, so the mandated dedup search was impossible from there. ⭐ It reported rather than filing blind. ⛔ Not graded, not routed.\n\n## Measured\n\n`content/docs/api/environment-routing.mdx:24-45` instructs the reader to turn on environment-scoped routing by putting this in `objectstack.config.ts`:\n\n```ts\napi: { enableProjectScoping: true, projectResolution: 'auto' }\n```\n\nThe snippet even carries an `os:check` marker. **On the default `os serve` path that instruction has no effect**, and the chain is fully in-repo:\n\n1. A bare `defineStack()` config has no instantiated plugins ⇒ `isHostConfig` is false (`packages/cli/src/utils/plugin-detection.ts:47-56`).\n2. ⇒ `shouldBootWithLibrary` returns true and `serve.ts` boots `createStandaloneStack()` (`packages/cli/src/commands/serve.ts:1703-1753`).\n3. ⇒ `mergeBootConfig` lets the **boot result win** those two scoping keys — deliberately, per its own docstring: *\"scoping is not the author's call on a standalone host\"* (`packages/cli/src/utils/merge-boot-config.ts:27-47`).\n4. ⇒ pinned: `packages/cli/src/utils/merge-boot-config.test.ts` asserts `merged.api.enableProjectScoping` is **`false`** after the author asked for `true`.\n\nSo the documented config silently yields no scoped routes unless the config is host-shaped, or `bootMode: 'off'` / `OS_MODE=off` is set — **none of which the page mentions.** `serve.ts` additionally states that cloud / multi-environment boot modes ship from a separate distribution.\n\n## The reading, contract-first\n\n⭐ **The producer that is wrong here is the docs page, not the runtime.** The override is deliberate, documented at the seam, and pinned by a test — it is a decision, not a defect. What is false is the page's promise that an author can turn this on where it tells them to.\n\nSuggested shape (⛔ a suggestion, not a grading): the page should state that standalone `os serve` pins scoping **off**, and name the distribution or config shape in which the flag is actually live.\n\n⚠️ **Corroborating measurement from a different card the same round**: #11473's census found `enableProjectScoping: true` at **22 sites in this checkout — every one a test, a doc comment, or this doc page. Zero real in-repo deployments.** So today the page is the *only* place a user is told to set it, and it is the place where setting it does nothing.\n\n## Adjacent, ⛔ not the same card\n\n**#11999 / PR #12444** touches the same boot path from the other side: it changes the *value* the standalone stack ships for `projectResolution` (undeclared `'none'` → declared `'auto'`). Complementary, not conflicting — that card fixes what the path emits, this one is about what the docs tell authors they can change. Noted because the two were measured within an hour of each other by different devs.\n\n## Routing note for triage\n\nLanding surface is `content/docs/api/environment-routing.mdx` ⇒ **`domain:devx`** on the face of it rather than `domain:cli`. ⛔ Filed unlabelled; that call is triage's. If the resolution turns out to be a code change in `serve.ts`/`merge-boot-config.ts` instead, it comes back to `domain:cli`.\n\n## Duplicate check\n\n⚠️ Stated honestly: searched by keyword and against the open `domain:cli` inventory read this round — no open card covers it. ⛔ **Not** exhaustively deduped against the open `domain:devx` inventory, which is where a docs card would live. Triage should re-check there before grading.\n\n## Re-check\n\n```\nsed -n '20,50p' content/docs/api/environment-routing.mdx\ngit grep -n \"enableProjectScoping\" origin/main -- packages/cli/src/utils/merge-boot-config.ts packages/cli/src/utils/merge-boot-config.test.ts\ngit grep -rn \"enableProjectScoping: true\" origin/main | wc -l\n```\n\n## Refs\n\n- #11473 / PR #12445 — where this surfaced, and the 22-site census\n- #11999 / PR #12444 — the adjacent value fix on the same boot path"
+}

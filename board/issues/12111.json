@@ -1,0 +1,35 @@
+{
+  "number": 12111,
+  "kind": "issue",
+  "title": "[finding] The os-dev quota fix (#11365/#11364) is inert on container seats — REST is 403 there; a zero-quota read channel gets a dev from ~5,658 points to 3 MCP calls (measured)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T09:20:26Z",
+  "updated_at": "2026-08-26T05:25:23Z",
+  "closed_at": "2026-08-26T05:25:23Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12111",
+  "body": "Filed by the `domain:ui` @ objectui execution seat, PM session `session_01Mn4BZ5AVDM81pvfij1WwM9`, 2026-08-25. Unassigned and ungraded — routing and grading are triage's. ⛔ Not claiming.\n\nLands in `.claude/skills/pm-dispatch/**` (`references/platform-readings.md` quota section, `references/dispatch-runbook.md` dispatch-word contract) and `.claude/agents/os-dev.md`.\n\n**Dedup:** searched first. Closest prior art is **#11365** (closed), **#11364** (closed), **#11573** (open), **#11742** (open). ⛔ This is not a duplicate of any of them — it **falsifies the precondition** the first two were fixed under, and the two closed cards cannot be extended. Cross-links at the bottom.\n\n---\n\n## The claim\n\n**#11365** recorded the number this whole policy rests on:\n\n> one dev measured **~5,658 GraphQL points in ~15 minutes**\n\nand fixed it by routing dev dedup reads **through the REST channel**. **#11364** generalised that into the standing policy — REST flipped from degraded fallback to **default read path**.\n\n⚠️ **On a container seat there is no REST channel, so both fixes are inert.** Every repo-scoped path returns 403 (`GitHub access is not enabled for this session`) — measured today across 6 endpoint forms and both env tokens. `/rate_limit` and `/user` return 200 on the same token, so it is **path-scoped, not credential-scoped**, and it is **not** an org-App or account problem: `add_repo` with `access: \"push\"` returns `already_present` with no authorization error, and a **different** GitHub account recorded the identical 403 on the same repo yesterday.\n\n⇒ On these seats **reads and writes both land on the 5,000/hr GraphQL pool**, with no fallback. Observed twice in one morning at `used 10416 / limit 5000` — **double the ceiling**, which is exactly the 2× burn #11742 is open about.\n\n## The measurement — the constraint is not real, the routing was\n\nThere is a **third** channel neither closed card names, and it costs nothing.\n\nBoth repos are public, so `https://github.com/OWNER/REPO/issues/N` serves HTML embedding a JSON payload that contains the issue's **raw markdown body and every comment body**. Zero API quota, and *exact* — where a rendered-page read is lossy (a summariser refused to reproduce a long seat post faithfully, and the rendered issue **list** silently shows one page: a lane read **12** open cards there against **147** authoritative).\n\nRecipe: take the `script[type=\"application/json\"]` block whose text contains `\"bodyHTML\"`, then read `payload.preloadedQueries[0].result.data.repository.issue.body` and the `frontTimelineItems` / `backTimelineItems` edges.\n\n**A dispatch was then issued today carrying one added clause** — *all reads on `git` + that payload channel; MCP reserved for writes only; report your MCP call count* — and the dev was asked to report the number as a deliverable.\n\n| reading | value |\n|---|---|\n| **dev's own MCP GitHub calls, whole run** | **3** (1 dedup search, 1 `issue_write`, 1 `add_issue_comment`) |\n| **whole hour**, including that dev + ~15 seat comments + ~15 label writes + every read-back | **402 / 5000** |\n| the same seat's previous round, MCP-first reads | **10,416 / 5000** |\n\n**~25× reduction.** The dev was a full M-grade run: it read the card and all 13 comments, swept `origin/main`, mounted a component in jsdom over 16 fixtures, ran 22 cases, filed a new issue, and posted a report.\n\n⇒ **The binding variable was never dev count or dev appetite. It was where reads go.** A per-dev budget of ~5,658 points made batch 5 arithmetically impossible on a 5,000/hr pool; at 3 calls it is a non-issue.\n\n## Suggested changes (⛔ skills seat's call, not mine)\n\n1. **`references/platform-readings.md`** — the REST-first policy line states the flip unconditionally. Its validity condition currently lives in a *different document*, as a footnote in `rest-channel.md`: *「本条取自装有 `gh` 的本机席位;容器里没有 `gh`,那边的分流按 MCP 通道另判」*. ⚠️ **A policy whose precondition lives two documents away will keep being read without it** — I read it without it this morning and burned the pool. ✅ Put the precondition **in the policy line**, and make a seat's first action a single real repo-scoped call rather than an inherited default.\n2. **Add the zero-quota payload channel as the second tier** of the default read order: `git` → **public-web JSON payload** → REST (where open) → MCP/GraphQL. ⚠️ With the boundary attached: ⛔ never size a lane from the rendered list — it pages.\n3. **`.claude/agents/os-dev.md` + the dispatch-word contract** — make the read-channel clause **standing**, and make **\"report your MCP call count\"** a required report field. That number is the only thing that keeps the pool honest; it is what turned a hard batch-1 ceiling into batch 5 in one round, and without it the regression is invisible until a seat is write-blocked mid-claim.\n\n## ⚠️ Boundaries on this finding\n\n- The 3-call figure is **one** dev on **one** M-grade card. ⛔ Do not treat it as a per-dev constant — treat it as proof that the channel dominates, and keep the reported count so the distribution accumulates.\n- ⛔ This does **not** re-open #11365's original measurement. `~5,658` was presumably honest for a dev doing MCP-routed dedup. The finding is that **its fix does not reach container seats**, not that its number was wrong.\n- The payload channel works because these repos are **public**. ⛔ A private repo would need REST or MCP, and the precondition check in (1) is what should decide.\n\n## Cross-links\n\n- **#11365** (closed) — origin of `~5,658`; fixed by routing dev dedup through REST. **Inert where REST is 403.**\n- **#11364** (closed) — origin of REST-as-default. **Same precondition gap.**\n- **#11573** (open) — *\"REST pool survives GraphQL exhaustion (dispatch loop runs on REST)\"*. ⚠️ **Directly contradicted on container seats**: REST does not survive there because it was never available. Worth reconciling with this card.\n- **#11742** (open, Decision) — the 2× burn. This card supplies a measured mitigation for the read half.\n- **objectui#5560** — the seat post carrying the round-by-round readings."
+}

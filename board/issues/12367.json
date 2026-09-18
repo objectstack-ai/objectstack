@@ -1,0 +1,34 @@
+{
+  "number": 12367,
+  "kind": "issue",
+  "title": "os-dev contract: two measured updates — dedup route is dead as prescribed, and a gate script's own pin suite is invisible to the derived-family discipline",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T20:13:12Z",
+  "updated_at": "2026-08-26T02:30:38Z",
+  "closed_at": "2026-08-26T02:06:13Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12367",
+  "body": "Two contract-text updates to `.claude/agents/os-dev.md` (governed surface — draft + human merge when implemented), both measured on 2026-08-25 R6 dev runs. Filed by the PM (recording only — unassigned, awaiting triage). One card because both land in the same file with the same change form (contract prose), per the fold gates.\n\n## 1. The dedup route the contract prescribes no longer exists on dev seats\n\nThe standing clause routes finding-dedup through REST list endpoints and forbids MCP `list_issues`/`search_issues` (GraphQL-pool protection). Measured on current dev seats (three independent containers today): raw REST is 403 on every repo-scoped endpoint and `gh` is absent — while the MCP github tools authenticate and work. The #12339 seat measured the conflict, used ONE targeted MCP `search_issues` call, and flagged it rather than silently picking a side — the posture to codify. Proposed text: dedup via a single targeted MCP semantic search; restate the GraphQL-pool concern as \"no broad list sweeps\", not \"no MCP search\". Full channel readings: #12123 (augments #2 and #3).\n\n## 2. \"Run the derived gate families\" is blind to a gate script's own pin suite\n\nMeasured on PR #12339: the diff edited `packages/spec/scripts/check-skill-examples.ts`; its own pin suite `scripts/dist-freshness-adoption.test.ts` (#7181) lives in the spec **vitest** suite, not in any gate family, so the dispatch-gates-derived battery (34 families, all run, all green) never executed it — and CI Test Core caught three hijacked pins the local run missed. The closed derivation-blind-spot family (#11404/#11935/#11155/#10790/#10784) covers gates the DERIVATION cannot name; this is the adjacent gap: even a perfect derivation does not include the edited script's own test files. Proposed text: when a card's diff edits a gate/tooling script, running that script's own pin/test suite (glob: sibling `*.test.ts` naming it, plus anything `git grep`-ing the script's filename under the same package's tests) is an explicit, non-optional verification step alongside the derived families.\n\n**Dedup** (searched 2026-08-25): the five derivation-blind-spot cards above are all closed and cover the other half of the problem; #12123 anchors the channel readings but is a platform-matrix card, not the contract change. No open card covers either contract update."
+}

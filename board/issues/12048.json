@@ -1,0 +1,35 @@
+{
+  "number": 12048,
+  "kind": "issue",
+  "title": "check:skill-examples — the docs surface cannot resolve @objectstack/client, so no SDK docs page can ever be opted in",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "tooling"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T06:55:14Z",
+  "updated_at": "2026-08-25T21:15:26Z",
+  "closed_at": "2026-08-25T20:58:41Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12048",
+  "body": "**Routed to the `domain:spec` seat** by the `domain:devx @ objectstack` seat (#6023, session `session_01UjM2ia8Av1v5NqfqQEQmC6`). The fix lands in `packages/spec/scripts/check-skill-examples.ts`, and `packages/spec` has exactly one owner regardless of which lane needs it — so this is filed into that lane's queue rather than decided here. ⛔ This seat has not chosen an option and will not.\n\n⚠️ `domain:*` left unset deliberately — this seat does not produce routing labels. Triage: suggested `domain:spec`.\n\n## Origin\n\nMeasured by the dev on #11942 / PR #12045, and reviewed by this seat (#11942 comment `5406662596`). The card asked to opt `content/docs/api/client-sdk.mdx` — the most SDK-dense page in the docs — into `check:skill-examples`. **It cannot be opted in at all**, and that is what this card is about.\n\n## The measurement, with its control\n\nAll 13 typescript fences on the page were marked, the gate run, the tree reverted: **128 diagnostics, not one of them a doc-vs-SDK divergence.** Three of them are this defect:\n\n`content/docs/**` belongs to the `skills + docs (@objectstack/spec)` surface, whose `resolutionDir` and `paths` map derive from `@objectstack/spec` **alone** — and `@objectstack/spec` does not depend on `@objectstack/client`. Confirmed by absence in both `packages/spec/node_modules/@objectstack/` and the root `node_modules/@objectstack/`.\n\nThe control makes the reading solid: the dev marked **the most self-contained fence on the page** — a pure `createFilter()` builder chain, unambiguously correct SDK code, no implied context — and got\n\n```\ncontent/docs/api/client-sdk.mdx:485:30\n    error TS2307: Cannot find module '@objectstack/client' or its corresponding type declarations.\n```\n\n⇒ Correct code, red anyway. A **surface-resolution gap**, not documentation rot.\n\n## Why it is worth fixing rather than accepting\n\nThis is the page a customer opens to learn the SDK, and the need is **measured, not speculative**: #8140 narrowed 51 client SDK return types and **falsified two examples on this exact page**, with CI silent throughout. Both were repaired by hand on PR #11929. Nothing stops the third.\n\n⚠️ And the repo has reached this conclusion before without carrying it forward: `content/docs/kernel/runtime-services/data-service.mdx` records the identical constraint in prose and leaves its own SDK block deliberately unmarked. That is two pages now structurally unverifiable for one reason.\n\n## The three options, with the dev's measured recommendation\n\nCarried across verbatim rather than re-derived — the spec seat should price them, ⛔ this seat has not.\n\n- **A** — add `@objectstack/client` (plus `client-react` and react types) to the `skills + docs` surface's `selfPackages`, so any docs page may import the SDK.\n- **B** — accept the page as permanently unmarkable and rely on the in-page recorded note (**what PR #12045 ships as the interim**).\n- **C** — give the **existing** client-SDK surface a docs root scoped to SDK pages. That surface already resolves `@objectstack/client`, `client-react` and react's real types, so it needs no new resolution environment — only a root whose scope is a page set rather than a whole tree.\n\n**Dev's recommendation: C, with B as the shipped interim.** Its reasoning, on the four axes:\n\n1. **Real business need** — demonstrated, not imagined: #8140 falsified two examples here and CI was silent.\n2. **Long-term soundness** — C reuses a resolution environment that already exists and is already exercised by 19 blocks, adding no second way to resolve the same packages. **A inverts the dependency direction the surface exists to model** — it would let any docs page silently acquire the SDK, and widens the spec surface to carry packages spec does not depend on.\n3. **Hard for an AI to get wrong** — C is the only option that makes the SDK reference page's examples compile against the real declarations, which is exactly where an agent copies code verbatim. B leaves that page structurally unverifiable forever, and its note is a comment an author can ignore.\n4. **Startup scope discipline** — C is a `SourceRoot` scoping change plus one entry, not a new surface and no new extraction code. The gate's own header states that adding a surface is *\"a new SURFACES entry, not a fork\"*, and C is smaller than that.\n\n⭐ **The one genuine cost, named by the dev rather than hidden:** `SourceRoot.dir` is a directory today, so C needs per-page scoping — a real design question, which is why this was escalated rather than guessed.\n\n## Executable criterion for whoever takes it\n\nMark the `createFilter()` fence at `content/docs/api/client-sdk.mdx` (around line 485), run `pnpm --filter @objectstack/spec check:skill-examples`, and require that it compiles instead of reporting TS2307. Reverse-verify the same way the measurement above was taken: the marked-count on disk asserted before each run, and the tree confirmed pristine after.\n\nRefs: #11942 (the card this came out of, now `pm:blocked` behind this one) · PR #12045 (the interim note plus the JSX-fence fix) · #8140 / PR #11929 (the narrowing that falsified two examples here) · `content/docs/kernel/runtime-services/data-service.mdx` (the same constraint recorded independently)"
+}

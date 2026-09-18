@@ -1,0 +1,32 @@
+{
+  "number": 11965,
+  "kind": "issue",
+  "title": "platform-admin re-anchor L1 (spec seat): export the kernel platform-admin capability declaration — one list, imported by plugin-security (Choice 6A)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T03:30:14Z",
+  "updated_at": "2026-08-26T21:05:19Z",
+  "closed_at": "2026-08-26T21:05:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11965",
+  "body": "Leg **L1** of the accepted #11663 platform-admin re-anchor design. Provenance: design document = #11663 comment 5394453215 (§4 Choice 6, §6 row L1); maintainer acceptance = #11663 comment 5404675670 (2026-08-25, verbatim 「接受你的建议，继续」, bundle 1A/2B/3A/4A/5A/6A/7A). Filed by PM session `session_01KWRU3s15AJz7PGW7a7wdCh`.\n\n**Surface**: `packages/spec` — ⛔ spec seat only (sole owner of this package).\n\n**Content**: `@objectstack/spec` exports the platform-admin capability declaration (the capability set today carried by the org-less `admin_full_access` row); plugin-security's `admin_full_access` declaration **imports that same list**, so exactly one copy exists. Behaviour-neutral; lands alone (migration sequence step 2). Measured precedent in the design: core already imports `ADMIN_FULL_ACCESS` from `@objectstack/spec`.\n\n**Acceptance criterion**: `git grep -n ADMIN_FULL_ACCESS packages/spec/src packages/plugins/plugin-security/src` shows the capability list declared once (spec) and imported — not duplicated — by plugin-security, and no behaviour change lands with it.\n\n**Notes**: the design expects no authorable-surface movement (no new authorable key) — the spec seat must confirm that on the tree rather than take the design's word. Premise-first: re-verify the cited files/lines on current `origin/main` before implementing; the design was measured at `cad8b42f00`.\n\nDownstream: the core derivation leg (L2) declares `Blocked-by:` on this card."
+}

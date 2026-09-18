@@ -1,0 +1,35 @@
+{
+  "number": 12464,
+  "kind": "issue",
+  "title": "`doctor.ts` repeats serve's `isolated` posture sentence verbatim with its own bare `@objectstack/organizations` literal — and single-sourcing it is a coupling decision, not a substitution",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T04:38:04Z",
+  "updated_at": "2026-08-26T07:40:41Z",
+  "closed_at": "2026-08-26T07:40:41Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12464",
+  "body": "Filed unassigned and **unlabelled** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12151 dev**, which measured this while implementing PR #12463 and could not file it (403 on the REST issues API from that seat). ⛔ Not graded, not routed.\n\n## Measured\n\n`packages/cli/src/commands/doctor.ts:531` declares its own `TENANCY_POSTURE_FIX_HINTS`, whose `isolated` value repeats `serve.ts`'s sentence **verbatim**:\n\n> `organization wall + the enterprise @objectstack/organizations runtime `\n\n— same wording, same **bare literal**, under **no pin**.\n\nPR #12463 (#12151) has just single-sourced every operator-facing occurrence in `serve.ts` onto `Serve.ORGANIZATIONS_RUNTIME_PKG` and pinned what those messages *render*. This copy is outside that card's declared file surface and was correctly left alone.\n\n## ⚠️ Why this is NOT the same mechanical fix\n\nThe #12151 dev flagged this explicitly and it is the reason the card exists rather than a follow-up commit: **`doctor.ts` does not read `Serve.ORGANIZATIONS_RUNTIME_PKG`.** Single-sourcing it therefore requires choosing a coupling, not performing a substitution:\n\n- import the `Serve` command class's static into `doctor.ts` — couples a diagnostic command to a `serve` command's export; or\n- read the spec-owned `PLATFORM_PLUGIN_WIRED_RUNTIMES` roster directly in `doctor.ts` — a second reader of the roster, arguably the cleaner one; or\n- leave the duplication and accept that a roster rename leaves `os doctor` naming a package that no longer exists.\n\n⭐ That choice is the whole card. A picker-up who treats this as \"do what #12151 did\" will pick a coupling by accident.\n\n## Class\n\nSame defect class as #12151: a roster-key rename would leave `os doctor` printing a package name that boot no longer resolves, **with every gate green** — the roster pin only ever sees the declaration, and no test reads this hint table's text.\n\n⚠️ Lower severity than #12151's fatal-path sites: this one is a fix-list hint in a diagnostic command, not an instruction an operator acts on mid-outage. Recorded so the grading is not inherited from the parent card's.\n\n## Suggested shape (⛔ a suggestion, not a grading)\n\nIf it is worth doing, the pattern #12463 established is the one to copy — **pin what it renders, not that the constant appears in source.** #12463's `serve-organizations-message-spelling.test.ts` shows the shape, including why a source-scan pin was deliberately rejected (it would have to exclude comments).\n\n## Duplicate check\n\nSearched the open `domain:cli` inventory and by keyword this round; #12151 is the parent and no open card covers the `doctor.ts` copy. ⚠️ Not exhaustively deduped against `domain:devx`.\n\n## Re-check\n\n```\ngit grep -n \"@objectstack/organizations\" origin/main -- packages/cli/src/commands/doctor.ts\ngit grep -n \"TENANCY_POSTURE_FIX_HINTS\" origin/main -- packages/cli/src\ngit grep -n \"ORGANIZATIONS_RUNTIME_PKG\" origin/main -- packages/cli/src\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #12151 / PR #12463 — the parent, and the rendered-output pin shape\n- #11614 / PR #12149 — where `ORGANIZATIONS_RUNTIME_PKG` was declared and the roster pin added"
+}

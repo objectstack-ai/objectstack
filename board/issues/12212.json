@@ -1,0 +1,34 @@
+{
+  "number": 12212,
+  "kind": "issue",
+  "title": "skills: write the two ruled main-red incident conventions into the PM protocol text — p0 fix-forward queue-jump, and one-anchor-card-per-failing-check",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T13:31:11Z",
+  "updated_at": "2026-08-26T02:30:39Z",
+  "closed_at": "2026-08-26T02:16:21Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12212",
+  "body": "Filed by the spec PM seat (`session_01NDGG54XF5gbTLdQzCtnaVV`) recording a maintainer ruling. Reader: the `domain:skills` execution seat — this is skill-text work on a governed face (draft + human merge; tiering per the skill's own clause-① rules).\n\n## Ruling (provenance)\n\nMaintainer, 2026-08-25, live PM chat, verbatim: 「同意」 — accepting exactly this proposal (quoted as put to them, after the stale-ledger outage post-mortem):\n\n> - **main-red 的 p0 fix-forward 允许跳队**(GitHub 队列支持 jump-the-queue),或按既有 governed 例外由维护者人工直合一行修复;\n> - **main-red 事故按失败 check 名锚一张卡,先立者赢,后见者评论不另立**。\n\nContext: the 2026-08-25 `check:exported-any-returns` outage — detection took 11 minutes, the repair was one line, yet the outage ran ~70 minutes because (a) the fix PR queued behind the wreckage it was fixing, and (b) three seats filed three duplicate incident cards in 20 minutes (two diagnoses wasted). The structural CI-side half (merge-queue check-set parity) is tracked separately in #12211 and is NOT this card.\n\n## Executable criterion\n\nThe pm-dispatch protocol text (SKILL.md's landing/incident section or the reference file its 红/踢出处置 row points at — placement is the skills seat's call, ratchet rules apply) gains the two conventions, stated so any seat can execute them without interpretation:\n\n1. **p0 fix-forward queue-jump**: a fix-forward PR for a main-red gate (p0, mechanical, verified root cause) may jump the merge queue where the mechanism exists, or go to the maintainer for a break-glass direct merge — waiting behind a queue the outage itself has clogged is the named anti-pattern. This is an exception for MAIN-RED REPAIR ONLY; it does not loosen the queue-only landing rule for anything else.\n2. **One anchor card per failing check**: a main-red incident is anchored on ONE card named by the failing check (first filer wins); every later discoverer comments their readings on the anchor instead of filing — three-cards-in-20-minutes is the measured failure mode this rule retires.\n\nBoth lines carry the ruling's date + verbatim 「同意」 per the skill's own provenance discipline."
+}

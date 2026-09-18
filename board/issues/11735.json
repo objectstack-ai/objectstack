@@ -1,0 +1,35 @@
+{
+  "number": 11735,
+  "kind": "issue",
+  "title": "Nine in-repo sites cite \"ADR-0112 says the PRODUCER names the condition\" — ADR-0112 does not say it, and the unqualified paraphrase was read as governing HTTP status",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T14:25:00Z",
+  "updated_at": "2026-08-26T04:45:19Z",
+  "closed_at": "2026-08-26T04:45:19Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11735",
+  "body": "Filed unassigned and **unlabelled** by the `domain:cli` seat (#6024), session `019siH5jDmk5hrayvfyojUqR`, while verifying the fork resolution on PR #11731. ⛔ Not graded, not routed — a concrete measured defect goes to triage for both. (Filed unlabelled per `.claude/agents/os-dev.md`'s rule that `finding` is for observation-class items; two devs flagged that rule to this seat today and both were right.)\n\n## Measured on `origin/main`\n\nThe phrase **\"the producer names the condition\"** does not occur in ADR-0112:\n\n```\n$ git grep -n -iE \"producer names|names the condition\" origin/main -- docs/adr/0112-error-code-vocabulary-and-ledger.md\n(zero hits)\n```\n\n⛔ A zero is not a reading until the instrument is shown to produce a positive with a term independently known present — never a substring of the term under test. Reverse-check on the same file, terms taken from the ADR's own subject rather than from the phrase:\n\n```\ndeclaredCode -> 7      vocabulary -> 22      ledger -> 16\n```\n\nThe instrument works over that file. The phrase is absent.\n\n**It lives in nine places, every one attributing it to ADR-0112:**\n\n| site |\n|---|\n| `packages/rest/src/error-response.ts:394` |\n| `packages/rest/src/error-response.ts:871` |\n| `packages/rest/src/analytics-filter-refusal-envelope.test.ts:405` |\n| `packages/rest/src/rest-5xx-message-sanitization.test.ts:383` |\n| `packages/rest/src/rest-5xx-status-passthrough.test.ts:218` |\n| `packages/rest/src/rest-hook-refusal-code-parity.test.ts:346` |\n| `packages/rest/src/rest-hook-refusal-status-passthrough.test.ts:384` |\n| `packages/rest/src/rest-thrown-code-vocabulary.test.ts:253` |\n| `packages/spec/src/shared/external-errors.ts:47` |\n\n## The substance is absent too, not only the wording\n\nThis is the part that matters, and it is why the card is not \"fix a quote\".\n\nADR-0112 is `error-code-vocabulary-and-ledger`, and every decision in it governs the semantic **code**: **D2** renames the closed `StandardErrorCode` enum; **D4** closes `error.code` at every door and opens `declaredCode` beside it as the author-authored channel (2026-08-16 and 2026-08-17 amendments, #9106 / #9232); **D5** fixes one eventual location for the semantic code. HTTP status appears only as *the thing a code derives from* and *the thing that lives on the transport*.\n\n**Nothing in ADR-0112 rules on what HTTP status an UNDECLARED throw deserves.**\n\nAs a paraphrase on the **code** axis the sentence is fair — D4's demote channel really does honour the producer's own spelling rather than discarding it, and `error-response.ts:394`'s use (\"a half-declaration is honoured for the half that was declared\") is about a declared 5xx carrying no code, which is squarely the code axis. The defect is that it is written **unqualified**, as a general principle of the ADR, with no axis attached.\n\n## Why it is worth a card rather than a nit\n\n**The unqualified form was then read as governing status, and it nearly settled a contract question the wrong way.**\n\n#11684 records exactly two candidate rulings for \"what status does an undeclared hook refusal deserve on `/analytics/dataset/query`\", and names ADR-0112's \"the producer names the condition\" as the one arguing for `500`. PR #11731's dispatch carried a **binding stop**: if both readings had live in-repo pins, land nothing. The fold survived only because the dev measured that the ADR does not say this — the fork dissolved instead of having to be picked.\n\nHad the citation been believed, the honest outcome was a blocked card and a decision escalated to the maintainer on a premise that is not in the document.\n\n⇒ Same class as **#11032** (a doc comment citing ADR-0120 D4 for something D4's text did not say), which this lane closed today. Both are load-bearing citations to a governing document, both accurate about behaviour and inaccurate about the document, and in both cases the next reader takes the comment as the decision.\n\n## Not established here\n\n- **Whether the fix is to qualify the nine comments or to amend ADR-0112.** If the maintainer's intent was always that the producer names the condition on both axes, the ADR is what is incomplete and the comments were reporting a real decision from somewhere else. ⛔ That is a governed-surface question (`docs/adr/**`) and is not this seat's to answer — and note the amendment route is a maintainer-merge path, not a code PR.\n- Whether the `packages/spec` site (`external-errors.ts:47`) reads the same way as the eight in `packages/rest` — it was not examined line by line.\n- Whether any *other* principle is attributed to ADR-0112 in the same unqualified way. Only this phrase was censused.\n- Severity. ⛔ Not judged.\n\n⚠️ Routing note for triage: eight sites are `packages/rest` and one is `packages/spec`, so this may want splitting, and the `docs/adr/**` half is governed either way.\n\n## Re-check\n\n```\ngit grep -n -iE \"producer names|names the condition\" origin/main -- docs/adr/\ngit grep -n -iE \"PRODUCER names the condition\" origin/main -- '*.ts'\ngit grep -c -iE \"declaredCode|vocabulary|ledger\" origin/main -- docs/adr/0112-error-code-vocabulary-and-ledger.md\n```\n\nRelated: #11684, #11683, PR #11731 (where this surfaced), #11032 (same class, closed), #11718, #11719."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 12341,
+  "kind": "issue",
+  "title": "[finding] The verify-lock slot mechanism is discoverable only from `--help` and an exit-99 message, so no agent will use it — the fix lands in skills-owned files",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T19:11:21Z",
+  "updated_at": "2026-08-26T05:25:27Z",
+  "closed_at": "2026-08-26T05:25:27Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12341",
+  "body": "Filed by the `domain:devx @ objectstack` seat (#6023, session `session_01UjM2ia8Av1v5NqfqQEQmC6`) as a **cross-lane residue** of #11363 / PR #12335. Raised by that card's dev in its report and deliberately not folded in, because the fix lands outside that dispatch's declared surface.\n\n⛔ **No `domain:*` set — this seat does not produce that label.** Routing note for triage: the remedy lands in `AGENTS.md` and/or `.claude/agents/os-dev.md`, which are **skills-owned governed surfaces**, so the expected lane is `domain:skills`, not `devx`. Recorded here rather than acted on.\n\n## What PR #12335 shipped\n\n`OS_VERIFY_LOCK_SLOT=<name>` in `scripts/pm/os-verify-lock.sh`. A caller that waits on the shared verify lock and never acquires can **park** its place; the next call with the same name resumes it, keeping the original arrival stamp. Two invariants are pinned in the self-test: a parked place blocks nobody (parked tickets are excluded from the live queue, so the head is always a ticket with a live process behind it), and its priority ages out at `SLOT_MAX_AGE_S` from the *original* arrival.\n\nIt exists because obeying the foreground cap was the losing strategy: a ticket is removed when its process exits, so a caller that left came back with a **fresh** arrival stamp at the **back** of the queue, behind everyone who arrived while it was away.\n\n## The gap\n\n**Nothing tells an agent the variable exists.** It is advertised by the wrapper's own `--help` and by the text printed on exit 99 — both of which a dev reads only *after* it has already lost its place. The dispatch protocol, `AGENTS.md`, and the `os-dev` agent definition say nothing about it.\n\n⇒ A mechanism nobody sets is a mechanism that does nothing. The measured cost it exists to remove is real and current — from this shift, on this container:\n\n```\noutcome=command-exit waited=350 held=2 depth=3 rc=0 label=pnpm -s check:agent-test-spelling\n```\n\nA two-second gate waited 350 seconds behind a queue three deep. Separately, a foreground turn was killed at its ~10-minute ceiling about 210 s into a queued wait, and four of five devs in one earlier batch ended their turn while queued (#11463).\n\n## One-line executable criterion\n\nAn `os-dev` agent that runs a gate through `scripts/pm/os-verify-lock.sh` sets `OS_VERIFY_LOCK_SLOT` without having read the wrapper's `--help` — i.e. the instruction reaches it from its own agent definition or from `AGENTS.md`.\n\n## Why it is filed rather than fixed\n\n`AGENTS.md` and `.claude/agents/os-dev.md` are (a) outside #11363's declared file surface, (b) governed surfaces requiring a draft PR and human merge, and (c) among the hottest merge-conflict files in the repo. A rider on a code PR is the wrong shape for all three reasons.\n\n⚠️ **Do not treat this as landed work.** PR #12335 is open at time of filing; if it does not merge, this card is void rather than merely blocked. Re-verify that `OS_VERIFY_LOCK_SLOT` is on `main` before dispatching.\n\n## Refs\n\n#11363 (the contention card and its maintainer ruling) · PR #12335 (ships the mechanism) · #11463 (the \"agent ends its turn while queued\" half) · #12337 (the cold-closure-build-under-lock finding from the same measurement) · `scripts/pm/os-verify-lock.sh`"
+}

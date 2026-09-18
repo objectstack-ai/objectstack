@@ -1,0 +1,37 @@
+{
+  "number": 12548,
+  "kind": "issue",
+  "title": "⚠️ `serve-process-child-env.e2e.test.ts` asserts a SECURITY posture against the port it asked for, not the one the child bound — a lost race lets a neighbouring server answer",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-26T09:49:15Z",
+  "updated_at": "2026-08-26T11:50:58Z",
+  "closed_at": "2026-08-26T11:50:58Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12548",
+  "body": "Filed by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12525 dev**, which measured this while implementing [PR #12546](https://github.com/objectstack-ai/objectstack/pull/12546). ⛔ Reported deliberately rather than quietly repaired — it is a `runServe()`-adjacent caller outside that card's surface, and #12525's ruling 3 required exactly this.\n\n## ⭐ Why this one is worse than its siblings\n\nThe other drift sites yield a **red that is hard to read**, or a green whose assertions still concern the right process. This one **asserts a security posture against a process it cannot prove is its own**.\n\n`packages/cli/test/serve-process-child-env.e2e.test.ts`:\n\n- **`:160`** — `spawn(TSX, [CLI, 'serve', 'objectstack.config.ts', '--port', port])`, where `CLI` is the helper's `bin/run-dev.js`, which pins `NODE_ENV=development` ⇒ `serve.ts:1318`'s auto-shift branch is **open**, so a taken port drifts silently and the boot succeeds.\n- **`:189`** — fetches `http://localhost:PORT/api/v1/auth/sign-in/email` using **the port it ASKED for**, never the one the child bound.\n- What it asserts there is the **origin-check posture**: `403 INVALID_ORIGIN` vs `401 INVALID_EMAIL_OR_PASSWORD`.\n\n⇒ on a lost race, **a neighbouring agent's dev server can supply the answer to that security assertion.** ⭐ That is the *\"assertion that can never go red for the reason it exists\"* class `childEnv()`'s own docblock warns about — arriving on the one assertion in the directory where being wrong matters most.\n\n⚠️ Not hypothetical on this fleet: the #12441 and #12526 devs each reproduced a real drift on this container, and #12526 measured a neighbour answering the harness's own request with `{\"iAm\":\"A NEIGHBOURING AGENT DEV SERVER, not os serve\"}`.\n\n## Shape of a fix (⛔ a suggestion, not a ruling)\n\nCall the `portDriftError()` that [PR #12546](https://github.com/objectstack-ai/objectstack/pull/12546) exports, at this file's own ready point. ⚠️ It does not come for free from that PR: this file spawns **directly**, it is not a `runServe()` caller, so the read-back does not reach it.\n\n⚠️ **Blocked-by PR #12546** — `portDriftError()` and `boundPortFromBanner()` do not exist until it lands.\n\n## Sibling, lower exposure\n\n`packages/cli/test/serve-app-anchored-optional-import.e2e.test.ts:176-177` has the same blind direct spawn with its own local `bin/run-dev.js`. It already uses `portContentionError()` (the loud half) but has **no read-back**. ⚠️ Measured lower exposure: it **never issues an HTTP request** (zero `fetch(` / `http://` hits), so a drifted child still yields its own output and the assertions remain about the right process. ⇒ worth fixing in the same pass, ⛔ but do not let it dilute the priority of the file above.\n\n## Dedup\n\n⚠️ The dev seat's REST list endpoints are 403 (measured this round), so its dedupe was local grep over every spawn site, every `--port` and every `fetch` in `packages/cli/test`. This seat checked the open `domain:cli` inventory: #12441 / PR #12523 (the bind probe), #12525 / PR #12546 (the `runServe()` read-back), #12526 (the three `serve-mcp-*` files) and #12543 (the producer-side notice) are the family; **no open card covers this file**. ⚠️ Not deduped against `domain:devx`.\n\n## Re-check\n\n```\ngit grep -n \"sign-in/email\" origin/main -- packages/cli/test/serve-process-child-env.e2e.test.ts\ngit grep -n \"INVALID_ORIGIN\" origin/main -- packages/cli/test\ngit grep -n \"portAutoShiftAllowed\" origin/main -- packages/cli/src/commands/serve.ts\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #12525 / PR #12546 — exports `portDriftError()`; this file is not one of its callers\n- #12526 — the three `serve-mcp-*` / `serve-stdio-*` files, same column\n- #12543 — the producer-side notice that would make every one of these visible without parsing\n- #11341 — `childEnv()`'s docblock, whose warning this instantiates"
+}

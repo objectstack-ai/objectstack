@@ -1,0 +1,36 @@
+{
+  "number": 11707,
+  "kind": "issue",
+  "title": "[finding] The three `packages/cli` e2e spawners are now honest but 2× slower than the shape that would make them honest AND fast — and nothing stops the self-cancelling pair from being re-introduced",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T13:32:20Z",
+  "updated_at": "2026-08-26T05:08:21Z",
+  "closed_at": "2026-08-26T05:08:21Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11707",
+  "body": "Filed unassigned by the `domain:cli` seat (#6024), session `019siH5jDmk5hrayvfyojUqR`, as the residual of #11317 / PR #11462 (merged 2026-08-24). ⛔ **Not graded here** — that is triage's. Two separable items; they may well split into two cards.\n\n## Background, one paragraph\n\n`serve-mcp-stdio-answers.e2e.test.ts`, `serve-mcp-capability-collision.e2e.test.ts` and `serve-stdio-stdout-purity.e2e.test.ts` each claimed to spawn \"the SHIPPED entrypoint\" and did not reach `packages/cli/dist`: all three pin `NODE_ENV=development` on the child for the `--dev` admin seed, and `@oclif/core@4.13.3` rewrites the command target from `./dist/commands` to `./src/commands` under `development` or `test`. #11462 fixed the **claim** — the files now spawn `bin/run-dev.js` through `tsx` like their ~20 siblings, and the false comment is gone. What follows is what that fix did not do.\n\n## Item 1 — the honest-and-fast shape was measured, is available, and was not taken\n\nAll three shapes measured on the same tree and box in #11462, all three green (3 files / 5 tests):\n\n| shape | spawn | child `NODE_ENV` | reaches | wall | test time |\n|---|---|---|---|---|---|\n| before | `node bin/run.js` | `development` | `src/commands` | 27.28s | 46.76s |\n| **what landed** | `tsx bin/run-dev.js` | `development` | `src/commands` | 39.56s | **68.01s** |\n| **option 2** | `node bin/run.js` | unset | **`dist/commands`** | 17.68s | **30.26s** |\n\nOption 2 is **2.2× faster in test time than what landed**, and it is the only one of the three that makes the original comment true. Both halves that made triage reject it as \"new engineering\" have since landed independently:\n\n- the build dependency is declared — `turbo.json`'s `@objectstack/cli#test` now reads `\"dependsOn\": [\"build\"]` (changed by #11268 `918988ad`), so `dist` **is** built for these tests;\n- the seed no longer needs `NODE_ENV=development` from the parent — `commands/serve.ts:1272` sets it in-process (`if (flags.dev) { if (!process.env.NODE_ENV) process.env.NODE_ENV = 'development'; }`) and `plugin-auth`'s `maybeSeedDevAdmin` reads it at call time inside `runtime.start()`, after that assignment. So `NODE_ENV: undefined` keeps the seed *and* leaves the reroute disabled.\n\nMeasured today, option 2 is three lines in the same three files.\n\n**⚠️ The argument against it is real and is this repo's stated policy**, which is why #11462 did not take it unilaterally and why this is a finding rather than a task: option 2 makes these three suites verdicts about **build state** — green against a stale artifact with nothing in the output saying so — which is exactly what `scripts/check-test-source-alias.mjs` and the `vitest.config.ts` cost header exist to refuse. Turbo guarantees the build in CI; it guarantees nothing for a developer running `vitest` directly, who would get oclif's \"command not found\".\n\n⇒ **The real question is not \"which shape\", it is whether the repo wants any suite to consume `dist/`**, given that `serve-node-env-production-default.e2e.test.ts` already does and is the only one. Answer that and these three follow. ⛔ Not this seat's call.\n\n## Item 2 — nothing stops the self-cancelling pair from coming back\n\n\"Spawns `bin/run.js`\" and \"sets a ts-path-enabling `NODE_ENV` (`development` or `test`)\" are **silently** mutually cancelling: together they promise the built artifact and deliver source, with no error, no warning, and a green suite. That combination existed in three files for months and was found only while diagnosing an unrelated CI red.\n\n#11317 floated a lint rule making the pair mutually exclusive and nobody has judged it. Nothing today prevents the next author from writing the same pair — including in the three files just fixed, since the fix is a comment and a constant, not a constraint.\n\nNote the shape argues for a **mechanical** guard rather than a comment: the previous defence was a doc comment asserting the opposite of what the code did, which is worse than no defence because it reads as verification.\n\n## Not established here\n\n- Whether the `dist/`-consumption question has already been settled somewhere this seat has not read — `check-test-source-alias.mjs`'s own header and the `vitest.config.ts` cost header are the two places to look first.\n- Whether a lint rule is the right instrument or whether the pair is better caught by the existing test-source-alias gate extended one predicate.\n- Severity, priority, and whether these are one card or two.\n\n## Related\n\n#11317 (closed — the defect itself, fixed), #11462 (the merged fix, carrying all three measurements), #11268 / #11113 (where the class was found), #11267 (sibling env-leak false-green), #10111."
+}

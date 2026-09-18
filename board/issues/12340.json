@@ -1,0 +1,35 @@
+{
+  "number": 12340,
+  "kind": "issue",
+  "title": "[finding] HotReloadConfig.stateStrategy 'disk'/'distributed' are silent memory fallbacks, and distributedConfig has zero readers — declared≠enforced inside the KEPT host-driven library",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T19:11:19Z",
+  "updated_at": "2026-08-26T05:45:47Z",
+  "closed_at": "2026-08-26T05:45:47Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12340",
+  "body": "**Origin**: measured during #11825's per-group consumer audit (base 8cdd6965) by the os-dev run for PR #12336. Filed by the PM on the dev's behalf (recording only — unassigned, awaiting triage).\n\n**Dev's measurement, verbatim draft**: \"packages/core/src/hot-reload.ts `PluginStateManager.saveState`: the 'disk' and 'distributed' switch arms both write to the in-memory store ('memory fallback' comments in-source), and `DistributedStateConfigSchema` (carried on `HotReloadConfig.distributedConfig`) is read by nothing. An author passing `stateStrategy: 'disk'` to `HotReloadManager` gets memory persistence and no error.\"\n\n**Scope note**: deliberately kept as-is in PR #12336 — the 2026-08-25 ruling on #11825 keeps the classes unchanged as a host-driven library, and the honest-status caveat already exists in `PLUGIN_STANDARDS.md` §5.1. This card records the declared≠enforced remainder inside that kept library (PD #10 shape, library-parameter form rather than authorable-surface form).\n\n**Options when triaged**: implement the two arms, or narrow the `stateStrategy` enum + retire `distributedConfig` via a follow-up enforce-or-remove card.\n\n**Dedup** (searched 2026-08-25): no open or closed card covers this (sole distant hit #3433 is a different subsystem, closed)."
+}

@@ -2,7 +2,7 @@
   "number": 18890,
   "kind": "pull_request",
   "title": "feat(spec,objectql,driver-sql,driver-turso): a transport can declare it has no transactions, and the engine gates on the declaration",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T04:20:56Z",
-  "updated_at": "2026-09-18T13:55:28Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-18T14:42:08Z",
+  "closed_at": "2026-09-18T14:42:07Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": "2026-09-18T14:42:07Z",
   "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/18890",

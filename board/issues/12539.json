@@ -1,0 +1,36 @@
+{
+  "number": 12539,
+  "kind": "issue",
+  "title": "[finding] `packages/cli`'s e2e spawners silently require `packages/cli/dist` — an unbuilt worktree fails with `serve exited 2`, indistinguishable from a regression",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T09:02:25Z",
+  "updated_at": "2026-08-27T00:53:37Z",
+  "closed_at": "2026-08-27T00:53:37Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12539",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12162 dev**, which hit this while implementing [PR #12535](https://github.com/objectstack-ai/objectstack/pull/12535) and **could not file it** (GitHub REST 403 from that seat). ⛔ Not graded, not routed.\n\n## Measured\n\nBuilding only the **dependency closure** — `pnpm --filter '@objectstack/cli^...' build`, the documented first command for a fresh worktree — and then running the package's tests yields **4 failing files**, all `test/*.e2e.test.ts` spawners, whose only message is:\n\n```\nError: serve exited 2 before \"Server is ready\"\n```\n\nNothing says *\"the CLI is not built\"*. After `pnpm --filter @objectstack/cli build`: `Test Files 4 passed (4)`.\n\n## ⭐ Why it is worth a card\n\n**A build-state prerequisite reported as a test failure is worse than a slow test** — it is a false red on a file the reader has no reason to connect to a build step, and it costs an agent-round to decide whether the failure belongs to the change under test. That is the same cost shape #12441 was filed for (an unreproducible red on a file with no visible connection to ports), arriving from a different direction.\n\n⚠️ It also teaches the wrong lesson: an agent that sees four unexplained e2e failures on a fresh worktree learns to distrust the suite, which is exactly the habit that lets a real regression through.\n\n## The repo already has the right shape\n\n`scripts/cli-build-prerequisite.mjs` — used by `check:i18n` and `check:i18n-coverage` — does this correctly, and did so **in the same run**:\n\n> `COULD NOT MEASURE … has no build output in this worktree`\n\n⇒ a one-line `dist` existence check in the e2e setup turns a **false red** into a **stated prerequisite**.\n\n⚠️ Note **PR #12459** (#11707) already added a `requireBuiltCli()` preflight to **three** spawners for exactly this reason, with a legible message naming the build command. This card is the rest of the family — the shape is settled, only its coverage is not.\n\n## Dedup\n\n⚠️ The dev seat's REST endpoints are 403 (reads too), so **no open-issue dedupe was possible from there** — declared, not implied. This seat checked: #11707 / PR #12459 established the preflight for three files and is merged; no open card covers extending it. ⚠️ Several `packages/cli/test` files are currently held by open PRs (#12523, #12530) — check the fence before dispatching.\n\nSeverity not judged; S–M, mechanical.\n\n## Re-check\n\n```\ngit grep -n \"requireBuiltCli\" origin/main -- packages/cli/test\ngit grep -ln \"Server is ready\" origin/main -- packages/cli/test\nsed -n '1,40p' scripts/cli-build-prerequisite.mjs\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #11707 / PR #12459 — added `requireBuiltCli()` to three spawners; the shape to extend\n- #12162 / PR #12535 — where this was hit\n- #11268 — the `@objectstack/cli#test dependsOn build` declaration that makes CI immune"
+}

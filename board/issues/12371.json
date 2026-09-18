@@ -1,0 +1,35 @@
+{
+  "number": 12371,
+  "kind": "issue",
+  "title": "[Decision] extractWatchHints strips a module-relative literal's own depth, so a gate inside a package emits hints that are not repo paths — fix the producer (fleet-wide MATCHED widening) or explain it downstream?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T20:23:22Z",
+  "updated_at": "2026-08-26T05:37:10Z",
+  "closed_at": "2026-08-26T05:35:51Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12371",
+  "body": "Raised by the `domain:devx @ objectstack` seat (#6023) from the #12299 dispatch, which returned `premise_still_valid: false` and **opened no PR**. ⛔ This seat picks among none of these options.\n\n## First: #12299's named mechanism does not exist\n\n#12299 is titled *\"`extractWatchHints` admits **`paths`-mapped** TypeScript module specifiers\"*. There is no `paths` mapping. Measured by the dev at `1f6b8bb193` and re-verified independently by this seat at `origin/main`, **with a positive control**:\n\n```\ntsconfig.json                            paths=0 baseUrl=0\npackages/spec/tsconfig.json              paths=0 baseUrl=0\npackages/spec/tsconfig.scripts.json      paths=0 baseUrl=0\npackages/spec/tsconfig.test.json         paths=0 baseUrl=0\n\npositive control — tsconfigs that DO declare paths:\n  apps/docs/tsconfig.json · examples/app-crm · examples/app-showcase\n  packages/drivers/driver-sql · packages/drivers/driver-sqlite-wasm\n```\n\nThe control matters: it proves the reading is a real zero and not a broken search. `tsconfig.scripts.json` resolves through `moduleResolution: bundler`.\n\n**The real class is three mechanisms, not one:**\n\n- **(a) extensionless RELATIVE imports** — `./lib/dist-freshness`, `../src/kernel/protocol-version`. `extractWatchHints` strips the leading `./`/`../` **by design**: the strip assumes a module-relative literal is spelled from the repo root, which holds for `scripts/*.mjs` writing `'../../packages/...'` and **fails for a gate that lives inside a package**.\n- **(b) package-src-relative path TABLES** — `data/field.zod.ts`, `ui/view.zod.ts`. `build-skill-references.ts` says in-source that its paths are relative to `packages/spec/src/`.\n- **(c) genuine non-paths** — `@objectstack/spec`, `typescript/bin/tsc`.\n\n⭐ **Only (c) matches what the residue actually prints.**\n\n## The residue is not noise — it is false\n\n`unreachableReason` says *\"never was a repo path\"* about literals whose targets exist:\n\n```\nEXISTS packages/spec/scripts/lib/dist-freshness.ts\nEXISTS packages/spec/src/kernel/protocol-version.ts\nEXISTS packages/spec/src/data/field.zod.ts\n```\n\nThe gates really read them. This lane's standing rule is that a gate's self-description must be true; here it is not.\n\n⚠️ **And #12299's other headline measures ZERO.** The card claims the inert hints *\"displace a family's real reason\"*. Across all 11 unreachable families every dead hint is the `never` kind, so the number of families where a non-`never` reason is displaced by the `cap=3` is **0**. That half of the card is not a defect at all.\n\n## What is unchanged and still real\n\nThe fabrication direction the card warned about re-measures as live: probing `data/field.zod.ts` as a top-level path yields 1 fabricated (check, hint) pair; `src/kernel/protocol-version.ts` yields 3 across two families; `src/ai/agent.zod.ts` yields 4 across three. **31 distinct top-level roots sit one directory away from converting** (largest: `@objectstack` 279 pairs, `src` 59, `@fx` 58, `lib` 36). Cost is still residue-confined today — 386 inert distinct hints × 6844 tracked files gives **0** covering pairs, asserted rather than assumed.\n\n## 四维分析\n\n**① 实际业务需求.** A 的拉力是具体的:11 个 unreachable family 里有 **9 个**只因这一个原因不可达,修好 producer 它们会拿到**真实**的 lead。B 的拉力小但真实:9 行 residue 现在写着假话,而两种走法下 verdict 都不变。\n\n**② 平台长远合理性.** A 最高,且是**唯一 contract-first 的选项** —— 它修的是**生产者**(提取),让输出的含义等于源码的含义,而不是在下游迁就一个错误字面量。B 是把缺陷**记录下来**而不是修掉:hint 仍留在集合里、仍然 inert,fabrication 方向原封不动。\n\n**③ 避免 AI 写代码犯错.** A 最强 —— 它整类消灭「读起来像仓库路径但不是」的字符串,而这正是本文件把 fabricated lead 定价为**昂贵方向**的那一类。⚠️ 31 个 top-level root 只差一个目录就会转化,到那时伪造落在 **matched** 列而不是 residue,即昂贵方向。B 只有轻微正面效果(读者不再追幽灵),却把错误提取**固化**成一件需要解释的事。\n\n**④ 创业阶段不扩散需求.** A 最大,而且是一次**跨 fleet 的 MATCHED 列加宽** —— 必须按 `firstPartyImportTargets` docblock 给加宽定价的方式,单独测 pair 数、单独立卡。B 最便宜,且是唯一落在 #12299 已申报面内的选项。\n\n⭐ **四维不同向**:②③ 指向 A,①④ 指向「先便宜地止血」。这正是需要人工决裁的形状。\n\n## Options\n\n- **A. 修生产者** —— 让 module-relative 字面量按**书写它的脚本自身目录**解析,而不是剥掉前缀(`extractWatchHints` 增加 script path 入参)。`./lib/dist-freshness` 变成 `packages/spec/scripts/lib/dist-freshness`,一条真实的读取。⚠️ 跨 fleet 的 matched 列加宽,需自带 pair 数测量与独立卡。\n- **B. 只修 residue 侧** —— 教 `unreachableReason` 认出「在其书写脚本目录下能解析到真实文件」的死 hint 并如实陈述,不再断言 \"never was a repo path\"。落在 #12299 原申报面内。\n- **C. 在提取处拒绝该类** —— 丢弃能解析到真实同级模块的无扩展名相对字面量。⛔ **dev 明确拒绝 C**:它付出了 A 的爆炸半径,买到的却比 A 少。\n\n**dev 的建议是 A,并作为独立定价卡;B 作为可接受的止血。** ⛔ 本座位不背书任何一个。\n\n## Sequencing note (this seat's, and it is mechanical rather than a preference)\n\n⚠️ B 不能先于 **#12329** 落地。#12329 改的是覆盖规则(`**` 在非末段不匹配零段),而覆盖规则决定 inert 集合 —— B 的 recognizer 描述的正是这个集合。先建 B,它一出生就是陈旧的。因此 #12299 已挂 `pm:blocked` + `Blocked-by: #12329`,与本卡的裁决无关,两者独立成立。\n\nRefs: #12299(前提被证伪的卡,现 blocked + retriage) · #12246(其拆分来源) · #12300(引入 `globInNonFinalSegment` 分支) · #12329(覆盖规则的存活缺陷,B 的前置) · #12107(使 23 个 TS 门禁解析到源码,暴露本类)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 12502,
+  "kind": "issue",
+  "title": "rest: `package-routes`' `sendThrownError` drops `thrown.userMessage` too — the second declared channel, now that `sendError`'s `extra` admits it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T06:00:07Z",
+  "updated_at": "2026-08-26T10:05:12Z",
+  "closed_at": "2026-08-26T10:05:12Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12502",
+  "body": "Filed by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, as the follow-on this seat **committed to filing on #12404** once [PR #12477](https://github.com/objectstack-ai/objectstack/pull/12477) landed. It has: merged as `0e5fe7fc0`.\n\n## Why this is a card and not a rider on #12405\n\n#12405 is the `declaredCode` half at the same call site and is **in flight now**. Its ruling holds the two channels apart deliberately, and the reason is the one #12404 spent a round establishing:\n\n> `declaredCode`'s presence **means demotion**, so its caller must pass `demotedDeclaredCode(thrown)` rather than the raw field. `userMessage`'s presence means only that the producer opted in — `declaredUserMessage` already decided that — so its caller passes `thrown.userMessage` **straight through**.\n\nTwo channels, **opposite caller obligations**, at one call site. Folding them into one PR merges the two reviews that difference exists to keep separate.\n\n⛔ **HARD SERIAL behind #12405** — same file, same function (`packages/rest/src/package-routes.ts`, `sendThrownError`). Ruling ①: released by the **merge**, never by the arming.\n\n## Measured\n\n`sendThrownError` forwards `thrown.details` and nothing else:\n\n```ts\nsendError(res, thrown.status, thrown.code, message,\n  thrown.details ? { details: thrown.details } : undefined);\n```\n\n`resolveThrownHttpError` already populates `ThrownHttpError.userMessage` for every caller of the shared resolver (#12404 measured this end-to-end, including the sandboxed producer crossing the QuickJS boundary through `SANDBOX_ERROR_PASSTHROUGH`). Until `0e5fe7fc0` this door **could not** emit the field — a compile error to try. Now it can, and it still doesn't.\n\n## Not established here\n\n- **Reachability at THIS door.** #12404 established the channel is live *somewhere*; whether a producer reaching `/api/v1/packages` carries a `userMessage` is unmeasured. ⚠️ Measure before widening — a writer admitting a channel nothing produces at this door is the declared-but-dead class this lane spends most of its time removing. `premise_still_valid: false` with `pr: null` would be a legitimate delivery.\n- Whether the `rest-server.ts` twin door should be made to agree. ⛔ Not here: that file is held by [PR #12421](https://github.com/objectstack-ai/objectstack/pull/12421) (#11926).\n- Severity not judged.\n\n## Region\n\n`packages/rest/src/package-routes.ts`, `sendThrownError` — and its sibling tests. ⛔ `packages/spec/**` is the contract being honoured, not changed. ⛔ `packages/types/src/response-envelope.ts` is done (#11719, #12404) and is read-only here.\n\n## Refs\n\n- #12404 / PR #12477 (`0e5fe7fc0`) — the writer change that makes this compilable, and the ruling that separates the two channels\n- #11719 / PR #12403 (`db8c288`) — the `declaredCode` half of the same writer\n- #12405 — the `declaredCode` half of THIS call site; this card is serial behind it\n- #9934 · maintainer ruling 2026-08-19 on objectui#5210 option 1 — where the channel's semantics were set"
+}

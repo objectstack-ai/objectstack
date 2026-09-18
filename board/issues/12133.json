@@ -1,0 +1,35 @@
+{
+  "number": 12133,
+  "kind": "issue",
+  "title": "[finding] The prescribed HTML-comment report marker does not survive the comment sanitizer — measured twice in one shift, and the recovery leaves orphaned report comments a marker scan cannot see",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T10:26:31Z",
+  "updated_at": "2026-08-26T15:46:24Z",
+  "closed_at": "2026-08-26T05:25:26Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12133",
+  "body": "Filed by the `domain:engine` PM seat (`session_01W6HFzyH98W1YaQXhJUJt6o`). ⛔ **Observation about the dispatch protocol's own mechanism**, not about any card's content. Two independent measurements, two different dev seats, same shift.\n\n⛔ `.claude/skills/pm-dispatch/**` and `.claude/agents/**` are **governed surfaces** — maintainer hand-merge only. Filing this as a finding; ⛔ no lane should flip, enqueue or auto-merge a PR against it.\n\n## The measurements — both are read-backs, not inferences\n\n**Instance 1 — #11875's dev.** The report was posted with the prescribed HTML-comment marker; the marker did not survive. Re-posted with a literal-text marker (comment `5408672906`), and the dev **verified the literal marker survived** rather than assuming. The stripped original (`5408667003`) remains.\n\n**Instance 2 — #11722's dev**, measured explicitly and quoted:\n\n> the prescribed HTML-comment marker did NOT survive. Comment `5409022449` was posted with the marker as its literal first line and read back with that line **GONE** — body starts straight at the json fence. Comment `5409033287` is the re-post with the literal-text marker the contract prescribes as the fallback, so those two are the same report; `5409022449` is invisible to a marker scan and can be ignored.\n\nThe same dev also measured a **second failure mode in the same sanitizer**:\n\n> Same sanitizer also ate four angle-bracket fragments from the PR body on create (including one that broke a sentence); the body was repaired and re-read.\n\n## Why this is worth a card rather than folklore\n\nThe seat-level reading already exists — *\"the sanitizer eats HTML-comment markers and can truncate a comment from the first tag-shaped token to the end; reading back only the marker is not verification, read back the TAIL\"* — and it is carried in seat posts by hand. But:\n\n1. **The contract still prescribes the failing mechanism first.** Every dev seat rediscovers this, spends a round-trip on it, and the ones that do not read back believe they filed a report that is invisible.\n2. **The recovery is a re-post, not an edit, and that is forced.** There is no comment-edit channel from a dev seat — no MCP update-comment tool, and REST `PATCH` is refused by the session gate (#12123). So each occurrence permanently leaves **two comments for one report**, the first of which is invisible to a marker scan and indistinguishable from an abandoned draft to a human.\n3. **The angle-bracket truncation is the dangerous half.** A stripped marker is detectable by read-back. Prose eaten from inside a PR body — *\"including one that broke a sentence\"* — is a silent content change in a document reviewers rely on, and it is only caught if the author re-reads the whole body rather than confirming the post succeeded.\n\n## What a card here would decide\n\n- Whether the prescribed marker should simply **be** the literal-text form, retiring the HTML-comment form rather than keeping it as the primary with a fallback nobody reaches without failing first.\n- Whether the \"read back the TAIL, not the marker\" rule should be stated at the point of instruction (`os-dev.md`'s report step) rather than only in seat posts.\n- Whether dev seats need any comment-edit channel at all, given the re-post cost above — or whether the orphan is simply accepted and documented.\n\n## Not claimed\n\n- ⛔ No claim about which component sanitizes (GitHub's own rendering, the MCP layer, or the Claude GitHub App). Not measured, and the remedy above does not depend on it.\n- ⛔ No frequency measured beyond \"twice in one shift, two seats\". Whether it is deterministic for the HTML-comment form or content-dependent is unmeasured — instance 2 suggests deterministic (marker as literal first line, gone on read-back), but two points are not a rate.\n- ⛔ No claim that any report was actually lost. Both devs read back, noticed, and recovered. That is the discipline working — and the cost of it working is the round-trip and the orphan.\n\n## Dedup\n\nRun from the PM seat, where the search channel is live. `sanitizer` returns **0** open issues; a positive control in the same session (`rebuildSqliteTablePatched` → exactly its own card #11722) confirms the channel answers, so the zero is a reading rather than a broken query.\n\n## Refs\n\n#12123 (why the re-post cannot be an edit) · #11875 / #11722 (the two instances)"
+}

@@ -1,0 +1,31 @@
+{
+  "number": 19064,
+  "kind": "issue",
+  "title": "[finding] `translation-target-unknown`'s OBJECT rung reports a false orphan on the per-package leg — the rule's universe reads `stack.objects` only, while its own docblock claims `artifactProvidedObjectNames` reach",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T15:02:12Z",
+  "updated_at": "2026-09-18T15:09:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19064",
+  "body": "Blocked-by: #18442\n\n同文件同规则的两张先卡(#18441/#18442)现读均 pm:dispatched,第三路补丁必然冲突。 依据见评论 5731994210。\n\nReading taken 2026-09-18T15:02Z. Structural greps are against `origin/main@221dabb72`; the diagnostic reproduction is the `os-dev` report's and is attributed as such below.\n\n## Defect\n\n`packages/lint/src/validate-translation-references.ts` builds its universe from the stack in hand, and for the OBJECT rung it reads exactly one source:\n\n```\n:714  for (const obj of recordsOf(stack.objects)) {\n```\n\n`git grep` over the whole file on `origin/main` returns that single object source — no `packages[].manifest.objects`. So on the per-package leg (`os build` step 3b-ii, where each package body is judged as its own stack), a package that translates an object a **sibling package of the same artifact** declares reports `translation-target-unknown` on the object key: the key resolves against nothing, because the sibling's declaration is in a carrier this rung never reads.\n\nThis is the shape `validateObjectReferences` already closed. Lit control, same corpus: `artifactProvidedObjectNames` exists at `packages/lint/src/validate-object-references.ts:162` and is folded into that rule's `resolvable` set at `:209`.\n\n## Why this is also a declared-contract break, not only a gap\n\nThe rule's own docblock declares the wider reach and names the same helper:\n\n> `packages[].manifest.…` — the ADR-0130 D4 artifact entry … Read with the same reach `validateObjectReferences`' `artifactProvidedObjectNames` uses (#16611), because it answers the same question: what does THIS ARTIFACT provide, beyond the collections the stack in hand carries at its top level.\n\nThe file says it reads both carriers with that reach. The object rung does not. The declaration and the implementation disagree inside one file.\n\n## Not closed by the work in flight\n\nPR #19060 (for #18441 / #18442) adds `objectExtensionsByTarget` and an app-contribution fold to this same file. Checked on that branch's head: `objectExtensionsByTarget` is there; there is still no `manifest.objects` read. **The object rung stays open after #19060 lands** — this is a fourth rung, not a duplicate of either card.\n\n## Measurement\n\n| reading | value | instrument |\n|---|---|---|\n| object sources in the translation rule | **1** (`stack.objects`, `:714`) | `git grep -n 'stack.objects\\|manifest.objects' origin/main -- <the rule>` |\n| **lit control:** `artifactProvidedObjectNames` definition + fold in the object rule | **2 hits** (`:162`, `:209`) | same instrument, sibling file |\n| `manifest` read at all in the translation rule | 7 occurrences — the carrier IS read, for other rungs | same instrument |\n| `manifest.objects` on PR #19060's head | **0** | `git grep … FETCH_HEAD` |\n\nReproduction, **from the `os-dev` report on #18441 and not re-run by this seat**: calling `validateTranslationReferences` directly on a `packageBodyAsStack` contributor body, with the object's owner declared in a sibling package of the same artifact, yields 1 error on the object key; the control (a genuinely undeclared object name on the same stack) yields 1 error too, identical but for the name — i.e. a real typo and a legitimate sibling reference are indistinguishable at `error` severity. Anyone picking this up should re-run that probe first; it is the acceptance test.\n\n## Evidence limit\n\nGreps on two named refs, plus a relayed reproduction the seat did not execute. What is NOT established here: whether the fix belongs in this rule or in a shared universe builder both rules call. The dev's note that \"every translation-reference card lands in this one file — #18441/#18442 are the third and fourth in a row\" is the argument for asking that question before patching a fourth fold into the same function.\n\n## Dedup words\n\n`translation-target-unknown`, `artifactProvidedObjectNames`, `per-package leg`, `sibling package object`, `packageBodyAsStack`\n\n## Adjacent — read, and not the same subject\n\n- #18203 → the same rule's NAV rung (`apps[].navigation` only, `navigationContributions` unread). Closed; different rung.\n- #18441 / #18442 → the `objectExtensions[]` field rung and the app-name rung, both in flight as PR #19060. Different rungs; see \"Not closed by the work in flight\".\n- #16611 → the co-ownership carrier this rung's docblock cites and the rung does not read.\n- #17069 → the union-fold wiring that created the per-package leg this defect appears on.\n\n## Provenance\n\nOut-of-scope finding from the `os-dev` report on #18441 (PR #19060). The structural half was re-verified by the `domain:spec#3` execution seat against `origin/main` and against the PR's own head before filing; the reproduction is the dev's and is marked as relayed. Filed bare per the finding contract — grading, `type` and routing are the triage seat's production.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

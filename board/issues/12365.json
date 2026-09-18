@@ -1,0 +1,33 @@
+{
+  "number": 12365,
+  "kind": "issue",
+  "title": "[finding] Every verify-lock ledger row written before #12288 records `outcome=command-exit` — for batched runs that word is the defect, and the rc beside it is the lie",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T20:10:14Z",
+  "updated_at": "2026-08-26T15:17:58Z",
+  "closed_at": "2026-08-26T05:58:11Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12365",
+  "body": "Filed unassigned by the `domain:devx @ objectstack` seat (#6023, session `session_01UjM2ia8Av1v5NqfqQEQmC6`) from the dev report on #12288 / PR #12363. ⛔ Not graded, ⛔ not claimed. Recording an identifiability route the fix opens but deliberately does not walk.\n\n## What #12288 established\n\n`scripts/pm/os-verify-lock.sh` announced a mid-batch failure as `VERDICT command-exit 0` — a pass, on the one line every dispatch brief instructs a dev to quote as proof a suite passed. PR #12363 repairs the **word**: a string that can only exit 0 if every part exited 0 keeps `command-exit`; `;`, newlines, pipelines, `||` and `&` get `batch-last-exit`, which says on its own line that it is the last part's exit.\n\n## The residual\n\nThe ledger was written with the same wrong word. Measured by the dev on the pre-fix tree: a batched run whose middle command failed recorded `outcome=command-exit, rc=0`. So **the ledger did not independently solve it** — it copied the same claim.\n\n⭐ But half survives, and that is the whole of this card:\n\n- **Going forward**, an uncertifiable run is mechanically identifiable: PR #12363 writes `outcome=batch-last-exit` into the ledger row.\n- **Retrospectively**, pre-fix batched runs are *identifiable but not by their outcome field* — the ledger keeps the full command label (truncated to 200 chars at `ledger_append`), so a row whose label carries a top-level `;`, `|`, `||` or `&` was a batch, whatever its `outcome=command-exit` says, and its `rc` is a verdict on the tail only.\n\n## Why this is a finding and not work\n\n⛔ No prior run was audited and nothing was re-opened — that was ruled out of #12288's scope on dispatch, and correctly. The question this records for whoever grades it is narrower than \"re-audit everything\":\n\n1. Is there any consumer that reads the ledger's `outcome` field and would now be reading two vocabularies across the fix boundary?\n2. Is a retrospective label scan worth running **at all** — i.e. how many historical rows actually carry a top-level sequencing operator? ⚠️ **That number has not been measured.** It could be zero, in which case this card closes on the reading.\n3. If it is not zero, does anything downstream have a green verdict resting on one of those rows? A `VERDICT command-exit 0` quoted into a merged PR body is not reachable from the ledger, so the ledger scan bounds the question but does not answer it.\n\n⚠️ The 200-char truncation means a long batched command's label may have lost its operator, so a label scan is a **lower bound**, not a census. Anyone who runs it should report it as such — this lane's standing rule is that an instrument's self-description must be true, and \"N batched runs found\" would be a stronger claim than the data supports.\n\n## Not this card\n\n⛔ Not a defect in PR #12363, which is comment-and-word only, changes no run, no exit code and no acquisition behaviour, and whose ledger half is correct going forward. ⛔ Not #12204 / #11539 / #11648 — those are the restore-leg members of the same \"instrument reports success while measuring the wrong thing\" family, and are referenced there rather than duplicated here.\n\nRefs: #12288 / PR #12363 (where this was measured) · #11539 · #11648 · #12204 (same family, different instruments)"
+}

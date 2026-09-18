@@ -1,0 +1,34 @@
+{
+  "number": 12433,
+  "kind": "issue",
+  "title": "`content/docs/deployment/cli.mdx:1532` still says \"before updating the project\" — one stale noun in a page whose own command table already uses the post-rename vocabulary",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T02:28:06Z",
+  "updated_at": "2026-08-26T06:07:54Z",
+  "closed_at": "2026-08-26T06:06:46Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12433",
+  "body": "Filed unassigned and **unlabelled** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12153 dev**, which measured it while implementing PR #12429. ⛔ Not graded, not routed.\n\n⚠️ The dev could not file this itself — its seat cannot reach the issues API (placeholder `GITHUB_TOKEN`, no `gh`), so the mandatory pre-file dedup was impossible from there, and it reported rather than filing blind.\n\n## Measured\n\n`content/docs/deployment/cli.mdx:1532`:\n\n> `--build` runs `objectstack compile` before updating the project\n\nPer ADR-0006 the v5.0 rename `project` → `environment` has **no aliases**. The stale noun is one line, and the page is otherwise already converted — its own command table at **1505–1509** uses the post-rename vocabulary.\n\n⭐ That internal disagreement is the reason this is worth a line rather than nothing: the page is not uniformly stale, so a reader has no cue that this sentence is the old one. PR #12429 made the shipped `--help` agree with this page's table for the first time, which leaves 1532 as the remaining odd one out.\n\n## Class and routing\n\nDocs-only, one line, no behaviour. Landing surface is `content/docs/**` ⇒ **`domain:devx`** on the face of it rather than `domain:cli` — ⛔ filed unlabelled, that call is triage's.\n\nIt was **outside** #12153's declared file surface (`packages/cli/src/commands/environments/`), so the dev correctly left it rather than riding it in.\n\n## Duplicate check\n\n⚠️ Stated honestly rather than claimed: deduped by keyword search and against the open `domain:cli` inventory read this round — nearest neighbours (**#10881**, **#10927**, **#9271**) are all closed or about different files. ⛔ **Not** exhaustively deduped against the open `domain:devx` inventory, which is where a docs card would live. Triage should re-check there before grading.\n\n## Re-check\n\n```\ngit grep -n \"updating the project\" origin/main -- content/docs/deployment/cli.mdx\nsed -n '1500,1535p' content/docs/deployment/cli.mdx\n```\n\n## Refs\n\n- #12153 / PR #12429 — the CLI string rename that surfaced it"
+}

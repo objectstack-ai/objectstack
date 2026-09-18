@@ -1,0 +1,35 @@
+{
+  "number": 11671,
+  "kind": "issue",
+  "title": "[finding] `check:i18n` verifies key presence, not that an untranslated leaf still matches the source string it was filled from — and the drift is sticky",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T11:36:34Z",
+  "updated_at": "2026-08-26T11:11:57Z",
+  "closed_at": "2026-08-26T11:11:57Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11671",
+  "body": "Ruled 2026-08-25 — maintainer ruling on #12069: **Option A** (recorded there). The three machine lines this body carried (`Blocked-by: #12069` / `Restart-when:` / `Unlock-action:`) are discharged and removed in the same stroke by PM session `session_01H9StxQgG2DPA26XzZZqnJB`. Scope, exactly as the unlock action pre-wrote for ruling A: extend `packages/platform-objects/src/apps/translations/source-hash.ts` to the generated bundles — ⛔ extend that existing module, do not design a second mechanism, and do not touch `check:i18n`'s key-set comparison. The false \"cannot occur\" note in `source-hash.ts` must be corrected in the same work.\n\n> ⓘ **PM status block, added 2026-08-25 by the `domain:devx @ objectstack` seat** (`session_01UjM2ia8Av1v5NqfqQEQmC6`). The three lines above are the machine-readable half of `pm:blocked`; they were previously only in the ACCEPT comment, where the unlock scan — which greps **bodies** — could never have seen them. Repairing that half-state is the only change to this body; everything below is the filer's original text, unedited.\n>\n> **Shipped so far:** PR #12067 (`Part of`, not `Fixes`) lands `check:i18n-stale-fill` — the \"at minimum\" half, built on cross-locale byte-identity as a provenance proxy. It finds 5 real stale leaves on `main`, frozen in a baseline with a written reason each and filed as #12065. The durable half needs recorded fill provenance, which is a bundle/extract **format change**, hence the escalation.\n\n---\n\nMeasured on PR #11659 (card #11507) by the `domain:services` seat and its dev. Filed unassigned, **no `pm:queue`** — grading is triage's field. ⚠️ Routing is a guess: the gate is repo tooling (`check:i18n` / the bundle extract config), so if this belongs to a tooling lane rather than services, please re-route rather than treating the label as a claim.\n\n## The gap\n\n`check:i18n` checks that bundles are **in sync by key** — every expected key present, no undeclared authoring keys. It does **not** check that a leaf which was filled with the **source string** still equals that source string after the source is revised.\n\nSo a locale bundle can publish a **superseded draft** of a description indefinitely, and the gate reports `OK`.\n\n## Measured instance\n\nOn PR #11659 at head `bbe0b17`, `sys_activity.fields.type.help`:\n\n| locale | length | state |\n| --- | --- | --- |\n| `en` | 411 chars | matches the source `description` |\n| `es-ES` | 602 chars | **superseded draft** |\n| `ja-JP` | 602 chars | **superseded draft** |\n| `zh-CN` | 602 chars | **superseded draft** |\n\nThe three stale leaves carried two clauses the declaration no longer made — including an implementation detail (about `readonly` fields and `validateRecord`) that had been deliberately removed from the shipped help text.\n\nAt that same commit the gate reported, verbatim:\n\n> `check-i18n-bundles: OK (1 package(s) — all bundles in sync, no undeclared authoring keys)`\n\n⭐ And it was not only the gate. **The full CI suite was green at `bbe0b17`** — 31 checks, 29 success / 2 skipped / 0 failures, `Lint & Repo Gates` included — while that drift was live. Nothing in the repo's automated defences can currently see it.\n\n## Why it is worth a card: the drift is **sticky**\n\n`--fill=default` fills **gaps only**. Once a non-en leaf holds any non-empty value, a later regeneration leaves it alone. So this does not self-heal: it persists until someone deliberately drops the leaf and re-fills it, which is exactly what the repair on #11659 had to do.\n\n**The mechanism that produces it is ordinary, not exotic:** extract once → revise the source string → extract again. The second run rewrites `en` (the source locale) and silently keeps the stale copies everywhere else.\n\n## Class, not instance\n\nAny package whose bundles are filled with source text and whose source string is later revised. `plugin-audit` is where it was caught; nothing about the mechanism is specific to it.\n\n## What was NOT done, deliberately\n\n⛔ The PR was **not** widened to fix the gate — the repair on #11659 was limited to regenerating the four affected leaves (they are now byte-equal to the source, 411 chars each, verified independently by the seat with a `git show` of the staged blob and a sha256 comparison carrying a passing negative control). Whether the gate should grow this check, and at what cost, is a separate decision.\n\nNot measured / not proposed here: what the fix would cost, whether a source-hash-per-leaf is the right shape, and whether `check:i18n-coverage` (not run on that PR — it needs a full workspace build) already covers part of this. Those belong with whoever takes the card.\n\nRefs: #11507 (the card this surfaced under) · PR #11659"
+}

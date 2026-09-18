@@ -1,0 +1,33 @@
+{
+  "number": 12479,
+  "kind": "pull_request",
+  "title": "fix(cli): rename `project` -> `environment` in comment prose (environments/**, api-client.ts)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T05:17:13Z",
+  "updated_at": "2026-08-26T06:16:40Z",
+  "closed_at": "2026-08-26T06:16:38Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": "2026-08-26T06:16:38Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12479",
+  "body": "Fixes #12432\n\n## What\n\nComment-axis-only follow-up to the v5.0 `project` -> `environment` rename (ADR-0006). PR #12429 (#12153) already rewrote every user-visible string in these five CLI files; this PR updates the docblock/inline-comment prose in the same files so the comments agree with what the code now prints and returns.\n\n## Files (exactly the six named by the card)\n\n- `packages/cli/src/commands/environments/list.ts`\n- `packages/cli/src/commands/environments/bind.ts`\n- `packages/cli/src/commands/environments/create.ts`\n- `packages/cli/src/commands/environments/show.ts`\n- `packages/cli/src/commands/environments/switch.ts`\n- `packages/cli/src/utils/api-client.ts`\n\n## Re-census on current `origin/main` (do not trust the card's counts — both #12432's own body and the PM's claim comment say so explicitly)\n\nFull-file grep for `project` (case-insensitive, whole word, every line — not a phrase literal, so a wrapped docblock line does not hide anything) across the six files, then each hit classified by hand as comment / identifier / API-surface:\n\n**Changed (12 comment-prose sites — one more than the card's \"13 docblocks + api-client.ts:19 = 14\", see note below):**\n\n| File | Line | Before | After |\n|---|---|---|---|\n| list.ts | 9 | `list projects visible to...` | `list environments visible to...` |\n| bind.ts | 13 | `multi-environment server project.` | `multi-environment server environment.` |\n| bind.ts | 17 | `next per-project kernel` | `next per-environment kernel` |\n| create.ts | 10 | `provision a new project.` | `provision a new environment.` |\n| create.ts | 13 | `activates the new project for` | `activates the new environment for` |\n| create.ts | 67 | `leave a half-bound project.` | `leave a half-bound environment.` |\n| show.ts | 9 | `single project.` | `single environment.` |\n| show.ts | 11 | `Renders the project row` | `Renders the environment row` |\n| switch.ts | 9 | `set the active project for` | `set the active environment for` |\n| switch.ts | 15 | `target this\\n * project.` | `target this\\n * environment.` |\n| api-client.ts | 19 | `Explicit project id.` | `Explicit environment id.` |\n| api-client.ts | 55 | `// Resolve active project id` | `// Resolve active environment id` |\n\n`api-client.ts:19` is the site the card called out as sharpest (docblock said \"project id\" for a field literally named `environmentId`) — confirmed present exactly as described, now fixed.\n\n**Not changed (deliberately, per the card's own fences):**\n\n- `create.ts:12` and `show.ts:12` quote real identifiers — `ProjectProvisioningService.provisionProject` (confirmed live elsewhere: `packages/runtime/src/system-environment-plugin.ts`, `packages/client/src/index.ts:1815`) and `client.projects.get(id)`. These are identifier references, not prose — renaming a fragment of a real quoted name would misdescribe actual code. The card's naive \"13 docblock sites\" count included both as raw `project` grep hits without this classification; excluding them plus adding the newly-found `api-client.ts:55` (a bare `//` comment the card's JSDoc-shaped census missed) nets to the same 12 in `environments/**` + `api-client.ts`.\n- Everything on the API-surface axis: `client.projects.*` SDK calls, `res.project`/`res.projects` response fields, and every local bound directly from them (`const p = res?.project`, `const project = lookup?.project`, `current.project.metadata`, etc.) — untouched, identifiers unrenamed, per ruling #2/#3. That axis now has its own card, #12473.\n\nReverse-check (proving the grep instrument can say no and isn't fooled by `project` being a substring of `projects`): post-edit, `grep -inE 'project' <files>` still returns exactly the API-surface/identifier lines above and nothing from the changed list — confirmed by hand, see report.\n\n## Verification\n\n- `pnpm --filter '@objectstack/cli^...' build` — dependency closure, clean.\n- `pnpm --filter @objectstack/cli build` — clean.\n- `pnpm --filter @objectstack/cli typecheck` — clean.\n- `pnpm --filter @objectstack/cli exec vitest run --maxWorkers=2 src/commands/environments/environments.test.ts` — 73/73 passed.\n- `git diff --stat` — 6 files changed, 12 insertions(+), 12 deletions(-); confirmed the diff contains only the 12 comment edits above (no string literal, no identifier touched).\n- Gate families re-derived from `node scripts/pm/dispatch-gates.mjs` against the actual changed paths (not trusted from the dispatch prompt) — all matched families run and green at final HEAD `ea04b744c`, details in the report comment.\n\nZero behaviour change, zero string-literal change.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01UjujZN219uFzBhSYfMykCd)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UjujZN219uFzBhSYfMykCd)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 11991,
+  "kind": "issue",
+  "title": "sql-driver: one emission-identity source — loud refusal for redshift/cockroachdb DDL, pgnative joins the Postgres family (#11756 ruling)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "needs:contract-review",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T03:58:51Z",
+  "updated_at": "2026-08-26T17:40:24Z",
+  "closed_at": "2026-08-26T17:40:24Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11991",
+  "body": "Implementation of the #11756 ruling (maintainer, 2026-08-25, verbatim 「同意」 on the presented 「C，但 pgnative 归入 Postgres 家族」; full record = #11756 comment 5404884704). Filed by PM session `session_01KWRU3s15AJz7PGW7a7wdCh` per the confirmed checklist.\n\n**Content**:\n1. Converge the three inconsistent judgment tables in `packages/drivers/driver-sql/src/sql-driver.ts` (`isPostgres` getter · `DIALECT_CONNECT_TIMEOUT` · `POSTGRES_WIRE_CLIENTS`) into **one emission-identity source**, with the other tables as declared extensions over it. Premise-first: re-verify the spellings on the current tree (`git grep -n \"isPostgres\\|DIALECT_CONNECT_TIMEOUT\\|POSTGRES_WIRE_CLIENTS\" origin/main -- packages/drivers/driver-sql/src/sql-driver.ts`).\n2. **`redshift` / `cockroachdb`**: wire recognition stays (connection/parsing per #11389, deliberate); ⛔ no emission identity. A configuration reaching the DDL-emission path gets an immediate **named refusal with guidance** (which configurations are supported) — never a silently mis-built table.\n3. **`pgnative`**: joins the Postgres family for emission (knex resolves it to the same `postgresql` dialect — measured on #11756) AND enters the wire table (absent from both today), including the calendar-day parser pin the wire table carries.\n4. Rewrite the deliberately-pinned cases in `packages/drivers/driver-sql/src/sql-driver-11550-dialect-client-spellings.test.ts` (landed by PR #11783 under a docblock naming #11756) — the rewrite IS the ruling landing; do it explicitly, never as refactor fallout.\n5. `mariadb`: ⛔ out of this ruling's scope — stays unrecognised; do not fold it in.\n\n**Discipline**: Clause-② — assess at claim time against the tree, expected **yes** (previously-proceeding configurations now refuse loudly; `pgnative` gains emission — accept/reject behaviour changes in both directions); contract-review tier expected.\n\n**Acceptance criterion**: a stack configured with `redshift` or `cockroachdb` that reaches DDL emission receives one named, actionable refusal (code + message pinned); `pgnative` behaves identically to `pg` for emission and carries the wire parser pin; the emission-identity answer has exactly one source of truth.\n\nReopening condition recorded on #11756: evidence of a real Redshift/CockroachDB customer reopens toward recognition, with a measured DDL boundary and the two databases judged separately."
+}

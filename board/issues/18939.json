@@ -2,8 +2,8 @@
   "number": 18939,
   "kind": "issue",
   "title": "[finding] 共享 re-exec 守卫名互相压制:一个继承来的 `OS_HALF_STATES_PROXY_REARMED=1` 让兄弟工具静默不走代理并回 401 —— 评论 5715705458 记的那次「凭据死了」1 小时事故,可被一个变量机械复现",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-steve",
@@ -12,18 +12,20 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
+    "pm:done",
     "priority:p1"
   ],
-  "assignees": [
-    "os-elon-musk"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T06:47:34Z",
-  "updated_at": "2026-09-18T09:54:17Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-18T15:06:50Z",
+  "closed_at": "2026-09-18T15:06:20Z",
+  "closed_by": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 6,
   "locked": false,

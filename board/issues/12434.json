@@ -1,0 +1,35 @@
+{
+  "number": 12434,
+  "kind": "issue",
+  "title": "skills: write the two 2026-08-26 rulings into the PM protocol text — md-content review fork for skills-lane PRs, and the 5-card decision-batch flow as the standing adjudication process",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T02:28:49Z",
+  "updated_at": "2026-08-26T05:33:10Z",
+  "closed_at": "2026-08-26T05:33:10Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12434",
+  "body": "Filed by the skills seat (`session_01JANH3y7qe3MD8aLaLXci8N`) recording two maintainer rulings from the 2026-08-26 live PM chat. Reader: the `domain:skills` execution seat — protocol-text work on the governed face (draft + human merge; clause-① tiering per the skill's own rules). Filed with `pm:queue` and no lane label — triage confirms routing (`domain:skills` expected: pm-dispatch SKILL.md is the landing surface).\n\n## Ruling 1 — the skills-lane PR review fork keys on .md CONTENT, not on path alone\n\nMaintainer, 2026-08-26, verbatim:\n\n> skills 中的pr，只有包含md文件时需要推给我审核，其他代码文件你直接自己审核。\n\nExecutable criterion for the protocol text (the ACCEPT-path fork section):\n\n- A skills-lane PR whose diff **contains any `.md` file** (SKILL.md, references, os-dev.md, AGENTS.md, CLAUDE.md, published `skills/**` markdown) → unchanged governed ending: draft, review-requested, **human merge is the review record**.\n- A skills-lane PR whose diff is **code only** — `scripts/pm/**`, `.claude/hooks/*.sh`, `.claude/workflows/*.js`, `.claude/settings*.json`, `skills/**` non-md artifacts — → the skills seat **self-reviews (fable-tier, checklist unchanged) and lands it directly** (ready → queue), no maintainer review required.\n- Scope boundary, stated so the text cannot overreach: this fork applies to the **skills lane's own PRs**. Other lanes' governed faces (`docs/adr/**` etc.) keep the standing regime unless the maintainer rules otherwise.\n\n## Ruling 2 — today's decision-batch flow becomes the standing adjudication process\n\nMaintainer, 2026-08-26, verbatim:\n\n> 决裁流程今天这样很好，决策卡5张一组，从业务的角度给我具体解释，说明可选项，并进行四维分析。应该写入技能。\n\nExecutable criteria (the 升级与决策 / decision-inbox section, likely with detail in `references/decision-analysis.md`):\n\n- Decision cards are presented in **batches of ≤5**, priority-ordered (in-flight-blocked > operational blockers > user-visible > structural).\n- Each card carries: a **business-angle concrete explanation** (what it means for the product/user, not the mechanism), the **options with their real costs**, the **four-axis analysis**, and one recommendation.\n- One-line batch reply format (「1A 2B …」; 「X, 但…」 = attached conditions ride into execution); after the ruling, the four-piece atomic execution per card (provenance comment with verbatim quote + state transition + Blocked-by liveness + judge-what-is-known) runs without further prompts.\n- New inbox arrivals during a batch roll into the next batch; the flow ends only when the inbox reads zero.\n\n## Fold note\n\nSame file and same change form as **#12227** (repo classes + governance split, already ruled and `pm:queue`): chain-head fold candidate for one SKILL.md dispatch once PR #12406 reaches MERGED and frees the file. Both cards are ruled; the five fold gates get answered at claim time. Ratchet applies — the compression candidates named on #12227 (five-repo enumeration, 代扫 exception text) plus the ACCEPT-fork paragraph this ruling amends."
+}

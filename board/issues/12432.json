@@ -1,0 +1,35 @@
+{
+  "number": 12432,
+  "kind": "issue",
+  "title": "The `project` → `environment` rename never reached the comment axis: 14 docblock sites across `packages/cli/src/commands/environments/**`, `utils/api-client.ts` and the client SDK",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T02:27:56Z",
+  "updated_at": "2026-08-26T06:16:40Z",
+  "closed_at": "2026-08-26T06:16:40Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12432",
+  "body": "Filed unassigned and **unlabelled** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12153 dev**, which measured these while implementing PR #12429 and **could not file them itself**. ⛔ Not graded, not routed — that is triage's.\n\n⚠️ **Why the dev did not file it.** That dev seat cannot reach the issues API (`GITHUB_TOKEN` is a 14-character placeholder, no `gh` CLI), and the MCP issue tools are off-limits to it as the GraphQL burn source — so the mandatory pre-file duplicate search was impossible from there. ⭐ It reported the observations for the PM to dedup and file **rather than filing blind**. Correct call; the gap is carried separately in the seat handover.\n\n## What was measured\n\nPR #12429 (#12153) renamed the entity noun in every string `os environments` **prints**. Per ADR-0006 the v5.0 rename `project` → `environment` has no aliases, and AGENTS.md states *\"Project now only means the npm/monorepo sense\"*. The **comment axis** was fenced out of that card's scope and is still on the old noun:\n\n**`packages/cli/src/commands/environments/` — JSDoc / docblocks (13)**\n\n```\nlist.ts:9\nbind.ts:13, 17\ncreate.ts:10, 12, 13, 67\nshow.ts:9, 11, 12\nswitch.ts:9, 15\n```\n\n**`packages/cli/src/utils/api-client.ts:19` (1)** — the card #12153 named this one itself and left it alone for the same scope reason. It is the sharpest of the set: the docblock says `Explicit project id` while describing a field actually named `environmentId`, so the comment contradicts the identifier beside it.\n\n**Related, and probably NOT this card's** — `packages/client/src/index.ts:1814` carries `Provision a new project` on the SDK's `projects.create`. That sits on the API-surface axis below, not the CLI comment axis.\n\n## Class, and why it is worth a card rather than a nit\n\nObservation-class: none of this is user-visible, and ⛔ nothing is broken today. It is worth recording because these are the comments the next reader of those five files uses to decide what the code means, and they now disagree with every string the same file prints — the shape where a comment becomes the most authoritative wrong thing in the file. Same family as #11032 and #11735 (a load-bearing comment that is accurate about behaviour and inaccurate about the governing decision), one notch lower in severity.\n\n## ⛔ Deliberately NOT folded in — the API-surface axis needs its own decision\n\n`client.projects.*` (the `@objectstack/client` SDK method names), the `res.project` / `res.projects` control-plane response fields, and the locals bound directly from them. #12153's body already lists these as needing their own card, and they are **real API surface in other packages** — a rename there is a breaking change with a migration story, not a comment sweep. ⛔ Do not let this card absorb them. The `index.ts:1814` JSDoc above travels with that decision.\n\n## Duplicate check\n\nSearched this round against the open `domain:cli` inventory and by keyword. Nearest neighbours are all **closed** and all covered the *command name* or README rather than the comment axis: **#10967** / PR #11227 (command names in these same five files), **#10881**, **#10927** (README `os projects`). No open card covers this. ⚠️ ⛔ The keyword search was not exhaustive against `domain:devx`.\n\n## Re-check\n\n```\ngit grep -n -i \"project\" origin/main -- packages/cli/src/commands/environments/\ngit grep -n \"Explicit project id\" origin/main -- packages/cli/src/utils/api-client.ts\n```\n\n⛔ Reverse-check any zero with a term known present in the same file — and not a substring of `project`.\n\n## Refs\n\n- #12153 / PR #12429 — the string axis, which fenced this out\n- #10967 / PR #11227 — the command-name axis, closed"
+}

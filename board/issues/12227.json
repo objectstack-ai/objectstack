@@ -1,0 +1,35 @@
+{
+  "number": 12227,
+  "kind": "issue",
+  "title": "[Decision] pm-dispatch should register repo *classes*, not roster rows — single-lane repos self-triage",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-25T14:36:43Z",
+  "updated_at": "2026-08-26T05:33:09Z",
+  "closed_at": "2026-08-26T05:33:09Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12227",
+  "body": "## Trigger\n\n`objectstack-ai/www.objectos.ai` (the Astro marketing + blog site) was opened as a sixth lane on 2026-08-25 under the standing 维护者直派通道, seat #12224. The pm-dispatch skill's multi-repo section enumerates **five** repos, so the new lane is maintainer-authorised but **not skill-registered — and no triage seat sweeps it.** 33 cards were filed into it in one session.\n\nMaintainer's framing, verbatim:\n\n> 我觉得 这个车道要不要正式进 pm-dispatch 的仓库名册，否则越来越多，没有任何分诊席扫这个仓，这种仓是否就应该项目经理全权负责所有。\n\n## The observation the proposal rests on\n\n**The single-producer rule protects routing, and single-lane repos have no routing to protect.**\n\n`domain:*` exists to answer \"which lane owns this card\". In `objectstack` that is a real question across six lanes. In `cloud`, `objectos`, `hotcrm` and `www.objectos.ai` there is exactly one seat, so the question is vacuous — which is why those repos carry no `domain:*` labels at all, and why the backlog sweep already exempts them (\"豁免仅余真无车道标签的仓 cloud、objectos\"). The skill half-acknowledges this today without drawing the conclusion.\n\nTaken duty by duty, for a single-lane repo:\n\n| Triage duty | On a single-lane repo | Devolvable? |\n|:--|:--|:--|\n| `domain:*` routing | vacuous — one lane | n/a |\n| issue `type` | mechanical; the boundary test is already written down | yes |\n| `finding` first-touch grading | real work, but no conflict of interest | yes |\n| `target:<major>` release board | these repos have none | n/a |\n| **cross-repo dedupe / shadow check** | needs the all-repo view | **no** |\n| **代裁 (adjudicating decision cards)** | — | **no** |\n\n代裁 is the one with a hard reason. A seat that can both rule its own decision card *and* dispatch the result to itself has no check on it at all. That is self-dealing, not an efficiency question, and it must stay central regardless of repo class.\n\n## Cost pressure\n\nThe triage seat is one seat running a two-tier inventory across every registered repo. Each added repo raises its per-fire cost linearly, and the skill already pre-registers the breaking point (\"单轮时长逼近 fire 周期 ⇒ 按仓拆回多席\"). Loading low-complexity documentation and marketing repos onto the scarcest seat spends it in the wrong place — and the roster will keep growing, which is exactly the maintainer's point.\n\n## Proposal\n\nReplace the five-repo enumeration with a **repo class**:\n\n- **Multi-lane** (`objectstack`, `objectui`) — central triage unchanged; sole producer of `domain:*`, type and grading.\n- **Single-lane** (`cloud`, `objectos`, `hotcrm`, `www.objectos.ai`, and future repos by default) — the execution seat is **self-triaging**: its own sweep, its own `type`, its own `finding` first-touch grading. Produces no `domain:*`, because the label is vacuous there.\n- **Reserved to the triage seat in both classes:** 代裁, and the cross-repo dedupe / shadow check.\n- **Registering a repo becomes a checklist**, not a debate: seat post, labels, class assignment, gate inventory. Repo #7 should not need another decision card.\n\n## Honest cost\n\nThis weakens the single-producer guarantee for **grading** in single-lane repos. Two arguments that it is acceptable, and one thing it does not solve:\n\n- Grading conflicts are far cheaper than routing conflicts. A mis-graded finding sits in the wrong queue; a mis-routed card gets worked twice by two lanes.\n- Self-triage is **already** the skill's sanctioned fallback (代扫). This makes the fallback the designed state for one class rather than a permanently-running exception — which is more honest than the status quo, where the exception is what actually happens.\n- **Unsolved:** where decision cards from single-lane repos queue. 维护者收件箱恒为 objectstack, but these cards live in their own repos. The skills seat should settle this as part of implementation — it is the weakest part of this proposal.\n\n## 四维分析\n\n**实际业务需求。** 需求是实测出来的，不是推演的：本轮 33 张卡进了一个没有任何分诊席覆盖的仓，其中 5 张阻塞卡、2 张定位决策卡，没有任何机制会扫到它们。同时 `finding` 首次定级在这类仓里本来就常年由执行席代扫完成——代扫条款存在本身就是这个需求的证据。反面证据也要记：`domain:*` 在这四个仓里从未被生产过，说明中央分诊对它们提供的核心价值一直是空的。\n\n**项目长远合理性。** 按仓逐行加名册是 O(n) 增长且每次都要重新讨论，而仓的数量只会增加（org 下已有 30+ 仓，其中数个是潜在车道）。改成按类别注册是一次性结构变更，第 7 个仓走清单而不是走决策卡。反向的代价是引入了一个新概念（仓类别），技能文本有行数棘轮，必须以删减付账。\n\n**防 AI 写代码犯错。** 这条是本提案最强的一环，也是唯一必须收紧而不是放宽的地方：代裁下放会让一个席位既裁自己的卡又派给自己，制衡当场归零——这正是 AI 座位最容易自我合理化的形状。所以提案显式把代裁和跨仓查重钉死在分诊席，**下放的只有无利益冲突的机械职责**（type、定级、本仓 sweep）。声明即强制：如果实现时做不到把代裁挡在执行席之外，这个提案应当整体否决而不是打折执行。\n\n**创业阶段不扩散需求。** 本提案不新增座位、不新增标签、不新增 sweep，净效果是把最稀缺的分诊席从低复杂度仓上解放出来，属于收敛而非扩张。但要警惕一个扩散风险：一旦\"注册新仓\"变得便宜，会诱导把更多边缘仓拉进 PM 体系。建议实现时把类别注册清单里加一条准入判据——**这个仓是否真的需要一个常设座位**，而不是只需要偶尔有人看一眼。\n\n## Recommendation\n\nAdopt, with the two carve-outs (代裁 and cross-repo dedupe stay central) as non-negotiable conditions. The maintainer's own framing — 「这种仓是否就应该项目经理全权负责所有」— is right for everything **except** those two, and the exception is what keeps it safe rather than a hedge.\n\n## Notes for whoever implements\n\n- This edits the pm-dispatch `SKILL.md` protocol surface, so **clause ① applies: `claude-fable-5`**, not opus.\n- Governed surface — draft PR only, human merge, review-requested to `os-zhuang`.\n- The line ratchet applies: this must pay for itself with deletions. The five-repo enumeration and the 代扫 exception text are both candidates to collapse into the new class rule.\n- `scripts/pm/ensure-pm-labels.sh` currently targets `objectstack`; `www.objectos.ai` had its `pm:*` labels auto-created by the issues API rather than by the script. Worth reconciling.\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 12223,
+  "kind": "issue",
+  "title": "packages/spec: an author-facing refusal message routes to `objectstack publish`, a command retired with the direct-to-environment path",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T14:16:19Z",
+  "updated_at": "2026-08-26T04:02:17Z",
+  "closed_at": "2026-08-26T03:41:40Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12223",
+  "body": "Found by the gate built for #12016 (`scripts/check-cli-command-ids.mjs`) on its **first live run**, and left unfixed there deliberately: `packages/spec` is not that card's lane, and its edit would pull a second package's regeneration family into a `scripts/`-only PR. Filed unassigned so the owning lane can take it with the evidence attached.\n\n## The defect\n\n`packages/spec/src/api/endpoint.zod.ts:39`, inside `STORED_BOOKKEEPING_GUIDANCE` — the message an author meets when they hand-write a stored-envelope key onto an `api` declaration:\n\n```\n'... Remove it — publication state is managed by `objectstack publish`, not authored.'\n```\n\n`objectstack publish` resolves to no command. `objectstack` is a real declared bin (`packages/cli/package.json` declares both `objectstack` and `os`), but there is no `publish` command id: the registered publish ids are `package publish` and `plugin publish`.\n\nThat is not a guess. #11465 measured it against the **built oclif `Config`** and #12177 records the result in `packages/cli/src/commands/package/publish.ts`:\n\n> the registered `publish` ids are `package publish` and `plugin publish`, and no `rollback` id exists at all\n\n`os publish` was the legacy direct-to-environment command, removed with the path that wrote `sys_environment_revision`.\n\n## Why it is worth fixing rather than declaring\n\n#12177 declares two *deliberate* unresolvable ids in place, because those sentences are **about** the removal — accurate history that a rewrite would falsify. This one is the opposite shape. It is **present tense and prescriptive**: it tells an author, at the moment their write is refused, where publication state actually comes from. An author who follows it types a command that errors as unknown. Same class as items 1 and 2 in #11465, which that card fixed.\n\nCorrect spelling: **`os package publish`** — the message's own neighbouring sentence names `publishPackage` as the writer, and `packages/cli/src/commands/package/publish.ts` is the command that runs it.\n\n## Two more sites, same word, lower severity\n\nBoth are outside the #12016 gate's population by design (it scans non-comment string literals in source), so they will not be caught mechanically and need the same pass:\n\n| Site | Shape |\n|---|---|\n| `packages/spec/src/cloud/package.zod.ts:237` | a doc comment — \"the `objectstack publish` CLI sets it explicitly when promoting first-party or partner content\" |\n| `content/docs/api/declarative-endpoints.mdx:91` | published prose — \"Publish it (`objectstack publish`), and the two URLs answer\" |\n\nThe `objectstack validate` on that same docs line **is** valid (`validate.ts` exists, `objectstack` is a declared bin) — only `publish` is stale.\n\n## Current state\n\nThe literal is carried as a **baselined violation** in `scripts/check-cli-command-ids.mjs`, printed on every green run of `pnpm check:cli-command-ids` and linked to this issue. The ledger self-retires: once the string is fixed the gate **reds** until the entry is deleted, so this cannot rot into a silent exemption.\n\nBack-links: #12016 (the gate) · #11465 / PR #12177 (the sibling sweep inside `packages/cli`, which measured the id set).\n"
+}

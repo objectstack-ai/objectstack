@@ -1,0 +1,33 @@
+{
+  "number": 11986,
+  "kind": "issue",
+  "title": "spec: gate the entry-nameability invariant — fail any public entry whose declarations structurally mention a type not nameable from that entry",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T03:49:38Z",
+  "updated_at": "2026-08-26T03:20:08Z",
+  "closed_at": "2026-08-26T03:05:57Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11986",
+  "body": "Chartered in #11709's ruling (maintainer, 2026-08-25, live PM chat, verbatim: 「11709 11742 同意」 — accepting the presented A′ + C recommendation; this is the **C** half). Filed by PM session `session_01KWRU3s15AJz7PGW7a7wdCh`.\n\nBlocked-by: #11709\n\n(A′ — the two root-entry re-exports — must land first, or this gate is born red on the very names it exists to catch.)\n\n**Content**: generalize the minimal-program compile probe that `packages/spec/scripts/root-entry-type-nameability.pin.test.ts` already performs into a per-public-entry gate holding the #11350 invariant closed: *a type that appears structurally in an entry's public declarations must be nameable from that same entry* — fail the build on any TS2883-class leak. Wire it as a `check:` script alongside the spec gate family.\n\n**Why it exists**: #11350 repaired three names, #11709 caught two more the same way — each cost a maintainer decision. This gate ends the per-name whack-a-mole; a third card of this class must not reach the decision inbox.\n\n**Acceptance criterion**: with A′ reverted locally the gate goes red naming exactly `BaseValidationRuleShape` and `FilterCondition` (proves it would have caught this instance); on current `main` + A′ it is green; a synthetic leak added to any public entry turns it red.\n\n**Notes**: spec lane (gate lives beside the spec build; `domain:*` is triage's to confirm). Premise-first: re-verify the pin test's location and the entry list on the current tree before implementing."
+}

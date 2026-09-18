@@ -1,0 +1,35 @@
+{
+  "number": 12397,
+  "kind": "issue",
+  "title": "[finding] The flat-input Proxy's `getOwnPropertyDescriptor` synthesises a descriptor instead of mirroring `data`'s — now reachable, since #12277 routed `defineProperty` into `data`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T00:36:04Z",
+  "updated_at": "2026-08-26T12:41:58Z",
+  "closed_at": "2026-08-26T12:41:58Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12397",
+  "body": "Found while enumerating the trap set for #12277 (PR #12396). Reported there under \"Reported, not fixed\" and filed here so it is not lost with that PR. **Unassigned, observation class** — no measured consumer, and the fix has real design questions attached.\n\n## What it does\n\n`installFlatInput` (`packages/objectql/src/hook-wrappers.ts`) answers `getOwnPropertyDescriptor` for any key present on `data` with a **synthesised** descriptor:\n\n```\n{ configurable: true, enumerable: true, writable: true, value: (data)[prop] }\n```\n\nIt never reads `data`'s real descriptor. For every key created by ordinary assignment the synthesis happens to be the truth, which is why this has cost nothing so far.\n\n## Why it is worth writing down now\n\n#12277 routed `deleteProperty` and `defineProperty` into `data`, so a hook can now put a key on the record payload with **non-default attributes** for the first time:\n\n```js\nObject.defineProperty(ctx.input, 'k', { value: 1, enumerable: false, configurable: true });\nObject.getOwnPropertyDescriptor(ctx.input, 'k');   // reports enumerable: true — it is not\n```\n\nBefore that change the same call defined on the wrapper and never reached `data` at all, so the inaccuracy was unreachable in practice. The fix did not create the synthesis; it gave it a way to be wrong.\n\n## Why it was not just repaired in the same PR\n\n`configurable: true` is **not** free to change. The proxy target is the `{ data, options, id? }` wrapper, which does not carry the key, and a proxy may not report a non-existent target property as non-configurable — so a naive mirror throws `TypeError` on any key `data` holds as non-configurable. A correct trap has to force `configurable: true` while mirroring `enumerable` / `writable` (and decide what to do with accessor descriptors on a record payload, which the engine then persists by evaluating). That is a contract question about what a record payload may hold, not a mechanical repair, and it did not belong inside a card about `delete`.\n\n## Adjacent residual from the same fix, recorded here rather than as a second card\n\n`applyMutationsToInput` (`packages/runtime/src/sandbox/body-runner.ts`) decides deletability by probing each entry-snapshot value with `JSON.stringify`. `safeJsonStringify` marshals a `bigint` into the VM as a string, but the probe throws on it and drops the key — so `delete ctx.input.<bigint_field>` in a sandboxed body is still lost. Deliberately conservative (losing a delete beats destroying a field on absent evidence) and documented at the call site.\n\n## Dedup\n\nScanned the 100 most recently created open issues plus a local grep for `getOwnPropertyDescriptor` across `packages/**` — no existing card. ⚠️ The contract's prescribed REST dedup channel returned **403** for this session (`GitHub access is not enabled for this session`), which is #12293's shape, so this scan went through the MCP list endpoint instead — declared rather than reported as a clean search."
+}

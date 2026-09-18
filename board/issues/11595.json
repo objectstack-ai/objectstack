@@ -1,0 +1,36 @@
+{
+  "number": 11595,
+  "kind": "issue",
+  "title": "finding: 8 `packages/cli/test` spawners pass no `env` at all, so the child inherits the vitest worker environment verbatim — the purer form of #11341's leak, and the new gate is silent on it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T07:24:39Z",
+  "updated_at": "2026-08-26T09:20:08Z",
+  "closed_at": "2026-08-26T09:20:08Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11595",
+  "body": "Surfaced while implementing #11341 (the `childEnv()` enforcement gate). Filed rather than folded in: #11341's declared surface is the check script, its self-test, its wiring and its baseline, and the fix here would be edits to eight test files — including two in a neighbourhood another card held in flight at the time.\n\n## The gap\n\n#11341's gate refuses a **bulk `process.env` reference** in a spawner file under `packages/cli/test/**` — a spread, an `Object.assign` source, an alias. It says nothing about a spawn that passes **no `env` option at all**, and that child gets `process.env` verbatim: `TEST=true`, `VITEST=true`, `VITEST_WORKER_ID`, the lot.\n\nThat is the same leak in a purer form. `{ ...process.env, NO_COLOR: '1' }` at least lets the author see the inheritance they are asking for; omitting `env` inherits everything with nothing on the page to read.\n\n## Measured on `origin/main` @ `2dc0a770b`\n\nEight call sites, derived by walking every spawner file's AST for calls to a `node:child_process` binding (or a `promisify()` wrapper of one) whose options object carries no `env` key:\n\n```\npackages/cli/test/authoring-rule-command-parity.test.ts:192  execFileSync\npackages/cli/test/cloud-login-json-ndjson.e2e.test.ts:310    execFileSync\npackages/cli/test/emit-json-pipe.test.ts:62                  execFileP (promisify(execFile))\npackages/cli/test/emit-json-pipe.test.ts:144                 spawn\npackages/cli/test/emit-json-pipe.test.ts:194                 execFileP\npackages/cli/test/format-zod-union.test.ts:176               execFileSync\npackages/cli/test/login-json-ndjson.e2e.test.ts:298          execFileSync\npackages/cli/test/metadata-type-schema-gate.test.ts:185      execFileSync\n```\n\nNone of these is an active false green today. Every one spawns `tsx` on a probe script or a non-`serve` CLI command, so nothing in the child reads `TEST` or `VITEST` — the same reading #11341 recorded for its own fifteen. The gap is latent and structural, exactly as #11267 was before someone tried to write a security-posture assertion against it.\n\n## Why #11341 left it out rather than widening\n\nStated in that gate's header as a named false negative, not discovered afterwards. The reason is that closing it is a decision about the **convention's reach**, not about the defect:\n\n`childEnv()` was written for spawned CLI children whose environment matters. Requiring it at `execFileSync(TSX, [probe], { cwd })` in an in-process-flavoured unit test asserts that *every* child in this directory owes the convention — which may well be right, but it is a widening of `childEnv()`'s contract and it belongs to whoever owns that contract. A gate that reaches past its own convention is how a gate gets carved out.\n\n## What closing it would look like\n\nTwo halves, and the second is the one that needs the ruling:\n\n1. Extend `scripts/check-cli-test-child-env.mjs` to treat a spawn call with no `env` option as a finding. Mechanically small — the gate already resolves spawn bindings and their `promisify()` wrappers; the call-anchored pass exists in its measurement history and was set aside for the site-anchoring reason its header gives.\n2. Decide whether the eight above are repairs or carve-outs. A probe script that reads nothing from the environment arguably wants `childEnv()` anyway (it costs nothing and removes the question); a `format-zod-union` fixture spawning `tsx` may be better declared than changed.\n\nEither outcome needs the eight baselined first if the gate lands before the repairs, for the same reason #11341's did.\n\n## Explicitly not this issue\n\n- #11341 — the parent defect and the gate. Its baseline holds the eighteen **bulk-reference** leaks; nothing here is in it.\n- #11464 — `bin/run.js` plus a ts-path-enabling `NODE_ENV`, a different defect that carries its own upstream block."
+}

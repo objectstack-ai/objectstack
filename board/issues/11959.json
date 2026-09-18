@@ -1,0 +1,34 @@
+{
+  "number": 11959,
+  "kind": "issue",
+  "title": "[finding] a third hand-spelled copy of the human-user predicate lives in plugin-security, out of reach of the one #11767 consolidated",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T03:05:03Z",
+  "updated_at": "2026-08-26T08:30:00Z",
+  "closed_at": "2026-08-26T07:33:42Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11959",
+  "body": "## What\n\n\"Is this `sys_user` row a HUMAN?\" — `u.id !== SystemUserId.SYSTEM && u.role !== 'system'` — is spelled in three places:\n\n- `packages/plugins/plugin-auth/src/auth-plugin.ts` (dev-admin seed precondition)\n- `packages/plugins/plugin-auth/src/auth-manager.ts` (the #11739 audience bootstrap bypass)\n- `packages/plugins/plugin-security/src/bootstrap-platform-admin.ts:401` (`isHumanUser`, also used at :426 and :472)\n\nobjectstack#11767 consolidated the first two onto one owner, `isHumanUserRow` in `plugin-auth/src/audience-posture.ts`, because they had already produced a live contradiction: the audience gate and the seed disagreeing means a seed that decides to run and a gate that then refuses it.\n\nThe plugin-security copy was left where it is: `plugin-security` does not depend on `plugin-auth`, so sharing across them needs the predicate to move to a package both depend on (`@objectstack/spec` or `@objectstack/platform-objects`) — an api-surface change #11767 should not have carried.\n\n## Why it matters\n\nThe three answer for the SAME boot sequence, on the SAME population. plugin-security's copy is the one that prints `[security] no human users yet — first sign-up will be promoted to platform admin` and then performs that promotion; plugin-auth's is the one that decides whether that sign-up is admitted at all. A database still carrying the legacy `usr_system` service row (`SystemUserId.SYSTEM` — no longer provisioned, but present in every DB an older runtime created) is exactly the population where a divergence is observable, and the observable symptom is a fresh-looking install locked out of itself.\n\nNothing gates the agreement today; there is no test that asserts the three predicates answer alike.\n\n## Suggested shape\n\nMove the predicate to a package both plugins already depend on (`@objectstack/spec/system` sits beside `SystemUserId` itself) and have all three read it. Note this touches `packages/spec` exports and so needs `gen:api-surface`.\n\n## Related\n\n- #11767 (consolidated the two plugin-auth copies; this is the remaining third)\n"
+}

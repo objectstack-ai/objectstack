@@ -1,0 +1,35 @@
+{
+  "number": 11825,
+  "kind": "issue",
+  "title": "`AdvancedPluginLifecycleConfig` is an authorable surface with no runtime consumer — nothing reads `.health`, and the kernel never constructs `PluginHealthMonitor`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "tooling"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T18:53:00Z",
+  "updated_at": "2026-08-26T00:49:22Z",
+  "closed_at": "2026-08-26T00:46:09Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11825",
+  "body": "Found while implementing #11811 (correcting the `checkMethod` example in\n`lifecycle.mdx`). Out of that card's scope — its dispatch ruled `packages/spec`\nand `packages/core` off-limits, so this is recorded rather than acted on.\n\n## What was measured\n\n`AdvancedPluginLifecycleConfigSchema`\n(`packages/spec/src/kernel/plugin-lifecycle-advanced.zod.ts:431`) is the only\ncontainer for `PluginHealthCheckSchema` and its four siblings:\n\n```ts\nhealth: PluginHealthCheckSchema.optional(),        // :435\nhotReload: HotReloadConfigSchema.optional(),\ndegradation: GracefulDegradationSchema.optional(),\nupdates: PluginUpdateStrategySchema.optional(),\n```\n\nRepo-wide references to `AdvancedPluginLifecycleConfig` (excluding\n`node_modules` and `dist`) are **5**, and every one is the schema's own file or\nits own test:\n\n| location | what it is |\n|---|---|\n| `plugin-lifecycle-advanced.zod.ts:431` | the declaration |\n| `plugin-lifecycle-advanced.zod.ts:495,497` | the two exported types |\n| `plugin-lifecycle-advanced.test.ts:11,308,310,350,360,377` | its own schema tests |\n| `plugin-loading.zod.ts:53` | a **comment** mentioning `.hotReload` |\n\nPositive control in the same sweep: `checkMethod` = **8** hits in `packages/`,\nspanning schema, consumer and two test files — so the zero is a reading, not a\ndead probe.\n\nThe consumer side matches. `PluginHealthMonitor` is constructed in exactly one\nplace repo-wide, and it is not the kernel:\n\n- `packages/core/src/kernel.ts` — **no** occurrence of `HealthMonitor` (nor does\n  `packages/core/src/index.ts` beyond the `export *` at `:76`).\n- `packages/core/examples/phase2-integration.ts:53` — `new PluginHealthMonitor(...)`,\n  an example file.\n\nSo nothing in the boot path ever calls `registerPlugin()` / `startMonitoring()`.\nThe class works and is unit-tested; it is simply never wired.\n\n## Why this is a finding rather than a defect report\n\n`PluginHealthCheck` **is** carried in `packages/spec/authorable-surface/kernel.json`,\ni.e. it is declared as an authorable surface. The liveness ledger\n(`packages/spec/liveness/*.json`) cannot catch this because it is scoped by\n**metadata type** (`object`, `field`, `view`, `flow`, …) and these kernel\nplugin-lifecycle schemas are not a metadata type — so no existing ratchet is\nlooking at them.\n\nThat is the `declared != enforced` shape of Prime Directive #10, in its\nauthorable-surface form: five config groups an author can write, parse-validated\nby Zod, that no runtime path reads.\n\n⚠️ **Not the same as \"dead code\"** — the capability is genuinely reachable:\n`PluginHealthMonitor` is exported from `@objectstack/core`, so an embedding\napplication can drive it by hand, which is exactly what #11811's corrected doc\nexample now shows. The open question is only whether the *declarative config\nsurface* should exist with nothing consuming it. Three routes, none of them\nchosen here — this needs someone who knows whether the kernel is meant to grow\nthe wiring:\n\n1. **Wire it** — the kernel reads `AdvancedPluginLifecycleConfig` off the plugin\n   and drives the monitor, making the declared surface real.\n2. **Retire the container** under ADR-0049 enforce-or-remove, keeping the classes\n   as a host-driven library.\n3. **Leave it and say so** — record it as a deliberately-published intention.\n\n## Not asserting more than was checked\n\nOnly `AdvancedPluginLifecycleConfig` and the `PluginHealthMonitor` construction\nsites were traced. The other three groups (`hotReload`, `degradation`, `updates`)\nwere counted through the same container but their own consumers were **not**\naudited individually — `HotReloadManager` does have `registerPlugin` callers in\n`packages/core/src/hot-reload.test.ts`, so at least one of them may have a\ndifferent wiring story. No sibling repo was examined.\n"
+}

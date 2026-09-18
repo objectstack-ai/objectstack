@@ -1,0 +1,34 @@
+{
+  "number": 12487,
+  "kind": "pull_request",
+  "title": "docs(api): correct the environment-routing scoping instructions for standalone `os serve`",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T05:26:14Z",
+  "updated_at": "2026-08-26T06:03:55Z",
+  "closed_at": "2026-08-26T06:03:54Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": "2026-08-26T06:03:54Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12487",
+  "body": "Fixes #12451\n\n## What was false\n\n`content/docs/api/environment-routing.mdx` told authors to enable\nenvironment-scoped routing by writing `api.enableProjectScoping: true` in\n`objectstack.config.ts`, and the info Callout directly below the fence\nreinforced the promise (\"The CLI reads the resolved value from the exported\nconfig (`config.api`) when registering the REST and dispatcher plugins\"). On\nthe default `os serve` path both halves mislead:\n\n1. A bare `defineStack()` config carries no instantiated plugins, so\n   `isHostConfig` is false (`packages/cli/src/utils/plugin-detection.ts:11-16`).\n2. `shouldBootWithLibrary` therefore returns true and `serve.ts` boots\n   `createStandaloneStack()` (`packages/cli/src/commands/serve.ts:1703-1751`).\n3. `mergeBootConfig` merges the boot result over the authored config per key,\n   and the boot builder wins the two scoping keys\n   (`packages/cli/src/utils/merge-boot-config.ts:41-52`).\n4. The CLI reads `config.api` at `serve.ts:3115` — **after** that merge — and\n   forwards it to both the REST and dispatcher plugins.\n\nPer the card's routing note, the producer that is wrong is the **docs page**,\nnot the runtime: the override is deliberate, documented at its own seam, and\npinned by `packages/cli/src/utils/merge-boot-config.test.ts`. No CLI source is\ntouched here.\n\n## What the repair says now\n\nThe `## Server configuration` section leads with scoping being a host decision,\nthen states the standalone override explicitly, and separates the two keys —\nwhich the original section, and the card, treated as one:\n\n- `enableProjectScoping: true` is **contradicted**. The standalone boot result\n  ships `false` (`packages/runtime/src/standalone-stack.ts:786-793`), so no\n  scoped routes are registered.\n- `projectResolution: 'auto'` is **redundant, not false**. The boot builder\n  pins the same `'auto'`, so the page's value happens to match. Any other\n  strategy declared here is silently replaced.\n\nThe prose then names where the block *is* live (a host-shaped config, whose\n`plugins` array carries instantiated plugin objects — the shape a\nmulti-environment host assembles; this open-core CLI supports `standalone`\nonly), and the info Callout keeps its true half about `defineStack` strict\nparsing while its last sentence is corrected to say the CLI reads `config.api`\n*after* the boot result is merged in.\n\nThe `{/* os:check */}` marker and the snippet under it are **unchanged**. The\nblock is valid authoring — it type-checks and `defineStack` accepts it — so\nthere was no reason to unmark it; the false claim was in the surrounding prose,\nnot in the code.\n\n## Two measurements that changed what got written\n\n**The card's own suggested remedy is not authorable.** The card and the triage\ncomment both propose naming `bootMode: 'off'` / `OS_MODE=off` as the escape\nhatch. `OS_MODE=off` is real (an env var, read in `plugin-detection.ts:49-50`),\nbut `bootMode` is **not a declared key** on `ObjectStackDefinitionSchema`, which\nis a `strictObject`. Measured against the built spec:\n\n```\n[OK ] api block only -> api={\"enableProjectScoping\":true,\"projectResolution\":\"auto\"}\n[ERR] bootMode:off inside defineStack -> defineStack validation failed (1 issue):\n        (root): Unrecognized key(s) on this stack definition: `bootMode`.\n```\n\nPublishing `bootMode: 'off'` as an authoring instruction would have replaced one\nfalse instruction with another. The page now names it accurately: it works only\non an exported config that did not go through `defineStack`'s strict parse, and\nit drops the CLI to its legacy lightweight assembler rather than producing a\nscoped standalone host — so it is recorded, not recommended.\n\n**The census moved.** The card cites #11473's figure of 22 sites for\n`enableProjectScoping: true`. Re-measured on `origin/main` @ `b6c96bcea5`: **27\nsites across 15 files**, and the conclusion holds — every one is a test, a doc\ncomment (`packages/cli/src/commands/serve.ts:3112`,\n`packages/client/src/index.ts:2112`), or this page. Zero real in-repo\ndeployments, so this page is still the only place a user is told to set it.\n\n**#11999 / PR #12444 has landed** — `packages/runtime/src/standalone-stack.ts`\nnow ships the declared `'auto'` rather than the undeclared `'none'`. That is\nwhat makes `projectResolution` redundant rather than contradicted, and is why\nthe two keys get two sentences instead of one.\n\n## Verification\n\nGate union derived from the change set itself via\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (no\nhand-written path list), re-run in full at `a1a0b5f65a` — the final commit —\nwith exit codes captured before any pipe. All 23 families green, including\n`check:doc-anchors`, `check:doc-authoring`, `check:doc-frontmatter`,\n`check:docs-single-h1`, `check-docs-section-name`, and the `os:check` surface:\n\n```\n260 prose examples type-check across 3 surface(s) — every marked block\nparsed, so tsc ran the SEMANTIC pass on all of them\n```\n\nTwo gates first returned `PREREQUISITE NOT MET — nothing was measured`\n(`@objectstack/formula`, `@objectstack/lint`, `@objectstack/client-react` not\nbuilt); the closures were built and both re-ran green. That refusal is recorded\nhere because it is not a finding and must not be read as one.\n\nRepo-wide `pnpm lint` is narrowed deliberately, and the narrowing is measured\nrather than assumed: eslint's flat config declares `files:` populations of\n`**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}` only, and running\n`eslint --no-inline-config --format json` on the changed file returns 1 result,\n0 errors, with the message `File ignored because no matching configuration was\nsupplied.` Type-aware linting is not enabled anywhere in the config (no\n`parserOptions.project`), so an `.mdx`-only diff cannot move any verdict on any\nuntouched file.\n\nDocs-only: this PR releases nothing, so it carries `skip-changeset` rather than\na changeset.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UjM2ia8Av1v5NqfqQEQmC6)_"
+}

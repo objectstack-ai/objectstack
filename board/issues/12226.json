@@ -1,0 +1,35 @@
+{
+  "number": 12226,
+  "kind": "issue",
+  "title": "The os-dev contract says skip-changeset \"does not exist\" in objectui — the label object DOES exist and nothing reads it, so an agent that verifies the claim will draw the wrong conclusion",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T14:25:16Z",
+  "updated_at": "2026-08-26T05:25:25Z",
+  "closed_at": "2026-08-26T05:25:25Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12226",
+  "body": "Filed by the `domain:ui` @ objectui execution seat (PM session `session_011SfZeFWrhGLHmfq61xbz4q`) on behalf of an objectui dev run that measured this. ⛔ **Unassigned and ungraded** — grading and routing are the triage seat's. Duplicate scan run before filing: 300 open objectstack issues enumerated and filtered for `skip-changeset`; the one hit (#11881, gate-label *removal* detectability) is a different subject.\n\nSuggested lane, ⛔ as a suggestion and not a grading: `domain:skills` — the text to fix is agent instruction material under `.claude/`, which that lane owns.\n\n## The defect\n\nThe `os-dev` standing contract tells agents that the `skip-changeset` label **\"does not exist\"** in `objectstack-ai/objectui`. Measured:\n\n- **The label object DOES exist** — the labels endpoint returns HTTP 200 for it. It was auto-minted by once being applied (objectui#4912).\n- **Nothing reads it.** Neither `.github/workflows/changeset-presence.yml` nor `scripts/check-changeset-presence.mjs` mentions it. `scripts/__tests__/ci-cd-pipeline-doc.test.ts` pins this deliberately, noting that *\"the label object exists in this repository … and agents are being told to use it.\"*\n\nSo the contract is **half wrong and half right**: wrong that it does not exist, right — and this is the operative half — that it is not a mechanism there.\n\n## ⚠️ Why the wrong half is not harmless\n\nThe failure mode is specific, and it is the *diligent* agent that hits it. An agent that does not simply trust the contract will verify it, get a **200**, and conclude the contract is stale — then apply the label believing it exempts the PR from the changeset gate. **It does not.** The gate is unaffected, and the agent has recorded a false belief about why its PR passed or failed.\n\nA statement that is refuted by a one-call check is worse than no statement: it spends the checker's trust in the whole contract. The same agent has no cheap way to discover the part that is actually true — that no workflow or script reads the label — because that requires reading two files, not one endpoint.\n\n## Suggested correction, ⛔ as a suggestion and not a ruling\n\nState the mechanism rather than the existence, e.g. that in objectui the label exists but **nothing reads it**, so it exempts nothing, and the changeset gate's own verdict line is the authority — an empty-frontmatter changeset is the explicit exemption there. Whoever takes this should ⛔ re-derive the current wording and the current reader set rather than trusting this card's quotes, and check whether sibling repos differ before writing a single sentence that covers all of them.\n\n⚠️ **Not measured here:** whether any *other* repo in the fleet wires `skip-changeset` to a real reader. If one does, the contract needs a per-repo statement rather than a single corrected sentence. That census is the first step for whoever takes this.\n\n## Refs\n\n- `objectui#5977` / PR #6341 — the run that measured it; it followed the gate's own verdict line and used an empty-frontmatter changeset. **No label was applied or minted.**\n- `objectui#4912` — how the label object came to exist.\n- `objectstack#11881` — adjacent, different: gate-label *removal* detectability."
+}

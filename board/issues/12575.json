@@ -1,0 +1,33 @@
+{
+  "number": 12575,
+  "kind": "pull_request",
+  "title": "docs(spec): record the eager glob-discovery disposition beside `filePatterns`",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T11:35:13Z",
+  "updated_at": "2026-08-26T12:18:04Z",
+  "closed_at": "2026-08-26T12:18:02Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-26T12:18:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12575",
+  "body": "Fixes #12165\n\nRoute (a) of the two the triage admitted (comment 5409942502). The 24-line note is a pure insertion into the JSDoc of the `filePatterns` field in `packages/spec/src/kernel/metadata-plugin.zod.ts`. No schema shape, no `.describe()` text, no other file.\n\n## Why a note rather than close-as-covered\n\nThe triage's actual question was whether a spec-level declaration should carry a consumer-side observation at all. Three measured things say yes here:\n\n1. **The pointer only runs one way.** #12075's CLI-side note states in its own words that it was written on the CLI's read *\"rather than beside the registry declaration itself — that lives in `packages/spec/src/kernel/metadata-plugin.zod.ts`, which this package only reads.\"* A reader who arrives at the CLI note gets the whole story; a reader who arrives at the declaration had nothing pointing at it. Closing as covered leaves the half the triage on #12075 asked for permanently unwritten.\n2. **The genre is already this file's.** `metadata-plugin.zod.ts` records dispositions with measured evidence and issue references throughout — the `DEFAULT_METADATA_TYPE_REGISTRY` docblock (#8586), the `field` entry (#7893), the `capability` and `api` entries. `packages/spec` carries a no-business-logic rule, not a no-comments rule, and a comment changes no accept/reject behaviour.\n3. **The declaration is the site that invites the over-read.** The field's own second line says the patterns are *\"Used to discover metadata files on disk\"* — and discovery turns out to be the one use of this field nothing in the tree exercises.\n\n## What was re-measured, on `origin/main` at `09b4f4e`\n\nMeasured here rather than copied from #12075:\n\n- `MetadataPlugin._loadFromFileSystem` (`packages/metadata/src/plugin.ts:873`, called at `:395`) is the only reader that globs these patterns, and `_bootstrap` reaches it on exactly one branch — `eager` (the default) **and** `src` unset. `artifact-only` and `lazy` never glob; `eager` with a source goes to `_loadFromLocalFile`.\n- Both non-test `new MetadataPlugin(...)` sites set `artifactSource: { mode: 'local-file', … }` unconditionally: `packages/runtime/src/standalone-stack.ts:725` and `packages/cli/src/commands/serve.ts:2388`.\n- `git ls-files '*objectstack.config.ts'` → 9 tracked configs, all declaring metadata in code.\n\nSo the glob pass has no end-to-end dogfood, and the recorded disposition is that none is being minted for it — startup focus.\n\n## The second paragraph is the load-bearing one\n\nStating only \"no measured consumer\" a few hundred lines above the `capability` and `api` entries would have contradicted this file's own comments, which lean on `codeOnlySourceHint` reading `filePatterns[0]` back as the prescription in a `403 not_creatable` refusal. The field's **values** have live readers that never glob — that one, plus the CLI deriving every scaffolded file name from them (#11071, pinned by `packages/cli/test/generate-file-name-registry-parity.test.ts`), plus `metadata-manager.ts:2486` re-projecting them. *Discovery* is the unexercised use; name derivation and refusal prescriptions are not. The note says so explicitly, so the observation cannot be quoted later as \"the field is inert\".\n\n## The generated docs tree did not move\n\nThe note sits inside an object literal, and `packages/spec/scripts/lib/file-description.ts` publishes a block only when it is top-level (column 0), in the header zone, and documents no declaration — all three fail here, by two counts. Verified rather than reasoned: `check:docs` reports **229 generated files in sync**. Nothing under `content/docs/references/**` changed, so the module-header renumbering that landed in #12551 (`dd4fc6c`) is not engaged. The prose sits **before** the `@example` tag, since a TSDoc block tag would otherwise absorb it.\n\n## Checks — all at the final commit `4c5d68e`, tree clean\n\nExit codes captured before any pipe; verdicts quoted from each gate's own output.\n\n| check | verdict |\n|---|---|\n| `pnpm --filter @objectstack/spec build` | `command-exit 0`, 34/34 declarations emitted |\n| `pnpm --filter @objectstack/spec typecheck` | exit 0 (incl. `check:scripts-typecheck`, `check:test-typecheck`) |\n| `pnpm --filter @objectstack/spec check:docs` | `✅ 229 generated files in sync with packages/spec` |\n| `pnpm lint` (full repo, `eslint . --no-inline-config`) | `command-exit 0` — not narrowed |\n| `check:authorable-surface` · `check:liveness` · `check:empty-state` · `check:strictness-ledger` · `check:variant-docs` | exit 0 |\n| `check:doc-authoring` · `check:overlay-whitelist-table` · `check:spec-parsed-alias` · `check:doc-anchors` | exit 0 |\n| `check-comment-mask-adoption` · `check-nul-bytes` · `docs-audit/check-affected-docs` | exit 0 |\n\nThe gate list was re-derived from the actual change set with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (it reads the merge-base diff itself), then run at head after the commit.\n\n⚠️ **One gate is NOT MEASURED, not green:** `pnpm check:i18n` exits 1 with `PREREQUISITE NOT MET — the workspace CLI is not built` (\"Nothing was checked: no bundle was compared and no config was parsed\"). It needs a built `@objectstack/cli`, which a comment-only spec diff cannot move a bundle through; CI runs it with the CLI built. Recorded as unmeasured rather than passed.\n\nNo changeset: comment-only, releases nothing — `skip-changeset`.\n\nDraft, per dispatch: no auto-merge, PM reviews and lands.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01E5LFCYBJ3q2s6yW6oMLxwy)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01E5LFCYBJ3q2s6yW6oMLxwy)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 12159,
+  "kind": "issue",
+  "title": "Ledger convergence: registration home + one store implementation + permission-set convergence (ADR-0126 §4/§8, maintainer-ruled bundle)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T11:27:17Z",
+  "updated_at": "2026-08-26T02:51:34Z",
+  "closed_at": "2026-08-26T02:51:34Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12159",
+  "body": "Part of #12150 (Epic: ADR-0126 implementation, v17 line — 17.x minor, maintainer-ruled).\n**Maintainer ruling, 2026-08-26, live PM chat, verbatim: 「同意」** — to the three-part package presented with four-axis analysis (full ruling record: #12359 [comment 5419050253](https://github.com/objectstack-ai/objectstack/issues/12359#issuecomment-5419050253)): #12359 option B, #12350, and this card's original L8 scope are **one card, one PR, one verification pass**. This card is that card; its PR closes #12159, #12350 and #12359.\nDispatch: coordinated under the #12150 program — ⛔ not from the general queue (maintainer anti-preemption instruction, 2026-08-25, PM session `session_01KWRU3s15AJz7PGW7a7wdCh`). Contract: **ADR-0126 §4 walls + §8 items 2–3**, ADR-0029 D7 (object ownership), ADR-0068 D2 (write authority unchanged).\n\n## Part 1 — registration home (#12359, **ruled: option B**)\n\n`sys_metadata_activation` registration **moves** from the automation service's manifest (`registerRunObject`, beside `sys_automation_run`/`sys_flow_dispatch`) to `PlatformObjectsPlugin` — where the object is declared, beside `SysMigration`/`SysMigrationJournal`/`SysSecret`. **Move, not add**: single owner, no double registration. Consequence: every composition carrying platform-objects has the ledger, so packaged-action disable works without the automation service, and every future Regime C consumer inherits it.\n\n- The #12359 measured 503 (actions-and-no-automation boot, `bootStack(showcaseStack)` + flip → `SERVICE_UNAVAILABLE`) becomes this part's **positive test**: same boot, flip succeeds, disable consulted at dispatch.\n- A composition with automation must be measured too: boot order, `metadata:reloaded` re-attach (both the flow and the action projections hydrate), no ownership-diagnostic regression (ADR-0029 D7).\n\n## Part 2 — one store implementation (#12350)\n\nOne `metadata_type`-parameterized store replaces the two copies of the §4 row contract (`ObjectStoreFlowActivationStore` in service-automation, `ObjectStoreActionActivationStore` in objectql). Home: a package BOTH may depend on — **`@objectstack/core` is the leading candidate** (#12350's own analysis); ⛔ platform-objects as *code* home would invert the tiering for objectql (orthogonal to Part 1's registration move, which is composition-level). Both consumers move onto it; the row semantics stay byte-equivalent: install-level rows only, org-carrying rows skipped on read, driver `0` read as false, read-then-write, no engine-slice `delete`.\n\n- Both existing pin suites (`flow-activation-ledger.test.ts`, `action-activation.test.ts`) stay green **unchanged** — they pin the contract, so they are the proof the consolidation lost nothing.\n\n## Part 3 — permission-set convergence (original L8, ADR-0126 §8 item 3)\n\nDecide and implement how `sys_permission_set.active` (the #11513 row-state door, `permission-set-projection.ts` #4669 carve-out) relates to the generic ledger — **projection** (column stays, ledger reads through) vs **migration** (rows move, column retired). §4 walls inherited: no definitions in the ledger, no linkage columns.\n\n- A short decision note **on this card before code** (which route, and the measurement that grounds it); ⛔ if the choice has customer-visible consequences, stop-and-report to the maintainer instead of choosing.\n- Landed #11513 behavior unchanged from the customer's seat (lock message, clone action, deactivate semantics); existing `sys_permission_set.active` values preserved whichever route.\n\n## Acceptance\n\n- One PR, `Closes #12159`, `Closes #12350`, `Closes #12359`; three parts verifiable independently in the diff.\n- Actions-only boot: flip works end-to-end (Part 1 positive test); automation boot: flows + actions both keep working.\n- Both activation pin suites green unchanged; #11513 suites green unchanged.\n- No `packages/spec` surface; smooth upgrade (the table already exists in live databases — moving its registrar must be a no-op for existing data).\n\nRefs: #12359 (ruling) · #12350 · ADR-0126 §4/§8 · ADR-0029 D7 · #11513/#4669 · `permission-set-projection.ts:1128-1145`"
+}

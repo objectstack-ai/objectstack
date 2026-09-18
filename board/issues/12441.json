@@ -1,0 +1,35 @@
+{
+  "number": 12441,
+  "kind": "issue",
+  "title": "`packages/cli` e2e tests pick a serve port by blind `Math.random()` with no bind probe — the comment claims it \"never contends\", and it did",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-26T03:05:25Z",
+  "updated_at": "2026-08-26T09:00:54Z",
+  "closed_at": "2026-08-26T09:00:54Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12441",
+  "body": "Filed unassigned, for grading. Found incidentally while running `pnpm --filter @objectstack/cli test` for #11624 — **not** caused by that card's change (its diff touches only i18n key collection and a `@objectstack/lint` export), and reported rather than fixed under the out-of-scope rule.\n\n## What was measured\n\nOne run of the full CLI suite in this container went **1 failed | 2101 passed (2102)**:\n\n```\nFAIL  test/serve-node-env-production-default.e2e.test.ts\n      > #11113: os serve defaults NODE_ENV to production when unset\n      > NODE_ENV unset: the localhost trusted-origin convenience gate is CLOSED (regression pin)\n\nError: serve exited 1 before \"Server is ready\"\n--- stderr ---\n  ✗ Port 49402 is already in use.\n     ObjectStack does not auto-select a different port in production mode:\n     a drifted port silently breaks reverse-proxy, OAuth callback, and CORS config.\n```\n\nRe-run in isolation immediately afterwards: **3 passed (3)**, exit 0. So the failure is a port bind race, not an assertion.\n\n## The mechanism\n\n`packages/cli/test/serve-node-env-production-default.e2e.test.ts:186-189`:\n\n```ts\n/** A random high port, so a run never contends with another agent's dev server on this host. */\nfunction randomPort(): number {\n  return 41000 + Math.floor(Math.random() * 19000);\n}\n```\n\nThe port is drawn blind — **no bind probe, no retry, no reservation**. The docblock's claim (\"a run never contends with another agent's dev server on this host\") is the part that is falsified: several agents share one container in this fleet, and 19,000 candidates is not immunity, it is a low per-draw probability that this run lost.\n\nWhat turns a lost draw into a hard failure rather than a retry is `os serve`'s own production-mode rule, which is **correct and should not change**: it refuses to auto-select a different port because a drifted port silently breaks reverse-proxy, OAuth-callback and CORS config. The test drives `serve` with `NODE_ENV` unset — i.e. into exactly that production default — so a collision can only exit 1.\n\n## Scope of the pattern\n\nTwo sites draw a port this way, plus one shared helper:\n\n- `packages/cli/test/serve-node-env-production-default.e2e.test.ts:187` — `randomPort()`\n- `packages/cli/test/serve-app-anchored-optional-import.e2e.test.ts:160` — `40000 + Math.floor(Math.random() * 20000)`, inline\n- `packages/cli/test/helpers/serve-process.ts` — also defines a `randomPort`\n\nThe two inline ranges (41000-60000 and 40000-60000) overlap, so the sites can also collide with **each other** under `--maxWorkers > 1`, not only with a neighbouring agent.\n\n## Why it is worth a card rather than a shrug\n\nCI runs each job in its own container, so this is mostly invisible there — which is the reason it has stayed. Where it does bite is the parallel-agent container, and it bites in the most expensive way available: a **red suite that is not reproducible**, on a test file the reader has no reason to connect to a port. The cost is one agent-round of re-verification per occurrence, spent deciding whether the failure belongs to the change under test.\n\n## Shape of a fix (a suggestion, ⛔ not a ruling)\n\nBind-probe and retry inside the test harness — open a listener on `0.0.0.0:0`, read the assigned port, close it, hand that port to `serve`. That is still TOCTOU, but it narrows the window from \"the whole run\" to \"one close-to-spawn gap\", and it stops drawing ports that are already held for the duration of a neighbouring process. A loop of N draws each confirmed free before spawning would close the common case. Whatever is chosen, the docblock's \"never contends\" claim should be replaced by what the mechanism actually guarantees — an unqualified negative claim in a comment is what stopped anyone re-examining this.\n\n⚠️ Two things deliberately **not** proposed: changing `os serve`'s production no-auto-select rule (it is right, and #11113 pins it), and pinning the ports (that guarantees the collision instead of making it unlikely).\n\n## Dedup\n\nScanned the 100 most-recently-updated open issues (352 open) plus every open `finding`-labelled issue; nothing covers e2e port selection. The nearest neighbours are about different subjects: #11113 (the behaviour this test pins) and #12123 (agent REST channel)."
+}

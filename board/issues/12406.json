@@ -1,0 +1,34 @@
+{
+  "number": 12406,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): write the two ruled main-red incident conventions into the protocol text",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T01:44:48Z",
+  "updated_at": "2026-08-26T02:16:21Z",
+  "closed_at": "2026-08-26T02:16:20Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-26T02:16:20Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12406",
+  "body": "Fixes #12212\n\n## What\n\nWrites the two maintainer-ruled main-red incident conventions (2026-08-25, verbatim 「同意」) into the PM dispatch protocol text:\n\n1. **p0 fix-forward queue-jump** — a fix-forward PR for a main-red gate (p0, mechanical, verified root cause) may jump the merge queue (GitHub's queue supports jump-the-queue) or go to the maintainer for a break-glass one-line direct merge; waiting behind the queue the outage itself clogged is the named anti-pattern. Exception for MAIN-RED REPAIR ONLY — the queue-only landing rule is untouched for everything else.\n2. **One anchor card per failing check** — a main-red incident is anchored on ONE card named by the failing check; first filer wins, later discoverers comment their readings on the anchor instead of filing.\n\n## Where\n\n- `.claude/skills/pm-dispatch/references/landing-operations.md` §B gains the two-convention paragraph — the landing window owns 红/踢出处置, so the incident conventions sit next to those details. Each convention carries the ruling's date + verbatim 「同意」 per the skill's provenance discipline.\n- `.claude/skills/pm-dispatch/SKILL.md` — two line-level pointers at zero net lines, so both reader paths find the conventions: the queue-only landing paragraph (whose incident anecdote already ends at fix-forward) and the stop-bleed-and-file line (the one that previously instructed every discovering lane to file — exactly the duplicate-cards mode convention 2 retires) now point at landing-operations B.\n\n## Ratchet payment (zero headroom on both files)\n\nLive readings hold: SKILL.md **1005/1005**, landing-operations.md **80/80**; table-row pins unchanged (no new table rows; all new/edited lines ≤120 bytes). The addition is paid by cutting genuinely redundant content — not by re-wrap alone — and every cut keeps another home:\n\n| cut (landing-operations.md) | surviving home |\n|---|---|\n| os-regen driver \"exit 0, silently drops one side\" sentence | SKILL.md's own pointing bullet + AGENTS.md §11 |\n| four-step enumeration ①–④ | `scripts/pm/os-regen-merge.sh` (the named in-repo authority) + AGENTS.md §11; the ⛔ 禁 rebase / force-push clause stays in file |\n| MERGE-state trap mechanism parenthetical (HEAD is the pre-merge tip / anchor stays authentic) | os-dev.md 标准条款 packages/spec clause; the consequence (且全部门放行) and the 先-commit rule stay in file |\n| job-conclusion parenthetical (`completed: success`) | SKILL.md 放行认门禁 job 的结论 row |\n| timer-discipline parenthetical (幂等开头、只写判据) | SKILL.md 定时器文本纪律 row (the pointer 定点文本照定时器写法纪律 stays in file) |\n| ready/auto-merge order sentence (draft-flip drops both) | platform-readings draft-flip row + AGENTS.md §7; the green path 绿即转 ready + 挂 auto-merge stays in file |\n| `unknown` lazy-read clause + enable-auto-merge verification detail | platform-readings `mergeable_state` row and the enable/quota/verification-sequence rows; pointers kept in file |\n| §C context sentence + restated rationale (「几条测试会红」不够用) | §C's own title + SKILL.md's 签名级预期红清单 summary row; the operative 逐条失败测试名 + 报错签名 stays in file |\n\nNet bytes: SKILL.md +136 (two pointers within existing line-length slack), landing-operations.md **−100** — content volume flat-to-down while both conventions land.\n\n## Gates (run at cf1760c4, the final commit)\n\n- `pnpm check:pm-skill-ratchet` — ✓ \".claude/skills/pm-dispatch/SKILL.md is 1005 lines (ceiling 1005; headroom 0)\" · ✓ \".claude/skills/pm-dispatch/references/landing-operations.md is 80 lines (ceiling 80; headroom 0)\"\n- `pnpm check:pm-skill-id-lint` — ✓ \"22 file(s) clean (pattern /#[0-9]{3,}/g)\" (the outage anecdote's card numbers stay on the card, not in the skill)\n- `pnpm check:skill-frame-sync` — ✓ \"binding sentence present in all 4; 4 count mention(s) agree\"\n- `pnpm check:agent-test-spelling` — ✓ 0 violations · `pnpm check:doc-authoring` — ✓ \"390 files clean\" · `pnpm check:nul-bytes` — ✓ · `pnpm check:pm-governed-prose` — ✓ \"2 instruction surface(s) name all 5 registered governed surfaces\" · `pnpm check:pm-governed-merges` — ✓ (self-test 159 assertions) · `pnpm --filter @objectstack/lint run check:doc-formula-expressions` — ✓ (after building its declared prerequisites `@objectstack/formula` and `@objectstack/lint`)\n- `node scripts/pm/check-governed-queue-guard.mjs` — NOT MEASURED locally (it reads `GITHUB_EVENT_PATH`; workflow-context only) — CI runs it with a real event\n- Gate list derived from the actual diff, not recalled: `node scripts/pm/dispatch-gates.mjs` (no paths) — 9 matched families, all covered above\n\n## Scope\n\n- Governed surface (`.claude/**`): **draft PR, human merge** — never flipped ready, no auto-merge armed.\n- The CI-side half (merge-queue check-set parity) is tracked separately in #12211 and remains open — out of scope here.\n- `skip-changeset`: internal `.claude/` instruction files only; nothing publishes.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01JANH3y7qe3MD8aLaLXci8N)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JANH3y7qe3MD8aLaLXci8N)_"
+}

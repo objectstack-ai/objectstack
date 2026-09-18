@@ -1,0 +1,34 @@
+{
+  "number": 12201,
+  "kind": "issue",
+  "title": "[finding] The skill-reference `Exports:` fallback ranks by source order, so DEPRECATED_/NON_AUTHORABLE_/LEGACY_ constants headline customer-facing rows",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T12:49:30Z",
+  "updated_at": "2026-08-26T01:50:09Z",
+  "closed_at": "2026-08-26T01:01:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12201",
+  "body": "Filed unassigned while converging `build-skill-references.ts` on the shared module-docblock selector (#12094). Out of that card's scope — that one fixes *which doc block* is published; this is about what the **fallback** publishes when there is no module doc block at all. #12094 explicitly left the fallback chain in place and named the follow-up question, so this records the measurement rather than pre-judging it.\n\n## What\n\nWhen a `.zod.ts` has no module doc block, `extractDescription()` in `packages/spec/scripts/build-skill-references.ts` falls through to an export list:\n\n```js\nconst re = /export\\s+const\\s+(\\w+Schema|\\w+)\\s*(?:[:=])/g;\n// …\nif (exports.length > 0) return `Exports: ${exports.slice(0, 5).join(', ')}`;\n```\n\nTwo properties combine badly on a customer-facing surface:\n\n1. **Rank is source order**, not importance — `slice(0, 5)` keeps whichever five happen to be declared first.\n2. **The regex has no notion of public authorable surface** — any `export const` qualifies, including constants whose own names say they are not for authoring.\n\n## Measured\n\nAfter #12094 lands, these rows are what `skills/**` publishes (measured on `main` at 22c42c9 plus that change):\n\n- `skills/objectstack-automation/references/_index.md`\n\n  ```\n  - `…/src/automation/approval.zod.ts` — Exports: ApproverType, DEPRECATED_APPROVER_TYPES, NON_AUTHORABLE_APPROVER_TYPES, ORG_MEMBERSHIP_LEVELS, APPROVER_EXPRESSION_ROOTS\n  ```\n\n  Two of the five named constants are explicitly deprecated or explicitly non-authorable.\n\n- `skills/objectstack-i18n/references/_index.md`\n\n  ```\n  - `…/src/system/translation.zod.ts` — Exports: LocaleSchema, FieldTranslationSchema, ActionResultDialogTranslationSchema, ObjectTranslationDataSchema, LEGACY_OBJECT_FIRST_KEYS\n  ```\n\n## Why it is worth a card\n\nThe line is **true** — it is an accurate list of what the module exports, which is why #12094 kept it (an honest export list beats a confidently wrong prose sentence). It is the **ranking** that is the hazard, and only on this surface: `skills/**` is loaded whole into a customer agent's context window, and its job is to teach that agent what it may author. A row that headlines `DEPRECATED_APPROVER_TYPES` and `NON_AUTHORABLE_APPROVER_TYPES` is pointing an authoring agent at exactly the vocabulary it must not use, with nothing on the line marking them as such.\n\nThis is the \"make AI-written metadata hard to get wrong\" axis rather than a correctness bug — nothing is broken, and no gate is wrong today.\n\n## Options (not pre-judging)\n\n- Rank or filter the fallback list — prefer `*Schema` exports, or skip `SCREAMING_SNAKE` constants, which are machine constants rather than authorable metadata.\n- Require a module doc block on any `.zod.ts` reachable from `SKILL_MAP` and drop the fallback (the loud-refusal answer #12094 declined to take for that card, since it would make \"write a module docblock\" an implicit prerequisite and red the gate on ~9 files).\n- Leave it — the export list is honest, and the real repair is authoring module doc blocks on the files that lack them.\n\nThe middle option interacts with the third: the population that reaches the fallback at all is the same ~9 files, so authoring their module doc blocks removes the symptom without any generator change.\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 12092,
+  "kind": "issue",
+  "title": "[finding] objectstack-automation \"Verify your work\" still teaches that an unknown function in a condition fails silently at runtime — it fails the build",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T08:41:18Z",
+  "updated_at": "2026-08-26T00:33:27Z",
+  "closed_at": "2026-08-26T00:01:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12092",
+  "body": "Found while teaching the value-expression function vocabulary in the same file (skills lane). Not fixed there — different passage, different surface, and the file is under a zero-headroom token ratchet.\n\n`skills/objectstack-automation/SKILL.md` (`## Verify your work`, ~`:965`) opens:\n\n> Flow predicates fail **silently at runtime** when malformed: a typo'd field name, **an unknown function**, or a `{…}`-wrapped reference in a condition evaluates to `null`/`false`, so the flow \"fires\" but does nothing — and nothing errors at edit time.\n\nTwo of those three examples are stale, and the file contradicts itself about them:\n\n1. **Unknown function in a condition.** The Common Pitfalls row in the same file (`:937`) already says the opposite, correctly: \"An UNKNOWN function (`PRIOR()`, a typo'd name) **fails the build**.\" The engine agrees — `AutomationEngine.validateFlowExpressions` runs the fatal pass (syntax, brace-in-CEL, unknown-function, ADR-0032 §5) over every condition and declared bare-CEL slot at flow **registration** and throws; it never reaches a silent runtime evaluation.\n2. **`{…}`-wrapped reference in a condition.** Same fatal pass — the brace-trap is precisely what it catches, and the thrown message tells the author to drop the braces. The `:937` row states this correctly too.\n\nOnly the first example (a typo'd *field* name) still matches the described behavior, and even that is an advisory warning when an object-schema resolver is wired.\n\nNet effect on an AI author reading the published skill: it learns that a typo'd function name in a condition is an invisible failure it must hunt for, when in fact registration refuses it loudly with a located, corrective message. That is the same defect class as the silent-`null` trap the value-expression work removed — a skill teaching a silence the platform no longer has.\n\nNote the value-expression surface is genuinely the other way round and should not be flattened into this passage when it is fixed: an unknown function in a **node value** (`'{ROUND(x, 2)}'`) is *not* checked at build (the save-time pass deliberately skips `flow-template` slots — no validator implements that dialect) and raises its named error at run time instead. So the corrected passage has to distinguish the two dialects rather than simply flipping the sentence.\n\nObservation only — no behavior change implied, and the fix is a wording correction inside a published `skills/**` file, so it carries the token-ratchet budget (that file currently sits at its ceiling with 0 headroom).\n"
+}

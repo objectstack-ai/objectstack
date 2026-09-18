@@ -1,0 +1,35 @@
+{
+  "number": 11719,
+  "kind": "issue",
+  "title": "types: `sendError`'s `extra` cannot carry `declaredCode`, so every nested-envelope route silently drops an unregistered producer's own code spelling",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T13:52:57Z",
+  "updated_at": "2026-08-26T02:26:36Z",
+  "closed_at": "2026-08-26T02:25:42Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11719",
+  "body": "Filed unassigned while implementing the #11683 + #11684 fold. Out of scope there: the repair is in `packages/types`, outside that card's declared file surface.\n\n## Measured\n\n`ApiErrorSchema` (`packages/spec/src/api/contract.zod.ts`) declares `declaredCode`:\n\n```\ndeclaredCode: z.string().optional().describe('The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106)')\n```\n\nThe shared nested-envelope writer cannot emit it. `packages/types/src/response-envelope.ts`:\n\n```ts\nexport function sendError(\n  res: EnvelopeResponse,\n  status: number,\n  code: ErrorCode,\n  message: string,\n  extra?: Pick<ApiError, 'category' | 'httpStatus' | 'details' | 'requestId'>,\n): void\n```\n\n`declaredCode` is not in that `Pick`, so no route answering through `sendError` can put it on the wire — it is a compile error to try.\n\n## Why it matters\n\nADR-0112's 2026-08-17 amendment (#9106, extended to the flat door by #9232) rules the demote **platform-wide**, in its own words: *\"`error.code` stays a closed vocabulary at every door. A thrown code that is not a member … is **demoted** to a declared sibling field, `ApiError.declaredCode`\"* — and it names the capability the channel exists to preserve: `SandboxError` carries a metadata app's **own** `.code` across the QuickJS boundary on purpose (#7867), so the author's spelling *\"still crosses the sandbox and still reaches the wire; it lands in the open channel rather than the closed one.\"*\n\nOn a route answering the nested envelope it does not. The closed `code` still carries the derived member, so nothing invalid ships — the loss is silent and one-directional: the author's spelling is gone, and a consumer told by the ADR to read `declaredCode` finds nothing there.\n\nObserved while routing the record-share family's refusals through the shared classification door: `resolveThrownHttpError` / `demotedDeclaredCode` produce the pair, the flat `/data` door carries both, and `respondError` (→ `sendError`) can only carry one. A sandboxed hook on a `sys_record_share` write is the reachable producer of a tenant-authored code there.\n\n## Not established here\n\n- The blast radius. The seven modules on the shared pair (`storage-routes`, `settings-routes`, `admin-routes`, `external-datasource-routes`, `package-routes`, `i18n-service-plugin`, `share-link-routes`) plus the record-share family all answer through `sendError`; which of them can actually catch a tenant-authored code was not censused.\n- Whether the fix is widening the `Pick` or routing these bodies through `resolveThrownHttpError` wholesale.\n- Severity not judged.\n\nRegion: `packages/types/src/response-envelope.ts`, `sendError`'s `extra` parameter.\n"
+}

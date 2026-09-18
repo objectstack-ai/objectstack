@@ -1,0 +1,32 @@
+{
+  "number": 12117,
+  "kind": "issue",
+  "title": "type-compat: the `text` canonical column's exact field-type set omits `signature`/`qrcode`, which the driver now emits as TEXT",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T09:51:39Z",
+  "updated_at": "2026-08-26T04:02:15Z",
+  "closed_at": "2026-08-26T03:41:40Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12117",
+  "body": "Found while implementing #11875 (signature/qrcode joined the driver's TEXT family under the 2026-08-25 maintainer ruling). Filed unassigned, observation-class — no measured consumer breakage; recording the drift so the next reader of `type-compat.ts` is told.\n\n## The observation\n\n`packages/spec/src/data/type-compat.ts` (`CANONICAL_TO_FIELD`) maps each canonical SQL column type to the ObjectStack field types it is exactly/lossily compatible with:\n\n- `text: { suggested: 'text', exact: ['text', 'textarea', 'email', 'url', 'phone', 'markdown', 'html', 'richtext', 'code', 'select', 'color'], lossy: [] }` — `signature` and `qrcode` are absent.\n- `binary: { suggested: 'file', exact: ['file', 'image', 'signature'], lossy: ['text'] }` — the only place `signature` appears, reading it as a binary payload.\n\nAfter #11875, an unbounded TEXT column is the platform's OWN emitted physical shape for `signature` / `qrcode` (their stored value is a string — routinely a data-URI — per `STRING_VALUE_TYPES` and `valueSchemaFor`, which says `z.string()` for both). So introspecting a table the driver itself created would find a `text` column holding a signature and the compat table would not list `signature` as exactly compatible with it, while `binary` — a column shape the driver never emits for this type — would.\n\n## Why this is a finding and not part of #11875\n\nThe compat table serves external-column introspection/import suggestions, a different surface from the authoring/write/storage seams the ruling covered, and its membership semantics (\"which field types can this existing column serve\") were not part of the ruled route. Whether `signature`/`qrcode` (and possibly the `binary.exact` row) should move is a small self-contained decision for whoever owns this table.\n\n## Dedup note\n\nThe pre-filing issue search could not run in the filing session (repo-scoped REST returns 403 \"GitHub access is not enabled for this session\"); local grep of `type-compat.ts` and its neighbors found no issue reference covering this. If a covering card exists, close this as a duplicate."
+}

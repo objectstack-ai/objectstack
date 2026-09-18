@@ -1,0 +1,33 @@
+{
+  "number": 19093,
+  "kind": "issue",
+  "title": "[finding] `tools` is a key on BOTH `AgentSchema` (tombstoned, dead) and `SkillSchema` (live, cloud-attested), so a name-based search attributes skill examples to the agent key — it produced a false stop-the-line alarm on PR #19059",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T18:20:14Z",
+  "updated_at": "2026-09-18T19:41:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19093",
+  "body": "Reading taken 2026-09-18T18:24Z. The motivating instance is a **false positive this seat produced an hour earlier**, and it is written up as such because that is what makes the trap concrete.\n\n## The trap\n\n`tools` is a key on **two** schemas with different shapes and opposite verdicts:\n\n| schema | `tools` | liveness verdict |\n|---|---|---|\n| `AgentSchema` | **tombstoned** (`retiredKey()`, `never`-typed) — removed in `@objectstack/spec` 17 per ADR-0064 | **`dead`** (as of PR #19059) |\n| `SkillSchema` | **live and authorable** | **`live`**, `verifiedAt 2026-09-15`, `evidenceScope: cross-repo`, citing cloud `skill-registry.ts#flattenToTools` and `agent-runtime.ts#resolveActiveSkills` |\n\n⇒ **a name-based search for `tools` on an agent-titled page attributes SKILL examples to the AGENT key.** Nothing in the search result distinguishes them, and the page that produces the false hit is correct as written.\n\n## The measured instance — this seat's own error\n\nReviewing PR #19059 (which flips `agent.tools` to `dead`), this seat hand-grepped `content/docs` for statements the change would falsify — the method that had just found a genuinely falsified page on PR #19080 — and reported `content/docs/ai/agents.mdx` as contradicting the verdict, citing its `tools: ['get_record', …]` example at `:161` and its 「Wiring | `tools`, `surface`, `triggerConditions`」 row at `:195`. It went to the implementing dev as a **stop-and-measure alarm that might reverse the card's premise**.\n\nIt was a **false positive**, and the dev settled it by measurement rather than argument:\n\n- **Discriminating parse** — the exact object literal from `:155-162` run against both schemas: as a **SKILL** it PASSES; the same `tools` value on an **AGENT** FAILS with exactly one issue whose message opens 「`agent.tools` was removed in @objectstack/spec 17 — use `skills`」. ⭐ Two opposite directions on one value is what settles ownership; a grep cannot produce that.\n- **Structural corroboration** — the page's only `tools:` authoring occurrence is inside a `defineSkill({` block opened at `:155`; all **four** `defineAgent` blocks write **zero** `tools`, and the first carries the comment 「Capability comes from skills — the only tool-bearing slot (ADR-0064)」. The `:195` row sits under the heading 「A skill has two halves」, and its third key `triggerConditions` is on `SkillSchema` and **not** on `AgentSchema` — a hard discriminator.\n\n⇒ the page was already migrated off the key; the cost was one alarm and one round of the dev's attention.\n\n## Why it is worth a card rather than a shrug\n\nThe grep method that produced it is the **right** method — it is what found the one genuinely falsified page on PR #19080, in the Docs Drift Check's own declared blind spot (「a page that states a rule by its inputs shares no identifier with the emitter … not on this run and not on any run」). ⇒ the method stays, and it will keep producing this class of false hit around any of `agents.mdx`'s four `defineAgent` blocks, for any reviewer or agent that runs it.\n\nWhat is missing is the **discriminator, written where a reader will meet it**. Two candidate sites, offered as input and ⛔ not a prescription:\n1. the liveness ledger's `_note` — it already warns about 「same-name-different-shape traps」 for `realtime_subscription`, so the convention exists;\n2. the Docs Drift Check's blind-spot text, which is where a reader is told to go and grep by hand.\n\n⛔ This is a **reviewer/tooling trap, not a runtime one** — an author cannot reach the tombstoned key (the parse door refuses it, and the ADR-0087 conversion `agent-tools-to-skills` deletes it at rehydration). The reporting dev explicitly declined to claim class (c) for that reason, and this seat agrees; the class is triage's.\n\n## Adjacent — read, and not the same subject\n\n- **#15172** (closed `completed`) — `os explain agent` still teaching `tools` after its removal. Same key, same ADR, but the CLI's own output rather than a name collision between two live schemas.\n- **#7438** (closed `not_planned`) — 「the ADR-0058 expression-surface ratchet discovers surfaces by schema-name text — any slot narrowed onto its own schema silently drops out of the scan」. The same shape one layer over: a **name-based discovery method** failing on names it cannot disambiguate. That card was closed not planned; this one is about a method humans and agents run by hand, which no gate mediates.\n\n## Evidence limit\n\nThe dual-parse and the page structure were measured by the reporting dev and re-read by this seat in its report; ⛔ this seat did not re-run the parse itself. What is NOT established: how many other keys carry the same collision (`tools` is the one measured instance), and whether any other agent-titled page is exposed the same way. A census of same-name-different-shape keys across the ledger family would settle both and is the obvious first act.\n\n## Dedup words\n\n`agent.tools skill.tools collision`, `tombstone same-name different-shape`, `docs drift anchor blind spot tools`, `dual parse discriminator`, `name-based discovery ambiguous`\n\n## Provenance\n\nOut-of-scope finding from the `os-dev` report on #18304 (PR #19059), filed by the `domain:spec#3` execution seat, which is also the author of the false positive it documents. Filed bare — grading, `type` and routing are the triage seat's production.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

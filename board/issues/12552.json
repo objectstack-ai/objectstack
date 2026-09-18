@@ -1,0 +1,34 @@
+{
+  "number": 12552,
+  "kind": "pull_request",
+  "title": "test(cli): catch the silent port drift in three serve e2e spawners",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T10:15:42Z",
+  "updated_at": "2026-08-26T10:47:45Z",
+  "closed_at": "2026-08-26T10:47:44Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": "2026-08-26T10:47:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12552",
+  "body": "Fixes #12526\n\n## These three are in the SILENT-DRIFT column, not the loud one\n\nThe card originally asked for `portContentionError()` at these three sites, on the premise that they run in production posture where a taken port is a hard `exit 1`. Measured on `origin/main`, that premise does not hold, and the PM withdrew it (ruling 1's action and ruling 3's classification are withdrawn; this PR implements the re-aimed fix).\n\nAll three spawn `serve -p PORT --dev`. `packages/cli/src/commands/serve.ts` reads:\n\n```ts\nconst portAutoShiftAllowed = flags.dev || process.env.NODE_ENV === 'development';\n```\n\n`flags.dev` **alone** opens the auto-select branch, whatever `NODE_ENV` is — and `serve.ts` also assigns `NODE_ENV=development` in-process for `--dev`. So a port taken between `randomPort()`'s bind probe and the spawn does **not** fail the boot: `getAvailablePort()` hops the child onto the next free port and it reports itself READY. `portContentionError()` lives in the child's `exit` handler, which never runs, so adding it here would have been dead code — a fix that passes every gate and changes nothing.\n\nThat is the strictly worse direction: a **green** boot on the wrong port. Every request each file makes afterwards goes to the port it *reserved* and no longer owns, so it measures whatever else took it.\n\nOnly `serve-node-env-production-default.e2e.test.ts` — which spawns **without** `--dev`, so unset `NODE_ENV` defaults to production — is in the loud column where `portContentionError()` has something to read.\n\n## Not a regression from #11707 / #12459\n\nThe `--dev` responsible has been on all three spawn lines since `83e6016fa`, long predating #11707 / #12459, which changed `NODE_ENV` and never touched it. This was never read, not newly introduced. Same for the classification error itself, which is inherited rather than new.\n\n## What this changes\n\nEach of the three files now reads the bound port back out of the **child's own output** — never out of what the harness reserved, which is #12441 ruling 2's principle applied to the failure that actually occurs — and refuses to hand back a boot that drifted. Two patterns, because either alone can be absent: the structured `HTTP server started successfully` log obeys `OS_LOG_LEVEL`, and the banner's `API:` line is what survives when it does not.\n\nResolution is now gated on having seen that port. That is part of the check, not an optimisation: resolving on `waitFor` alone would let a boot through before the child had said which port it took, and the drift check would then be a no-op on an already-settled promise.\n\nAlso corrected: the `THEY REACH IT NOW` paragraph in `serve-node-env-production-default.e2e.test.ts`, which called these three \"this file's own shape\". That sentence is the seed of the misclassification — leaving it standing guarantees the next reader re-derives the same wrong column from the tree.\n\n`packages/cli/test/helpers/serve-process.ts` is deliberately untouched (held by #12525), and `os serve`'s auto-shift rule is unchanged — auto-shifting in development is correct, and #11113 pins the production half.\n\n## Proof the check fires\n\nHeld the port the file reserves with an HTTP neighbour, then ran the real suite. The child auto-shifted and the harness refused it:\n\n```\nError: PORT DRIFT: this file reserved port 37167, but the child bound 37168.\n`os serve -p 37167 --dev` passes `--dev`, so `serve.ts`'s `portAutoShiftAllowed =\nflags.dev || NODE_ENV === 'development'` opened the auto-select branch and\n`getAvailablePort()` hopped the child off the port that was asked for. The boot\nSUCCEEDED — on the wrong port.\n```\n\nAblation discipline: the mutation was proven on disk before the run (`git hash-object` before `6a845fa6` / after `afd25a47`, injected marker count 1, `port = randomPort();` count 0), restored under an `EXIT`/`INT`/`TERM` trap pinned to an absolute path, and the restore proven by an empty `git diff HEAD` plus the marker's absence. Without the fix this run is a **green** boot on port 37168 while the assertions talk to 37167.\n\n## Verification — all on the final commit `36b472381`\n\n- `pnpm --filter '@objectstack/cli...' build` (package and closure) — `VERDICT command-exit 0`\n- The four affected suites: **4 files, 8 tests passed**\n- Ratchet family, with the full workspace closure built as `lint.yml` does: `check-type-check-coverage --re-measure: OK — 32 ledger entr(ies) re-measured in 223.8s, 1843 raw tsc error(s) total, none above its recorded number`\n- Gate families derived with `scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (24 families): `check:cli-test-child-env`, `check:test-source-alias`, `check:type-check-coverage`, `check:type-check-debt`, `check:cross-package-test-inputs`, `check-comment-mask-adoption`, `check-empty-changeset`, `check-ci-filter-parity`, `check-plugin-teardown-shape` — all exit 0, each captured before any pipe\n\nTwo declared readings rather than silent claims:\n\n1. **`pnpm --filter @objectstack/cli typecheck` does NOT cover these files.** `packages/cli/tsconfig.json` is `\"include\": [\"src\"]`, and `--listFiles` finds **0 of 4** edited files in that program. Its green says nothing about this diff. Real coverage came from compiling the four files directly under the same strict options: **4/4 in program, 0 errors**, confirmed with `--listFiles`.\n2. **Lint was narrowed** to the four changed files (`eslint --no-inline-config --format json`, 4 files linted, 0 errors, 0 warnings) rather than the repo-wide `pnpm lint`. Type-aware linting is not enabled, so this diff cannot move the verdict on any untouched file; the full-repo sweep is CI's run.\n\nTest-only diff (four files under `packages/cli/test/`), so no changeset — `skip-changeset`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UjujZN219uFzBhSYfMykCd)_"
+}

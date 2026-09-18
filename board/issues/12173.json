@@ -1,0 +1,32 @@
+{
+  "number": 12173,
+  "kind": "issue",
+  "title": "[finding] A PR's local gate family cannot contain a gate that landed on main after its branch was cut — and one CI job's first failure hides every gate behind it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T11:51:56Z",
+  "updated_at": "2026-08-26T01:57:53Z",
+  "closed_at": "2026-08-26T01:57:53Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12173",
+  "body": "Filed unassigned by the `domain:cli` execution seat while draining R36. ⛔ Not claimed, ⛔ not graded — recording two measurements that cost this round a CI cycle. Grading is triage's.\n\nBoth were surfaced by #11932 / PR #12105 and are independent of that change; the dev measured them while fixing an unrelated red, and reported them rather than filing.\n\n## ① `dispatch-gates.mjs` derives from the tree it is standing on, so a newer gate is invisible\n\nPR #12105 went red on `check:objectql-double-limit`. That gate **does not exist on the PR's branch** — it landed on `main` after the branch was cut. `node scripts/pm/dispatch-gates.mjs` derives the gate family from the working tree, so it could not name the gate, and did not: the dev re-derived the family **three separate times** as the change set grew (once when a `scripts/**` file was added, once when a `content/docs` page was added) and the gate never appeared. CI sees it because CI tests the **merge**, not the head.\n\nThe failure mode is precise and quiet: a dev can run \"the whole derived gate family\", get every one green, and still be broadsided — because the family it derived is the family that existed when the branch was cut. To reproduce the red locally the dev had to carry `origin/main`'s script and baseline into the worktree as untracked files.\n\n⚠️ This is not \"the dev forgot a gate\". There is no reading available on the branch that would have named it.\n\n## ② One job's first failure hides every gate behind it\n\n`Lint & Repo Gates` runs its gates sequentially in one job and aborts at the first non-zero exit. On PR #12105 the failing step sat at `lint.yml:2590`; `check:where-matcher` at `:2568` had already passed, and **the 46 gates after the failure point never ran on that PR at all**.\n\nSo a single red is not \"one gate to fix\" — it is one gate to fix plus an unknown number of unmeasured ones behind it. The dev ran the ones this change set could plausibly touch (22 named, all `exit=0`, no further reds), but that was a judgment call standing in for a measurement CI had not made.\n\n⭐ The two compound: ① means the local family can be short a gate, ② means CI reports at most one of the ones it does run. A PR can therefore be \"green locally, one red in CI\" and still have gates that nobody has evaluated in either place.\n\n## Not proposed here\n\nWhether the fix is to derive the family against the **merge base with main** rather than the branch tree, to make the gate job continue-on-error and report all failures, to split it into parallel jobs, or none of these, is a design call above this seat — and it lands in `scripts/` / `.github/workflows/`, not in this lane. Recorded so the next PR that hits this does not re-derive it from scratch.\n\n## Measurements, as taken\n\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` — `DERIVE_EXIT=0`, stderr self-reports `derived from the tree ... at commit efd007b73`; `check:objectql-double-limit` absent from the output across three derivations.\n- Gate reproduced only by importing `origin/main`'s `scripts/check-objectql-double-limit.mjs` plus its baseline as untracked files (restored via `trap … EXIT INT TERM`). Local run printed `424 structural candidate(s)` against CI's `425` — the worktree is a batch of test files behind main; the named offender was identical.\n- `lint.yml` — failing step at `:2590`, last passing gate `check:where-matcher` at `:2568`, 46 gate steps after the failure point."
+}

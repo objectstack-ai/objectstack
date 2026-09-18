@@ -1,0 +1,36 @@
+{
+  "number": 12525,
+  "kind": "issue",
+  "title": "`runServe()` children auto-shift port silently — `bin/run-dev.js` pins NODE_ENV=development, so a lost race is a FALSE GREEN and the test then talks to whatever else holds the port",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "tests"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T08:26:39Z",
+  "updated_at": "2026-08-26T10:25:52Z",
+  "closed_at": "2026-08-26T10:25:52Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12525",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12441 dev**, which measured this while implementing [PR #12523](https://github.com/objectstack-ai/objectstack/pull/12523) and **could not file it** (every GitHub write answers *\"GitHub access is not enabled for this session\"* from that seat; no `gh` in the container). ⛔ Not graded, not routed.\n\n## ⭐ Why this is worse than #12441, which it was found beside\n\n#12441's defect is a **red** suite that is not reproducible. This one is a **green** one that is wrong. That is the more expensive direction, and it is invisible by construction.\n\n## Measured\n\n`runServe()` in `packages/cli/test/helpers/serve-process.ts` spawns through `bin/run-dev.js`, which pins `process.env.NODE_ENV = 'development'` **before argv is parsed** (`bin/run-dev.js:28`).\n\n`packages/cli/src/commands/serve.ts:1319`:\n\n```ts\nportAutoShiftAllowed = flags.dev || NODE_ENV === 'development'\n```\n\n⇒ for **every `runServe()` caller**, a taken port is not an error at all. `getAvailablePort()` silently drifts the child onto a different port and the boot **succeeds**.\n\nAnd `runServe()` never learns the child's real port — the port is an opaque element of the argv list it built. So a test that afterwards talks to the port it **asked for** reaches **whatever else is holding it**. On the parallel-agent container this repo is developed in, that is plausibly a neighbouring agent's dev server.\n\n## The contrast that makes it legible\n\nThe same lost race produces opposite outcomes depending only on which entry the spawner used:\n\n| spawner | `NODE_ENV` | taken port ⇒ |\n|---|---|---|\n| `bin/run.js`, `NODE_ENV` unset (#11707's three, and `serve-node-env-production-default`) | production default | hard `exit 1` — loud, and #12523 now names it |\n| **`runServe()` → `bin/run-dev.js`** | pinned `development` | **silent drift, green boot, test talks to a stranger** |\n\n⛔ Note this is **not** an argument to change `os serve`'s auto-shift rule. Auto-shifting in development is correct and deliberate; #11113 pins the production half for its own good reasons. The defect is that the **test harness** cannot tell the difference, because it never reads back the port the child actually bound.\n\n## Shape of a fix (⛔ a suggestion, not a ruling)\n\nParse the ready banner's port and assert it equals the requested one — failing loudly on a mismatch. ⚠️ That is a behaviour change to the **shared** harness (`runServe()` has many callers) and is beyond #12441's declared surface, which is why it was reported rather than folded in.\n\n## Dedup\n\nThe #12441 dev's dedupe was done the REST-free way (local grep over `packages/cli/test` for every port draw and every spawn site); the REST list endpoints are 403 from a dev seat. #12441 / PR #12523 is the sibling — it fixes the **draw** (bind-probe) and the **legibility of the loud case**, and explicitly does not touch this one. ⚠️ Not exhaustively deduped against `domain:devx`.\n\nSeverity not judged.\n\n## Re-check\n\n```\ngit grep -n \"portAutoShiftAllowed\" origin/main -- packages/cli/src/commands/serve.ts\ngit grep -n \"NODE_ENV\" origin/main -- packages/cli/bin/run-dev.js\ngit grep -n \"runServe\" origin/main -- packages/cli/test\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #12441 / PR #12523 — the sibling, the bind-probe and the loud-case legibility\n- #11113 — pins the production no-auto-select rule\n- #11707 / PR #12459 — moved three spawners to `bin/run.js` with `NODE_ENV` unset, i.e. into the loud column"
+}

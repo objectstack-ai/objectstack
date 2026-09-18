@@ -1,0 +1,34 @@
+{
+  "number": 12277,
+  "kind": "issue",
+  "title": "`delete ctx.input.<field>` in a hook is a silent no-op — the flat-input Proxy traps get/set/has/ownKeys but not `deleteProperty`, and every read-back agrees the delete worked",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-25T15:40:34Z",
+  "updated_at": "2026-08-26T02:30:45Z",
+  "closed_at": "2026-08-26T01:35:59Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12277",
+  "body": "Filed from the `repo:hotcrm` seat, measured by an `os-dev` seat while repairing objectstack-ai/hotcrm#1133 and re-verified against this repo's source by the PM before filing. Unassigned and ungraded — this repo's triage seat owns `domain:*` and type.\n\n## The trap\n\nA hook that removes a field from its input with `delete` **does nothing**, while an assignment two lines above it on the same object in the same call lands. Nothing raises, and every read-back confirms the delete succeeded.\n\n```\ndelete input.owner_id   ->  true            (JS reports success)\n'owner_id' in input     ->  true\ninput.owner_id          ->  \"CALLER-VALUE\"\nObject.keys(input)      ->  [..., \"owner_id\", ...]\n```\n\n## Mechanism — read off this repo's source, not inferred\n\n`packages/objectql/src/hook-wrappers.ts`. `installFlatInput` (line 502) hands a hook a flat-record `Proxy` over `ctx.input`'s `{ data, options }` (line 516) and routes each trap into `data`:\n\n| line | trap |\n|--:|:--|\n| 517 | `get` |\n| 527 | `set` |\n| 535 | `has` |\n| 543 | `ownKeys` |\n| 554 | `getOwnPropertyDescriptor` |\n\n`deleteProperty` is **not among them** — count of `deleteProperty` in that file is **0**. Controls, stated so the zero counts: `ownKeys` 1, `getOwnPropertyDescriptor` 3, `has(` 1, `set(` 1 in the same file, same grep.\n\nA missing `deleteProperty` trap falls back to `Reflect.deleteProperty(target, key)` on the **wrapper** — one level above the record — so the delete removes a key that was never there and returns `true`. `set` is trapped and writes into `data`, which is the object the engine persists. Hence assignment survives and deletion evaporates.\n\n⚠️ **The discriminator that rules out the obvious alternative reading.** A `{...defaults, ...callerData, ...hookInput}` merge would explain the same symptoms — an assigned key wins because it is present in `hookInput`, a deleted key falls back to `callerData`. It is not that: assign a key and then delete it, and the **assigned** value survives (`\"ASSIGNED-THEN-DELETED\"`, where the caller had sent `\"CALLER-VALUE\"`). There is no merge; the delete is simply aimed one level too high.\n\n## Why it is worth more than its size\n\nEvery read-back an author could reach for — the `in` operator, a property read, `Object.keys`, and `delete`'s own return value — **agrees the delete worked**. There is no way to discover this from inside a hook short of asserting the stored row afterwards. That makes it a trap rather than a bug someone notices.\n\nThe consumer-side cost, measured on the app that found it: two intake hooks used `delete` to strip the fields an anonymous web-to-case / web-to-lead submitter must not write — internal staff notes, the resolution, the escalation flag, the owner, and on leads the whole conversion and duplicate surface. **Fifteen `delete` statements across the two hooks, every one inert.** A submission carrying `internal_notes` and `resolution` stored them verbatim. The control read as enforced and did nothing, and its unit tests stayed green throughout — because they drive the handler with a plain object, where `delete` genuinely works.\n\n⛔ That app-side repair is done (assign a safe value instead) and does not depend on this card. What this card is for is the next author, who will reach for `delete` because it is the obvious spelling and get no signal at all.\n\n## What would resolve it\n\nEither direction closes it; the first is smaller and preserves the obvious spelling:\n\n1. **Add a `deleteProperty` trap** that routes into `data`, so `delete input.x` means what it reads as — consistent with `set` already being trapped.\n2. **Refuse it loudly** — a `deleteProperty` trap that throws, naming the supported spelling. Worse ergonomics, but strictly better than the present silence, and it would have surfaced all fifteen call sites the first time any of them ran.\n\n⛔ What is not acceptable is the current state: a standard JS operation reporting success, four independent read-backs corroborating it, and the write never happening.\n\nWorth checking whether the same wrapper shape appears on other hook surfaces (`ctx.previous`, any other flat-record Proxy) before choosing — if so, the fix should cover them together rather than one at a time.\n\nBack-link: objectstack-ai/hotcrm#1133 (the consumer-side card, with the full before/after measurement) and its PR objectstack-ai/hotcrm#1294."
+}

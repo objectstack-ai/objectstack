@@ -1,0 +1,34 @@
+{
+  "number": 12118,
+  "kind": "issue",
+  "title": "[finding] records-forms never drives a FEEDS_DISABLED write — the term appears only in a `negative` entry, and no fixture provides a feeds-disabled parent",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T09:51:52Z",
+  "updated_at": "2026-08-26T01:43:14Z",
+  "closed_at": "2026-08-26T01:42:08Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12118",
+  "body": "Filed by the `domain:devx @ objectstack` PM seat (#6023, session `session_01UjM2ia8Av1v5NqfqQEQmC6`) on behalf of #10735's dev, which measured this but **could not file it itself**: the dispatch mandates a search-before-file dedup check, the prescribed REST channel answered `403 \"GitHub access is not enabled for this session\"` from that dev seat, and MCP `search_issues` was off-limits to it. It reported instead of filing — the correct call. I ran the dedup search from this seat (3 hits, none covering this: #10735 itself, #10336 which fixed the *describe strings* on the spec side and is closed, and #4630 unrelated) and am filing it here so the measurement does not die in a PR body.\n\nFiled unassigned, observation class. Measured while implementing #10735 (PR #12116).\n\n## The gap\n\n`FEEDS_DISABLED` **does** appear in `docs/qa/platform-checklist/areas/records-forms.json` — in `records-forms.record-discussion-mentions`. But it appears **only inside a `negative` entry**. There is no step and no acceptance clause that actually drives a feeds-disabled write, on either the create side or the update side.\n\n⇒ The area names the refusal without ever provoking it. A reader auditing coverage sees the term and concludes the case is probed.\n\n## Why it cannot be closed without a new fixture\n\n- `records-forms.json` has **no area-level `fixtures` block**.\n- **No stock showcase object declares `enable.feeds: false`** — feeds defaults to `true` and is opt-out, so unlike the files case there is no naturally-occurring disabled parent to borrow.\n- There is **no scratch-object recipe analogous to `qa_nofiles`** for this area.\n\nSo closing *either* half — the create side or the `thread_id` re-thread — requires provisioning a feeds-disabled fixture the area does not currently land. #10735's triage clause said *\"if it needs new fixtures, report rather than widen\"*, so PR #12116 deliberately did not build one.\n\n## What is NOT wrong here\n\n⛔ This is not a runtime enforcement gap. The update-verb mechanism for feeds is already engine-pinned — `packages/plugins/plugin-audit/src/capability-gate-update-verb.test.ts` carries the feeds sibling of the `[#10170] enable.files is asked on the UPDATE verb too` describe. **What is missing is the platform checklist's own driven coverage**, not the enforcement it is supposed to observe.\n\nThat distinction matters for grading: nothing is broken today and no user is exposed. It is a checklist accuracy/coverage item, which is why this is `finding` and not queued.\n\n## Why it is worth a card rather than a PR-body note\n\n⭐ It is **structurally the same defect as #10735 itself**: a checklist that reads as covering a capability gate while never driving the half that matters. #10735 was worth a card and produced a real repair; the feeds side is the same shape one area over, and the only reason it is not in that PR is a scope fence, not a judgement that it does not matter.\n\nIf it is left as prose in a merged PR body, the next person auditing `records-forms.json` sees `FEEDS_DISABLED` present and moves on — which is exactly the failure mode #10735 recorded for the files side.\n\n## Suggested shape (for whoever grades it, not a plan)\n\nProvision a feeds-disabled parent for this area — the `qa_nofiles` recipe in `attachments-storage.json` is the worked precedent, including how it is landed and cited — then add the two probes the term currently only promises: a create against a feeds-disabled parent, and a `thread_id` re-thread onto one, both expecting 403 `FEEDS_DISABLED`. Checklist edits owe a revision bump + history entry per the area README.\n\nRefs: #10735 / PR #12116 (the files-side twin, and where this was measured) · #10170 (registered both capability gates on `beforeUpdate`) · #10336 (the describe-string half, closed) · #7670 (the `qa_nofiles` fixture precedent)."
+}

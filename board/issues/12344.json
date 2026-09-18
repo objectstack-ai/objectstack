@@ -1,0 +1,32 @@
+{
+  "number": 12344,
+  "kind": "issue",
+  "title": "`mcp:connect-agent` has no `ComponentPropsMap` row — door 3 of the canonical-envelope gate is blind to its props, and the gate now carries a standing exemption for it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T19:16:23Z",
+  "updated_at": "2026-08-26T07:26:32Z",
+  "closed_at": "2026-08-26T07:09:31Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12344",
+  "body": "Filed unassigned by the os-dev seat implementing #12269 (the `packages/mcp` canonical-envelope gate). Recording the residual the new gate had to exempt; not claiming it.\n\n## What\n\n`CONNECT_AGENT_PAGE` (`packages/mcp/src/connect-ui.ts`) authors two components: a `page:header` and an `mcp:connect-agent` widget. `page:header` carries a `ComponentPropsMap` row, so door 3 of `auditPageExpressionEnvelopes` reads its `properties` bag. `mcp:connect-agent` does **not** — it is a console-registered widget provided by objectui's app-shell, and `ComponentPropsMap` has no entry for it.\n\nMeasured on the #12269 branch: the gate's door-3 precondition reported `unmappedTypes: ['mcp:connect-agent']` the first time it ran, against an expectation of none.\n\n## Why it matters\n\nDoor 3 is the channel that reads expression keys authored **inside** a component's `properties`. With no props schema for this type there is no schema to read that bag with, so a bare predicate authored at `properties.<something>` on this widget is unread by the gate and reports the same green as a clean page. Doors 1 and 2 still cover the component-level positions (`visibleWhen` and friends), so the blind spot is props-level only.\n\n## What #12269 did instead\n\nExactly what `cloud-connection`'s gate did between #11480 and #11575, and for the same reason (out of that card's declared surface):\n\n- the exemption is recorded and asserted **EXACTLY**, so any NEW unmapped type reds;\n- the exempted widget's props bag is pinned **EMPTY** — nothing authored is nothing to serve bare — so the moment it grows a real authored prop the pin reds and forces this decision;\n- a non-vacuity pin reds if the exempted type ever stops appearing on the page, so a stale exemption cannot sit there covering nothing.\n\nThat is containment, not coverage.\n\n## Possible closures\n\n- **A.** Give `mcp:connect-agent` a `ComponentPropsMap` row, the #11575 treatment: a strict schema measured from the renderer's real read points at the current `.objectui-sha` pin (empty, if the renderer reads nothing today — strict-and-empty is what refuses an undeclared key). Then delete the exemption and the two pins that guard it from `packages/mcp/src/canonical-expression-envelopes.test.ts`; the door-3 EXACT assert reds until they go, so the cleanup cannot be forgotten.\n- **B.** Leave it — the widget authors an empty props bag today and the emptiness pin forces the decision on the first real prop.\n\nNo recommendation recorded. Note that #11575 did A for two widgets in one PR, so the shape and its cost are known."
+}

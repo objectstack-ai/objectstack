@@ -1,0 +1,35 @@
+{
+  "number": 12395,
+  "kind": "issue",
+  "title": "The #8686 boot warning asserts an active duplicate-minting hazard for the benign zero-organization first boot, and its object list is a mid-seed race snapshot — it has now generated three consumer cards",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-26T00:32:02Z",
+  "updated_at": "2026-08-26T15:16:39Z",
+  "closed_at": "2026-08-26T15:16:39Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12395",
+  "body": "Filed from the `repo:hotcrm` seat, measured on the pinned `@objectstack/* 17.1.0`. Unassigned and ungraded — this repo's triage seat owns `domain:*` and type.\n\nThis is about the **diagnostic**, not the mechanism. The real defect it half-points at is filed separately (the backfill destroying the autonumber high-water mark).\n\n## Problem 1 — the guard conflates \"no organizations yet\" with \"ambiguous owner\"\n\nThe guard is `organizationIds.length !== 1`, which treats **0** and **2-or-more** as the same condition. They are not:\n\n- With **2 or more**, the target organization is genuinely ambiguous and a warning is right.\n- With **0**, there is nothing to adopt *yet*, and the state **self-heals at the first sign-up** through the runtime's own `sys_organization`-insert handoff.\n\nMeasured on a clean 17.1.0 boot of the HotCRM exemplar: `SELECT COUNT(*) FROM sys_organization` = **0** at the moment the warning prints (its own payload says `organizationCount: 0`). Seeds load inline during `start()`, while the first organization is created by `plugin-auth`'s `ensureDefaultOrganization`, gated on an admin permission-set grant — so it *cannot* exist until a sign-up POST reaches the running server. After sign-up, all 9 objects went to **0 untenanted rows and exactly 1 partition**, and a restart logged `grep -c 8686` = **0**.\n\n⚠️ Meanwhile the line asserts that the named objects *\"run two autonumber counters\"* and *\"can mint the same `unique` identifier twice\"* — at a moment when **exactly one counter exists per object** (every row carries `tenant_id '__global__'`; there is not one organization-scoped counter) and **zero tenanted rows exist to collide with**. The `organizationLastValue 0` in the payload is `buildSplitProbeSql`'s `LEFT JOIN` missing, not a second live counter.\n\n**Suggested**: a third state that stays silent, or logs at info, when `organizationCount` is 0.\n\n## Problem 2 — the affected-object list is a race snapshot, not a measurement\n\nThe backfill probe runs at `kernel:ready` **while the inline seed is still writing**. The same boot emits:\n\n```\nWARN [Seeder] Inline seed exceeded 8000ms budget for app.objectstack.hotcrm;\n     continuing in background to avoid blocking kernel start     17:41:14.143Z\n[metadata-protocol] seed/API tenancy split detected …             17:41:14.337Z\n```\n\n**194 ms apart.** So the warning names only the counters allocated so far. Measured: the first clean boot named exactly **3** objects; the settled database holds **9** counters; a restart on that same database names all **9**.\n\n**Suggested**: order the backfill after seed completion, or say in the line that the snapshot is partial.\n\n## Why this is worth fixing rather than tolerating\n\n⚠️ **This warning has now generated three cards in the consumer repo** — hotcrm#698, hotcrm#1292, and the sweep that produced #1292 — each spending real measurement effort to discover that the headline hazard does not reproduce. The cost is not the log line; it is that the line reads as an active data-integrity emergency, so every reader who takes it seriously pays for the investigation.\n\nIt also **buried a real defect**: the same handoff genuinely does re-issue a burned autonumber (filed separately), and that one is invisible on the happy path. A diagnostic that cries wolf about a benign state while staying silent about an actual duplicate-minting path is worse than either alone.\n\n## ⚠️ One thing to correct while here\n\nobjectstack-ai/hotcrm#698 is closed with its work split as *\"`organization_id NULL` on seed rows: **CRM** (seed data)\"*. That attribution is **factually wrong**, which is why the \"CRM half\" was never done — it was never actionable. Seed-row tenancy is resolved entirely inside the platform's `SeedLoaderService`: `tenantOrg = config.organizationId ?? fallbackOrgId`, where `fallbackOrgId = resolveSoleOrganizationId()` and `config.organizationId` is supplied only by the runtime's per-organization replayer. None of those inputs is reachable from app metadata, and the documented app-side override (a seed record supplying its own `organization_id`) is unusable on a first boot because `sys_organization` is empty — there is no id to author, no natural key that resolves, and the loader drops **the whole record** on an unresolvable reference.\n\nWorth reopening or superseding #698 rather than leaving a half attributed to a repo that cannot act on it.\n\nBack-link: objectstack-ai/hotcrm#1292."
+}

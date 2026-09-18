@@ -1,0 +1,37 @@
+{
+  "number": 12366,
+  "kind": "issue",
+  "title": "docs content: links to `objectstack-ai/spec` — a second stale repository name — survive in two published blog posts and in docs.site.json",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p2",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T20:12:32Z",
+  "updated_at": "2026-08-26T06:24:57Z",
+  "closed_at": "2026-08-26T06:12:14Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12366",
+  "body": "## Measurement\n\nThe repository has been renamed at least twice, and links to both former names survive in the tree. All three names resolve to the same repository:\n\n```\ngh api repos/objectstack-ai/framework   --jq .id  →  1136691870\ngh api repos/objectstack-ai/spec        --jq .id  →  1136691870\ngh api repos/objectstack-ai/objectstack --jq .id  →  1136691870\n```\n\n`framework` is being fixed at its single producer in #12354 / PR #12364. **`spec` is a separate, unrelated set of spellings**, and it is the one this card is about.\n\n## Where `objectstack-ai/spec` still appears\n\n**Renders to visitors today:**\n\n| file | hits |\n|:--|--:|\n| `content/blog/protocol-first-development.mdx` | 2 |\n| `content/blog/metadata-driven-architecture.mdx` | 1 |\n\n**Inert config that spells a name nothing else spells** — `content/docs.site.json`:\n- line 40 — `themeConfig.socials[].url`\n- line 63 — `page.repoBaseUrl`\n\nBoth have **zero runtime consumers today**: the only references to `repoBaseUrl` anywhere in the repo are gate scripts naming the file as a path-hint fixture. That is precisely why it is worth a card rather than a shrug — inert config carrying a wrong value is what someone wires up later, having reasonably assumed it was maintained.\n\n**Also present, and deliberately out of this card's scope unless the maintainer wants them in:** `CONTRIBUTING.md` (3), `docs/notes/airtable-dashboard-analysis.mdx`, and the link-reference block at the bottom of the root `CHANGELOG.md`.\n\n## Prior art — read this before acting\n\n`docs/audits/2026-06-handwritten-docs-accuracy-followups.md:40` already flagged these links and **declined to rewrite them**. Whoever takes this card should read that entry and either follow its reasoning or say why it no longer applies — ⛔ do not re-litigate it from scratch, and do not silently overturn a recorded decision.\n\n## Why it matters\n\nEvery one of these costs a 301 today; none is broken. The reason to fix them is that a rename redirect is a signal that decays — GitHub keeps them only while the old name stays unclaimed — and because `docs.site.json` is a config file whose stale value is invisible until it is used.\n\n## Suggested scope\n\nThe two blog posts and `docs.site.json`. `CONTRIBUTING.md`, `docs/notes/**` and `CHANGELOG.md` are a maintainer call: `CHANGELOG.md` in particular is a historical record, and rewriting URLs inside past entries is not obviously right.\n\n## Source\n\nSurfaced by the dev on #12354 while sweeping `apps/docs/` for repository-name literals; the sweep was correctly held to `apps/docs/` by its dispatch, and these hits are outside it. Every claim above was independently re-measured before filing."
+}

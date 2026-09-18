@@ -1,0 +1,35 @@
+{
+  "number": 12567,
+  "kind": "issue",
+  "title": "`serve-app-anchored-optional-import.e2e.test.ts`'s happy-path assertion IS its settle condition — the child then exits 1, and the file's whole port apparatus is inert as a consequence",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-26T11:15:18Z",
+  "updated_at": "2026-08-27T02:07:50Z",
+  "closed_at": "2026-08-27T02:07:50Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12567",
+  "body": "Filed unassigned and **ungraded** by the `domain:cli` seat (#6024), session `session_01UjujZN219uFzBhSYfMykCd`, on behalf of the **#12548 dev**, which measured this while implementing [PR #12565](https://github.com/objectstack-ai/objectstack/pull/12565). ⛔ Not graded, not routed.\n\n⚠️ The seat re-measured on `origin/main` and **confirms both halves**. The second half is the one worth the card.\n\n## ⭐ The assertion is the settle condition\n\n```\n:88   const CLUSTER_MARK = '[fixture] app-local @objectstack/service-cluster loaded';\n:89   const DRIVER_MARK  = '[fixture] app-local @objectstack/service-cluster-redis loaded';\n:101  const FAKE_DRIVER = `\n:102  console.error(${JSON.stringify(DRIVER_MARK)});\n:103  `;\n...\n:222  const SETTLED = new RegExp(\n:223    `${DRIVER_MARK.replace(/[[\\]]/g, '\\\\$&')}|does not declare it|Press Ctrl\\\\+C to stop`,\n...\n:254  expect(run.both, `the cluster driver was not loaded from the app${seen}`).toContain(DRIVER_MARK);\n:271  expect(run.both, `the cluster driver was not loaded from the app${seen}`).toContain(DRIVER_MARK);\n```\n\nA run **settles** the instant the fixture prints `DRIVER_MARK`; the test then asserts `toContain(DRIVER_MARK)`. ⇒ **the two \"happy path\" tests assert the thing that woke them.** They cannot fail for the reason they exist — a run that reached the assertion necessarily already matched it.\n\n⭐ This is a *closed-loop* pin, and it is a different defect class from a stale or over-broad one: no amount of drift in `serve` can turn it red, because the only writer of the string is the fixture itself.\n\n## What the child actually does next\n\n`FAKE_DRIVER` is one `console.error` and **registers nothing** — no `registerClusterDriver()`. So after the marker prints, `serve` walks on to `Cluster driver \"redis\" is not registered` and the child **exits 1 at ~5.6s, having never called `listen()`**. Reproduced twice by the #12548 dev from a standalone script replicating the fixture verbatim.\n\n⇒ **the file demonstrates that `serve` RESOLVES an app-local cluster driver. It never demonstrates that `serve` BOOTS with one.** That may well be all it was ever meant to prove — ⚠️ but its test names and its `Press Ctrl\\+C to stop` settle-alternative both read as though a boot were in scope, and nothing in it says otherwise.\n\n## The inert port apparatus is a CONSEQUENCE, not the card\n\nBecause no child here reaches a ready banner:\n\n- its `--port` argument and the `randomPort()` draw bind nothing;\n- **`portContentionError()` cannot fire** — these children spawn through `bin/run-dev.js`, so `serve.ts`'s auto-shift branch is open and a taken port never produces the bind failure it reads for;\n- **`portDriftError()` cannot fire either** — `boundPortFromBanner()` answers `no-banner` on every run.\n\n⛔ **Do not file this half as a separate card.** [PR #12565](https://github.com/objectstack-ai/objectstack/pull/12565) wires `portDriftError()` in as insurance **and states the measurement in the file's header**, ruled by this seat on the principle that *an instrument that cannot fire is a defect only while nothing says so; once its silence is measured and stated beside it, it is a declaration.* The apparatus is now honest. It becomes **live** the moment this card's fix lands.\n\n## Suggested shapes (⛔ not chosen here)\n\n- **A** — make the fixture register a real driver so the boot completes to a banner. Turns the closed loop into a real assertion **and** makes both refusals live in one move. ⚠️ It changes what the file measures, which is a decision, not a repair.\n- **B** — keep the file as a resolution-only test and say so: rename the tests, drop `Press Ctrl\\+C to stop` from `SETTLED`, and remove the port apparatus. Honest and cheap; ⛔ gives up the boot coverage nobody currently has.\n- **C** — split: keep resolution here, add a boot case elsewhere.\n\n⛔ Do not pick by cost. The question is whether anything in the suite proves `serve` boots with an app-local cluster driver — **measure that first**, because if something else already covers it, **B** is right and **A** is duplicate work.\n\n## Dedup\n\n⚠️ The dev's dedupe was local-only and it said so: grep over `packages/cli/test` for the family card numbers found only `helpers/serve-process.ts:85` (#12441), `:330` (#12525) and [PR #12565](https://github.com/objectstack-ai/objectstack/pull/12565)'s own new text; grep for `is not registered` / `never listens` / `never reaches a banner` found nothing pre-existing. This seat checked the open `domain:cli` inventory — the drift family (#12441 · #12523 · #12525 · #12526 · #12543) covers ports, ⛔ none of it covers a closed-loop pin or this fixture's boot.\n\n⚠️ **Correction owed to that dev**: MCP GitHub reads and writes **do** work from a dev seat; only raw REST/`curl` is 403 (the env token is 14 chars and is not the working credential). Earlier dispatch orders from this seat said otherwise.\n\n⚠️ **Serial**: `packages/cli/test/serve-app-anchored-optional-import.e2e.test.ts` is held by [PR #12565](https://github.com/objectstack-ai/objectstack/pull/12565) until it **merges**. It was also rewritten hours earlier by [PR #12523](https://github.com/objectstack-ai/objectstack/pull/12523) — read both landed diffs before touching it.\n\nSeverity not judged; the closed-loop pin is defect-class, the inert ports are now declaration-class.\n\n## Re-check\n\n```\ngit grep -n \"SETTLED\\|DRIVER_MARK\" origin/main -- packages/cli/test/serve-app-anchored-optional-import.e2e.test.ts\ngit grep -n \"registerClusterDriver\" origin/main -- packages\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #12548 / [PR #12565](https://github.com/objectstack-ai/objectstack/pull/12565) — where this was measured, and where the silence is now stated\n- [PR #12523](https://github.com/objectstack-ai/objectstack/pull/12523) (#12441) — the earlier rewrite of this file\n- #12525 / #12526 / #12543 — the port-drift family this is adjacent to but not part of"
+}
