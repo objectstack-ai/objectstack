@@ -98,7 +98,7 @@ export const Task = ObjectSchema.create({
 import { ObjectSchema } from '@objectstack/spec/data';
 
 // Validate a JSON object against the schema
-const result = ObjectSchema.parse(myObjectDefinition);
+const result = ObjectSchema.safeParse(myObjectDefinition);
 if (result.success) {
   console.log('Valid object:', result.data);
 }

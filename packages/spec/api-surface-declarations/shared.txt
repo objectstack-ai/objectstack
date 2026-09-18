@@ -1,0 +1,819 @@
+# @objectstack/spec — the .d.ts DECLARATION TEXT of every export of `./shared`.
+#
+# The SHAPE half of the ADR-0059 public-API pin, and the readable counterpart of
+# api-surface/shared.json's breadth half. That file pins each export by
+# `name (kind)`, which a signature change, a renamed interface field and a dropped
+# union member all leave untouched. This file pins the declaration text, so each of
+# those moves a line here. Text and NOT a hash, deliberately: a diff a reviewer can
+# read is what makes contract review a guard rather than a rubber stamp.
+#
+# Verbatim from the PACKED `.d.ts` reached through this package's `exports` map — the
+# declarations a consumer installs, never `src/`. A declaration's leading TSDoc is
+# excluded: documentation drift is `check:docs`'s axis, not this one.
+#
+# entry: ./shared
+# exported names: 121
+# declarations: 126
+#
+# GENERATED — ⛔ never hand-edited. Regenerate after a real build:
+#   pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec gen:api-surface-declarations
+# Gated by `check:api-surface-declarations`; a hand edit is a red gate, not a change.
+
+// ── ApplyProtectionContext (interface) ──
+interface ApplyProtectionContext {
+    /** Owning package id (e.g. `com.objectstack.platform-objects`). */
+    packageId?: string;
+    /** Owning package semver. */
+    packageVersion?: string;
+    /**
+     * `'package'` for items introduced by a package loader (default).
+     * Pass `'env-forced'` when the runtime is materialising an
+     * emergency override.
+     */
+    provenance?: 'package' | 'env-forced';
+}
+
+// ── BaseMetadataRecord (type) ──
+type BaseMetadataRecord = z.input<typeof BaseMetadataRecordSchema>;
+
+// ── BaseMetadataRecordSchema (const) ──
+declare const BaseMetadataRecordSchema: z.ZodObject<{
+    id: z.ZodString;
+    type: z.ZodString;
+    name: z.ZodString;
+    format: z.ZodOptional<z.ZodEnum<{
+        json: "json";
+        yaml: "yaml";
+        typescript: "typescript";
+        javascript: "javascript";
+    }>>;
+}, z.core.$strip>;
+
+// ── CorsConfig (type) ──
+type CorsConfig = z.input<typeof CorsConfigSchema>;
+
+// ── CorsConfigParsed (type) ──
+type CorsConfigParsed = z.infer<typeof CorsConfigSchema>;
+
+// ── CorsConfigSchema (const) ──
+declare const CorsConfigSchema: z.ZodObject<{
+    enabled: z.ZodDefault<z.ZodBoolean>;
+    origins: z.ZodDefault<z.ZodUnion<readonly [z.ZodString, z.ZodArray<z.ZodString>]>>;
+    methods: z.ZodOptional<z.ZodArray<z.ZodEnum<{
+        GET: "GET";
+        POST: "POST";
+        PUT: "PUT";
+        DELETE: "DELETE";
+        PATCH: "PATCH";
+        HEAD: "HEAD";
+        OPTIONS: "OPTIONS";
+    }>>>;
+    credentials: z.ZodDefault<z.ZodBoolean>;
+    maxAge: z.ZodOptional<z.ZodNumber>;
+}, z.core.$strip>;
+
+// ── CronExpressionInput (type) ──
+type CronExpressionInput = z.input<typeof CronExpressionInputSchema>;
+
+// ── CronExpressionInputSchema (const) ──
+declare const CronExpressionInputSchema: z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
+    dialect: "cron";
+    source: string;
+}, string>>, z.ZodObject<{
+    source: z.ZodOptional<z.ZodString>;
+    ast: z.ZodOptional<z.ZodUnknown>;
+    meta: z.ZodOptional<z.ZodObject<{
+        rationale: z.ZodOptional<z.ZodString>;
+        generatedBy: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+    dialect: z.ZodLiteral<"cron">;
+}, z.core.$strip>]>;
+
+// ── DurationMs (const) ──
+declare const DurationMs: z.ZodNumber;
+
+// ── DurationMs (type) ──
+type DurationMs = z.input<typeof DurationMs>;
+
+// ── DurationSeconds (const) ──
+declare const DurationSeconds: z.ZodNumber;
+
+// ── DurationSeconds (type) ──
+type DurationSeconds = z.input<typeof DurationSeconds>;
+
+// ── EVALUATED_EXPRESSION_SOURCE_REQUIRED (const) ──
+declare const EVALUATED_EXPRESSION_SOURCE_REQUIRED: string;
+
+// ── EXTERNAL_ERROR_CODES (const) ──
+declare const EXTERNAL_ERROR_CODES: {
+    readonly schemaMismatch: "EXTERNAL_SCHEMA_MISMATCH";
+    readonly writeForbidden: "EXTERNAL_WRITE_FORBIDDEN";
+    readonly schemaModeViolation: "EXTERNAL_SCHEMA_MODE_VIOLATION";
+};
+
+// ── EXTERNAL_ERROR_HTTP_STATUS (const) ──
+declare const EXTERNAL_ERROR_HTTP_STATUS: {
+    readonly EXTERNAL_SCHEMA_MISMATCH: 503;
+    readonly EXTERNAL_WRITE_FORBIDDEN: 403;
+    readonly EXTERNAL_SCHEMA_MODE_VIOLATION: 403;
+};
+
+// ── EpochMs (const) ──
+declare const EpochMs: z.ZodNumber;
+
+// ── EpochMs (type) ──
+type EpochMs = z.input<typeof EpochMs>;
+
+// ── EvaluatedExpression (type) ──
+type EvaluatedExpression = z.input<typeof EvaluatedExpressionSchema>;
+
+// ── EvaluatedExpressionInput (type) ──
+type EvaluatedExpressionInput = z.input<typeof EvaluatedExpressionInputSchema>;
+
+// ── EvaluatedExpressionInputSchema (const) ──
+declare const EvaluatedExpressionInputSchema: z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
+    dialect: "cel" | "cron" | "template";
+    source: string;
+    ast?: unknown;
+    meta?: {
+        rationale?: string | undefined;
+        generatedBy?: string | undefined;
+    } | undefined;
+}, string>>, z.ZodObject<{
+    dialect: z.ZodEnum<{
+        cel: "cel";
+        cron: "cron";
+        template: "template";
+    }>;
+    ast: z.ZodOptional<z.ZodUnknown>;
+    meta: z.ZodOptional<z.ZodObject<{
+        rationale: z.ZodOptional<z.ZodString>;
+        generatedBy: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+    source: z.ZodString;
+}, z.core.$strip>]>;
+
+// ── EvaluatedExpressionParsed (type) ──
+type EvaluatedExpressionParsed = z.infer<typeof EvaluatedExpressionSchema>;
+
+// ── EvaluatedExpressionSchema (const) ──
+declare const EvaluatedExpressionSchema: z.ZodObject<{
+    dialect: z.ZodEnum<{
+        cel: "cel";
+        cron: "cron";
+        template: "template";
+    }>;
+    ast: z.ZodOptional<z.ZodUnknown>;
+    meta: z.ZodOptional<z.ZodObject<{
+        rationale: z.ZodOptional<z.ZodString>;
+        generatedBy: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+    source: z.ZodString;
+}, z.core.$strip>;
+
+// ── Expression (type) ──
+type Expression = z.input<typeof ExpressionSchema>;
+
+// ── ExpressionDialect (const) ──
+declare const ExpressionDialect: z.ZodEnum<{
+    cel: "cel";
+    cron: "cron";
+    template: "template";
+}>;
+
+// ── ExpressionDialect (type) ──
+type ExpressionDialect = z.input<typeof ExpressionDialect>;
+
+// ── ExpressionInput (type) ──
+type ExpressionInput = z.input<typeof ExpressionInputSchema>;
+
+// ── ExpressionInputSchema (const) ──
+declare const ExpressionInputSchema: z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
+    dialect: "cel" | "cron" | "template";
+    source?: string | undefined;
+    ast?: unknown;
+    meta?: {
+        rationale?: string | undefined;
+        generatedBy?: string | undefined;
+    } | undefined;
+}, string>>, z.ZodObject<{
+    dialect: z.ZodEnum<{
+        cel: "cel";
+        cron: "cron";
+        template: "template";
+    }>;
+    source: z.ZodOptional<z.ZodString>;
+    ast: z.ZodOptional<z.ZodUnknown>;
+    meta: z.ZodOptional<z.ZodObject<{
+        rationale: z.ZodOptional<z.ZodString>;
+        generatedBy: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+}, z.core.$strip>]>;
+
+// ── ExpressionMeta (type) ──
+type ExpressionMeta = z.input<typeof ExpressionMetaSchema>;
+
+// ── ExpressionMetaSchema (const) ──
+declare const ExpressionMetaSchema: z.ZodObject<{
+    rationale: z.ZodOptional<z.ZodString>;
+    generatedBy: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── ExpressionSchema (const) ──
+declare const ExpressionSchema: z.ZodObject<{
+    dialect: z.ZodEnum<{
+        cel: "cel";
+        cron: "cron";
+        template: "template";
+    }>;
+    source: z.ZodOptional<z.ZodString>;
+    ast: z.ZodOptional<z.ZodUnknown>;
+    meta: z.ZodOptional<z.ZodObject<{
+        rationale: z.ZodOptional<z.ZodString>;
+        generatedBy: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+
+// ── ExternalErrorCode (type) ──
+type ExternalErrorCode = (typeof EXTERNAL_ERROR_CODES)[keyof typeof EXTERNAL_ERROR_CODES];
+
+// ── ExternalSchemaMismatchError (class) ──
+declare class ExternalSchemaMismatchError extends Error {
+    readonly datasource: string;
+    readonly object: string;
+    readonly diffs: SchemaDiffEntry[];
+    readonly code: "EXTERNAL_SCHEMA_MISMATCH";
+    /** [#7739] See {@link EXTERNAL_ERROR_HTTP_STATUS} — 503, not a client error. */
+    readonly status: 503;
+    constructor(datasource: string, object: string, diffs: SchemaDiffEntry[]);
+}
+
+// ── ExternalSchemaModeViolationError (class) ──
+declare class ExternalSchemaModeViolationError extends Error {
+    readonly code: "EXTERNAL_SCHEMA_MODE_VIOLATION";
+    /** [#7739] See {@link EXTERNAL_ERROR_HTTP_STATUS} — 403, a policy refusal. */
+    readonly status: 403;
+    constructor(message?: string);
+}
+
+// ── ExternalWriteForbiddenError (class) ──
+declare class ExternalWriteForbiddenError extends Error {
+    readonly code: "EXTERNAL_WRITE_FORBIDDEN";
+    /** [#7739] See {@link EXTERNAL_ERROR_HTTP_STATUS} — 403, a policy refusal. */
+    readonly status: 403;
+    constructor(message?: string);
+}
+
+// ── F (const) ──
+declare const F: typeof cel;
+
+// ── FieldMapping (type) ──
+type FieldMapping = z.input<typeof FieldMappingSchema>;
+
+// ── FieldMappingSchema (const) ──
+declare const FieldMappingSchema: z.ZodObject<{
+    source: z.ZodString;
+    target: z.ZodString;
+    transform: z.ZodOptional<z.ZodNever>;
+    defaultValue: z.ZodOptional<z.ZodUnknown>;
+}, z.core.$strip>;
+
+// ── HttpMethod (const) ──
+declare const HttpMethod: z.ZodEnum<{
+    GET: "GET";
+    POST: "POST";
+    PUT: "PUT";
+    DELETE: "DELETE";
+    PATCH: "PATCH";
+    HEAD: "HEAD";
+    OPTIONS: "OPTIONS";
+}>;
+
+// ── HttpMethod (type) ──
+type HttpMethod = z.input<typeof HttpMethod>;
+
+// ── HttpMethodSubset (type) ──
+type HttpMethodSubset = z.input<typeof HttpMethodSubsetSchema>;
+
+// ── HttpMethodSubsetSchema (const) ──
+declare const HttpMethodSubsetSchema: z.ZodEnum<{
+    GET: "GET";
+    POST: "POST";
+    PUT: "PUT";
+    DELETE: "DELETE";
+    PATCH: "PATCH";
+}>;
+
+// ── HttpRequest (type) ──
+type HttpRequest = z.input<typeof HttpRequestSchema>;
+
+// ── HttpRequestParsed (type) ──
+type HttpRequestParsed = z.infer<typeof HttpRequestSchema>;
+
+// ── HttpRequestSchema (const) ──
+declare const HttpRequestSchema: z.ZodObject<{
+    url: z.ZodString;
+    method: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
+        GET: "GET";
+        POST: "POST";
+        PUT: "PUT";
+        DELETE: "DELETE";
+        PATCH: "PATCH";
+    }>>>;
+    headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+    params: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    body: z.ZodOptional<z.ZodUnknown>;
+}, z.core.$strip>;
+
+// ── ISO_3166_ALPHA2_CODES (const) ──
+declare const ISO_3166_ALPHA2_CODES: ReadonlySet<string>;
+
+// ── IsolationLevel (type) ──
+type IsolationLevel = z.input<typeof IsolationLevelEnum>;
+
+// ── IsolationLevelEnum (const) ──
+declare const IsolationLevelEnum: z.ZodEnum<{
+    read_uncommitted: "read_uncommitted";
+    read_committed: "read_committed";
+    repeatable_read: "repeatable_read";
+    serializable: "serializable";
+    snapshot: "snapshot";
+}>;
+
+// ── KeySetGuidance (interface) ──
+interface KeySetGuidance {
+    /**
+     * The set's name — the constant an author greps for
+     * (`LEGACY_WIDGET_ANALYTICS_KEYS`). Deliberately **not** rendered into the
+     * message: an author-facing rejection should name the KEYS, not the array
+     * that holds them, and each prescription below already spells its family out
+     * in prose (that is what makes it legible). The name is for the declaration
+     * and for the audit's failure text.
+     */
+    readonly name: string;
+    /**
+     * Membership: an enumerated family, or a pattern for the open case. Matched
+     * against the authored spelling **case-sensitively** (an enumerated list is
+     * tested with `includes`; a pattern with its own flags), the same exactness
+     * `guidance` uses — case folding is the rename channel's job.
+     */
+    readonly keys: readonly string[] | RegExp;
+    /**
+     * Required when {@link keys} is a pattern, ignored otherwise: spellings this
+     * pattern exists for. The audit asserts each one matches, and that none of
+     * them is a key the shape declares.
+     */
+    readonly examples?: readonly string[];
+    /** The prescription, emitted verbatim as one bullet line. */
+    readonly prescription: string;
+}
+
+// ── MAP_SUPPORTED_FIELDS (const) ──
+declare const MAP_SUPPORTED_FIELDS: readonly ["objects", "apps", "pages", "dashboards", "reports", "datasets", "actions", "flows", "jobs", "positions", "permissions", "sharingRules", "apis", "webhooks", "agents", "hooks", "mappings", "analyticsCubes", "connectors", "datasources", "emailTemplates"];
+
+// ── METADATA_ALIASES (const) ──
+declare const METADATA_ALIASES: Record<string, MapSupportedField>;
+
+// ── METADATA_ITEM_NAME_PATTERN (const) ──
+declare const METADATA_ITEM_NAME_PATTERN: RegExp;
+
+// ── META_URL_TO_SINGULAR (const) ──
+declare const META_URL_TO_SINGULAR: Readonly<Record<string, string>>;
+
+// ── MapSupportedField (type) ──
+type MapSupportedField = (typeof MAP_SUPPORTED_FIELDS)[number];
+
+// ── MetadataCollectionInput (type) ──
+type MetadataCollectionInput<T> = T[] | Record<string, Omit<T, 'name'> & {
+    name?: string;
+}>;
+
+// ── MetadataFormat (type) ──
+type MetadataFormat = z.input<typeof MetadataFormatSchema>;
+
+// ── MetadataFormatSchema (const) ──
+declare const MetadataFormatSchema: z.ZodEnum<{
+    json: "json";
+    yaml: "yaml";
+    typescript: "typescript";
+    javascript: "javascript";
+}>;
+
+// ── MetadataItemName (type) ──
+type MetadataItemName = z.input<typeof MetadataItemNameSchema>;
+
+// ── MetadataItemNameSchema (const) ──
+declare const MetadataItemNameSchema: z.ZodString;
+
+// ── MutationEvent (type) ──
+type MutationEvent = z.input<typeof MutationEventEnum>;
+
+// ── MutationEventEnum (const) ──
+declare const MutationEventEnum: z.ZodEnum<{
+    delete: "delete";
+    insert: "insert";
+    update: "update";
+    upsert: "upsert";
+}>;
+
+// ── NormalizeStackInputOptions (interface) ──
+interface NormalizeStackInputOptions {
+    /**
+     * Sink for the structured deprecation notices emitted by the ADR-0087 D2
+     * conversion pass (one per rewritten old-shape site). Defaults to a no-op:
+     * the conversion still runs (zero consumer action is the point), but the
+     * notice is only *surfaced* when a caller asks — `objectstack validate`
+     * passes a sink that prints them.
+     */
+    onConversionNotice?: (notice: ConversionNotice) => void;
+    /**
+     * Whether to run the D2 conversion pass. Defaults to `true` (the load-time
+     * behavior). Set `false` to get map→array normalization *only* — used by
+     * `objectstack migrate meta`, which must replay the conversions itself as
+     * chain steps against the raw authored source so each rewrite is attributed
+     * to the chain rather than silently pre-applied here.
+     */
+    convert?: boolean;
+}
+
+// ── ObjectStackRawIssue (type) ──
+type ObjectStackRawIssue = z.core.$ZodRawIssue;
+
+// ── P (const) ──
+declare const P: typeof cel;
+
+// ── PLURAL_TO_SINGULAR (const) ──
+declare const PLURAL_TO_SINGULAR: Record<string, string>;
+
+// ── Predicate (type) ──
+type Predicate = z.input<typeof PredicateSchema>;
+
+// ── PredicateInput (type) ──
+type PredicateInput = z.input<typeof PredicateInputSchema>;
+
+// ── PredicateInputSchema (const) ──
+declare const PredicateInputSchema: z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
+    dialect: "cel" | "cron" | "template";
+    source?: string | undefined;
+    ast?: unknown;
+    meta?: {
+        rationale?: string | undefined;
+        generatedBy?: string | undefined;
+    } | undefined;
+}, string>>, z.ZodObject<{
+    dialect: z.ZodEnum<{
+        cel: "cel";
+        cron: "cron";
+        template: "template";
+    }>;
+    source: z.ZodOptional<z.ZodString>;
+    ast: z.ZodOptional<z.ZodUnknown>;
+    meta: z.ZodOptional<z.ZodObject<{
+        rationale: z.ZodOptional<z.ZodString>;
+        generatedBy: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+}, z.core.$strip>]>;
+
+// ── PredicateSchema (const) ──
+declare const PredicateSchema: z.ZodObject<{
+    dialect: z.ZodEnum<{
+        cel: "cel";
+        cron: "cron";
+        template: "template";
+    }>;
+    source: z.ZodOptional<z.ZodString>;
+    ast: z.ZodOptional<z.ZodUnknown>;
+    meta: z.ZodOptional<z.ZodObject<{
+        rationale: z.ZodOptional<z.ZodString>;
+        generatedBy: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+
+// ── Protection (type) ──
+type Protection = z.input<typeof ProtectionSchema>;
+
+// ── ProtectionSchema (const) ──
+declare const ProtectionSchema: z.ZodObject<{
+    lock: z.ZodEnum<{
+        none: "none";
+        "no-overlay": "no-overlay";
+        "no-delete": "no-delete";
+        full: "full";
+    }>;
+    reason: z.ZodString;
+    docsUrl: z.ZodOptional<z.ZodString>;
+}, z.core.$strict>;
+
+// ── QUALIFIED_ITEM_NAME_PATTERN (const) ──
+declare const QUALIFIED_ITEM_NAME_PATTERN: RegExp;
+
+// ── RateLimitConfig (type) ──
+type RateLimitConfig = z.input<typeof RateLimitConfigSchema>;
+
+// ── RateLimitConfigParsed (type) ──
+type RateLimitConfigParsed = z.infer<typeof RateLimitConfigSchema>;
+
+// ── RateLimitConfigSchema (const) ──
+declare const RateLimitConfigSchema: z.ZodObject<{
+    enabled: z.ZodDefault<z.ZodBoolean>;
+    windowMs: z.ZodDefault<z.ZodNumber>;
+    maxRequests: z.ZodDefault<z.ZodNumber>;
+}, z.core.$strict>;
+
+// ── ResilientFetchOptions (interface) ──
+interface ResilientFetchOptions {
+    /** fetch implementation (injectable for tests / non-global runtimes). */
+    fetchImpl?: typeof fetch;
+    /** Per-attempt timeout in ms. Default 30000. */
+    timeoutMs?: number;
+    /** Total attempts including the first. Default 3. */
+    retries?: number;
+    /** Base backoff in ms; doubled each retry, plus jitter. Default 300. */
+    backoffBaseMs?: number;
+    /** Predicate for retryable HTTP statuses. Default: 429 or >= 500. */
+    retryableStatus?: (status: number) => boolean;
+    /** Sleep impl (injectable for deterministic tests). */
+    sleep?: (ms: number) => Promise<void>;
+}
+
+// ── SINGULAR_TO_PLURAL (const) ──
+declare const SINGULAR_TO_PLURAL: Record<string, string>;
+
+// ── SchemaDiffEntry (interface) ──
+interface SchemaDiffEntry {
+    kind: SchemaDiffEntryKind;
+    /** Remote schema/database qualifier, when known. */
+    remoteSchema?: string;
+    /** Remote table/view name, when known. */
+    remoteName?: string;
+    /** Affected column/field name, for column-scoped diffs. */
+    column?: string;
+    /** What the local object declared. */
+    expected?: string;
+    /** What the remote table actually has. */
+    actual?: string;
+    severity: 'error' | 'warning';
+}
+
+// ── SchemaDiffEntryKind (type) ──
+type SchemaDiffEntryKind = 'missing_table' | 'missing_column' | 'type_mismatch' | 'nullability_mismatch' | 'unmapped_column' | 'pk_mismatch'
+/** A declared index is absent, or the index under that name has a different
+ *  definition than metadata declares (#3728). */
+ | 'index_mismatch'
+/** A physical index ObjectStack generated that metadata no longer declares. */
+ | 'unmapped_index'
+/**
+ * The column's physical DEFAULT is not the one metadata calls for — including
+ * "metadata calls for none". A column DEFAULT is data the DATABASE writes on
+ * the platform's behalf, so a wrong one is silently wrong rows, not a
+ * rejected write: a `defaultValue` runtime token emitted as a literal DEFAULT
+ * stamped the token's own spelling into every omitted insert (#4560).
+ */
+ | 'default_mismatch'
+/**
+ * The validator COULD NOT READ what the comparison needs — remote schema
+ * introspection failed (connection refused, DNS, expired credentials, a
+ * timeout), or the object/datasource definition vanished mid-sweep — so the
+ * comparison never ran.
+ *
+ * Unlike every other kind, this entry asserts **nothing about the remote
+ * schema**: it is "validation was indeterminate", a condition that is often
+ * TRANSIENT (the remote table may be perfectly intact and the next attempt
+ * may succeed), where the other kinds each state a measured FACT about a
+ * schema that was successfully read. Consumers must keep the two apart:
+ * treating an unreachable remote as a mismatch tells an operator (or an AI)
+ * to "repair" a schema nobody has seen — e.g. recreate a table that was
+ * never dropped. The boot gate logs it loudly and continues rather than
+ * applying `onMismatch`, and drift consumers should surface it as "cannot
+ * watch", never as "schema changed" (maintainer ruling 2026-08-23).
+ *
+ * The throwing error's message is carried as free text in `actual`.
+ */
+ | 'unreachable';
+
+// ── SnakeCaseIdentifier (type) ──
+type SnakeCaseIdentifier = z.input<typeof SnakeCaseIdentifierSchema>;
+
+// ── SnakeCaseIdentifierSchema (const) ──
+declare const SnakeCaseIdentifierSchema: z.ZodString;
+
+// ── SortDirection (type) ──
+type SortDirection = z.input<typeof SortDirectionEnum>;
+
+// ── SortDirectionEnum (const) ──
+declare const SortDirectionEnum: z.ZodEnum<{
+    asc: "asc";
+    desc: "desc";
+}>;
+
+// ── SortItem (type) ──
+type SortItem = z.input<typeof SortItemSchema>;
+
+// ── SortItemSchema (const) ──
+declare const SortItemSchema: z.ZodObject<{
+    field: z.ZodString;
+    order: z.ZodEnum<{
+        asc: "asc";
+        desc: "desc";
+    }>;
+}, z.core.$strip>;
+
+// ── StaticMount (type) ──
+type StaticMount = z.input<typeof StaticMountSchema>;
+
+// ── StaticMountSchema (const) ──
+declare const StaticMountSchema: z.ZodObject<{
+    path: z.ZodString;
+    directory: z.ZodString;
+    cacheControl: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// ── StrictUnknownKeyErrorOptions (interface) ──
+interface StrictUnknownKeyErrorOptions {
+    /** Prose name of the authoring surface the key was written on (e.g. `'this permission set'`). */
+    surface: string;
+    /** The schema's declared keys — candidates for the edit-distance fallback. */
+    knownKeys: readonly string[];
+    /**
+     * Semantic near-misses: a different *word* for the same intent, usually
+     * borrowed from a neighbouring schema or product where that word is correct.
+     * Consulted BEFORE {@link findClosestMatches} and preferred over it, so an
+     * entry answers both the near-miss distance cannot reach AND the one it
+     * reaches and gets wrong — `hosts → network` is 2 edits from the declared
+     * `hooks` against a budget of 2, and the entry is what keeps the author off
+     * lifecycle hooks (#16859; this line asserted only the first half until
+     * #17361 measured 41 overruling entries across the spec). Plain
+     * case/underscore slips are still left to the fallback, which folds them.
+     * Map keys are matched case-insensitively with `_` / `-` / space separators
+     * removed.
+     */
+    aliases?: Readonly<Record<string, string>>;
+    /**
+     * Exact-key prescriptions, appended verbatim as bullet lines: tombstones for
+     * retired keys (the rejection must carry the upgrade — see the Post-Task
+     * Checklist in AGENTS.md), or wrong-layer pointers for keys that belong to a
+     * different surface. An entry here suppresses the rename suggestion for that
+     * key. Matched case-sensitively (exact authored spelling).
+     */
+    guidance?: Readonly<Record<string, string>>;
+    /**
+     * The set-keyed half of the same channel: one prescription shared by a named
+     * family of keys, emitted once per message however many members were written.
+     * Consulted only after {@link guidance} has had its exact say — see
+     * {@link KeySetGuidance} for the full precedence rule and why the form exists.
+     */
+    guidanceSets?: readonly KeySetGuidance[];
+    /**
+     * One sentence of history: why this key would previously have failed
+     * silently. Rendered **last**, after both fix channels (`Did you mean` and
+     * the `guidance` bullets) — see the ordering note on
+     * {@link strictUnknownKeyError}.
+     */
+    history: string;
+}
+
+// ── SystemIdentifier (type) ──
+type SystemIdentifier = z.input<typeof SystemIdentifierSchema>;
+
+// ── SystemIdentifierSchema (const) ──
+declare const SystemIdentifierSchema: z.ZodString;
+
+// ── TYPED_EXPRESSION_DIALECT_ONLY (const) ──
+declare const TYPED_EXPRESSION_DIALECT_ONLY: Readonly<Record<TypedExpressionDialect, string>>;
+
+// ── TYPED_EXPRESSION_SOURCE_REQUIRED (const) ──
+declare const TYPED_EXPRESSION_SOURCE_REQUIRED: Readonly<Record<TypedExpressionDialect, string>>;
+
+// ── TemplateExpressionInput (type) ──
+type TemplateExpressionInput = z.input<typeof TemplateExpressionInputSchema>;
+
+// ── TemplateExpressionInputSchema (const) ──
+declare const TemplateExpressionInputSchema: z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
+    dialect: "template";
+    source: string;
+}, string>>, z.ZodObject<{
+    source: z.ZodOptional<z.ZodString>;
+    ast: z.ZodOptional<z.ZodUnknown>;
+    meta: z.ZodOptional<z.ZodObject<{
+        rationale: z.ZodOptional<z.ZodString>;
+        generatedBy: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+    dialect: z.ZodLiteral<"template">;
+}, z.core.$strip>]>;
+
+// ── TypedExpressionDialect (type) ──
+type TypedExpressionDialect = Extract<ExpressionDialect, 'cron' | 'template'>;
+
+// ── VISIBILITY_ALIAS_KEYS (const) ──
+declare const VISIBILITY_ALIAS_KEYS: readonly ["visibleOn", "visibility"];
+
+// ── VISIBILITY_STRICT_OPTIONS (const) ──
+declare const VISIBILITY_STRICT_OPTIONS: StrictObjectOptions;
+
+// ── ValueDomain (type) ──
+type ValueDomain = z.input<typeof ValueDomainSchema>;
+
+// ── ValueDomainSchema (const) ──
+declare const ValueDomainSchema: z.ZodEnum<{
+    iana_time_zone: "iana_time_zone";
+    iso_4217_currency: "iso_4217_currency";
+    iso_3166_alpha2: "iso_3166_alpha2";
+}>;
+
+// ── applyProtection (function) ──
+declare function applyProtection<T extends Record<string, unknown>>(item: T, ctx?: ApplyProtectionContext): T;
+
+// ── canonicalMetaUrlType (function) ──
+declare function canonicalMetaUrlType(type: string): string;
+
+// ── cel (function) ──
+declare function cel(strings: TemplateStringsArray, ...values: unknown[]): Expression;
+
+// ── cron (function) ──
+declare function cron(strings: TemplateStringsArray, ...values: unknown[]): Expression;
+
+// ── expression (function) ──
+declare function expression(source: string, dialect?: ExpressionDialect, meta?: ExpressionMeta): Expression;
+
+// ── findClosestMatches (function) ──
+declare function findClosestMatches(input: string, candidates: readonly string[], maxDistance?: number, maxResults?: number): string[];
+
+// ── formatSuggestion (function) ──
+declare function formatSuggestion(suggestions: string[]): string;
+
+// ── formatZodError (function) ──
+declare function formatZodError(error: z.ZodError, label?: string): string;
+
+// ── formatZodIssue (function) ──
+declare function formatZodIssue(issue: ZodIssueMinimal): string;
+
+// ── isValueDomainMember (function) ──
+declare function isValueDomainMember(domain: ValueDomain, value: string): boolean;
+
+// ── keySetMatches (function) ──
+declare function keySetMatches(set: KeySetGuidance, key: string): boolean;
+
+// ── lazySchema (function) ──
+declare function lazySchema<T extends z.ZodTypeAny>(factory: () => T): T;
+
+// ── levenshteinDistance (function) ──
+declare function levenshteinDistance(a: string, b: string): number;
+
+// ── metaUrlSpellingRefusal (function) ──
+declare function metaUrlSpellingRefusal(urlType: string): {
+    declared: string;
+    hint: string;
+} | null;
+
+// ── normalizeMetadataCollection (function) ──
+declare function normalizeMetadataCollection(value: unknown, keyField?: string): unknown;
+
+// ── normalizePluginMetadata (function) ──
+declare function normalizePluginMetadata<T extends Record<string, unknown>>(metadata: T): T;
+
+// ── normalizeStackInput (function) ──
+declare function normalizeStackInput<T extends Record<string, unknown>>(input: T, options?: NormalizeStackInputOptions): T;
+
+// ── normalizeVisibleWhen (function) ──
+declare function normalizeVisibleWhen<T extends WithVisibilityAliases>(input: T): Omit<T, 'visibleOn' | 'visibility'>;
+
+// ── objectStackErrorMap (const) ──
+declare const objectStackErrorMap: (issue: ObjectStackRawIssue) => {
+    message: string;
+} | null;
+
+// ── pluralToSingular (function) ──
+declare function pluralToSingular(key: string): string;
+
+// ── renderDiffMessage (function) ──
+declare function renderDiffMessage(datasource: string, object: string, diffs: SchemaDiffEntry[]): string;
+
+// ── resilientFetch (function) ──
+declare function resilientFetch(input: string | URL, init?: RequestInit, opts?: ResilientFetchOptions): Promise<Response>;
+
+// ── safeParsePretty (function) ──
+declare function safeParsePretty<T extends z.ZodTypeAny>(schema: T, data: unknown, label?: string): {
+    success: true;
+    data: z.infer<T>;
+} | {
+    success: false;
+    error: z.ZodError;
+    formatted: string;
+};
+
+// ── singularToPlural (function) ──
+declare function singularToPlural(key: string): string;
+
+// ── strictUnknownKeyError (function) ──
+declare function strictUnknownKeyError(options: StrictUnknownKeyErrorOptions): z.core.$ZodErrorMap;
+
+// ── suggestFieldType (function) ──
+declare function suggestFieldType(input: string): string[];
+
+// ── tmpl (function) ──
+declare function tmpl(strings: TemplateStringsArray, ...values: unknown[]): Expression;
+
+// ── unrecognisedMetaTypeRefusal (function) ──
+declare function unrecognisedMetaTypeRefusal(urlType: string): {
+    type: string;
+} | null;

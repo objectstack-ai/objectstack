@@ -1531,7 +1531,7 @@ function selfTestLineCitationBinding() {
 //   * how a citation is WRITTEN and which documents are swept — corpus data,
 //     and that is what was widened.
 //
-// Two declarations this corpus needed and the core did not have:
+// Three declarations this corpus needed and the core did not have:
 //
 //   `unspannedAnchors: true`  Every citation here lives inside a JSON string
 //       value, where a backtick is payload rather than a code span. Measured
@@ -1546,11 +1546,33 @@ function selfTestLineCitationBinding() {
 //       :202` — and an `L` pin beside it. Both carry NO path of their own, and
 //       both were the last thing this file still detected with a grammar of its
 //       own. ⛔ Default OFF everywhere else, and that is a measurement rather
-//       than caution: in PROSE a colon before digits is punctuation, and these
-//       two turned on corpus-wide fire 245 times across `docs/adr/**`,
-//       `scripts/**` and `packages/spec/src/**`, essentially all of them ports,
-//       scenario labels and docblock back-references. In DATA, beside the
-//       filename they continue, they are line pins.
+//       than caution: in PROSE a colon before digits is punctuation, so the two
+//       spellings turned on there admit ports, scenario labels and docblock
+//       back-references, and in the PROJECTED corpora that population was
+//       re-measured to buy unjudged residual and NOT ONE finding an author
+//       could act on. In DATA, beside the filename they continue, they are
+//       line pins.
+//
+//       ⛔ That measurement is CITED from here and no longer RESTATED here
+//       (#18913). The corpus-wide tally this entry used to carry was a
+//       RAW-REGEX count, and the re-take named it void: it subtracted neither
+//       the fenced blocks the extractor skips nor the citations the
+//       path-anchored passes had already recorded, so it overstated what the
+//       option admits by about a half. ⭐ Retyping the corrected figure here
+//       would rot the same way, because a reading is a count plus the tree it
+//       was taken against and this entry never carried a tree — so the reading
+//       stays with the grammar that admits the two spellings,
+//       `scripts/symbol-anchors.mjs#PATHLESS_COLON_CITATION`, where the re-take
+//       names its own tree. That anchor is resolved on every PR by
+//       `check:scripts-symbol-anchors`; a digit is gated by nothing. Re-take it
+//       THERE.
+//
+//       ⭐ And what makes THIS declaration legal is not a cost reading at all:
+//       `scripts/symbol-anchors.mjs#defineCorpus` REFUSES the option to any
+//       corpus declaring a `docProjection` (#18845), at registration. A
+//       projection is a corpus saying its judged text is authored PROSE; this
+//       one declares none and sweeps its documents raw. That test is
+//       mechanical, and this registration passes it.
 //
 // The dotted `#Outer.member` form this ledger's grammar carried is now the
 // shared grammar's, and `sweepCorpus` requires EVERY segment to resolve — the
