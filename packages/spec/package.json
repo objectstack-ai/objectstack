@@ -240,6 +240,7 @@
     "src/**/*.zod.ts",
     "CHANGELOG.md",
     "api-surface",
+    "api-surface-declarations",
     "spec-changes.json"
   ],
   "scripts": {
