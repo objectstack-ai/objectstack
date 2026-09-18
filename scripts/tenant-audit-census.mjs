@@ -1598,9 +1598,13 @@ export function renderCountsFile(census) {
   out.push('');
   out.push('⚠️ **On a merge conflict here, regenerate — never resolve by hand.** Two branches');
   out.push('that each add a write call site produce rows git merges cleanly and totals that');
-  out.push('merge cleanly and WRONG. This file is deliberately NOT `merge=os-regen`: that');
-  out.push('driver resolves an artefact\'s `gen:`/`check:` scripts in `@objectstack/spec`');
-  out.push('only, and these are root-level tooling. The gate is the backstop — a wrongly');
+  out.push('merge cleanly and WRONG. This file is NOT `merge=os-regen`: no `.gitattributes`');
+  out.push('row names it, so `git check-attr merge` over it reads `unspecified`. Routing it');
+  out.push('would take a `REGEN_ARTIFACTS` row whose `gen:`/`check:` names exist in the');
+  out.push('manifest that row declares as owner, and no manifest declares such a pair for');
+  out.push('this census — the gate runs straight from the lint workflow. Root-level tooling');
+  out.push('is no obstacle by itself: the driver resolves those names in whichever manifest');
+  out.push('the row names, the root one included. The gate is the backstop — a wrongly');
   out.push('merged file fails `check-tenant-audit-census`, so the error is loud rather than');
   out.push('silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.');
   out.push('');

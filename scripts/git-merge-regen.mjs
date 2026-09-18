@@ -831,12 +831,20 @@ function reconcileScripts() {
 /**
  * The owner-resolution rule itself, pinned — the half a live tree cannot show.
  *
- * `reconcileScripts` above is green on this tree for the same reason it was green
- * before #13585: every row is spec-owned, so it exercises exactly one manifest and
- * would keep passing if the loosening were reverted. These cases read the REAL root
- * manifest through the same functions the driver and the `pre-commit` gate use, so
- * the root path is measured on every run rather than the first time somebody
- * registers a root-owned artifact.
+ * `reconcileScripts` above no longer rests on a single manifest. Rows that declare
+ * no owner default to `DEFAULT_OWNER`; rows that declare `ROOT_OWNER` send the
+ * lookup to the root manifest instead (measured on this tree: 18 rows — 16
+ * defaulted, 2 root-owned, none naming `DEFAULT_OWNER` explicitly). The four
+ * `gen:`/`check:` names those two root-owned rows carry exist ONLY in the root
+ * manifest, so reverting #13585's loosening would now turn that reconciliation RED
+ * rather than leave it green.
+ *
+ * What a live tree still cannot show is the RULE. Which manifests get exercised is
+ * a property of whatever the table happens to hold, and a table that fell back to a
+ * single owner would stop touching the root path with nothing saying so. These
+ * cases read the REAL root manifest through the same functions the driver and the
+ * `pre-commit` gate use, so the root path is measured on every run rather than only
+ * while some row happens to declare it.
  *
  * The two-way case is the third one. A permissive lookup — "resolve the name in any
  * manifest" — passes every other assertion here and fails that one, which is the
