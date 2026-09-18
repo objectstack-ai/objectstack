@@ -783,7 +783,12 @@ function selfTest() {
   t('a node that cannot take the flag SAYS so rather than bypassing silently', [unsupported.rearm, unsupported.hint], [false, true]);
   const ownSource = maskCommentsAndLiterals(readFileSync(SELF_PATH, 'utf8'));
   t('structural: the plan is imported, not restated here', /\bproxyRearmPlan\b/.test(ownSource) && !/function\s+proxyRearmPlan\b/.test(ownSource), true);
-  t('structural: the hand-off is decided BEFORE the first network read', ownSource.lastIndexOf('rearmThroughProxy(') < ownSource.lastIndexOf('await collect('), true);
+  // Both halves, because the ablation that planned this case found the
+  // ordering alone vacuous: with the CALL deleted, the last occurrence is the
+  // DECLARATION, which sits above the collection and satisfied the comparison
+  // with no hand-off left in the file at all.
+  const rearmSites = ownSource.split('rearmThroughProxy(').length - 1;
+  t('structural: the hand-off is CALLED exactly once, and decided BEFORE the first network read', [rearmSites, ownSource.lastIndexOf('rearmThroughProxy(') < ownSource.lastIndexOf('await collect(')], [2, true]);
 
   // --- The short-circuit. This is the property that makes the gate affordable,
   // and it is invisible in the verdict layer, so it is pinned here against a
