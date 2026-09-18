@@ -19,6 +19,14 @@
  * single-spelling defect that made `/api/v1/data` answer 500 to this very
  * refusal until #7525.
  *
+ * ⚠️ The `message` in that block is the text as MEASURED IN #8502 and is left
+ * verbatim as the record of what was observed then. #18153 reworded exactly
+ * that sentence — it was the one user-facing refusal of the four, and it put
+ * the internal record id and the object's API name into a toast — so the
+ * assertion below carries the CURRENT text and no longer matches the quote.
+ * What this file pins is unchanged: which `code`, which `httpStatus`, and that
+ * both survive the batch-row lowering.
+ *
  * ## Why the pin lives HERE
  *
  * `metadata-protocol` cannot import this plugin, and its own pins therefore
@@ -121,9 +129,22 @@ describe('[#8570] a locked record\'s batch row carries the 409 the hook declared
     expect(res.results[0].success).toBe(false);
     expect(res.results[0].errors[0]).toEqual({
       code: 'RECORD_LOCKED',
-      message: `RECORD_LOCKED: record '${lockedId}' of 'opportunity' is locked while an approval is in progress`,
+      // [#18153] The sentence names the record the way the object declares it
+      // ('Deal' is this row's `name`, and `nameField` resolves to it) instead
+      // of `record '<id>' of '<apiName>'`. The `code`/`httpStatus` pair either
+      // side of it is what this file exists for and is unmoved.
+      message: "RECORD_LOCKED: Opportunity 'Deal' is locked while an approval is in progress, and cannot be edited until that approval is complete",
       httpStatus: 409,
     });
+    // The same row, read as the CARD reads it: no internal identifier in the
+    // user-visible body (#18153). The object is named by its LABEL
+    // ('Opportunity'), which is why the API-name assertion is case-sensitive on
+    // purpose — the two differ by exactly that, and the label is the half a
+    // user can act on.
+    const body: string = res.results[0].errors[0].message;
+    expect(body).not.toContain(lockedId);
+    expect(body).not.toContain(opportunity.name);
+    expect(body).toContain(opportunity.label);
 
     // The refusal was a refusal: nothing reached the store.
     expect((await engine.findOne('opportunity', { where: { id: lockedId } }))?.amount).toBe(100);

@@ -28,6 +28,8 @@
 
 import type { ServiceObject } from '@objectstack/spec/data';
 
+import type { OrgScopingEngine } from './org-scoping-engine.js';
+
 interface ClaimOptions {
   logger?: {
     info: (message: string, meta?: Record<string, any>) => void;
@@ -58,7 +60,7 @@ function hasOrganizationField(schema: ServiceObject): boolean {
  * Returns a per-object summary `{ object, count }[]`.
  */
 export async function claimOrphanOrgRows(
-  ql: any,
+  ql: OrgScopingEngine,
   organizationId: string,
   options: ClaimOptions = {},
 ): Promise<{ object: string; count: number }[]> {
@@ -66,7 +68,7 @@ export async function claimOrphanOrgRows(
   if (!ql || typeof ql.update !== 'function' || typeof ql.find !== 'function') {
     return [];
   }
-  const registry = (ql as any).registry;
+  const registry = ql.registry;
   if (!registry || typeof registry.getAllObjects !== 'function') {
     logger?.warn?.('[org-scoping] claimOrphanOrgRows: registry unavailable');
     return [];

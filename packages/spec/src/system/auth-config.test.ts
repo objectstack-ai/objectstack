@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import {
   AuthProviderConfigSchema,
   AuthPluginConfigSchema,
@@ -506,5 +507,43 @@ describe('AudienceConfigSchema (#11739)', () => {
     });
     expect((parsed.audience as { posture?: string } | undefined)?.posture).toBe('email_domain');
     expect(() => AuthConfigSchema.parse({ audience: { posture: 'bogus' } })).toThrow();
+  });
+});
+// #18124 — step 3 of ruling A on #18115. `AuthConfig.session.updateAge` takes the
+// `externalVocabulary` route, the one its sibling `session.expiresIn` already
+// carries. The comment above the pair in the schema calls BOTH of them better-auth
+// names "forwarded by name", and the forwarding is real:
+// `packages/plugins/plugin-auth/src/auth-manager.ts` passes
+// `updateAge: this.config.session?.updateAge || 60 * 60 * 24` straight into
+// better-auth's `session.updateAge`, whose unit is seconds. Only `expiresIn`
+// carried the marker; this closes the pair.
+describe('AuthConfig.session.updateAge declares seconds by mirror (#18124)', () => {
+  it('keeps the bare name, the default and the value it always accepted', () => {
+    expect(AuthConfigSchema.parse({}).session).toBeUndefined();
+    const parsed = AuthConfigSchema.parse({ session: { updateAge: 3 * 86_400 } });
+    expect(parsed.session?.updateAge).toBe(3 * 86_400);
+    expect(AuthConfigSchema.parse({ session: {} }).session?.updateAge).toBe(86_400);
+  });
+
+  it('emits the externalVocabulary marker and the unit through z.toJSONSchema', () => {
+    const json = z.toJSONSchema(AuthConfigSchema, {
+      target: 'draft-2020-12',
+      io: 'input',
+      unrepresentable: 'any',
+    }) as {
+      properties?: {
+        session?: {
+          properties?: {
+            updateAge?: { externalVocabulary?: unknown; description?: unknown };
+            expiresIn?: { externalVocabulary?: unknown };
+          };
+        };
+      };
+    };
+    const session = json.properties?.session?.properties;
+    expect(session?.updateAge?.externalVocabulary).toBe('better-auth `session.updateAge`');
+    expect(session?.updateAge?.description).toBe('Session update frequency in seconds');
+    // The sibling this row was matched to — unchanged, and still declared.
+    expect(session?.expiresIn?.externalVocabulary).toBe('better-auth `session.expiresIn`');
   });
 });

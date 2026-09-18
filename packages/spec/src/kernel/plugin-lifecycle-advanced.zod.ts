@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { DurationMs } from '../shared/duration.zod';
 
 /**
  * # Advanced Plugin Lifecycle — host-driven library vocabularies
@@ -408,10 +409,15 @@ export const HotReloadConfigSchema = lazySchema(() => z.object({
     .describe('How to preserve state during reload'),
   
   /**
-   * Graceful shutdown timeout
+   * Graceful shutdown timeout, in milliseconds
    */
-  shutdownTimeout: z.number().int().min(0).default(30000)
-    .describe('Maximum time to wait for graceful shutdown'),
+  // Typed `DurationMs` (#18124, step ③ of ruling A on #18115) rather than
+  // renamed: the `#15676` wave that renamed this def's `debounceDelay` left this
+  // sibling alone on purpose, and the type declares the unit without retiring an
+  // authorable key. `DurationMs` is `.int().nonnegative()`, the same accepted set
+  // `.int().min(0)` carried, so nothing that parsed before stops parsing.
+  shutdownTimeout: DurationMs.default(30000)
+    .describe('Maximum time to wait for graceful shutdown, in milliseconds'),
   
   /**
    * Pre-reload hooks

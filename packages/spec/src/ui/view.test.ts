@@ -182,6 +182,45 @@ describe('KanbanConfigSchema', () => {
 
     expect(() => KanbanConfigSchema.parse(config)).not.toThrow();
   });
+
+  // [#16894] Director seat, decision batch #87 (objectstack-ai/objectui#8367,
+  // maintainer 「批 #87 同意」): `titleField` joins this schema as optional
+  // `z.string()`. The legs below are the card's executable acceptance
+  // criterion — BOTH controls fire on the same call shape, so the PROBE's flip
+  // is evidence about the NAME and not about a parser that stopped refusing.
+  it('ACCEPTS `titleField` as a member, with both controls firing on the same shape', () => {
+    const canonical = {
+      groupByField: 'status',
+      columns: ['name', 'owner'],
+    };
+
+    // CONTROL-1 — the parser CAN refuse, on the named surface.
+    const control1 = KanbanConfigSchema.safeParse({ ...canonical, zzUnlikelyBogusKey__: true });
+    expect(control1.success).toBe(false);
+    const issues = JSON.stringify(control1.error?.issues);
+    expect(issues).toContain('unrecognized_keys');
+    expect(issues).toContain('zzUnlikelyBogusKey__');
+    expect(issues).toContain('this kanban configuration');
+
+    // CONTROL-2 — a refusal is about the name: the canonical block is accepted.
+    expect(KanbanConfigSchema.safeParse(canonical).success).toBe(true);
+
+    // PROBE — before this card: `ok=false unrecognized_keys=["titleField"]`.
+    const probe = KanbanConfigSchema.safeParse({ ...canonical, titleField: 'subject' });
+    expect(probe.success).toBe(true);
+    // Accepted as a MEMBER, not merely tolerated: the value survives the parse.
+    expect(KanbanConfigSchema.parse({ ...canonical, titleField: 'subject' }))
+      .toMatchObject({ titleField: 'subject' });
+  });
+
+  // ⛔ NOT required. `TimelineConfigSchema` and `GanttConfigSchema` spell
+  // `titleField` required and are the two siblings this declaration does not
+  // copy: absence resolves through the ADR-0079 record display-name chain, so
+  // requiring it would demand more than the renderer reads (#13748).
+  it('leaves `titleField` OPTIONAL — a board that omits it is a complete config', () => {
+    const parsed = KanbanConfigSchema.parse({ groupByField: 'status', columns: ['name'] });
+    expect('titleField' in parsed).toBe(false);
+  });
 });
 
 describe('CalendarConfigSchema', () => {
@@ -2254,8 +2293,10 @@ describe('GalleryConfigSchema', () => {
 
 describe('ListMapConfigSchema (#9340 — the eighth visualization block)', () => {
   it('accepts the full documented renderer surface — every key plugin-map reads, no extras', () => {
-    // Mirrors objectui plugin-map's own MapConfigSchema (ObjectMap.tsx): the
-    // spec block and the renderer's read set are the same seven keys.
+    // Mirrors objectui's own `ObjectMapConfigSchema` (`@object-ui/types`,
+    // imported by `ObjectMap.tsx`): the spec block and the renderer's read set
+    // are the same EIGHT keys. `style` was the eighth and was missing here
+    // until #18406 — see the pin below, which is this test's own repro.
     const map = {
       latitudeField: 'lat',
       longitudeField: 'lng',
@@ -2264,9 +2305,33 @@ describe('ListMapConfigSchema (#9340 — the eighth visualization block)', () =>
       descriptionField: 'address',
       zoom: 12,
       center: [37.7749, -122.4194] as [number, number],
+      style: 'https://tiles.example/style.json',
     };
 
     expect(() => ListMapConfigSchema.parse(map)).not.toThrow();
+    // Every key survives the parse — a declaration that silently dropped one
+    // would still satisfy `not.toThrow()`.
+    expect(ListMapConfigSchema.parse(map)).toEqual(map);
+  });
+
+  it('accepts `style` — the card repro that used to fail, and the key the renderer reads', () => {
+    // #18406, director decision batch #153 item 4 letter 1. The card's repro
+    // verbatim: `getMapConfig` reads `schema.mapStyle || schema.map?.style`
+    // (`ObjectMap.tsx:365` at the `.objectui-sha` pin `53ded82b`) and
+    // objectui's `ObjectMapConfigSchema` declares `style`, so this strict block
+    // refusing it meant a map style could not be declared through the spec's
+    // list-view face at all.
+    expect(ListMapConfigSchema.safeParse({ style: 'https://tiles.example/style.json' }).success).toBe(true);
+    // A style URL alone is enough — the key is independent of the coordinate
+    // binding, exactly as it is on the renderer's own schema.
+    expect(ListMapConfigSchema.parse({ style: 'https://tiles.example/style.json' }))
+      .toEqual({ style: 'https://tiles.example/style.json' });
+    // Still a string, and still NOT the node-level inline CSS record: the
+    // object form `BaseSchema.style` takes is refused here.
+    expect(ListMapConfigSchema.safeParse({ style: { color: 'red' } }).success).toBe(false);
+    // And the neighbouring misspelling stays loud — `style` did not open the block.
+    expect(ListMapConfigSchema.safeParse({ styl: 'https://tiles.example/style.json' }).success).toBe(false);
+    expect(ListMapConfigSchema.safeParse({ mapStyle: 'https://tiles.example/style.json' }).success).toBe(false);
   });
 
   it('accepts the showcase task shape — the exact declaration #9340 exists to make legal', () => {
@@ -2383,6 +2448,153 @@ describe('TimelineConfigSchema', () => {
   });
 });
 
+// ============================================================================
+// [#17499] `groupByField` refuses a padded field name — kanban / gantt / timeline
+// ============================================================================
+//
+// The sibling axis of #17360 / PR #17498 (`grouping.fields[].field`, landed as
+// `f8e5790593`), which scoped this one out by name. All three keys were bare
+// `z.string()`, so `' stage'` was valid authored metadata handed to a consumer
+// that looks the name up on every row: objectui (`dda8f3815`) resolves the
+// kanban lane as `groupByField || groupField || detectStatusField(objectDef)`
+// and buckets cards by `card[laneField]`; `ObjectGantt`'s `groupByAccessor`
+// splits the name on `.` and walks the backing record. The server answers
+// under the unpadded name, so the padded spelling reads `undefined` on every
+// row and the board shows one `Uncategorized` lane / the gantt and timeline
+// one ungrouped bucket holding every record — a wrong answer that reads as a
+// true statement about the data.
+//
+// `KanbanConfigSchema.groupByField` is the site that makes this its own card:
+// it is REQUIRED, so the padded value cannot be withdrawn by omitting the key.
+describe('groupByField — a padded field name is refused (#17499)', () => {
+  /**
+   * Per schema: the minimal valid block MINUS `groupByField`, and the sibling
+   * `z.string()` keys on that same schema the DARK control probes.
+   */
+  const SCHEMAS: Array<[string, z.ZodTypeAny, Record<string, unknown>, string[]]> = [
+    ['kanban', KanbanConfigSchema as unknown as z.ZodTypeAny,
+      { columns: ['name'] }, ['summarizeField', 'titleField']],
+    ['gantt', GanttConfigSchema as unknown as z.ZodTypeAny,
+      { startDateField: 'starts_at', endDateField: 'ends_at', titleField: 'name' },
+      ['startDateField', 'endDateField', 'titleField', 'progressField']],
+    ['timeline', TimelineConfigSchema as unknown as z.ZodTypeAny,
+      { startDateField: 'starts_at', titleField: 'name' },
+      ['startDateField', 'titleField', 'endDateField', 'colorField']],
+  ];
+
+  const PADDED: Array<[string, string]> = [
+    ['leading', ' stage'],
+    ['trailing', 'stage '],
+    ['both', '  stage  '],
+    ['a tab', '\tstage'],
+    ['a newline', 'stage\n'],
+    ['whitespace only', ' '],
+  ];
+
+  // Every DISTINCT `groupByField` spelling this repo carries, harvested from
+  // every `.ts` / `.tsx` / `.mdx` / `.json` / `.mjs` outside `node_modules`
+  // (14 distinct literals; `'warning'` / `'error'` are severity-map VALUES in
+  // `packages/lint` and `'<select_or_status_field>'` is prose inside a
+  // completeness hint, so neither is an authored name and neither is listed).
+  // `owner.name` is the load-bearing member: these keys hold a field
+  // REFERENCE, and a dotted relationship path is an in-tree spelling of one —
+  // which is why this is NOT the snake_case machine-name grammar
+  // `/^[a-z_][a-z0-9_]*$/` (`owner.name` measured `false` against it, while
+  // `packages/lint`'s `validate-list-view-field-refs.test.ts` carries
+  // `kanban: { groupByField: 'owner.name' }` in a case asserting no findings).
+  const IN_TREE_GROUP_BY_FIELD_SPELLINGS = [
+    'status', 'stage', 'team', 'workshop', 'due_date', 'owner', 'owner.name',
+    'business_unit', 'A9_no_such_field', 'statuss', 'zzzzzzzzzzzzzzzz',
+  ];
+
+  describe.each(SCHEMAS)('%s.groupByField', (view, schema, rest, siblings) => {
+    it.each(PADDED)('refuses %s whitespace', (_label, spelling) => {
+      expect(schema.safeParse({ ...rest, groupByField: spelling }).success).toBe(false);
+    });
+
+    it('addresses the refusal to `groupByField` BY NAME and quotes the spelling', () => {
+      const result = schema.safeParse({ ...rest, groupByField: ' stage' });
+      expect(result.success).toBe(false);
+
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'groupByField');
+      expect(issue).toBeDefined();
+      // The whitespace an author cannot see in an editor is visible here...
+      expect(issue!.message).toContain('" stage"');
+      // ...next to the name to write instead, and the key that is wrong.
+      expect(issue!.message).toContain('Write "stage".');
+      expect(issue!.message).toContain(`\`${view}.groupByField\``);
+    });
+
+    // ⛔ NOT a `.trim()`. A trimming schema would make `' stage'` and `'stage'`
+    // silently equivalent — the consumer-tolerance direction AGENTS.md #0.1
+    // refuses, and on the REQUIRED kanban key the author cannot withdraw the
+    // value instead. This arm is what tells the two designs apart: it pins
+    // that an accepted name arrives byte-identical, so a schema that
+    // normalised on the way through would fail here even though it would also
+    // stop the silent miss.
+    it('does not trim — an accepted name arrives byte-identical', () => {
+      const parsed = schema.parse({ ...rest, groupByField: 'stage' }) as { groupByField?: string };
+      expect(parsed.groupByField).toBe('stage');
+    });
+
+    // LIT — the narrowing must not over-reach: every in-tree spelling is still
+    // accepted, on all three schemas.
+    it.each(IN_TREE_GROUP_BY_FIELD_SPELLINGS)('still accepts the in-tree spelling %s', (spelling) => {
+      expect(schema.safeParse({ ...rest, groupByField: spelling }).success).toBe(true);
+    });
+
+    // DARK — must read 0. The narrowing lands on `groupByField` and on nothing
+    // else: every sibling `z.string()` key on the SAME schema still accepts a
+    // padded value. A leak into a neighbour shows up here as a refusal.
+    it('leaves every sibling string key on the same schema untouched', () => {
+      expect(siblings.length).toBeGreaterThan(0); // non-vacuous: the table is populated
+
+      for (const key of siblings) {
+        const probe = { ...rest, groupByField: 'stage', [key]: ' padded_sibling ' };
+        expect(schema.safeParse(probe).success).toBe(true);
+      }
+    });
+  });
+
+  // The kanban key is REQUIRED — the difference from the precedent that earns
+  // this card. Omitting it is refused for absence (as before); supplying it
+  // padded is refused for the padding (new). Both doors, one call shape.
+  it('kanban.groupByField is required AND non-padded — both doors refuse', () => {
+    expect(KanbanConfigSchema.safeParse({ columns: ['name'] }).success).toBe(false);
+    expect(KanbanConfigSchema.safeParse({ columns: ['name'], groupByField: ' stage' }).success).toBe(false);
+    expect(KanbanConfigSchema.safeParse({ columns: ['name'], groupByField: 'stage' }).success).toBe(true);
+  });
+
+  // The refusal survives nesting: a padded name inside a whole list view is
+  // addressed to the block's own key, not to the view.
+  it('refuses a padded name through ListViewSchema, addressed to `kanban.groupByField`', () => {
+    const result = ListViewSchema.safeParse({
+      type: 'kanban',
+      columns: ['name'],
+      kanban: { groupByField: ' stage', columns: ['name'] },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((i) => i.path.join('.'))).toContain('kanban.groupByField');
+  });
+
+  // The empty string is deliberately NOT narrowed here — the precedent decided
+  // that for the sibling axis and nothing about these three keys changes it.
+  // Widening the pattern to catch `''` would be a second, undeclared narrowing
+  // riding on this card.
+  it('still accepts the empty string — this card narrows padding only', () => {
+    expect(KanbanConfigSchema.safeParse({ columns: ['name'], groupByField: '' }).success).toBe(true);
+  });
+
+  // The whole block is a reading only if this schema is genuinely NARROWER
+  // than the one it replaces: every accepting arm above would pass just as
+  // well against the old bare `z.string()`.
+  it('is a narrowing — the discriminator the old schema would fail', () => {
+    expect(z.string().safeParse(' stage').success).toBe(true);
+    expect(KanbanConfigSchema.safeParse({ columns: ['name'], groupByField: ' stage' }).success).toBe(false);
+  });
+});
+
 describe('ViewSharingSchema', () => {
   it('should default to collaborative', () => {
     const sharing = {};
@@ -2427,11 +2639,55 @@ describe('RowColorConfigSchema', () => {
       },
     };
 
+    // ⚠️ #18791 — this ASSERTION is correct and is deliberately left alone: the
+    // accept set really is `z.record(z.string(), z.string())`, and hexes really
+    // do parse. What is wrong is believing a parse means a colour. None of
+    // these three values resolves — objectui `useRowColor.ts`'s `colorToClass`
+    // returns `undefined` for every one of them — so this map parses,
+    // publishes, and paints nothing. The schema is not the enforcement point
+    // for that; the author-time diagnostic
+    // `view/row-color-unresolvable-value` (`kernel/functional-completeness.ts`)
+    // is, and it reports exactly this fixture.
     expect(() => RowColorConfigSchema.parse(rowColor)).not.toThrow();
   });
 
   it('should require field', () => {
     expect(() => RowColorConfigSchema.parse({})).toThrow();
+  });
+
+  // #18791 — the describe read `Map of field value to color (hex/token)`, and a
+  // hex is the one spelling the only renderer cannot resolve. The schema told
+  // an author to write the value that silently does nothing; the diagnostic
+  // that would have caught it checks presence only, so the hex map turned it
+  // GREEN. This pins the two properties that made the old sentence a trap,
+  // rather than the wording that replaced it.
+  it('⛔ the `colors` describe never offers a hex — it names what actually resolves (#18791)', () => {
+    const description = (RowColorConfigSchema as unknown as {
+      shape: { colors: { description?: string } };
+    }).shape.colors.description ?? '';
+
+    // ⛔ The trap literal, verbatim from the sentence this replaced.
+    expect(description).not.toContain('hex/token');
+    // ⚠️ `token` went with it. Read as the renderer's colour NAMES it was still
+    // standing beside hex as an equal alternative, and putting a bad option
+    // first is as harmful as offering only the bad option.
+    expect(description).not.toMatch(/\btokens?\b/i);
+
+    // ⭐ The property, not the wording: hex must still be NAMED — an author who
+    // comes here asking "can I paste the option colours in?" has to find the
+    // answer — but only ever in the same sentence as the consequence. Deleting
+    // the word would pass a bare `not.toMatch(/hex/)` and leave that reader
+    // with nothing, which is how the old sentence got written in the first
+    // place.
+    expect(description, 'the describe answers the hex question nowhere').toMatch(/hex/i);
+    for (const sentence of description.split('. ')) {
+      if (/hex/i.test(sentence)) expect(sentence).toContain('colours no row');
+    }
+
+    // And it names a spelling that DOES reach a class, plus the rule that
+    // reports the ones that do not.
+    expect(description).toContain('bg-red-200');
+    expect(description).toContain('view/row-color-unresolvable-value');
   });
 });
 
@@ -2561,13 +2817,18 @@ describe('Airtable-style ListView enhancements', () => {
   it('should accept list view with row color', () => {
     const listView: ListView = {
       columns: ['name', 'priority'],
+      // #18791 — colour NAMES, not hexes. The assertion below only says the
+      // shape parses, and a hex parses just as well; what changed is that a
+      // fixture is read as an example, and this corpus was demonstrating the
+      // one spelling `colorToClass` resolves to `undefined`. The deliberate
+      // "a hex does parse" pin is kept, once, in `RowColorConfigSchema` above.
       rowColor: {
         field: 'priority',
         colors: {
-          critical: '#ff0000',
-          high: '#ff8800',
-          medium: '#ffcc00',
-          low: '#00cc00',
+          critical: 'red',
+          high: 'orange',
+          medium: 'amber',
+          low: 'green',
         },
       },
     };
@@ -2653,12 +2914,14 @@ describe('Airtable-style ListView enhancements', () => {
         ],
       },
       rowHeight: 'medium',
+      // #18791 — colour NAMES: this is the "realistic, fully-loaded view"
+      // fixture, so it is the one most likely to be copied as a template.
       rowColor: {
         field: 'status',
         colors: {
-          on_track: '#22c55e',
-          at_risk: '#f59e0b',
-          blocked: '#ef4444',
+          on_track: 'emerald',
+          at_risk: 'amber',
+          blocked: 'red',
         },
       },
       hiddenFields: ['internal_id', 'sys_updated_at'],
@@ -4115,6 +4378,101 @@ const flattenUnionIssues = (issues: z.ZodIssue[]): z.ZodIssue[] =>
       ? [i, ...flattenUnionIssues(nested.flat())]
       : [i];
   });
+
+// ============================================================================
+// [#16885] The RETIRED `navigation.view` binding — declared, consumed, wrong
+// ============================================================================
+
+/**
+ * `navigation.view` promised "the form view to use for details", and nothing
+ * from spec to console ever resolved a view BY NAME: its one read in the
+ * shipped console put the value in the SECOND argument of `onNavigate` — the
+ * slot that otherwise carries the navigation-MODE token — so an authored name
+ * substituted for the mode instead of selecting a view. Retired under ADR-0049
+ * enforce-or-remove by maintainer ruling 2026-09-13 (director decision batch
+ * #126 item 4, option B).
+ *
+ * The refusal is pinned at all three doors, and the five surviving keys of the
+ * same block are pinned ACCEPTING beside it — separately and together. That
+ * second half is not ceremony: a tombstone that also broke its live siblings
+ * would satisfy every refusal assertion above while being a different and
+ * larger bug, and `navigation` is one `strictObject`, so the blast radius of a
+ * mistake here is the whole block.
+ */
+describe('ListViewSchema — the RETIRED `navigation.view` binding (#16885)', () => {
+  describe.each(viewDoorsCarryingObjectLevelChecks)('%s', (_label, parse) => {
+    it('REFUSES `navigation.view` with the tombstone prescription, not a bare unknown-key report', () => {
+      const r = parse({ type: 'grid', columns: ['name'], navigation: { view: 'summary_view' } });
+      expect(r.success).toBe(false);
+      // Select the TOMBSTONE issue by the SHAPE `retiredKey()` raises rather
+      // than by its text — the overlay door also carries that text on the union
+      // WRAPPER (path `[]`), so a text-only find is satisfied by either, and
+      // this pin's subject is that the refusal is raised AT THE KEY the author
+      // wrote, which needs the issue that has a path.
+      const issue = flattenUnionIssues((r as { error: z.ZodError }).error.issues)
+        .find((i) => (i as { expected?: string }).expected === 'never');
+      expect(issue, JSON.stringify((r as { error: z.ZodError }).error.issues)).toBeDefined();
+      expect(issue!.message).toContain('`view.list.navigation.view` was removed');
+      // The prescription must name the ROUTE, not merely the removal: a bare
+      // "this key is gone" leaves the author with the want that made them write
+      // it. Page assignment is where a chosen detail layout belongs.
+      expect(issue!.message).toContain('`record` page');
+      expect(issue!.message).toContain('`isDefault`');
+      expect(issue!.path.join('.')).toBe('navigation.view');
+    });
+
+    it("still ACCEPTS `navigation: { mode: 'page' }` — the lit control for the refusal above", () => {
+      expect(parse({ type: 'grid', columns: ['name'], navigation: { mode: 'page' } }).success).toBe(true);
+    });
+
+    it('still ACCEPTS every surviving key of the same block, one at a time and all together', () => {
+      const survivors = {
+        mode: 'drawer',
+        preventNavigation: false,
+        openNewTab: false,
+        size: 'lg',
+        width: '600px',
+      } as const;
+      for (const [key, value] of Object.entries(survivors)) {
+        const r = parse({ type: 'grid', columns: ['name'], navigation: { [key]: value } });
+        expect(r.success, `${key}: ${JSON.stringify(r.success ? null : (r as { error: z.ZodError }).error.issues)}`)
+          .toBe(true);
+      }
+      expect(parse({ type: 'grid', columns: ['name'], navigation: { ...survivors } }).success).toBe(true);
+    });
+  });
+
+  // The tombstone must not become the answer for every navigation typo. An
+  // unrelated unknown key keeps the ordinary closed-shape report, which is what
+  // tells the author it is unrecognised rather than retired — the failure mode
+  // `acceptsNothing()` exists for, one message over.
+  it('does not hand the removal prescription to an unrelated unknown navigation key', () => {
+    const r = ListViewSchema.safeParse({ type: 'grid', columns: ['name'], navigation: { placement: 'right' } });
+    expect(r.success).toBe(false);
+    const messages = flattenUnionIssues((r as { error: z.ZodError }).error.issues)
+      .map((i) => i.message).join('\n');
+    expect(messages).not.toContain('`view.list.navigation.view` was removed');
+    // ...and it must not SUGGEST the tombstoned key either: `view` is still in
+    // `Object.keys(shape)` and is 4 edits from `placement`, so the guard that
+    // keeps a dead key out of the suggester is load-bearing here.
+    expect(messages).not.toMatch(/Did you mean[^\n]*`view`/);
+  });
+
+  // A `navigation` block that carries only live keys parses byte-for-byte as it
+  // did before the retirement — the property the semantic TODO promises.
+  it('leaves a live-only navigation block byte-identical after parse', () => {
+    const r = ListViewSchema.safeParse({
+      type: 'grid',
+      columns: ['name'],
+      navigation: { mode: 'drawer', size: 'lg' },
+    });
+    expect(r.success).toBe(true);
+    expect((r as { data: { navigation?: Record<string, unknown> } }).data.navigation)
+      .toMatchObject({ mode: 'drawer', size: 'lg' });
+    expect((r as { data: { navigation?: Record<string, unknown> } }).data.navigation)
+      .not.toHaveProperty('view');
+  });
+});
 
 describe("ListViewSchema — calendar in `appearance.allowedVisualizations` requires the `calendar:` block (#13817)", () => {
   // The same three doors, and since #17063 this is the ONLY object-level check

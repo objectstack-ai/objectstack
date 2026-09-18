@@ -379,18 +379,35 @@ describe('the views[] visibility-predicate family at the runtime publish gate (#
   });
 
   it('REFUSES a predicate calling a function the CEL environment does not register', () => {
-    // #13594 — the arm that used to walk through. `current_user.can(object, verb)`
-    // is the authored shape from objectui#4421: it PARSES, so the syntax arm has
-    // nothing to say, and `current_user` is a declared root, so the bare-ref arm
-    // cannot reach the call. Before the ruling this reached a tenant's runtime
-    // and faulted fail-CLOSED on every surface.
-    const { errors } = gateView(runtimeView('current_user.can(object, verb)'));
+    // #13594 — the arm that used to walk through. The shape is a method call on
+    // `current_user`: it PARSES, so the syntax arm has nothing to say, and
+    // `current_user` is a declared root, so the bare-ref arm cannot reach the
+    // call. Before the ruling this reached a tenant's runtime and faulted
+    // fail-CLOSED on every surface.
+    //
+    // RE-POINTED, not deleted (batch #147 item 5, letter A): the example used to
+    // be `current_user.can(object, verb)` from objectui#4421, and `can` is a
+    // registered receiver method now. `canApprove` carries the same shape and is
+    // still invented; the case below is the other half, and the two together are
+    // what says the gate narrowed by exactly one name.
+    const { errors } = gateView(runtimeView('current_user.canApprove(object, verb)'));
     const f = errors.find((e) => e.rule === 'visibility-predicate-unknown-function');
     expect(f, 'the publish door must refuse an unresolvable call, not just the validator').toBeDefined();
     expect(f!.severity).toBe('error');
     expect(f!.path).toBe('views[0].form.sections[0].fields[0]');
-    expect(f!.message).toMatch(/`can`/);
+    expect(f!.message).toMatch(/`canApprove`/);
     expect(f!.message).toMatch(/found no matching overload/);
+  });
+
+  it('ACCEPTS `current_user.can(object, verb)` — objectui#4421, registered and evaluable now', () => {
+    // The predicate the whole #13594 arm was built around. It is no longer an
+    // unresolvable call, and the gate must say so: a publish door that kept
+    // refusing it would block the capability this platform now ships, and one
+    // that accepted it while nothing could evaluate it was the defect. Both ends
+    // moved together — `@objectstack/formula` registers `can` receiver-only and
+    // answers it from `EvalContext.permissions`.
+    const { errors } = gateView(runtimeView('current_user.can(object, verb)'));
+    expect(errors.map((e) => e.rule)).not.toContain('visibility-predicate-unknown-function');
   });
 
   it('ACCEPTS a predicate whose functions all resolve — the control for the arm above', () => {

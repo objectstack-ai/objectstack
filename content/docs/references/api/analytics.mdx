@@ -45,7 +45,7 @@ const result = AnalyticsEndpoint.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ name: string; title?: string; measures: object[]; dimensions: object[] }[]` | ✅ | Available cubes, each as the `CubeMeta` discovery projection — the cube name, its title, and the measures/dimensions a client may name in a query. A bare array: there is no `cubes` wrapper object, and no cube `sql` is published. |
 
 ### Nested Shape: `AnalyticsMetadataResponse.error`
@@ -61,6 +61,15 @@ const result = AnalyticsEndpoint.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `AnalyticsMetadataResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `AnalyticsMetadataResponse.data[number]`
 
@@ -111,7 +120,7 @@ const result = AnalyticsEndpoint.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ rows: Record<string, any>[]; fields: object[]; sql?: string; totals?: object[] }` | ✅ |  |
 
 ### Nested Shape: `AnalyticsResultResponse.error`
@@ -127,6 +136,15 @@ const result = AnalyticsEndpoint.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `AnalyticsResultResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `AnalyticsResultResponse.data`
 
@@ -148,7 +166,7 @@ const result = AnalyticsEndpoint.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ sql: string; params: any[] }` | ✅ |  |
 
 ### Nested Shape: `AnalyticsSqlResponse.error`
@@ -164,6 +182,15 @@ const result = AnalyticsEndpoint.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `AnalyticsSqlResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 
 ---

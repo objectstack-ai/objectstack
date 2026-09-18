@@ -892,13 +892,17 @@ export const RowHeightSchema = lazySchema(() => z.enum([
 const GROUPING_FIELD_RULING = 'ruled 2026-09-10';
 
 /**
- * A name with no leading and no trailing whitespace.
+ * A field-reference name with no leading and no trailing whitespace.
+ *
+ * Shared by the two axes that carry this rule: `grouping.fields[].field`
+ * (#17360) and the three `groupByField` keys (#17499). One spelling for one
+ * rule — a second regex saying the same thing is a second thing to drift.
  *
  * Deliberately **not** the snake_case machine-name grammar
  * (`/^[a-z_][a-z0-9_]*$/`) this package spells inline for object, field and
- * tool NAMES: a grouping level is authored as a field REFERENCE, and a dotted
+ * tool NAMES: these keys are authored as a field REFERENCE, and a dotted
  * relationship path (`owner.name`) is an in-tree spelling of one, so the
- * machine-name grammar is the wrong vocabulary for this key. The ruling asks
+ * machine-name grammar is the wrong vocabulary for them. The ruling asks
  * for a non-padded pattern, and that is exactly what this is — nothing wider,
  * nothing narrower.
  *
@@ -906,7 +910,7 @@ const GROUPING_FIELD_RULING = 'ruled 2026-09-10';
  * refused LOUDLY one layer down (`compileListViewGroupQuery`'s
  * `grouping_field_blank`), and this narrowing exists for the SILENT case only.
  */
-const GROUPING_FIELD_NON_PADDED_PATTERN = /^(?:\S|\S[\s\S]*\S)?$/;
+const NON_PADDED_FIELD_NAME_PATTERN = /^(?:\S|\S[\s\S]*\S)?$/;
 
 /**
  * Validate one `grouping.fields[].field` name against the ruling. Returns the
@@ -918,7 +922,7 @@ const GROUPING_FIELD_NON_PADDED_PATTERN = /^(?:\S|\S[\s\S]*\S)?$/;
  * dialect the producer should quietly accept and normalise away.
  */
 function checkGroupingFieldName(raw: string): string | undefined {
-  if (GROUPING_FIELD_NON_PADDED_PATTERN.test(raw)) return undefined;
+  if (NON_PADDED_FIELD_NAME_PATTERN.test(raw)) return undefined;
 
   const trimmed = raw.trim();
   const remedy = trimmed === ''
@@ -933,6 +937,87 @@ function checkGroupingFieldName(raw: string): string | undefined {
     + 'a single `Uncategorized` lane holding every record — a wrong answer that reads as a true '
     + `statement about the data. ${remedy} (${GROUPING_FIELD_RULING}.)`;
 }
+
+/*
+ * ---------------------------------------------------------------------------
+ * `groupByField` — the same non-padded name rule, three more schemas (#17499)
+ * ---------------------------------------------------------------------------
+ *
+ * `KanbanConfigSchema`, `GanttConfigSchema` and `TimelineConfigSchema` each
+ * declare a `groupByField`, and all three were bare `z.string()`. This is the
+ * sibling axis #17360 named and scoped OUT by name ("symmetric and is
+ * explicitly not this card"), so the shape is the one that card already landed
+ * — a refusal, not a `.trim()` — and the only thing re-derived here is what
+ * the padded spelling DOES per view type, because that is the sentence an
+ * author reads.
+ *
+ * Three differences from the precedent, all deliberate:
+ *
+ *   1. `KanbanConfigSchema.groupByField` is REQUIRED. A padded spelling there
+ *      cannot be dropped by omitting the key, which is why the whole axis is
+ *      worth its own card rather than a footnote on #17360.
+ *   2. The refusal is addressed per view type (`kanban.groupByField`,
+ *      `gantt.groupByField`, `timeline.groupByField`) rather than to one path,
+ *      because these are three keys on three schemas, not one key reached
+ *      through an array index.
+ *   3. It carries no ruling citation. #17360's ruling C (objectui#7347) is
+ *      about `grouping.fields[].field` and explicitly not about this axis, so
+ *      quoting its date here would attribute a decision that was never made.
+ *
+ * What the name is used for, measured in the consumer (objectui `dda8f3815`):
+ * the kanban board resolves its lane as
+ * `laneField = groupByField || groupField || detectStatusField(objectDef)`
+ * and buckets cards by `card[laneField]`; `ObjectGantt`'s `groupByAccessor`
+ * splits the name on `.` and walks the backing record
+ * (`resolvePath(task.data, field)`); the timeline groups its rows the same
+ * way. Every one of those is a lookup BY THAT NAME on data the server answers
+ * under the unpadded name, so a padded spelling reads `undefined` on every row.
+ */
+
+/** Per-view-type tail of the refusal: what the padded spelling actually does. */
+const GROUP_BY_FIELD_CONSEQUENCE = {
+  kanban: 'every card falls into one `Uncategorized` lane instead of the column it belongs to',
+  gantt: 'every leaf task falls into one ungrouped bucket instead of the summary row it belongs to',
+  timeline: 'every row falls into one ungrouped band instead of the band it belongs to',
+} as const;
+
+/** The three schemas that declare a `groupByField`. */
+type GroupByFieldView = keyof typeof GROUP_BY_FIELD_CONSEQUENCE;
+
+/**
+ * Validate one `groupByField` name. Returns the author-facing refusal, or
+ * `undefined` when the value conforms.
+ *
+ * ⛔ Not a `.trim()`, for the reason {@link checkGroupingFieldName} carries: a
+ * trimming schema makes `'  a  '` and `'a'` silently equivalent, which is the
+ * consumer-tolerance direction AGENTS.md #0.1 refuses. The padded spelling is
+ * a mistake the author should be told about, not a dialect the producer
+ * quietly normalises away — and on the kanban key, which is required, the
+ * author has no way to withdraw the value instead.
+ */
+function checkGroupByFieldName(raw: string, view: GroupByFieldView): string | undefined {
+  if (NON_PADDED_FIELD_NAME_PATTERN.test(raw)) return undefined;
+
+  const trimmed = raw.trim();
+  const remedy = trimmed === ''
+    ? 'Name the field to group by — this value is nothing but whitespace.'
+    : `Write ${JSON.stringify(trimmed)}.`;
+
+  return `\`${view}.groupByField\` names the field exactly as it is stored, with no leading or `
+    + `trailing whitespace — received ${JSON.stringify(raw)}. The renderer reads that name off `
+    + 'every row verbatim while the server answers under the unpadded name, so every per-row '
+    + `lookup misses and ${GROUP_BY_FIELD_CONSEQUENCE[view]} — a wrong answer that reads as a `
+    + `true statement about the data. ${remedy}`;
+}
+
+/**
+ * The `superRefine` body for one view type's `groupByField`, so each of the
+ * three declaration sites keeps its own inline `z.string()….describe()` shape.
+ */
+const groupByFieldCheck = (view: GroupByFieldView) => (raw: string, ctx: z.RefinementCtx): void => {
+  const refusal = checkGroupByFieldName(raw, view);
+  if (refusal) ctx.addIssue({ code: 'custom', message: refusal });
+};
 
 /**
  * Grouping Field Configuration
@@ -1069,7 +1154,13 @@ export const TimelineConfigSchema = lazySchema(() => strictObject({
   startDateField: z.string().describe('Field for timeline item start date'),
   endDateField: z.string().optional().describe('Field for timeline item end date'),
   titleField: z.string().describe('Field to display as timeline item title'),
-  groupByField: z.string().optional().describe('Field to group timeline rows'),
+  groupByField: z.string()
+    .superRefine(groupByFieldCheck('timeline'))
+    .optional()
+    .describe(
+      'Field to group timeline rows. NO leading or trailing whitespace: the renderer reads this '
+      + 'name off every row verbatim, so a padded spelling drops every row into one ungrouped band.',
+    ),
   colorField: z.string().optional().describe('Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color'),
   scale: z.enum(['hour', 'day', 'week', 'month', 'quarter', 'year']).default('week').describe('Default timeline scale'),
 }).describe('Timeline view configuration'));
@@ -1095,7 +1186,7 @@ export const RowColorConfigSchema = lazySchema(() => strictObject({
   history: VIEW_HISTORY,
 }, {
   field: z.string().describe('Field whose value is looked up in the `colors` map below to pick a row colour (typically a select/status field). The map is what does the colouring — with no `colors`, no row is ever coloured, whatever this field holds. Author-time diagnostic `view/row-color-without-colors` reports that combination.'),
-  colors: z.record(z.string(), z.string()).optional().describe('Map of field value to color (hex/token)'),
+  colors: z.record(z.string(), z.string()).optional().describe('Map of field value to row colour. The spellings that actually paint a row are not free-form: objectui `plugin-grid`\'s `useRowColor` hands a value already written as a complete Tailwind background class (`bg-red-200`) straight through, otherwise lower-cases and trims it and resolves it through its own closed vocabulary of colour NAMES (`red`, `blue`, `slate`, … each mapping to `bg-NAME-100`), and returns undefined for anything else. A hex, an `rgb()` or a CSS variable parses here, publishes, and colours no row — Tailwind v4 has no runtime, so no class can be fabricated from one. Author-time diagnostic `view/row-color-unresolvable-value` reports a value that cannot resolve.'),
 }).describe('Row color configuration based on field values'));
 
 /**
@@ -1347,8 +1438,33 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
   surface: 'this kanban configuration',
   history: VIEW_HISTORY,
 }, {
-  groupByField: z.string().describe('Field to group columns by (usually status/select)'),
+  groupByField: z.string()
+    .superRefine(groupByFieldCheck('kanban'))
+    .describe(
+      'Field to group columns by (usually status/select). NO leading or trailing whitespace: the '
+      + 'board reads this name off every card verbatim, so a padded spelling collapses the whole '
+      + 'board into one `Uncategorized` lane.',
+    ),
   summarizeField: z.string().optional().describe('Field to sum at top of column (e.g. amount)'),
+  /**
+   * [#16894] The one item-titled view config of the family that omitted this
+   * key. `GalleryConfigSchema`, `TimelineConfigSchema`, `CalendarConfigSchema`,
+   * `GanttConfigSchema` and `ListMapConfigSchema` all declare `titleField`
+   * under the same name and the same `z.string()`; this schema is a
+   * `strictObject`, so an author writing the key the board actually reads was
+   * refused BY NAME while the renderer honoured it. Declared here under the
+   * director seat's decision batch #87 (objectstack-ai/objectui#8367).
+   *
+   * OPTIONAL, deliberately — the shape `CalendarConfigSchema` already writes
+   * down for this exact key. Absence resolves through the ADR-0079 record
+   * display-name chain (`titleFormat` -> `displayNameField` -> type-aware
+   * derivation -> `'Untitled'`), so requiring it would demand more than the
+   * renderer reads, the exact shape the #13748 ruling forbids
+   * (「不要求超过渲染器真正需要的」). `TimelineConfigSchema` and
+   * `GanttConfigSchema` spell it required; they are the two siblings this
+   * declaration does NOT copy.
+   */
+  titleField: z.string().optional().describe('Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain)'),
   columns: z.array(z.string()).describe('Fields to show on cards'),
 }));
 
@@ -1498,7 +1614,14 @@ export const GanttConfigSchema = lazySchema(() => strictObject({
   baselineStartField: z.string().optional().describe('Baseline (planned) start field'),
   baselineEndField: z.string().optional().describe('Baseline (planned) end field'),
   // Dynamic grouping: bucket leaf tasks under one synthesized summary per value.
-  groupByField: z.string().optional().describe('Field to group leaf tasks by (synthesized summary rows)'),
+  groupByField: z.string()
+    .superRefine(groupByFieldCheck('gantt'))
+    .optional()
+    .describe(
+      'Field to group leaf tasks by (synthesized summary rows). NO leading or trailing whitespace: '
+      + 'the group accessor reads this name off every task verbatim, so a padded spelling drops '
+      + 'every task into one ungrouped bucket.',
+    ),
   // Resource / workload view.
   resourceView: z.boolean().optional().describe('Render a per-resource workload histogram instead of the timeline'),
   assigneeField: z.string().optional().describe('Resource field to bucket load by (resource view)'),
@@ -1622,7 +1745,19 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  *
  * Closed (strict) from the start: the map renderer's read set is itself closed
  * — it validates `schema.map` against a local zod schema with exactly these
- * keys, so an extra key here would be dropped there. The gantt / tree blocks
+ * keys, so an extra key here would be dropped there. That parity was one key
+ * SHORT until the `style` row below landed: the renderer's own
+ * `ObjectMapConfigSchema` declares `style` and `getMapConfig` reads it
+ * (`schema.map?.style`) while this block did not declare it, so strictness here
+ * refused a style URL the renderer honours — an author could not declare a map
+ * style through this face at all (#18406, director decision batch #153 item 4).
+ * The two key sets match again. Measured at the `.objectui-sha` pin `53ded82b`:
+ * `packages/types/src/zod/objectql.zod.ts:562` declares the eight keys,
+ * `packages/plugin-map/src/ObjectMap.tsx:365` reads
+ * `schema.mapStyle || schema.map?.style`, and objectui's own
+ * `content/docs/plugins/plugin-map.mdx:131` documents `style` in the block —
+ * so the divergence was against the documented surface this docblock cites, not
+ * merely against the code. The gantt / tree blocks
  * above used to be this file's two `.passthrough()` exceptions (renderer-ahead
  * knobs); #15469 closed both, so every view config block here now refuses an
  * unknown key the same way. Strict means a misspelling is a loud parse error
@@ -1639,6 +1774,7 @@ export const ListMapConfigSchema = lazySchema(() => strictObject({
   descriptionField: z.string().optional().describe('Field displayed as the marker description'),
   zoom: z.number().min(1).max(20).optional().describe('Initial zoom level (1-20). Omit to let the renderer fit the camera to the queried records'),
   center: z.tuple([z.number(), z.number()]).optional().describe('Initial camera center as [latitude, longitude]. Omit to let the renderer fit the camera to the queried records'),
+  style: z.string().optional().describe('Map style URL — the MapLibre style document the renderer loads in place of the public demo tiles. The component-level `mapStyle` is read FIRST and wins when both are present; this is NOT the inline CSS `style` record a component node carries'),
 }).describe('Map view configuration'));
 
 /**
@@ -1655,6 +1791,36 @@ export const NavigationModeSchema = lazySchema(() => z.enum([
   'none'        // No navigation (read-only list)
 ]));
 
+// [#16885] `navigation.view` retirement prescription — director decision batch
+// #126 item 4 (maintainer ruling 2026-09-13, option B: retire). Declared with
+// `//` on purpose: build-docs takes a file's first JSDoc per exported symbol,
+// and this constant needs no doc page (the `LIST_VIEW_EXPORT_PDF_RETIRED`
+// placement note in this same file).
+//
+// The key promised "the form view to use for details" and nothing from spec to
+// console ever resolved a view BY NAME. Its one read in the shipped console put
+// the value in the second argument of `onNavigate` — the slot that otherwise
+// carries the navigation-MODE token — so an authored name did not select a
+// view, it SUBSTITUTED for the mode, and a consumer reading that argument
+// against its closed `edit`/`view` vocabulary matched neither branch. Declared,
+// consumed, and wrong: the one state that teaches an author something false.
+//
+// ⛔ No `os migrate meta` sentence: the house sentence is owed only where an
+// ADR-0087 conversion covers the surface (`shared/retired-key.ts` module
+// docblock). This retirement's ADR-0087 disposition is a D3 SEMANTIC entry
+// (`list-view-navigation-view-retired`) — an author who wrote the key wanted a
+// named detail layout, and stripping it mechanically would drop that intent
+// without telling anyone which list view lost it.
+const NAVIGATION_VIEW_RETIRED =
+  '`view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) '
+  + '— it named the form view to open for a record detail, and no layer resolved a view by that '
+  + 'name: the value was passed straight into the navigation-MODE argument of the console\'s '
+  + '`onNavigate`, where anything other than `edit` or `view` matched no branch, so the key '
+  + 'selected nothing and could silently deaden the row click. Delete the key; to choose what '
+  + 'opens for a record, assign a `record` page to the object and let `isDefault` pick the one '
+  + 'that opens — page assignment is the machinery that resolves a detail layout, and a list '
+  + 'view\'s navigation block only decides HOW the detail is surfaced (`mode`, `size`).';
+
 /**
  * Navigation Configuration Schema
  */
@@ -1663,10 +1829,15 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
   history: VIEW_HISTORY,
 }, {
   mode: NavigationModeSchema.default('page'),
-  
-  /** Target View Config */
-  view: z.string().optional().describe('Name of the form view to use for details (e.g. "summary_view", "edit_form")'),
-  
+
+  /**
+   * [#16885] RETIRED — see {@link NAVIGATION_VIEW_RETIRED} above the schema.
+   * The tombstone stays in the shape on purpose: `tsc` types the key `never`
+   * and a value reaching a parse raises the prescription instead of a bare
+   * unrecognized-key report.
+   */
+  view: retiredKey(NAVIGATION_VIEW_RETIRED),
+
   /** Interaction Triggers */
   preventNavigation: z.boolean().default(false).describe('Disable standard navigation entirely'),
   openNewTab: z.boolean().default(false).describe('Force open in new tab (applies to page mode)'),
@@ -2607,12 +2778,19 @@ const FormFieldBaseSchema = lazySchema(() => {
   immutable: z.boolean().optional().describe('Editable on create, locked once the record exists (e.g. machine names).'),
   required: z.boolean().optional().describe('Required override'),
   hidden: z.boolean().optional().describe('Hidden override'),
-  colSpan: z.number().int().min(1).max(4).optional().describe('[legacy — prefer `span`] Absolute column span (1-4). Fragile when the column count is derived per surface (mobile 1 / modal 2 / page 3-4): a fixed span only lines up at the width the author imagined. The renderer clamps it to the current column count. Prefer `span`.'),
+  colSpan: z.number().int().min(1).max(4).optional().describe("Absolute column span (1-4). The renderer clamps it to the form grid's current column count, so the cell starts at a real column boundary at every surface width and never overflows (`colSpan: 4` in a 3-column grid renders as 3); a `colSpan` within the column count renders as authored, and `colSpan: 1` emits no span class at all."),
   /**
-   * [#2578] Relative field width — decoupled from the (often auto-derived)
-   * column count, so it stays correct at 1/2/3/4 columns.
+   * [#2578] Relative field width. 'full' resolves to the form grid's full
+   * column count (`plugin-form` `resolveColSpan`); which container-query tiers
+   * receive the span class is the form renderer's, not this key's.
+   * At the `.objectui-sha` pin `53ded82bf7` the renderer emits the widest
+   * tier's class only, so at intermediate widths the field takes a single
+   * cell, not the row (objectstack#17328: one cell of two at 720px). objectui#9253 (objectui
+   * `bd09957380`, 2026-09-12, ahead of that pin) emits one clamped class per
+   * multi-column tier, making 'full' the whole row at every multi-column tier
+   * — re-read this block at the pin bump that absorbs it.
    */
-  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count (wide widgets like textarea/richtext/json/file/subform take the whole row). 'full': whole row at any column count. Prefer this over the absolute `colSpan`."),
+  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count (wide widgets like textarea/richtext/json/file/subform take the whole row). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at the `.objectui-sha` pin `53ded82bf7` only the widest tier's class is emitted (`@2xl:col-span-3` for a 3-column grid), so at intermediate widths the field took a single cell, not the row (one of two at the 720px modal width; measured in Chromium at viewport widths 390, 720 and 1700)."),
 
   /** Custom widget override — only needed when auto-inference is insufficient */
   widget: z.string().optional().describe('Custom widget/component name (overrides type-based inference)'),

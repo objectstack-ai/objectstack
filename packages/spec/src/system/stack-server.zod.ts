@@ -68,39 +68,26 @@ import { strictObject } from '../shared/strict-object';
 import { RateLimitConfigSchema } from '../shared/http.zod';
 
 /**
- * `server.security.rateLimit` — the shared {@link RateLimitConfigSchema} shape,
- * closed against unknown keys for this authoring surface.
+ * `server.security.rateLimit` — the shared {@link RateLimitConfigSchema}, plus
+ * the two bounds this surface refuses.
  *
- * The SHAPE is reused verbatim (`RateLimitConfigSchema.shape`) rather than
- * retyped, so there is no fourth rate-limit shape in the repo and no drift to
- * police — #4686 opened on there already being three. What is added is
- * strictness: this key is new, so it joins the #4001 ratchet at birth instead of
- * being tightened later, and a misspelled budget (`maxRequest`, `window`) is
- * rejected at parse rather than silently defaulted to 100 req/min.
+ * The shape is reused verbatim rather than retyped, so there is no fourth
+ * rate-limit shape in the repo and no drift to police — #4686 opened on there
+ * already being three.
+ *
+ * ⚠️ **It reuses the shared schema, not the shared schema's `.shape`, and that
+ * is the whole of this declaration.** Building `strictObject(…,
+ * RateLimitConfigSchema.shape)` here is what put ONE declaration in front of TWO
+ * emitted defs — this closed one and `shared/RateLimitConfig`, which was a plain
+ * open `z.object` — so the `guidance` entries below were delivered on
+ * `server.security.rateLimit` and silently dropped on every bare mount of the
+ * same shape. The strictness and the tables moved to the shared schema
+ * (`shared/http.zod.ts`), where both defs inherit them; declaring a SECOND
+ * `strictObject` over the same shape object would restore the two-declaration
+ * ambiguity in the other direction, where the declaration match resolves to
+ * neither. What is left here is what is genuinely server-only: the bounds.
  */
-export const ServerRateLimitConfigSchema = lazySchema(() => strictObject(
-  {
-    surface: 'server.security.rateLimit',
-    history:
-      'This key is new in v17 and strict from birth — an unknown key here was never accepted.',
-    aliases: {
-      window: 'windowMs',
-      windowSeconds: 'windowMs',
-      max: 'maxRequests',
-      maxRequest: 'maxRequests',
-      limit: 'maxRequests',
-    },
-    guidance: {
-      keyBy:
-        'The rate-limit key is not authorable. It is the resolved principal, falling back to the caller IP for '
-        + 'anonymous traffic; whether the IP is read from forwarded headers is decided by `server.trustProxy`.',
-      store:
-        'The counter store is not authorable. Counters live in the kernel `cache` service when one is registered '
-        + '(ADR-0069 D2) and degrade to a per-process store otherwise, announced once at boot.',
-    },
-  },
-  RateLimitConfigSchema.shape,
-).superRefine((value, ctx) => {
+export const ServerRateLimitConfigSchema = lazySchema(() => RateLimitConfigSchema.superRefine((value, ctx) => {
   // The shared shape declares `.int()` but no lower bound, so `0` and negatives
   // parse. They are not budgets: `maxRequests: 0` rejects every request
   // including your own health checks, and either zero makes the derived refill

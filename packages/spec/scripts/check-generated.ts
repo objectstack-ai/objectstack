@@ -347,14 +347,18 @@ const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
 ];
 
 /**
- * Source audits that CANNOT RUN from this repository at all, because the input
- * they compare against does not exist here and cannot be produced here.
+ * Source audits THIS AGGREGATE cannot run, because each needs an input handed to
+ * it on the command line and this aggregate hands none over. That, and only that,
+ * is the claim — ⛔ NOT that the input is unavailable here: for the entry below it
+ * is TRACKED in this repo and CI feeds it to the gate on every PR (that entry's
+ * `why` carries the reading).
  *
  * A separate bucket from `NO_GENERATOR` because the two say different things to a
- * reader, and #4690 is what conflating them cost. `NO_GENERATOR` means "runnable,
- * deliberately not run in this aggregate — run it yourself and it will answer".
- * This one means "you cannot run it here at all, and here is the input it wants
- * and who produces it". Sitting in the first list, `check:react-declaration-parity`
+ * reader, and #4690 is what conflating them cost. `NO_GENERATOR` means "runnable
+ * as it stands, deliberately not run in this aggregate — run it yourself and it
+ * will answer". This one means "running it takes an input this aggregate does not
+ * pass, so here is that input and who does pass it" — still runnable by hand, and
+ * the `why` says with what. Sitting in the first list, `check:react-declaration-parity`
  * read as the former for the entire time it was the latter: it was wired into no
  * workflow, and a manual run without `MANIFEST` printed a `⚠` and exited 0, so no
  * path existed on which the gate could go red. Whoever read "deliberately not run"
@@ -380,10 +384,20 @@ const EXTERNAL_INPUT_REQUIRED: ReadonlyArray<{
     runBy: 'scripts/gen-sdui-manifest.sh',
     why:
       'compares the spec schema props against the registry-declared inputs (two declarations, no renderer: #4472). ' +
-      'The registry is a browser app, so its manifest exists only after objectui is built at .objectui-sha and ' +
-      'enumerated in a real browser — nothing in this repo (console dist is gitignored, the published console ships ' +
-      'no sdui.manifest.json) can hand it one. `pnpm sdui:manifest` produces it and runs the ratchet; without it the ' +
-      'gate now exits 1 rather than skipping (#4690)',
+      'It reads its manifest from MANIFEST=<path> and THIS AGGREGATE PASSES NONE — that, and only that, is what ' +
+      '"cannot run here" means for this entry. The input is NOT unavailable in the repo: since #13446 a dump is ' +
+      'TRACKED at the repo root as sdui.manifest.json, and lint.yml runs the gate --strict against it on every PR ' +
+      '(MANIFEST="$PWD/sdui.manifest.json"), so the gate is neither unrun nor unrunnable — it is unrun BY THIS ' +
+      'AGGREGATE. Nor does producing one require a browser: scripts/gen-sdui-manifest-node.mjs regenerates the ' +
+      'tracked artefact under plain Node from the PUBLISHED @object-ui/* packages (the browser-only claim was ' +
+      'measured false on 2026-08-29, re-measured 2026-08-30 against published 17.6.0, and reproduced ' +
+      'byte-identically in review of #18608), and scripts/check-sdui-manifest.mjs holds artefact, record and pin ' +
+      'together. `pnpm sdui:manifest` (runBy) is the other producer, and it does NOT build objectui: it REQUIRES ' +
+      'a checkout already vendored at .cache/objectui-<sha> by `pnpm objectui:build`, exits 1 telling you to run ' +
+      'that first (gen-sdui-manifest.sh 507-516), then serves that tree with a vite dev server and dumps the ' +
+      'registry from a real browser, running this ratchet against THAT. ⚠️ The two producers read two ' +
+      'different registries — published packages vs the pinned checkout\'s source — and do not agree today (#17735). ' +
+      'Without a MANIFEST the gate exits 1 rather than skipping (#4690)',
   },
 ];
 
@@ -481,7 +495,7 @@ function reconcileLedger(scripts: Record<string, string>): void {
     if (name.startsWith('check:') && !declaredChecks.has(name)) {
       problems.push(`  \`${name}\` exists in package.json but is in neither GATED nor NO_GENERATOR (nor EXTERNAL_INPUT_REQUIRED).\n` +
         `    Classify it: does it compare a checked-in artifact against a generator, audit source,\n` +
-        `    or audit source against an input this repo cannot produce (name where it DOES run)?`);
+        `    or audit source against an input THIS AGGREGATE does not pass (name who does pass it)?`);
     }
     if (name.startsWith('gen:') && !declaredGens.has(name)) {
       problems.push(`  \`${name}\` exists in package.json but no GATED entry names it and it is not in UNGATED_GENERATORS.\n` +
@@ -646,10 +660,12 @@ for (const entry of GATED) {
 console.log(`\nNot run here (${NO_GENERATOR.length} source audits with no artifact to regenerate): ` +
   NO_GENERATOR.map((n) => n.check).join(', '));
 // Narrowing is never silent, part three — and this one is a different sentence:
-// "deliberately not run" invites the reader to run it, which for these is not an
-// option from this repo. Say what the missing input is and who supplies it.
+// "deliberately not run" invites the reader to run it AS IT STANDS, which for
+// these does not work: each needs an input on the command line that this
+// aggregate does not pass. Say what that input is and who does pass it, so the
+// reader can run it by hand — for the entry below the input is tracked here.
 if (EXTERNAL_INPUT_REQUIRED.length) {
-  console.log(`Cannot run here (${EXTERNAL_INPUT_REQUIRED.length} source audit(s) whose input this repo cannot produce):`);
+  console.log(`Needs an input this aggregate does not pass (${EXTERNAL_INPUT_REQUIRED.length} source audit(s)):`);
   for (const e of EXTERNAL_INPUT_REQUIRED) {
     console.log(`  ${e.check} — needs ${e.input}\n    runs in ${e.runBy}; ${e.why}`);
   }

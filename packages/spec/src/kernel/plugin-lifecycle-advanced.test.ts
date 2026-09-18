@@ -424,3 +424,36 @@ describe('plugin lifecycle durations carry their unit (#17780, #14478)', () => {
     );
   });
 });
+// #18124 — step 3 of ruling A on #18115. `HotReloadConfig.shutdownTimeout` takes
+// the TYPE route rather than the rename route, and that is the disposition this
+// def already recorded: the #15676 wave that renamed its siblings to `intervalMs`
+// / `timeoutMs` / `debounceDelayMs` wrote down that this key was "deliberately NOT
+// renamed with them". Measured unit: `packages/core/src/hot-reload.ts` is the only
+// in-repo reader and treats it as a millisecond budget (its own test suite drives
+// 120_000, 1000 and 50 through it).
+//
+// `DurationMs` is `z.number().int().nonnegative()` and this key declared
+// `z.number().int().min(0)`, so the accepted set is UNCHANGED — the pins below
+// are about what the declaration now refuses loudly at the authoring site.
+describe('HotReloadConfig.shutdownTimeout declares milliseconds (#18124)', () => {
+  it('refuses a fractional millisecond count', () => {
+    const result = HotReloadConfigSchema.safeParse({ shutdownTimeout: 30000.5 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'shutdownTimeout');
+    expect(issue).toBeDefined();
+    expect(issue!.code).toBe('invalid_type');
+  });
+
+  it('refuses a negative span', () => {
+    const result = HotReloadConfigSchema.safeParse({ shutdownTimeout: -1 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'shutdownTimeout');
+    expect(issue).toBeDefined();
+    expect(issue!.code).toBe('too_small');
+  });
+
+  it('keeps the accepted set it already had — the 30000 default and the zero floor', () => {
+    expect(HotReloadConfigSchema.parse({}).shutdownTimeout).toBe(30000);
+    expect(HotReloadConfigSchema.parse({ shutdownTimeout: 0 }).shutdownTimeout).toBe(0);
+  });
+});

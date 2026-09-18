@@ -14,6 +14,11 @@ import { stripComments } from '../../../scripts/js-comment-mask.mjs';
 import stack from '../objectstack.config.js';
 import { PLATFORM_CAPABILITY_NAMES } from '@objectstack/spec/security';
 import { FILE_REFERENCE_TYPES, valueSchemaFor } from '@objectstack/spec/data';
+import { VIEW_ROW_COLOR_WITHOUT_COLORS } from '@objectstack/spec/kernel';
+// The SHIPPED ADR-0078 completeness gate, never a re-derivation of it —
+// `vitest.config.ts` aliases `@objectstack/lint` to its `src/`, so the verdict
+// is about the rule in this checkout rather than about `packages/lint/dist`.
+import { validateFunctionalCompleteness } from '@objectstack/lint';
 // The job handler's argument type, from the package that BUILDS it
 // (`AppPlugin`) — not a local re-description of it. A fake context typed to a
 // hand-written approximation is how a double drifts looser than the contract it
@@ -741,3 +746,90 @@ describe('sharing rules target an object under record-sharing enforcement (#9237
     ).toEqual([]);
   });
 });
+
+/**
+ * #15100 — the task Grid view's `rowColor` named a field and declared no
+ * `colors` map, so objectui `plugin-grid`'s `useRowColor` returned before it
+ * read a record and every row kept the default background, while the metadata
+ * parsed, validated and published clean. The same class as every guard above:
+ * a declaration the platform accepts at authoring time and then does not
+ * honour, announced only by an advisory line nobody reads.
+ *
+ * Two arms, because the wiring has two independent ways to be inert and only
+ * the first has a shipped rule:
+ *
+ *   ① NO MAP — the author-time diagnostic `view/row-color-without-colors`
+ *     names it. WARNING severity, so `os validate` prints it and still exits
+ *     0; a pin asserting "validate succeeds" would have passed on the broken
+ *     tree, so this asserts on the FINDINGS.
+ *
+ *   ② A MAP THE RENDERER CANNOT RESOLVE — invisible to ①. `colorToClass`
+ *     hands a value that already starts with `bg-` through untouched,
+ *     otherwise looks it up in its own `COLOR_TO_CLASS` vocabulary of colour
+ *     names, and returns `undefined` for anything else; it never fabricates a
+ *     class string, because Tailwind v4 has no runtime and only complete class
+ *     literals present in scanned source reach the compiled stylesheet. So a
+ *     hex — the spelling the `priority` field uses for its own option colours,
+ *     and the obvious thing to copy — clears the `!config.colors` guard,
+ *     silences ①, and still colours no row.
+ */
+describe("the task Grid's rowColor is wired all the way to a colour (#15100)", () => {
+  it('reports no `view/row-color-without-colors` finding anywhere in this stack', () => {
+    const offenders = validateFunctionalCompleteness(stack)
+      .filter((f) => f.rule === VIEW_ROW_COLOR_WITHOUT_COLORS)
+      .map((f) => `${f.where} (${f.path})`);
+    expect(
+      offenders,
+      `\`rowColor\` block(s) with no \`colors\` map — the row-className resolver `
+        + `returns before it reads a record: ${offenders.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  it('spells every authored colour as a value the renderer can resolve', () => {
+    // A colour NAME (`red`) or a complete Tailwind class (`bg-red-200`). The
+    // vocabulary itself is not transcribed here: a hand-copy of another repo's
+    // 23-entry map is a second opinion that drifts, and the shape rule is what
+    // separates a resolvable value from a hex.
+    const RESOLVABLE = /^(?:[a-z]+|bg-[a-z0-9/[\]().,%#-]+)$/;
+    const offenders: string[] = [];
+    for (const { path, block } of rowColorBlocks(stack)) {
+      for (const [value, colour] of Object.entries(block.colors ?? {})) {
+        if (typeof colour !== 'string' || !RESOLVABLE.test(colour)) {
+          offenders.push(`${path}.colors.${value} = ${JSON.stringify(colour)}`);
+        }
+      }
+    }
+    expect(
+      offenders,
+      `authored row colour(s) \`colorToClass\` resolves to \`undefined\` — the block passes `
+        + `the completeness rule above and still colours no row: ${offenders.join(', ')}`,
+    ).toEqual([]);
+  });
+});
+
+/** Every `rowColor` block anywhere in this app's stack, with where it sits. */
+function rowColorBlocks(
+  root: unknown,
+): Array<{ path: string; block: { colors?: Record<string, unknown> } }> {
+  const out: Array<{ path: string; block: { colors?: Record<string, unknown> } }> = [];
+  const seen = new WeakSet<object>();
+  const walk = (node: unknown, path: string): void => {
+    if (!node || typeof node !== 'object') return;
+    if (seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      node.forEach((child, i) => walk(child, `${path}[${i}]`));
+      return;
+    }
+    for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
+      // The BOOLEAN toolbar toggle `userActions.rowColor` shares this key name
+      // and is a different thing entirely — only an object is the config.
+      if (key === 'rowColor' && child && typeof child === 'object' && !Array.isArray(child)) {
+        out.push({ path: `${path}.rowColor`, block: child as { colors?: Record<string, unknown> } });
+      }
+      walk(child, `${path}.${key}`);
+    }
+  };
+  walk(root, '$');
+  return out;
+}

@@ -475,17 +475,29 @@ describe('[#11588] #5437/#5582 and #5423 are exactly where they were', () => {
 });
 
 // ---------------------------------------------------------------------------
-// §7 MEASURED AND NOT REPAIRED — recorded so it is not rediscovered as new
+// §7 INVERTED by #17273 — the bound this section recorded is now CLOSED
+//
+// §7 was written as MEASURED AND NOT REPAIRED: a crashed body carrying a
+// declared 4xx answered `409` + the QuickJS debug wrapper through the route
+// door while `mapDataError` sanitised the same error to a `500`. #11588 stated
+// why it stopped there — "making the two agree means moving the STATUS the
+// passthrough decided, which is a contract question and not this card's" — and
+// #15071 widened the population without being able to take that question
+// either, recording it a second time as an ACCEPTED DIVERGENCE one file over
+// (`error-response-structured-arm-door-parity.test.ts` §4).
+//
+// #17273 is the card that took it: `resolveErrorResponse` now asks the same
+// `isSandboxCrash` gate #15071 put above `classifyDataError`'s arms, before its
+// declared-status passthrough, so the two doors answer one crash one way.
+//
+// ⛔ INVERTED rather than DELETED, the discipline §8b above already applies: a
+// pin that records a measured defect is the only evidence the defect existed,
+// and the only thing that would notice it coming back. What changes is the
+// verdict and the assertions, never the section's existence.
 // ---------------------------------------------------------------------------
 
-describe('[#11588] the crash-with-a-declared-4xx divergence this card does NOT close', () => {
-    it('a CRASHED body carrying a declared 4xx still answers differently at the two doors', () => {
-        // `sandboxBusinessMessage` declines a script fault (#7543), so the
-        // passthrough's answer here is byte-identical to before this card —
-        // deliberately. The unwrap door sanitises the same error to a 500;
-        // making the two agree means moving the STATUS the passthrough
-        // decided, which is a contract question and not this card's. Green on
-        // both sides of the fix: it documents the gap, it does not bless it.
+describe('[#11588 → #17273] the crash-with-a-declared-4xx divergence, now CLOSED', () => {
+    it('a CRASHED body carrying a declared 4xx answers the same sanitised fault at both doors', () => {
         const crash = () => sandboxRefusal('x', { status: 409 });
         const withCrash = () => {
             const e = crash();
@@ -493,13 +505,30 @@ describe('[#11588] the crash-with-a-declared-4xx divergence this card does NOT c
             return e;
         };
 
+        // The route door. It read `409` and `"hook 'guard' threw: Error: x"`
+        // until #17273 — this assertion IS the inversion.
         const viaRoute = throughRouteDoor(withCrash());
-        expect(viaRoute.status).toBe(409);
-        expect(viaRoute.body.error).toBe("hook 'guard' threw: Error: x");
+        expect(viaRoute.status).toBe(500);
+        expect(viaRoute.body.error).toBe(INTERNAL_ERROR_MESSAGE);
+        expect(String(viaRoute.body.error)).not.toContain('threw:');
 
+        // The `/data` door, unmoved since #7543/#15071 — the control that says
+        // the flip above is the route door meeting it, not both doors sliding.
         const viaData = mapDataError(withCrash());
         expect(viaData.status).toBe(500);
         expect(viaData.body.error).toBe(INTERNAL_ERROR_MESSAGE);
+
+        expect(viaRoute.body).toEqual(viaData.body);
+    });
+
+    it('#17273 negative control: the same declared 4xx WITHOUT a crash keeps the passthrough, both status and sentence', () => {
+        // One `innerMessage` apart from the case above. A refusal is not a
+        // crash, and #15071's ruling fences it explicitly — if this goes green
+        // by answering 500, the fix above deleted the refusal surface instead
+        // of moving the crash.
+        const refusal = throughRouteDoor(sandboxRefusal('x', { status: 409 }));
+        expect(refusal.status).toBe(409);
+        expect(refusal.body.error).toBe('x');
     });
 });
 

@@ -519,6 +519,162 @@ export function checkDashboardWidgetStageOrder(
 }
 
 /**
+ * The widget `type`s that render exactly ONE number — the metric FAMILY.
+ *
+ * Read off `ChartTypeSchema`'s own "Performance (single value)" group, which
+ * is the taxonomy's word for the same set: `metric`/`kpi` render a number and
+ * `gauge`/`solid-gauge`/`bullet` "render a value today and gain a dial when a
+ * gauge renderer lands". A dial is still one value; nothing in the group has a
+ * second mark to put a second measure on.
+ *
+ * Declared here beside the check rather than exported from `chart.zod.ts`: the
+ * taxonomy groups by RENDERER FAMILY in a comment, and a comment is not a set.
+ * Widening it later (a real gauge that draws a target band, say) is a one-line
+ * edit here plus a relaxation of this rule — the direction that costs an author
+ * nothing.
+ */
+const SINGLE_MEASURE_WIDGET_TYPES = ['metric', 'kpi', 'gauge', 'solid-gauge', 'bullet'] as const;
+
+/**
+ * objectui#8894 ruling D — a metric-family widget declares EXACTLY ONE measure.
+ *
+ * ## What was wrong
+ *
+ * `values` is `z.array(z.string()).min(1)` with no upper bound, so a `metric`
+ * tile could declare three measures. All three were selected, the analytics
+ * query ran all three, and the tile rendered `values[0]`: the other two were
+ * queried and thrown away. That is the declared≠delivered shape ADR-0049 exists
+ * to end, and it had been kept alive by a runtime warning — objectui#8887
+ * landed a sub-caption saying the extra measures are not rendered, which makes
+ * the tile HONEST about dropping them without making the document legal.
+ *
+ * The maintainer's standing ruling on this class is 「协议不正确的应该先修改协议。」
+ * and objectui#8894 decision batch #119 item 4 (2026-09-12) took option **D**
+ * on this instance: judge the protocol wrong. A single-value card is one
+ * measure on every mainstream dashboard product; several numbers is a different
+ * visual, not a variant of this one.
+ *
+ * ## Why an object-level check and not a per-`type` union arm — MEASURED
+ *
+ * The card left the spelling to this seat. Both spellings refuse the same
+ * document; they differ in what the author is told about EVERY OTHER mistake.
+ * Measured on this tree, eight widget bodies through
+ * `z.union([metricArm, otherArm])` (arms built with `.safeExtend()`, since zod
+ * 4.4.3 throws `Cannot overwrite keys on object schemas containing refinements`
+ * on a plain `.extend()` that redeclares a key) versus one more `.superRefine`
+ * on this strict object:
+ *
+ * | body | union arms | this spelling |
+ * |---|---|---|
+ * | `bogusProp` on a widget | `(root) invalid_union: Invalid input` | the strict-object refusal, naming the key + the history sentence |
+ * | `categoryField`/`valueField` | `(root) invalid_union: Invalid input` | the {@link WIDGET_GUIDANCE_SETS} ADR-0021 prescription |
+ * | `titel` | `(root) invalid_union: Invalid input` | `Did you mean \`titel\` → \`title\`?` |
+ * | `type: 'ziggurat'` | `(root) invalid_union: Invalid input` | `invalid_value` at `type`, listing all twenty |
+ *
+ * Four of eight bodies lose their whole diagnostic to one bare `Invalid input`.
+ * That is not a new observation on this file — the `compareTo` docblock above
+ * records the same measurement for the same reason (#5014: "a union collapses
+ * into one bare `Invalid input` on the wire … A plain strict object's errors
+ * reach the author"), and `view-union-diagnostics.test.ts` is the whole
+ * apparatus objectui needed because `ViewMetadataSchema` IS a union. Adding a
+ * second union to this file would be commissioning that apparatus again to buy
+ * a refusal the object-level form gives for free.
+ *
+ * So: one more check on the same door, attached by identifier, exactly as
+ * {@link checkDashboardWidgetStageOrder} is.
+ *
+ * ## What the refusal says
+ *
+ * It names the widget (its `id` and its `type`), states the rule in the ruling's
+ * own words — one measure per tile, make N tiles for N measures — and names the
+ * shapes that DO render several numbers, so "I really do want three" has an
+ * answer that is not "delete two".
+ *
+ * ## What this check deliberately does NOT reach
+ *
+ * Five shapes, named so the gate is not read as complete:
+ *
+ *  1. **The EMPTY array.** `values: []` is refused by the field's own `.min(1)`
+ *     with `too_small`, and this check returns on it rather than adding a
+ *     second issue about a tile with no measure at all. "Exactly one" is the
+ *     CONJUNCTION of that `.min(1)` and this upper bound, not this check alone
+ *     — a mirror that re-attaches this export onto a shape whose `values`
+ *     carries no `.min(1)` gets the upper bound only.
+ *  2. **A widget that declares no `type`.** `type` carries
+ *     `.default(WIDGET_TYPE_DEFAULT)`, which is `metric` — a member of this
+ *     family — and zod applies defaults BEFORE object-level checks, so an
+ *     omitted `type` arrives here as `metric` and is refused like an authored
+ *     one. The verdict is right either way; the message carries an extra
+ *     sentence in that ambiguous case rather than claiming the author wrote it.
+ *  3. **A `type` outside `ChartTypeSchema`.** zod treats that `invalid_value`
+ *     as aborting and skips every object-level check for the input, so
+ *     `type: 'ziggurat'` plus four measures reports the type refusal alone.
+ *  4. **Whether the measures EXIST in the bound dataset.** Still a fact about
+ *     the dataset, not about the widget, and unreachable from this schema — a
+ *     tile naming one measure nobody declared parses exactly as before.
+ *  5. **objectui's CLIENT-SIDE authoring door**, a `.shape` mirror that runs no
+ *     object-level check of this schema's: at the `.objectui-sha` pin,
+ *     `@object-ui/types` builds its own `DashboardWidgetSchema` from
+ *     `specFieldsExcept(SpecDashboardWidgetSchema.shape, …).extend({…}).strict()`
+ *     and re-attaches none of this file's exported checks. Until it imports and
+ *     chains this one, the dashboard EDITOR keeps accepting three measures on a
+ *     `metric` and the author meets the refusal at PUBLISH. That mirror also
+ *     redeclares `type` with no default, so a typeless widget reaches a
+ *     re-attached check as `undefined`; this function defaults it itself for
+ *     exactly that caller.
+ */
+export function checkDashboardWidgetMetricMeasureArity(
+  widget: { id?: unknown; type?: unknown; values?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const values = widget.values;
+  // Not an array, or empty, or already the one measure the family takes: the
+  // field's own `z.array(z.string()).min(1)` owns both of the first two
+  // verdicts and says them better (`too_small` at `values`), and the third is
+  // the legal document. See non-coverage 1.
+  if (!Array.isArray(values) || values.length <= 1) return;
+
+  // `?? WIDGET_TYPE_DEFAULT` is UNREACHABLE through this schema's own door —
+  // zod applies `type`'s default before object-level checks. It is here for the
+  // mirror that re-attaches this export onto a shape whose `type` carries no
+  // default (non-coverage 5), so the export never refuses LESS than the door it
+  // is exported from; `object-refinement-check-exports.test.ts` pins that
+  // equivalence on the raw fixture.
+  const type = widget.type ?? WIDGET_TYPE_DEFAULT;
+  if (typeof type !== 'string') return;
+  if (!(SINGLE_MEASURE_WIDGET_TYPES as readonly string[]).includes(type)) return;
+
+  // Same ambiguity the stage-order check carries, and the same repair: a widget
+  // that declared NO type arrives here as `metric` and cannot be told apart
+  // from one that wrote it, so the extra sentence is added only in that case.
+  const defaultedTypeNote = type === WIDGET_TYPE_DEFAULT
+    ? ' (`' + WIDGET_TYPE_DEFAULT + '` is also what a widget that declares no `type` at all '
+      + 'resolves to — if you meant a chart, the `type` key is missing rather than wrong.)'
+    : '';
+  const widgetName = typeof widget.id === 'string' && widget.id.length > 0
+    ? '`' + widget.id + '`'
+    : 'this widget';
+
+  ctx.addIssue({
+    code: 'custom',
+    path: ['values'],
+    message:
+      'Widget ' + widgetName + ' declares ' + values.length + ' measures on `type: '
+      + `'${type}'`
+      + '`, and a metric-family widget ('
+      + SINGLE_MEASURE_WIDGET_TYPES.map((t) => '`' + t + '`').join(' / ')
+      + ') renders exactly ONE number: one measure per tile, so make N tiles for N '
+      + 'measures. Every measure after `values[0]` was queried and then dropped on the '
+      + 'floor by the renderer — keep the one this tile is for, and give each of the '
+      + 'others its own widget with its own `id` (and `layout`, if you pin positions). '
+      + 'If you meant several numbers in ONE widget, that is a different visual: '
+      + "`type: 'table'` renders a row of measures, and the chart families "
+      + "(`bar` / `line` / `area` / `combo`) render one mark per measure."
+      + defaultedTypeNote,
+  });
+}
+
+/**
  * Dashboard Widget Schema
  * A single component on the dashboard grid.
  *
@@ -535,22 +691,22 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
   guidanceSets: WIDGET_GUIDANCE_SETS,
 }, {
   /** Unique widget identifier (snake_case, used for targetWidgets references) */
-  id: SnakeCaseIdentifierSchema.describe('Unique widget identifier (snake_case)'),
+  id: SnakeCaseIdentifierSchema.describe('Unique widget identifier (snake_case)').meta({ title: 'Widget ID' }),
 
   /** Widget Title */
-  title: I18nLabelSchema.optional().describe('Widget title'),
+  title: I18nLabelSchema.optional().describe('Widget title').meta({ title: 'Title' }),
 
   /** Widget Description (displayed below the title) */
-  description: I18nLabelSchema.optional().describe('Widget description text below the header'),
+  description: I18nLabelSchema.optional().describe('Widget description text below the header').meta({ title: 'Description' }),
   
   /** Visualization Type */
-  type: ChartTypeSchema.default(WIDGET_TYPE_DEFAULT).describe('Visualization type'),
+  type: ChartTypeSchema.default(WIDGET_TYPE_DEFAULT).describe('Visualization type').meta({ title: 'Visualization Type' }),
   
   /** Chart Configuration */
-  chartConfig: ChartConfigSchema.optional().describe('Chart visualization configuration'),
+  chartConfig: ChartConfigSchema.optional().describe('Chart visualization configuration').meta({ title: 'Chart Configuration' }),
 
   /** Color variant for the widget (e.g., KPI card accent color) */
-  colorVariant: WidgetColorVariantSchema.optional().describe('Widget color variant for theming'),
+  colorVariant: WidgetColorVariantSchema.optional().describe('Widget color variant for theming').meta({ title: 'Color Variant' }),
 
   /**
    * Runtime capability gate — widget is hidden when the named object is
@@ -561,13 +717,13 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
    * Set explicitly to the dataset's base object when the widget should be
    * gated on that object's availability.
    */
-  requiresObject: z.string().optional().describe('Hide the widget unless the named object is registered'),
+  requiresObject: z.string().optional().describe('Hide the widget unless the named object is registered').meta({ title: 'Requires Object' }),
 
   /**
    * Runtime capability gate — widget is hidden when the named kernel
    * service is not registered. Mirrors `NavigationItem.requiresService`.
    */
-  requiresService: z.string().optional().describe('Hide the widget unless the named kernel service is registered'),
+  requiresService: z.string().optional().describe('Hide the widget unless the named kernel service is registered').meta({ title: 'Requires Service' }),
 
   // `actionUrl` / `actionType` / `actionIcon` REMOVED (#5010, ADR-0049 D2):
   // the three keys described a per-widget header action BUTTON that no renderer
@@ -583,7 +739,7 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
   actionIcon: retiredKey(WIDGET_ACTION_RETIRED('actionIcon')),
 
   /** Presentation-scope filter (MongoDB-style), ANDed into the dataset query as `runtimeFilter`. */
-  filter: FilterConditionSchema.optional().describe('Presentation-scope filter (runtimeFilter)'),
+  filter: FilterConditionSchema.optional().describe('Presentation-scope filter (runtimeFilter)').meta({ title: 'Filter' }),
 
   /**
    * Period-over-period comparison window.
@@ -689,7 +845,7 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
      */
     dimension: z.string().optional()
       .describe('Time dimension to shift; omit when the selection has exactly one dated time dimension'),
-  }).optional().describe('Period-over-period comparison window ({ kind, dimension? })'),
+  }).optional().describe('Period-over-period comparison window ({ kind, dimension? })').meta({ title: 'Compare To' }),
 
   /**
    * ADR-0021 — the semantic-layer `dataset` this widget binds to. The widget
@@ -699,11 +855,22 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
    * author-facing analytics shape (the legacy inline `object` + `categoryField`
    * + `valueField` + `aggregate` query was removed in the single-form cutover).
    */
-  dataset: SnakeCaseIdentifierSchema.describe('Dataset name to bind (ADR-0021)'),
+  dataset: SnakeCaseIdentifierSchema.describe('Dataset name to bind (ADR-0021)').meta({ title: 'Dataset' }),
   /** Dimension names (from the dataset) for X / group / split. */
-  dimensions: z.array(z.string()).optional().describe('Dimension names — X/group/split'),
-  /** Measure names (from the dataset) for the value axis. */
-  values: z.array(z.string()).min(1).describe('Measure names — Y (at least one)'),
+  dimensions: z.array(z.string()).optional().describe('Dimension names — X/group/split').meta({ title: 'Dimensions' }),
+  /**
+   * Measure names (from the dataset) for the value axis.
+   *
+   * At least one, always. For the METRIC FAMILY — `metric` / `kpi` / `gauge` /
+   * `solid-gauge` / `bullet`, and the `metric` default a widget with no `type`
+   * resolves to — exactly one: those types render a single number and dropped
+   * every measure after `values[0]` on the floor, so the second one is now a
+   * parse error rather than a queried-and-discarded column
+   * ({@link checkDashboardWidgetMetricMeasureArity}).
+   */
+  values: z.array(z.string()).min(1)
+    .describe('Measure names — Y (at least one; exactly one on the metric/kpi/gauge/solid-gauge/bullet family)')
+    .meta({ title: 'Values' }),
 
   /**
    * Layout Position (React-Grid-Layout style)
@@ -758,10 +925,10 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
     y: z.number(),
     w: z.number(),
     h: z.number(),
-  }).optional().describe('Grid layout position (auto-flowed when omitted)'),
+  }).optional().describe('Grid layout position (auto-flowed when omitted)').meta({ title: 'Layout' }),
   
   /** Widget specific options (colors, legend, etc.) — see {@link DashboardWidgetOptionsSchema}. */
-  options: DashboardWidgetOptionsSchema.optional().describe('Widget specific configuration'),
+  options: DashboardWidgetOptionsSchema.optional().describe('Widget specific configuration').meta({ title: 'Options' }),
 
   /**
    * Per-widget bindings from a dashboard-level filter (referenced by its
@@ -773,14 +940,15 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
    *   (dateRange: `dateRange.field ?? 'created_at'`)
    */
   filterBindings: z.record(z.string(), z.union([z.string(), z.literal(false)])).optional()
-    .describe("Per-widget dashboard-filter bindings: filter name → this widget's field, or false to opt out"),
+    .describe("Per-widget dashboard-filter bindings: filter name → this widget's field, or false to opt out")
+    .meta({ title: 'Filter Bindings' }),
 
   /**
    * Rule ids of build diagnostics intentionally suppressed on this widget
    * (e.g. `'table-count-only'` when a single-row summary table is deliberate).
    * Consumed by `objectstack build` / `objectstack lint`; no runtime effect.
    */
-  suppressWarnings: z.array(z.string()).optional().describe('Build diagnostic rule ids suppressed on this widget'),
+  suppressWarnings: z.array(z.string()).optional().describe('Build diagnostic rule ids suppressed on this widget').meta({ title: 'Suppress Warnings' }),
 
   // `responsive` REMOVED (#4876): authorable and inert, exactly like the
   // same-named `view.responsive` retired four days earlier (#3896 close-out).
@@ -852,7 +1020,11 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
   // ADR-0049 enforce-or-remove on `options.stageOrder`. Attached by identifier
   // rather than inlined, the way `GlobalFilterSchema` attaches its own check:
   // the exported function IS the rule this door runs.
-  .superRefine(checkDashboardWidgetStageOrder));
+  .superRefine(checkDashboardWidgetStageOrder)
+  // objectui#8894 ruling D — the metric FAMILY takes exactly one measure. Same
+  // idiom, same reason: `values`'s arity is decided by its sibling `type` one
+  // level up, so the rule has to run where both keys are in scope.
+  .superRefine(checkDashboardWidgetMetricMeasureArity));
 
 /**
  * Dashboard date-range presets — the named windows a dashboard date filter may
@@ -1004,7 +1176,7 @@ export const GlobalFilterSchema = lazySchema(() => strictObject({
    * Defaults to `field`. The name `"dateRange"` is reserved for the built-in
    * dashboard date range.
    */
-  name: z.string().optional().describe('Stable filter name (variable key); defaults to field'),
+  name: z.string().optional().describe('Stable filter name (variable key); defaults to field').meta({ title: 'Name' }),
 
   /**
    * Field name to filter on — at the authoring layer it resolves against the
@@ -1028,7 +1200,8 @@ export const GlobalFilterSchema = lazySchema(() => strictObject({
    * dimension without the dataset declaring it, and `widget-dimension-unknown`
    * is what holds that line for authored dashboards.
    */
-  field: z.string().describe('Field name to filter on — at the authoring layer it resolves against the object behind each bound widget\'s dataset (`dataset.object`), not against that dataset\'s declared `dimensions`; enforced by the lint rule `dashboard-filter-field-unknown` (severity error)'),
+  field: z.string().describe('Field name to filter on — at the authoring layer it resolves against the object behind each bound widget\'s dataset (`dataset.object`), not against that dataset\'s declared `dimensions`; enforced by the lint rule `dashboard-filter-field-unknown` (severity error)')
+    .meta({ title: 'Field' }),
 
   /**
    * Source object for i18n label resolution (#7804): when set, this filter's
@@ -1046,13 +1219,14 @@ export const GlobalFilterSchema = lazySchema(() => strictObject({
    * keyed by. `optionsFrom.object` already proves the schema is willing to
    * name an object here — this reuses that same primitive one level up.
    */
-  object: z.string().optional().describe('Object whose `fields.<object>.<field>` translation-bundle entry resolves this filter\'s field label and option labels'),
+  object: z.string().optional().describe('Object whose `fields.<object>.<field>` translation-bundle entry resolves this filter\'s field label and option labels')
+    .meta({ title: 'Object' }),
 
   /** Display label for the filter */
-  label: I18nLabelSchema.optional().describe('Display label for the filter'),
+  label: I18nLabelSchema.optional().describe('Display label for the filter').meta({ title: 'Label' }),
 
   /** Filter input type */
-  type: z.enum(['text', 'select', 'date', 'number', 'lookup']).optional().describe('Filter input type'),
+  type: z.enum(['text', 'select', 'date', 'number', 'lookup']).optional().describe('Filter input type').meta({ title: 'Input Type' }),
 
   /** Static options for select/lookup filters */
   options: z.array(strictObject({
@@ -1062,19 +1236,19 @@ export const GlobalFilterSchema = lazySchema(() => strictObject({
   }, {
     value: z.union([z.string(), z.number(), z.boolean()]).describe('Option value'),
     label: I18nLabelSchema,
-  })).optional().describe('Static filter options'),
+  })).optional().describe('Static filter options').meta({ title: 'Options' }),
 
   /** Dynamic data binding for filter options */
-  optionsFrom: GlobalFilterOptionsFromSchema.optional().describe('Dynamic filter options from object'),
+  optionsFrom: GlobalFilterOptionsFromSchema.optional().describe('Dynamic filter options from object').meta({ title: 'Options From' }),
 
   /** Default filter value */
-  defaultValue: z.union([z.string(), z.number(), z.boolean()]).optional().describe('Default filter value'),
+  defaultValue: z.union([z.string(), z.number(), z.boolean()]).optional().describe('Default filter value').meta({ title: 'Default Value' }),
 
   /** Filter application scope */
-  scope: z.enum(['dashboard', 'widget']).default('dashboard').describe('Filter application scope'),
+  scope: z.enum(['dashboard', 'widget']).default('dashboard').describe('Filter application scope').meta({ title: 'Scope' }),
 
   /** Widget IDs to apply this filter to (when scope is widget) */
-  targetWidgets: z.array(z.string()).optional().describe('Widget IDs to apply this filter to'),
+  targetWidgets: z.array(z.string()).optional().describe('Widget IDs to apply this filter to').meta({ title: 'Target Widgets' }),
 })
   // #4614 — the date `defaultValue` vocabulary check. Attached by identifier,
   // not inlined: the export is the rule a `.shape` mirror re-attaches (#16489),

@@ -71,7 +71,9 @@
  *   check-self-test-workflow-commands 168 script(s) CI runs ship a `--self-test`
  *
  * The missing member was `packages/lint/scripts/check-reference-carrier-shape
- * .mjs`, which `lint.yml` runs with `--self-test` on every pull request. Its
+ * .mjs`, which `lint.yml` then ran with `--self-test` on every pull request (that
+ * gate has since been retired by maintainer ruling, and the package-local lane
+ * has no live member today — the mechanism below is unchanged by that). Its
  * output was in no sweep — and NOTHING said so, because every `#4690` refusal
  * below fires on an EMPTY population or an empty candidate set. A population
  * that is complete-minus-one refuses nothing and prints a confident scope line.
@@ -537,21 +539,34 @@ function selfTest() {
   //     here and stayed.
   battery('the population is imported, never re-walked');
   {
-    const SPECIMEN = 'packages/lint/scripts/check-reference-carrier-shape.mjs';
     const live = collectPopulation();
     ok(
       live.refusal === null && live.population.length > 0,
       `the imported population could not be read (${live.refusal ?? 'empty'}), so the cases below prove nothing (#4690)`,
     );
+    // The specimen these two pins named was
+    // `packages/lint/scripts/check-reference-carrier-shape.mjs` — the tree's only
+    // package-local gate invocation, and the file whose absence from this gate's
+    // private walk was the 169/168 split. It was retired by maintainer ruling, so
+    // the package-local lane is now EMPTY (measured at the retirement:
+    // `packageLocal` 1 → 0, `population` 214 → 213).
+    //
+    // What the pins were really holding is that this gate takes the IMPORTED
+    // population whole rather than re-deriving one, and that survives the lane
+    // emptying: every package-local member the shared reader hands over is scanned
+    // here on the same terms as a root script. Both halves are asserted over the
+    // whole population, so they hold at zero package-local members and start
+    // judging the day one returns — ⛔ no re-pointing at a hopeful path.
     ok(
-      live.population.includes(SPECIMEN) && live.packageLocal.length > 0,
-      `${SPECIMEN} is not in the population this gate scans. CI runs its --self-test on every pull request; `
-        + 'out of the population, its output is in no sweep and nothing says so (#15414)',
+      live.packageLocal.every((s) => live.population.includes(s) && typeof isCandidate(s, live.sources.get(s) ?? '') === 'boolean'),
+      'a package-local member of the imported population is not scanned on the same terms as a root script. '
+        + "CI runs such a gate's --self-test on every pull request; out of this sweep its output is in no "
+        + 'sweep at all and nothing says so (#15414)',
     );
     ok(
-      typeof isCandidate(SPECIMEN, live.sources.get(SPECIMEN) ?? '') === 'boolean',
-      'the prefilter could not be applied to the package-local member — it is filtered on exactly the same '
-        + 'terms as a root script, and its VALUE is a measurement of that file, deliberately not pinned here',
+      live.population.every((s) => typeof isCandidate(s, live.sources.get(s) ?? '') === 'boolean'),
+      'the prefilter could not be applied to a population member — it is filtered on exactly the same '
+        + 'terms for every member, and its VALUE is a measurement of that file, deliberately not pinned here',
     );
     ok(
       live.workflowDir === WORKFLOW_DIR,

@@ -29,19 +29,43 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 223 |
+| Write call sites | 225 |
 | Object name statically decidable | 149 |
-| Object name chosen at run time | 74 |
+| Object name chosen at run time | 76 |
 | Against a tenancy-enabled object | 149 |
 | Against an object declaring tenancy off | 0 |
-| Threading a tenant context | 139 |
+| Threading a tenant context | 141 |
 | Provably carrying none | 17 |
 | …and decidably tenancy-enabled | 9 |
 | Options argument unreadable | 67 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 104 |
+| Threading a decidably elevated context | 106 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 102 |
+
+## Subtractions the census could NOT defend — enforced
+
+A same-named call on something that is not a data engine is subtracted, and the
+subtraction is DEFENSIBLE when this census can name why: the receiver is a `node:`
+builtin, a value it watched being constructed, a language global, a type THIS
+corpus declares and the door rule rejected, or an `UNTYPED_RECEIVERS` row.
+
+⚠️ Counted below are the subtractions it can name no such fact for — the
+receiver carries a declared type the engine type index does not hold, and that
+index is built from TRACKED sources only, deliberately. An untracked, generated
+or dependency-owned declaration is one this census never saw, and «never saw it»
+must not be spelled the same way as «read it, not an engine».
+
+| what | count |
+| :--- | ---: |
+| write calls subtracted with no defensible reason | **3** |
+| …whose declared type text states an engine door anyway | **2** |
+
+| file | receiver | verb | why | declared type | door | n |
+|---|---|---|---|---|---|---:|
+| `packages/plugins/plugin-auth/src/audience-gate-test-support.ts` | `engine` | `insert` | anonymous-type | `{ insert: (name: string, data: any, options?: any) => Promise<unknown> } \| null` | ⚠️ yes | 1 |
+| `packages/plugins/plugin-auth/src/sso-client-secret.ts` | `e` | `update` | anonymous-type | `{ find(object: string, query: unknown): Promise<Record<string, unknown>[]>; update(object: string, data: unknown, options?: unknown): Promise<unknown>; }` | ⚠️ yes | 1 |
+| `packages/plugins/plugin-hono-server/src/adapter.ts` | `this.app` | `delete` | type-not-in-corpus | `Hono` | no | 1 |
 
 ## Corpus scale — present and dated, ⛔ NOT enforced
 
@@ -52,19 +76,21 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-09-14 at `d4554d4f5`.
+Measured on 2026-09-18 at `02bdeaaf2`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 568 |
-| engine-shaped types recognised | 61 |
+| tracked non-test sources scanned | 573 |
+| engine-shaped types recognised | 63 |
 | declared objects in the registry | 117 |
-| same-named calls subtracted as non-engine | 140 |
+| same-named calls subtracted as non-engine | 146 |
 
 ## Every site
 
 | file | verb | object | tenancy | tenant context | n |
 |---|---|---|---|---|---:|
+| `packages/plugins/organizations/src/claim-org-seed-ownership.ts` | `update` | `schema.name` | undecidable | elevated | 1 |
+| `packages/plugins/organizations/src/claim-orphan-org-rows.ts` | `update` | `schema.name` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `update` | `object` | undecidable | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_action` | enabled | elevated | 14 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `delete` | `sys_approval_approver` | enabled | elevated | 2 |

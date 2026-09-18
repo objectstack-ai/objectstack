@@ -790,11 +790,18 @@ per-node `summary`:
                     "errorMessage": "…", "summary": { … } } } }
 ```
 
-Branch on `details.repairable`, never on the message: it is `true` exactly when
-`status` is `stranded`, and it is **always present** on this route's `400` —
-`false` on a plain terminal failure, so an absent member reads as an older
-server rather than as "not repairable". `status` is the engine's own stamp,
-forwarded when it set one and never invented by the route. The code does not
+Branch on `details.repairable`, never on the message. It is **always present**
+on this route's `400`, and it is the engine's own answer rather than a reading
+of the status word: where the engine stamped a `status`, that stamp decides
+(`stranded`); where it stamped none, the route asks the engine's read-only
+inspection and relays the verdict. The second case is a real exit, not a
+fallback — a subflow **delegation** failure carries no status, because nothing
+re-arms an ancestor by resuming it, and yet the ancestor's consumed pause is
+journalled and one operator restore re-arms that whole chain, so it answers
+`repairable: true` with no `status` beside it. `false` on a plain terminal
+failure, so an absent member reads as an older server rather than as "not
+repairable". `status` is the engine's own stamp, forwarded when it set one and
+never invented by the route. The code does not
 change (there is no `FLOW_STRANDED`), and the trigger route's `400` carries
 `errorMessage` / `summary` only — it never resumes, so the question has no
 referent there. The shape is `ResumeFailureDetailsSchema` in
@@ -2115,10 +2122,13 @@ policy** — a distinct reason, never "binding failed". Nothing about the flow
 needs fixing; the deployment has not asked for it. `os doctor` prints the
 effective value.
 
-Studio does **not** carry that reason today: `GET /automation/_status` reports
-each flow as `bound` or not and has no field to say why, so a policy-disabled
-flow is indistinguishable there from one whose trigger is missing. Read the
-startup summary or the audit for the reason.
+The status door carries that reason too: `GET /automation/_status` answers one
+row per flow, and an unarmed flow's row holds the same sentence in its optional
+`reason` field — read from what the engine RECORDED when it refused the bind,
+never re-derived later, so a switch flipped since cannot turn it into a binding
+failure. ⛔ Reaching the wire is not the same as being **rendered**: whether a
+console shows it as a distinct state rather than as an error is that console's
+own change. The startup summary and the audit carry the same sentence.
 
 ⛔ Platform-internal scheduled work — approvals escalation, the lifecycle
 Reaper, the messaging dispatch loop, membership backfill — is **not** gated by

@@ -81,6 +81,57 @@ export interface ExprSchemaHint {
    */
   scope?: 'record' | 'flattened';
   /**
+   * Binding roots THIS authoring surface mounts **beyond** the platform
+   * baseline (`SCOPE_ROOTS`) — the surface naming the roots it binds, so the
+   * validator keeps refusing every other one instead of standing down.
+   *
+   * ## What it is for
+   *
+   * `scope` answers "are the record's fields flattened here?". It cannot answer
+   * "what else is mounted here?", and some surfaces mount something else. A
+   * page component's `visibleWhen` is the worked case: `page.zod.ts`'s describe
+   * states its contract-bound roots as `record`, `current_user` **and page
+   * state as `page.<var>`**, and ends with the example `page.selectedProjectId
+   * != ''`. `page` is not in the platform baseline and has no business being
+   * there — a hook condition or a validation rule binds nothing of the sort —
+   * so before this key the two faces of `scope` were the only choices, and
+   * neither is correct for that surface:
+   *
+   *   - `'record'`    refuses `page.selectedProjectId != ''` — the spec's own
+   *                   worked example — and prescribes `record.page`, which
+   *                   names nothing on any layer;
+   *   - `'flattened'` accepts it, and accepts a bare `status` with it, which is
+   *                   the narrowing the surface wanted in the first place.
+   *
+   * Declaring `roots: ['page']` keeps the narrowing and stops the false
+   * refusal: `page.selectedProjectId != ''` resolves, `status == 'done'` is
+   * still the hard error it should be.
+   *
+   * ## Direction — this key only ADDS, and that is deliberate
+   *
+   * A root listed here is declared alongside the baseline, never instead of it:
+   * passing `roots` can only turn a refusal into an acceptance, never the
+   * reverse, so a caller that adopts it cannot silently lose a check it has
+   * today. The opposite direction — a surface that binds a **closed** set and
+   * must refuse a baseline root (`os`, `vars`) it never mounts — is NOT this
+   * key's job and must not be bolted onto it: that surface says so with
+   * `collectCelRootIdentifiers`, which reads the AST and is independent of any
+   * declaration here. `SCOPE_ROOTS`'s own docblock is the authority on why
+   * those are two mechanisms rather than one.
+   *
+   * ## Shape
+   *
+   * Plain declarative data — a list of names the caller already knows, not a
+   * resolver callback the validator would have to invoke. `@objectstack/lint`'s
+   * view/page gate already supplies exactly such a list to
+   * {@link firstUndeclaredReference} (`VIEW_PAGE_EXTRA_ROOTS`); this key is the
+   * same vocabulary reaching the shared validator, so a surface can declare its
+   * roots without dropping out of `validateExpression` — and losing the compile
+   * check, the braces hint, field existence, the role catalog and the
+   * type-soundness pass with it.
+   */
+  roots?: readonly string[];
+  /**
    * ADR-0068 D4 — the closed catalog of valid role names (built-in + declared).
    * When supplied, a role-membership predicate testing a role NOT in this set
    * (e.g. `'org_admni' in current_user.positions`) is flagged as an error. Closes
@@ -507,6 +558,65 @@ function checkFieldExistence(source: string, schema: ExprSchemaHint | undefined,
   }
 }
 
+/**
+ * Is `name` written as a NAMESPACE in `source` — `name.x`, `name?.x`,
+ * `name['x']`, `name.fn(…)` — rather than as a bare value (`name == 'x'`)?
+ *
+ * The distinction is what lets a refusal speak about roots at all: an author
+ * who wrote `pge.selectedProjectId` is treating `pge` as a namespace, and a
+ * bare value reference (`stat == 'done'`) is not that, whatever it is named.
+ */
+function isNamespaceUse(name: string, source: string): boolean {
+  // `name` reaches here from cel-js's `Unknown variable: X` capture, so it is
+  // `[A-Za-z_$][\w$]*` — `$` is the only regex metacharacter it can carry.
+  const escaped = name.replace(/\$/g, '\\$');
+  return new RegExp(`(?<![\\w$.])${escaped}\\s*(?:\\?\\.|\\.|\\[)`).test(source);
+}
+
+/**
+ * A ROOT-oriented refusal for a namespace reference that is one typo away from
+ * a root this surface declared (`pge.selectedProjectId` where the surface binds
+ * `page`) — or `null`, which leaves the generic bare-reference message and its
+ * `record.<name>` prescription exactly as they were.
+ *
+ * Three guards keep this from ever prescribing the wrong fix, and each one is
+ * load-bearing:
+ *
+ *  - **No declared roots ⇒ null.** Every call site that does not pass
+ *    `schema.roots` — which is all of them until one opts in — gets the message
+ *    it got before, byte for byte. The message change rides entirely inside the
+ *    new opt-in.
+ *  - **A known field ⇒ null.** `record.<name>` is the right fix for a bare
+ *    field, JSON member access included (`address.city` → `record.address.city`),
+ *    and a field named in `schema.fields` is exactly that case.
+ *  - **Not a near-miss of a declared root ⇒ null.** Without a field catalog a
+ *    namespace reference is genuinely ambiguous — a record field written bare,
+ *    or a root that does not exist — and prescribing either one would be a
+ *    guess. A name within the shared edit-distance threshold of a root the
+ *    surface *does* mount is the one shape that is not ambiguous, so it is the
+ *    only one that gets a second prescription. ⛔ Never widen this to emit both
+ *    prescriptions at once: two findings pointing opposite ways is the shape
+ *    the author cannot act on.
+ */
+function mistypedRootMessage(
+  bare: string,
+  source: string,
+  surfaceRoots: readonly string[],
+  fields: readonly string[] | undefined,
+): string | null {
+  if (surfaceRoots.length === 0) return null;
+  if (fields?.includes(bare)) return null;
+  if (!isNamespaceUse(bare, source)) return null;
+  const suggestion = nearest(bare, surfaceRoots);
+  if (!suggestion) return null;
+  return (
+    `unbound root \`${bare}\` — beyond the record this authoring surface binds ` +
+    `\`${surfaceRoots.join('`, `')}\`, and \`${bare}\` is none of them, so \`${bare}.…\` ` +
+    `resolves to nothing and the expression silently evaluates to null. ` +
+    `Did you mean \`${suggestion}\`?`
+  );
+}
+
 /** Cheap edit-distance suggestion for typo'd field names. */
 /**
  * The closest candidate to `name`, or `undefined` when nothing is close enough
@@ -685,11 +795,18 @@ export function validateExpression(
     if (schema?.scope === 'record') {
       // In a `record`-scoped site a bare top-level identifier is a silent bug —
       // it must be `record.<field>` (#1928). Hard error.
-      const bare = firstUndeclaredReference(source);
+      //
+      // `schema.roots` are declared alongside the platform baseline, so a root
+      // this surface really does mount is not read as a bare field: that is the
+      // whole of the accept-side change, and an absent/empty `roots` reproduces
+      // the previous call byte for byte.
+      const surfaceRoots = schema.roots ?? [];
+      const bare = firstUndeclaredReference(source, surfaceRoots);
       if (bare) {
         errors.push({
           source,
           message:
+            mistypedRootMessage(bare, source, surfaceRoots, schema.fields) ??
             `bare reference \`${bare}\` — a formula/validation expression binds the record as the ` +
             `\`record\` namespace, not at top level, so \`${bare}\` resolves to nothing and the ` +
             `expression silently evaluates to null. Write \`record.${bare}\`.`,
@@ -710,7 +827,10 @@ export function validateExpression(
       // identifier is either a flow variable or a typo. When it is a near-miss
       // of a known field, warn (did-you-mean) WITHOUT failing the build —
       // a genuine flow variable won't be edit-distance-close to a field. (#1928)
-      const unknown = firstUndeclaredReference(source, schema.fields);
+      // `roots` joins the declared set here for the same reason it does in the
+      // `record` arm: a root the surface mounts is not a typo'd field, and
+      // suggesting one for it would be a did-you-mean nobody can act on.
+      const unknown = firstUndeclaredReference(source, [...schema.fields, ...(schema.roots ?? [])]);
       if (unknown) {
         const suggestion = nearest(unknown, schema.fields);
         if (suggestion) {
@@ -746,6 +866,12 @@ function bracesHintForTemplate(source: string): string {
  * Introspect what an author (esp. an agent) may use in a field (Decision 1e):
  * the expected dialect, the in-scope field references, and the callable
  * functions. Feeds the authoring context so the model does not guess.
+ *
+ * A surface that declares `schema.roots` gets those roots ADVERTISED here as
+ * well as accepted by {@link validateExpression}. The two faces are fed from
+ * one declaration on purpose: a root the validator accepts but this list never
+ * names is a spelling the author has no way to discover, and a second hand-kept
+ * list is how the two drift apart.
  */
 export function introspectScope(role: FieldRole, schema?: ExprSchemaHint): {
   dialect: 'cel' | 'template';
@@ -757,7 +883,10 @@ export function introspectScope(role: FieldRole, schema?: ExprSchemaHint): {
   return {
     dialect: expectedDialect(role),
     fields: [...(schema?.fields ?? [])],
-    roots: ['record', 'previous', 'input', 'os', 'current_user', 'user', 'vars'],
+    roots: [...new Set([
+      'record', 'previous', 'input', 'os', 'current_user', 'user', 'vars',
+      ...(schema?.roots ?? []),
+    ])],
     roles: [...(schema?.roleCatalog ?? [])],
     functions: CEL_STDLIB_FUNCTIONS,
   };

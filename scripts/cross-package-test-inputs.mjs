@@ -934,6 +934,11 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // the two directories above.
       'scripts/check-published-files.mjs',
       'scripts/check-cross-package-test-inputs.mjs',
+      // [#18650] This module itself, NAMED the same way and settled the same
+      // way: src/checklist-refusal-envelope-consistency.test.ts cites it in
+      // prose as where its own escaping read is declared, and the collector
+      // takes the quoted path without parsing. Low-churn like the two above.
+      'scripts/cross-package-test-inputs.mjs',
       'packages/types/src/node-isolation.test.ts',
       // That same test imports `stripComments` from `js-comment-mask.mjs` to
       // separate code from prose in the 423 sources it walks -- the conversion
@@ -945,6 +950,21 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // typecheck verdict is a function of it too.
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',
+      // [#18650] src/checklist-refusal-envelope-consistency.test.ts holds the QA
+      // platform checklist's statements about the anonymous `/get-session`
+      // answer equal to this package's own refusal envelope
+      // (`anonymous-session-refusal.ts`). The two halves can drift in OPPOSITE
+      // directions, so the radius is declared for the one the graph cannot
+      // reach: a diff HERE that moves the status or the code already puts this
+      // package in the affected set, but a diff in the checklist that
+      // re-introduces better-auth's retired `200 null` convention touches
+      // nothing this package declares -- and that is the direction the drift
+      // actually arrived from (the clauses sat inverted for five weeks after
+      // #17881 landed, with every gate green). Area-file granularity rather
+      // than the whole `docs/qa/platform-checklist/` tree: the scan reads
+      // `areas/*.json` and nothing else, and `runs/` beside it churns once per
+      // QA run.
+      'docs/qa/platform-checklist/areas/*.json',
     ],
     heldBy: {
       // The pair #10566 was measured on. That test's walk of `PACKAGES_DIR`

@@ -1601,7 +1601,7 @@ describe('the in-memory ObjectQL double honours `limit` (#10978)', () => {
  *
  * ## What was measured, before the guard existed
  *
- * On a live `isolated` boot with the real cloud-private `Organizations` plugin
+ * On a live `isolated` boot with the real licence-gated `Organizations` plugin
  * and a file-backed sqlite store, a session whose owner had been removed
  * through better-auth's OWN `/organization/remove-member` — driven by the org
  * owner, 200, the `sys_member` row really deleted — went on READING that

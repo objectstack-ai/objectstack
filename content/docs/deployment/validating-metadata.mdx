@@ -382,6 +382,12 @@ For someone authoring in Studio that door is not one of four — it is the **onl
 one. `sys_metadata` overlay rows are not in any config file, so there is no
 `os lint` they could have run instead.
 
+The table below has exactly two axes: its **rows** are rule **families**, its
+**columns** are the four doors. A `✓` means that door runs that family — it does
+not say what that door hands the family to judge. That input is a third thing,
+orthogonal to both, and no cell here can carry it; it is written out in
+[What each door hands the rule table](#what-each-door-hands-the-rule-table).
+
 | | `os validate` | `os build` | `os lint` | runtime publish |
 |---|---|---|---|---|
 | Protocol schema (Zod) | ✓ | ✓ | — | ✓ |
@@ -522,6 +528,14 @@ rubric — snake_case names, missing labels, the best-practice data-model sweep 
 is a lint verdict, not a publish gate. `os build` has never rejected a camelCase
 object name.
 
+Read that parenthetical at the scope it is written at. It is a claim about these
+**rows**: no row is `✓` at one door and `—` at another in a direction that lets a
+stack through. The same sentence about the **input** each door hands the table is
+a *different* claim, it has been false three times, and the two read identically
+in prose — so the input claim is stated
+[separately below](#what-each-door-hands-the-rule-table) rather than folded in
+here.
+
 The declared-unique row is the one that looks like that rubric and is not. Its
 ADR-0120 D5 rules register for `os validate` and `os build` only, because
 `os lint` reaches them through its own data-model sweep and a second
@@ -545,6 +559,61 @@ obvious: **`os build` was the weakest of the three gates**, so it emitted an
 artifact for stacks the other two refuse. A flow whose expression approver did
 not parse built and published green; only `os lint` stopped it, and CI usually
 runs the other two.
+
+### What each door hands the rule table
+
+Everything above this heading is one axis: which rule **family** runs at which
+**door**. This is the other one — the **input** each door hands those families to
+judge. They are independent: a door can run every rule in the registry and still
+certify a project clean, if what it hands them is an empty stack. A `✓` in the
+matrix answers the first question only.
+
+**The three CLI commands run the whole table twice on every run.**
+
+1. **The union fold.** One stack, every package's collections seen together.
+   Under the ADR-0130 D4 artifact shape a project's definitions may live entirely
+   in `packages[]` with nothing at the top level, so the fold fills only the
+   collections the top level does not carry, and returns a stack that already
+   carries them unchanged. This is the only pass that can see a finding which
+   **spans** packages. Until it was wired at all three doors (#17069, #17528),
+   such a project was judged as if it declared nothing — `os validate` and
+   `os lint` exited 0 on a stack `os build` refused.
+2. **The per-package walk.** The same table again, once per entry of `packages[]`:
+   each package's body re-read as the stack it was assembled from, handed the
+   artifact's own `packages[]` as **resolution context** so a sibling package's
+   object still resolves, while the collections being judged stay that package's
+   alone. It is de-duplicated against the union run, so what it reports is exactly
+   the set the union could not see, and every finding it raises carries a
+   `package '<id>' —` prefix in its `where`. A project with no `packages[]` skips
+   it: one package by definition, already judged whole by the union run.
+
+The second pass is not the first one in a stricter mood — it is a different
+question. A rule asking *"does this stack's app navigation point at an object
+this stack defines?"* is satisfied by the union for a package that carries
+neither half; per package it is not. Because the artifact registers **per
+package** (ADR-0130 D4/D5), the per-package answer is the one the runtime will
+live with.
+
+**That pass reached the three doors one at a time, and every gap was false-clean
+in the author's favour.** `os build` has run it since #16611, `os validate` since
+#18677 and `os lint` since #18778; until each of those landed, the door in
+question ran the union fold and stopped. Symbol presence is not coverage here:
+`os lint` imported the per-package seams for two cards before it ran this pass,
+because it walks `packages[]` for a duplicate-name advisory of its own — and that
+advisory is `os lint`'s own rubric, not this table.
+
+**The fourth door is on neither pass, and the package narrowing it does have is a
+third thing again.** A runtime write is one *item*, not a stack, so the publish
+gate builds a per-write snapshot — the written item plus the live registry's
+objects as resolution context — and runs the table twice over it: once on the
+context alone, once with the item grafted in, attributing to the write only the
+findings the item **added** (#4463). Its package dimension narrows that context to
+the written item's **package closure** — the written package, its declared
+dependencies, and unconditionally both platform/system objects and rows carrying
+no package provenance (#9612); a provenance it cannot read narrows nothing at all.
+That changes what a rule can **resolve**, never what it judges, and nothing at
+this door walks `packages[]`. So "runs per package" names one thing at the three
+CLI doors and another one here, and the `runtime publish` column says neither.
 
 A clean run walks the registry and reports timing:
 

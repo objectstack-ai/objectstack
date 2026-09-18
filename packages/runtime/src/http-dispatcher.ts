@@ -2180,49 +2180,25 @@ export class HttpDispatcher {
         return handlePackagesRequest(this.domainDeps, path, method, body, query, _context);
     }
 
-
     /**
-     * Cloud / Environment Control-Plane routes.
+     * Resolve `resolveActiveOrganizationId` — the ACTIVE ORGANIZATION id on the
+     * request's auth session, i.e. `session.activeOrganizationId`, normalising
+     * plain-object headers into a `Headers` instance first because the auth
+     * API's `getSession` requires one. Returns `undefined` for anonymous calls,
+     * when auth is not wired up, when the session names no active organization,
+     * and on any failure reaching the auth service — the caller cannot
+     * distinguish those four, by design.
      *
-     *  - GET    /cloud/drivers                                 → list registered ObjectQL drivers (for env provisioning)
-     *  - GET    /cloud/environments                            → list
-     *  - POST   /cloud/environments                            → provision (driver: memory | turso | <any registered driver>)
-     *  - GET    /cloud/environments/:id                        → detail (+ db, credential, membership)
-     *  - PATCH  /cloud/environments/:id                        → update displayName / plan / status / isDefault / metadata
-     *  - DELETE /cloud/environments/:id[?force=1]              → cascade-delete the project (cred/member/package install rows + physical DB)
-     *  - DELETE /cloud/organizations/:id                   → cascade-delete every project (and its DB) for the org, then drop the org
-     *  - POST   /cloud/environments/:id/retry                  → re-run provisioning for a failed environment
-     *  - POST   /cloud/environments/:id/activate               → mark as active for session (stub)
-     *  - POST   /cloud/environments/:id/credentials/rotate     → rotate credential
-     *  - GET    /cloud/environments/:id/members                → list members
-     *  - GET    /cloud/environments/:id/packages               → list installed packages
-     *  - POST   /cloud/environments/:id/packages               → install package into env
-     *  - GET    /cloud/environments/:id/packages/:pkgId        → get installation detail
-     *  - PATCH  /cloud/environments/:id/packages/:pkgId/enable  → enable package
-     *  - PATCH  /cloud/environments/:id/packages/:pkgId/disable → disable package
-     *  - DELETE /cloud/environments/:id/packages/:pkgId        → uninstall (scope=platform forbidden)
-     *  - POST   /cloud/environments/:id/packages/:pkgId/upgrade → upgrade to newer version
-     *
-     * Driver binding
-     * --------------
-     * Environments are not tied to any specific driver. At provisioning time the
-     * caller passes `driver` (a short name such as `memory`, `turso`, or any
-     * future `sql` / `postgres` driver). The dispatcher validates the name
-     * against the kernel's registered driver services (`driver.<name>`) and
-     * derives an appropriate placeholder `database_url` for the chosen driver.
-     * If `driver` is omitted, the dispatcher auto-selects the first available
-     * in preference order: turso → memory → any other registered driver.
-     *
-     * Backed by ObjectQL sys_environment / sys_environment_credential /
-     * sys_environment_member tables (registered by
-     * `@objectstack/service-tenant`'s `createTenantPlugin`).
-     * Physical database addressing (database_url, database_driver, etc.)
-     * is stored directly on the sys_environment row.
-     */
-
-    /**
-     * Resolve the calling user id from the request session, if any.
-     * Returns `undefined` for anonymous calls or when auth is not wired up.
+     * ⚠️ Until this was corrected the block here described `resolveCallerUserId`
+     * ("the calling user id from the request session"), a sibling deleted with
+     * the multi-tenant `/cloud` control plane. TSDoc binds a block by POSITION,
+     * so deleting the declaration under a docblock does not delete the docblock
+     * — it silently re-points it at the next declaration down, which then ships
+     * a description of a method that no longer exists. A rename sweep cannot
+     * catch that, because a sweep reads the docblock OF the method it is
+     * changing and this one read as if it already belonged there. Keep the
+     * first line naming the method it documents, so the next re-point is
+     * visible on sight rather than plausible.
      */
     private async resolveActiveOrganizationId(context: HttpProtocolContext): Promise<string | undefined> {
         try {

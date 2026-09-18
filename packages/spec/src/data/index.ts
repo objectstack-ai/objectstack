@@ -53,6 +53,17 @@ export * from './filter-dotted-head';
 // explicitly out of that table's scope, and this one needs an `expectRejection`
 // discriminant it deliberately never grew (#5701).
 export * from './filter-text-conformance';
+// [#18113] The text-comparand door those rows declare — the predicate for the
+// two REJECTION rows the case-insensitive contains operator carries (a
+// non-string comparand, the empty string) and the reason text they are
+// refused with, published once by the owner of the rule (objectui#9048
+// ruling D). The reason is the CONTRACT half only: no leading capital, no
+// trailing period, and no envelope — each face seats it in its own
+// (excludes-and-logs, or throws INVALID_FILTER). A sibling of the case table
+// rather than rows inside it, and named like `filter-comparand-type` for the
+// same reason: this is a door consumers CALL, not data they are checked
+// against.
+export * from './filter-text-comparand';
 // Canonical conformance cases for the comparand-type door (#7872) — each of
 // the six accepted types compiles on every driver path, and each refused type
 // gets the loud INVALID_FILTER refusal at the door, the two worst measured

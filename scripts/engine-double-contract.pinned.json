@@ -2999,12 +2999,12 @@
     {
       "file": "packages/plugins/plugin-security/src/security-plugin.test.ts",
       "verb": "findOne",
-      "pinned": 5
+      "pinned": 6
     },
     {
       "file": "packages/plugins/plugin-security/src/security-plugin.test.ts",
       "verb": "update",
-      "pinned": 1
+      "pinned": 2
     },
     {
       "file": "packages/plugins/plugin-security/src/seed-write-refusal.test.ts",

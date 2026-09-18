@@ -15,6 +15,8 @@
     "ai/BlueprintSummaryOperations",
     "ai/BlueprintView",
     "ai/BlueprintWidgetCondition",
+    "ai/BuildProgressFrame",
+    "ai/BuildProgressPhase",
     "ai/CodeContent",
     "ai/ConversationAnalytics",
     "ai/ConversationContext",

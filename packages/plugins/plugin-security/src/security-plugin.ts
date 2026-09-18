@@ -3,6 +3,7 @@
 import { Plugin, PluginContext, POSTURE_LADDER, isRowActive } from '@objectstack/core';
 import type { PermissionSet, RowLevelSecurityPolicy, TenantLayer0Verdict } from '@objectstack/spec/security';
 import { describeHighPrivilegeBits, describeAnchorForbiddenBits, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
+import type { AnchorBindingContext } from '@objectstack/spec/security';
 import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 // [#8220] The read-scope provenance mark: this middleware is one of the two
 // merge boundaries that stamp it (see the RLS injection below).
@@ -66,6 +67,7 @@ import {
 import { bootstrapSystemCapabilities } from './bootstrap-system-capabilities.js';
 import { normalizeManagedByVocab } from './normalize-managed-by.js';
 import { bootstrapDeclaredCapabilities } from './bootstrap-declared-capabilities.js';
+import { readDeclaredCapabilityContext } from './declared-capability-context.js';
 import { RLSCompiler, RLS_DENY_FILTER, policyDeclaresClause } from './rls-compiler.js';
 import {
   computeTenantLayer0Verdict,
@@ -3580,9 +3582,17 @@ export class SecurityPlugin implements Plugin {
     // another's catalog.
     const bindBaselineToEveryone = async (organizationId?: string): Promise<void> => {
       try {
+        // [#18535, ADR-0090 D5] The stack's declared `capabilities:` — the half
+        // of the anchor question the predicate cannot discover for itself. Read
+        // ONCE per pass, from the DECLARATIONS rather than from `sys_capability`:
+        // this binding runs before `bootstrapDeclaredCapabilities` seeds those
+        // rows (see `declared-capability-context.ts` for why that order is
+        // fixed), so the rows are empty here on a first boot. Unreadable or
+        // absent ⇒ `undefined` ⇒ the pre-#17811 verdict, which refuses.
+        const anchorContext = await readDeclaredCapabilityContext(ql, this.metadata);
         for (const baselineName of this.baselinePermissionSets) {
           const boot = this.bootstrapPermissionSets.find((p) => p.name === baselineName);
-          const offending = boot ? describeHighPrivilegeBits(boot) : null;
+          const offending = boot ? describeHighPrivilegeBits(boot, anchorContext) : null;
           if (offending) {
             ctx.logger.warn('[security] refusing to bind fallback set to everyone — high-privilege bits', {
               set: baselineName, offending,
@@ -5445,6 +5455,22 @@ export class SecurityPlugin implements Plugin {
     if (rows.length === 0) return;
 
     const ql = this.ql;
+    // [#18535, ADR-0090 D5] The stack's declared `capabilities:`, read at most
+    // ONCE per gate pass and only once an anchor row is actually in play — the
+    // common write on this table names an ordinary position and must not pay
+    // for a read it does not use. Same source as the boot binding and as
+    // `confirmAudienceBindingSuggestion`, which is this gate's friendly early
+    // rendition: a second source there would let a confirm pass its own check
+    // and then be refused by the insert it performs.
+    let anchorContext: AnchorBindingContext | undefined;
+    let anchorContextLoaded = false;
+    const declaredCapabilityContext = async (): Promise<AnchorBindingContext | undefined> => {
+      if (!anchorContextLoaded) {
+        anchorContext = await readDeclaredCapabilityContext(ql, this.metadata);
+        anchorContextLoaded = true;
+      }
+      return anchorContext;
+    };
     for (const row of rows) {
       const positionId = (row as any)?.position_id;
       if (!positionId || !ql?.find) continue;
@@ -5472,7 +5498,14 @@ export class SecurityPlugin implements Plugin {
       // [ADR-0090 D9] Anchor-tier predicate: `guest` faces the strictest tier
       // (additionally no edit bit — read-only by default, create is the single
       // case-by-case write); `everyone` uses the high-privilege predicate.
-      const offending = describeAnchorForbiddenBits(boot ?? setDef, positionName as 'everyone' | 'guest');
+      // [#18535] `guest` faces the strictest tier and the predicate DROPS the
+      // context for it (D5's app-token excusal is the `everyone` tier's alone),
+      // so the same call serves both anchors.
+      const offending = describeAnchorForbiddenBits(
+        boot ?? setDef,
+        positionName as 'everyone' | 'guest',
+        await declaredCapabilityContext(),
+      );
       if (offending) {
         throw new PermissionDeniedError(
           `[Security] Access denied: permission set '${setName || setId}' cannot be bound to the '${positionName}' audience anchor — it carries ${offending} (ADR-0090 D5/D9). ` +

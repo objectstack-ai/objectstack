@@ -1258,20 +1258,34 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // ADR-0087 conversion that would otherwise strip it (`permission-allow-
   // restore-purge-removed`) is `retiredFromLoadPath: true`, so it does not run
   // inside `normalizeStackInput` and the key reaches this tier intact.
+  //
+  // [#17936] Crossed onto the runtime publish gate for `permission` writes, and
+  // the measurement the previous `surfaceReason` held it back for is TAKEN. That
+  // reason asked one question — does the gate's `body` reach this rule BEFORE
+  // the per-type `safeParse`, whose residue stage strips the only evidence it
+  // reads? It does, and not by luck: `saveMetaItem` keeps the AUTHORED body
+  // verbatim by design (`parsed.data` would strip the Studio-only auxiliary
+  // fields an overlay rides with) and grafts back exactly two normalizations,
+  // each a walk over the authored keys that adds and removes nothing else. So
+  // `assertRuntimeAuthoringRules` is handed the raw document, the gate passes it
+  // straight through as `item`, and the residue is present in the snapshot this
+  // rule reads. Pinned end to end at the door
+  // (`metadata-protocol`'s `protocol.runtime-authoring-gate.test.ts`, #17936
+  // block) and at this layer (`runtime-gate.permission-residue.test.ts`) — the
+  // phantom-check risk that reason named is answered by measurement, not by
+  // argument. Why it had to cross at all: ruling D's population — a Studio /
+  // REST `/meta` / MCP author who never runs `os lint` — has no other door.
+  // Advisory only, so it rides the 2xx the write earns and can never refuse one.
+  // `permission` is the only declared type because `stack.permissions` is the
+  // only collection the rule reads.
   {
     name: 'validateRetiredPermissionResidue',
     tier: 'advisory',
     input: 'normalized',
     commands: ALL,
     source: 'packages/lint/src/validate-retired-permission-residue.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason:
-      'Ruled scope: the signal belongs at the authoring door over RAW SOURCE, which is ' +
-      'where the authored and the built path are distinguishable. Crossing it needs a measurement ' +
-      "this round did not take — whether the gate's `body` reaches it BEFORE the per-type " +
-      '`safeParse`, whose residue stage strips the only evidence this rule reads. Post-parse the ' +
-      'rule is structurally silent, so wiring it there without that reading would publish a ' +
-      'phantom check, not coverage.',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['permission'],
     run: (stack) =>
       validateRetiredPermissionResidue(stack).map((f) => ({
         severity: f.severity,

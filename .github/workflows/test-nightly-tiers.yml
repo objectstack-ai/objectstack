@@ -433,8 +433,19 @@ jobs:
             const failing = read('failing-files.txt').split('\n').map((s) => s.trim()).filter(Boolean);
             const extractorExit = process.env.FAILING_FILES_EXIT;
 
-            // The log tails, bounded: a GitHub issue body caps at 65536 chars,
-            // and the run link carries the whole log anyway.
+            // The log tails, bounded. ⛔ The bound below is NOT the platform
+            // cap, and the platform cap is not 65,536 of anything. This step
+            // posts an ISSUE BODY, and that surface is MEASURED, in UTF-8
+            // BYTES: 262,144 bytes stored, 262,145 refused — bisected to one
+            // byte on objectstack#18793, and restated as `ISSUE_BODY_LIMIT` in
+            // scripts/pm/check-half-states.mjs. ⛔ Do not re-derive 65,536 from
+            // a refusal message: GitHub's own 422 text still says "maximum is
+            // 65536 characters" and is false in both unit and value —
+            // objectstack#18826 stored a 262,144-CHARACTER comment. ⚠️ And on
+            // this surface the refusal is not a 422 at all: an oversized issue
+            // body is answered 200 with the OLD body kept and nothing reported
+            // (#18793), so a body that outgrows the cap vanishes silently.
+            // The run link carries the whole log anyway.
             const tails = [];
             const reportsDir = path.join(process.env.RUNNER_TEMP, 'nightly-reports');
             const walk = (dir) => {
@@ -447,6 +458,16 @@ jobs:
               }
             };
             walk(reportsDir);
+            // BUDGET is a READING budget, ⛔ not a platform bound, and it is
+            // deliberately NOT re-sized now that the cap above is known to be
+            // four times what this file used to assert. 40,000 is about as much
+            // log tail as a person reads off a card before clicking through,
+            // and the run link carries every byte elided here — so this number
+            // is sized against the reader, and a correction to the cap moves a
+            // reading, never a licence to print more. It is counted in the unit
+            // the slice below uses (JS string length, i.e. UTF-16 code units),
+            // because nothing judges it against the byte cap: even as bytes of
+            // CJK prose it stays far under 262,144.
             const BUDGET = 40000;
             const perTail = Math.max(2000, Math.floor(BUDGET / Math.max(1, tails.length)));
             const tailBlocks = tails.sort((a, b) => a.shard.localeCompare(b.shard)).flatMap(({ shard, text }) => [

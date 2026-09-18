@@ -45,10 +45,42 @@
  * `packageName` is asserted to be the package's OWN manifest name, read from its
  * `package.json` — the #17978 finding was a notice hardcoded to another
  * package's name, and a sweep that accepted any string would not have caught it.
+ *
+ * ## The SECOND preflight, and why this sweep grew a spawning leg (#18788)
+ *
+ * `runProjectCliOverridePreflight` closes the other defect the same `projects`
+ * narrowing produces: a CLI TIMEOUT OVERRIDE vitest will not carry into a
+ * project config, which today returns a GREEN HAVING MEASURED NOTHING. Its
+ * population is the same eight packages, derived the same way, so it is swept
+ * here rather than listed anywhere — a ninth package declaring `projects` is
+ * caught on the PR that adds it, for both preflights at once.
+ *
+ * ⭐ BUT A SOURCE ASSERTION IS THE WRONG INSTRUMENT FOR A REFUSAL, and this card
+ * is precisely about instruments that cannot fail. `runFilterPreflight`'s four
+ * assertions above are about a config that must WRITE something in one case; a
+ * refusal is about a config that must ABORT, and a config can contain the call
+ * in code position and still abort nowhere — a swallowed throw, a wrong argv
+ * source, a re-export that resolves to a stub. So every subject additionally
+ * gets a real `vitest` child, and both directions are asked of it:
+ *
+ *   - `list --filesOnly --hookTimeout=1` must exit NON-ZERO and print the
+ *     refusal NAMING THAT SUBJECT'S OWN manifest name. The name is what makes
+ *     the non-zero a reading: a spawn failure, an unresolvable config or a
+ *     missing build all exit non-zero too, and none of them prints this text.
+ *   - `list --filesOnly` with no override must exit ZERO and print no refusal.
+ *     ⛔ Without this leg every assertion above is satisfied by a config that
+ *     refuses EVERYTHING — which would be a far worse defect than the one being
+ *     fixed, and it would take the whole package's suite with it.
+ *
+ * `--filesOnly` globs test paths and never imports them, so neither leg depends
+ * on build state; the refusing leg aborts at config load before even the glob.
+ * Measured on this tree: 16 children, ~9s wall for the eight packages.
  */
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { createRequire } from 'node:module';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
@@ -67,6 +99,64 @@ function findUp(predicate: (dir: string) => boolean): string {
   }
 }
 const REPO = findUp((dir) => existsSync(join(dir, 'pnpm-workspace.yaml')));
+
+const require = createRequire(import.meta.url);
+
+/** The `vitest` CLI entry of the INSTALLED runner — found, never spelled. */
+const VITEST_ENTRY = resolve(dirname(require.resolve('vitest/package.json')), 'vitest.mjs');
+
+/** The refusal's headline, exactly as `renderInertOverrideNotice` prints it. */
+const REFUSAL = 'TIMEOUT OVERRIDE CANNOT REACH THIS PACKAGE';
+
+interface ChildRun {
+  readonly status: number;
+  readonly output: string;
+}
+
+/**
+ * The environment a nested `vitest` child gets.
+ *
+ * ⛔ `VITEST`-prefixed variables and `TEST` are the RUNNER'S OWN state — pool
+ * id, worker id, the "we are inside vitest" bit. Inheriting them into a child
+ * vitest makes the child's behaviour a function of which worker spawned it,
+ * which is a flake this file cannot afford: its whole job is to tell a refusal
+ * apart from every other way a child can exit non-zero. Everything else is kept
+ * on purpose — `PATH` and `HOME` are what let the child resolve and run at all.
+ */
+function childEnv(): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([key]) => key !== 'TEST' && key !== 'VITEST' && !key.startsWith('VITEST_'),
+    ),
+  );
+}
+
+/**
+ * `vitest list --filesOnly [flags]` inside one swept package, never throwing.
+ *
+ * ⛔ `execFileSync` throws on a non-zero exit and the non-zero exit is half of
+ * what this measures, so the status is read off the thrown error. `stdout` and
+ * `stderr` are joined: the refusal is written to stderr at config load while
+ * vitest's own report of the failed load lands separately.
+ */
+function runVitestList(cwd: string, ...flags: string[]): ChildRun {
+  const args = [VITEST_ENTRY, 'list', '--filesOnly', ...flags];
+  try {
+    const stdout = execFileSync(process.execPath, args, {
+      cwd,
+      env: childEnv(),
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return { status: 0, output: stdout };
+  } catch (error) {
+    const e = error as { status?: number | null; stdout?: string; stderr?: string };
+    // ⛔ A child that never ran (spawn failure) has a NULL status. Reading that
+    // as a refusal would be this card's own defect in a new place.
+    expect(typeof e.status).toBe('number');
+    return { status: e.status ?? -1, output: `${e.stdout ?? ''}${e.stderr ?? ''}` };
+  }
+}
 
 /** The config spellings `scripts/check-console-intercept-disarm.mjs` accepts. */
 const CONFIG_NAMES = [
@@ -184,6 +274,43 @@ describe.each(SUBJECTS.map((s) => [s.rel, s] as const))('%s', (_rel, subject) =>
 
   it('⛔ does NOT name `test.reporters` — the measured regression this avoids', () => {
     expect(subject.source).not.toMatch(/\breporters\s*:/);
+  });
+
+  it('invokes the timeout-override preflight too, with the parser and its own name (#18788)', () => {
+    // Same anti-phantom assertion as `runFilterPreflight` above, for the second
+    // preflight this package owns. The behavioural legs below are what make it
+    // more than a spelling.
+    expect(subject.source).toMatch(/runProjectCliOverridePreflight\(\{/);
+    expect(subject.source).toMatch(
+      /runProjectCliOverridePreflight\(\{[\s\S]*?parse:\s*parseCLI[\s\S]*?\}\)/,
+    );
+    expect(subject.source).toMatch(
+      new RegExp(
+        `runProjectCliOverridePreflight\\(\\{[\\s\\S]*?packageName: '${subject.name}'`,
+      ),
+    );
+  });
+
+  it('⭐ REALLY refuses `--hookTimeout` — asked of a real vitest child (#18788)', () => {
+    const run = runVitestList(subject.dir, '--hookTimeout=1');
+
+    expect(run.status).not.toBe(0);
+    expect(run.output).toContain(REFUSAL);
+    // The name is what makes the non-zero a READING: every other way a child
+    // exits non-zero here prints something else. It is also the #17978 finding
+    // held for the second preflight — a notice carrying another package's name
+    // sends the reader to a command that runs the wrong suite.
+    expect(run.output).toContain(subject.name);
+  });
+
+  it('⭐ CONTROL — refuses NOTHING when no override is named', () => {
+    // ⛔ Without this leg, every assertion in this file is satisfied by a config
+    // that refuses every run — a worse defect than the one being fixed, and one
+    // that would take this package's entire suite down with it.
+    const run = runVitestList(subject.dir);
+
+    expect(run.status).toBe(0);
+    expect(run.output).not.toContain(REFUSAL);
   });
 });
 

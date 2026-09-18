@@ -52,7 +52,7 @@ const result = AppDefinitionResponseSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; icon?: string; … }` | ✅ | Full App Configuration |
 
 ### Nested Shape: `AppDefinitionResponse.error`
@@ -68,6 +68,15 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `AppDefinitionResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `AppDefinitionResponse.data`
 
@@ -115,7 +124,7 @@ const result = AppDefinitionResponseSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ name: string; label: string; icon?: string; description?: string }[]` | ✅ | List of available concepts (Objects, Apps, Flows) |
 
 ### Nested Shape: `ConceptListResponse.error`
@@ -131,6 +140,15 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `ConceptListResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 
 ---
@@ -164,7 +182,7 @@ const result = AppDefinitionResponseSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ total: integer; succeeded: integer; failed: integer; errors?: object[] }` | ✅ | Bulk operation result |
 
 ### Nested Shape: `MetadataBulkResponse.error`
@@ -180,6 +198,15 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `MetadataBulkResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `MetadataBulkResponse.data`
 
@@ -219,7 +246,7 @@ const result = AppDefinitionResponseSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ type: string; name: string }` | ✅ |  |
 
 ### Nested Shape: `MetadataDeleteResponse.error`
@@ -235,6 +262,15 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `MetadataDeleteResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `MetadataDeleteResponse.data`
 
@@ -254,7 +290,7 @@ const result = AppDefinitionResponseSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ sourceType: string; sourceName: string; targetType: string; targetName: string; … }[]` | ✅ | Items this item depends on |
 
 ### Nested Shape: `MetadataDependenciesResponse.error`
@@ -270,6 +306,15 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `MetadataDependenciesResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `MetadataDependenciesResponse.data[number]`
 
@@ -292,7 +337,7 @@ const result = AppDefinitionResponseSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ sourceType: string; sourceName: string; targetType: string; targetName: string; … }[]` | ✅ | Items that depend on this item |
 
 ### Nested Shape: `MetadataDependentsResponse.error`
@@ -308,6 +353,15 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `MetadataDependentsResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `MetadataDependentsResponse.data[number]`
 
@@ -330,7 +384,7 @@ const result = AppDefinitionResponseSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ exists: boolean }` | ✅ |  |
 
 ### Nested Shape: `MetadataExistsResponse.error`
@@ -346,6 +400,15 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `MetadataExistsResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `MetadataExistsResponse.data`
 
@@ -377,7 +440,7 @@ const result = AppDefinitionResponseSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `any` | ✅ | Exported metadata bundle |
 
 ### Nested Shape: `MetadataExportResponse.error`
@@ -393,6 +456,15 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `MetadataExportResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 
 ---
@@ -419,7 +491,7 @@ const result = AppDefinitionResponseSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ total: integer; imported: integer; skipped: integer; failed: integer; … }` | ✅ | Import result |
 
 ### Nested Shape: `MetadataImportResponse.error`
@@ -436,6 +508,15 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
 
+### Nested Shape: `MetadataImportResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
+
 
 ---
 
@@ -447,7 +528,7 @@ const result = AppDefinitionResponseSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ type: string; name: string; definition: Record<string, any> }` | ✅ | Metadata item |
 
 ### Nested Shape: `MetadataItemResponse.error`
@@ -463,6 +544,15 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `MetadataItemResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `MetadataItemResponse.data`
 
@@ -483,7 +573,7 @@ const result = AppDefinitionResponseSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `Record<string, any>[]` | ✅ | Array of metadata definitions |
 
 ### Nested Shape: `MetadataListResponse.error`
@@ -500,6 +590,15 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
 
+### Nested Shape: `MetadataListResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
+
 
 ---
 
@@ -511,7 +610,7 @@ const result = AppDefinitionResponseSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `string[]` | ✅ | Array of metadata item names |
 
 ### Nested Shape: `MetadataNamesResponse.error`
@@ -527,6 +626,15 @@ const result = AppDefinitionResponseSchema.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `MetadataNamesResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 
 ---
@@ -562,7 +670,7 @@ Metadata query with filtering, sorting, and pagination
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ items: object[]; total: integer; page: integer; pageSize: integer }` | ✅ | Paginated query result |
 
 ### Nested Shape: `MetadataQueryResponse.error`
@@ -578,6 +686,15 @@ Metadata query with filtering, sorting, and pagination
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `MetadataQueryResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `MetadataQueryResponse.data`
 
@@ -643,7 +760,7 @@ Metadata query with filtering, sorting, and pagination
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ type: string; label: string; description?: string; filePatterns: string[]; … }` | optional | Type info |
 
 ### Nested Shape: `MetadataTypeInfoResponse.error`
@@ -659,6 +776,15 @@ Metadata query with filtering, sorting, and pagination
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `MetadataTypeInfoResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `MetadataTypeInfoResponse.data`
 
@@ -683,7 +809,7 @@ Metadata query with filtering, sorting, and pagination
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `string[]` | ✅ | Registered metadata type identifiers |
 
 ### Nested Shape: `MetadataTypesResponse.error`
@@ -699,6 +825,15 @@ Metadata query with filtering, sorting, and pagination
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `MetadataTypesResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 
 ---
@@ -723,7 +858,7 @@ Metadata query with filtering, sorting, and pagination
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ valid: boolean; errors?: object[]; warnings?: object[] }` | ✅ | Validation result |
 
 ### Nested Shape: `MetadataValidateResponse.error`
@@ -739,6 +874,15 @@ Metadata query with filtering, sorting, and pagination
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `MetadataValidateResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `MetadataValidateResponse.data`
 
@@ -759,7 +903,7 @@ Metadata query with filtering, sorting, and pagination
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ name: string; label?: string; pluralLabel?: string; description?: string; … }` | ✅ | Full Object Schema |
 
 ### Nested Shape: `ObjectDefinitionResponse.error`
@@ -775,6 +919,15 @@ Metadata query with filtering, sorting, and pagination
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `ObjectDefinitionResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `ObjectDefinitionResponse.data`
 

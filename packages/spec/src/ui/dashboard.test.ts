@@ -16,6 +16,7 @@ import {
   DATE_RANGE_DEFAULT_RANGES,
   DashboardWidgetOptionsSchema,
   checkDashboardWidgetStageOrder,
+  checkDashboardWidgetMetricMeasureArity,
 } from './dashboard.zod';
 import * as ui from './index';
 import { readFileSync } from 'node:fs';
@@ -769,8 +770,16 @@ describe('#16458 — DashboardHeaderAction fields carry an item-level `title`', 
       }
       // Control — a sibling item property with no authored title has none:
       // the pin above is reading a title, not a default the emitter invents.
+      // The control is a `retiredKey()` TOMBSTONE, which is the one widget row
+      // property that must stay untitled on purpose: it declares the key
+      // unwritable, and an authoring label would advertise it as writable.
+      // (`widgets[].id` held this role until its carrier was titled.)
       const widgetProps = js.properties.widgets.items.properties;
-      expect(widgetProps.id.title).toBeUndefined();
+      expect(widgetProps.actionUrl.title).toBeUndefined();
+      expect(widgetProps.actionUrl.description).toMatch(/^\[REMOVED\] /);
+      // Lit — the authorable sibling really does carry one, so the line above
+      // measures the tombstone rule, not an emitter that never writes titles.
+      expect(widgetProps.id.title).toBe('Widget ID');
     });
   }
 
@@ -1039,5 +1048,141 @@ describe('DashboardWidgetOptions.stageOrder — the ADR-0049 type gate', () => {
     expect(r.success).toBe(false);
     const paths = (r.success ? [] : r.error.issues).map((i) => i.path.join('.'));
     expect(paths).toContain('widgets.0.options.stageOrder');
+  });
+});
+
+/**
+ * [#17779] objectui#8894 ruling D — a metric-family widget declares EXACTLY one
+ * measure.
+ *
+ * The maintainer took **D** on objectui#8894 (decision batch #119 item 4,
+ * 2026-09-12 「同意」): judge the protocol wrong rather than invent display
+ * semantics for `values[1..]`. Before this, `values` was
+ * `z.array(z.string()).min(1)` with no upper bound on EVERY widget type, so a
+ * `metric` tile could declare three measures, the query ran all three, and the
+ * tile rendered `values[0]`.
+ *
+ * "Exactly one" is the CONJUNCTION of two rules and the tests below read both:
+ * the field's own `.min(1)` (0 measures → `too_small`) and
+ * `checkDashboardWidgetMetricMeasureArity` (>1 on the family → `custom` at
+ * `values`).
+ */
+describe('[#17779] DashboardWidgetSchema — the metric family takes exactly one measure', () => {
+  const widget = (over: Record<string, unknown>) => ({ ...WIDGET_BASE, ...over });
+  const refusal = (value: Record<string, unknown>) => {
+    const r = DashboardWidgetSchema.safeParse(value);
+    expect(r.success).toBe(false);
+    const issues = r.success ? [] : r.error.issues;
+    expect(issues).toHaveLength(1);
+    return issues[0]!;
+  };
+
+  // The family, read off the refusal rather than re-listed as a literal: the
+  // message interpolates the authored type, so a member silently dropped from
+  // the set would fail HERE rather than in a list that agrees with itself.
+  const FAMILY = ['metric', 'kpi', 'gauge', 'solid-gauge', 'bullet'] as const;
+
+  it.each(FAMILY)('refuses two measures on a `%s` tile, at `values`', (type) => {
+    const issue = refusal(widget({ type, values: ['amount_sum', 'count'] }));
+    expect(issue.code).toBe('custom');
+    expect(issue.path.join('.')).toBe('values');
+    expect(issue.message).toContain(`\`type: '${type}'\``);
+  });
+
+  it.each(FAMILY)('accepts ONE measure on a `%s` tile — the legal single-value card', (type) => {
+    expect(DashboardWidgetSchema.safeParse(widget({ type, values: ['amount_sum'] })).success).toBe(true);
+  });
+
+  it('names the widget, the count, and the ruling\'s own prescription', () => {
+    const issue = refusal(widget({ id: 'pipeline_total', type: 'metric', values: ['a', 'b', 'c'] }));
+    // "The refusal names the widget and says one measure per tile, 'make N
+    // tiles for N measures'" — the card's acceptance sentence, as an assertion.
+    expect(issue.message).toContain('`pipeline_total`');
+    expect(issue.message).toContain('declares 3 measures');
+    expect(issue.message).toContain('one measure per tile');
+    expect(issue.message).toContain('make N tiles for N measures');
+    // …and it names the visuals that DO render several numbers, so "I really
+    // want three" has an answer that is not "delete two".
+    expect(issue.message).toContain("`type: 'table'`");
+  });
+
+  it('a widget that declares NO type is refused too — `type` defaults to `metric`', () => {
+    const issue = refusal(widget({ values: ['a', 'b'] }));
+    expect(issue.path.join('.')).toBe('values');
+    expect(issue.message).toContain("`type: 'metric'`");
+    // …and says so, because the gate cannot tell the two apart.
+    expect(issue.message).toContain('declares no `type` at all');
+  });
+
+  it.each(['bar', 'horizontal-bar', 'column', 'line', 'area', 'pie', 'donut', 'funnel',
+    'scatter', 'treemap', 'sankey', 'combo', 'radar', 'table', 'pivot'] as const)(
+    'leaves `%s` — every NON-metric type — accepting three measures, unmoved',
+    (type) => {
+      expect(DashboardWidgetSchema.safeParse(widget({ type, values: ['a', 'b', 'c'] })).success).toBe(true);
+    },
+  );
+
+  it('covers the whole taxonomy — the metric family plus the others IS `ChartTypeSchema`', () => {
+    // Guards the two `it.each` lists above against a new chart type landing in
+    // the enum and being covered by neither.
+    const OTHERS = ['bar', 'horizontal-bar', 'column', 'line', 'area', 'pie', 'donut', 'funnel',
+      'scatter', 'treemap', 'sankey', 'combo', 'radar', 'table', 'pivot'];
+    expect([...FAMILY, ...OTHERS].sort()).toEqual([...ChartTypeSchema.options].sort());
+  });
+
+  it('the EMPTY array keeps the field\'s own verdict — not a second `custom` issue', () => {
+    // "Exactly one" is `.min(1)` AND this check; the check returns on 0 so the
+    // author reads one refusal about an empty tile, not two.
+    const issue = refusal(widget({ type: 'metric', values: [] }));
+    expect(issue.code).toBe('too_small');
+    expect(issue.path.join('.')).toBe('values');
+  });
+
+  it('a `type` outside the enum reports the TYPE refusal alone, not both', () => {
+    // Same zod behaviour the stage-order gate pins: `invalid_value` on the enum
+    // aborts, so object-level checks are skipped for that input.
+    const issue = refusal(widget({ type: 'ziggurat', values: ['a', 'b'] }));
+    expect(issue.code).toBe('invalid_value');
+    expect(issue.path.join('.')).toBe('type');
+  });
+
+  it('does NOT reach whether the one measure exists in the dataset', () => {
+    // A fact about the dataset, not about the widget — unreachable from here,
+    // stated as a pin rather than left implied.
+    expect(DashboardWidgetSchema.safeParse(widget({ type: 'metric', values: ['no_such_measure'] })).success)
+      .toBe(true);
+  });
+
+  it('the rule the door runs is the EXPORT, attached by identifier — no inline copy', () => {
+    const src = readFileSync(new URL('./dashboard.zod.ts', import.meta.url), 'utf8');
+    expect(src).toContain('export function checkDashboardWidgetMetricMeasureArity(');
+    expect(src.match(/^\s*(export )?function checkDashboardWidgetMetricMeasureArity\b/gm)).toHaveLength(1);
+    expect(src.match(/^[ \t]*\.superRefine\(checkDashboardWidgetMetricMeasureArity\)/gm)).toHaveLength(1);
+  });
+
+  it('`@objectstack/spec/ui` ships the same function object', () => {
+    expect((ui as Record<string, unknown>).checkDashboardWidgetMetricMeasureArity)
+      .toBe(checkDashboardWidgetMetricMeasureArity);
+    expect(checkDashboardWidgetMetricMeasureArity.length).toBe(2);
+  });
+
+  it('the gate travels with the widget through `DashboardSchema.widgets[]`', () => {
+    const r = DashboardSchema.safeParse({
+      name: 'sales_dashboard',
+      label: 'Sales',
+      widgets: [widget({ type: 'kpi', values: ['a', 'b'] })],
+    });
+    expect(r.success).toBe(false);
+    const paths = (r.success ? [] : r.error.issues).map((i) => i.path.join('.'));
+    expect(paths).toContain('widgets.0.values');
+  });
+
+  it('the shipped `values` doc string states the arity rule it enforces', () => {
+    // declared = documented: the `.describe()` an author reads in the generated
+    // reference cannot still say only "at least one".
+    const described = (DashboardWidgetSchema as unknown as { shape: Record<string, { description?: string }> })
+      .shape.values.description ?? '';
+    expect(described).toContain('exactly one');
+    for (const type of FAMILY) expect(described).toContain(type);
   });
 });

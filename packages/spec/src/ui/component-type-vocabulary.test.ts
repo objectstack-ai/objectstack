@@ -76,6 +76,28 @@ describe('KNOWN_COMPONENT_TYPES covers every declared face', () => {
   });
 
   /**
+   * #18305 — the three `object-*` blocks that entered the map when the
+   * objectui#8348 ruling 「8348 以协议为准」 was executed. The known set is
+   * DERIVED from `Object.keys(ComponentPropsMap)`, so this pin is not a second
+   * list: it is the card's stated acceptance ("`Object.keys(ComponentPropsMap)`
+   * pins list the three new rows") asked of the vocabulary, which is the reader
+   * the row set feeds. `object-chart` stays unknown beside them — its absence is
+   * deliberate and has its own note in `component.zod.ts`, so a sweep that took
+   * it in by accident is caught here rather than in a rendered page.
+   */
+  it('the three #18305 blocks are known through their rows; object-chart still is not', () => {
+    for (const type of ['object-map', 'object-gantt', 'object-tree']) {
+      expect(Object.keys(ComponentPropsMap), type).toContain(type);
+      expect(isKnownComponentType(type), type).toBe(true);
+      // Every `object-*` type reaches `PageComponentSchema` through the open
+      // string arm, which the rows do not narrow — the parse is unchanged.
+      expect(KNOWN_COMPONENT_TYPE_CANDIDATES, type).toContain(type);
+    }
+    expect(Object.keys(ComponentPropsMap)).not.toContain('object-chart');
+    expect(isKnownComponentType('object-chart')).toBe(false);
+  });
+
+  /**
    * #12950's own readiness verdict, pinned: `global:search` and
    * `global:notifications` STAY declared — the 2026-08-26 ruling retires a
    * member only when no data source covers the horizon, and both are backed by

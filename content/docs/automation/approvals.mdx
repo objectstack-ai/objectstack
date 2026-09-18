@@ -94,10 +94,15 @@ write it either. Where an identity carries `source: 'idp_provisioned'` the admin
 Setting the column is still something you have to *do*. Where `manager_id` is unset the rung
 expands to nobody, the request opens on a slate no one can act on, and under the default
 `lockRecord: true` the record stays locked — recoverable only by a platform or tenant admin
-override. So set it for everyone who submits this request, or add a fallback approver that cannot
-resolve empty — e.g. `{ type: 'org_membership_level', value: 'owner' }`. `os lint` reports the
-shape at authoring time (`approval-approvers-may-resolve-empty`, `info`) and carries the same
-remedy text, so the two cannot drift apart.
+override. So set it for everyone who submits this request, or take one of the two escapes that
+need no write to the column at all: add a second approver entry that cannot resolve empty — e.g.
+`{ type: 'org_membership_level', value: 'owner' }` — or declare `onEmptyApprovers: 'fallback'`
+on the node with a `fallbackApprovers` list, so an empty manager rung opens the request on those
+people instead. Neither makes `manager` resolve; they make the failure survivable, which is a
+different and independently useful thing. `os lint` reports the shape at authoring time
+(`approval-approvers-may-resolve-empty`, `info`) and carries the same remedy text, so the two
+cannot drift apart — and it keeps reporting it even with a fallback declared, because a static
+check cannot read the column and cannot know the fallback resolves either.
 </Callout>
 
 Approving is itself a gated action — model "may approve" as a capability (`approve_invoice`) the approver's permission set grants, and gate the approve action's `requiredPermissions` on it so the gate is enforced on **both** the UI and the server (ADR-0066 D4).
@@ -273,11 +278,38 @@ empty slate you can see than a task the tenancy wall hides.
 A result may legitimately be **empty** (a present-but-empty field or variable);
 the node-level `onEmptyApprovers` policy decides what that means —
 `admin_rescue` (default: the request opens, a privileged admin takes over via
-Reassign), `fail` (the node fails: an empty slate is a config bug), or
+Reassign), `fail` (the node fails: an empty slate is a config bug),
 `auto_approve` (skip the request and continue down `approve` with
-`output.autoApproved = true`; opt-in, since it waves the record through). A
+`output.autoApproved = true`; opt-in, since it waves the record through), or
+`fallback` (open the request on the people named in `fallbackApprovers`). A
 **missing** key (`vars.never_written`) is a loud error instead — guard
 genuinely-optional inputs with `has(vars.x) ? vars.x : []`.
+
+`fallback` is the only one of the four that **names people**, so it is the only
+one that turns an empty slate into a request someone can actually decide:
+
+```ts
+{
+  approvers: [{ type: 'manager' }],
+  onEmptyApprovers: 'fallback',
+  fallbackApprovers: [{ type: 'org_membership_level', value: 'owner' }],
+}
+```
+
+`fallbackApprovers` takes the same entries as `approvers` — same types, same
+`group` / `resolveAs` / `organization` keys — and is resolved by the same
+expansion, OOO delegation included. The pairing is enforced in both directions:
+`fallback` without a `fallbackApprovers` list is refused, and a
+`fallbackApprovers` list under any other policy is refused too, because nothing
+would ever read it. Both arms fire at **flow execution**, where the approval
+node parses its config on entry — **not** at authoring time, and `os lint` has
+no pairing arm for this one. The refusal is loud, names both keys, and lands
+before the node opens any approval request.
+
+Prefer a fallback target that cannot itself resolve empty (a literal `user`, or
+the `owner` membership tier). If it does resolve empty the node degrades to
+`admin_rescue` — the request still opens and the run is never killed — and the
+log says both that the fallback fired and that it found nobody.
 
 The "previous approver picks the next step's approvers" loop needs no record
 field at all: declare `decisionOutputs: ['next_reviewers']` on node A, have the

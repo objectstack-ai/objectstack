@@ -322,11 +322,13 @@ export function sandboxBusinessMessage(error: any): string | undefined {
  * now CONVERGED. {@link sandboxBusinessMessage} still declines a crash by
  * contract, so this function keeps no opinion of its own about one.
  *
- * ⚠️ CONVERGED is the no-declared-status case, not the whole question: a crash
- * that DECLARED a 4xx still leaves {@link resolveErrorResponse} at that status,
- * wrapper and all, through a passthrough this card did not touch — pinned as an
- * ACCEPTED DIVERGENCE, widened by #15071, in
- * `error-response-structured-arm-door-parity.test.ts` §4.
+ * ⚠️ CONVERGED was the no-declared-status case only until #17273: a crash that
+ * DECLARED a status used to leave {@link resolveErrorResponse} at that status,
+ * wrapper and all, through a passthrough #15071 did not touch. That door now
+ * asks the SAME {@link isSandboxCrash} gate before its passthrough, so the
+ * question has one answer at both doors for every band — flipped from ACCEPTED
+ * DIVERGENCE to CONVERGED in
+ * `error-response-structured-arm-door-parity.test.ts` §4 rather than deleted.
  *
  * ⛔ Deliberately a READ of the field the sandbox populated, never a
  * pattern-strip of the wrapper off `.message` — {@link sandboxBusinessMessage}
@@ -2097,6 +2099,49 @@ function logWithheldServerFault(
  * drift this whole seam exists to prevent (#4886).
  */
 function resolveErrorResponse(error: any, object?: string): { status: number; body: Record<string, unknown> } {
+    // [#17273] A sandboxed body that CRASHED is a fault before it is anything
+    // else — the SAME terminal ordering #15071 gave {@link classifyDataError},
+    // asked here so the ruling reaches the other door too.
+    //
+    // #15071 converged the single `/data` door and named the residue rather
+    // than rediscovering it: {@link isSandboxCrash} went ABOVE that function's
+    // code-gated arms, so a crashed body reaches {@link UNCLASSIFIED_FAULT}
+    // whatever it declared — while THIS door kept answering the declared
+    // status with the QuickJS debug wrapper as its client-facing sentence,
+    // because {@link sandboxBusinessMessage} declines a crash (#7543) and the
+    // passthrough below therefore fell back to `error.message`. One crash, two
+    // answers, decided by which route caught it — and the one this door gave
+    // put the runner's `TypeError: …` text on the wire at a business status.
+    //
+    // The ruling that decides it is #15071's, quoted on {@link isSandboxCrash}
+    // and NOT restated here: *"A declared code is the author's statement about
+    // the failure mode they **handled**. A crash … is not that mode, so it is
+    // classified as a fault"*, against *"an internal stack-shaped sentence at a
+    // business status is both a leak and a lie to the client about what
+    // happened"*. What that card could not take was the STATUS this door's
+    // passthrough decides — the #11588 fence — so it recorded the gap as an
+    // ACCEPTED DIVERGENCE instead. This card is that follow-up, and the
+    // divergence pin flips with it.
+    //
+    // Answered through {@link mapDataError} rather than by returning
+    // {@link UNCLASSIFIED_FAULT} here, for the reason the #14541 consult below
+    // gives: same terminal, same {@link withDeclaredUserMessage} wrapper,
+    // nothing for a future edit to desynchronise. Both doors now read ONE
+    // `isSandboxCrash` gate; ⛔ do not grow a second opinion about a crash in
+    // this function.
+    //
+    // ⛔ Deliberately NOT band-scoped. The card names the declared-**4xx**
+    // passthrough, and a band condition here would converge that shape while
+    // leaving a crash declaring a **5xx** answering `503 DELETE_RESTRICTED`
+    // where the single door already answers `500 INTERNAL_ERROR` — a NEW named
+    // divergence minted by the repair for the divergence. The 5xx arm's
+    // unconditional prose-drop (#5437 / #5582 / #5907) is not narrowed by this:
+    // the terminal withholds prose too, and what moves for that shape is the
+    // status and the declared `code`, both of which shrink to the sanitised
+    // pair. #14541's guard 1 is about a producer-declared 5xx that is NOT a
+    // crash and is untouched — `error-response-structured-arm-door-parity.test.ts`
+    // §4 pins both shapes, side by side.
+    if (isSandboxCrash(error)) return mapDataError(error, object);
     // [#14541] The bespoke structured arms are asked BEFORE this door's
     // declared-status passthrough, because that ordering is the whole defect
     // this card reports: an engine envelope declaring `status: 409` left
@@ -2129,11 +2174,13 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
     //    never displaces a declared 4xx either — the same band, fenced from
     //    the other side. Measured: its producer declares no `status` at all,
     //    so this guard changes nothing today and states the boundary anyway.
-    //  - a **sandbox** producer keeps the unwrap answer it has today. The arms
+    //  - a **sandbox** REFUSAL keeps the unwrap answer it has today. The arms
     //    ship `error.message`, which for a sandboxed body is the QuickJS debug
     //    wrapper #11588 exists to keep off this wire; the passthrough below
     //    reads {@link sandboxBusinessMessage} instead and is the right door
-    //    for it.
+    //    for it. [#17273] A sandboxed CRASH no longer reaches either — the
+    //    terminal above this comment takes it, so "sandbox producer" here now
+    //    means the refusal half only.
     const structured = isSandboxOrigin(error) ? undefined : structuredCodeAnswer(error, object);
     const declaresServerBand = typeof error?.status === 'number' && error.status >= 500 && error.status < 600;
     if (structured !== undefined
@@ -2294,13 +2341,15 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
         // picked. The two doors agree again now — pinned door-to-door rather
         // than asserted, in `rest-hook-refusal-message-parity.test.ts` §4.
         //
-        // Recorded because it is measured and NOT repaired here: a body that
-        // CRASHED while carrying a declared 4xx `status` still answers with
-        // that status and the wrapper, where `mapDataError` would sanitise it
-        // to a 500. `sandboxBusinessMessage` declines the crash (#7543) so this
-        // arm's answer for it is byte-identical to before. Closing that gap
-        // means moving the STATUS this arm decided, which is the contract
-        // question this card was fenced away from — filed separately.
+        // [#17273] CLOSED — the paragraph that stood here recorded, as
+        // measured and NOT repaired, that a body which CRASHED while carrying
+        // a declared 4xx `status` still answered with that status and the
+        // wrapper. That gap is gone: the {@link isSandboxCrash} terminal at
+        // the TOP of this function takes the crash before this arm is reached,
+        // so `sandboxBusinessMessage`'s #7543 decline no longer decides what a
+        // crash gets here — nothing does, because a crash never arrives. The
+        // STATUS this arm decides is unmoved for everything that still reaches
+        // it, which is every sandboxed REFUSAL.
         const businessMessage = sandboxBusinessMessage(error);
         // [#13095] The sentence this arm hands the caller is the HUMAN half
         // only — the same #12975 rule `classifyDataError`'s declared-4xx arm
@@ -2579,6 +2628,70 @@ export function logUnexpectedRouteError(error: any, resolved: { status: number; 
     // but a declared one no longer ships its own text either. One line, never
     // two: a genuine fault already printed the whole error above.
     logWithheldServerFault(error, resolved);
+}
+
+/**
+ * [#18402] Would the classification door answer this caught value with a
+ * BARE `404 RESOURCE_NOT_FOUND` — no code the producer chose, nothing else
+ * riding along?
+ *
+ * ## Why a predicate rather than a second reading of the error
+ *
+ * A handler that owns ONE absence answer has to recognise the absences its
+ * producers THROW, and the tempting spelling — `error?.status === 404 &&
+ * error?.code === 'RESOURCE_NOT_FOUND'` — is a second opinion about what a
+ * caught value means. It disagrees with this door on every shape the door
+ * classifies rather than reads: a producer that declares a status and no code,
+ * an unregistered spelling that {@link thrownCodeFields} demotes to
+ * `declaredCode` while deriving `code` from the status, a structured arm that
+ * owns its own envelope. Each disagreement is one arm of one route quietly
+ * answering a different body again — the exact class the caller was fixing.
+ *
+ * So this ASKS the door. `resolveErrorResponse` is the function that would
+ * have rendered the value one line later; reading its verdict means the
+ * handler's fork and the fallback it forks away from can never drift apart.
+ * The function is pure and this runs on an error path, so the second
+ * classification pass costs nothing worth naming — the same argument
+ * {@link resolveErrorResponse} already makes for its own `mapDataError`
+ * re-entry.
+ *
+ * ## ⛔ Why it is NOT "the status is 404"
+ *
+ * MEASURED, and the measurement is the reason this function has three
+ * conditions instead of one. `404` on a metadata route is not a synonym for
+ * "you get nothing": `metadata-protocol` throws `{ code: 'NO_DRAFT', status:
+ * 404 }` from the Studio designer's draft probe — pinned byte-for-byte in
+ * `rest-expected-error-logging.test.ts` and `rest-4xx-message-truncation.test.ts`
+ * — and that refusal says the ITEM is there and its DRAFT is not. Folding it
+ * into an absence would tell a designer the object does not exist while it
+ * plainly does: the #5532 flattening, one pair over, minted by the repair for
+ * a sibling of it.
+ *
+ * So the question is asked about the ANSWER, not the status:
+ *
+ *  - `status` is 404, and
+ *  - `code` is `RESOURCE_NOT_FOUND`, i.e. the producer named that member. ⚠️
+ *    MEASURED: a producer that declares a 404 and NO code at all does not get
+ *    one derived into its BODY — {@link thrownCodeFields} answers `{}`,
+ *    ADR-0112's rule that nothing is invented for the half the producer did
+ *    not name — so that answer is false here and keeps the shape it had.
+ *    Folding it in would mean inventing the member the ADR declines to
+ *    invent, and
+ *  - no `declaredCode` sits beside it. Presence MEANS demotion (see
+ *    `ApiErrorSchema`): the producer spelled a code the ledger does not know,
+ *    and ADR-0112 keeps that spelling as the open, author-authored channel.
+ *    Converting such an answer would delete the one field it exists to carry.
+ *
+ * ⚠️ This predicate does NOT decide what a route answers — it only recognises
+ * an answer. The 503 an unreadable metadata store throws (#5532) resolves to
+ * 503 and is false here, which is the distinction that must never be
+ * flattened.
+ */
+export function thrownAnswerIsBareNotFound(error: any, object?: string): boolean {
+    const resolved = resolveErrorResponse(error, object);
+    return resolved.status === 404
+        && resolved.body?.code === 'RESOURCE_NOT_FOUND'
+        && resolved.body?.declaredCode === undefined;
 }
 
 /**

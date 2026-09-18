@@ -4490,7 +4490,15 @@ const connectorRateLimitConfigRemoved: MetadataConversion = {
       ],
     },
     // One notice per connector, not per knob: the block is what was removed.
-    // `retryConfig` and the timeouts beside it are untouched — they are live.
+    // `retryConfig` and the timeouts beside it are untouched by THIS conversion
+    // — a statement about its scope, not a liveness verdict. They are not live:
+    // declared, defaulted and documented, and read by nothing. No retry loop
+    // reads a strategy or a backoff; every occurrence of the timeouts outside
+    // `packages/spec` is a write of the literal `30000` so a def satisfies the
+    // post-parse type; and `ConnectorProviderContext` carries neither, so a
+    // provider factory cannot see them. `liveness/connector.json` classifies
+    // all of them `dead` and is the authority here — ADR-0049 owes them a
+    // decision, which this entry does not pre-empt.
     after: {
       connectors: [
         { name: 'billing_api', label: 'Billing API', type: 'api' },

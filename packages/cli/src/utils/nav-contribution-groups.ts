@@ -39,6 +39,42 @@
  * contribution: `os build`'s cold path should not pull the data engine in to
  * judge two empty arrays.
  *
+ * ## Why the package-id rule is imported too, and which answer that chose
+ *
+ * `artifactPackages` (`./artifact-packages.ts`) is the declared sole owner of
+ * "which package is this", and this module used to carry a second copy of it.
+ * The two had already drifted on one input — a package whose `manifest.id` AND
+ * `manifest.name` are both the empty string, which
+ * `ObjectStackDefinitionSchema` accepts (both keys are required strings on
+ * `ManifestSchema`; neither has a non-empty constraint, so `''` parses). The
+ * owner computed that package's id as `''`; the copy computed it as
+ * `packages[<index>]`.
+ *
+ * ⭐ Importing the owner therefore CHOSE `''`, and that is the answer this path
+ * wants — measured against the runtime, which is the authority this module
+ * declares it mirrors two sections up. `ObjectQL.registerApp` derives the id it
+ * registers a contribution under as `manifest.id || manifest.name` and has NO
+ * positional fallback, so the fold registers that package under `''` and its
+ * relocation diagnostic reads `Package "" contributes …`. Under the deleted
+ * copy the build printed `Package "packages[0]" …` for the same artifact —
+ * two doors naming one package differently, which is the whole defect the
+ * shared `checkNavContributionGroups` exists to prevent, one field over.
+ *
+ * ⚠️ Two bounds on that reading, because they are where it could be wrong
+ * rather than merely narrow:
+ *
+ *  - **The id is not a key here.** It is carried onto the diagnostic as
+ *    `packageId` and printed; nothing on this path uses it as a map key, a
+ *    dedupe key or a sort key, so two packages that both resolve to `''` still
+ *    produce two findings rather than collapsing into one. Measured, not read.
+ *  - **`artifactPackages` declares a precondition this path meets.** It reads
+ *    the PARSED stack and does not re-check entry shape, so a `null` element
+ *    would throw where the copy returned a positional id. Both commands call
+ *    `findNavGroupDiagnostics(result.data)`, and every malformed element —
+ *    `null`, a string, a non-object `manifest`, a missing one — is refused by
+ *    `ArtifactPackageSchema` before that. ⛔ Do not hand this function a
+ *    hand-built `packages[]` that has not been through the parse.
+ *
  * ## Why the findings ride the declared `warnings` key, and why BOTH commands
  * ## compute them
  *
@@ -63,35 +99,24 @@
 
 import type { NavContributionGroupDiagnostic } from '@objectstack/objectql';
 
+import { artifactPackages } from './artifact-packages.js';
+
 type AnyRec = Record<string, unknown>;
 
 const asArray = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 const asRec = (v: unknown): AnyRec | undefined =>
   v && typeof v === 'object' && !Array.isArray(v) ? (v as AnyRec) : undefined;
 
-/** One artifact package, in the `{ id, body }` shape the commands walk. */
+/**
+ * One artifact package, in the `{ id, body }` shape the commands walk — the
+ * shape `artifactPackages` returns, narrowed to the two facts read here.
+ *
+ * ⛔ The id RULE is not re-spelled: this is a structural parameter type, and
+ * `./artifact-packages.ts` remains the only place that computes an id.
+ */
 export interface CompiledPackage {
   readonly id: string;
   readonly body: AnyRec;
-}
-
-/**
- * The artifact's package entries, derived from the PARSED stack.
- *
- * Mirrors `compile.ts`' `artifactPackages` id rule — `manifest.id`, falling
- * back to `name`, then to the positional spelling — because that is the string
- * the runtime registers a contribution under, so a command names a package the
- * same way the fold does. Derived here rather than passed in, so both commands
- * reach the check through ONE call that needs only the parsed stack.
- */
-export function artifactPackagesOf(parsed: AnyRec): CompiledPackage[] {
-  return asArray(parsed.packages).map((entry, index) => {
-    const body = asRec((entry as { manifest?: unknown })?.manifest) ?? {};
-    const id = typeof body.id === 'string' && body.id !== ''
-      ? body.id
-      : (typeof body.name === 'string' && body.name !== '' ? body.name : `packages[${index}]`);
-    return { id, body };
-  });
 }
 
 /**
@@ -170,7 +195,7 @@ export function collectNavGroupInputs(
  */
 export async function findNavGroupDiagnostics(
   parsed: AnyRec,
-  packages: readonly CompiledPackage[] = artifactPackagesOf(parsed),
+  packages: readonly CompiledPackage[] = artifactPackages(parsed),
 ): Promise<NavContributionGroupDiagnostic[]> {
   const { apps, contributions } = collectNavGroupInputs(parsed, packages);
   if (contributions.length === 0 || apps.length === 0) return [];

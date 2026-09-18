@@ -644,7 +644,10 @@
 import { defineConfig } from 'vitest/config';
 import path from 'path';
 import { parseCLI } from 'vitest/node';
-import { runFilterPreflight } from '../qa/vitest-filter-preflight/src/index.js';
+import {
+  runFilterPreflight,
+  runProjectCliOverridePreflight,
+} from '../qa/vitest-filter-preflight/src/index.js';
 import { integrationTestFiles, unitTestFiles } from './vitest-tiers.js';
 
 // The two tiers, DERIVED from what the files DO — never written down — over
@@ -680,6 +683,30 @@ runFilterPreflight({
   root: __dirname,
   packageName: '@objectstack/cli',
   populations: { unit: UNIT_FILES, integration: INTEGRATION_FILES },
+  parse: parseCLI,
+});
+
+// #18788 — the same narrowing, the same failure direction, a different input.
+// `projects` also swallows a CLI TIMEOUT OVERRIDE: vitest 4.1.11 carries only a
+// closed twenty-name allowlist into a project config, `hookTimeout` and
+// `teardownTimeout` are not on it, and a run that names one uses the DEFAULT
+// budget and reports a pass that measured nothing. Measured in THIS package and
+// not recalled: a probe `beforeAll` sleeping 500ms passes under
+// `--hookTimeout=1` (with and without `--project`), while the same probe body
+// under `@objectstack/plugin-dev`, which declares no `projects`, exits 1 with
+// `Hook timed out in 1ms.`
+//
+// ⭐ That flag is the instrument this repo's own prior art reaches for to
+// witness that a cold load has left every clocked window — the header of
+// `packages/plugins/plugin-dev/src/dev-plugin-security-enforcement-warning.test.ts`
+// reads a GREEN under `--hookTimeout=1` as the pass. Here that green cannot
+// fail, so it is indistinguishable from one that passed, and this call is what
+// stops it being read: the run is REFUSED, loudly, naming the spellings that do
+// bite here. ⛔ Not forwarded into the projects below — the shared module's
+// header carries the three measured reasons that was rejected.
+runProjectCliOverridePreflight({
+  argv: process.argv,
+  packageName: '@objectstack/cli',
   parse: parseCLI,
 });
 

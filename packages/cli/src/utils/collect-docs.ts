@@ -5,7 +5,8 @@
  *
  * `os build` compiles every Markdown file in the package's flat
  * `src/docs/` directory into a `doc` metadata item on the stack
- * (`docs: DocSchema[]`). This module owns both halves of that contract:
+ * (`docs: DocSchema[]`). This module owns that contract end to end — what is
+ * collected, what is NOT, and what the collected set must satisfy:
  *
  *   - **Collection**: filename stem → `name`, frontmatter `title:` or the
  *     first `#` heading → `label`, body → `content`; the optional
@@ -14,6 +15,11 @@
  *     build error — flatness is the contract that keeps cross-references
  *     stable (a link is `[text](./<name>.md)`; resolution is a basename
  *     lookup with zero path arithmetic).
+ *   - **Absence**: a `src/<pkg>/docs/` directory one level down is NEVER
+ *     collected (ADR-0046 anchors at `src/docs`), and under an ADR-0130
+ *     multi-package layout that is where a moved docs directory lands — so it
+ *     is REPORTED rather than passed over, because a build that keeps none of
+ *     the author's docs and says nothing is the defect (#18170).
  *   - **Lint**: namespace-prefix naming (doc uniqueness is logical — the
  *     metadata registry key carries no package coordinate, so a bare-name
  *     collision silently overwrites across packages), the v1 syntax bans
@@ -212,15 +218,94 @@ function firstHeading(markdown: string): string | undefined {
   return m ? m[1].trim() : undefined;
 }
 
+/** The one directory this collector reads, relative to the config file. */
+const COLLECTED_DOCS_DIR = 'docs';
+
+/** Markdown files directly inside `dir`, sorted; `[]` when it is not a readable directory. */
+function markdownFilesIn(dir: string): string[] {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((e) => e.isFile() && e.name.endsWith('.md'))
+    .map((e) => e.name)
+    .sort();
+}
+
+/**
+ * Report Markdown docs that exist under `src/` but sit where this collector
+ * never looks — one warning per `src/<pkg>/docs/` directory holding `.md`
+ * files (#18170).
+ *
+ * ## Why this is a diagnostic and not a collection
+ *
+ * ADR-0046 collection is anchored at exactly `<config dir>/src/docs`, while
+ * ADR-0130 lets one artifact ship N packages, each conventionally a top-level
+ * directory under `src/`. Move a docs directory into its package
+ * (`git mv src/docs src/sales/docs`) and the two conventions disagree: the
+ * collector reads nothing, `os build` exits 0 with its usual
+ * `Collecting package docs (ADR-0046)...` line, and the artifact is written
+ * with no `docs[]` at all. Measured on `objectstack-ai/hotcrm` at `590b095`
+ * (pin 17.4.0): four package docs gone, exit 0, no output naming the loss.
+ *
+ * **The hazard is the silence, not the fixed path.** An exit-0 build with the
+ * usual progress line is the shape every reader trusts, so this collector says
+ * what it did not read, in the same channel it already uses for authored input
+ * it cannot use (`docs/frontmatter-tags` above): the author wrote docs, the
+ * build kept none of them, and until now nothing said so.
+ *
+ * ⚠️ `severity: 'warning'` deliberately, not `'error'`. An error fails the
+ * build (`compile.ts` exits 1 on any doc error), which would refuse a tree that
+ * builds green today on a directory this collector can only GUESS was meant as
+ * ADR-0046 docs — a `src/<pkg>/docs/` directory is not declared anywhere the
+ * build can read. Reading those files instead (the card's other option) widens
+ * the accepted set and needs a ruling this does not make: an ADR-0130 D4
+ * artifact registers per package, so per-package docs would have to say which
+ * package body they belong to. ⛔ Neither is decided here; the loss is made
+ * audible, which is the card's stated minimum.
+ */
+function uncollectedDocsDirectories(srcDir: string): DocIssue[] {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(srcDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const issues: DocIssue[] = [];
+  const packageDirs = entries.filter((e) => e.isDirectory() && e.name !== COLLECTED_DOCS_DIR);
+  packageDirs.sort((a, b) => a.name.localeCompare(b.name));
+  for (const entry of packageDirs) {
+    const files = markdownFilesIn(path.join(srcDir, entry.name, COLLECTED_DOCS_DIR));
+    if (files.length === 0) continue;
+    const rel = `src/${entry.name}/docs`;
+    issues.push({
+      severity: 'warning',
+      rule: 'docs/uncollected-directory',
+      message: `${rel}/ holds ${files.length} Markdown file(s) that were NOT collected: package docs are read from src/docs/ only (ADR-0046 §3.2), so these are absent from the artifact's \`docs[]\` and from every book that includes them. Move them into src/docs/ (doc names carry the package namespace prefix, so packages do not collide there), declare them inline as \`defineStack({ docs })\`, or delete them if they are not package docs. Found: ${files.join(', ')}`,
+      path: rel,
+    });
+  }
+  return issues;
+}
+
 /**
  * Read `src/docs/*.md` (flat) next to the given config file and compile
  * each file into a `DocItem`. Structural problems (subdirectories, bad
  * filename stems) are reported as error issues; offending files are
  * skipped rather than partially collected.
+ *
+ * Markdown docs sitting one level down, in `src/<pkg>/docs/`, are never
+ * collected — they are REPORTED instead (see {@link uncollectedDocsDirectories}),
+ * whether or not `src/docs/` itself exists, because either way the build keeps
+ * none of them.
  */
 export function collectDocsFromSrc(configPath: string): { docs: DocItem[]; issues: DocIssue[] } {
-  const docsDir = path.join(path.dirname(configPath), 'src', 'docs');
-  const issues: DocIssue[] = [];
+  const srcDir = path.join(path.dirname(configPath), 'src');
+  const docsDir = path.join(srcDir, COLLECTED_DOCS_DIR);
+  const issues: DocIssue[] = uncollectedDocsDirectories(srcDir);
   if (!fs.existsSync(docsDir)) return { docs: [], issues };
 
   const baseByName = new Map<string, DocItem>();

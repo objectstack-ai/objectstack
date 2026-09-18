@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { EpochMs } from '../shared/epoch.zod';
 
 /**
  * Identity & User Model Specification
@@ -39,9 +40,40 @@ export const UserSchema = lazySchema(() => z.object({
   name: z.string().optional().describe('User display name'),
   
   /**
-   * User's profile image URL
+   * User's profile image URL.
+   *
+   * `null` is accepted alongside a URL string and alongside the key being
+   * absent. better-auth owns this column, `sys_user.image` is declared
+   * `Field.url({ required: false })` and reaches SQLite as
+   * `image varchar(255)` with `notnull=0`, and better-auth SELECTs it and
+   * serialises it present-and-null for a user who never set an avatar. Measured
+   * on a real `AuthManager` over ObjectQL + driver-sqlite-wasm (#18509): the
+   * `/auth/sign-up/email` and `/auth/get-session` bodies both carry
+   * `"image": null`, and so does `members[].user.image` inside
+   * `/auth/organization/get-full-organization`. The declaration was the thing
+   * that was wrong — Prime Directive #12's default (fix the producer, never
+   * widen the consumer) rests on the premise it states out loud, that we own
+   * both ends, which does not hold for a third-party model.
+   *
+   * Same defect and same remedy as `SessionUserSchema.image` (#17235 / PR
+   * #18501, ruling batch #138 item 1), reached here by measurement rather than
+   * by analogy — #18509 exists precisely because that review refused to infer
+   * this key's verdict from that one.
+   *
+   * `.nullish()`, NOT `.nullable()`: the key's ABSENCE is a legal shape today,
+   * so `.nullable()` would retire a live shape as the price of admitting
+   * `null`. Pure widening only.
+   *
+   * `.url()` is KEPT, and it is not in tension with `null`. `.nullish()` wraps
+   * the whole `z.string().url()`, so `null` and `undefined` are separate
+   * branches the URL check never sees, while a present string is still required
+   * to be a well-formed URL. Measured: of the six inputs
+   * (absent / `null` / `''` / a URL / a non-URL / a number) exactly ONE moves,
+   * and it is the ruled one — `''` and `'not-a-url'` are still refused, which
+   * is why the empty-avatar-URL boundary note carried on #18509 does not become
+   * live here the way it would on a declaration without `.url()`.
    */
-  image: z.string().url().optional().describe('Profile image URL'),
+  image: z.string().url().nullish().describe('Profile image URL'),
   
   /**
    * Account creation timestamp
@@ -108,7 +140,7 @@ export const AccountSchema = lazySchema(() => z.object({
   /**
    * Token expiry timestamp
    */
-  expiresAt: z.number().optional().describe('Token expiry timestamp (Unix)'),
+  expiresAt: EpochMs.optional().describe('Token expiry timestamp (Unix milliseconds)'),
   
   /**
    * OAuth token type

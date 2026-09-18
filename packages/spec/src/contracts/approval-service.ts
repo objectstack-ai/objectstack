@@ -571,12 +571,25 @@ export interface ApprovalRecallInput {
  * (`api/automation-api.zod.ts`), the structure the automation resume door
  * already publishes inside its `400 FLOW_FAILED` `error.details` (#15221, the
  * ruling's third carrier). They are inherited here, never re-spelled, so the
- * two cannot drift, and a caller that parses this member with
- * `ResumeFailureDetailsSchema` reads the same three facts it reads off that
- * door. What this adds is the one member a success envelope cannot leave to
- * its envelope: on the resume door the registered code is the answer's own
- * `code`; on a success answer nothing else names the failure class, so it
- * rides here as {@link code}.
+ * two cannot drift. What this adds is the one member a success envelope
+ * cannot leave to its envelope: on the resume door the registered code is
+ * the answer's own `code`; on a success answer nothing else names the
+ * failure class, so it rides here as {@link code}.
+ *
+ * ⛔ Which is exactly why `ResumeFailureDetailsSchema` is NOT the reader for
+ * this member. That schema declares the three shared members and not
+ * {@link code}, and it is a plain non-strict `z.object`: parsing a report
+ * with it SILENTLY STRIPS the code — the parse SUCCEEDS, raises no
+ * `unrecognized_keys` issue, logs nothing, and hands back an object whose
+ * failure class is simply gone. The one member the paragraph above calls
+ * indispensable is the one the act of validating removes, and nothing in the
+ * result says so. On the resume door that schema is the right reader,
+ * because there the registered code rides on the `error` envelope it parses
+ * beside; here there is no envelope, so read {@link code} off the report
+ * itself — it is typed `ErrorCode`, required, and needs no parse at all. Use
+ * that schema on this member to read the three shared facts if you like,
+ * ⛔ never as a way to obtain the report. Both halves are measured in
+ * `contracts/resume-failure-report.pin.test.ts`.
  *
  * ⛔ No new error code is minted under the ruling. `code` is typed as
  * `ErrorCode` — the ADR-0112 vocabulary `ApiErrorSchema.code` parses

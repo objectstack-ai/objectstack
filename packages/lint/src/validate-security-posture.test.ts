@@ -447,6 +447,67 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
     ).toEqual([]);
   });
 
+  // ── [#18535] …and the ADR-0090 D5 half of that rule: 「平台系统权限;带
+  // package provenance 的应用声明 capability 令牌不计」. The predicate has taken
+  // an `AnchorBindingContext` since PR #17811; this rule passes the stack's own
+  // `capabilities:` declarations into it, which is what makes an app's
+  // "every employee holds this" set authorable at all. Three cases, because a
+  // single one of them is satisfied by both a correct rule and a rule that
+  // stopped judging `systemPermissions` altogether.
+  it('accepts an isDefault set whose systemPermissions token THIS stack declares (ADR-0090 D5)', () => {
+    expect(
+      rulesOf({
+        capabilities: [{ name: 'crm.export_pipeline', label: 'Export Pipeline' }],
+        permissions: [
+          {
+            name: 'app_default',
+            isDefault: true,
+            systemPermissions: ['crm.export_pipeline'],
+            objects: { invoice: { allowRead: true } },
+          },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it('still errors on an UNDECLARED systemPermissions token — the control for the case above', () => {
+    const findings = validateSecurityPosture({
+      // A real declaration list, naming a DIFFERENT capability: this pins that
+      // membership is what excuses a token, never the mere presence of a
+      // `capabilities:` collection on the stack.
+      capabilities: [{ name: 'crm.export_pipeline', label: 'Export Pipeline' }],
+      permissions: [
+        {
+          name: 'app_default',
+          isDefault: true,
+          systemPermissions: ['crm.settle_ledger'],
+          objects: { invoice: { allowRead: true } },
+        },
+      ],
+    }).filter((f) => f.rule === SECURITY_ANCHOR_HIGH_PRIVILEGE);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('system permissions');
+  });
+
+  it('still errors on a PLATFORM capability even when the stack declares a capability of that name', () => {
+    // The platform floor, applied inside the predicate: declaring
+    // `manage_users` must not launder it past the anchor gate. Keeping this
+    // case beside the two above is what stops the lint and the runtime gate
+    // from drifting — both read the same `PLATFORM_CAPABILITY_NAMES`.
+    const findings = validateSecurityPosture({
+      capabilities: [{ name: 'manage_users', label: 'Not Yours' }],
+      permissions: [
+        {
+          name: 'app_default',
+          isDefault: true,
+          systemPermissions: ['manage_users'],
+          objects: { invoice: { allowRead: true } },
+        },
+      ],
+    }).filter((f) => f.rule === SECURITY_ANCHOR_HIGH_PRIVILEGE);
+    expect(findings).toHaveLength(1);
+  });
+
   // ── Rule: security-role-word (ADR-0090 D3) ──────────────────────────
   // [#8310] Its own function (and registry entry) since the rest of the block
   // crossed the runtime publish surface — same file, same rule id, same
@@ -482,6 +543,89 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
   it('skips system objects (better-auth sys_member.role is the documented exception)', () => {
     expect(
       validateSecurityRoleWord({ objects: [{ name: 'sys_member', fields: { role: { name: 'role', label: 'Role' } } }] }),
+    ).toEqual([]);
+  });
+
+  // ── The field-group surface (#18306) ────────────────────────────────
+  // The gap this closed was the #7220 shape one grain finer than the one
+  // `validateSecurityRoleWord`'s own split exists to avoid: the field label
+  // below is refused, so the group HEADING above it has to be refused too, or
+  // the author renames the field and the heading keeps the word. The pair is
+  // asserted together, in one stack, because apart they are two passing tests
+  // that say nothing about the thing that was wrong.
+  it('refuses the reserved word on a field-group heading, beside the field it heads', () => {
+    const findings = validateSecurityRoleWord({
+      objects: [
+        {
+          name: 'showcase_contact',
+          label: 'Contact',
+          sharingModel: 'private',
+          fields: { duty: { name: 'duty', label: 'Role Of Record', group: 'assignment' } },
+          fieldGroups: [{ key: 'assignment', label: 'Account & Role' }],
+        },
+      ],
+    });
+    expect(findings.map((f) => f.path)).toEqual([
+      'objects[0].fields.duty.label',
+      'objects[0].fieldGroups[0].label',
+    ]);
+    expect(findings.every((f) => f.severity === 'error' && f.rule === SECURITY_ROLE_WORD)).toBe(true);
+  });
+
+  it('refuses the reserved token in a field-group KEY, and names `key` (not `name`) in the fix-it', () => {
+    // `ObjectFieldGroupSchema` spells the identifier `key` and REJECTS `name`
+    // as an alias, so a message naming `name` would point the author at a key
+    // the schema refuses.
+    const findings = validateSecurityRoleWord({
+      objects: [
+        {
+          name: 'showcase_contact',
+          sharingModel: 'private',
+          fieldGroups: [{ key: 'role_info', label: 'Assignment' }],
+        },
+      ],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'error',
+      rule: SECURITY_ROLE_WORD,
+      path: 'objects[0].fieldGroups[0].key',
+      where: 'field group "showcase_contact.role_info"',
+    });
+    expect(findings[0]!.message).toContain('field group key "role_info"');
+    expect(findings[0]!.message).not.toContain('field group name');
+  });
+
+  it('stays silent on a field group with no reserved word — the showcase shape', () => {
+    // The four groups `examples/app-showcase` authors on `showcase_contact`,
+    // plus the near-miss the sibling test pins one grain up (`payroll`).
+    expect(
+      validateSecurityRoleWord({
+        objects: [
+          {
+            name: 'showcase_contact',
+            label: 'Contact',
+            sharingModel: 'private',
+            fieldGroups: [
+              { key: 'contact', label: 'Contact' },
+              { key: 'work', label: 'Work' },
+              { key: 'status', label: 'Status' },
+              { key: 'notes', label: 'Notes' },
+              { key: 'payroll', label: 'Payroll — Controlled Rollout' },
+            ],
+          },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it('exempts a field group on a system object, exactly as it exempts the fields under it', () => {
+    // The visit lives INSIDE the `isSystemObject` guard on purpose: a platform
+    // object whose fields are exempt cannot have a gated heading above them.
+    expect(
+      validateSecurityRoleWord({
+        objects: [{ name: 'sys_member', fieldGroups: [{ key: 'role_info', label: 'Organization Role' }] }],
+      }),
     ).toEqual([]);
   });
 
@@ -1189,7 +1333,11 @@ const NOT_SCHEMA_RECEIVERS: Record<string, string> = {
 const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: string; keys: () => string[] }> = [
   {
     receiver: 'stack',
-    expected: ['apps', 'books', 'data', 'objects', 'permissions', 'positions'],
+    // [#18535] `capabilities` joined the list when the ADR-0090 D5 anchor rule
+    // started passing the stack's own capability declarations to the predicate
+    // as `AnchorBindingContext.declaredCapabilities` — a declared token is the
+    // app's own gate, not a platform system permission.
+    expected: ['apps', 'books', 'capabilities', 'data', 'objects', 'permissions', 'positions'],
     declaredBy: 'ObjectStackSchema',
     keys: () => Object.keys(ObjectStackSchema.shape),
   },
@@ -1197,7 +1345,10 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     receiver: 'obj',
     // `security` is absent, and that is the #5017 fix: `ObjectSchema` declares
     // the OWD dials FLAT and has no `security` envelope to nest them under.
-    expected: ['actions', 'externalSharingModel', 'fields', 'isSystem', 'label', 'name', 'sharingModel'],
+    // [#18306] `fieldGroups` joined when the ADR-0090 D3 vocabulary freeze
+    // started visiting the group headings that sit above the fields it already
+    // judged.
+    expected: ['actions', 'externalSharingModel', 'fieldGroups', 'fields', 'isSystem', 'label', 'name', 'sharingModel'],
     declaredBy: 'ObjectSchema',
     keys: () => Object.keys(ObjectSchema.shape),
   },
@@ -1231,6 +1382,17 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     declaredBy: 'ObjectSchema.actions[]',
     keys: () => shapeKeysOf(ObjectSchema.shape.actions),
   },
+  // [#18306] The field-group heading surface. `key`, not `name`: the schema
+  // spells the identifier `key` and declares `name` as a REJECTED alias, so
+  // reading `group.name` here would be the #5017 shape — a consumer tolerating
+  // a spelling its own schema refuses by name. This entry is what makes that
+  // regression fail before review rather than after.
+  {
+    receiver: 'group',
+    expected: ['key', 'label'],
+    declaredBy: 'ObjectSchema.fieldGroups[]',
+    keys: () => shapeKeysOf(ObjectSchema.shape.fieldGroups),
+  },
   {
     receiver: 'app',
     expected: ['label', 'name'],
@@ -1260,6 +1422,16 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     expected: ['object', 'records'],
     declaredBy: 'ObjectStackSchema.data[]',
     keys: () => shapeKeysOf(ObjectStackSchema.shape.data),
+  },
+  // [#18535] The ADR-0066 D1 capability declarations the anchor rule reads: it
+  // wants their NAMES and hands the declarations themselves to the predicate,
+  // which reads `name` and ignores every other field — so nothing is
+  // transcribed here and this stays a one-key surface.
+  {
+    receiver: 'cap',
+    expected: ['name'],
+    declaredBy: 'ObjectStackSchema.capabilities[]',
+    keys: () => shapeKeysOf(ObjectStackSchema.shape.capabilities),
   },
 ];
 
@@ -1304,6 +1476,7 @@ describe('validateSecurityPosture — reads only keys the spec declares (meta-te
       'declared', // #16108: one object's sorted field-name list — `.length` / `.slice` / `.join`.
       'entries', // #7503: the rule's own field list — `.find`, a JS method.
       'matched', // #14747: one tier's candidate list — `.length` / `.map`, JS methods.
+      'declaredCapabilities', // #18535: the stack's own capability list — `.length`, a JS property.
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
@@ -1452,6 +1625,19 @@ const REACHABILITY_CORPUS: Array<{ label: string; stack: Record<string, unknown>
   },
   { label: 'role-word (identifier)', stack: { objects: [objectFixture({ name: 'user_role', sharingModel: 'private' })] } },
   { label: 'role-word (label)', stack: { objects: [objectFixture({ name: 'user_duty', label: 'User Role', sharingModel: 'private' })] } },
+  // [#18306] Not a new push site — the same two branches, reached through the
+  // field-group surface. It earns its place in THIS corpus for the other
+  // guarantee the corpus makes: that the keys the rule reads are keys an
+  // author can legally write, which is the claim `group.key` / `group.label`
+  // rests on.
+  {
+    label: 'role-word (field-group key)',
+    stack: { objects: [objectFixture({ name: 'user_duty', sharingModel: 'private', fieldGroups: [{ key: 'role_info', label: 'Assignment' }] })] },
+  },
+  {
+    label: 'role-word (field-group label)',
+    stack: { objects: [objectFixture({ name: 'user_duty', sharingModel: 'private', fieldGroups: [{ key: 'assignment', label: 'Account & Role' }] })] },
+  },
   {
     label: 'book-audience-unknown-set',
     stack: { books: [{ name: 'guide', label: 'Guide', slug: 'guide', groups: [], audience: { permissionSet: 'nobody_declares_this' } }] },

@@ -181,7 +181,7 @@ const result = AutomationApiErrorCode.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ name: string; label: string; description?: string; successMessage?: string; … }` | ✅ | The created flow, canonicalized — the parsed shape the engine stored, identical to what a subsequent GET answers |
 
 ### Nested Shape: `CreateFlowResponse.error`
@@ -197,6 +197,15 @@ const result = AutomationApiErrorCode.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `CreateFlowResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `CreateFlowResponse.data`
 
@@ -248,7 +257,7 @@ const result = AutomationApiErrorCode.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ name: string; deleted: boolean }` | ✅ |  |
 
 ### Nested Shape: `DeleteFlowResponse.error`
@@ -264,6 +273,15 @@ const result = AutomationApiErrorCode.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `DeleteFlowResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `DeleteFlowResponse.data`
 
@@ -312,7 +330,7 @@ const result = AutomationApiErrorCode.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ name: string; label: string; description?: string; successMessage?: string; … }` | ✅ | Full flow definition |
 
 ### Nested Shape: `GetFlowResponse.error`
@@ -328,6 +346,15 @@ const result = AutomationApiErrorCode.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `GetFlowResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `GetFlowResponse.data`
 
@@ -380,7 +407,7 @@ const result = AutomationApiErrorCode.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ id: string; flowName: string; flowVersion?: integer; status: Enum<'pending' \| 'running' \| 'paused' \| 'completed' \| 'failed' \| 'cancelled' \| …>; … }` | ✅ | Full execution log with step details |
 
 ### Nested Shape: `GetRunResponse.error`
@@ -396,6 +423,15 @@ const result = AutomationApiErrorCode.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `GetRunResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `GetRunResponse.data`
 
@@ -441,7 +477,7 @@ const result = AutomationApiErrorCode.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ flows: object[]; total?: integer; nextCursor?: string; hasMore: boolean }` | ✅ |  |
 
 ### Nested Shape: `ListFlowsResponse.error`
@@ -457,6 +493,15 @@ const result = AutomationApiErrorCode.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `ListFlowsResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `ListFlowsResponse.data`
 
@@ -492,7 +537,7 @@ const result = AutomationApiErrorCode.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ runs: object[]; total?: integer; nextCursor?: string; hasMore: boolean }` | ✅ |  |
 
 ### Nested Shape: `ListRunsResponse.error`
@@ -508,6 +553,15 @@ const result = AutomationApiErrorCode.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `ListRunsResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `ListRunsResponse.data`
 
@@ -529,7 +583,7 @@ const result = AutomationApiErrorCode.parse(data);
 | :--- | :--- | :--- | :--- |
 | **runId** | `string` | ✅ | The run the resume was addressed to - the run that failed, and on the `stranded` arm the run an operator verb can re-arm. Named so a caller acts on an identifier instead of parsing one out of the message |
 | **status** | `Enum<'failed' \| 'stranded'>` | optional | The engine's own lifecycle verdict for the run, forwarded verbatim when the producer stamped one and never synthesised by the door - absent when the engine reported no status (a subflow child that failed terminally, an engine that predates the discriminator). `stranded` is the terminally-failed-but-repairable run of `AutomationResult.status`; `failed` says the run ran and was rejected. These two terminal-failure members of that union are the only ones that can reach a 400 |
-| **repairable** | `boolean` | ✅ | Whether the engine says this run can still be re-armed by an operator verb - `true` exactly when `status` is `stranded`, derived from the engine's discriminator and never from the message text. Always present on this arm: `false` is the honest answer for every other exit, the ones that report no status included, because an absent member would be indistinguishable from a server that predates this field, and promising a repair verb that will refuse is worse than promising nothing |
+| **repairable** | `boolean` | ✅ | Whether the engine says this run can still be re-armed by an operator verb. Answered from the engine, two ways, and never from the message text: where the engine stamped a `status`, that word decides (`stranded` is the run whose OWN pause a resume consumed before a downstream node threw); where it stamped none, the door asks the engine's read-only inspection (`IAutomationService.inspectConsumedSuspension`) and relays its verdict. The second half is not a fallback but the honest answer for a real exit: a subflow DELEGATION failure carries no status, because nothing re-arms an ancestor by resuming it, and yet the ancestor's consumed pause is journalled and the restore verb re-arms that chain as one unit. Always present on this arm: an absent member would be indistinguishable from a server that predates this field. Every way of not getting an answer is fail-closed - a service that declares no inspection member, and a store the inspection could not read - because promising a repair verb that will refuse is worse than promising nothing |
 
 
 ---
@@ -554,7 +608,7 @@ const result = AutomationApiErrorCode.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ name: string; enabled: boolean }` | ✅ |  |
 
 ### Nested Shape: `ToggleFlowResponse.error`
@@ -570,6 +624,15 @@ const result = AutomationApiErrorCode.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `ToggleFlowResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `ToggleFlowResponse.data`
 
@@ -605,7 +668,7 @@ const result = AutomationApiErrorCode.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ success: boolean; output?: any; error?: string; durationMs?: number; … }` | ✅ |  |
 
 ### Nested Shape: `TriggerFlowResponse.error`
@@ -621,6 +684,15 @@ const result = AutomationApiErrorCode.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `TriggerFlowResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `TriggerFlowResponse.data`
 
@@ -690,7 +762,7 @@ const result = AutomationApiErrorCode.parse(data);
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
+| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ name: string; label: string; description?: string; successMessage?: string; … }` | ✅ | The updated flow, canonicalized — the parsed shape the engine stored, identical to what a subsequent GET answers |
 
 ### Nested Shape: `UpdateFlowResponse.error`
@@ -706,6 +778,15 @@ const result = AutomationApiErrorCode.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Nested Shape: `UpdateFlowResponse.meta`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **timestamp** | `string` | ✅ |  |
+| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
+| **requestId** | `string` | optional |  |
+| **traceId** | `string` | optional |  |
 
 ### Nested Shape: `UpdateFlowResponse.data`
 

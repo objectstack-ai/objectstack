@@ -414,20 +414,18 @@ overrides:
   #     nothing re-resolved it when 5.9.1 and 5.9.2 published, the same
   #     mechanism the hono note above records. `pnpm update devalue -r --depth
   #     Infinity` does clear it, but it re-resolves the whole tree and moved
-  #     twelve unrelated packages in one 107/87-line lockfile churn; the
-  #     override moves devalue alone and leaves a floor behind, so a future
-  #     transitive reintroduction lands on the patched line instead of silently
-  #     re-arming the advisory.
-  #     ONE resolved copy in the whole tree (`pnpm why devalue`), so the
-  #     floorless selector forces nothing else onto the 5.x line.
+  #     twelve unrelated packages (type-fest, seroval, postcss, nanoid, knex,
+  #     picomatch, ip-address, isbot, node-abi, use-sync-external-store …) in
+  #     one 107/87-line lockfile churn; the override moves devalue alone and
+  #     leaves a floor behind, so a future transitive reintroduction lands on
+  #     the patched line instead of silently re-arming the advisory.
+  #     ONE resolved copy in the whole tree (measured, `pnpm why devalue`), so
+  #     the floorless selector forces nothing else onto the 5.x line.
   #     Bound at the 6.0.0 major boundary per this block's header rule, never
   #     `<5.9.2`, which would self-invalidate the day 5.9.2 is itself flagged
   #     (the undici 7.28.0 / brace-expansion 5.0.8 specimens, #4961 / #5032).
   #     ⚠️ The advisory's CONTENT is NOT characterised here: api.osv.dev and
-  #     GitHub's /advisories endpoint are both refused by this container's
-  #     egress proxy, so the severity and the fixed version above are read off
-  #     the scanner's own output line and nothing else.
-  #     ⚠️ PORTED, not authored here: this block and its lockfile effect are
-  #     PR #18942's (card #18930), copied verbatim so this PR stops inheriting
-  #     `main`'s red. It no-ops the moment the base carries it.
+  #     GitHub's /advisories endpoint are both refused by the authoring
+  #     container's egress proxy, so the severity and the fixed version above
+  #     are read off the scanner's own output line and nothing else.
   'devalue@<6.0.0': '^5.9.2'

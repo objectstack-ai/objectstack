@@ -12,9 +12,12 @@ import {
   formatUnknownAuthoringKey,
   type ConversionNotice,
 } from '@objectstack/spec';
-import { loadConfig } from '../utils/config.js';
+import { loadConfig, namedExportRejectionHints } from '../utils/config.js';
 import { lowerCallables } from '../utils/lower-callables.js';
 import { authoringRuleUnionStack } from '../utils/stack-collections.js';
+// [#18677] The per-package half of the author-time rule run, shared with
+// `os compile` — ⛔ the loop is not re-written here; see that module's header.
+import { artifactPackages, runPerPackageAuthoringRules } from '../utils/artifact-packages.js';
 import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
 import { resolveSduiManifest } from '../utils/sdui-manifest.js';
 import { preflightRequiredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
@@ -45,6 +48,14 @@ import { checkProtocolVersionGap } from '../utils/protocol-version-gap.js';
 // Reports; never refuses — the runtime still relocates, deliberately.
 import { findNavGroupDiagnostics } from '../utils/nav-contribution-groups.js';
 import type { NavContributionGroupDiagnostic } from '@objectstack/objectql';
+// [#18024] The permission-set name-collision check, shared with `os compile`.
+// Reports; never refuses — the runtime still drops the foreign set, correctly
+// (ADR-0086 D4); what was missing was the author hearing about it.
+import {
+  findPermissionSetNameCollisions,
+  formatPermissionSetNameCollisions,
+} from '../utils/permission-set-name-collisions.js';
+import type { PermissionSetNameCollisionDiagnostic } from '@objectstack/plugin-security';
 
 export default class Validate extends Command {
   static override description =
@@ -135,6 +146,10 @@ export default class Validate extends Command {
     // validate does not also report, and the two commands being one wall with
     // two doors is the #4409 / #4463 discipline this list already follows.
     let navGroupWarnings: NavContributionGroupDiagnostic[] = [];
+    // [#18024] Computed HERE as well as in `os compile`, and for the same
+    // reason the line above it gives: the #11727 residue pin asserts that
+    // nothing rides in build's `warnings` that validate does not also report.
+    let permissionSetCollisionWarnings: PermissionSetNameCollisionDiagnostic[] = [];
     const warningsSoFar = () => [
       ...ruleAdvisories,
       ...docWarnings,
@@ -149,6 +164,8 @@ export default class Validate extends Command {
       // end and the pin keeps guarding exactly what it was written to guard.
       // ⛔ Do not "fix" that pin by loosening its regex.
       ...navGroupWarnings,
+      // [#18024] APPENDED for the same reason, one member later.
+      ...permissionSetCollisionWarnings,
     ];
     // [#12125] The ADR-0087 D2 conversion notices, hoisted for the SAME reason
     // and under the SAME ruling as the five lists above — one field over. The
@@ -179,7 +196,7 @@ export default class Validate extends Command {
     try {
       // 1. Load configuration
       if (!flags.json) printStep('Loading configuration...');
-      const { config, absolutePath, duration } = await loadConfig(args.config);
+      const { config, absolutePath, duration, namedExports } = await loadConfig(args.config);
 
       if (!flags.json) {
         printKV('Config', absolutePath);
@@ -285,6 +302,17 @@ export default class Validate extends Command {
         console.log('');
         printError('Validation failed');
         formatZodErrors(result.error as unknown as ZodError);
+        // [#18171] …and, when one of those unrecognised top-level keys got
+        // there by being a NAMED EXPORT of the config module rather than a key
+        // the author wrote inside `defineStack()`, the rule that makes it one.
+        // Text face only: the `--json` branch above is untouched, so no field
+        // is added to a published envelope.
+        for (const line of namedExportRejectionHints(
+          (result.error as unknown as ZodError).issues,
+          namedExports,
+        )) {
+          console.log(chalk.dim(line));
+        }
         this.exit(1);
       }
 
@@ -357,6 +385,80 @@ export default class Validate extends Command {
         this.exit(1);
       }
 
+      // 3a-ii. [ADR-0130 D4, #18677] The SAME rule table, once per PACKAGE —
+      //     the second half of the run above, and the half this door ran
+      //     without.
+      //
+      //     `os build` has run it since #16611; `os validate` ran the union
+      //     fold and stopped, importing neither `artifactPackages` nor
+      //     `packageBodyAsStack`. Every finding this pass yields is therefore
+      //     one `os build` reported and this command structurally could not.
+      //     Same FALSE-CLEAN direction #17069 fixed one layer up, and the worse
+      //     door for it: the fast inner-loop check is what an author runs
+      //     BEFORE shipping, so its clean bill of health is the strongest false
+      //     assurance the three commands can give.
+      //
+      //     ⚠️ [#18779] This step used to size that gap by quoting `compile.ts`
+      //     step 3b-ii — "exactly the set the union could not see" — and that
+      //     sentence was FALSE when it was copied here: the de-duplication key
+      //     carried the POSITIONAL `path`, so a package-local finding and its
+      //     flattened twin got two keys and the ECHO survived. Part of every
+      //     survivor set was therefore something THIS door's own union run
+      //     already reported. The key was corrected in
+      //     `utils/artifact-packages.ts`; the gap this step closed is real and
+      //     its direction is unchanged, but ⛔ do not re-derive its size from
+      //     that sentence — it was quoted, never measured.
+      //
+      //     ⛔ Not a second copy of the loop — `runPerPackageAuthoringRules` is
+      //     the one the build door calls, so the de-duplication key, the
+      //     severity split and the `where` prefix cannot drift between the two
+      //     doors. That drift is the defect this step closes, one layer down.
+      //
+      //     The SEVERITY MAPPING is `os build`'s, unchanged and deliberately:
+      //     an `error` refuses (exit 1), an advisory joins `ruleAdvisories` and
+      //     rides `warningsSoFar()`. The card asked for the asymmetry, ⛔ not
+      //     for a severity judgement, and a per-package `error` is one
+      //     `os build` ALREADY refuses — so this narrows `os validate` to the
+      //     bar the command that ships already holds, never past it.
+      //
+      //     Skipped entirely for a stack with no `packages[]`: one package by
+      //     definition, already judged whole by the union run above.
+      const packageEntries = artifactPackages(result.data as Record<string, unknown>);
+      if (packageEntries.length > 0) {
+        if (!flags.json) {
+          printStep(`Running author-time rules per package (${packageEntries.length})...`);
+        }
+        const perPackage = runPerPackageAuthoringRules({
+          command: 'validate',
+          parsed: result.data as Record<string, unknown>,
+          unionFindings: findings,
+          sduiManifest: resolveSduiManifest(),
+          // [#16546] The same ref set the union run above was handed, so a
+          // per-package hook write-set finding reports at the same `path` the
+          // other two doors report it at.
+          loweredHookRefs: lowering.loweredHookRefs,
+        });
+        ruleAdvisories = [...ruleAdvisories, ...perPackage.advisories];
+        if (perPackage.errors.length > 0) {
+          if (flags.json) {
+            await emitJson({
+              valid: false,
+              errors: perPackage.errors,
+              warnings: warningsSoFar(),
+              conversions: conversionNotices,
+              duration: timer.elapsed(),
+            });
+            this.exit(1);
+          }
+          console.log('');
+          printError(
+            `Author-time rules failed inside the artifact's packages (${perPackage.errors.length} issue${perPackage.errors.length > 1 ? 's' : ''})`,
+          );
+          printAuthoringRuleErrors(perPackage.errors, { remedy: JSON_FULL_LIST_REMEDY });
+          this.exit(1);
+        }
+      }
+
       // 3b. [#3366] Installable-provider preflight — the shift-left of the
       //     `serve`-time capability check. `os validate` previously only checked
       //     the `requires` tokens against the vocabulary (ADR-0066), never
@@ -383,6 +485,28 @@ export default class Validate extends Command {
         printBulletList(
           navGroupWarnings.map((d) => `[${d.code}] ${d.message} Fix: ${d.fix}`),
           { noun: 'navigation-contribution diagnostic' },
+        );
+      }
+
+      // [#18024] Permission sets declared under a name another package in this
+      //     same compilation unit already owns. Reports, never refuses, and
+      //     ⛔ changes nothing about the skip: refusing to write into a foreign
+      //     row is correct under ADR-0086 D4 and unchanged — the whole declared
+      //     set is dropped at runtime and until now no door said so before the
+      //     deployment. A name owned by a package some OTHER artifact installed
+      //     is NOT reported: that is the cross-artifact case a build cannot see.
+      permissionSetCollisionWarnings =
+        await findPermissionSetNameCollisions(result.data as Record<string, unknown>);
+      if (permissionSetCollisionWarnings.length > 0 && !flags.json) {
+        console.log('');
+        printWarning(
+          `Permission sets declared under a name another package in this artifact owns ` +
+            `(${permissionSetCollisionWarnings.length}) — at runtime the ENTIRE declared set is ` +
+            `dropped, not merged (ADR-0086 D4)`,
+        );
+        printBulletList(
+          await formatPermissionSetNameCollisions(permissionSetCollisionWarnings),
+          { noun: 'permission-set collision diagnostic' },
         );
       }
 

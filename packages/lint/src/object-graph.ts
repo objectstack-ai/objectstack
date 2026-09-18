@@ -68,6 +68,8 @@
  * second question about it is still unanswered — truthfully, and only there.
  */
 
+import { referenceCarrierOf } from '@objectstack/spec/data';
+
 import { injectedColumnDefsFor, injectedColumnsFor } from './system-fields.js';
 
 /** Any plain metadata record. */
@@ -234,7 +236,10 @@ function strName(v: unknown): string | undefined {
 function graphFieldOf(def: AnyRec): GraphField {
   return {
     type: typeof def.type === 'string' ? def.type : undefined,
-    reference: strName(def.reference),
+    // ⛔ NOT `strName` here. A carrier in a shape no reader can read is refused
+    // rather than narrowed to `undefined` (#13053): every rule downstream reads
+    // this slice, so a silent narrowing here is that blindness wholesaled.
+    reference: referenceCarrierOf({ reference: def.reference }, 'object-graph graphFieldOf'),
     multiple: def.multiple === true ? true : undefined,
   };
 }

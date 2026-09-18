@@ -74,6 +74,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { maskComments } from '../../../scripts/js-comment-mask.mjs';
 import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
@@ -450,7 +451,12 @@ describe('the mirror direction: a reader that is never coming back', () => {
     // nothing holding it is how a ceiling ends up sized around a bound that
     // moved. Same discipline as `INVOCATION_PREFIX` vs `CLI_NAME`: kept in
     // sync by a case, not by an import.
-    const declared = /const STDERR_DRAIN_STALL_MS = ([\d_]+);/.exec(readFileSync(SHIM, 'utf8'))?.[1];
+    // Masked — `exec` takes the FIRST match, so a docblock carrying the old
+    // value (the natural way to record "this used to be 5_000") would be read
+    // as the shim's bound. The sibling pin over the other published entry,
+    // `published-entry-stderr-nonblocking.e2e.test.ts`, already masks
+    // `bin/run.js`; this is the same entry pair read the same way (#18520).
+    const declared = /const STDERR_DRAIN_STALL_MS = ([\d_]+);/.exec(maskComments(readFileSync(SHIM, 'utf8')))?.[1];
     expect(declared, `no STDERR_DRAIN_STALL_MS declaration found in ${SHIM}`).toBeDefined();
     expect(Number(String(declared).replaceAll('_', ''))).toBe(SHIM_DRAIN_STALL_MS);
   });

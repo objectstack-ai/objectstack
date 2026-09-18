@@ -47,7 +47,6 @@ type UpdateShape = Awaited<ReturnType<EnvironmentsNamespace['update']>>;
 type ActivateShape = Awaited<ReturnType<EnvironmentsNamespace['activate']>>;
 type RetryShape = Awaited<ReturnType<EnvironmentsNamespace['retryProvisioning']>>;
 type HostnameShape = Awaited<ReturnType<EnvironmentsNamespace['updateHostname']>>;
-type VisibilityShape = Awaited<ReturnType<EnvironmentsNamespace['updateVisibility']>>;
 
 /**
  * The list envelope: the row array is `environments`, and `total` is unchanged
@@ -100,11 +99,24 @@ export function singleRowEnvelopesCarryTheWireKey(): void {
     void renamedHost.environment;
     // @ts-expect-error change-hostname answers `environment`
     void renamedHost.project;
+}
 
-    const revisibled = {} as VisibilityShape;
-    void revisibled.environment;
-    // @ts-expect-error change-visibility answers `environment`
-    void revisibled.project;
+/**
+ * `updateVisibility` is GONE from the namespace (ADR-0049 retirement, #17964).
+ *
+ * The removal's own pin, and it is the one worth having: a pin that proves what
+ * REMAINS goes green whether or not the method came back, while this one goes red
+ * the moment `updateVisibility` is re-declared on `environments`. The capability
+ * arrives on its OWN control-plane endpoint when the public-listing feature ships
+ * (2026-09-12 maintainer ruling), so the method that returns is a NEW one against
+ * that endpoint — never this signature against the generic update, which the
+ * control plane refuses.
+ */
+export function updateVisibilityIsRetiredFromTheNamespace(): void {
+    const ns = {} as EnvironmentsNamespace;
+    void ns.updateHostname;   // control: its sibling is still declared
+    // @ts-expect-error ADR-0049 — `updateVisibility` was removed from the published SDK surface (#17964)
+    void ns.updateVisibility;
 }
 
 /**
@@ -195,6 +207,20 @@ describe('[ADR-0006 D2] client.environments — the control-plane namespace afte
         // and this must fail on the SHAPE, not on the value.
         expect('projects' in client).toBe(false);
         expect((client as unknown as Record<string, unknown>).projects).toBeUndefined();
+    });
+
+    it('no longer exposes `updateVisibility` — retired under ADR-0049 (#17964)', () => {
+        const { client } = clientAnswering({});
+
+        // `in` rather than a truthiness check, for the reason the sibling pin
+        // above gives: a getter answering `undefined` is still a declared member,
+        // and this must fail on the SHAPE.
+        expect('updateVisibility' in client.environments).toBe(false);
+        expect((client.environments as unknown as Record<string, unknown>).updateVisibility).toBeUndefined();
+
+        // Control: the sibling that was NOT retired is still there, so the
+        // assertion above is a reading rather than a misspelled namespace.
+        expect(typeof client.environments.updateHostname).toBe('function');
     });
 
     it('relays the list envelope untouched — `environments` + `total`', async () => {
@@ -335,5 +361,6 @@ describe('[ADR-0006 D2] client.environments — the control-plane namespace afte
         expect(typeof singleRowEnvelopesCarryTheWireKey).toBe('function');
         expect(typeof createDeclaresNoDatabaseBlock).toBe('function');
         expect(typeof createDeclaresTheWireResponseKeys).toBe('function');
+        expect(typeof updateVisibilityIsRetiredFromTheNamespace).toBe('function');
     });
 });

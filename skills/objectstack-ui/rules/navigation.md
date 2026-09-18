@@ -133,18 +133,18 @@ at runtime from how heavy the record is + the client viewport, because an author
   always pages. Don't set it. To force it for a specific object, set
   `navigation.mode` (`page` | `drawer` | `modal`) on the list view (or object) — or,
   for bespoke layout, assign a record `Page`.
-- **Field width.** Use the relative **`span: 'full'`** to make a field take the
-  whole row; otherwise **omit it** (`auto` sizes by widget type × current columns —
-  textarea / rich-text / file take the row automatically). Do **not** use the
-  absolute `colSpan` — it only lines up at one width and is deprecated.
+- **Field width.** **Omit it** (`auto` sizes by widget type × current columns —
+  textarea / rich-text / file take the row). Both keys are valid: `colSpan`
+  (1–4) is clamped to the current column count, grid-aligned at every width;
+  `span: 'full'` resolves to the form grid's full column count, but the shipped
+  renderer emits it at the widest tier only (a 3-column form: one cell of two
+  in a modal).
 - **Overlay width.** Never author pixels. If you must nudge, use the **`size`**
   bucket (`sm` | `md` | `lg` | `xl` | `full`) on `navigation`; the pixel
-  `width` / `drawerWidth` are deprecated (they can't be chosen without knowing the
-  client viewport).
+  `width` / `drawerWidth` are deprecated.
 - **Column count.** Not authored. The form grid follows its **real rendered width**
   via container queries — the same form is 1 column in a narrow drawer and up to 4
-  on a wide page. Author *grouping* with `fieldGroups` + `Field.group`; the columns
-  adapt themselves.
+  on a wide page. Author *grouping* with `fieldGroups` + `Field.group`.
 - **`sections` are the escape hatch — reach for them last.** The ladder, in
   order: (1) **derive** — declare `fieldGroups` + `Field.group` and author no
   `sections` at all; (2) **reference** — when one surface needs a local

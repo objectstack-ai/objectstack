@@ -460,7 +460,8 @@ Even inside your own worktree, operate defensively:
    straight to `main`.** Name the branch after the issue it fixes: `claude/issue-<n>-<slug>`.
    The issue number is what makes in-flight work *discoverable* — `git ls-remote --heads
    origin | grep issue-<n>` is a one-command pre-check, and the Duplicate Fix Guard
-   workflow warns on fix PRs whose branch names no declared issue.
+   workflow warns on fix PRs whose branch names no declared issue. A hit is a hint, not a
+   claim — most heads carry no PR: ⛔ never skip a card on one, the `Claim:` comment decides.
 
    ⛔ **Off `main` is literal — a stacked series, each PR branched off the one below, is NOT a supported form.** No
    tooling represents it: squash landing destroys the ancestry link, so every descendant rewinds behind what landed and
@@ -582,15 +583,15 @@ Even inside your own worktree, operate defensively:
    `pre-commit` refuses the commit until those artifacts check clean. Sequence after a
    merge unchanged from §9: rebuild, then `check:generated --fix`. Worth knowing:
    - **The MERGE commit itself is the one exemption, and it is a deferral, not a pass.**
-     `scripts/pm/os-regen-merge.sh` is the in-repo authority for landing one of these
-     branches, and its step 3 commits the merge **before** regenerating on purpose: the
-     driver exits 0 while silently dropping one side, so only a separate regeneration
-     commit on a known-good base lets a reviewer read "what main brought" apart from
-     "what the change produces". `pre-commit` records that merge as a deferral and then
-     holds you to it — the immediately following commit must discharge it (every commit
-     until then is refused, and a second merge cannot defer on top of an outstanding
-     one), and `.githooks/pre-push` refuses a push that still owes one. ⛔ So this step
-     never needs `--no-verify`, which skips *every* pre-commit check rather than this one.
+     `scripts/pm/os-regen-merge.sh` is the in-repo authority for landing one onto `main`,
+     and its step 3 commits the merge **before** regenerating on purpose: the driver exits
+     0 while silently dropping one side, and no diffstat or `git diff` shows the drop, so
+     only a separate regeneration commit on a known-good base lets a reviewer read "what
+     main brought" apart from "what the change produces". `pre-commit` records it as a
+     deferral and holds you to it — the next commit must discharge it (every commit until
+     then is refused, and a second merge cannot defer onto an outstanding one), and
+     `.githooks/pre-push` refuses a push that still owes one. ⛔ So this step never needs
+     `--no-verify`, which skips *every* pre-commit check, not this one.
    - **The driver is a LOCAL facility** — the merge queue rebuilds server-side where no
      custom driver runs, so the three hottest artifacts are **sharded** per category/entry
      (`authorable-surface/`, `json-schema.manifest/`, `api-surface/`) to keep parallel
@@ -603,9 +604,9 @@ Even inside your own worktree, operate defensively:
      clone that shares the object store and has no driver registered
      (`git clone --bare --shared . PROBE.git`, then
      `git --git-dir=PROBE.git merge-tree --write-tree --name-only BASE HEAD`), ⛔ never
-     with `-c merge.os-regen.driver=`, which does not disable the driver but leaves git
-     failing to run it and reporting a conflict for every routed path, including ones that
-     text-merge cleanly.
+     with `-c merge.os-regen.driver=` or `-c merge.os-regen.driver=false`, neither of
+     which disables the driver: git runs the configured program, it fails, and every
+     routed path is reported conflicted, including ones that text-merge cleanly.
    - **Registration is per clone** (`pnpm install` → `prepare` →
      `scripts/setup-git-hooks.mjs`); an unregistered clone falls back to git's default
      text merge — older behaviour, not breakage.
@@ -796,8 +797,7 @@ working in its domain — browse the directory, never a hand-written list here:
 - `.claude/skills/` — repo-internal agent playbooks; every entry must carry
   `metadata.internal: true`.
 
-⛔ **Both roots are governed surfaces** — human-merge only, or queued under **Prime Directive #14**'s pinned-approval
-path; no per-PR check holds it: the queue guard refuses an unpinned governed diff at queue time.
+⛔ **Both roots are governed surfaces** — human-merge only, or **Prime Directive #14**'s pinned-approval path.
 
 ---
 

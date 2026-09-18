@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The seven converged rule-array `filter` doors name the new spelling when
+ * The ten converged rule-array `filter` doors name the new spelling when
  * they refuse the old one.
  *
  * Seven doors converged on `z.array(ViewFilterRuleSchema)` (the objectui#6206
@@ -39,8 +39,17 @@ import { MIGRATIONS_BY_MAJOR } from '../migrations/registry';
 const RECORD_FORM = { status: 'active' } as const;
 
 /**
- * The seven doors, each with enough sibling props to reach a clean reading —
+ * The ten doors, each with enough sibling props to reach a clean reading —
  * the other required keys are filled so the only issue under test is `filter`.
+ *
+ * Seven at the convergence; `object-map`, `object-gantt` and `object-tree`
+ * joined at #18305, when those three blocks got their `ComponentPropsMap` rows.
+ * They were BORN on the ruled orthography rather than converged onto it, so
+ * their §1 reading is the same one and their history sentence is not — what
+ * this file pins of them is identical: the refusal carries the prescription,
+ * the array author's element issues are still their own, and the surface each
+ * one names is the surface its own declaration registered. A door added
+ * without its row here fails §4's count, which is the point of the count.
  */
 const DOORS: readonly {
   readonly name: string;
@@ -77,6 +86,24 @@ const DOORS: readonly {
     surface: 'this `object-calendar`',
     migration: 'element-data-source-and-object-block-filter-rule-array',
     parse: (filter) => ComponentPropsMap['object-calendar'].safeParse({ objectName: 'task', filter }),
+  },
+  {
+    name: "ComponentPropsMap['object-map'].filter",
+    surface: 'this `object-map`',
+    migration: 'element-data-source-and-object-block-filter-rule-array',
+    parse: (filter) => ComponentPropsMap['object-map'].safeParse({ objectName: 'task', filter }),
+  },
+  {
+    name: "ComponentPropsMap['object-gantt'].filter",
+    surface: 'this `object-gantt`',
+    migration: 'element-data-source-and-object-block-filter-rule-array',
+    parse: (filter) => ComponentPropsMap['object-gantt'].safeParse({ objectName: 'task', filter }),
+  },
+  {
+    name: "ComponentPropsMap['object-tree'].filter",
+    surface: 'this `object-tree`',
+    migration: 'element-data-source-and-object-block-filter-rule-array',
+    parse: (filter) => ComponentPropsMap['object-tree'].safeParse({ objectName: 'task', filter }),
   },
   {
     name: "ComponentPropsMap['element:number'].filter",
