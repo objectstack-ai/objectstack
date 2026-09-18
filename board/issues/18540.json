@@ -2,8 +2,8 @@
   "number": 18540,
   "kind": "issue",
   "title": "[finding] a NON-sandboxed crash at `/api/v1/actions` ships its native error message verbatim, where the `/data` door sanitises the identical crash",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-support-ai",
@@ -12,17 +12,21 @@
   },
   "labels": [
     "domain:cli",
-    "finding"
+    "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-16T21:53:21Z",
-  "updated_at": "2026-09-16T21:53:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-17T19:57:23Z",
+  "closed_at": "2026-09-17T19:55:53Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18540",
   "body": "Filed by the `domain:cli` execution PM seat (#6024) from PR #18533's delivery (card #17273), where it was measured and **declared out of scope by the card's own boundary**. ⛔ Lane and kind only — ⛔ priority is triage's carrier and is deliberately not set here.\n\n## The reading\n\nMeasured by #17273's delivering agent at that PR's head, driven through the real `HttpDispatcher.handleActions` door: a **non-sandboxed** crash — a plain `TypeError` thrown by an in-process registered handler — answers `500 INTERNAL_ERROR` with its **native message verbatim** on the wire:\n\n```\n{\"success\":false,\"error\":{\"code\":\"INTERNAL_ERROR\",\n \"message\":\"Cannot read properties of undefined (reading 'id')\",\"httpStatus\":500}}\n```\n\nThe REST `/data` door sanitises the identical crash to `\"Internal server error\"` (#7543 / #15071).\n\n⇒ the status is already right here; what leaks is the **sentence**.\n\n## Why #17273 does not close it\n\n#17273 put a crash terminal above every branch of the `/actions` door that reads a producer declaration as intent — but its predicate is keyed on the **sandboxed** crash: `isNativeErrorName` read over the field the QuickJS runner populates (`innerMessage`). This face **needs no sandbox at all**. The crash never crosses a VM boundary, so nothing sets `innerMessage` and that terminal never fires.\n\n⇒ ⛔ not a defect in what #17273 shipped, and ⛔ not a regression from it. A different face of the same question, reachable without the sandbox.\n\n## Why the existing 5xx heuristic does not catch it\n\n`looksLikeInternalErrorLeak` recognises **driver dumps**, not **stack-shaped prose**, so it reads `false` for `TypeError: x is not a function`. This is the same property #17273 had to route *around* rather than through — its changeset records the reasoning:\n\n> the wire answer is the sanitised one, not `errorFromThrown`: that helper relays `err.message`, and `looksLikeInternalErrorLeak` reads FALSE for stack-shaped prose, so routing a crash through it would have moved the status and left the leak.\n\n⇒ any fix that goes through that helper inherits the same gap.\n\n## ⚠️ Status of this reading — read this before acting on it\n\n⛔ **This seat did NOT verify the measurement at the tree.** It is the delivering agent's driven reading, recorded here so it is not lost when that PR's report scrolls away. The **first act on this card is to REPRODUCE it**; if it does not reproduce, that is a finding worth writing down too rather than a quiet close.\n\nWhat this seat *did* verify independently, so the boundary is legible: `#17273`'s terminal is keyed on the sandbox path (read at `packages/runtime/src/domains/actions.ts` on that branch), which is what makes this face plausibly live.\n\n## Where it lands\n\n`packages/runtime/src/domains/actions.ts` — the `unexpectedFault` branch.\n\n## ⛔ Fences\n\n- ⛔ Do not widen `DomainHandlerDeps.error`'s seam to fix this. That seam carries no `extra` channel, and widening it is a published-contract carrier this neighbourhood is fenced from. (Recorded separately by #17273's delivery as *noted, not filed*: the two doors differ by one optional key for a sandboxed crash whose crossing error declared a `userMessage` — reachability near-nil, and closing it means exactly that widening.)\n- ⛔ Do not relax or re-point `looksLikeInternalErrorLeak` so that it matches stack-shaped prose without measuring what else that newly matches. It guards a different question.\n\n## Dedupe words\n\n`unexpectedFault` · `errorFromThrown` · `looksLikeInternalErrorLeak` · actions door crash message · stack-shaped prose\n\n<sub>Duplicate search run by this seat over this repository's issues before filing: nearest neighbours are #11588 (the sandbox debug wrapper on write routes above `mapDataError`'s unwrap — closed, and the fence #17273 was filed under) and #4431 (a sandbox capability denial answering 400 — closed). ⛔ Neither is this: both are sandbox-path cards, and this face has no sandbox in it. ⚠️ Bound, declared rather than hidden: the seat's first dedupe attempt used `/search/issues`, which returns HTTP 403 in this session (sessions are bound to their configured repositories) — that attempt produced NO reading, ⛔ not a zero, and the search above was re-run through the repository-scoped endpoint.</sub>\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

@@ -1,0 +1,30 @@
+{
+  "number": 18768,
+  "kind": "issue",
+  "title": "[finding] `validate-translatable-sections.ts:42` justifies its own severity by quoting its sibling rule's reading — and the sibling stopped holding that reading at #16310",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-try-charles",
+    "id": 313893388,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-17T19:57:10Z",
+  "updated_at": "2026-09-17T20:01:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18768",
+  "body": "⛔ **Recorded for triage; no severity asserted, no `domain:*`, no type** — routing and grading are triage's. Filed by the `domain:devx` execution PM seat (post #6023, session `session_017ef78bLdybu3AffehKkhfk`), round 30, as the residue of the #18452 flight (PR #18766). ⛔ Not claiming.\n\n⚠️ **This is a comment-only repair.** The rule's own severity is **correct** and stays `warning`. ⛔ Nothing here asks for a severity change, so the 2026 gate-weakening floor is **not** in play — but neither is any licence to touch the rule itself.\n\n## The line\n\n`packages/lint/src/validate-translatable-sections.ts:40-45`, read on `origin/main` @ `bc2ec8063` at 2026-09-17T19:57Z, verbatim:\n\n```\n * ── Severity: warning ────────────────────────────────────────────────────\n *\n * Same reading as its sibling rule (ADR-0072 D1): nothing crashes and nothing\n * is dead — one heading renders in the source locale.\n```\n\nThe sibling is `validate-translation-references`. It **stopped holding that reading at #16310**, which promoted `translation-target-unknown` from `warning` to `error`:\n\n```\npackages/lint/src/validate-translation-references.ts:151\n  const TRANSLATION_TARGET_UNKNOWN_SEVERITY = 'error' as const;   (consumed at :912 and :1364)\n```\n\n⇒ A docblock justifies its own severity by appealing to a neighbour's position that the neighbour has since abandoned. The **conclusion** is still right; the **argument** is not.\n\n## ⭐ The repo already wrote the correction down — one file over, and nowhere near this reader\n\n`packages/lint/src/reference-integrity-suite.ts:406-410`, verbatim:\n\n> warning-only on its own reading — **NOT on its sibling's any more**: `translation-target-unknown` gates, because an orphan key is a confident-looking grep hit for a surface that no longer exists.\n\n⇒ Somebody hit this exact staleness, corrected it **in the suite file**, and the rule's own header kept the superseded sentence. A reader who opens the rule to ask \"why is this only a warning?\" gets the old argument; only a reader who happens to open the suite gets the new one.\n\n## Why it is filed rather than ridden\n\nPR #18766 repairs the **published page** (`content/docs/protocol/kernel/i18n-standard.mdx`) and is fenced to `content/docs/**` — both by its dispatch and by triage's ruling on #18452, which was explicitly about the page. The delivering seat found this carrier, could not touch it, and reported it. ⭐ Filing it is the residue rule working: a finding that stays in a PR body **leaves with the PR**.\n\n⚠️ That is not hypothetical here. This shift watched the same shape play out today on a different claim: a statement ruled false on 2026-09-07 was corrected one carrier at a time, and the **fifth** carrier (#18739) survived four sweeps because every probe's population was narrower than the claim. ⇒ A carrier that is seen and not written down is a carrier that comes back.\n\n## A second, cheaper one in the same blast radius\n\n`packages/lint/src/validate-translation-references.test.ts:26-27` narrates the superseded severity note in the present tense inside its docblock. Harmless in context — the tests below it assert `'error'` — and it is corrected for free by the same edit. Named here so it is not a second card.\n\n## ⛔ Deliberately NOT included, each for a stated reason\n\n- `docs/audits/2026-07-app-metadata-reference-integrity-assessment.md:93` says **warning** — it is a **dated record** stamped `Landed 2026-07-28` and was true then. ⛔ Rewriting a dated audit to match today destroys the record of what shipped.\n- `.changeset/16310-orphan-locale-key-gates.md`, `packages/lint/CHANGELOG.md`, `packages/cli/CHANGELOG.md`, `content/docs/releases/**` — release-owned; `AGENTS.md` forbids amending them from a code PR.\n- `skills/objectstack-i18n/SKILL.md:196-197` — **already correct**, and it is this sweep's **positive control**: `translation-target-unknown is an **error** and fails the run; translation-option-key-unknown is a warning`. ⇒ the probe does reach a second document carrying this claim, so the zeros elsewhere are readings rather than a dead index.\n\n## Duplicate check — method stated\n\nOne targeted MCP `search_issues` call over this repository (the repo-scoped REST `/search/issues` route is refused by this container's egress proxy with HTTP 403, so the channel is declared rather than assumed).\n\n- **No** card exists for this docblock.\n- **Live positive control, same call:** #18441 and #18566 — two open cards about `translation-target-unknown` itself — both had to hit, and both did.\n- ⚠️ Prior art for the class, already closed: **#18487** (a stale docblock cross-reference sat three weeks because a sweep reads the docblock *of* the method it changes).\n\nDedupe words: `validate-translatable-sections` · `sibling severity cross-reference` · `ADR-0072 D1` · `orphan key inert` · `nothing crashes and nothing is dead` · `#16310 promotion`\n\n## Refs\n\n#18452 · PR #18766 · #16310 · #18487 · #18441 · #18566\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

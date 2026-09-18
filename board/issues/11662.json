@@ -1,0 +1,36 @@
+{
+  "number": 11662,
+  "kind": "pull_request",
+  "title": "feat(spec): declare hideEmpty / collapsible / showBorder on record:details sections",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ui",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T10:56:28Z",
+  "updated_at": "2026-08-24T12:32:08Z",
+  "closed_at": "2026-08-24T12:32:06Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-08-24T12:32:06Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11662",
+  "body": "Fixes #11289\n\nMaintainer ruling 2026-08-23 (on-card, comment 5386670045), direction 1: declare the three keys on `RecordDetailsProps` sections with defaults matching current renderer behavior; direction 2 (renderer change) not approved — this PR touches no objectui code.\n\n## What changed\n\n- `packages/spec/src/ui/component.zod.ts` — the `record:details` section shape gains `hideEmpty` / `collapsible` / `showBorder`, each `z.boolean().optional()` with **no schema default** (the file's own `maxVisible` principle, stated at this schema's `inlineEdit` docblock: the fallbacks are the renderer's, and a schema default would turn \"the author said nothing\" into \"the author asked for the default\"). The `sections` describe() now enumerates the full object form.\n- `packages/spec/src/ui/component.test.ts` — four new tests: verbatim preservation of the three keys; no materialization on a clean parse; `invalid_type` at the right path for non-boolean values; strictness survives the widening and the new keys entered the \"did you mean\" candidate list (asserted in the arrow form `` `showBorders` → `showBorder` `` — a bare substring assertion is satisfied by the echoed offending key, which reverse verification actually measured).\n- `content/docs/references/ui/component.mdx` — regenerated (generator-owned; not hand-edited).\n- `.changeset/record-details-section-presentation-keys.md` — `@objectstack/spec` **minor** (accept-set widening; nothing removed or renamed, so no ADR-0087 disposition is required — the changeset is not declared-breaking).\n\n## Renderer defaults — measured, not transcribed\n\nMeasured at the `.objectui-sha` pin `190fbd01` AND the current objectui checkout `e52fac05` (byte-identical logic at both), in objectui `packages/plugin-detail`:\n\n- `hideEmpty` — `record-details.tsx:210`: `hideEmpty: s.hideEmpty ?? true`; with the default, `DetailSection.tsx:450` returns `null` for an all-empty section (no heading, no skeleton). `hideEmpty: false` renders the empty rows and keeps the label skeleton on an all-empty record (its `shouldAutoHideEmpty` requires `filledCount > 0`, so nothing re-hides an all-empty section).\n- `collapsible` — `DetailSection.tsx:509`: read as bare truthiness; omitted → non-collapsible card. Default: off; when on, initially expanded.\n- `showBorder` — `record-details.tsx:204`: `s.showBorder ?? (translatedTitle ? true : false)` — a **derived** default (titled → bordered card, untitled → borderless), which is also why a materialized `.default()` could not express it.\n\nThe `objectstack validate` warning this removes asserted the authored key \"did nothing\" — false for all three (and for `collapsible` the issue body had already measured it reaching `DetailSection` intact). Schema and runtime now declare the same key set for this surface.\n\n## Verification (all readings at head `9dd48377`)\n\n- `@objectstack/spec` full suite: **Test Files 420 passed (420) · Tests 11222 passed (11222)** (the four new tests re-run post-amend in the targeted file: 203/203).\n- Reverse verification, from committed state (`git restore --source=$BASE` of the schema file only, restore verified by a discriminating text anchor 1/1/0 across worktree/HEAD/BASE): the preservation test and the invalid_type test go red on the pre-declaration schema with unrecognized-keys-shaped failures — and the run exposed that the original suggestion assertion stayed green there (vacuous substring), which is what the arrow-form assertion now pins.\n- `@objectstack/spec` typecheck (tsc + scripts + test-typecheck): green.\n- Consumer sweep, downstream direction (spec-lane duty): `@objectstack/lint` (the `objectstack validate` component-props path) — **Test Files 81 passed · Tests 2266 passed | 5 skipped**; its one `hideEmpty` fixture is `record:reference_rail`'s, untouched. No fixture in the rule's consumption radius pins the old rejection.\n- `pnpm --filter @objectstack/spec check:generated`: **all 14 artifacts up to date** after regenerating the 2 it proved stale (`api-surface/` — no content change after rebuild; `content/docs/references/**` — the one-row diff above). `check:authorable-surface` green.\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (no paths — changed set derived by the script itself; derivation stderr confirmed repo/commit): 34 path-matched + convention gates for the test-file kind. 36/38 ran green locally; 2 environmental reds (`check:dev-prereqs`, lint `check:doc-security-posture`) are the fresh worktree's unbuilt-packages precondition, not this diff — full workspace build + re-run in flight, result recorded in the report on the issue.\n\nOut of scope, filed as #11661 (which remains open, not addressed here): five more renderer-honoured section keys (`title`, `defaultCollapsed`, `icon`, `description`, `headerColor`) are still undeclared; each needs its own declare-vs-converge judgement beyond this card's ruled three-key scope.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Rxnd8cyFnoU8V5y21PaTsy)_"
+}

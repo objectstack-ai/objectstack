@@ -1,0 +1,32 @@
+{
+  "number": 11411,
+  "kind": "issue",
+  "title": "[finding] Form section/field `visibleWhen` binds no `current_user`, so position-gated visibility is expressible on pages but not on forms — the asymmetry was undocumented and the docs asserted the opposite (lands in objectui)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T16:04:52Z",
+  "updated_at": "2026-08-24T12:41:03Z",
+  "closed_at": "2026-08-24T12:41:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11411",
+  "body": "Filed unassigned as a `finding` — recording only, not graded, no `domain:*` set.\n\n**The code half lands in `objectstack-ai/objectui`, not here.** Filed in this repo because the measuring seat was fenced to `content/docs/protocol/objectui/layout-dsl.mdx` by its dispatch and routed it to the PM rather than minting a cross-repo card unasked — same disposition as #11258 and #11247. Handing to triage, which owns routing and transfer. The **docs** half is already corrected on this repo's side by #11034 / PR for `claude/issue-11034-visiblewhen-hasrole-example`.\n\nFound while implementing #11034 (session `session_015ahemw8RcTgqtxrj15PEZx`), measured on `origin/main` at 365e334 with objectui at its current checkout.\n\n## The asymmetry\n\n`current_user` reaches some `visibleWhen` sites and not others:\n\n| Site | `current_user` bound? | Evidence |\n|:--|:--|:--|\n| Page component, app/nav `visible` | **yes** | `app-shell/src/providers/ExpressionProvider.tsx:59,70` builds `{ current_user: user, user, ctx: { user }, os: { user }, app, data, features }` |\n| Per-option `visibleWhen` (select options) | **yes** | `core/src/evaluator/optionRules.ts:103` forwards `scope`; `resolveCascadingOptions(…, predicateScope)` in `components/src/renderers/form/form.tsx:1428,2129` |\n| Form **section / field** `visibleWhen` | **no** | all three `resolveFieldRuleState` call sites — `components/src/renderers/form/form.tsx:1201`, `:1237`, `:1935` — pass `undefined` for the `scope` parameter. `predicateScope` is read at `:1276` and used **only** for `resolveCascadingOptions`. |\n\n`evalFieldPredicate` (`core/src/evaluator/fieldRules.ts:158`) binds `{ record, previous, extra: scope }`, so with `scope === undefined` a form field's predicate sees `record` and `previous` and nothing else. Its own fault warning says so: `\"Values are bound under 'record.' (e.g. record.status)\"`.\n\n## Why it is worth recording\n\n1. **It is silent and fail-open in the dangerous direction.** A `visibleWhen` naming an unbound root does not render the element hidden — `resolveFieldRuleState` passes `true` as the visibility fallback, so a gate that faults shows the field to everyone. Identical failure shape to #11034, one layer over.\n2. **The docs asserted the opposite.** `content/docs/protocol/objectui/layout-dsl.mdx` carried a binding table reading `Runtime record forms & pages (*.view.ts, *.page.ts) | record + current_user`. An author following it would write `'org_admin' in current_user.positions` on a form field and get a field visible to everyone. #11034's PR splits that row.\n3. **The platform's own reference already knew.** `content/docs/references/data/field.mdx:333` (auto-generated from the spec) describes the per-option environment as \"the live `record` plus the host predicate scope, which binds `current_user` — **wider than field-level visibleWhen, which has no `current_user`**\". So the fact was recorded in one generated page and contradicted in a hand-written one.\n\n## The open question triage has to route\n\nIs the missing binding **intended** or a gap?\n\n- **If intended** — the docs fix in #11034 is the whole answer, and this card closes as documented behaviour. There is a defensible design story: a form field predicate is evaluated per keystroke against live form values, and keeping its scope minimal keeps it cheap and record-pure.\n- **If a gap** — the fix in objectui is small and local: pass `predicateScope` (already in hand at `form.tsx:1276`) as the `scope` argument to the three `resolveFieldRuleState` calls, exactly as `resolveCascadingOptions` already receives it. That would make one predicate text mean the same thing on every `visibleWhen` surface, which is the stated ADR-0068 D1 goal — \"a predicate authored against any one form evaluates identically\".\n\n⚠️ Note the second option changes shipped behaviour: predicates that today fault-open on form fields would begin evaluating, and any that resolve FALSE would start hiding fields that are currently visible. That is a correctness improvement and a visible change at once, so it wants a deliberate call rather than a drive-by.\n\n## Not a duplicate of\n\n- #11258 — three other `visibleWhen` gaps in objectui (`emptyAction` bypass, a second evaluator with an opposite `data` binding, silence on fault). Different sites; none is the form-field scope argument.\n- #11256 — the spec `describe` for `PageComponentSchema.visibleWhen` under-names the roots the renderer binds. That is the page layer, where the roots *are* bound; this is the form layer, where they are not.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 11579,
+  "kind": "issue",
+  "title": "AuthPlugin reads the `auth` settings namespace in the pre-bind window — stored `sys_setting` rows are ignored at boot under the shipped `os serve` order",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T04:17:33Z",
+  "updated_at": "2026-08-24T10:07:04Z",
+  "closed_at": "2026-08-24T10:06:49Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11579",
+  "body": "Found by the step-1 measurement of #11045 (the settings bind-window gate). Filed per-plugin rather than fixed there, per that card's ruling: #11045 is the gate, not a fourth declaration.\n\n## What happens\n\n`AuthPlugin` reaches `getService('settings')` from `kernel:ready` handlers it registers in `start()`, and it uses the handle in the same tick:\n\n- `packages/plugins/plugin-auth/src/auth-plugin.ts:1207` — `bindAuthSettings()` resolves the handle and then `await applySettings()`, which calls `settings.getNamespace('auth')`.\n- `packages/plugins/plugin-auth/src/auth-plugin.ts:728` — the second acquisition in the same plugin.\n\nIt is reached transitively, at depth 3 from one of the registrations:\n\n```\nctx.hook('kernel:ready', () => runBackfill('kernel:ready'))   // auth-plugin.ts:1029\n  → runBackfill (a const inside start())\n    → this.ensureAuthSettingsBound(ctx)                        // :1188\n      → this.bindAuthSettings(ctx)                             // :1202\n        → ctx.getService<SettingsReadSurface>('settings')      // :1207\n          → await settings.getNamespace('auth')\n```\n\nand at depth 2 from `auth-plugin.ts:674`.\n\n`SettingsServicePlugin` binds its data engine from its *own* `start()`-registered `kernel:ready` hook (`settings-service-plugin.ts:153`). Handlers run in registration order, and registration order is `start()` order. `AuthPlugin` declares `dependencies = ['com.objectstack.engine.objectql']` and nothing about settings, so nothing orders it after the settings plugin.\n\n## Why it fires on the shipped composition\n\n`packages/cli/src/commands/serve.ts` does `kernel.use(new AuthPlugin(...))` at line 2693; `SettingsServicePlugin` arrives later, from the capability loop at line ~3417. `resolvePluginOrder` preserves insertion order for plugins with no edge between them, so auth starts first.\n\nMeasured with the real `resolvePluginOrder` from `packages/core/src/plugin-order.ts`, fed the verbatim declarations of the five plugins involved in the `serve` insertion order:\n\n```\nstart() order: [\"com.objectstack.engine.objectql\",\"com.objectstack.auth\",\"com.objectstack.audit\",\"com.objectstack.service.settings\",\"com.objectstack.mcp\"]\nauth  before settings?  true\n```\n\nSo auth's `kernel:ready` handlers are registered — and therefore fire — before the engine bind.\n\n## Consequence\n\nIn that window `SettingsService.loadRows` takes its `this.memory` branch, so `getNamespace('auth')` answers the manifest defaults with `source: 'default'` while the deployment's persisted `sys_setting` rows go unread (this is the exact class #10250 documented and made audible via `reportPreBindRead`). Everything `applySettings()` derives is therefore computed from defaults at boot: the ADR-0093 membership policy the D6 backfill runs under, and the `google_*` social-provider config. `settings.subscribe('auth', …)` only re-applies on a *later* change, so a workspace that configured auth in Setup and never touched it again keeps booting with the wrong values.\n\nNote the D6 backfill's own comment at `auth-plugin.ts:1175` already reasons about this ordering hazard between auth's two hooks — the hazard against the *settings plugin* is the one still open.\n\n## Repair\n\nThe #10250 shape — one declaration on `AuthPlugin`:\n\n```ts\noptionalDependencies = ['com.objectstack.service.settings'];\n```\n\n`requiresServices` would not do it: that asserts the service is registered before `init()` (it always is), and carries no `start()` ordering.\n\nVerification: after the fix, `pnpm check:settings-bind-window` must go green with the `com.objectstack.auth` entry **deleted** from `KNOWN_PRE_BIND_READS` in `scripts/check-settings-bind-window.mjs` — that ledger is shrink-only and errors on a stale entry, so the deletion is part of the fix, not follow-up.\n\nSuggested lane: whoever owns `packages/plugins/plugin-auth`.\n"
+}

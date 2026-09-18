@@ -2,9 +2,9 @@
   "number": 18674,
   "kind": "pull_request",
   "title": "docs(skills): navigation.md states the measured behaviour of colSpan and span: 'full', drops the deprecated claim",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "os-justin",
     "id": 323634890,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs-user-decision",
     "size/s",
     "skip-changeset"
   ],
@@ -20,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-17T13:51:45Z",
-  "updated_at": "2026-09-17T14:12:44Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-18T01:44:30Z",
+  "closed_at": "2026-09-18T01:44:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-18T01:44:29Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/18674",

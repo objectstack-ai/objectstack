@@ -1,0 +1,32 @@
+{
+  "number": 11249,
+  "kind": "issue",
+  "title": "[Decision] `min`/`max` over a boolean aggregand: pin the cross-driver JSON answer — `0`/`1` (SQL) vs `false`/`true` (both in-memory faces)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T06:10:35Z",
+  "updated_at": "2026-08-24T10:05:24Z",
+  "closed_at": "2026-08-24T10:05:24Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11249",
+  "body": "Split from #11152 (retriage, 2026-08-23): half (a) — `sum`/`avg` boolean conformance cases, settled by #11065's precedent — stays on #11152 and is dispatchable. This card carries half (b), the genuinely unpinned contract question, which is 协议变化类别 ⇒ manual floor.\n\n## The question\n\nWhen an aggregation query takes `min` or `max` over a boolean column, what JSON value does the platform contract promise?\n\n- SQLite / the SQL family: `MIN(col)`/`MAX(col)` over a boolean answer **`0` / `1`**.\n- objectql's in-memory fallback (`in-memory-aggregation.ts`) and `driver-memory` both reduce with `<`/`>` and answer **`false` / `true`**.\n\nUnlike #11065 (driver-memory was the lone outlier; two faces pinned the answer), here the two in-memory faces **agree with each other** and differ from SQL — precedent does not settle it. Whatever is chosen becomes the expected value in `AGGREGATION_ROWS` conformance cases and forces the losing side to convert.\n\n[facets-block]\n- 实际业务需求:布尔列上的 min/max 在真实分析里语义是「是否存在任一 false / 任一 true」——用户拿到 `0/1` 或 `false/true` 都能用,但两驱动答案不同就是同一查询两个结果,由调用方看不见的驱动能力位决定;真实需求是**一致**,不是哪个字面量。\n- 项目长远合理性:平台契约面(REST/JSON)里布尔字段的读值恒为 `true/false`;聚合结果突然变 `0/1` 是 SQL 存储表示的泄漏。选 `false/true` 让契约与字段类型系统自洽;选 `0/1` 则是让存储实现定义契约。\n- 防 AI 写代码犯错:AI 写下游代码时会对布尔字段做 `=== true` 判断——`0/1` 会静默永假。收敛到 `false/true`(SQL 侧结果在驱动层归一化)是结构上更难写错的一侧。\n- 创业阶段不扩散需求:两选项实现代价接近(都是在少数驱动侧加一层归一化);不存在「先不做」选项——#11152 的列一加,期望值必须写死。\n\n**推荐 B(`false`/`true`,置信度高)**:四轴同向——契约按字段类型说话,SQL 驱动在聚合读出侧把 `0/1` 归一化为布尔;与布尔字段普通读取路径的既有归一化同族。**本分析看不见什么**:driver-sql 各方言布尔存储表示的现状差异(TINYINT/BOOLEAN/INTEGER),归一化实现成本以实测为准;PG 对 `avg(boolean)` 可能直接报错(#11152 half (a) 的实测项,读数会回贴该卡)。\n\n裁决格式:回「A」(= `0`/`1`,SQL 面答案为准)或「B」(= `false`/`true`,布尔类型面答案为准)。裁后:结论写进 #11152 的实施约束,min/max 案例随裁决入列;本卡关闭。\n\nRelated: #11152 (carrier of half (a)), #11065 (the `avg` cell that exposed the family), #11151 (driver-mongodb sibling, on hold)."
+}

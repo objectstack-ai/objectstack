@@ -1,0 +1,33 @@
+{
+  "number": 11452,
+  "kind": "issue",
+  "title": "MessagingService.listInbox has the same free-userId shape markRead just lost — any in-process plugin can read any user's inbox",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T20:04:49Z",
+  "updated_at": "2026-08-24T03:15:17Z",
+  "closed_at": "2026-08-24T03:13:06Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11452",
+  "body": "Measured while implementing the authenticated-caller scoping for the inbox **write** door (#10753 / PR #11450). Filing rather than folding in: the ruling on #10753 names `markRead` and `recall`, so the read side is outside that card's scope.\n\n## The shape\n\n`MessagingService.listInbox(userId, opts)` (`packages/services/service-messaging/src/messaging-service.ts:372`) keys its whole read on the caller-supplied `userId`:\n\n- `where = { user_id: userId }` against `sys_inbox_message` (`:378`)\n- `readReceiptStates(data, userId)` → `where: { user_id: userId, channel: 'inbox' }`\n\nOn the REST path that parameter is trustworthy — `packages/runtime/src/domains/notifications.ts:175` binds it to `context.executionContext.userId` and answers 401 when there is none. But the service is also registered as a kernel service (`ctx.registerService('messaging', service)`, `messaging-service-plugin.ts:162`), and the kernel hands every plugin **one shared `PluginContext`** (`packages/core/src/kernel.ts:65,:91`) whose `getService` carries no caller identity.\n\nSo for an in-process caller `userId` is a free string, and the read lands context-lessly on `sys_inbox_message` / `sys_notification_receipt` — the latter `managedBy: 'engine-owned'` with `apiMethods: ['get','list']` (ADR-0103) — so no engine permission check sees it either.\n\n⇒ **Any plugin can read any user's inbox titles, bodies and read-state.** This is the exact shape PR #11450 removed from the write side, on the read side, and it is arguably the more sensitive half: inbox bodies carry rendered business content.\n\n## Why it was not fixed in PR #11450\n\nThat PR's ruling (comment `5386675655`) covers the write verbs only. Widening it to the read side without a ruling would be scope creep on a card whose whole point was that public-surface widening is the maintainer's call.\n\n## Suggested shape (not a decision)\n\nThe same one PR #11450 landed: a plugin-facing `listInboxAsCaller(caller: ExecutionContext, opts)` that derives the recipient from `caller.userId` and refuses with `InboxCallerError` (401 `UNAUTHENTICATED`) otherwise, reusing `resolveInboxRecipient` from `packages/services/service-messaging/src/inbox-caller.ts`. `listInbox(userId, opts)` stays as the published `INotificationService` contract the REST door needs.\n\nNote the same honest caveat that PR applies to itself: this is a **discipline** boundary, not a security boundary — an in-process plugin already holds the data engine.\n\n## Links\n\n- Chain parent: #10753\n- Landed write-side counterpart: #11450\n"
+}

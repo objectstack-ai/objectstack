@@ -1,0 +1,32 @@
+{
+  "number": 11499,
+  "kind": "issue",
+  "title": "pm-dispatch references: fix the hotcrm lane's changeset falsehood; add liveness-ledger-first, sibling-estimate zoning, and GitHub API quota readings",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T01:14:18Z",
+  "updated_at": "2026-08-24T13:57:14Z",
+  "closed_at": "2026-08-24T13:57:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11499",
+  "body": "pm-dispatch references: four measured lessons from two days of seat operation — one factual error and three missing readings\n\n## Authorization\n\nMaintainer, verbatim (未译, in-session 2026-08-24): 「经验是不是应该写入项目 skills」 → 「写入」. `references/**` face only (opus build, fable-tier review per the standing compensation rule). The `SKILL.md` main-file lesson is the sibling card #11498 — do not touch `SKILL.md` here.\n\n## 1. `references/lanes/hotcrm.md` states a falsehood: \"该仓无 changeset 流\"\n\nhotcrm has `.changeset/`, a `changeset-check.yml` that gates **every** PR (with a `skip-changeset` label escape), and a `changeset version`-driven release flow that consumed 292 pending changesets into a 3.0.0 release on 2026-08-23. A dispatch that inherits the lane doc's sentence produces a dev whose PR is red on arrival. The seat corrected it by hand in every dispatch for two days; fix the source. While in the file: hotcrm consumes **published** `@objectstack/*` packages, not a git pin — worth one sentence, since it is the fact that triggers the sibling card's unlock rule.\n\n## 2. `references/dispatch-runbook.md`: liveness-ledger-first (new clause)\n\nLesson, self-contained (no issue ids, 中文 house style, adapt wording):\n\n> **凡派发前提含「spec 有这个槽位」，派发前先读安装包内的 liveness 账本**（`node_modules/@objectstack/spec/liveness/<域>.json` 对应行）。`status: 'planned'` = 有 carrier、零消费者，`authorHint` 就是证词。失效模式：不读账本的派发让 dev 写出解析通过、校验通过、加载成功、**渲染为零**的元数据——绿收据假修复，比诚实的缺陷更贵。一次文件读的成本对一次整 agent 运行。\n\n## 3. `references/dispatch-runbook.md`: sibling estimates live in zone 2 (new clause)\n\n> **兄弟 dev 报告里的成本/形状估计进派发词必须落「机制假设」区并要求复测**，⛔ 不得穿裁决的衣服转述。实测教训：一句被当作事实转述的「两行改动」，字面照做会把一个双字面量的方向循环改成 `desc → desc → null` —— 度量列永远无法升序，且「首点是降序」的天真测试还照绿。估计的作者没错——错在把它当事实搬运的派发词。\n\n## 4. `references/platform-readings.md`: GitHub API quota facts (new entries for the facts table)\n\nMeasured 2026-08-23/24, worth table entries in the file's own format:\n\n- `gh` GraphQL quota (5000/hr) is a **shared pool across every parallel subagent on the host** — a batch of devs exhausts it and the PM's merge verbs starve.\n- Verbs by transport: `pr ready`, `pr merge`, `issue transfer` are **GraphQL**; claims (assignee), labels, comments, issue create/patch, check-runs reads are **REST** (`gh api`). A quota-dead hour still allows the full claim/label/review cycle; only merge-family verbs need a `until remaining>threshold` watcher.\n- `issue transfer` unavailable (quota or permission) ⇒ the rebuild-at-destination fallback already documented for cross-repo moves is quota-immune (REST only).\n\n## Process\n\nDraft PR only; governed face ⇒ maintainer merges manually. Keep each lesson self-contained with failure mode + boundary; no issue numbers in the shipped text (dates + verbatim rulings allowed).\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 11455,
+  "kind": "issue",
+  "title": "driver-sql (PG): sum/avg/min/max over a boolean column throw the raw PostgreSQL 42883 with no ADR-0112 envelope (status undefined)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T20:22:18Z",
+  "updated_at": "2026-08-24T03:36:58Z",
+  "closed_at": "2026-08-24T03:36:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11455",
+  "body": "Measured on a live PostgreSQL 16.13 while taking the #11152 readings. Filed unassigned as an out-of-scope finding — #11152 is scoped to `packages/spec` and may not touch a driver.\n\n## What was measured\n\n`driver-sql` maps a `boolean` field to `table.boolean(name)`, which is a real `boolean` column on Postgres (confirmed via `columnInfo()`: `{\"flag\":{\"type\":\"boolean\",...}}`). `SQL_AGGREGATE_FUNCTIONS` lowers the arithmetic aggregates to a bare function name with **no cast**, so the statement reaches the server as `avg(\"flag\")`.\n\nPostgreSQL has no `avg`/`sum`/`min`/`max` over `boolean`, so the call fails — and the failure escapes `SqlDriver.aggregate()` **un-enveloped**:\n\n```\nsum(flag)  => THREW code=42883 status=undefined\n             msg=select sum(\"flag\") as \"n\" from \"probe_bool_agg_pg\" - function sum(boolean) does not exist\navg(flag)  => THREW code=42883 status=undefined\n             msg=select avg(\"flag\") as \"n\" from \"probe_bool_agg_pg\" - function avg(boolean) does not exist\nmin(flag)  => THREW code=42883 status=undefined  - function min(boolean) does not exist\nmax(flag)  => THREW code=42883 status=undefined  - function max(boolean) does not exist\ncount(flag)          => OK 6   (count is defined over any type)\ncount_distinct(flag) => OK 2\n```\n\n`code` is the raw SQLSTATE and `status` is `undefined`. The same four calls answer fine on SQLite (`sum` 3, `avg` 0.5, `min` false, `max` true).\n\n## Why this is a defect independent of the contract question\n\nWhether the platform should *answer a number* here (by casting boolean to int in the lowering) or *refuse* is a contract question that belongs to #11152 / #11249. This card is the other half, and it holds either way: **when it fails, the failure must carry a catalogued code and status.**\n\nA raw `42883` is not in `@objectstack/rest`'s `isExpectedQueryRejection` list, so a caller-shaped mistake (asking for a rate measure over a flag column — an ordinary analytics shape) is logged as an unhandled server fault and answered as a 500.\n\nThis is a new instance of a well-worn family, all previously fixed the same way: #5907 (bare `Error`, code/status undefined on the aggregate door), #8790 (`count()` threw a raw dialect error with no ADR-0112 envelope), #8926 (MySQL wording matched by neither predicate arm, so no envelope), #8931 (dotted WHERE key escaping as a raw dialect error).\n\n## Repro\n\nDeclare an object with a `boolean` field on a live PG connection, seed rows, then `driver.aggregate(table, { aggregations: [{ function: 'avg', field: 'flag', alias: 'n' }] })`. Measured with PostgreSQL 16.13, `driver-sql` at `5a916c4d4d`.\n\n## Out of scope here\n\n- What the answer *should* be (number vs refusal) — #11152 half (a), and #11249 for `min`/`max`.\n- MySQL, which was not provisionable in the measuring container and is unmeasured. `tinyint(1)` may well answer arithmetically; that is a reading someone should take rather than assume.\n\nRelated: #11152, #11249, #11065, #11151."
+}

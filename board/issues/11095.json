@@ -1,0 +1,35 @@
+{
+  "number": 11095,
+  "kind": "issue",
+  "title": "Two more faces of the DESTRUCTIVE_CHANGE 409 prescribe `?force=true` on routes that never thread it — the compound-name `PUT /meta/:type/:a/:b` and the runtime dispatcher `PUT /meta`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-22T16:46:51Z",
+  "updated_at": "2026-08-24T02:07:19Z",
+  "closed_at": "2026-08-24T02:07:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11095",
+  "body": "Measured while repairing the remedy clause on the duplicate face for #11015. Separate defect, filed rather than fixed in that PR — the repair there is not obviously the repair here.\n\n## What was measured\n\n`saveMetaItem`'s Phase 3a-destructive gate raises the `409 DESTRUCTIVE_CHANGE` in one place and the clause is quoted onto whatever response the caller's catch builds. #11015 made that clause face-aware and repaired the one face it was filed on (`duplicatePackage`'s `failed[].error`). The face inventory in `packages/metadata-protocol/src/protocol.destructive-409-face-inventory.test.ts` lists **two further doors that reach the same gate and also never thread `force`**, and both were re-measured on `origin/main` @ `4257e4e`:\n\n| face | call site | threads `force`? |\n|:--|:--|:--|\n| `@objectstack/rest` `PUT /meta/:type/:name` | `packages/rest/src/rest-server.ts:5472` | **yes** — `...(force ? { force: true } : {})` |\n| `@objectstack/rest` `PUT /meta/:type/:a/:b` (compound name) | `packages/rest/src/rest-server.ts:6590` | **no** — the request is built field by field and `force` is not one of them |\n| `@objectstack/runtime` dispatcher `PUT /meta` | `packages/runtime/src/domains/meta.ts:417` | **no** — `saveMetaItem({ type, name, item, organizationId, ...(packageId ? { packageId } : {}) })` |\n\nSo a caller refused on either of the bottom two rows is told `— re-submit with ?force=true to proceed.` and, doing exactly that, gets the identical refusal back. Same defect class as #11015, different doors.\n\n## Why this was not folded into #11015's PR\n\n#11015's duplicate face had a genuine alternative to prescribe (duplicate into a free target namespace, or reconcile the collision first), so repairing the *message* was the whole fix and widened nothing. These two doors have no such alternative: they address one item by name, and the only thing that lifts a risk-acknowledgement refusal is the acknowledgement. The two candidate repairs are therefore\n\n- **A — thread `force` on both routes**, so the sentence becomes true. This *widens a public surface* on two HTTP doors and is a contract decision. Note the compound-name route was deliberately kept in step with its single-segment twin once before (#7019, the masked-schema round-trip), which is an argument that the two `PUT` doors should not disagree about `force` either.\n- **B — give these faces their own remedy clause**, as #11015 did, stating whatever is actually actionable (reconcile the colliding item first). Message-side only, widens nothing, but prescribes strictly less than option A would.\n\nBoth are defensible and the choice is not the dev seat's to make, which is why this is filed rather than folded.\n\n## Where the repair would land\n\n`packages/metadata-protocol/src/protocol.ts` already carries the mechanism #11015 added — `destructiveChangeRemedy(face, name)` plus a server-stated `writeFace` on the `saveMetaItem` request — so option B is a new face value and two call sites stating it. Option A is a change to `packages/rest/src/rest-server.ts` and `packages/runtime/src/domains/meta.ts`. The `⚠️` paragraph on `destructiveChangeRemedy`'s docblock and the `[#11015]` section of the face-inventory test both record these two rows as knowingly left, and point here.\n\nRelated: #11015 (the duplicate face, fixed), #10886 (the sole-carrier verdict that forbids trimming the findings prose).\n\nMeasured on `origin/main` at `4257e4e`.\n"
+}

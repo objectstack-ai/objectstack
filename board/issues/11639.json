@@ -1,0 +1,35 @@
+{
+  "number": 11639,
+  "kind": "pull_request",
+  "title": "fix(plugin-security): walled elevation requires a verified owner-email match, and the bootstrap replays on the verifying update",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T10:14:30Z",
+  "updated_at": "2026-08-24T13:09:10Z",
+  "closed_at": "2026-08-24T13:09:08Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": "2026-08-24T13:09:08Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11639",
+  "body": "Fixes #11343\n\n## What this closes\n\nUnder walled postures (`group`/`isolated`), the platform-admin elevation in `bootstrapPlatformAdmin` matched the env-declared `OS_PLATFORM_OWNER_EMAIL` against the raw email string on `sys_user`, with no `email_verified` condition — while email verification is off by default. PR #11211 was a **real and large narrowing** — it moved the hole from \"whoever registers first\" to \"whoever knows the owner's email *and* registers first\". This PR closes that remainder, exactly as card #11343 records it; no new reproduction detail is added here.\n\nDirection per the card's triage grading (maintainer-invoked, 2026-08-24): **invariant restoration** — the elevation match must be a *verified* email. No product fork.\n\n## Both halves, deliberately in one change\n\nThe card's own measurement is that the obvious fix taken alone creates a worse defect: the bootstrap re-run listened for `sys_user` **insert only**, and email verification is an **update** — so requiring verification without an update trigger would refuse the genuine owner at sign-up and then never look again, leaving a first boot with no administrator at all.\n\n1. **`bootstrap-platform-admin.ts` — the elevation half.** The walled owner-email match additionally requires `email_verified`, via a fail-closed allow-list predicate over driver representations (`true`/`1`/`'1'`/`'true'`); an absent field on an imported/legacy row reads as **unverified**. An unverified holder of the owner's address is refused with the new reason `walled_owner_not_verified`, logged loudly at `warn` with the unblock in the line, and never falls back — the same fail-closed direction as the existing undeclared-owner refusal. `single` posture is untouched in both directions (first-user promotion gains no verification requirement; the owner-email variable is still never consulted there — both pinned).\n2. **`security-plugin.ts` — the replay half.** The bootstrap-replay middleware now fires on `sys_user` **updates touching `email_verified` or `email`** (the change-email flow rewrites both), in addition to insert/create. The trigger set is extracted as `shouldReplayBootstrapFor` in `bootstrap-platform-admin.ts`, consumed by the middleware and its pins alike (the `resolveEngineUpdateDispatch` pattern), and deliberately does **not** fire on unrelated profile edits.\n\n## Pins, in both directions\n\nA suite pinning only the refusal would score green on a platform nobody can administer, so both directions are pinned in `bootstrap-platform-admin-walled-owner.test.ts` and `security-plugin.test.ts`:\n\n- **Refusal**: unverified holder of the owner email (explicit `false`, absent field, driver `0`) ⇒ `adminPromoted: false`, reason `walled_owner_not_verified`, **no** `sys_user_permission_set` write, loud warn naming `OS_PLATFORM_OWNER_EMAIL`.\n- **Elevation**: verified owner elevates — including across the refuse-then-verify-then-re-run sequence, and when an unverified row with the same address is older; driver `1` reads verified.\n- **Trigger set**: exhaustive predicate pins, plus a wiring pin that the registered middleware re-runs the bootstrap on the verifying update, not on a profile edit, and still on insert.\n\nReverse verification (mutate → confirm on disk → run → restore byte-identically, trap'd): removing the verified filter reds exactly the 5 refusal-direction pins (15 others stay green); disabling the predicate's update branch reds exactly the 2 update-trigger pins plus the wiring pin (258 others stay green). Restoration proven by `git hash-object` against the HEAD blob. Both suites resolve the mutated modules via same-package relative imports (no `dist/` in the subject's path), so no rebuild was required for the ablation legs.\n\n## Verification at head `cd8a891892`\n\nAll run through the shared verify lock, after `origin/main` was merged in (clean merge; the #11610 edit to `security-plugin.ts` is in a different region):\n\n- `pnpm --filter @objectstack/plugin-security test` — 76 files, **1479 passed** · `typecheck` (`tsc --noEmit`) clean\n- Derived gate batch (dispatch-gates at this tree): `check:nul-bytes` · `check:changeset-gate-self-tests` · `check:cross-package-test-inputs` · `check:objectui-changeset` · `check:published-files` · `check:slot-lookup` · `check:test-source-alias` · `check:type-source-resolution` · ADR-0087 registration · changeset-no-major · ci-filter-parity · empty-changeset · plugin-teardown-shape · affected-docs · release-rehearsal self-test · `check:query-options-erasure` · `check:type-check-coverage` · `check:engine-double-contract` · `check:where-matcher` · `check:i18n` — **all green** (`BATCH-RESULT: FAIL=0`)\n- `check:type-check-debt` (`--re-measure`, closure built): **OK — 32 ledger entries re-measured, none above its recorded number**\n- The new fake engine double routes `update()` through `assertEngineUpdateDispatch` and is recorded in the pinned ledger (`--write`; coverage grew, nothing lost)\n\nRepo-wide `pnpm lint` was not run locally — CI owns that run on every PR.\n\nChangeset: `.changeset/walled-elevation-verified-email.md` (patch, `@objectstack/plugin-security`).\n\n_Generated by [Claude Code](https://claude.ai/code/session_01APWX2AwT3a4xDcjPCe8bk4)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01APWX2AwT3a4xDcjPCe8bk4)_"
+}

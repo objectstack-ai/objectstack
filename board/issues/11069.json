@@ -1,0 +1,34 @@
+{
+  "number": 11069,
+  "kind": "issue",
+  "title": "check:optional-error-sink has two measured blind spots: bare-`Function` sinks escape the population, and the no-`error` census tally undercounts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T15:03:06Z",
+  "updated_at": "2026-08-24T03:50:38Z",
+  "closed_at": "2026-08-24T03:48:50Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11069",
+  "body": "Observation filed while landing PR #11068 (the #10692 logger-shape de-duplication). Not a claim; unassigned. Not repaired there — out of that card's scope.\n\n⚠️ Duplicate search was **not** performed: the GitHub search/list API was returning `API rate limit already exceeded` for the whole window in which this was filed. Please close as a duplicate if one already exists.\n\nTwo independent narrowings in `scripts/check-optional-error-sink-contract.mjs` (#9754) make its population narrower than the census line advertises. Neither weakens what the gate *enforces* on the shapes it does see; both mean the tree contains sinks the rule would call red and never reports.\n\n## 1. A sink spelled with bare `Function` members escapes the population entirely\n\n`isFunctionTyped()` accepts a method signature or a property whose type is a\n`FunctionTypeNode`. The type reference `Function` is neither, so a member spelled\n`error?: Function` sets `fn = false`. In `analyzeSourceFile`'s `consider()` that has two\ncompounding effects:\n\n```js\nconst error = read.find((m) => m.name === 'error' && m.fn);   // ← not found\nif (!error) {\n    if (pure && read.length > 0) census.noErrorMember.push(...); // ← pure is false too\n    return;\n}\n```\n\nThe shape is counted in **neither** bucket — not the population, not `noErrorMember`, not\n`impure` (that list is only appended after an `error` member is found). It is invisible.\n\n**Two real red sinks are hidden behind this today**, both in `plugin-sharing`:\n\n| file | shape |\n|---|---|\n| `packages/plugins/plugin-sharing/src/sharing-service.ts:280` | `logger?: { info?: Function; warn?: Function; error?: Function; debug?: Function }` |\n| `packages/plugins/plugin-sharing/src/share-link-service.ts:345` | `logger?: { info?: Function; warn?: Function; error?: Function; debug?: Function }` |\n\nBoth declare `error?` beside an **optional** `warn` — precisely the \"contract that permits\nsilence\" #9754 forbids. Measured by rewriting the four members to real signatures and\nre-running the gate (change reverted byte-identically afterwards, `git hash-object`\nconfirmed):\n\n| | population declaring `error` | permit silence (RED) | gate exit |\n|---|---|---|---|\n| today | 37 | 2 (2 baselined) | 0 ✓ |\n| members given real signatures | **39** | **4** | **1 ✗** |\n\nThe gate then names both, with its standard `drop the ? from warn` prescription. Note the\ntightening itself costs **0 compile errors** — `pnpm --filter @objectstack/plugin-sharing typecheck` stays green.\n\n⚠️ The repair is **not** mechanical, which is why this is filed rather than fixed:\n`SharingServiceOptions` and `ShareLinkServiceOptions` are both **publicly exported** from\n`packages/plugins/plugin-sharing/src/index.ts`, so making `warn` required is a breaking\nchange for any host passing `{ info, error }`. That is a contract decision for the #10556\nfamily.\n\n## 2. The `noErrorMember` tally is systematically undercounted by the text prefilter\n\n`run()` skips a file before parsing unless its raw text matches:\n\n```js\nif (!/\\berror\\s*\\??\\s*[:(]/.test(text)) continue;\n```\n\nThat is sound for the **enforced** population — a sink declaring `error` necessarily\ncontains `error:`, `error?:` or `error?(`. It is **unsound for the census line** that\ncounts sinks declaring *no* `error`, since such a file has no reason to contain the token\nat all. A file whose only sink is a pure `{ info?, warn? }` is skipped before the parser\nsees it and is never counted.\n\nReproduced while landing #11068: the new `packages/plugins/plugin-sharing/src/logger-shapes.ts`\ndeclares exactly one pure `{ info?, warn? }` sink and does not move the tally. Deleting the\nfile leaves it at 54, unchanged.\n\nThe two declarations that file replaced *were* counted — but only incidentally, because\ntheir call sites pass `{ error: err?.message }`, i.e. a literal `error:` elsewhere in the\nfile. So membership in this tally currently depends on unrelated text.\n\nThis matters because the header argues the number is a re-measurable cost:\n\n> That number is printed as `impure` on every run — a narrowing whose cost is only argued\n> is a narrowing nobody re-measures.\n\nThe `56` / `54` figure is not that measurement; it is a lower bound of unknown slack.\n\n## Suggested direction (not a decision)\n\n- For (1): treat `Function`, `(...args: any[]) => any` and similar catch-all callables as\n  function-typed for population purposes, or report them in a third bucket so they are\n  visible rather than silently dropped. Either way the two `plugin-sharing` shapes above\n  need a ruling first, since they go red the moment they become visible.\n- For (2): apply the prefilter only when computing the population, and parse\n  unconditionally when the `noErrorMember` tally is wanted — or drop the tally's claim to\n  be a count.\n\n## Refs\n\n#9754 (the gate and its population rule) · #10556 (the sink ledger) · #10692 / PR #11068 (where this was measured)"
+}

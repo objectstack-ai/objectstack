@@ -1,0 +1,35 @@
+{
+  "number": 11293,
+  "kind": "issue",
+  "title": "A lowered hook body cannot name a record: no nameField accessor, no formula fields — so every message hand-composes the title, or falls back to the id",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-23T09:05:28Z",
+  "updated_at": "2026-08-23T20:24:13Z",
+  "closed_at": "2026-08-23T20:24:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11293",
+  "body": "Filed from `objectstack-ai/hotcrm#1243` (PR `objectstack-ai/hotcrm#1251`) under the maintainer's standing rule that a platform capability gap found in the exemplar app is filed here rather than worked around there. Unassigned; this is an observation with a measurement, not a request for a specific API.\n\n## The gap\n\nA hook body ships **body-only**: the CLI lowers `handler` to `body.source` and the runtime evaluates it in QuickJS with no module scope. Two consequences that meet here:\n\n1. A hook cannot reach a **formula field**. `ctx.previous` / `ctx.input` carry stored columns; a formula like `display_title` is computed on read, so a body composing a message has to rebuild it.\n2. There is no `ctx` helper that answers *\"what is this record called?\"* — no accessor for the object's `nameField`, and no way to resolve one for a **related** record either (a lookup column hands the body an id, and reading the name costs a `findOne`).\n\nSo the only way for a hook to name a record in a sentence is to re-implement the object's title inline, per hook.\n\n## Measured, in the exemplar app\n\n`objectstack-ai/hotcrm` after PR #1251 has **five** inline reimplementations of a record title inside hook bodies:\n\n| hook | object | `nameField` | what the body re-composes inline |\n|---|---|---|---|\n| `case_status_side_effects` | `crm_case` | `display_title` (formula) | `case_number` + `subject` |\n| `lead_automation` ×2 | `crm_lead` | `display_title` (formula) | `first_name` + `last_name` + `company` |\n| `quote_workflow` / `quote_on_accepted` | `crm_quote` | `display_title` (formula) | `quote_number` + `name` |\n| `contact_integrity` ×2 | `crm_contact` | `full_name` (formula) | `first_name` + `last_name` |\n| `opportunity_lifecycle` | `crm_opportunity` | `name` (real column) | — the only one that is free |\n\nEach copy is a duplicate of a formula declared once in the object, and the copies can drift from it silently: nothing connects the `display_title` formula in `quote.object.ts` to the `[quoteNumber, name].join(' - ')` in `quote.hook.ts`. The app had to add a repo-local test (`test/record-id-not-in-prose.test.ts`) and a repo-local hygiene check to hold the invariant, both of which are compensating for the absence rather than expressing anything about CRM.\n\n## Why it produced a real defect, not just duplication\n\nThe cheap thing to write when there is no title accessor is the id — it is the one identifier a body always holds. hotcrm#1243 is that outcome measured end to end: eight sites across four hooks put a raw primary key into user-facing prose, and a walkthrough found 15 of 31 tasks in a demo org titled by a 16-character key, plus a duplicate-email refusal that answered *\"which contact already has this address?\"* with a string the UI never displays. #1208 had already fixed one instance of the same shape a month earlier.\n\nThe AI-authoring angle is the sharper half: an agent writing a hook reaches for `${record.id}` precisely because it is the value in scope, and nothing in the platform makes the correct alternative closer to hand than the wrong one.\n\n## Not a proposal\n\nDeliberately not naming an API shape — a title accessor on `ctx`, hydrating `nameField` into the pre-image, or making formula fields readable from a body are three different designs with different costs, and which (if any) is worth building is a scope call, not something one exemplar app's experience settles. Startup-scope discipline cuts against building any of them on one consumer's evidence; the counter-evidence is that this is the second card in the same class in the same app, and the workaround it forces is a duplicated formula per hook.\n\nRecording the measurement so the decision is made on data rather than on the next occurrence.\n\n"
+}

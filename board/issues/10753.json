@@ -1,0 +1,33 @@
+{
+  "number": 10753,
+  "kind": "issue",
+  "title": "Console 顶栏铃铛未读角标在审批处理完成后不更新",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:blocked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-21T10:26:38Z",
+  "updated_at": "2026-08-24T12:35:37Z",
+  "closed_at": "2026-08-24T12:35:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 14,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10753",
+  "body": "## 现象\n\n在 Console 审批中心 `/_console/apps/<app>/system/approvals`:「待我审批」有 1 条,点击【同意】处理完成后,列表正确刷新为空(显示「暂无请求」),但**页面右上角顶栏铃铛图标的红色未读角标仍显示 1**,不随之更新。刷新页面后依旧为 1,直到用户手动「全部已读」。\n\n- 平台版本:@objectstack/* 17.1.0(项目依赖锁定版本)\n- 复现项目:steedos-labs/os-project-titanwind-ehr#1684(含截图)\n\n## 项目侧已排查(证据在上面项目 issue 的归属排查评论里)\n\n- 审批中心页面、顶栏铃铛组件、未读计数均为平台 Console SPA 实现,项目仓库无相关代码;\n- 实测抓包:角标数 = Console 前端直查 `sys_inbox_message` + `sys_notification_receipt`(filter channel=inbox)在前端 join 出的未读收件箱消息数;\n- 「同意」由平台 approvals API 执行;「标记已读」走平台服务端路由 `POST /api/v1/notifications/read`(`MessagingService.markRead()` 系统上下文写回执),项目对回执表仅有读权,无从修复。\n\n## 请平台确认根因(二选一)\n\n1. **前端缓存 bug**:若角标语义是「待审批数」,则审批处理后角标缓存未失效(列表数据已刷新、角标未刷新);\n2. **语义/机制缺口**(现象更像这种):角标语义本是「未读收件箱消息数」,该未读项是业务侧经 `MessagingService.emit()` 推送的「…待审批」站内消息;审批完成后平台无任何机制将关联 inbox 消息标已读/撤回,角标恒挂。\n\n判别方法(点【同意】后不刷新页面直查库):\n\n```sql\nSELECT im.title, r.state FROM sys_inbox_message im\nLEFT JOIN sys_notification_receipt r ON r.notification_id = im.notification_id\nWHERE im.user_id = '<审批人id>';\n```\n\n仍有 `state != 'read'` 且标题为「…待审批」的行 → 情形 2;收件箱干净而角标仍 1 → 情形 1。\n\n## 诉求\n\n- 明确角标的产品语义(未读消息数 vs 待办审批数);\n- 若为情形 2:建议审批完成时联动 markRead/recall 对应 inbox 消息,或将 `MessagingService.markRead()/recall()` 开放给插件调用——否则任何经 `emit()` 推「待审批」类消息的项目都会遇到同一问题(该项目 30+ 处业务 Hook 走此扇出点);\n- 若为情形 1:请修复角标缓存失效逻辑。\n\n## 关联\n\n- 项目侧复现与归属排查:steedos-labs/os-project-titanwind-ehr#1684\n- 同链路历史问题(项目侧记录):铃铛恒 0(内建表未授权)、通知红点不消失(`is_read` 回写 403)"
+}

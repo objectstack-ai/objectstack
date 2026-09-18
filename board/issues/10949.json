@@ -1,0 +1,37 @@
+{
+  "number": 10949,
+  "kind": "issue",
+  "title": "[security] plugin-auth's two id-shaped platform-admin judges disagree with resolve-authz-context on three axes — two of them load-bearing on live gates",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T20:11:45Z",
+  "updated_at": "2026-08-24T13:49:01Z",
+  "closed_at": "2026-08-24T13:49:01Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10949",
+  "body": "Measured by the `domain:services` seat while taking #10348's measurement-only dispatch. **Filed by the PM** because the measuring seat hit `API rate limit already exceeded` on every attempt and **declined to file blind without a duplicate search** — that search has now been run (nothing open).\n\n⛔ **Disclosure discipline: conclusions and their in-repo basis only. No reproduction recipe.** (#9391/#9653/#9756/#9714/#10069 family.)\n\n## What was compared\n\n#10348 asked whether three near-identical id-shaped platform-admin reads should be consolidated. Two survive (`isOrgOrPlatformAdmin` was deleted by #10390 today). The card asserted **\"all three do the same two reads\"**.\n\n**That is overturned.** The two `plugin-auth` spellings agree with *each other* byte-for-byte, and **disagree with the declared authority** — `packages/core/src/security/resolve-authz-context.ts`, whose own header states that every entry point must resolve authorization through it and **never re-read `sys_*_permission_set` itself** — on three axes. Two of those axes are live.\n\n## The two live axes\n\nBoth `auth-manager.ts` judges — `isPlatformAdminUserId` (~`:4420`, which authorizes **`/sso/register`** and, via `applyPlatformAdminImpersonation`, **`/admin/impersonate-user`**) and the `customSession` closure (~`:2961`) —\n\n**① apply no ADR-0091 validity window (`isGrantActive`) and no ADR-0049 active check (`isRowActive`)** to the grant or to the permission-set row. The declared authority applies **both** before any derivation.\n⇒ **An expired or deactivated grant still authorizes those gates.**\n\n**② resolve `admin_full_access` by matching a name over an unfiltered, unordered `find('sys_permission_set', { limit: 50 })` page.**\n⇒ **An environment with more permission sets than that page holds can lose the row and demote every platform admin at once.**\n\n## Why this is a defect and not a style difference — the corroboration is all in-repo\n\nNone of this rests on an outside standard. **This repository already does it correctly, in four places, one of them inside the same package:**\n\n| | |\n| --- | --- |\n| `plugin-auth`'s own `last-admin-guard.ts` | already imports `isGrantActive` / `isRowActive` from `@objectstack/core` — **for the same table and the same permission-set name** |\n| `ensure-default-organization.ts` | already spells the same lookup as `{ where: { name: 'admin_full_access' }, limit: 1 }` — targeted, not a page scan |\n| `last-admin-guard.ts`'s `scan()` | deliberately reads `maxScan + 1` and **refuses rather than truncating** — the posture axis ② is missing |\n| `packages/qa/dogfood/test/authz-conformance.matrix.ts:305` | enumerates *\"every reader that turns a window-carrying row into authority\"* |\n\n⭐ **That last row is the sharpest part of the finding**: `auth-manager.ts`'s judge **is** a reader of exactly that kind and is **absent from the enumeration**. So the conformance matrix that exists to catch this class **does not contain the instance** — the gap is invisible to the very inventory built to see it. That makes the enumeration incomplete too, independently of the two judges.\n\n## Direction of the repair\n\n**Tightening — fewer principals authorized** (an expired or deactivated grant stops authorizing; a targeted lookup stops silently missing the row). It is not a loosening and does not need the maintainer floor on that account.\n\n⚠️ But it **does change callers' verdicts**, which #10348's dispatch placed behind a hard stop, so it is filed rather than fixed.\n\n## Relationship to #10348\n\n#10348 is the consolidation card and its thesis was **confirmed, not refuted**: N copies of an authorization predicate drift, and *the drift is invisible while the copies exist*. This finding is what the drift turned out to be. The two are best taken together — consolidating onto `resolve-authz-context.ts` (option C on #10348) subsumes this defect, because the authority already applies both checks and already spells the lookup targeted.\n\n⚠️ Consolidation also carries a **separate** open question that is a genuine loosening and is the maintainer's: see #10348's measurement of the `withSystemReadContext` wrapper on the `customSession` site.\n\n## Refs\n\n- #10348 — the consolidation card and the measurement this came out of\n- #10390 / #10009 — removed the third spelling today; established that a platform-admin path must not admit org owners/admins\n- ADR-0091 (grant validity window) · ADR-0049 (active check) · ADR-0068 D2 (the org-less `admin_full_access` channel)\n\nFiled unassigned, `security` + `finding`, **no `pm:queue`** — grading is triage's field."
+}

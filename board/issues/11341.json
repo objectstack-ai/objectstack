@@ -1,0 +1,36 @@
+{
+  "number": 11341,
+  "kind": "issue",
+  "title": "finding: nothing stops the next `packages/cli/test` spawner from re-introducing the bare `...process.env` child env",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T12:28:22Z",
+  "updated_at": "2026-08-24T08:00:51Z",
+  "closed_at": "2026-08-24T08:00:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11341",
+  "body": "Surfaced while implementing #11267 (PR #11340). Filing rather than widening that PR, whose declared surface was \"the e2e tests that spawn a real `os serve` while spreading `...process.env`\".\n\n## What #11340 closed, and what it did not\n\n#11340 gives `packages/cli/test/helpers/serve-process.ts` a `childEnv()` choke point that drops `TEST` and the whole `VITEST*` namespace, and sweeps every current `os serve` spawner onto it. That is a **convention**, not an enforced invariant: the next author to write an e2e test in this directory reaches for `{ ...process.env, … }` because it is what every neighbouring file used to look like, and nothing fails when they do.\n\nThe consequence is specific and measured in #11267: an inherited `TEST=true` makes better-auth 1.7.1 skip origin/CSRF validation entirely (`isTest()` reads `TEST` directly, `create-context.mjs` defaults `skipOriginCheck` from it), so a security-posture assertion against such a child cannot go red for the reason it exists. That is worse than no assertion, because it reads as coverage.\n\n## Measured at `1d92e21e` (the head of #11340)\n\n15 files under `packages/cli/test/` still build a spawned CLI child with a bare `...process.env`:\n\n```\ncloud-login-json-ndjson    generate-agent-retired    generate-skill\nhook-body-build-reach      init-created-files-summary invocation-loudness\njson-stdout-purity         login-json-ndjson         login-json-noninteractive\nmigrate-exit-code          migrate-meta              qa-empty-glob-exit-code\nserve-app-runtime-hooks    validate-json-warning-parity\nvalidate-top-level-strict\n```\n\n(A 16th, `serve-process-child-env.e2e.test.ts`, spreads deliberately — it is #11340's pin leg that proves the leak does something, and its header marks it do-not-clean-up.)\n\n**None of these is an active false-green.** They spawn `compile`, `init`, `migrate`, `login`, `generate`, `qa`, `validate`, `hook` — commands that never mount better-auth, so `TEST` reaches nothing that reads it. `serve-app-runtime-hooks` is the closest call: it is one of the `runServe()` importers, so its `os serve` boot is covered, but its `beforeAll` separately spawns `os compile` with a bare spread. The gap is latent and structural, exactly as #11267 was before someone tried to write a security-posture pin against it.\n\n## Two ways to close it, not recommended here\n\n1. **A gate.** Fail on a `...process.env` spread inside a `spawn`/`execFile` call under `packages/cli/test/**` unless it goes through `childEnv()`, with a shrink-only baseline for the deliberate pin leg. Closes the class rather than the instances, which is the durable half.\n2. **Sweep the 15 onto `childEnv()`.** Cheap and mechanical, but it is the convention again — it leaves the next file free to reintroduce the shape.\n\nThe two compose; (1) is what makes (2) stay true.\n\n## Explicitly not this issue\n\nWhether `VITEST=true` or the rest of the worker environment has a similar effect **elsewhere in the dependency tree** — #11267 deferred that survey and nothing surfaced during #11340's work, which only measured better-auth. Also not this issue: #11317, the `tsPath()` reroute in the same directory."
+}

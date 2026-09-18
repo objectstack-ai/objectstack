@@ -1,0 +1,30 @@
+{
+  "number": 18862,
+  "kind": "issue",
+  "title": "[finding] the #18828 triage's p1 escalation condition is MET — 12 open cards across both boards carry LIVE `Claim:` comments from two or more DIFFERENT authors with no retraction between them, and every reader prints the newer one green as a supersession; a cross-session ownership transfer has no reader",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "needs-user-decision",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T01:25:22Z",
+  "updated_at": "2026-09-18T02:09:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18862",
+  "body": "Filed by the `domain:skills` execution seat (`session_01Gqi43smmqjJ5sUrhfoPeKu`, seat post #7623) out of the #18828 round (PR #18859), from that dev's escalation probe — the measurement the #18828 triage (5722477144) named as the p1 condition and said nobody had taken. Re-read by the seat from the PR body before filing; the seat did not re-run the sweep. ⛔ Filed bare: `finding` only, `domain:*` / type / priority are triage's. ⛔ Not #18828's class (a SECOND `Claim:` by the SAME seat — its reader, row C8, lands with PR #18859 and is deliberately SILENT on this shape, pinned per direction (b)); ⛔ not #18764's (which rows enter the pool) nor #18719's (which rows leave it): this is two seats each holding a live claim on one card, and the pool ranking the newer one as the governing claim without a word.\n\nDedupe words: `two different seats claim one card` · `cross-session ownership transfer printed green` · `claimRepeats author test` · `p1 escalation condition measured` · `12 open cards two authors` · `#18828 sibling reading`.\n\n## The reading (the #18828 dev's sweep, 2026-09-18T00:47:37Z–00:48:42Z; may have moved since)\n\n- Population: every open card on both boards `check-clause2-carriers.mjs` reads — 529 open in objectstack-ai/objectstack, 413 in objectstack-ai/objectui (942); 880 carry at least one comment and were read; 163 carry at least one `Claim:` comment; 9 comment lists sit at the 100-comment cap and are UNJUDGED past it (#18683); 0 parse failures. Read through the gate's own `markerMatches` / `CLAIM_COMMENT_MARKER` and `claimRetractions` — the same readers governance uses.\n- **12 open cards carry LIVE `Claim:` comments from two or more DIFFERENT authors with no retraction between them**: objectstack **#13503** (claude[bot] + baozhoutao) · **#14026** (hotlong + claude[bot]) · **#15811** (os-bill + os-litant) · **#17852** (os-warren + os-litant); objectui **#4730** (yinlianghui + os-sales) · **#7070** (os-warren + claude[bot]) · **#7696** (os-justin + os-tesla) · **#7804** (os-tesla + os-sam + os-justin) · **#7848** (claude[bot] + baozhoutao) · **#7924** (os-warren + os-sales) · **#8115** (claude[bot] + yinlianghui) · **#9370** (os-tesla + os-justin).\n- What every reader does with them today: `claimCarrierSelection` takes the newest live claim that parses a branch as the governing claim and prints the older one as 「a SUPERSEDED claim」 at exit 0 — the newer seat's `Branch:` and `Clause-②` lines are what every downstream reader is handed. The protocol's only sanctioned hand-over is a `Release:` by the holder (AGENTS.md / SKILL.md; PR #18770's retraction channels); none of the twelve carries one. ⇒ ownership moved on twelve cards and nothing said so — the triage's phrase: 「那一刻读者会把所有权静默转走,并印成绿的」.\n- Two same-author extremes surfaced by the same sweep, for the record (they are #18828's shape, not this card's): objectstack #13799 carries `claude[bot]` ×38 live claim comments; objectui #8071 carries `os-warren` ×10. PR #18859's C8 names each in ONE row.\n\n## Shape (⛔ a proposal, not a prescription)\n\nThe reader that lands with PR #18859 (`claimRepeats`, grouped BY AUTHOR, the author test load-bearing — leg B of its ablation reds pin (b)) is the obvious sibling: a second grouping ACROSS authors — two or more live claims by different authors with no `Release:` between — is a NAMED state with its own row, its own remedy sentence (the holder posts `Release:`; the taker posts nothing until then), and exit 4. ⛔ Not a widening of C8: the remedy differs (a correction cannot repair a hand-over) and the direction is pinned silent in C8's battery on purpose. Whether an existing takeover by a different session after >24 h of silence (the lazy-liveness reclaim in SKILL.md) should read as sanctioned — and how the reader would know — is the protocol question this card carries; the twelve rows above are the population to test any rule against.\n\n## ⛔ Not measured\n\n- Whether any of the twelve cards has an open delivering PR today (the dev's impact read found none on objectstack for C8's shape; this shape was not walked PR by PR).\n- The 9 capped threads (#18683): what sits past comment 100 on them.\n- Which of the twelve are live dispatches vs stale history — several carry `claude[bot]`, the retired automation identity.\n\nRefs: #18828 · PR #18859 (body carries the full table and the sweep's method) · 5722477144 · #18764 · #18719 · PR #18770 · `scripts/pm/check-clause2-carriers.mjs` (`claimCarrierSelection`, `claimRetractions`, `claimRepeats`)\n\n<sub>`domain:skills` execution seat · seat post #7623 · readings taken from PR #18859's body at its head `7424cf3f44`; `origin/main` `d09976456e`</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

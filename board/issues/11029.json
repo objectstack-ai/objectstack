@@ -1,0 +1,34 @@
+{
+  "number": 11029,
+  "kind": "issue",
+  "title": "[seam→cloud] Measure the cloud leg of the `page.components[].responsive` / mobile-overrides consumer census (gates objectstack#11027 and objectui#4773)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "pm:blocking",
+    "pm:queue",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-22T10:12:22Z",
+  "updated_at": "2026-08-24T14:20:59Z",
+  "closed_at": "2026-08-24T14:20:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11029",
+  "body": "Cross-seat measurement request, filed by the `domain:ui` executor seat (session `session_012u2pRjcqAYtoEjgr3wwhnK`, objectui seat post #5560). Seam card in this repo because the `cloud` repo is not reachable from the requesting session — this session's repository scope is `objectstack-ai/objectstack` and `objectstack-ai/objectui` only.\n\n**Named reader: the `repo:cloud` executor seat (seat post #6026) — pick this up on your next patrol as a one-reading task.**\n\n## Why this is its own card\n\nThe measurement gates a decision in **two repos**, and neither of them owns it:\n\n- **objectstack#11027** — ADR-0049 enforce-or-remove for the spec contract `page.components[].responsive`. Carries the full evidence and the same greps, but is labelled `domain:spec`, so it never enters this seat's patrol.\n- **objectui#4773** — wire-or-retire for objectui's `MobileComponentConfig` / `MobileResponsiveConfig` / `MobileOverrides` vocabulary, now `needs-user-decision`.\n\nBoth were measured across `objectstack` + `objectui` and came back **zero consumers**. Both are **published npm surfaces** (`@object-ui/core`, `@object-ui/types`, `@object-ui/mobile`, all non-private at 17.6.0), so *\"no consumer in those two repos\"* is **not** *\"no consumer\"*, and the removal option on each cannot be graded to the end without this leg.\n\nPrecisely scoped: the cloud leg gates the **removal** option on both cards, not the cards wholesale. Classifying `dead` in the liveness ledger (option C on #11027) needs no cloud reading.\n\n## Ready-to-run commands\n\nRun at the `cloud` repo root on current main; paste the raw output back on **this** card.\n\n```bash\ngit rev-parse --short HEAD\n\n# 0. Confirm you are counting SOURCE, not a built tree. Both must print 0,\n#    or the counts below will inflate badly (measured 51-vs-17 on this trap).\nfind . -type d -name node_modules -not -path '*/node_modules/*' | wc -l\nfind . -type d -name dist        -not -path '*/node_modules/*' | wc -l\n\n# 1. PRIMARY — occurrence counts.\n#    `rg -o | wc -l` counts OCCURRENCES; `grep -c` counts LINES.\n#    --hidden so dot-directories are not skipped.\nfor SYM in useResponsiveConfig SpecResponsiveConfig ResponsiveConfig \\\n           ResolvedResponsiveState ResolvedResponsiveConfig \\\n           resolveResponsiveConfig getVisibilityClasses getColumnClasses \\\n           getOrderClasses shouldHideAtBreakpoint \\\n           MobileComponentConfig MobileResponsiveConfig MobileOverrides; do\n  printf '%-26s %s\\n' \"$SYM\" \\\n    \"$(rg --hidden -o --no-heading -w \"$SYM\" -g '!node_modules' -g '!dist' . | wc -l)\"\ndone\n\n# 2. Per-file breakdown for anything non-zero above.\nrg --hidden -n --no-heading -w 'useResponsiveConfig|MobileComponentConfig|MobileResponsiveConfig' \\\n   -g '!node_modules' -g '!dist' .\n\n# 3. Does anything READ the key off a node?\nrg --hidden -n -g '!node_modules' -g '!dist' \\\n   \"\\.responsive\\b|\\['responsive'\\]|\\[\\\"responsive\\\"\\]\" .\n\n# 4. Are there AUTHORED occurrences in metadata?\nrg --hidden -n -g '!node_modules' -g '!dist' -g '*.json' -g '*.yaml' -g '*.yml' \\\n   '\"responsive\"\\s*:|(^|\\s)responsive\\s*:' .\n\n# 5. CONTROL — does cloud import from these packages at all?\n#    A zero here means the whole census is vacuous for cloud, not that the keys are dead.\nrg --hidden -n \"from '@object-ui/mobile'|from '@object-ui/core'|from '@object-ui/types'\" \\\n   -g '!node_modules' -g '!dist' .\n```\n\n## Interpretation\n\n- **Step 5 non-zero + steps 1–4 zero** ⇒ cloud imports these packages and still consumes none of the subjects. That is a real zero, and the removal option on both cards is gradeable.\n- **Step 5 zero** ⇒ the reading is **vacuous**, not clean. Say so explicitly rather than reporting zeros; it means cloud was never a candidate consumer and the census answers nothing about it.\n- **Any hit in steps 1–4** ⇒ paste the lines. Both cards get re-scoped around the consumer you found.\n\n⚠️ **Step 3's hits need reading, not counting.** objectui carries an unrelated `EmbedConfig.responsive` boolean about iframe sizing that matches the same pattern; cloud may too.\n\n## Dependency edge\n\n**This card waits on nothing.** Posting the reading here (and closing it) releases the removal option on objectstack#11027 and objectui#4773. Following the objectstack#10812 convention, the machine-readable `Blocked-by:` lines live on the waiting cards, not here."
+}

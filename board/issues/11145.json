@@ -1,0 +1,34 @@
+{
+  "number": 11145,
+  "kind": "issue",
+  "title": "Remove the `(p as any)` cast at the REST `publishMetaItem` call site once `MetadataProtocol` declares the member (#11006 follow-up)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-22T21:00:29Z",
+  "updated_at": "2026-08-24T12:51:37Z",
+  "closed_at": "2026-08-24T12:36:47Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11145",
+  "body": "Blocked-by: #11006\n\nFiled by the `domain:engine` PM seat as the downstream half of a maintainer ruling, so the follow-up is a card rather than something a seat has to remember. ⛔ Not dispatchable until #11006 closes.\n\n## Why this card exists\n\nThe maintainer ruled **B** on #11006 (2026-08-22 live session, 「同意所有」, item 5): `MetadataProtocol` gains an optional `publishMetaItem` member. The [ruling record](https://github.com/objectstack-ai/objectstack/issues/11006#issuecomment-5380748532) assigns the consumer-side cleanup to this lane by name:\n\n> follow-up in the engine lane removes the `(p as any)` cast at the REST call site once landed (the spec PR body names that consumer so the engine seat picks it up)\n\nThat sentence was the only record of this work. It lives in a comment on a card in **another lane** which will **close** when the spec PR merges — at which point the follow-up becomes invisible to every queue view in this repo. Hence a card.\n\n## What the work is\n\nOnce #11006's spec change lands, the REST call site's `(p as any)` cast can come off, because the cast will no longer be carrying anything. That is the measured point from #11006, and it is worth restating precisely because it is counter-intuitive:\n\n> 删掉 cast 得到的是 **`TS2339 — Property 'publishMetaItem' does not exist on type 'RestProtocol'`**,而**不是** `TS2353`(对象字面量属性不匹配)。也就是说 **cast 承的是「成员存在性」的重,不是「请求形状」的重**\n\nSo this is not a request-shape fix and adding fields to `metadata-protocol`'s own request type could never have achieved it — the cast exists solely because the interface had no such member. #11006 adds the member; this card removes the prop that was holding the gap closed.\n\nExpected shape after the ruling lands: the cast degrades to the existing optional-call idiom (matching `getMetaItemLayered` / `deleteMetaItem`), and with #9741's `TransportScopedMetaRequest` wrapper applied, **an undeclared key at the call site becomes a compile error** — which is the entire point of the exercise and the acceptance signal for this card.\n\n## Before dispatching, re-verify rather than assume\n\n- Confirm on merged `main` that #11006's member actually landed **as an optional member with the request type**, not some narrowed variant. The scope may have shifted during spec-seat implementation, and this card's premise is exactly that member's existence.\n- Establish that removing the cast produces a **clean** compile, not a different error. If a second, independent reason for the cast surfaces, that is a finding — report it rather than re-casting.\n- ⛔ `packages/spec` is off limits from this lane. If the cleanup needs anything further in spec, it goes back to the `domain:spec` seat, not into this card's PR.\n\n## Labelling note\n\n`domain:engine` here **transcribes the ruling's own routing** (\"follow-up in the engine lane\") rather than being a fresh triage judgement — this seat does not produce `domain:*`. Triage should correct it freely if the landing point argues otherwise. Size looks S (one cast, one compile check), but the sizing is this seat's guess and not measured.\n\nRelated: #11006 (the ruling, upstream) · #10350 (the parent card, landed as PR #11005 — `packageId` declared, three stale comments corrected) · #9741 (the meta-read sibling and the transport wrapper) · #7294 (declared the response side) · ADR-0076 D9"
+}

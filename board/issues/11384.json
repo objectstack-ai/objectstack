@@ -1,0 +1,34 @@
+{
+  "number": 11384,
+  "kind": "issue",
+  "title": "`lintLivenessProperties` tells the author a `planned` property is `dead` — the message and the hint on the same finding contradict each other",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T15:08:06Z",
+  "updated_at": "2026-08-24T03:56:07Z",
+  "closed_at": "2026-08-24T03:31:25Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11384",
+  "body": "## Summary\n\n`describe()` in `packages/lint/src/lint-liveness-properties.ts` knows two verdicts, and the ledger ships three:\n\n```ts\nfunction describe(entry: LedgerEntry): { kind: string; rule: string } {\n  if (entry.status === 'experimental') {\n    return { kind: 'is experimental — declared but NOT enforced at runtime', rule: LIVENESS_EXPERIMENTAL_PROPERTY };\n  }\n  return { kind: 'has no runtime effect (liveness: dead)', rule: LIVENESS_DEAD_PROPERTY };\n}\n```\n\nAnything that is not `experimental` falls into the `dead` branch, `planned` included — so a row the ledger deliberately grades `planned` (\"declared, and a consumer is being built against it\") is reported to the author as `liveness: dead` under the rule id `liveness-dead-property`.\n\n## Measurement (`origin/main` @ `b863f01`)\n\nCensus of every warned row across all 30 shipped ledgers (`authorWarn: true` or `status: experimental`) — 8 rows, and **3 of the 8 are `planned`**:\n\n```\nagent · lifecycle          [status=experimental]\nagent · memory             [status=experimental]\nagent · guardrails         [status=experimental]\nagent · structuredOutput   [status=experimental]\nfield · relatedListFilter  [status=planned]      <- reported as dead\nobject · externalSharingModel [status=planned]   <- reported as dead\ntool · outputSchema        [status=experimental]\ntranslation · flows        [status=planned]      <- reported as dead\n```\n\nA real finding, captured from a test run on `translation.flows`:\n\n```\nmessage: \"sets `flows` but this translation property has no runtime effect (liveness: dead).\"\nhint:    \"No shipped screen-flow runner reads this group yet — until the objectui half of #7646\n          lands, a `type: 'screen'` flow renders the strings authored on the flow ... in every locale.\"\n```\n\nThe message says the property is dead; the hint attached to the same finding says a runner is coming and names the card. The ledger's own note is explicit that this is not a `dead` row: \"`dead` means declared with no consumer and no plan, while this group was ruled into the vocabulary by the maintainer specifically so the runner half could be built against it\".\n\n## Why it matters\n\nThe two verdicts imply opposite author actions. `dead` means *remove it* — which is what the rule's default hint says when a row has no `authorHint` (\"Remove it — it is declared in the spec but not consumed at runtime\"). `planned` means *keep it, it is contract-first and the reader is being built*. An author who follows the message deletes metadata the platform asked them to write; an author who reads the hint keeps it and wonders why the linter called it dead. The rule id is also what suppression and reporting key off, so the two states are indistinguishable to anything downstream.\n\nNot urgent: all three rows carry an `authorHint` today, so the honest sentence is present on every finding — just underneath a contradicting one.\n\n## Suggested shape\n\nA third branch in `describe()` for `status === 'planned'` with its own wording (declared, not read *yet*) and its own rule id, plus a decision on whether the new id is advisory-only like the other two. Worth checking at the same time what `describe()` should do with a status it does not recognise — the current fallthrough grades an unknown status as `dead`, silently.\n\n## Provenance\n\nFound while implementing #11288 (the translation liveness walk, PR #11383) — that fix is what first made a `planned` translation row reach an author at all, but the defect is older and independent of it: `field.relatedListFilter` and `object.externalSharingModel` have been reported this way for as long as they have been `planned`. Out of scope there, filed here; no fix attempted."
+}

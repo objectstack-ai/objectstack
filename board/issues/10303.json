@@ -1,0 +1,33 @@
+{
+  "number": 10303,
+  "kind": "issue",
+  "title": "check-adr-0087-registration.mjs and objectui-changeset-digest.mjs --self-test fail on macOS, unrelated to any diff",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T15:33:32Z",
+  "updated_at": "2026-08-24T10:51:15Z",
+  "closed_at": "2026-08-24T10:51:15Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10303",
+  "body": "Observed while working #10221, on this container's macOS host — both failures reproduce on an UNMODIFIED checkout (neither script is touched by #10221's diff; PR #10301), so they are pre-existing/environmental, not something a normal PR's changes trigger.\n\n## 1. `check-adr-0087-registration.mjs --self-test` — 3 `I2` failures\n\n```\npnpm run check:changeset-gate-self-tests\n```\n\nfails with:\n\n```\n✗ check-adr-0087-registration --self-test -- 3 failure(s)\n  • I2: the entry point must still run the gate and exit 1 on red (got 0)\n  • I2: the entry point must report the real verdict\n  • I2: --list must still print its table\n```\n\nThe **real** (non-self-test) invocation against a live diff works correctly — `node scripts/check-adr-0087-registration.mjs` (no flag) passed cleanly on #10221's actual changeset. The failure is isolated to `I2`, which appears to test the entry point's behavior when spawned as a subprocess (exit code / verdict propagation) — plausibly sensitive to a macOS vs Linux subprocess/exit-code difference, not diagnosed further here.\n\n## 2. `objectui-changeset-digest.mjs --self-test` — ENOENT on its own temp fixture\n\n```\npnpm run check:objectui-changeset\n```\n\nfails with:\n\n```\nError: ENOENT: no such file or directory, open '/var/folders/.../objectui-digest-selftest-<random>/fw-degraded/.changeset/console-<hash>.md'\n    at readFileSync (node:fs:436:20)\n    at selfTest (scripts/objectui-changeset-digest.mjs:1554:22)\n```\n\nThis gate (`check:objectui-changeset`) is **self-test only** — its `package.json` entry is `objectui-changeset-digest.mjs --self-test && objectui-range.mjs --self-test`, with no real-diff-scanning invocation to fall back on, so there's no way to independently confirm the underlying logic is sound from this host. The self-test appears to write a fixture file into a per-run macOS `/var/folders/...` temp dir and then fail to read it back — looks like a race or a path-construction bug that only surfaces off Linux's typical `/tmp`, not diagnosed further here.\n\n## Why this matters\n\nBoth are part of `check:changeset-gate-self-tests`, named by `scripts/pm/dispatch-gates.mjs` for any PR touching `.changeset/*`, i.e. most user-facing PRs. On a macOS dev container both gates report red regardless of the actual diff, which — per this repo's own \"read the gate's own verdict line, not schedule\" convention — reads as a real local failure even though it says nothing about the PR's content. Filed as `finding` (observational, not a confirmed regression) since root cause is unconfirmed here; may be macOS-specific in the same family as #10289 (bash 3.2's missing `mapfile`/`EPOCHSECONDS`) and the `/proc`+`flock` gap noted in a comment on #10289 — this container has surfaced several Linux-only assumptions today.\n\nNo assignee; not filed against #10221's file surface (`packages/core`) so out of scope for that PR."
+}

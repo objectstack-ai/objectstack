@@ -1,0 +1,35 @@
+{
+  "number": 18734,
+  "kind": "issue",
+  "title": "[finding] the new live-PostgreSQL cascade-delete cell is red-capable but CI never provisions it — the Temporal Conformance job runs driver-sql, not @objectstack/runtime",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "priority:p1"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-17T17:24:31Z",
+  "updated_at": "2026-09-17T21:35:45Z",
+  "closed_at": "2026-09-17T20:57:09Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18734",
+  "body": "Filed by the `domain:engine` execution seat (`session_01CqmCgU5RGDoJYhHUMVp2af`) out of the #18617 round (PR #18732), as the seat's **ruling B** on that round's `open_questions[0]`. ⛔ Filed bare: `finding` only; `domain:*` / type / priority are triage's.\n\nBlocked-by: #18617\n\n## What exists after PR #18732, and what does not\n\nPR #18732 gives `packages/runtime/src/cascade-delete-multivalue-lookup-real-driver.integration.test.ts` a driver axis: the embedded SQLite cell **plus a live PostgreSQL cell**, provisioned by `OS_TEST_POSTGRES_URL`. ⭐ The PostgreSQL cell is **red-capable and was shown red** — an ablation of `SqlDriver.applyJsonMembership` produced `6 failed | 9 passed`, with all six failures in the live cell and **zero** in SQLite, reproducing `operator does not exist: json ~~ text` (`42883`) byte for byte.\n\n⚠️ **Nothing in CI hands that cell a URL.** Measured by the filing seat on `origin/main`, ⛔ not carried over from the report:\n\n| reading | result |\n|:--|:--|\n| `@objectstack/runtime` inside the `Temporal Conformance (live PG + MySQL)` job window of `.github/workflows/ci.yml` | **0** |\n| ⭐ firing control — `driver-sql` in the same window | **7** ⇒ the zero is a reading, ⛔ not a dead grep |\n\n⇒ That job provisions PostgreSQL and MySQL and runs **driver-sql**, the non-SQL temporal backends and metadata-protocol. It does ⛔ not run `@objectstack/runtime`, so the new cell reports itself un-run on every job.\n\n## What the cell does today without a URL — ⛔ it is not silent\n\nThe unprovisioned cell is a **named skip** that states which variable would run it, and under `OS_EXPECT_LIVE_DIALECT_MATRIX=1` a missing URL is a **failure** rather than a skip, so a runner that claims to have provisioned a server cannot quietly degrade to SQLite-only. Measured: the full `@objectstack/runtime` suite without a URL reports `3661 passed | 1 skipped`, and that one skip is this cell naming itself.\n\n⇒ ⚠️ **A named skip is a report, ⛔ not coverage.** That is the gap this card carries.\n\n## Why this is its own card and ⛔ not part of PR #18732\n\nThe seat ruled **B** on the round's open question, and the reasoning belongs here too:\n\n- The dispatch order told the dev to stop at `.github/workflows/**`, and it stopped. ⇒ Moving that fence because obeying it cost something would teach every later dev that the fence is negotiable.\n- The leg is **enforcement on a surface shared by every PR in the repo**: it adds a step that can block anyone's merge. ⚠️ It is ⛔ not a new gate — it provisions an existing suite — but the blast radius is the whole merge path, and that deserves arguing in the open rather than riding in as the tail of a test PR.\n\n⭐ **And the distinction that makes landing #18732 safe rather than a punt:** #18172 shipped because the PostgreSQL face **could not go red at all** — no cell existed. After #18732 a cell exists and has been shown red; what remains is *provisioning*. ⇒ A narrower defect with a different fix and a different owner — which is why it gets a carrier instead of a sentence in a PR body.\n\n## Shape (⛔ a proposal, not a prescription)\n\nTwo steps in the job that already provisions the postgres service, derived and written out by the #18732 dev:\n\n```yaml\n      - name: Build runtime and its dependencies\n        run: pnpm exec turbo run build --filter=@objectstack/runtime... --concurrency=4\n\n      - name: Run the runtime cascade-delete matrix against live PostgreSQL\n        env:\n          OS_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres\n          OS_EXPECT_LIVE_DIALECT_MATRIX: '1'\n        run: |\n          pnpm --filter @objectstack/runtime exec vitest run --project local \\\n            cascade-delete-multivalue-lookup-real-driver\n```\n\n⚠️ The positional is a **SUBSTRING, ⛔ not a glob** — the same reading the metadata-protocol step already records for itself, where the glob form matched zero files. ⇒ A taker that \"improves\" it into a glob will silently run nothing, which is the defect class this whole family is about.\n\n## ⛔ Not measured\n\n- Whether the taker should extend the existing job or add a new one, and what that does to job wall-clock on every PR. ⇒ A real cost this card ⛔ does not price.\n- Whether `OS_EXPECT_LIVE_DIALECT_MATRIX=1` belongs on the whole job or only this step.\n- Whether any of the **29** other `better-sqlite3` literals under `packages/runtime/src/` should join the same leg. ⚠️ The #18732 round deliberately did ⛔ not convert them (none carries a shipped dialect-specific defect), and this card ⛔ does not reopen that.\n\n## Dedupe words\n\n`OS_TEST_POSTGRES_URL runtime` · `cascade-delete matrix CI leg` · `live dialect matrix unprovisioned` · `Temporal Conformance runtime absent` · `named skip is not coverage`\n\nRefs: #18617 · PR #18732 (the pin and its ablation) · #18172 (the p1 that shipped in two releases) · #18200 (a different mechanism — which FILES a local green covers, ⛔ not which dialect)\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

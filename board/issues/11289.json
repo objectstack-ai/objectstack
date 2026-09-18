@@ -1,0 +1,34 @@
+{
+  "number": 11289,
+  "kind": "issue",
+  "title": "record:details sections cannot survive an empty record: `hideEmpty` / `collapsible` / `showBorder` are honoured by the renderer but undeclared by the strict section schema",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T08:58:06Z",
+  "updated_at": "2026-08-24T13:23:37Z",
+  "closed_at": "2026-08-24T12:32:07Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11289",
+  "body": "`RecordDetailsProps.sections` is strict and declares `name` / `label` / `columns` / `fields`. objectui's `DetailSection` reads three more keys off the same object — `hideEmpty`, `collapsible`, `showBorder` — and `RecordDetailsRenderer` spreads the authored section through to it, so those keys are honoured at runtime while `objectstack validate` warns that they are not props the component declares.\n\nOne of them is not cosmetic. It decides whether a section exists.\n\n## What the renderer does\n\n`packages/plugin-detail/src/renderers/record-details.tsx` maps every authored section with `hideEmpty: s.hideEmpty ?? true`, and `DetailSection` then returns `null` outright:\n\n```ts\nif (visibleFields.length === 0 && emptyCount === section.fields.length) return null;\n```\n\n(Both verified in the shipped bundle: `@objectstack/console` 17.1.0, `dist/assets/plugins-views-BaBStVok.js` — `hideEmpty:e.hideEmpty??!0` and `j.length===0&&T===e.fields.length)return null`.)\n\nSo on a record where a section's fields all happen to be empty, the section renders nothing at all — no heading, no empty shell, no prompt. `DetailSection`'s own auto-hide heuristic has the opposite intent one screen above, and says so:\n\n> If a section is entirely empty (e.g., loading state, brand-new record), do NOT auto-hide — the labels themselves are useful as a structural skeleton.\n\nThe renderer's forced `hideEmpty` overrides exactly that case, and the author has no way to ask for the skeleton back, because the key that would ask for it is not declarable.\n\n## Why it matters to an author\n\nFound while fixing objectstack-ai/hotcrm#1211. A freshly created opportunity there renders a Details tab with two rows: the highlights de-dup removes the fields the strip carries, the remaining ones are empty on a new record, and two of the three authored sections vanish. A \"Description\" section that says *this deal has no description and no next step yet* is more useful to a seller than no section — but there is no authored key that produces it. An app author's only options today are to author an undeclared key (warned, and the warning text asserts the key \"did nothing\", which is not true for `collapsible` — it reaches `DetailSection` intact via the open `properties` bag) or to accept the disappearance.\n\n## What would resolve it\n\nEither direction closes the gap; the first is smaller:\n\n1. **Declare the keys** on `RecordDetailsProps.sections` — `hideEmpty` (boolean), and `collapsible` / `showBorder` while the shape is open — so declared = enforced and the author can keep a section that an empty record would otherwise erase.\n2. **Or** stop forcing `hideEmpty` in `RecordDetailsRenderer` and let `DetailSection`'s stated heuristic own the all-empty case, so an empty section keeps its labels.\n\nEither way, the strict schema and the renderer should agree on the same key set — right now the three keys sit on opposite sides of the contract.\n\nBack-link: objectstack-ai/hotcrm#1211 (and the hotcrm PR that lands the authoring half references this card).\n"
+}

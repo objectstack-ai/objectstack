@@ -1,0 +1,35 @@
+{
+  "number": 11261,
+  "kind": "issue",
+  "title": "`packages/console/package.json`'s npm `description` still names the fabricated `@objectstack/framework`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T07:04:03Z",
+  "updated_at": "2026-08-24T02:10:57Z",
+  "closed_at": "2026-08-24T02:10:07Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11261",
+  "body": "Found while fixing #10921, which measured `@objectstack/framework` as **404 on the public npm registry** and as fabricated: unlike `@objectstack/security-enterprise` and `@objectstack/organizations` (real, deliberately private), nothing in this tree describes `@objectstack/framework` as enterprise, cloud, or closed-source — it is presented as the *default public* install, and no such package exists.\n\n#10921's PR removes the name from `packages/console/README.md` and `packages/cli/src/utils/console.ts`. **One site is left**, and it was outside that card's declared file surface:\n\n```\npackages/console/package.json:4\n  \"description\": \"Prebuilt Console SPA pinned to this @objectstack/framework release. Source of truth: @object-ui/console (…)\",\n```\n\nThis one is arguably the most visible of the three: a package `description` is what renders on the npm package page for `@objectstack/console`, so every visitor reads a fabricated package name.\n\nThe correction is the same one the README took: the mechanism is real but misnamed — `@objectstack/cli` declares `@objectstack/console` as a dependency and both ship at one version from the Changesets `fixed` group. Something like:\n\n```\n\"description\": \"Prebuilt Console SPA pinned to this framework release, installed as a dependency of @objectstack/cli. Source of truth: @object-ui/console (…)\"\n```\n\nDeliberately not folded into #10921's PR: `packages/console/package.json` is not in that card's declared surface, and editing a published manifest widens the gate surface (`check:published-files`) beyond what that card measured. It is a one-line change for whoever picks it up.\n\nRefs: #10921 and its PR.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 18790,
+  "kind": "pull_request",
+  "title": "test(spec): pin the OpenAPI WRITE-refusal test on the generator's diagnostic",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-17T20:54:07Z",
+  "updated_at": "2026-09-17T22:02:24Z",
+  "closed_at": "2026-09-17T22:02:23Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": "2026-09-17T22:02:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/18790",
+  "body": "Fixes #18591\n\nClause-②: no\n\n`refuses to WRITE the artifact when the document is inconsistent`\n(`packages/spec/scripts/openapi-self-consistency.test.ts`) asserted only a non-zero exit\nstatus and a missing artifact. **A subprocess that never starts satisfies both**, so the\ncase stayed green in exactly the scenario where the gate it exists to pin never ran once.\n\nThe fix is the shape its three sibling spawn tests already carry: assert the generator's\nown diagnostic text as well. Test file only, 8 lines added, nothing else touched.\n\n## Which text to assert — measured, not assumed\n\nThe claim comment could not say what the generator actually prints for the injected\n`ApiErrorTypo` ref. The mutated generator was run once and read:\n\n```text\nError: OpenAPI document is not self-consistent: 1 unresolvable $ref(s).\n  - #/components/schemas/ApiErrorTypo  (referenced at components.schemas.Broken)\n  defined components.schemas: [CreateRequest, UpdateRequest, SingleRecordResponse,\n  ListRecordResponse, DeleteResponse, ApiError, BulkRequest, BulkResponse, BaseResponse, Broken]\n```\n\nSo the sibling's pair does apply verbatim, and both halves are now asserted:\n`toMatch(/unresolvable \\$ref/)` and `toContain('#/components/schemas/ApiErrorTypo')`.\n\n## Acceptance controls\n\nProbe: park `node_modules/.pnpm/tsx@4.23.12` aside, so `npx tsx` resolves the pnpm shim\nand the shim's target is gone — the generator subprocess never starts. Proven in effect\nbefore any result was read (`npx tsx --version` exit 1, `Cannot find module …/tsx/dist/cli.mjs`),\nrestored under a `trap … EXIT INT TERM` with absolute paths and proven byte-identical after\neach leg (same inode 689295, same tar-stream sha256 `e8d303f8…67e6`).\n\n### LIT — the red leg\n\nSame command both times: `pnpm --filter @objectstack/spec exec vitest run --project local --maxWorkers=2 scripts/openapi-self-consistency.test.ts`\n\n| tsx parked | file counts | `refuses to WRITE …` |\n|:---|:---|:---|\n| **before** (`2085be2b2d`) | `Tests  8 failed \\| 13 passed (21)` | **PASSED** — the vacuous pass |\n| **after** (`cd4904d361`) | `Tests  9 failed \\| 12 passed (21)` | **FAILED** |\n\nThe new failure, in full:\n\n```text\nFAIL  |local| scripts/openapi-self-consistency.test.ts > build-openapi.ts end to end >\n  refuses to WRITE the artifact when the document is inconsistent\nAssertionError: expected 'node:internal/modules/cjs/loader:1386…' to match /unresolvable \\$ref/\n```\n\nAll nine spawn tests in the file now go red under the probe; before this change, eight did.\n\n### DARK — normal tree\n\n| tsx in place | result |\n|:---|:---|\n| **before** (`2085be2b2d`) | `Test Files  1 passed (1)` · `Tests  21 passed (21)` |\n| **after** (`cd4904d361`) | `Test Files  1 passed (1)` · `Tests  21 passed (21)` |\n\nNothing reddened. Whole package at `cd4904d361`: `pnpm --filter @objectstack/spec test` →\n`Test Files  485 passed | 1 skipped (486)` · `Tests  14015 passed | 1 skipped (14016)`, exit 0.\n`pnpm --filter @objectstack/spec typecheck` → exit 0 (`tsc --noEmit`, `check:scripts-typecheck`,\n`check:test-typecheck`; the test-typecheck debt ledger did not move).\n\n## Changeset — measured\n\n`npm pack --dry-run --json` in `packages/spec` at `cd4904d361`: **275** published entries,\n**0** of them under `scripts/`, so the changed file is not in this package's `files[]`.\nPositive control on the same reading: `src/**/*.zod.ts` is present (`src/ai/agent.zod.ts`, …),\nso the instrument is live. Nothing published moves ⇒ no changeset is owed; `skip-changeset`\napplies and is declared, not omitted.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --ran …` at `cd4904d361`:\n56 derived families — **51 run exit 0**, **5 NOT MEASURED** (recorded exit 3, `PREREQUISITE NOT MET`:\n`check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`,\n`check:sourcemap-no-sources-content`, `check:type-check-debt`). All five read a built `dist/`\nacross the workspace and refuse without one; this diff emits nothing to any `dist/`, so they are\nCI's closure-build run, not a red. Dependency-closure build (`--filter '@objectstack/spec^...'`)\nis an empty run: `packages/spec` has no workspace dependencies.\n\n`eslint --no-inline-config --format json` on the changed file: 1 file, 0 errors, 0 warnings.\nThe repo-wide `pnpm lint` sweep is CI's run. Invariance leg, quoted from `eslint.config.mjs`'s\nown header: \"this repo runs one `eslint.config.mjs`, which never enables type-aware linting\n(no `parserOptions.project`, no typed `@typescript-eslint` rules) for ANY file\" — so this diff\ncannot move any untouched file's verdict. The universe count was not measured, so this is a\ntargeted run, not a proven narrowing.\n\n## Acceptance notes\n\n- Swept the repo for the same vacuous shape: `git grep \"status).not.toBe(0)\" -- '*.test.ts'`\n  returns 9 hits across 4 files; the 5 outside this file each carry an output assertion on the\n  adjacent line, so no second instance of this defect class exists in that spelling. Observation,\n  not a card.\n- `runGenerator()` could immunise the whole spawn family structurally by refusing a launch\n  failure once, instead of each case re-deriving it from diagnostic text. Out of scope here —\n  the card prescribes the siblings' shape and forbids inventing one — and moot for this file\n  now that all nine spawn cases assert output. Noted, not filed.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JbZnqu8bt6YqfJsr9vaFb3)_"
+}

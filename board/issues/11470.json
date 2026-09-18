@@ -1,0 +1,35 @@
+{
+  "number": 11470,
+  "kind": "pull_request",
+  "title": "perf(plugin-security): batch capability + overlay boot seeds, skip no-op writes",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T21:08:14Z",
+  "updated_at": "2026-08-23T22:48:11Z",
+  "closed_at": "2026-08-23T22:48:09Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": "2026-08-23T22:48:09Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11470",
+  "body": "Fixes #11096\nFixes #11097\n\n## What\n\nBoth `bootstrapDeclaredCapabilities` and `reconcilePermissionSetProjection` were\nread-then-write reconcilers over a set known in full before their loop started —\nthe exact shape #10946 removed from the permission-set and position seeders next\ndoor. Each now:\n\n1. pays **ONE** batched `{ name: { $in: [...] } }` existence read for the whole\n   set (`buildExistingByName`, from #10946), instead of one `SELECT` per item;\n2. **skips the `UPDATE`** when the stored row already matches what a re-seed\n   would write (an equality test, not a presence test) — the write only fires\n   on real drift.\n\n`bootstrapDeclaredCapabilities` gets its own `capabilityRecordDiffers` (covering\nexactly the columns it writes: `label`/`description`/`scope`).\n`permission-set-projection.ts` reuses the existing `recordDiffersFromBody` for\nfacets, plus a new `customizedDiffers` term — `customized` is provenance, not\ndefinition, so `recordDiffersFromBody` deliberately excludes it and it needs its\nown comparison against the same `managed_by:'package'` rule the write uses.\n`projectPermissionMutation`'s in-memory evaluator-registry sync is now gated on\n`seeded + updated + unchanged > 0`, not just `seeded + updated > 0` — that sync\nisn't a database round trip, and gating it on \"a write happened\" would leave a\nsteady-state boot enforcing a stale registry entry.\n\n## ⚠️ One resulting-state change, required by the write-skip itself — not a rider\n\n`upsertEnvPermissionSet`'s INSERT now stamps `customized: false` unconditionally\n(previously `!!customized`, the caller's raw opinion). This is a behaviour\nchange beyond the write **count**, and it is called out here deliberately per\nthe dispatch instructions for this card.\n\n**Why it's in this PR rather than filed separately** (it was filed separately\nfirst — objectstack-ai/objectstack#11460 — then closed as superseded once this\nwas measured): the UPDATE branch's rule (`existing.managed_by === 'package' ?\n!!customized : false`) already forces `customized: false` on every subsequent\ncall for a non-package row. If the INSERT stamps `!!customized` instead, a\nfresh `managed_by:'admin'` row is born disagreeing with its own update rule.\nBefore this PR, every boot rewrote every record unconditionally, so that\ndisagreement self-corrected invisibly on the very next boot. Once writes are\nequality-gated — the whole point of this PR — that disagreement stops being\ninvisible: it becomes a REAL, PERMANENT one-boot-late corrective `UPDATE`\nafter every such creation, forever, not a one-time historical artifact.\n**Measured, not asserted**: reverting this one line back to `!!customized`\nfails `#11097 — env overlay reconciliation: round trips > does not grow the\nsteady-state round-trip count` and `#11097 — drift STILL reconciles > only the\nDRIFTED overlay is written` (both start seeing a real `UPDATE` on the boot\nimmediately after any overlay-backed admin row is created).\n\nNet effect: today, a brand-new environment-authored permission set with no\npackage baseline can be observed `customized: true` for the one boot between\nits creation and the next reconciliation pass. After this PR it is never\nobserved `true`. Small, narrow, and in the \"more correct\" direction — but a\nreal resulting-state change, so this PR is **not** a pure round-trip/write-\ncount fix and is labelled `needs:contract-review` for that reason.\n\n## Tests\n\nNew `bootstrap-seed-round-trips.test.ts` (+ additions to\n`permission-set-projection.test.ts`) pin, against a counting fake driver:\n\n- **batched read**: `expect(ql.calls.find).toBe(1)` with the exact `$in` where\n  clause, on a steady-state rebuild;\n- **no-op skip**: steady-state round trips flat at `[1,1,1,1]` for 1/5/20/40\n  items, `updated: 0`;\n- **drift still reconciles** (the counter-direction, load-bearing pin): a\n  changed label/description/scope/facet/`customized` flag still gets its\n  `UPDATE`, and the healed value is asserted. Ablated on this branch (mutate →\n  confirm-on-disk via `git hash-object` → run → restore byte-identically,\n  `trap … EXIT INT TERM`): forcing `capabilityRecordDiffers` to always `false`\n  fails 4 tests; forcing the permission-set write-skip condition to always\n  take the \"unchanged\" branch fails 18 tests. Both restores verified\n  byte-identical to the pre-mutation hash.\n- **a read that cannot answer is not \"none exist\"**: a throwing/non-array read\n  falls back to the per-item read and never blind-inserts;\n- **a name declared twice in one batch** still gets its loud `skippedForeign`\n  refusal (the oracle's `remember()` write-back).\n\n`bootstrap-seed-round-trips.test.ts`'s own purpose, per its header, is a\ndatabase-round-trip **count**, not value/identity round-tripping — it does not\nassert row-id stability. That's separately pinned in the pre-existing\n`permission-set-projection.test.ts` (`row.id === 'ps_env'` / `'ps_pkg'`, \"id\nstable — junction FKs stay valid\"), unmodified by this PR; the round-trip\nfile's own drift assertions additionally re-read the specific named row's\ncontent after each update, which transitively catches a wrong-id write (the\nfake driver's `update` dispatches strictly by id via `assertEngineUpdateDispatch`).\n\n## Clause-② (accept/reject surface) — YES, not the dispatch's initial \"no\"\n\nJudged against the dispatch instructions' own test (\"does the resulting\nprojected state differ from today in any case — not just the number of writes\ntaken to reach it?\"): yes, for the reason above. Labelled\n`needs:contract-review`; not flipped ready, not enqueued, auto-merge not\narmed — left for maintainer review per standing policy for this grading.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01APWX2AwT3a4xDcjPCe8bk4)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01APWX2AwT3a4xDcjPCe8bk4)_"
+}

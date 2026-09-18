@@ -1,0 +1,32 @@
+{
+  "number": 11454,
+  "kind": "issue",
+  "title": "recall(): the ruled hard retract cannot be built under #10753's constraints — two independent measured blockers, raised per that ruling's own fork clause",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T20:09:51Z",
+  "updated_at": "2026-08-24T09:50:03Z",
+  "closed_at": "2026-08-24T09:48:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11454",
+  "body": "Filed by the `domain:services` execution seat (`session_01APWX2AwT3a4xDcjPCe8bk4`) **executing #10753's ruling, not appealing it**. That ruling ends with its own escape hatch, verbatim:\n\n> adding a provenance column to an engine-owned platform object is **NOT approved by this ruling** (raise it separately if the implementation truly cannot proceed without it — **that is the fork clause**).\n\nThe implementation measured that it truly cannot proceed. This card is that raise.\n\n## What already landed, so this card is not read as \"the feature failed\"\n\nPR **#11450** (`Part of #10753`) landed the **authenticated-user scoping** half the ruling named — `markReadAsCaller(caller, ids)` / `markAllReadAsCaller(caller)`, which take **no target user**: the recipient is derived from `ExecutionContext.userId`, so *\"mark someone else's inbox read\"* has no spelling on the plugin-facing surface. No new column, no `packages/spec` edit.\n\n⭐ **That closes the reported symptom.** The card was filed for a **single-approver** flow, and there the approver who clears the request **is** the recipient whose badge is stuck — the hook runs inside exactly the identity the new surface reads. `recall()` only becomes necessary for **multi-approver fan-out**, which #10753 does not evidence.\n\n⇒ Nothing is on fire. This is a decision about a ruled verb that has no buildable form today.\n\n## Blocker 1 — authorization: `recall` is an EMITTER-side verb, and emitter-scoped ≠ authenticated-scoped\n\nThe ruling anchors the implementation on the **authenticated** axis. On that axis the only expressible predicate is *\"the caller is one of the recipients\"*, which yields a **recipient-scoped retract** — not the ruled **hard recall across all recipients**.\n\n⛔ Shipping that under the name `recall` was refused deliberately, and the reason is worth keeping:\n\n> Naming a recipient-scoped dismiss `recall` is **precisely the shape that makes AI-written hooks wrong with confidence** — the author reads \"recall\" and believes the message is gone for everyone.\n\n**Emitter provenance does not exist anywhere**, measured:\n\n| surface | what it carries |\n|---|---|\n| `sys_notification` | `topic` · `payload` · `severity` · `dedup_key` · `source_object` · `source_id` · `actor_id` · `created_at` |\n| `sys_inbox_message` | no emitter column |\n| `EmitInput` | no emitter field |\n| kernel DI | one **shared** `PluginContext` (`core/src/kernel.ts:65,:91`); `getService` carries no caller identity |\n\n⚠️ `actor_id` is **the user who caused the event**, not the emitting plugin. ⛔ Pressing it into service as provenance would be wrong and would look right.\n\n## Blocker 2 — mechanism: there is no cancellation expression, and the thing that looks like one is a race\n\n**Independent of any column.** `INotificationOutbox` declares exactly `enqueue` | `claim` | `ack` | `list` | `claimDigest`. The ruled hard recall's *\"cancel pending/unclaimed deliveries\"* step **has no site**.\n\n⚠️ And it is worse than simply absent:\n\n> `ack(id, { success: false, suppressed: true })` **would appear to work** — neither `MemoryNotificationOutbox.ack` nor `SqlNotificationOutbox.ack` checks that the row was ever claimed — but it **races `claim()` with no compare-and-set**, and increments `attempts` on a delivery that was never attempted.\n\n⇒ An implementer reaching for the obvious workaround gets a **silent corruption**, not a refusal. Tracked on its own terms as **#11453**, because it is a standing contract gap whatever happens to this card.\n\n## ⭐ Why the two blockers together change the shape of the decision\n\n**Granting the provenance column does not unblock `recall`.** Blocker 2 still requires widening `INotificationOutbox`, which is an unrelated contract decision.\n\n⇒ Deciding them in one stroke would settle **two independent questions** under a ruling framed about **one column**. They are separated here on purpose.\n\n## Options\n\n1. **Defer `recall` until there is measured pull.** Cost: `markRead` is authenticated-scoped and safe; the multi-approver fan-out case stays unserved, and #10753's Q2 stays formally unimplemented. Nothing degrades.\n2. **Approve emitter provenance** (`emitter` on `EmitInput` → `emitter_id` on `sys_notification`) **and** rule the outbox cancellation contract. Cost: a provenance column on an **engine-owned platform object** — which the #10753 ruling explicitly withheld — plus a widened `INotificationOutbox`; legacy `NULL emitter_id` rows become closeable by nobody (acceptable under 90d retention, but should be ruled out loud rather than defaulted).\n3. **Redefine the verb honestly** — ship the recipient-scoped retract under a name that says so (`dismiss`, not `recall`). Cost: it does not serve the emitter case at all; it is a different feature wearing the honest name.\n\n[facets-block]\n- **实际业务需求** — 已报告的症状(单审批人)**已被 #11450 关掉**;recall 只服务多审批人扇出,而卡面**没有该场景的证据**。⇒ 拉动为**未测量**,不是零,但也不是已证实。\n- **项目长远合理性** — 阻塞 2 是一条**真实的契约缺口**(`ack` 在未 claim 行上静默成功且竞态),它**独立于本卡存在**,应当按自己的条件裁,而不是被一次关于「一根列」的重裁顺带决定。选项 2 把两件不相干的事绑在一起。\n- **防 AI 写代码犯错** — ⛔ 选项 3 若沿用 `recall` 之名是**最危险**的:作者读到「撤回」会相信消息对所有人消失。若取 3,**名字必须改**。而选项 2 的溯源列给 AI 一条可机械遵守的模式(emit 时留句柄、办结时按同一句柄撤回),写错自己的 id 会**响亮失败**。\n- **创业阶段不扩散需求** — 选项 1 面为零。选项 2 同时动**engine-owned 平台对象**与一条服务契约,是本卡里最大的一次扩面,而拉动尚未测得。\n\n**推荐:1(暂缓),并把 #11453 作为独立契约卡按自己的条件推进。** 若将来出现多审批人扇出的真实拉动,再以那份拉动为依据重开选项 2 —— 届时溯源列的代价有具体收益可对照,而不是为一个假设付账。⛔ 本席不代裁:给 engine-owned 平台对象加列、以及历史 `NULL` 行「无人可关闭」是否可接受,都是产品与数据模型决定。\n\n## Refs\n\n#10753(裁决与 fork clause)· PR #11450(已落地的认证作用域半边)· **#11453**(阻塞 2,独立契约缺口)· **#11452**(读侧同形缺陷:`listInbox(userId, …)` 允许任何插件读任何用户的收件箱)· ADR-0103(回执为无上下文裸引擎写入)"
+}

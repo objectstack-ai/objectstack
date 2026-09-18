@@ -1,0 +1,34 @@
+{
+  "number": 11344,
+  "kind": "issue",
+  "title": "[finding] `packages/spec/llms.txt` is hand-kept and load-bearing for AI consumers — decide whether it should be generated (or at least count-checked) like the rest of the spec's shipped artifacts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T12:49:43Z",
+  "updated_at": "2026-08-24T14:23:10Z",
+  "closed_at": "2026-08-24T13:46:40Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11344",
+  "body": "Follow-up the #10833 triage note assigned to the spec seat explicitly (\"the larger question — whether `llms.txt` should be generated rather than hand-kept — is the spec seat's follow-up to raise separately, not this card\"). #10833 fixes the acute defect (the `IGraphQLService` row + stale header provenance); this card records the structural one.\n\n## Observation (from #10833's measurements, not re-derived here)\n\n- `packages/spec/llms.txt` ships in the published `@objectstack/spec` tarball (`files` array, asserted by `scripts/check-published-files.mjs`) and describes itself as context for AI consumers — the audience least able to notice staleness.\n- It has **no generator**: none of the package's ~20 `gen:*` scripts emits it, and no script under `scripts/` or `packages/spec/scripts/` writes it.\n- Its hand-typed header provenance was stale for six months (`Schema Count: 171 Zod schemas, 191 test files, 5,157 tests · Last Updated: 2026-02-12`) and it advertised a service contract (`IGraphQLService`) that exists nowhere in `packages/**/src`.\n\nThe failure mode is the ledger README's own line, applied to a shipped file: being off the generated set is itself how the drift hid.\n\n## The decision this card asks for\n\nNot \"generate it all\" by default — the file's prose sections may be worth hand-keeping. The options worth grading:\n\n- **A. Full generation** — emit `llms.txt` from the same sources `gen:docs` / `gen:api-surface` read; prose sections become templates.\n- **B. Checked hand-keeping** — keep the file hand-written but add a gate leg that re-derives the checkable claims (schema/test counts, the service-contract table against real exported symbols) and fails on drift, the way `check:quick-reference-counts` already does for other counted claims.\n- **C. Slim it** — remove the checkable-but-uncheckied claims (counts, contract tables) so the file only says things that don't rot, and point at the generated references for the rest.\n\nB is the smallest change that ends the silent-drift class; A subsumes B; C trades usefulness for safety. Whoever takes this should look at what `check:quick-reference-counts` covers before writing anything new.\n\nFiled unassigned for triage."
+}

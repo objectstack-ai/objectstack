@@ -1,0 +1,34 @@
+{
+  "number": 11407,
+  "kind": "issue",
+  "title": "The `os:check` fence type-checks a `visibleWhen` CEL string as `string` — any predicate text passes, including calls to functions that exist nowhere",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T16:04:16Z",
+  "updated_at": "2026-08-24T11:12:13Z",
+  "closed_at": "2026-08-24T11:09:37Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11407",
+  "body": "Filed unassigned by the `domain:devx` seat while implementing #11034 (session `session_015ahemw8RcTgqtxrj15PEZx`). Triage on #11034 ruled this gap is its own gate card and explicitly scoped it out of that PR:\n\n> (3) the `os:check` gap (the snippet fence validates TS shape but not the CEL string) is its own gate card — file it as a finding, don't build it here.\n\nRecording only. Not claimed, not queued, not graded.\n\n## The gap\n\n`{/* os:check */}` blocks in `content/docs/**` are type-checked by `packages/spec/scripts/check-skill-examples.ts` (`tsc --noEmit` over the extracted blocks). A visibility predicate is authored as a bare assignment whose value is typed `string`:\n\n```typescript\nvisibleWhen: \"record.status != 'closed' && user.hasRole('admin')\"\n```\n\n`hasRole` is not a CEL function — it appears in no stdlib registry and on no contract (see below). The line nevertheless type-checks perfectly, because every CEL string is the same type as every other CEL string. That is what let #11034's example ship and survive: a shipped doc taught a visibility gate whose copy faults at runtime and — because visibility is fail-open — shows the element to **everyone**.\n\n## Why the sibling gate does not already cover it\n\n`packages/lint/scripts/check-doc-formula-expressions.mjs` closes exactly this class for **field formulas**, and its own header states the reasoning this card is a second instance of:\n\n> `check:skill-examples` runs `tsc --noEmit` over blocks marked `os:check`. Between them, a formula example that **compiles perfectly and is semantically wrong** passes every gate.\n\nIt cannot reach `visibleWhen` as written, deliberately. Its opt-in is structural and narrow — (A) a `Field.<anything>({ … expression … })` factory call, or (B) an object literal carrying both `type: 'formula'` and `expression`. A `visibleWhen:` assignment matches neither, and the gate's header is explicit that predicates are out of its scope because their scope depends on enclosing structure a fragment does not carry.\n\n## The hard part, named rather than hand-waved\n\nA `visibleWhen` gate cannot use one scope for every site, because the binding root really does differ by layer. Measured on `origin/main` at 365e334 while fixing #11034:\n\n| Site | Binds |\n|:--|:--|\n| Page component / app-nav `visible` | `record`, `current_user`, `user`, `ctx.user`, `os.user`, `app`, `features`, `page.*` (objectui `app-shell/src/providers/ExpressionProvider.tsx:59,70`) |\n| Per-option `visibleWhen` | `record` + the host predicate scope (objectui `core/src/evaluator/optionRules.ts:103`) |\n| Form section / form field `visibleWhen` | `record` + `previous` **only** — all three `resolveFieldRuleState` call sites in objectui `components/src/renderers/form/form.tsx` (1201, 1237, 1935) pass `undefined` for the `scope` parameter |\n\nSo the same predicate text is correct on one layer and an unbound root on another, and a fragment in a doc fence does not always say which layer it illustrates. A gate keyed on the key alone would produce false reds — the failure mode `check-doc-formula-expressions`' header calls out as worse than no gate. Any design here has to answer \"which layer is this fragment about\" first.\n\n## Suggested shape (not a decision)\n\nExtend `check-doc-formula-expressions`' opt-in rather than minting a second opinion about one contract (Prime Directive #12): a `visibleWhen` / `readonlyWhen` / `requiredWhen` slot whose enclosing structure identifies the layer, validated through `@objectstack/formula`'s `validateExpression` with that layer's scope. Sites whose layer cannot be determined statically are skipped, loudly listed, rather than guessed.\n\n## Related, and distinct from each of them\n\n- #10830 — `os:check` cannot enforce the form-section `name` convention. Different mechanism: there the key is declared and `.optional()`, so the block is genuinely well-typed. Here the value's *content* is unvalidated.\n- #11355 — `check:skill-examples`' marked-block extraction is not fence-aware. Extraction, not semantics.\n- #11258 — three gaps in the runtime `visibleWhen` gate (all landing in objectui). Runtime enforcement, not the docs corpus.\n- #11256 — the spec `describe` for `PageComponentSchema.visibleWhen` names three roots where the renderer binds more. Independently corroborates the binding table above.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

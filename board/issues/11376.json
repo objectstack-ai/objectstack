@@ -1,0 +1,35 @@
+{
+  "number": 11376,
+  "kind": "issue",
+  "title": "`GET /api/v1/packages/:id` swallows the same failed REGISTRY read — and answers a terminal `404 RESOURCE_NOT_FOUND` for it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T14:58:24Z",
+  "updated_at": "2026-08-24T08:18:02Z",
+  "closed_at": "2026-08-24T08:18:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11376",
+  "body": "Found while implementing #11130 (the list door's registry half). **Not fixed there** — that card's dispatch ruling scoped the edit to the `GET /api/v1/packages` handler by name. Filed unassigned for triage.\n\n## The defect\n\n`packages/rest/src/package-routes.ts`, the `GET /api/v1/packages/:id` handler, tries the durable read first and falls back to the registry:\n\n```ts\n// Fall back to registry (in-memory loaded packages)\nif (options.protocol && typeof options.protocol.getMetaItems === 'function') {\n  try {\n    const result = await options.protocol.getMetaItems({ type: 'package' });\n    const match = result?.items?.find((item: any) =>\n      (item.manifest?.id || item.id) === packageId\n    );\n    if (match) {\n      sendOk(res, { package: { ...match, source: 'registry' } });\n      return;\n    }\n  } catch {\n    // Protocol unavailable\n  }\n}\n\nsendError(res, 404, 'RESOURCE_NOT_FOUND', `Package \"${packageId}\" was not found.`);\n```\n\nWhen `getMetaItems` throws, the catch absorbs it and control falls straight through to the line below. The door then answers **`404 RESOURCE_NOT_FOUND` — `Package \"<id>\" was not found.`**\n\nSame standing family ruling as its siblings — #10965 · #10677 / PR #10788 · #10789 / PR #10964 · #11063 · #11130: **a read that could not happen must not be reported as a read that found nothing.**\n\n## Why this is the worse half, not a smaller one\n\nThe list door's version (#11130) answered a `200` with a `total` that under-counted. This one answers a **terminal negative fact**: `404` / `RESOURCE_NOT_FOUND` is not \"the listing may be short\", it is *\"this package does not exist\"*. A caller acts on it — an installer decides the package is not installed and offers to install it; a console hides the entry; a script branches to the create path. The producer's own words for this condition are the opposite: *\"whether this item exists is **unknown**\"*.\n\nIt is also the exact defect #5532 fixed one layer down, resurfacing one layer up. `ObjectStackProtocolImplementation.getMetaItems` was taught **not** to report an unreadable `sys_metadata` as \"that item does not exist\"; this consumer-side catch then re-applies precisely that relabelling to the protocol's answer.\n\n## The producer already declares the refusal\n\nMeasured on the live implementation while working #11130. The `protocol` service this registrar is handed is `ObjectStackProtocolImplementation` (`packages/metadata-protocol/src/plugin.ts` registers it; `rest-api-plugin.ts` resolves it and `direct-mount-composition.ts` passes it through). Its `getMetaItems` routes every non-benign `sys_metadata` overlay read failure through `rethrowUnlessMetadataStoreUnprovisioned` → `metadataStoreUnavailableError`: `SERVICE_UNAVAILABLE` / 503 with an ADR-0112 status+code **on the error** (#5532).\n\nDriven with this door's own request:\n\n```\noutage (ECONNREFUSED)   type=package => THREW status=503 code=SERVICE_UNAVAILABLE\n                                        msg=\"The metadata store could not be read, so whether\n                                             this item exists is unknown. …\"\nhealthy store           type=package => RESOLVED {\"type\":\"package\",\"items\":[]}\nno such table (1st boot) type=package => RESOLVED {\"type\":\"package\",\"items\":[]}\n```\n\nSo there is a declared envelope here waiting to be let through, and removing the catch is mechanical — the same edit #11063 made for the durable half and #11130 made for the list door's registry half. `sendThrownError` already carries the producer's status and code.\n\n## Worth stating: the in-tree comment currently overclaims\n\nThe `[#11063]` note beside the durable read asserts:\n\n> `GET /packages/:id` next door has never had an inner catch, so it has answered that same 503 since #10965.\n\nTrue of that door's **durable** read. Its **registry** read is the block quoted above. Whichever way this is triaged, that sentence wants a qualifier.\n\n## Not measured here\n\n- **Whether a caller depends on the 404.** The behaviour change is narrower than the list door's (it only moves the answer on a *failed* read, never on a genuine miss), but the 404 → 503 flip on this route was not surveyed against consumers.\n- **The `DELETE /api/v1/packages/:id` handler** was not read for this shape.\n\n## Refs\n\n#11130 · #11063 · #10965 · #5532 · #10677 / PR #10788 · #10789 / PR #10964 · ADR-0112\n"
+}

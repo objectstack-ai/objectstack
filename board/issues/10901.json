@@ -1,0 +1,35 @@
+{
+  "number": 10901,
+  "kind": "issue",
+  "title": "[finding] docs-audit: `declinedIn` reads neither discriminator, so a literal-union `route:` TYPE member in any OTHER quote is billed as an unread row — a PARTIAL-read verdict on an accurate ledger",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T16:34:21Z",
+  "updated_at": "2026-08-24T01:45:19Z",
+  "closed_at": "2026-08-24T01:44:23Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10901",
+  "body": "Filed unassigned by the `os-dev` seat implementing #10793 (session `c970724d-303c-5614-9d20-a3f92205cfad`). Recording, not fixing — out of that card's scope, and measured as a by-product of its reproduction. **No live instance on today's tree.**\n\n## What\n\n#10793 made the row recognizer read through **both** of #10500's exact discriminators, so a\nsingle-quoted `route: 'GET /a' | 'GET /b'` TYPE member no longer mints a phantom row. The\ncomplement scan did not move: `declinedIn` still runs over **raw** text, through neither\n`codeOnly` nor `typeDeclRegions`.\n\nSo the same type member, written in either of the two quotes the recognizer declines, is\nbilled as a `route:` value the parse **failed to read** — and that is a verdict, not a\nnumber.\n\n## Measured (this tree, `parseLedgerSource` + `bridgeCoverageFrom` driven directly)\n\n```\nexport interface Entry { route: \"GET /api/v1/gone\" | \"GET /api/v1/meta\"; client: string }\nexport const L = [\n  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },\n];\n```\n⇒ `rows 1 · routesDeclared 2 · declined 1 · brokenScan 1`\n\n```\nx-route-ledger.ts is a PARTIAL read of that ledger, not its shape — the row recognizer\nreads single-quoted values only and read 1 of 2 declared `route:` value(s) and 1 of 1\ndeclared `client:` value(s); declined 1: line 1: route: \"GET /api/v1/gone\"\n```\n\nThe backtick spelling behaves identically (`declined 1 · brokenScan 1`, naming\n``route: `GET /api/v1/gone` ``). The file declares **one** row and the tool calls it a\npartial read of two, exits 1, and names the entry interface's own type member as the row it\ncould not read.\n\n## Why this is not #10794, which was closed not planned\n\n#10794 is the same scan reading raw **prose** — a `route: \"GET /x\"` inside a *comment*. Its\nremedy is `codeOnly`, and triage declined it. This one is not prose: a type member is\ngenuinely in code position, so `codeOnly` cannot reach it and never could. The discriminator\nthat answers it is `typeDeclRegions`, the second of #10500's pair — the same one #10793 just\napplied to the recognizer and to the first term of the denominator. `declinedIn` is now the\nonly `route:`/`client:` scan in the file that reads through neither.\n\nIt also fails in the **opposite** direction to #10793: loud, not silent. A named entry and a\nnon-zero exit on an *accurate* ledger is a false RED, which is the failure mode the\ntype-declaration exclusion exists to prevent — see the `--self-test` note that removing that\nexclusion turns all seven of today's accurate ledgers red (`259 of 266`).\n\n## Why it is a finding and not a live defect\n\nAll seven live ledgers declare `route: string;` and nothing else. Scanned on this tree with\nthe `codeOnly` + `typeDeclRegions` pair: **0** quoted `route:` / `client:` leads inside a type\ndeclaration in *any* quote, across all seven. Live figures stay exact (`259 of 259`,\n`221 of 221`, 176 unreachable), and #10793's before/after moved none of them.\n\nLikelihood is lower than the single-quoted spelling this repo's formatter produces — the\nformatter rewrites double quotes back to single — but a type member is exactly where a\ntemplate literal or a hand-written double quote survives review, because it is a *type*, not\na table row anybody is reading as data.\n\n## Direction, not a prescription\n\n1. **Leave it.** Nothing fires today, and the shape needs a ledger that unions its `route:`\n   member in a quote the recognizer declines.\n2. **Give `declinedIn` the same two discriminators** — the narrow version is to skip\n   `typeDeclRegions` only, which is the half `codeOnly` cannot cover and the half #10794's\n   closure did not decide. It moves the *declined* population, so it wants its own\n   before/after against the `--bridge-coverage` header on the same terms #10683 and #10793\n   did. Measured delta today would be zero.\n3. **Fold it into `declarationsIn`.** The file already states this design goal twice (\"two\n   scans that each decide separately what \\\"in code position\\\" means are two scans that can\n   drift into disagreeing while both look right\"), and after #10793 `declinedIn` is the last\n   scan still deciding it for itself. Bigger change, same population effect.\n\n(2) is the cheap one that closes the class; (3) is the one that removes the second opinion.\n\nRefs: #10793, #10794, #10683, #10500, #9896.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_"
+}

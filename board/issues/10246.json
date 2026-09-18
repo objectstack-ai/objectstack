@@ -1,0 +1,35 @@
+{
+  "number": 10246,
+  "kind": "issue",
+  "title": "A live attachment pointing at a grace-window tombstone 404s for up to 30 days, then silently starts working — the reap guard only revives files it is asked about, and it is never asked inside the window",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T14:38:58Z",
+  "updated_at": "2026-08-23T19:14:40Z",
+  "closed_at": "2026-08-23T19:13:41Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10246",
+  "body": "Found and measured while implementing #10171 (PR #10241). **Deliberately not fixed there**, and filed unassigned rather than ridden along: the fix would be `Clause-②: yes` (it turns a currently-404 download into a 200), and the services lane has no contract-review tier available right now. The #10171 dev stopped and reported it rather than implementing or filing unilaterally; this card is the PM recording it.\n\n## The shape\n\nRe-pointing a `sys_attachment` row **onto** a file that is inside its 30-day grace-window tombstone is **byte-safe** — that half is already owned by `createSysFileReapGuard`, whose sweep-time re-verification resolves current references, un-tombstones the file and vetoes the reap. #10241 measured exactly that and therefore added **no** revival leg, correctly.\n\nBut the guard only ever sees rows the sweep nominates, and the sweep nominates a tombstone **only after its `ttl { field: 'deleted_at', expireAfter: '30d' }` has expired**. Measured: candidates within the window = `[]`.\n\nSo inside the window the file is not a sweep candidate *at all*, and simply stays `status='deleted'`. Meanwhile `storage-routes.ts:606` and `:653` refuse any file whose `status !== 'committed'` with **404 `FILE_NOT_FOUND`**.\n\nNet: **a live attachment row can point at a file that 404s for up to 30 days, and then silently starts working** once the sweep finally runs and un-tombstones it. Nothing is lost, and nothing tells the operator why.\n\n## Why this is worth a card rather than a comment\n\nThe revival mechanism is correct and the bytes are safe — what is wrong is *when* it runs. \"Eventually correct, on a 30-day timer, with a 404 in between\" is a defensible retention posture and an indefensible download posture, and today the system has no way to tell those two apart because one timer serves both.\n\n⚠️ **#10241 enlarges this population.** Before it, only the DELETE verb minted tombstones; after it, an UPDATE that re-points `file_id` mints them too. The scenario is pre-existing, but the set of ways to reach it just grew — which is why it is being recorded now rather than left as a curiosity.\n\n## Why the fix is Clause-② and needs the contract-review tier\n\nAny fix makes a request that is refused today succeed — an endpoint's **accept set widens**. That is categorically different from #10241's own change, which applied an **already-declared** rule (`an attachments-scope file with zero join rows is tombstoned`, enforced on the delete verb since #2755) to the verb that was missing it, minting no new refusal category and no new accepted input.\n\n⛔ So this must not be folded into a lower-tier card.\n\n## Directions (not a recommendation — this needs triage/maintainer grading)\n\n1. **Revive at re-point time**, not at sweep time: when an update points a row at a tombstoned file, un-tombstone it immediately. Closes the window entirely; costs a second implementation of the reference-resolution question the guard already answers — the duplicate-mechanism hazard #10241 deliberately avoided.\n2. **Let the download path resolve it**: `storage-routes.ts` treats a tombstoned file with at least one live join row as downloadable. Keeps one revival mechanism, moves the judgement to the read side; the tombstone stays until the sweep tidies it.\n3. **Accept and document**: state that a re-attached file may 404 until the next sweep. Cheapest, and honest only if someone actually wants a 30-day 404 in a live attachment.\n\nRefs: #10171 (the update-verb detach leg), PR #10241, #2755 (the orphan rule), `createSysFileReapGuard`, `storage-routes.ts:606` / `:653`, `system-file.object.ts` (the `ttl` / `retention` lifecycle declaration).\n\n⚠️ `domain:services` assigned by the discovering lane; retriage if it belongs elsewhere."
+}

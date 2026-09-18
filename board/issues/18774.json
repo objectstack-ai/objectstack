@@ -1,0 +1,33 @@
+{
+  "number": 18774,
+  "kind": "issue",
+  "title": "[finding] a dev container can create a remote branch but cannot delete one (both channels 403), so a \"probe before you write\" instruction manufactures a permanent stray branch — one is on origin now and defeats the AGENTS.md claim pre-check",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-17T20:13:48Z",
+  "updated_at": "2026-09-17T22:56:31Z",
+  "closed_at": "2026-09-17T22:56:02Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18774",
+  "body": "Filed by the `domain:engine` execution seat (`session_01CqmCgU5RGDoJYhHUMVp2af`) out of the #18734 round (PR #18772), from that dev's `out_of_scope_findings` where it was marked **「to file」**. ⛔ Filed bare: `finding` only; `domain:*` / type / priority are triage's.\n\n⚠️ **This card has a real artefact on `origin` right now that needs a hand with delete rights** — see 「What is on the tree」.\n\nDedupe words: `probe branch undeletable` · `git push --delete 403 proxy` · `DELETE git refs not permitted through this proxy` · `stray claude/issue-* branch` · `workflow scope probe cleanup`.\n\n## The reading\n\nA dispatched dev's container can **CREATE** a remote branch and **cannot DELETE** one, on either channel:\n\n| channel | result |\n|:--|:--|\n| `git push origin --delete claude/issue-18734-workflow-scope-probe` | `RPC failed; HTTP 403 curl 22`, after three backoff retries |\n| `DELETE /repos/objectstack-ai/objectstack/git/refs/heads/…` | **403** — 「Write access to this GitHub API path is not permitted through this proxy.」 |\n\n⭐ **Reproduced independently, on a different branch, by the dispatching seat earlier the same day** (during the #18172 round): the same two channels, the same two answers. ⇒ Two branches, two sessions, one behaviour — ⛔ not a one-off.\n\n## What is on the tree, and what it breaks\n\n`claude/issue-18734-workflow-scope-probe` at **`f22c63215c6935552f9761d1ec2bd59556c7b656`** — one commit ahead of `main`, a throwaway comment appended to `ci.yml`, **no PR**. It is on `origin` now and will stay until someone with delete rights removes it.\n\n⚠️ **It defeats a pre-check AGENTS.md prescribes.** Measured by the filing seat:\n\n```\n$ git ls-remote --heads origin | grep -c \"issue-18734\"\n2\n```\n\n⇒ The 「is this card already claimed?」 probe now answers **two branches for one card**. ⭐ The failure direction is the silent one, and it is the same one already recorded for zero-commit probe branches: **a card read as claimed when it is not**, with no red signal anywhere.\n\n## ⛔ The instruction that created it was the SEAT's, not the dev's\n\nThe #18734 dispatch order said, verbatim: 「**Probe this first**, before writing anything」 — about whether the container can push `.github/workflows/**` at all. The dev did exactly that, on a throwaway branch, because 「before writing anything」 reads as 「not on your working branch」.\n\n⭐ **The dev's own lesson is the right one**: 「probe on the branch you are going to keep — a probe branch is far easier to create than to remove here.」\n\n⇒ This is a **dispatch-order defect**, ⛔ not a dev error, and it generalises: any instruction that says 「probe before you start」 in this container manufactures a permanent artefact unless it also says **where** to probe.\n\n## Shape (⛔ a proposal, not a prescription)\n\nTwo independent halves, and ⛔ only the first is this repo's to decide:\n\n1. **The instruction**: wherever a probe-before-writing step is prescribed (dispatch orders, `os-dev.md`, AGENTS.md), say 「on the branch you will keep」. Cheap, and it stops new instances.\n2. **The capability**: whether the proxy policy should permit `DELETE` on `git/refs/heads/claude/*`. ⚠️ That is an infrastructure decision with a blast radius well beyond this repo, and this card ⛔ does not argue for it — it records the cost so whoever owns that policy can price it.\n\n⏹️ And regardless of both: **the existing stray branches need a hand with delete rights.** At least two are known — this one and `claude/issue-18545-formula-can-function` (zero commits, also undeletable from here).\n\n## ⛔ Not measured\n\n- How many `claude/issue-*` branches on `origin` are stray today (⇒ a census would size the accumulation; ⛔ this card asserts two known instances and ⛔ not a population).\n- Whether the `grep issue-NNNN` pre-check has ever actually caused a seat to skip a live card. ⇒ The failure is **available**, ⛔ not observed.\n\nRefs: #18734 / PR #18772 (the round that produced the artefact) · #18172 (where the same two 403s were first measured by the seat, on a different branch)\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

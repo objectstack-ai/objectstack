@@ -1,0 +1,34 @@
+{
+  "number": 11612,
+  "kind": "pull_request",
+  "title": "fix(spec): re-point dead #6590 citations to the live v18 tracker #11509",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "protocol:ui",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T08:44:05Z",
+  "updated_at": "2026-08-24T09:26:54Z",
+  "closed_at": "2026-08-24T09:26:52Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-24T09:26:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11612",
+  "body": "Fixes #11269\n\nTwo comment-prose sites in `packages/spec/src/ui/component.zod.ts` anchored a v18 direction-B decision (retire the flat `object`/`filter` data-binding family, `dataSource` as the single data-binding door) to `#6590`, which now 404s (deleted/transferred/converted — undeterminable, per #11269's measurement). The triage seat filed **#11509** as the resolvable re-anchor tracker. This PR re-points both citations.\n\n## What changed\n\nCitations only — the zod shapes are byte-identical, the two-line diff is entirely comment prose:\n\n- `component.zod.ts:137` — `// v18 as #6590 — not rejected.` → `// v18 as #11509 — not rejected.`\n- `component.zod.ts:1896` (now `:1919` after rebasing past #11600, below) — `tracked as #6590 for v18` → `tracked as #11509 for v18`\n\nNo breadcrumb (`re-anchor of deleted #6590`) added to either site: the swapped sentence is fully true on its own (#11509 *is* the v18 direction-B tracker), and the historical link back to #6590 is already preserved at the issue level — #11509's own title and body record it as \"re-anchor of the deleted #6590 tracker\".\n\nRepo-wide under `packages/spec/src`, grep for `6590` found exactly these two sites (matching #11269's measurement); zero remain after the edit. The only other repo hit is `packages/spec/CHANGELOG.md` (historical release-note text, generated/append-only — correctly left untouched).\n\n## Neither site is inside a `.describe()` string\n\nLine 137 is a `//` line comment inside a top-level architecture note (not attached to any schema). Line 1896 is inside a `/** */` JSDoc block that precedes an export but is plain source comment, not a `.describe(...)` call — `build-docs.ts` extracts descriptions from the runtime zod schema's `.description` (populated only by `.describe()`), and has no JSDoc-scraping path. Confirmed empirically: `check:generated` reports all 14 generated artifacts still up to date after the edit (zero regeneration diff), so no `.mdx` reference doc needed touching.\n\n## The #9249 landing note\n\n#9249's triage ruling assigned its PM a landing-time step: \"leave the subsumption note on hold #6590\" — undeliverable to a 404. That note is delivered as a comment on #11509 (the resolvable home), not here — out of this PR's file surface: https://github.com/objectstack-ai/objectstack/issues/11509#issuecomment-5392773222\n\n## Changeset: `skip-changeset`, not a changeset file\n\nThe repo's convention for comment-only spec diffs picks the changeset route by whether the diff touches a `.describe()` string: #11215/PR #11593 used a **patch changeset** because its diff regenerated docs. This diff does not — `check:generated` confirms zero doc regeneration (see above) — so it falls in the \"pure comment diff\" carve-out and uses the `skip-changeset` label (#11416/#11403 precedent) instead. Label applied at PR creation via the additive labels endpoint per AGENTS.md; read back below.\n\n## Verification\n\nGate list derived mechanically: `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (provenance: this checkout at `5fba383c64`). All commands' exit codes captured before any pipe; quotes below are each gate's own printed verdict line.\n\n- `pnpm --filter @objectstack/spec build` — exit 0.\n- `pnpm --filter @objectstack/spec check:generated` — `✓ All 14 generated artifacts are up to date.`\n- `pnpm --filter @objectstack/spec test` — `Test Files 420 passed (420)` / `Tests 11213 passed (11213)`.\n- `pnpm --filter @objectstack/spec typecheck` — `check:test-typecheck: OK`.\n- Local gate families matched by the diff, all green: `check:cross-package-test-inputs`, `check:merge-driver`, `check:published-files`, `check:slot-lookup`, `check:spec-parsed-alias`, `check:test-source-alias`, `check:type-source-resolution`, `check:doc-formula-expressions` (lint), `check:empty-state`, `check:liveness`, `check:strictness-ledger`, `check:variant-docs` (spec-liveness-check family), `check-ci-filter-parity`, `check-cross-package-test-inputs`, `check-plugin-teardown-shape`, `check-affected-docs`.\n- **`check:dev-prereqs` — not cleared locally, by design.** It fails on a workspace-build precondition (this worktree has only `@objectstack/spec` built), not on anything in this diff; PR #11600 (same lane, landed just before this one) treated it identically: \"a repo-scale run CI performs before its gates,\" not runnable meaningfully in a single-package worktree.\n- Whole-repo `pnpm lint` is CI-owned, not run locally; no lint-rule surface touched by a two-line comment diff.\n\n## Sibling-PR rebase\n\nThis branch shares its file (`component.zod.ts`) with PR #11600 (`PageTabsProps.visibleWhen` region, lines ~662–700), a disjoint hunk. Per the PM's guidance this PR was held un-opened until #11600 merged (`644ad5043e`, confirmed via polling before this branch was pushed), then rebased onto the new `origin/main` — a clean rebase, no conflicts, as expected from the disjoint hunks. The rebase shifted the second citation site from `:1896` to `:1919` (+23 lines from #11600's own docblock expansion above it); line 137 is unaffected (before #11600's insertion point). `build` / `check:generated` / `test` / `typecheck` were all re-run on the rebased head (`5fba383c64`) and are the results quoted above — not carried over from the pre-rebase run.\n\n## Fences honored\n\n- `content/docs/releases/`: untouched.\n- No shape/behaviour change: zod shapes byte-identical, confirmed by diff and by `check:generated`.\n- `#11509` touched by exactly one comment (the delivered landing note above), nothing else.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01T9cDbY2NBiVJWYx3BpWfH2)_"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 11689,
+  "kind": "pull_request",
+  "title": "fix(spec): make check:skill-examples' marked-block extraction fence-aware",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T12:12:21Z",
+  "updated_at": "2026-08-24T13:48:28Z",
+  "closed_at": "2026-08-24T13:48:26Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-08-24T13:48:26Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11689",
+  "body": "Fixes #11355\n\n## The gap\n\n`check:skill-examples` has two loops over the same lines. #10791 made the **orphan scan**\nfence-aware, so a marker shown as example text inside a wrapping fence claims nothing — that\nis what lets this gate's own convention be documented in the very roots it governs. It\ndeliberately left the **marked-block extraction loop** alone, so extraction still matched a\nbare ts / tsx / typescript fence-open line wherever it appeared, with no notion of sitting\ninside another fence.\n\nA marker *alone* nested in an illustration was therefore handled correctly. A **fully worked**\none — the marker AND a real ts fence, both written as example text inside a wrapper — was\nextracted and handed to `tsc` as a genuine example: compiling by luck, or failing the whole\ngate with a diagnostic pointing at documentation prose.\n\nTriage ruling on the card (2026-08-24) chose option 1 of the body — share the fence walk —\nand asked for the nested-illustration self-test on the #10533 precedent in\n`scripts/check-role-word.mjs`. Option 2 (document the limitation) was not chosen.\n\n## The fix\n\nBoth loops now read **one** `fenceOwners()` walk — the same walk #10791 landed, returning\n*which* top-level fence owns each line rather than merely *whether* one does:\n\n- `owners[i] >= 0` — \"this marker is inside a fence\" — the orphan scan's question, semantics\n  unchanged from #10791.\n- `owners[i] === i` — \"this ts fence opens at top level\" — extraction's question.\n\nThe extraction loop's fence-open pattern is a strict subset of the CommonMark one the walk\nuses (three backticks plus an info string containing no backtick), so a genuine top-level\nblock always owns itself and the new guard **cannot** suppress one. Two independent notions of\n\"am I in a fence\" in one file is how the halves drifted apart in the first place, so there is\nnow only one.\n\n## Verification\n\nLocal, all at `478b817e6` with a clean tree.\n\n**Consumer duty — the gate against the real corpus, before and after.** Byte-identical apart\nfrom the self-test's own success line (which now names the new pinned behaviour); no corpus\noccurrence trips this, exactly as the card predicted:\n\n```\n   257 marked example(s) across 99 file(s), 3 surface(s):\n     • skills + docs (@objectstack/spec): 228 block(s)\n     • spec source TSDoc (@objectstack/spec): 10 block(s)\n     • client SDK (@objectstack/client-react, @objectstack/client): 19 block(s)\n✅ 257 prose examples type-check across 3 surface(s)\n```\n\n**Where the defect is measurable: the self-test.** Reverse-verified from the committed state\nby deleting only the guard line (`perl -i`, restore armed as a `trap` before the edit).\nMutation proved on disk by anchored counts — deleted text 1 → 0, neighbouring anchor 1 → 1,\n1846 → 1845 lines — and restoration proved byte-identical (`git hash-object` equals the HEAD\nblob, `git status --porcelain` empty). No build is interposed in either leg: the gate runs as\n`tsx scripts/check-skill-examples.ts`, straight off the source, and the self-test half never\nreads `dist` at all. Ablated, the self-test goes red naming the defect:\n\n```\n✗ nested-illustration fixture: extracted 3 block(s), expected 1\n✗ nested-illustration fixture: an illustrated payload reached an extracted block —\n  [\"const poison: number = 'not a number';\",\"const alsoPoison: number = 'not a number either';\",\"const real: number = 1;\"]\n✗ gutter-wrapped nested fixture: extracted [poison, real], expected only [real]\n```\n\nThose two poison payloads are precisely what would have reached `tsc`. Restored, exit 0.\n\nThe un-nested **control** passes in both legs, deliberately: it is what proves the nested red\ncomes from the nesting and not from the payload or the marking (the #10533 (B3) shape). Both\npoison payloads also sit after an inner close but before the wrapper's own, so a length-blind\ncloser surfaces as a second extracted block rather than as silence. The third fixture repeats\nthe pair inside a JSDoc-gutter-wrapped docblock — nothing else would catch ownership being\ncomputed over raw instead of gutter-stripped lines, which would return the defect on exactly\nthe roots whose prose lives in docblocks.\n\n**Gate families** — derived with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`\nfrom the real change set (not a hand-written path list). All 18 matched families green, plus\n`check:nul-bytes` and `pnpm --filter @objectstack/spec typecheck` (which is what type-checks\n`scripts/**`, via `check:scripts-typecheck`).\n\nOne family is red for a reason that is not this diff: `check-dev-prereqs` reports *\"The\nworkspace is not built\"*. It measures workspace build completeness — this worktree built only\nthe `@objectstack/client-react...` closure the gate needs. Run against the pristine shared\ncheckout, which carries none of these changes, it fails the same way and harder (67 of 67\npackages unbuilt, versus 34 of 67 here). CI builds the workspace before gates.\n\n## Notes\n\n- Changeset written rather than a `skip-changeset` label: the changeset check is path-blind\n  (any PR with no newly added `.changeset/*.md` fails), and every prior change to this gate\n  shipped a `@objectstack/spec` patch changeset. The label remains the PM's call.\n- File surface held to the card: `packages/spec/scripts/check-skill-examples.ts` plus its\n  self-test, which live in the same file, and the changeset. No fixture content was copied\n  from the card's rendered body — the body carries a live specimen of this very trap and its\n  own illustration is mangled by GitHub; all fixtures are constructed in code.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Rxnd8cyFnoU8V5y21PaTsy)_"
+}

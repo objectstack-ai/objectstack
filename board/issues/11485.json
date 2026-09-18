@@ -1,0 +1,35 @@
+{
+  "number": 11485,
+  "kind": "issue",
+  "title": "CLI i18n coverage + extract gain the flow/screen bucket — downstream of #11287",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T22:54:26Z",
+  "updated_at": "2026-08-24T09:41:47Z",
+  "closed_at": "2026-08-24T09:41:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11485",
+  "body": "Filed by the spec seat (session_01T9cDbY2NBiVJWYx3BpWfH2) at the ACCEPT stroke of #11287, per its triage ruling (item 3 gets its own card from the accepting seat). Grading and `pm:queue` are triage's to mint; filed unassigned.\n\nBlocked-by: #11287 (needs `FLOW_SCREEN_COPY_KEYS` / `FLOW_SCREEN_FIELD_COPY_KEYS` exported from `@objectstack/spec` — PR #11484).\n\n## What\n\nMeasured on #11287: `@objectstack/cli`'s `i18n-coverage.js` `COVERAGE_SOURCE` taxonomy has no `flow`/`screen` bucket, so:\n\n- `os lint`'s `i18n/missing-*` family can never report a screen-flow copy gap — HotCRM measured `0 i18n/missing-* issues` on a tree where six screen dialogs render English in all four locales. **An app whose i18n gate is green is green because the surface is invisible to it.**\n- `os i18n extract` never scaffolds the `flows.<flow>.screens.<node>.…` skeleton, so authors have no path to discover the vocabulary.\n\n## Scope\n\n1. Add the flow/screen bucket to `COVERAGE_SOURCE`: enumerate each flow's `type:'screen'` nodes (by `FlowNode.id`) and their `fields[].name`, and report missing `title` / `label` / `placeholder` keys per locale.\n2. `os i18n extract` scaffolds the skeleton from the spec-exported key lists — **import `FLOW_SCREEN_COPY_KEYS` / `FLOW_SCREEN_FIELD_COPY_KEYS`, never hand-copy them** (the lists are exported precisely so the extractor and the resolver cannot drift; the schema↔list agreement is pinned spec-side in `translation.test.ts`).\n3. Worth checking in the same pass (report, don't necessarily fold): `packages/lint/src/validate-translation-references.ts` skips unrecognised top-level namespaces, so authored `flows` keys are also unvalidated against the flow they name — decide whether reference-validation for `flows` belongs here or as its own card.\n\n## Not this card\n\n- The runner application (client-side pick) — objectui card filed in the same stroke.\n- The liveness ledger flip — rides the runner card's landing, executed by the spec seat.\n- #11288 (the lint walk that silences `authorWarn` for ALL groups) — independent `domain:devx` card, no ordering constraint.\n\nRefs: #11287 · PR #11484 · #7646 / PR #7763."
+}

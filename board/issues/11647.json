@@ -1,0 +1,35 @@
+{
+  "number": 11647,
+  "kind": "issue",
+  "title": "check-i18n-bundles resolves its population CWD-relatively and dies with an uncaught ENOENT stack from any cwd but the repo root",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T10:32:38Z",
+  "updated_at": "2026-08-24T13:29:51Z",
+  "closed_at": "2026-08-24T13:28:18Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11647",
+  "body": "Measured while fixing #11394. **No gate is red** — CI invokes this gate from the repo root. Filed unassigned, no `pm:queue`.\n\n## The shape\n\n#10907 anchored `check-i18n-coverage.mjs` to a root derived from `import.meta.url`, behind one `at()` seam. Its sibling `scripts/check-i18n-bundles.mjs` **was never given the same treatment**: it contains no `import.meta.url`, no `REPO_ROOT`, and enumerates its population with two bare relative literals:\n\n```js\nconst configs = findExtractConfigs('packages', 'packages')\n```\n\n`findExtractConfigs` (`scripts/i18n-bundle-surface.mjs:128`) `readdirSync`s that literal, so from any cwd but the repo root the gate does not merely mis-scan — it dies with an **uncaught exception and a node stack**:\n\n```\n$ cd /tmp && node .../scripts/check-i18n-bundles.mjs\nnode:fs:1590\nError: ENOENT: no such file or directory, scandir 'packages'\n    at readdirSync (node:fs:1590:26)\n    at findExtractConfigs (file:///.../scripts/i18n-bundle-surface.mjs:128:19)\n    at file:///.../scripts/check-i18n-bundles.mjs:748:17\n```\n\n## Pre-existing, and not introduced by #11394\n\nVerified on both trees. At `origin/main` `3637731e2`, off-root, the same stack appears — there preceded by the (now removed) probe-deferral line:\n\n```\ncheck-i18n-bundles: could not read packages/cli/package.json (ENOENT ...) — build prerequisite not pre-checked\nError: ENOENT: no such file or directory, scandir 'packages'\n```\n\n#11394 anchored the shared build probe and this gate's existence check on its answer; it deliberately did **not** widen into the population, which is this card.\n\n## Why it is worth recording\n\nTwo reasons, and the second is the load-bearing one.\n\n1. It is the last unanchored half of a pair whose other half is already fixed. `check-i18n-coverage` and `check-i18n-bundles` are described throughout their own headers as siblings running one step apart in `lint.yml`; one is cwd-independent and the other cannot start.\n\n2. **The failure mode is the one this gate family has repeatedly been fixed for.** `check-i18n-bundles.mjs` carries an elaborate prerequisite apparatus (#5217, #7681, and its `reportPrerequisiteNotMet` printer, which states in words that *nothing was checked*) precisely so an environment fact is never reported as a content verdict or as a bare stack. An uncaught `scandir 'packages'` bypasses all of it — it is exactly the shape #6033 removed from the coverage gate's per-config loop, still live one file over, at the population level.\n\nNote the direction is **not** #10907's silent-green: an uncaught throw is loud. The cost is a wrong first diagnosis (a node stack naming `node:fs`), not a false pass.\n\n## Suggested fix\n\nThe same shape both siblings now use: derive a root from `import.meta.url`, keep the repo-relative spellings as vocabulary, and put one `at()`/`atRepoRoot` seam between them. `scripts/cli-build-prerequisite.mjs` already exports `atRepoRoot` after #11394, and this gate already imports it — so the population change is the remaining half. #10907's anti-#4690 note applies too: an empty population must be refused, not reported OK.\n\n## Refs\n\n#11394 (where this was measured; that card anchored the shared probe, not this gate's population)\n#10907 (the same fix applied to the sibling gate)"
+}

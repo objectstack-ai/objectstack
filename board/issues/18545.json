@@ -2,8 +2,8 @@
   "number": 18545,
   "kind": "issue",
   "title": "Register `can` in the `@objectstack/formula` CEL engine function table — the objectstack half of the ruled cross-repo split for `current_user.can(object, verb)` (objectui#4421 batch #13)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-sam",
@@ -13,8 +13,6 @@
   "labels": [
     "domain:engine",
     "enhancement",
-    "needs:contract-review",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-16T23:08:46Z",
-  "updated_at": "2026-09-17T19:13:50Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-17T22:00:26Z",
+  "closed_at": "2026-09-17T21:53:46Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 8,
+  "comments": 13,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18545",
   "body": "**Filed by the triage seat (objectstack#6015) as the `objectstack engine` half of a maintainer-ruled cross-repo split. ⛔ Recording a ruling, not making one.**\n\n## The ruling this card carries\n\nobjectui#4421, comment `5474563898` — maintainer, 2026-08-31, director batch #13, verbatim 「其他同意」:\n\n> **裁定**:采**选项 A —— 保拼写,跨仓拆分**。2026-08-17 裁定的作者面拼写 `current_user.can(object, verb)` **维持**;实现路线按实测更正:\n> 1. **objectstack 半(先行)**:`@objectstack/formula` 在 CEL 引擎函数表注册 `can`(主体从求值上下文取,⛔ 不从 scope bag 取函数值——实测那条路必然 fault);动词别名语义(`update`/`edit`→`allowEdit`、`import`→`allowCreate` …)\n\nThe 2026-08-17 ruling on the same card (comment `5321072032`) had approved the author-facing spelling in function form with two riders; a dev then measured that the ruled shape is **not implementable from objectui alone** (report `5473068187`, `premise_still_valid: false`, no PR, no code, branch pushed empty as a write-route probe). Batch #13 is the correction: the spelling stands, the implementation splits, and **this repo goes first**.\n\nobjectui#6941 (ruled B, same day, batch #12) points at the same seam from the other side and records the join: 「`can` 在 objectstack formula 注册引擎函数落地后,本枚举集相应收缩」.\n\n## Measured state of this repo — 2026-09-16T23:10Z\n\n> ⚠️ **Correction, made by the filing seat within minutes of filing.** This heading first read `23:12Z`. That time was *typed from memory*, not read from a clock — the clock at the moment of filing said `23:10Z`. The readings below are unchanged and were re-taken against a read clock before this correction (`can` registrations: **0**; control registrations `now`/`upper`/`lower`: **5**). A stamp nobody read is not a reading, even when the number it carries turns out to be close.\n\n`can` is **not** registered, and the repo's own tests pin that it is not:\n\n| reading | result |\n|---|---|\n| `grep -rn \"^\\s*(can\\|now\\|upper\\|lower\\|contains\\|startsWith)\\s*:\" packages/formula/src` | `now`, `upper`, `lower` present; **`can` absent** |\n| `packages/formula/src/unknown-function.test.ts:77` | asserts `firstUnknownFunctionCall('current_user.can(object, verb)')?.name === 'can'` — i.e. `can` is an **unknown** function today |\n| `packages/formula/src/validate.test.ts:289` | asserts `nearestName('can', CEL_STDLIB_FUNCTIONS) === 'min'` — `can` is not in the stdlib catalog |\n\n**Firing control**: the same grep, in the same files, returns the registered names `now` / `upper` / `lower`, so the zero on `can` is the instrument working, not the instrument dead.\n\n⚠️ Note for whoever lands this: those two test assertions **encode the absence**. They are not incidental — `validate.test.ts:274` carries a comment reasoning about the `nearestName('can', …)` distance. Registering `can` will turn them red by design; updating them is part of this card, and ⛔ deleting them instead of re-pointing them is not.\n\n## Scope\n\n- Register `can` in the CEL engine function table of `@objectstack/formula`.\n- ⛔ The subject comes from the **evaluation context**, not from a function value on the scope bag — the ruling records that route as measured to fault without exception.\n- Verb alias semantics per the ruling: `update`/`edit` → `allowEdit`, `import` → `allowCreate`, and the rest of the alias table as ADR-0068 declares it.\n- ⛔ **Not in this card**: the objectui half (the named client-only enum set and its mechanical check, objectui#6941), and the record-level permitted-actions question raised at objectui#4421 comment `5695430738`. That commenter asked whether it should be a separate card; the triage answer, given on #4421, is **yes** — it is a different contract (record-level, not object-level). ⛔ Triage is not writing that card itself: the cloud-side measurement that makes it a finding is held by the commenter, not by this seat, and a card is not filed on someone else's unheld measurement.\n\n## Who is waiting\n\nobjectui#4421 is moved to `pm:blocked` against this card in the same round; its unlock condition is `can` resolving in the CEL engine function table here. objectui#6941's enum set shrinks when this lands.\n\n## Re-check\n\n    grep -rn \"unknown-function\\|CEL_STDLIB_FUNCTIONS\" packages/formula/src/validate.ts | head\n    grep -rnE \"^\\s*can\\s*:\" packages/formula/src\n\nIf the second prints nothing, this card still stands.\n\n---\nFiled by the triage seat (#6015), round R+258. ⛔ Not claimed, ⛔ not dispatched — triage files, splits and grades only.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

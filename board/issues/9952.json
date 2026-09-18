@@ -1,0 +1,33 @@
+{
+  "number": 9952,
+  "kind": "issue",
+  "title": "[field report] rc→GA upgraded envs: package-declared permission sets frozen at first-boot snapshot — provenance skip is silent and has no adoption/migration path",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "needs:contract-review"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-19T09:45:36Z",
+  "updated_at": "2026-08-24T03:37:16Z",
+  "closed_at": "2026-08-24T03:36:58Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9952",
+  "body": "Part of steedos-labs/os-project-titanwind-ehr#1606 (and steedos-labs/os-project-titanwind-ehr#1613).\n\nField report from a production-test deployment. Related but not covered by: #8692 (closed — platform-default seeder / `os meta resync` path), #8672 (open — org-less materialization; measured-harm follow-up posted there), #2705 (the resync intent this violates in spirit).\n\n## Summary\n\nAn environment whose database was first initialized on an earlier 17-rc line and then upgraded in place to GA 17.0.0 ends up with `sys_permission_set` rows that `bootstrapDeclaredPermissions` / `upsertPackagePermissionSet` **permanently refuses to reconcile**: the legacy rows do not carry `managed_by: 'package'` + the current `package_id`, so every boot takes the `skippedEnvAuthored` / `skippedForeign` branch. Result: **every permission change shipped in the package after the env's first boot silently never takes effect** — grants stay frozen at the first-boot snapshot while the deployed artifact moves on. The only signal is a log counter; nothing in Setup shows that a package-declared set has diverged from the package.\n\nThere is also **no adoption/migration path**: no migration, no `os` command, and (in our deployment — see #8672 follow-up) not even a Setup surface that can see the rows. The only remediation we found is direct SQL against `sys_permission_set`.\n\n## Pinned versions\n\n- `@objectstack/*` **17.0.0** (GA) — core, runtime, objectql, plugin-auth, spec, types, cli\n- vendor packs: `@objectstack/organizations@1.0.0`, `@objectstack/security-enterprise@1.0.0`\n- driver: postgres (postgres:16), single organization\n- Env DB first booted ~2026-07-30 on the then-current 17-rc; app image rebuilt/redeployed multiple times since, most recently 2026-08-19 with the current package.\n\n## Measured on the live env (2026-08-19, admin session)\n\n- `sys_user_permission_set` holds 13 assignment rows referencing `sys_permission_set` ids whose id timestamps date to the env's first boot (2026-07-30). The rows exist and are **still enforced** by authz.\n- The package's permission set (`ehr_quality_inspector`) currently declares **49** object grants in the built artifact; the env enforces the **41**-object first-boot snapshot. Grants added to the package after 07-30 (e.g. `CRU` on a child object, read on another) return **403** for real users — this is how the freeze was discovered (app issue steedos-labs/os-project-titanwind-ehr#1606).\n- Redeploying the current artifact and restarting does not change the snapshot — consistent with the provenance skip in `upsertPackagePermissionSet` (`packages/plugins/plugin-security/src/bootstrap-declared-permissions.ts`): update only when `existing.managed_by === 'package' && existing.package_id === packageId`, else counted as skipped with a log line only.\n- Control: a fresh GA 17.0.0 env materializes the same package correctly (49 objects, `managed_by: 'package'`, `package_id` set, `active: true`).\n\n## Expected vs actual\n\n- **Expected** (the #2705 intent, and what the ADR-0086 D5 log line implies): a package-declared permission set edited at the source is reconciled into `sys_permission_set` on boot, so the deployed artifact and the enforced grants agree; rows the platform's own earlier seeder created are recognized as platform/package-owned, not as tenant customizations.\n- **Actual**: rows created by an earlier 17-rc seeder are classified env-authored (cf. #8692's mechanism — inserts without `managed_by` fall to the object's `defaultValue: 'admin'`), so GA's sync freezes them forever, silently. The env-authored protection is sound for genuine admin-authored sets; the defect is that the platform's own historical rows land in that bucket and there is no adoption path out of it.\n\n## What we did NOT do\n\nNo app-side workaround was added. We are remediating the env with one-off SQL (`UPDATE sys_permission_set SET managed_by='package', package_id='<pkg>', organization_id='<org>' WHERE name LIKE '<prefix>%'` + restart), recorded in the app issue. Every other env upgraded along the same rc→GA line will need the same surgery until an adoption/migration path exists.\n\n## Asks\n\n1. An **adoption/migration** for legacy `sys_permission_set` rows whose `name` matches a currently-declared package set but whose provenance columns predate the current scheme (one-time migration, or an explicit `os` command an operator can run).\n2. **Surface the skip**: when boot sync skips a package-declared set because of provenance, show it somewhere an admin can see (Setup badge / warning on the set), not only a log counter — the failure mode is \"declared ≠ enforced\" drifting for weeks with 403s as the only symptom.\n"
+}

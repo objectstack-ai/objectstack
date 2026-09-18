@@ -1,0 +1,34 @@
+{
+  "number": 11045,
+  "kind": "issue",
+  "title": "[finding] Nothing requires the settings ordering declaration — `check:init-service-contract` walks `init()` only, and the settings bind window is a `kernel:ready` fact",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T13:23:37Z",
+  "updated_at": "2026-08-24T08:08:25Z",
+  "closed_at": "2026-08-24T08:08:11Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11045",
+  "body": "Found while implementing #10250 (PR #11044). Filed separately rather than widening that card: the ruling there names three specific plugins and their declarations, and building a gate is a different, larger piece of work. Filed unassigned.\n\n## Observation\n\n#10250's fix makes `plugin-email`, `service-sms` and `service-storage` each declare\n\n```ts\noptionalDependencies = ['com.objectstack.service.settings'];\n```\n\nso the kernel orders `SettingsServicePlugin`'s engine bind ahead of their `kernel:ready` settings reads. That closes the three measured readers.\n\n**Nothing checks that a fourth one declares it.** A plugin added tomorrow that acquires a settings handle in a `kernel:ready` hook and forgets the declaration is back in the pre-bind window, and the only thing that will say so is the runtime `warn` PR #11044 adds — which requires someone to be reading boot logs of a deployment whose composition order happens to be wrong.\n\n## Why the existing gate does not cover it\n\n`scripts/check-init-service-contract.mjs` (`check:init-service-contract`) is exactly the right *shape* — ADR-0116 / #4471, \"declaring is NOT voluntary\" — but its population is **`init()`-reachable `getService` calls**. The settings bind window is not an `init()` fact:\n\n- `SettingsServicePlugin` registers its bind hook from `start()`, not `init()`;\n- the readers acquire their handle inside a `kernel:ready` hook registered from `start()`;\n- so both sides of the ordering constraint are invisible to a walk rooted at `init()`.\n\nMeasured on `origin/main` at `2866d5f97`: `check:init-service-contract` reports `34 declared / 1 self-provided / 3 without a workspace provider (68 plugin unit(s) scanned)` and is green both before and after the three declarations land — i.e. it is indifferent to the property this card is about.\n\n## The population, measured\n\nShipped settings-handle acquisitions (`getService[^(]*\\(\\s*['\"]settings['\"]`, tests and `dist/` excluded; the regex was proved on three known readers before its silence was read anywhere) — **11 real acquisitions across 13 hits**, the other 2 being string literals inside `service-settings` comments:\n\n| site | in an always-on provider? | declares the edge after PR #11044? |\n|:--|:--|:--|\n| `packages/plugins/plugin-email/src/email-plugin.ts:388` | yes (`email`) | yes |\n| `packages/services/service-sms/src/sms-plugin.ts:189` | yes (`sms`) | yes |\n| `packages/services/service-storage/src/storage-service-plugin.ts:406` | yes (`storage`) | yes |\n| `packages/plugins/plugin-auth/src/auth-plugin.ts:703` | no | no — but defends itself via `resolved.source !== 'default'` |\n| `packages/plugins/plugin-auth/src/auth-plugin.ts:1182` | no | no — **not analysed** |\n| `packages/plugins/plugin-audit/src/audit-plugin.ts:200` | no | no — **not analysed** |\n| `packages/mcp/src/plugin.ts:301` | no | no — **not analysed** |\n| `packages/rest/src/rest-api-plugin.ts:299` | no | no — **not analysed** |\n| `packages/objectql/src/plugin.ts:436`, `:509` | no | no — **not analysed** |\n| `packages/runtime/src/security/resolve-execution-context.ts:204` | no | request-time, not boot-time |\n\n⚠️ The five **not analysed** rows are the honest part of this card: whether each of them reaches its `getService('settings')` from a hook registered before `SettingsServicePlugin.start()` has **not** been established. #10250's census established it only for the three always-on providers. That analysis is the first step here, and it may well come back \"none of them\" — which would make this a hygiene card rather than a defect card.\n\n## What a gate would have to do\n\nWalk each plugin's `start()`-registered `kernel:ready` hook body (transitively, like the init walk does) for a `getService('settings')` and require `com.objectstack.service.settings` in that plugin's `dependencies` / `optionalDependencies`.\n\nTwo known hazards for whoever picks this up, both measured on the #10250 census:\n\n- a name-based call-graph walker's **transitive** arm is the part that fails quietly. That census's walker hit 4 of 6 known readers, every hit at depth 0, and an earlier revision mis-parsed every `(ctx as any).hook(...)` site and returned 1-line bodies for 8 of 16 hooks — \"a zero that looked completely clean\". A gate resting on that walk needs a `--self-test` that pins the transitive arm, not just depth 0.\n- multi-line function signatures drop out of a naive definition index (`bootAutoEnqueue(` was the measured case).\n\n## Adjacent, not duplicates\n\n#4471 / #4131 established the `init()`-phase contract and produced the existing gate; this is the same argument one lifecycle phase later. #10250 is the defect this generalises from and is being fixed narrowly, by declaration, on the three measured readers.\n"
+}

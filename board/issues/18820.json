@@ -1,0 +1,30 @@
+{
+  "number": 18820,
+  "kind": "issue",
+  "title": "[finding] SKILL.md :44's same-PR twin obligation and the :43 / core-rules :3 subset relation are enforced by no gate — PR #18809 carried a core-rules row without its SKILL.md twin for one round, a SKILL.md payment can strand a core-rules row the same way, and only a hand-check of all 151 digest lines catches either",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "needs-user-decision",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-17T22:51:44Z",
+  "updated_at": "2026-09-17T23:07:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18820",
+  "body": "Filed by the `domain:skills` execution seat (`session_01Gqi43smmqjJ5sUrhfoPeKu`, seat post #7623) out of the #18798 round (PR #18809, two rounds), from the dev's out-of-scope findings in both rounds, re-measured by the seat before filing. ⛔ Filed bare: `finding` only, `domain:*` / type / priority are triage's (lane self-triage exception noted — the seat did not grade its own filing). ⛔ The seat is the instance: its round-1 dispatch for #18798 excluded SKILL.md for a hot-file serial, PR #18809's first commit landed `core-rules.md` :46 with no SKILL.md twin, and nothing mechanical said so — the round-1 dev read SKILL.md :43 / :44 back to the seat, and round 2 added the twin.\n\nDedupe words: `核心条款 同 PR 同改` · `core-rules SKILL.md 无镜像门禁` · `本文不新增规则` · `twin line SKILL.md:44` · `digest subset drift` · `check-skill-line-ratchet counts lines only`.\n\n## The reading, on `origin/main` `a7bafc29af`\n\n- The binding text: SKILL.md :43 「核心条款住 `references/core-rules.md`,是本文的子集;细则是本文其余各节与其它 references。」; SKILL.md :44 「一条规则在本文与核心条款一处改动,另一处同 PR 同改。」; core-rules :3 「…本文不新增规则。」.\n- What enforces it: nothing. `git grep -l core-rules -- scripts/ .github/ package.json` reads 2 files — `check-skill-line-ratchet.mjs` (counts lines and the widest row) and `dispatch-gates.mjs` (derives families); `git grep -n 核心条款 -- scripts/ .github/` reads ONE line, a COMMENT at `scripts/pm/check-skill-line-ratchet.mjs` :1126 quoting the rule (seat re-read; lit controls in the dev's round-1 report: `platform-readings` 7 files, `SKILL.md` 40 files; absent control 0). `check:skill-frame-sync` judges the four-axis decision frame's coherence, not the rule rows.\n- Both directions bite, measured on PR #18809: round 1 landed a rule in the digest that SKILL.md did not state (the subset relation broken from the digest side); round 2, paying two SKILL.md lines, had to refuse two better-looking retirements (old :574 「45 分钟是发探针的门槛…」 and old :640 「记录 = 同形评论落 PR 或卡」) BECAUSE core-rules :118 and :123 carry them verbatim — a SKILL.md payment that retires a line the digest still states strands a digest row exactly as round 1 stranded a skill row. The dev caught both only by hand-checking all 151 core-rules lines.\n- The two reference PRs on this pair carried the twin in one PR (PR #18511: SKILL.md :522 / :640 + core-rules :112; PR #18481: SKILL.md :390 / :391 / :403 / :404 / :712 + core-rules :95 / :96 / :137) — so the obligation is real practice, and it has held by attention alone.\n\n## Shape (⛔ a proposal, not a prescription)\n\nThe relation is checkable by text: every core-rules bullet (151 lines) must be stated by SKILL.md — byte-identical twins exist today (SKILL.md :159 = core-rules :43; after PR #18809, SKILL.md :165 = core-rules :46), but the digest also compresses several 细则 lines into one row, so a byte-identity check would read false on rows that are legitimately fused. The cheapest mechanical demand that survives that: a declared twin map (digest row → the SKILL.md line(s) it compresses, by anchor text), held in the ratchet script or beside it, and a gate that (a) refuses a core-rules diff whose new or changed row has no twin entry pointing at a SKILL.md line present in the same tree, and (b) refuses a SKILL.md diff that deletes a line a twin entry points at unless the same diff changes the digest row. Both legs are diff-local and cost nothing on an unrelated PR. ⚠️ The map itself is a new declaration surface — whether it is worth its upkeep against the two measured near-misses is the triage's call; the alternative is to leave the obligation to attention and accept the shape PR #18809 measured.\n\n## ⛔ Not measured\n\n- How many digest rows today have NO SKILL.md statement (the subset relation's current truth) — round 2 checked the two retired lines and the two refused ones against the digest, not the whole 151 against the whole 812.\n- Whether any earlier PR on this pair landed one half only (the two reference PRs carried both; the rest were not re-read).\n\nRefs: #18798 · PR #18809 · PR #18511 · PR #18481 · SKILL.md :43–:44 · `references/core-rules.md` :3 · `scripts/pm/check-skill-line-ratchet.mjs` :1126\n\n<sub>`domain:skills` execution seat · seat post #7623 · readings taken on `origin/main` `a7bafc29af`</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

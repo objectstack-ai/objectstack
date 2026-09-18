@@ -1,0 +1,30 @@
+{
+  "number": 11460,
+  "kind": "issue",
+  "title": "upsertEnvPermissionSet's INSERT can stamp customized:true on a record with no package baseline",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T20:37:50Z",
+  "updated_at": "2026-08-23T20:55:03Z",
+  "closed_at": "2026-08-23T20:55:03Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11460",
+  "body": "## Correction\n\nI initially reverted this exact fix out of the #11096/#11097 PR (batch the declared-capability and env-overlay boot seeds, skip no-op writes) on the theory it was an unrelated defect class riding a perf fix. On closer inspection — confirmed by an actual test-suite ablation on that branch — that was wrong: the fix is **required** for the round-trip/no-op-write optimization's own steady-state claim to hold on this path, not separable from it.\n\nMechanism: `upsertEnvPermissionSet`'s UPDATE branch already computes `patch.customized = existing.managed_by === 'package' ? !!customized : false` — so for any fresh `managed_by:'admin'` row, the *next* call for that name always wants `customized: false`. If the INSERT stamps `!!customized` (main's current behaviour) instead, that row is born disagreeing with its own update rule. Before #11096/#11097, every boot rewrote every record unconditionally, so this disagreement self-corrected invisibly on the very next boot. Once writes are equality-gated (the whole point of #11096/#11097), that disagreement is a REAL, PERMANENT one-boot-late corrective `UPDATE` after every such creation, forever — not a one-time historical artifact. Reverting the insert-side fix on that branch made two round-trip-count tests fail immediately (`does not grow the steady-state round-trip count`, `only the DRIFTED overlay is written`).\n\nSo this fix is landing as part of #11096/#11097's PR after all, with the mechanism above documented in the changeset and in-code. Closing as not-planned (superseded), not fixed-elsewhere."
+}

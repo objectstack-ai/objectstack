@@ -1,0 +1,34 @@
+{
+  "number": 11651,
+  "kind": "issue",
+  "title": "Four `*When` doc examples are authored in shapes that carry no layer, so the new #11407 gate must skip them — a docs-only re-authoring would put them under the gate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T10:34:47Z",
+  "updated_at": "2026-08-24T12:50:55Z",
+  "closed_at": "2026-08-24T12:50:55Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11651",
+  "body": "Filed unassigned by the `os-dev` seat while implementing #11407 (session `session_015ahemw8RcTgqtxrj15PEZx`). Recording only — not claimed, not queued, not graded.\n\n## What the new gate measured\n\n#11407 added a third scan surface to `packages/lint/scripts/check-doc-formula-expressions.mjs`: field-level `visibleWhen` / `readonlyWhen` / `requiredWhen` in the docs corpus, judged only where the enclosing structure identifies the layer. Its run on `origin/main` accounts for every `*When` occurrence in the corpus:\n\n| | count |\n|:--|--:|\n| text-level `*When:` occurrences in TS/TSX fences | 23 |\n| — the ADR quoting `field.zod.ts`'s **schema** (`visibleWhen: ExpressionInputSchema.optional()`), not predicates | 3 |\n| **admitted and judged** (layer determinable) | **13** |\n| **skipped and listed** (layer not determinable) | **7** |\n\nThe gate prints all 7 skips with a reason on every run, green ones included. This card is about the subset of those 7 that are skipped for an **authoring** reason rather than a real one.\n\n## The split inside the 7\n\n**Three are correctly skipped forever** — they genuinely are other layers, and judging them by the field-level rule would be a false red:\n\n- `content/docs/automation/flows.mdx:320` — a flow-screen field. `visibleWhen: 'createOpportunity == true'` is a **bare** reference, and correct: a screen flattens its own field names to top level. The record-scoped verdict would report it as the #1928 defect.\n- `content/docs/ui/pages.mdx:165` — a page component. `'sales_manager' in current_user.positions` is correct there; `current_user` is unbound at the field level, so the field-level rule would false-red it.\n- `content/docs/ui/views.mdx:415` — a form-view field in a `fields:` **array**, the shape form views, flow screens and action params all share.\n\n**Four are skipped only because of how the fragment is written**, and a docs-only edit would move them under the gate:\n\n- `content/docs/data-modeling/formulas.mdx:279` — `{ name: 'rating', type: 'select', visibleWhen: P` + \"`record.status == 'qualified'`\" + ` }`. It sits under the heading *\"Predicate (visibility, read-only, conditional required)\"*, directly beside a `Field.text({ … })` example that **is** admitted. It is a field example; it just carries no `fields:` map and no `Field.*` factory, so nothing in the tree says so.\n- `content/docs/protocol/objectui/layout-dsl.mdx:821`, `:824`, `:863` — bare `visibleWhen: \"…\"` lines at statement position. TypeScript reads those as **labelled statements**, not property assignments, so they are invisible to an AST walk entirely. (#11407 added a text-level tripwire so they are listed rather than dropped silently — before it, they produced zero sites and printed nothing.) Their layer is stated only in a prose comment above each line: `// e.g. on a PageComponent`, `// e.g. on a FormSection / FormField`.\n\n## Why this is a finding and not a defect\n\nEvery one of the four examples is **correct as documentation** — a reader gets the right answer. Nothing is broken. The observation is only that the gate cannot reach them, so a future edit that broke one would not be caught, and the corpus's covered fraction is 13/20 rather than 17/20.\n\n## Two ways it could go, neither decided here\n\n1. **Re-author the four fragments** into shapes the existing discriminator already admits (wrap in the `Field.*` factory, or in a `fields: { … }` map). Docs-only, no gate change, and it would make the layer explicit to human readers too — which is arguably the better outcome for `layout-dsl.mdx`, where the layer currently lives in a comment.\n2. **Widen the discriminator.** ⛔ #11407's dispatch was explicit that the selector must not be widened until something matches, and each widening has to answer \"which layer\" without guessing. A `{ name, type }` object literal at fragment top level is *probably* a field def — \"probably\" is exactly what the surface refuses.\n\nOption 1 needs no new judgement and is the cheaper half; option 2 is a real design question. Recording both rather than picking.\n\n## Related, and distinct\n\n- #11407 — the gate itself. This card is about its corpus coverage, not its correctness.\n- #11034 — fixed the `hasRole` instance in `layout-dsl.mdx`. Two of the bare lines named above are in that same file, but this is about their SHAPE, not their content.\n- #11256 — the spec `describe` for `PageComponentSchema.visibleWhen`. Different surface (spec, not docs)."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 11318,
+  "kind": "issue",
+  "title": "The AI settings manifest tells an operator at runtime to mount `@objectstack/service-ai`, which the capability roster declares cloud-only (no open-edition version to install)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T10:47:07Z",
+  "updated_at": "2026-08-23T21:33:49Z",
+  "closed_at": "2026-08-23T21:33:20Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11318",
+  "body": "Found while implementing #10920 (the sibling claim about `@objectstack/knowledge-turso` in `knowledge.manifest.ts`). Filed unassigned, no `pm:*` grading — triage's call. ⛔ Deliberately NOT folded into #10920: that card's scope fence is the knowledge manifest and the `knowledge-turso` name, and its PM seat graded it on that surface. This is a different manifest, a different package, and — importantly — a *stronger* evidence position, so it deserves its own grading rather than riding along.\n\n## The observation\n\n`packages/services/service-settings/src/manifests/ai.manifest.ts` tells an operator, at runtime, to mount `@objectstack/service-ai`:\n\n| line | message |\n|---|---|\n| `:343` | `` `Vercel AI Gateway configured (model=${values.gateway_model}). Mount @objectstack/service-ai to exercise live calls.` `` |\n| `:358` | `` `Cloudflare AI Gateway configured (model=${model}). Mount @objectstack/service-ai to exercise live calls.` `` |\n| `:370` | `` `${provider} configured (model=${model}). Mount @objectstack/service-ai to exercise live calls.` `` |\n\nMeasured on `main` at `f24c90df3d`:\n\n```\ngit ls-tree -r --name-only HEAD | grep -c \"/service-ai/\"        # -> 0\ngit ls-tree -r --name-only HEAD | grep -c \"/service-settings/\"  # -> reverse control, non-zero\n```\n\n## Why this one is sharper than the knowledge-turso case\n\nFor `knowledge-turso` the repo held no machine-readable statement about where the package ships. Here it does, and it contradicts the instruction. `PLATFORM_CAPABILITY_PROVIDERS` in `packages/spec/src/kernel/platform-capabilities.ts:127-131` declares:\n\n```ts\nai: {\n  package: '@objectstack/service-ai',\n  edition: 'cloud',\n  note: 'cloud-only since 11.3.0 / ADR-0025',\n},\n```\n\nand the `CapabilityEdition` docblock immediately above spells out what `cloud` means:\n\n> `cloud` — realized only by a cloud runtime tier; there is **no installable version in the open edition**. This is the boundary framework#3366 makes legible: \"add it to your dependencies\" is un-followable, so the error must say so.\n\nSo the repo already states, in the type that exists for exactly this purpose, that \"Mount `@objectstack/service-ai`\" is the un-followable instruction framework#3366 was written to eliminate — and the settings manifest prints it anyway, three times, to an operator standing in Settings → AI.\n\nRegistry measurement (2026-08-23, unauthenticated `GET https://registry.npmjs.org/@objectstack%2F<name>`, with `@objectstack/spec` + `@objectstack/cli` as positive controls and `@objectstack/security-enterprise` as a known-private negative control): `@objectstack/service-ai` returns **200**, `latest` **10.3.0**, while this repo ships 17.2.0. So a determined operator can install *something* — seven majors behind the platform they are running. That is arguably worse than a 404, because it succeeds.\n\n## Possible fourth site, same file, different question\n\n`:418` — `'Mount @objectstack/embedder-openai + a knowledge adapter to exercise live calls.'` — is **not** part of this observation. `embedder-openai` is built in this repo (8 path hits), so that instruction is followable as written. Recorded only so the next reader does not re-derive it.\n\n## Suggested disposition\n\nSame shape as the remedy on #10920 and the `@objectstack/organizations` remedy in PR #11266: keep the instruction, add the boundary it is missing, so an operator without a cloud tier can see that this path is not open to them. The roster entry's `note` field exists to be surfaced verbatim in exactly this kind of message and is not read here — wiring the manifest to `PLATFORM_CAPABILITY_PROVIDERS` rather than hand-writing a third copy of the claim may be the durable fix, but that is a design call, not a documentation edit, which is why this is filed rather than fixed.\n\nRefs: #10920 (the knowledge-turso sibling, where this was found) · PR #11266 (the un-followable-install remedy precedent) · #9532 / #10368 (the member-existence class)"
+}

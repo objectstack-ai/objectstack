@@ -1,0 +1,35 @@
+{
+  "number": 11292,
+  "kind": "issue",
+  "title": "`@objectstack/rest` overwrites discovery `version` with `config.api.version` (`'v1'`) — the URL path segment served in the schema's \"System Identity\" field, masking the producer entirely",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T09:05:27Z",
+  "updated_at": "2026-08-24T04:28:42Z",
+  "closed_at": "2026-08-24T04:28:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11292",
+  "body": "Found while implementing #11235 (deriving `getDiscovery()`'s `version` instead of the `'1.0'` literal). Filed rather than fixed: #11235's dispatch bounded that card to the **producer**, and this is a different package with a real design question attached, so it is not a mechanical in-place fix.\n\n## What was measured\n\n`packages/rest/src/rest-server.ts` calls the producer and then unconditionally replaces the field one line later:\n\n```ts\nconst discovery = await protocol.getDiscovery();\n\n// Override discovery information with actual server configuration\ndiscovery.version = this.config.api.version;\n```\n\n`config.api.version` is **the API version identifier**, not an artifact identity:\n\n- `normalizeConfig()` in the same file defaults it to `'v1'` (`api.version ?? 'v1'`).\n- The same value builds the mounted URL: `api.apiPath ?? \\`${api.basePath}/${api.version}\\`` → `/api/v1`.\n- `packages/spec/src/api/plugin-rest-api.zod.ts` declares it `version: z.string().default('v1').describe('API version identifier')`.\n\nBut `DiscoverySchema` (`packages/spec/src/api/discovery.zod.ts`) declares that field under `/** System Identity */`, grouped with `name` and `environment` — the \"what server is this\" question. #10993's ruling and its evidence (the SDK's `connect()` logging `data.version` next to `apiName` and `services` under \"Connected to ObjectStack server\") settled that reading.\n\nSo on any REST-served host, `GET /api/v1/discovery` answers `version: \"v1\"` — the path segment the caller already typed into the URL to get there.\n\n## Two consequences worth separating\n\n1. **The field carries no identity information on the REST surface.** `/health` and the runtime dispatcher's `/discovery` both report a real derived artifact version after #10993; the REST `/discovery` reports `\"v1\"` on every build of every release forever. A consumer reading one document cannot tell which producer answered, and gets a useless answer from the one that most clients hit.\n2. **It masks the producer.** #11235 fixed `getDiscovery()`'s hardcoded `'1.0'`, but that value is overwritten before it reaches the wire — the producer fix is correct and pins the class at the producer level, and is observable to embedders calling `ObjectStackProtocol.getDiscovery()` directly, but it changes nothing on the REST endpoint while this line stands. The two fixes are independent and this one is where the wire-visible behaviour lives.\n\n## Why this is a decision, not a codemod\n\nDeleting the line is not obviously right on its own. `api.version` is real information a client may want (which mounted API version answered), and the schema has no field for it — `DiscoverySchema` declares `name` / `version` / `environment` / `routes` / `locale` / `services` / `capabilities` / `schemaDiscovery` / `scoping` and nothing that means \"API version\". Options, roughly:\n\n- **A.** Drop the override, let the producer's derived value through. Simplest; loses the API-version fact (which is already recoverable from `routes.*`, all of which are prefixed with the mounted base path).\n- **B.** Drop the override and declare a separate field for the API version. Correct-looking, but a schema change — `packages/spec`, `domain:spec` seat, and a new field on a machine-readable surface needs its own justification under startup scope discipline.\n- **C.** Keep it. Requires arguing that \"System Identity\" `version` means the API version on the REST producer and the artifact version on the dispatcher producer — i.e. accepting exactly the two-dialects-of-one-field situation #4828 / #5672 / #10993 / #11235 have been closing.\n\nRecommend **A** unless someone can name a consumer of the API-version fact that `routes` does not already serve; **B** only if such a consumer exists. Either way it is a triage call, not a dev call.\n\n## Consumer survey (same one run for #11235)\n\nNo consumer reads discovery `version` **by value** — no version comparison, feature gate, or cache key — in `objectstack`, `objectui` or `cloud`. Controls: an org-wide code search for a known-present string (`x-objectstack-build-sha`) returned 10 hits across `objectstack` and `cloud`, so the queries were live in both repos. The only by-value assertions found are `packages/adapters/hono/src/hono.test.ts` (pinning its own mock of the *dispatcher* producer), `packages/client/tests/integration/01-discovery.test.ts` (`toMatch(/^v?\\d+/)` — which passes on `'v1'` today and would also pass on a semver), and `packages/spec/src/api/discovery.test.ts` (a schema-parse fixture). \"I found no consumer\" is not \"there is no consumer\": embedder code outside these three repos is not visible from here.\n\n## Not in scope of this card\n\nNeither producer is at fault here — `packages/runtime/src/http-dispatcher.ts` (#10993) and `packages/metadata-protocol/src/protocol.ts` (#11235) both derive the value correctly. This is the serving seam in `@objectstack/rest` only.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RfyXxZ2WPjcjhuXpiQQc3y)_"
+}

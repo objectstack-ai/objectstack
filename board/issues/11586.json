@@ -1,0 +1,32 @@
+{
+  "number": 11586,
+  "kind": "issue",
+  "title": "[Epic] Universal org invite link — shareable self-serve join (V1)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:epic"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T05:00:48Z",
+  "updated_at": "2026-08-24T14:38:43Z",
+  "closed_at": "2026-08-24T14:38:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11586",
+  "body": "## Ruling (maintainer, 2026-08-24, chat — quoted verbatim)\n\n> 「我想要的是一个统一的邀请链接，发到群里，个人自己注册登录，而不需要我输入邮箱。」\n> 「可以，你开一个epic任务，用objectstack项目经理技能统一派发处理」\n\nThe maintainer approved the V1 shape proposed in that conversation (four-axis analysis summarized below). This parent is the epic's coordination node — it is never dispatched; work happens on the sub-issues.\n\n## Outcome\n\nAn org owner/admin mints ONE shareable join link, posts it to a group chat; anyone opening it registers/logs in and becomes a **member** of that org. The admin never types an email address.\n\n## Verified premises (2026-08-24)\n\n- better-auth 1.7.1 (installed) and current upstream docs: every organization invitation endpoint requires `email`; no link/multi-use concept exists. Upstream demand tracked at better-auth/better-auth#3672 (open). Community plugins (bard/better-auth-invite alpha, vcode-sh/better-auth-invitation-only) gate SIGNUP, not org membership — not adoptable, and a new runtime dependency is maintainer-floor anyway.\n- Security context: better-auth advisory GHSA-fmh4-wcc4-5jm3 + PR #9877 (invitation acceptance vs email verification) — the join flow's verified-email posture must be explicit.\n\n## V1 scope (ruled)\n\n- One active link per org; role pinned to `member` (a link NEVER grants admin/owner); default expiry 7 days; revocable/rotatable; optional max-uses.\n- Membership writes go through the governed better-auth member path (server-side addMember) — never hand-inserted `sys_member` rows.\n- **Non-goals V1** (enterprise later): domain allowlists, approval queues, per-link roles, multiple concurrent links.\n\n## Four-axis decision record (中文,按 2026-08-20 裁定)\n\n- 实际业务需求:「链接发群里」是团队拉人的主流方式;逐个录邮箱+邮件送达率是双重摩擦;维护者本人即第一个撞上该需求的用户;受邀者注册即获客(增长原语)。\n- 长远合理性:标准 IdP 能力(Slack/Notion/飞书同款);better-auth 不原生支持,自建但贴着既有治理面(成员写入走 addMember 同族路径;策略面与 enterprise organizations 的 membership_policy 对齐)。\n- 防错/安全:链接=不记名凭证,V1 必带四件套(过期/可撤销旋转/角色钉死 member/次数上限可选);邮箱验证姿态显式设计(prod 开验证);OS_ORG_LIMIT 只数 owner,成员加入不撞组织上限。\n- 创业阶段不扩散:V1 收窄(单链接/固定角色/不做域名限制与审批队列),高杠杆增长原语而非投机面。\n\n## Sub-issues (contract-first: backend first, downstream Blocked-by)\n\n- [ ] A — objectstack: `sys_join_link` object + create/rotate/revoke/info/join endpoints (Clause-② YES: widens the public API surface ⇒ contract-tier dispatch)\n- [ ] B — objectui: console UI (link dialog on the org Team surface + `/join/:token` landing route) — Blocked-by A\n- [ ] C — cloud: control-plane org-scoping (org-scope plugin + PROXY_POLICY for the new object), plan-gate verification, staging E2E — Blocked-by A\n\n## Epic PM & territory\n\nEpic PM session: `session_71836b57-5db6-459d-ae4d-c6d9d7dd2cc6` (maintainer direct-dispatch; this session also dispatches the spec-adjacent sub-issue under the same instruction — deviation from the default spec-seat transfer is recorded here with the ruling quote above).\nTerritory: objectstack `packages/plugins/plugin-auth/**`, `packages/platform-objects/src/identity/**`, `packages/spec/src/kernel/public-auth-features.ts`; objectui `packages/app-shell/src/console/**` (org surfaces + join route); cloud `packages/service-cloud/**` (org-scope plugin / proxy policy).\n"
+}

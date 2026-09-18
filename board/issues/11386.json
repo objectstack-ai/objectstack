@@ -1,0 +1,35 @@
+{
+  "number": 11386,
+  "kind": "issue",
+  "title": "Adopt the referenceVia pointer-pair declaration on the remaining polymorphic pairs (sys_audit_log, sys_approval_request, sys_record_share, sys_share_link, sys_automation_run) — measured per object, not as a sweep",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T15:11:51Z",
+  "updated_at": "2026-08-24T13:49:00Z",
+  "closed_at": "2026-08-24T13:49:00Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11386",
+  "body": "## Context\n\n#11339 landed the declared polymorphic pointer-pair carrier — `Field.text({ referenceVia: '<sibling>' })` (ADR-0052 §5 ActivityPointer) — and adopted it on `sys_activity`'s two pairs (`record_id` via `object_name`, `source_id` via `source_object`). The seed loader now resolves a declared pointer as a natural key against the object each row names, and refuses an unresolvable pointer loudly instead of storing the literal.\n\nThe same `(object half, id half)` idiom exists, still undeclared, on five more system objects (survey done while implementing #11339):\n\n- `sys_audit_log` — `object_name` / `record_id` (`packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts`)\n- `sys_approval_request` — `object_name` / `record_id` (`packages/plugins/plugin-approvals/src/sys-approval-request.object.ts`)\n- `sys_record_share` — `object_name` / `record_id` (`packages/plugins/plugin-sharing/src/objects/sys-record-share.object.ts`)\n- `sys_share_link` — `object_name` / `record_id` (`packages/plugins/plugin-sharing/src/objects/sys-share-link.object.ts`)\n- `sys_automation_run` — `trigger_object` / `trigger_record_id` (`packages/services/service-automation/src/sys-automation-run.object.ts`)\n\n## Why this is a separate card, deliberately\n\nDeclaring `referenceVia` on an object CHANGES the seed accept/reject contract for that object: a seed row whose pointer does not resolve flips from \"stored verbatim, success\" to \"refused loudly, `success: false`\". For `sys_activity` that flip was measured downstream (objectstack-ai/hotcrm#1258 — the verbatim rows attach to nothing, so nothing working was lost). For these five, nothing is measured: whether any packaged app seeds them at all, whether natural keys are even meaningful there (`sys_automation_run.trigger_record_id` is telemetry an engine writes — seeding it may deserve refusal rather than resolution), and whether demo content for shares/approvals is a real need. Measure per object before declaring; do not declare the pair as a sweep.\n\n## Relationship to #5180\n\n#5180 (多态弱引用挂靠表的平台级删除级联 — delete-cascade for the `sys_record_share`/attachment/comment family) concerns the SAME pointer-pair family from the delete side. `referenceVia` may be the declaration carrier that card needs (a cascade needs to know which columns form the pointer); whoever takes either card should read the other first so the family gets one carrier, not two.\n\n## Acceptance sketch\n\nPer object: evidence of who seeds/reads the pair → declare `referenceVia` (or record a deliberate \"stays undeclared\" verdict with the reason) → the #11339 loader machinery picks it up with no further code; add a seed test per adopted object.\n"
+}

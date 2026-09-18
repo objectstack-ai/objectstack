@@ -1,0 +1,34 @@
+{
+  "number": 11494,
+  "kind": "issue",
+  "title": "docs-audit: a `route:` whose value sits on the NEXT line is counted TWICE in the denominator — `declinedIn` and `declarationsIn` disagree on whether a newline follows the colon",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T00:48:39Z",
+  "updated_at": "2026-08-24T03:58:38Z",
+  "closed_at": "2026-08-24T03:57:27Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11494",
+  "body": "Filed unassigned by the `os-dev` seat implementing #10901 (session `session_015ahemw8RcTgqtxrj15PEZx`). Recording, not fixing — out of that card's scope, and measured as a by-product of its differential probe. **No live instance on today's tree** (all seven ledgers write each row on one line).\n\n## What\n\n`scripts/docs-audit/affected-docs.mjs` has two scans that both claim a `route:`/`client:` declaration, and they disagree about **one character class**:\n\n- `declinedIn` matches `/(route|client)\\s*:\\s*([\"`])/` — `\\s*` after the colon, which **includes a newline**.\n- `declarationsIn` matches `/\\b(route|client)\\s*:[ \\t]*/` — `[ \\t]*` after the colon, which **does not**.\n\nSo a declaration whose value sits on the next line is seen by *both*, in two different buckets: `declinedIn` reads it as a declined quote (and names it correctly), while `declarationsIn` sees the character after the colon as `\\n`, classifies `quote === null`, and `unreadableIn` bills it a second time as a non-literal. Both push to `declined`, so the same single declaration is counted twice — in `declined` **and** in `routesDeclared`.\n\n## Measured (this tree; `parseLedgerSource` + `bridgeCoverageFrom` driven directly)\n\n```ts\nexport const L = [\n  { route:\n      \"GET /api/v1/gone\", family: 'metadata', disposition: 'sdk' },\n  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },\n];\n```\n\n⇒ `rows 1 · routesDeclared 3 · declined 2 · brokenScan 1`\n\n```\ndeclined = [\n  { key: 'route', line: 2, text: 'route: \"GET /api/v1/gone\"' },   // declinedIn, named correctly\n  { key: 'route', line: 2, text: 'route: ' },                     // unreadableIn, same declaration, empty value\n]\n```\n\nThe file declares **two** `route:` values and the denominator says **three**. The second entry also names nothing a reader can act on (`route: ` with an empty value), which is the silence every other report in this file exists to break.\n\nByte-identical on `origin/main` (951b025e) and on the #10901 branch — this is pre-existing and #10901's change moves it in neither direction (it is not a type-member question; both scans agree the declaration is in code position).\n\n## Why it matters, and why it is a finding\n\nThe denominator is what `bridgeCoverageFrom` renders a PARTIAL-read verdict from, so a double-counted declaration inflates the shortfall: `rows + declined === routesDeclared` still *holds arithmetically* (both terms moved), but it holds over a population that counts one declaration twice, and the reader is shown two entries for one line. If the declined half is ever fixed to name the value, the two entries become two near-identical lines for one declaration.\n\nZero live instances: all seven ledgers write `{ route: '…', … }` on a single line, and the repo's formatter keeps them there. The realistic trigger is a long interpolated route value that wraps.\n\n## Direction, not a prescription\n\n1. **Leave it.** No live instance; the arithmetic partition still balances.\n2. **Make the two scans agree on the character class.** They already agree on the key and on the quote set; this is the last spelling difference between them. Whichever class wins, it should be written once — the file argues twice that two scans deciding the same question separately can drift into disagreeing while both look right.\n3. **Claim once, by index.** `declarationsIn` already returns an `index` per declaration; the declined sweep could skip any declaration a prior sweep claimed, the way `unclaimedClientsIn` already skips `claimed`.\n\nRefs: #10901, #10794, #10793, #10500, #10636, #9896."
+}

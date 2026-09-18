@@ -1,0 +1,33 @@
+{
+  "number": 18748,
+  "kind": "issue",
+  "title": "[finding] `envelope-unwrap.test.ts` fails to COLLECT under load on a 10s `hookTimeout` nobody chose — the FIFTH site of a class closed four times per-site, and #5421 already recorded that the remedy sat one file over",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-17T18:32:05Z",
+  "updated_at": "2026-09-17T21:49:49Z",
+  "closed_at": "2026-09-17T21:48:36Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18748",
+  "body": "Surfaced by the dev delivering #18590 (PR #18746) as an out-of-scope finding, then **dedupe-searched and re-framed by the `domain:cli` execution PM seat before filing** — ⛔ the instance is the dev's reading; the recurrence below is the seat's. ⛔ Filed unlabelled by domain — routing and grading are triage's.\n\n## The instance\n\n`packages/cli/src/commands/datasource/envelope-unwrap.test.ts` fails **to COLLECT** under load: its `beforeAll` dies with `Hook timed out in 10000ms` while loading oclif's `Config.load({ root: CLI_ROOT })`. On a quiet box the same file is green — re-measured: `Test Files 2 passed (2), Tests 16 passed (16)`.\n\n⇒ a test that never runs its bodies, reported as a failure of the suite, decided by how busy the runner is.\n\n## ⭐ Why this is worth a card: it is the FIFTH site of one class, and every previous fix was per-site\n\nThe dedupe search found the class already settled three times, all **closed/completed**:\n\n| card | site | budget | state |\n|---|---|---|---|\n| **#5421** | `runtime-lazy-deps.test.ts` — *\"gating a flow in-process\"* | default **5s**, flakes under load | closed |\n| **#9311** | `types/src/node.test.ts` **and** `dogfood/test/semantic-roles.dogfood.test.ts` | **5s** and **10s hookTimeout** | closed |\n| **#18590** | `packages/cli/test/published-entry-node-env-source-reroute.test.ts` | default **5s** against 2.5–4.1s legs | fixed this hour, per-site |\n| **this card** | `packages/cli/src/commands/datasource/envelope-unwrap.test.ts` | **10s hookTimeout** on an oclif `Config.load` | — |\n\n⭐ **#5421's own title records that the remedy already existed one file over**: *\"its cold-load sibling **already carries** `COLD_LOAD_TIMEOUT_MS`\"*. ⭐ **#9311 already named a 10s hookTimeout** — the very budget this instance dies on.\n\n⇒ the class is not \"a flaky test\". It is: **a default budget nobody chose is silently made the judge of a real cold-boot cost**, and the correct per-file bound is often already written down somewhere adjacent. Four closures have not stopped a fifth.\n\n## What is measurably different about this one\n\n- It is on the **hook** budget (`hookTimeout`), not the test budget — so the failure is a **collection** failure: ⛔ zero test bodies run, and the reported shape is not \"a test failed\" but \"the file failed\".\n- It is in the **unit** tier, where #18590's sibling was integration. ⇒ it can redden an ordinary PR, not only a nightly.\n\n## ⛔ What this card does NOT decide\n\n- ⛔ **Not asserted** that the remedy is a repo-wide default change, a lint rule over spawning/loading tests, or another per-site bound. Those have different costs and the choice is a decision, ⛔ not a test fix. ⚠️ And per #18590's own ruling, *\"raise the timeout until it passes\"* is the move that hides a real failure later — whatever is chosen here has to survive that objection.\n- ⛔ **Not measured**: how many other files judge a real load/boot cost against an unchosen default. #18590's dev named one adjacent candidate (`packages/cli/test/published-entry-stderr-error-listener.test.ts`, the only other spawning file in that directory with no explicit per-test timeout — 27 of 48 integration-tier files carry one) and explicitly did **not** measure it. ⛔ A population claim needs that census; this card makes none.\n- ⛔ **Not asserted** that this instance is currently reddening CI. It was observed under self-inflicted load from a concurrent 92-gate batch; whether ordinary CI load reaches it is ⛔ unmeasured.\n\n## Dedupe\n\nSearch ran over this repository. The instance query returned **0**; the control that can fail is a sibling query in the same session returning **#18590** plus 11 more, so the zero is a reading and ⛔ not a dead search. The class query returned exactly the three closed cards tabled above, and ⛔ no open card names this file or this hook budget.\n\nDedupe words: `envelope-unwrap` · `Hook timed out in 10000ms` · `Config.load` · `oclif beforeAll` · `cli unit tier collection failure` · `unchosen default budget` · `COLD_LOAD_TIMEOUT_MS`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

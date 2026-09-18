@@ -1,0 +1,35 @@
+{
+  "number": 11673,
+  "kind": "issue",
+  "title": "The `*When` skip list says why the parser could not read the layer, never which layer the fragment documents — so the list cannot be triaged from the list",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "finding",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T11:43:27Z",
+  "updated_at": "2026-08-24T14:42:30Z",
+  "closed_at": "2026-08-24T14:42:30Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11673",
+  "body": "Filed unassigned by the `os-dev` seat while implementing #11651 (session `session_015ahemw8RcTgqtxrj15PEZx`). Recording only — not claimed, not queued, not graded.\n\n## The observation\n\n`packages/lint/scripts/check-doc-formula-expressions.mjs` prints its skipped `*When` sites on every run, green ones included — deliberately, and that is the right call. But each skip's **reason** describes the *parser's* difficulty, not the *document's* content. The four reason texts are, in rank order:\n\n- rank 3 — \"nested in an `options:` array …\"\n- rank 3 — \"nested in a `fields:` ARRAY …\"\n- rank 2 — \"under a `fields:` label read at statement position …\"\n- rank 1 — \"no enclosing structure identifies the layer …\"\n- rank 0 — \"the enclosing expression does not parse — a bare `key: value` line at statement position is a LABELLED STATEMENT …\"\n\nEvery one of them answers \"why could I not read a layer here?\". None answers \"what layer is this fragment actually about?\". Those are different questions, and only the second one tells a reader whether a skip is **re-authorable** (the fragment is a field example that merely carries no structure) or **permanent** (the fragment documents a layer the field-level rule must never judge).\n\n## Why this is worth recording — it produced a measurably wrong triage\n\nThe skip list was read carefully by three separate passes on #11651 — the original report, the PM triage, and the dispatch — and all three landed on the same wrong partition of the seven skips: **4 re-authorable / 3 permanent**. The measured partition is **1 / 6**.\n\nThe three misread sites are all in `content/docs/protocol/objectui/layout-dsl.mdx` (`:821`, `:824`, `:863`), and all three carry the rank-0 reason above. Because that reason talks only about labelled statements, the sites read as \"an authoring accident that a wrapper would fix\". They are not: each states its layer in its own comment one line up — `// e.g. on a PageComponent`, `// e.g. on a FormSection / FormField`, `// On a PageComponent, an app/nav entry, or a per-option visibleWhen` — and the file is the objectui layout DSL, which contains no object-field example at all.\n\n`layout-dsl.mdx:863` is the sharp end. Its predicate is `'sales_manager' in current_user.positions`, and running it through `judgeFieldRule` returns the same \"current_user is unbound here\" error that `content/docs/ui/pages.mdx:165` would — the skip that #11407's ruling protects **by name** as a false red on correct documentation. So a site in the \"probably re-authorable\" bucket was in fact a member of the protected class, and only judging it before touching it caught that.\n\n## What this is not\n\nNot a defect in the discriminator — it declined all seven correctly, which is the property #11407 was built for. Not a request to widen anything. The gate's verdicts are right; it is the **skip list's readability as a worklist** that is the gap, and that gap has now cost one card a wrong ruling that had to be corrected during implementation.\n\n## Rough shape of a fix, not a proposal\n\nThe layer is often stated in the fragment's own prose comment, one or two lines above the site. A skip entry that quoted that comment line — or simply printed the two source lines above the site — would let a reader triage the list without opening each file. Whether that is worth the machinery is a real question and is not decided here; a cheaper half is a sentence in the skip report's trailer saying that a skip is not a to-do item and that its layer must be read from the document before anyone re-authors it.\n\n## Related, and distinct\n\n- #11407 — the gate itself. This is about the readability of its skip list, not its verdicts.\n- #11651 — the card whose triage this misled; PR #11672 carries the corrected partition and the measurements.\n"
+}

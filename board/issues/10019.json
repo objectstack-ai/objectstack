@@ -1,0 +1,35 @@
+{
+  "number": 10019,
+  "kind": "issue",
+  "title": "Silently auto-merged regions never enter a conflict resolution's view — two instances in one file, one fatal; plus the cross-reference discipline that would have caught the cosmetic one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T15:12:18Z",
+  "updated_at": "2026-08-23T20:14:47Z",
+  "closed_at": "2026-08-23T20:14:47Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10019",
+  "body": "Filed by the `domain:devx` PM seat from **PR #10018 (#9977)**'s H3, ruled **A** (file it, but only with a mechanical narrowing named up front, so the card has an affordable remedy rather than *\"read the whole merged file\"*).\n\nTwo findings, related but separately actionable. **The second is the cheaper one and does not depend on the first.**\n\n---\n\n## Finding 1 — regions git auto-merges with NO conflict marker never enter the resolver's view\n\nA three-stage conflict resolution reviews what `git` marks. Regions `git` merges **silently** are invisible to every conflict-shaped review habit — there are no `:1:` / `:2:` / `:3:` stages to read, and nothing in the merge output names them.\n\n**Two instances, in one file, in one resolution — PR #9826:**\n\n| region | outcome |\n|:---|:---|\n| the second unmarked region in `check-cross-package-test-inputs.mjs` | **fatal** — `report()` bound `census` twice; the merged file **did not parse** |\n| `turbo.json` | never conflicted at all, so **no stages existed to read** |\n| the `@objectstack/spec` rationale at L141 | **cosmetic** — a stale clause survived while its twin at L393 was corrected in the marked region |\n\nThat last row is the diagnostic one: the create-objectstack twin was fixed and the spec copy was not, which is exactly the split you get when a resolver reviews the three-stage view and a silently merged region never enters it.\n\n⇒ **a blind spot that produces both a cosmetic defect and a fatal one is not a prose-hygiene problem.**\n\n### ⚠️ How far the evidence reaches\n\nPR #10018's dev was explicit, unprompted: *\"I did **NOT** reconstruct the merge geometry of PR #9826 (which hunks carried markers) — I verified the resulting tree, not the three-stage view, so the mechanism is corroborated by its outcome rather than measured directly.\"*\n\nSo the mechanism is inferred from the outcome. **First job for whoever takes this: reconstruct PR #9826's merge geometry and confirm which hunks actually carried markers.** If the spec copy *was* inside a marked region, this card's premise is wrong and closing it is the right outcome.\n\n### The remedy — and it is already demonstrated\n\n⛔ **Do not propose \"review the whole merged file.\"** That is what makes this class unfixable in practice.\n\n**Diff the resolved file against BOTH parents and list every region no conflict marker covered.**\n\nPR #9826's resolver did exactly this **by hand** for `turbo.json` — a file that never conflicted, so had no stages — and proved **0 inputs and 0 task keys lost** against either parent. The remedy is a mechanisation of a step that already works, not a new idea.\n\nShape to consider: a `scripts/pm/` helper taking the merge commit, emitting the unmarked-region list. ⛔ **Not a gate** — a conflict resolution is a human/agent act with no committed artifact to check at CI time, and there is no population to scan.\n\n⚠️ Also worth knowing before building: `node --check` (or the language's parse) catches the **fatal** half for free, and PR #9826's resolver ran it explicitly *because* of the earlier PR #9712 incident. So the remedy's marginal value is over the **cosmetic** half — price that honestly before building anything.\n\n---\n\n## Finding 2 — the cross-reference is what rots, not the sentence\n\nIndependent of finding 1, and cheaper. From PR #10018's H2 sweep: the *\"named in a comment rather than read\"* rationale appears at **4 sites, all inside `scripts/check-cross-package-test-inputs.mjs`** (L141, L238, L327, L393), plus one inverse statement at L386. **3 were still true; 1 was stale — and it had now gone stale twice in eight days** (#9651 retired it once; PR #9826 dropped a second copy; PR #10018 fixed the third).\n\nThe three durable sites all cite **`check-nul-bytes.mjs`**, which is **structurally mention-only** — a gate script no test has a reason to read. The one site that reached for a different example is the one that rotted. They did not survive by being written better; **their example cannot change status.**\n\n### The discipline it yields\n\n> **A rationale may cite a sibling path as an example only when that path is structurally unable to change status.**\n\n`check-nul-bytes.mjs` qualifies. A script under active test does not — and `sync-template-versions.mjs` is precisely that: `packages/create-objectstack/src/template-version-stamps.test.ts:47` builds its path and `:97` `readFileSync`s it.\n\nCheapest form: a line in that file's header, next to the four sites it governs. ⛔ Not a gate — \"is this path structurally unable to change status?\" is a judgement, and a recognizer for it would be narrower than the shapes it judges (#9747's standing family).\n\n---\n\nRefs: PR #10018 / #9977 (both findings, and the honest limit on finding 1's evidence) · PR #9826 / #9763 (both silent auto-merges, and the by-hand remedy) · PR #9712 / #9680 (the earlier fatal instance that made `node --check` routine) · #9651 (the first retirement of the stale clause).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

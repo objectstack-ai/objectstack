@@ -1,0 +1,32 @@
+{
+  "number": 9969,
+  "kind": "issue",
+  "title": "finding: seven better-auth `/admin/` routes refuse platform admins and have no ObjectStack consumer — decide whether they are capability or just vendor surface",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-19T10:45:43Z",
+  "updated_at": "2026-08-24T10:34:10Z",
+  "closed_at": "2026-08-24T10:33:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9969",
+  "body": "Split out of #9652 while implementing its Option-2 fallback. Filed unassigned; observation, not a repro-and-fix.\n\n#9652 measured that better-auth 1.7.1's `admin` plugin cannot be pointed at ObjectStack's platform-admin predicate, so every route it gates refuses platform admins. Its PR re-mounts the two that a `sys_user` action calls (`ban-user`, `unban-user`); #9968 carries the two that need a decision (`impersonate-user`, `set-role`). **These seven are the remainder**, and what separates them is that a repo-wide grep for their paths finds *no ObjectStack consumer at all* — no `type: 'api'` action, no console call, no SDK row that reaches them, no doc that tells a user to call them. They are surface the `rawApp.all(`${basePath}/*`)` catch-all publishes because better-auth registers it.\n\nThe greppable list, so this does not have to be re-derived:\n\n```text\nPOST /api/v1/auth/admin/remove-user\nPOST /api/v1/auth/admin/revoke-user-session\nPOST /api/v1/auth/admin/revoke-user-sessions\nPOST /api/v1/auth/admin/list-user-sessions\nPOST /api/v1/auth/admin/update-user\nGET  /api/v1/auth/admin/list-users\nGET  /api/v1/auth/admin/get-user\n```\n\nAll seven answer a platform admin `403 YOU_ARE_NOT_ALLOWED_TO_*` today, identically to a plain member. They fail closed — this is a broken capability claim, never an escalation.\n\n## The decision\n\nRe-implementing all seven as ObjectStack raw mounts is the largest slice of #9652's Option 2 and buys capability nothing in this repo currently pulls. Against that, they ARE published, ledgered (`BETTER_AUTH_MOUNTED_SURFACE` in `auth-route-ledger.ts`) and reachable by any client that reads the OpenAPI document, so \"advertised but always refuses the only caller entitled to it\" is a declared-≠-enforced claim of its own (Prime Directive #10).\n\n- **A.** Leave them. Record here that the refusal is known and intended pending pull. Zero code; the dogfood sweep's `better-auth-gate` bucket already pins the refusal side, so no silent drift.\n- **B.** Re-implement on demand — whichever one first gets an ObjectStack consumer gets an ObjectStack mount at that moment, using the pattern #9652 established.\n- **C.** Re-implement all seven now for parity with the surface the ledger publishes.\n\nRecommendation: **B**, with **A** as the standing state — startup scope discipline says do not build seven routes nobody calls, and B makes the trigger explicit so the next author does not have to rediscover why they 403. `remove-user` is the one worth watching: it is the closest to a real capability (and it carries the break-glass last-local-credential guard in `auth-manager.ts`'s before-hook, which stays intact precisely because that route is *not* shadowed).\n\nTwo mechanics worth recording for whoever picks this up, both measured in #9652:\n\n1. Shadowing a vendor path with a raw Hono mount **silently detaches every better-auth hook keyed on that path**. `/admin/remove-user` carries the break-glass guard. #9652 extracted that guard into `last-local-credential.ts` so both call sites share one implementation — reuse it rather than reimplementing.\n2. `/admin/create-user` is the ONLY admin endpoint with the header-less-server-call trust shape (it resolves the session optionally and gates only `if (session)`). Every other one declares `use: [adminMiddleware]`, which throws `UNAUTHORIZED` when no session resolves — so the \"call it server-side without headers\" trick that `admin-user-endpoints.ts` uses for create-user **does not generalise** to any of these seven.\n\nParent: #9652."
+}

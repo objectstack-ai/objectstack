@@ -1,0 +1,35 @@
+{
+  "number": 11593,
+  "kind": "pull_request",
+  "title": "docs(spec): NoSQLIndexSchema.unique documents its deliberate scope-vocabulary omission",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T07:14:21Z",
+  "updated_at": "2026-08-24T07:57:02Z",
+  "closed_at": "2026-08-24T07:57:01Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-24T07:57:01Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11593",
+  "body": "Fixes #11215\n\n**Branch decision: (b) — not tenant-aware / descriptor-layer.** Measure-first card; the settling measurement (below) found no consumer that materializes `NoSQLIndexSchema` declared indexes at all, let alone against organization-aware collections, so the surface documents its deliberate omission of the ADR-0120 scope vocabulary instead of adopting it. Held as **draft for the PM's contract review** (clause-② path-limb, `needs:contract-review` hung at claim).\n\n## Measurement map\n\n1. **Premise held at merge base `2dc0a770b6`**: `packages/spec/src/data/driver-nosql.zod.ts:403` was still the bare boolean (`unique: z.boolean().default(false)`), while both sibling surfaces carry the vocabulary — `UniqueScopeSchema` at `packages/spec/src/data/field.zod.ts:476` (used by `FieldSchema.unique`, field.zod.ts:822) and `DeclaredIndexUniqueScopeSchema` at `packages/spec/src/data/object.zod.ts:431` (used by `IndexSchema.unique`, object.zod.ts:483, the #10928 / PR #11213 per-surface message pattern).\n2. **`NoSQLIndexSchema` consumer graph — empty.** Repo-wide grep for `NoSQLIndexSchema` / `NoSQLIndex` hits only spec's own test (`packages/spec/src/data/driver-nosql.test.ts`), spec's generated artifacts, and the generated reference docs. No runtime, kernel, or driver import; it is a leaf schema — no other schema embeds it.\n3. **The whole `driver-nosql.zod.ts` module is descriptor vocabulary with no live consumer**: `NoSQLQuerySchema`, `NoSQLConnectionSchema`, `AggregationPipelineSchema`, `NoSQLDatabaseTypeSchema`, `NoSQLTransactionOptionsSchema` — zero imports outside `packages/spec`.\n4. **`isGlobalUnique` / `isOrganizationUnique` reachability from the NoSQL side — none.** The driver-facing helpers (`packages/spec/src/data/field.zod.ts:490` / `:518`) are consumed by spec itself and `packages/drivers/driver-sql/src/schema-drift.ts:68` only.\n5. **The one NoSQL driver that creates indexes takes the other surface.** driver-mongodb's `syncCollectionSchema` (`packages/drivers/driver-mongodb/src/mongodb-schema.ts:79`, called from `mongodb-driver.ts:592`) materializes the object-level `indexes[]` — the `IndexSchema` shape (`mongodb-schema.ts:54-58`), which already carries the vocabulary — and is explicitly **single-tenant** (settled by #3724; `mongodb-schema.ts:18-35` and `:135-139`): every scope materializes the listed columns verbatim, and no organization key part is injected anywhere on the NoSQL side.\n6. **ADR-0120 mentions NoSQL zero times.** D1's \"both spellings\" are the field-level and declared-index surfaces; `NoSQLIndexSchema` was never in the ADR's scope.\n\nConclusion: the 'organization'/'global' business boundary is stated on the authorable surfaces and resolved into physical key columns **above** this layer — by the time a descriptor of this shape would reach a NoSQL engine, an organization key part (when there is one) is already a listed field. A scope word here would be declarable-but-inert vocabulary (ADR-0078). The asymmetry the card observed is deliberate, not drift — the card's own stated right outcome for this branch.\n\n## Changes\n\n- `packages/spec/src/data/driver-nosql.zod.ts` — docblock + `describe()` on `NoSQLIndexSchema.unique`: states the layer, the measurement, why the vocabulary deliberately does not apply, and the condition under which `UniqueScopeSchema` should be adopted (import, never fork). The shape is untouched — still `z.boolean().default(false)`, so no parse/materialization change (the #9689 parse-idempotency clause is branch-(a) material and does not arise).\n- `content/docs/references/data/driver-nosql.mdx` — regenerated (`gen:docs`).\n- `.changeset/nosql-index-unique-scope-docs.md` — patch on `@objectstack/spec`.\n\n## Verification\n\nAll dispatch-derived gates ran at commit `8db4595ecf` (clean tree, exit codes captured before any pipe; wrapper verdict lines quoted):\n\n- `pnpm --filter @objectstack/spec build` — `os-verify-lock: VERDICT command-exit 0` (runs `gen:schema` + `gen:openapi` + tsup + DTS; the authorable-surface roster is byte-unchanged — the key set did not move).\n- `pnpm --filter @objectstack/spec check:generated` — first run flagged exactly 1 of 14 artifacts stale (`content/docs/references/**`, the expected product of the describe change); `--fix` ran `gen:docs` only; re-verified `VERDICT command-exit 0`. The new describe text is present in the regenerated `driver-nosql.mdx`.\n- `pnpm --filter @objectstack/spec test` — `Test Files 420 passed (420)`, `Tests 11213 passed (11213)`.\n- `pnpm --filter @objectstack/spec typecheck` — `VERDICT command-exit 0`.\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` at `8db4595ecf` derived 33 families; all 33 green. Two (`check:doc-formula-expressions`, `check:doc-security-posture`) first failed on fresh-worktree missing dist (`@objectstack/formula`, `@objectstack/lint`) and went green after `pnpm --filter \"@objectstack/lint...\" build` — unbuilt-dependency artifacts, not this diff.\n- **Declared narrowing (one gate):** standalone `node scripts/check-dev-prereqs.mjs` asserts the *entire workspace* is built and reds in this fresh worktree because 63 of 67 packages have no `dist/` — a build-state precondition CI provisions with a full `pnpm build`, independent of this diff (population: workspace build state; this diff cannot move it). The spec package's own prereq stamp — the one package this diff touches — was refreshed and verified during the spec build (`✓ packages/spec/dist/.build-input-hash`).\n- `node scripts/check-nul-bytes.mjs` — OK (6490 files scanned).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01T9cDbY2NBiVJWYx3BpWfH2)_"
+}

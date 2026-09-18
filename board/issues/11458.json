@@ -1,0 +1,37 @@
+{
+  "number": 11458,
+  "kind": "pull_request",
+  "title": "spec(ui): UserActionsConfigSchema adopts group / hideFields / rowColor (ruled A on objectui#5435)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "protocol:ui",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T20:32:34Z",
+  "updated_at": "2026-08-23T21:17:56Z",
+  "closed_at": "2026-08-23T21:17:55Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-23T21:17:55Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11458",
+  "body": "Fixes #11195\n\n**Held for contract review (clause ②)** — accept-set widening on a contract schema; `needs:contract-review` hangs on the card. Draft on purpose; the landing decision is the review's.\n\n## What\n\n`UserActionsConfigSchema` (`packages/spec/src/ui/view.zod.ts:853`, a `strictObject`) gains three boolean keys, implementing the ruling recorded on objectui#5435 (maintainer, 2026-08-22, decision-inbox digest, verbatim: 「接受所有」 — Option A):\n\n- `group` — default **true**\n- `hideFields` — default **false**\n- `rowColor` — default **false**\n\nobjectui's `normalize-list-view.ts` fold maps legacy `showGroup` / `showHideFields` / `showColor` onto exactly these keys, and `ListView.tsx` honours all three — so before this change the fold's own output was rejected by name at the save gate. The fold-map's own comment calls the three \"pending promotion into `UserActionsConfigSchema` upstream\"; this is that promotion, spelled exactly as the fold emits it. No shape or naming fork was forced — the stop-and-report clause on the card was not triggered.\n\n## Defaults asymmetry is load-bearing\n\nCopied from the renderer's reads, not chosen here: `ListView.tsx` computes `showGroup` as `ua?.group !== false` (absent = shown) but `showHideFields` / `showColor` as `=== true` (absent = hidden). Pinned in `view.test.ts` with a dedicated test naming those reads; normalising the three to one default would silently flip a toolbar affordance on every view that never wrote the key.\n\n## The name collisions, and what the batch20 guard reads on the pair\n\nBoth pre-existing spellings stay untouched; each pair is toggle-vs-config, documented on the describes and in the schema docblock:\n\n- `userActions.rowColor` (boolean toggle, NEW) vs the list view's own `rowColor` (`RowColorConfigSchema` — the colour rules the toggle exposes) and the component-registry `rowColor` (config, `component.zod.ts`).\n- `userActions.hideFields` (boolean toggle, NEW) vs the record-details component's `hideFields` (`string[]` of field names to omit, `component.zod.ts`).\n\n`object-strictness-batch20.test.ts` readings on the pair, post-adoption:\n\n- The prose vocabulary enumeration is updated (it had gone false).\n- The no-overlap claim is now **re-checked mechanically, not assumed**: a new test reads `UserActionsConfigSchema.shape` (11 keys), asserts the three adopted keys are present, asserts zero overlap with the object block's five verbs (`create`/`import`/`edit`/`delete`/`exportCsv`), and asserts the object block still **refuses `group`/`hideFields`/`rowColor` by name** — the operative half of \"disjoint\": the wrong-layer write stays a loud rejection, never a silent second meaning.\n- The existing control still holds: object-level `userActions: { sort: false }` still rejects naming VIEW.\n\n## Acceptance criterion (executed on the built dist at 51de14c509)\n\n```\nListViewSchema.safeParse({name:'my_view',label:'My View',columns:[{field:'name'}],\n  userActions:{group:false,hideFields:true,rowColor:true}}).success === true   ✅ observed: true\nobject-block control rejectOnObject({userActions:{sort:false}}) red, names VIEW ✅ observed: red + VIEW\nper-key probes group/hideFields/rowColor through ListViewSchema                 ✅ all accepted, zero unrecognized_keys\nobject-side probes group/hideFields/rowColor                                    ✅ all refused by name\ndefaults on parse of empty object: group=true, hideFields=false, rowColor=false ✅\n```\n\n## Bounded in-place fix (declared)\n\n`packages/spec/src/data/object.zod.ts` guidance comment (the wrong-layer guard's own rationale, lines 1726-1731): its enumeration of the view vocabulary went stale the same way the batch20 comment did — same defect class as pin 1 of the card, comment-only, mechanical (the shape is the evidence), no gate family added. Claim-surface supplement posted on the issue in the same round. No guidance/alias *entries* were added for the three new keys on the object block — that would be a behavioural extension outside this card; flagged in the report instead.\n\n## Verification (all at 51de14c509, clean tree; exit codes captured before any pipe)\n\n- `pnpm --filter @objectstack/spec build` — VERDICT command-exit 0\n- `pnpm --filter @objectstack/spec test` — 419 files / 11157 tests passed, VERDICT command-exit 0\n- `pnpm --filter @objectstack/spec typecheck` — VERDICT command-exit 0 (incl. `check:test-typecheck` OK line)\n- `pnpm --filter @objectstack/spec check:generated` — 1 of 14 stale (`check:docs`); regenerated via `--fix`; re-run green. Build had already refreshed `authorable-surface/ui.json` + `authorable-defaults/ui.json`; generated diff carries exactly the three keys + defaults.\n- Derived families (`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`, changeset from merge base 5a916c4d4): 26 derived gate commands run locally, all exit 0 — nul-bytes, changeset-gate-self-tests, objectui-changeset, adr-0087-registration, merge-driver, doc-anchors, doc-authoring, docs-audit-scope, docs-redirects, published-readme-links, quick-reference-counts, role-word, published-files, slot-lookup, spec-parsed-alias, test-source-alias, type-source-resolution, cross-package-test-inputs, engine-double-contract, where-matcher, spec empty-state / liveness / strictness-ledger / variant-docs, lint doc-formula-expressions / doc-security-posture.\n- **Declared narrowing** — `check:type-check-debt --re-measure` (needs the full workspace build closure; exceeds the local foreground cap cold) was NOT run locally; CI runs it. Receipt: population = the 26 ledger entries inside `scripts/check-type-check-coverage.mjs` itself; `@objectstack/spec` is not among them (it is COVERED via its own `typecheck`, run green above); all TS changes in this diff live in `packages/spec`; ledger packages see the change only through spec's built d.ts, where the delta is purely additive, and `UserActionsConfig` is referenced by **0** files outside `packages/spec` (repo grep over ts/tsx/mts excluding node_modules/dist). An additive extension of a type no ledger entry names cannot raise any entry's tsc error count.\n\n## Changeset\n\n`minor` for `@objectstack/spec` (accept-set widening; not breaking, so no ADR-0087 disposition marker is required and `check:adr-0087-registration` passes).\n\n## Downstream\n\nUnblocks objectui#5435 (fold/renderer test alignment — their seat's follow-up; that card stays open and is additionally held on objectui's spec pin bump, currently at 17.1.0 per objectui#5716). No objectui files touched here.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01T9cDbY2NBiVJWYx3BpWfH2)_"
+}

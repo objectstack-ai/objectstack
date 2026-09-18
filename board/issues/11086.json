@@ -1,0 +1,34 @@
+{
+  "number": 11086,
+  "kind": "issue",
+  "title": "Whole-text restructuring round of the pm-dispatch protocol face — maintainer-ordered, fires when the skills-lane backlog drains",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-22T16:14:35Z",
+  "updated_at": "2026-08-24T07:19:22Z",
+  "closed_at": "2026-08-24T07:18:17Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11086",
+  "body": "Maintainer ruling, 2026-08-22, live PM chat with the skills seat (session `session_01MsbKEG4LtERSLaDrbehM3e`), verbatim: 「所有的 skills 任务处理完之后，再来一轮全文重构」.\n\nContext: the maintainer asked whether per-card edits to the protocol get holistic analysis; the seat's honest answer named the real gap — the ratchet caps VOLUME but nothing periodically audits CONCEPTUAL drift across the whole document as per-card edits accumulate. This card is the ordered remedy.\n\nRestart-when: the skills lane has zero open `pm:queue` cards (other than this one) and zero `pm:dispatched` in flight\n\n## Scope (the round, not the edits — the edits get their own ruling)\n\n1. **Full-text analysis** of the protocol face: `.claude/skills/pm-dispatch/SKILL.md` + its `references/**` + `.claude/agents/os-dev.md` — read as one document set, in the state the drained backlog leaves them.\n2. Produce a **net-reduction restructuring proposal** for the maintainer: redundancies (the same rule stated in two places), contradictions or near-contradictions left by accumulated per-card edits, prose that should sink from SKILL.md to references (principle-vs-mechanism layering), retired concepts still carrying words, and any clause whose exceptions have drifted from its statement.\n3. The proposal goes to the maintainer as a decision digest BEFORE any edit — ⛔ the restructuring itself is not pre-authorized by this card; only the analysis round is. Implementation lands as governed draft PR(s) at `claude-fable-5` (clause ①), with the ratchet ceiling LOWERED to the post-shrink count in the same change (lowering is always legal).\n\n## Constraints carried from standing rulings\n\n- 「现有的项目经理skills 应该大幅简化，只需要说原则，不需要写细节」 (2026-08-12) is the direction of travel; details live in references, facts in the fact tables, enforcement in gates.\n- 密度优化仅随净减内容的 PR 顺带 (2026-08-17) — this round IS the commissioned net-reduction, so the density work rides it legitimately.\n- Every rule kept must keep its date + verbatim ruling anchors; ⛔ restructuring never rewrites a ruling's words.\n\nFiled by the skills seat under the lane self-triage exception; `pm:on-hold` until the restart criterion fires (evaluated by the standing daily executable-criteria scan, or by this seat at any round boundary where the queue reads empty)."
+}

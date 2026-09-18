@@ -1,0 +1,33 @@
+{
+  "number": 11444,
+  "kind": "pull_request",
+  "title": "docs(ci): record the cited-example discipline the mention-shape rationales rely on",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T19:42:51Z",
+  "updated_at": "2026-08-23T20:12:52Z",
+  "closed_at": "2026-08-23T20:12:50Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-23T20:12:50Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11444",
+  "body": "Part of #10019 — finding 2 only. Finding 1 is answered with a measurement and a\nrecommendation **not** to build, reported on the card; nothing here closes it.\n\n## Finding 1 — premise reconstructed, mechanism CONFIRMED, tool DECLINED\n\nPR #9826's merge geometry, reconstructed (merge `1e60ca74`, parents\n`c74b2b9aa` / `56656aa1aa`, unique merge base `9ff11921a`, replayed with\n`git merge-file`):\n\n| region | marker? | outcome |\n|---|---|---|\n| `create-objectstack` rationale + globs | **MARKED** — lines **375–424** | corrected by the resolver |\n| `@objectstack/spec` `serve.ts` glob + 11-line rationale, line **141** | **none** | stale clause survived |\n| `turbo.json` (changed by BOTH sides) | **none** — 0 conflicts | no stages existed to read |\n\nExactly **one** marked region in the file. The spec clause sat **234 lines\noutside** it, and the resolver's edits fall **entirely inside** lines 372–424 —\nthe same citation, corrected in the marked copy and untouched in the unmarked\none. The card's falsifier (\"if the spec copy was inside a marked region\") is\nrefuted.\n\n**Two corrections to the card, both measured:**\n\n1. **The \"fatal\" instance is misattributed.** `census` appears **0 times** in\n   all four merge stages of `check-cross-package-test-inputs.mjs`, and all four\n   pass `node --check`. That defect belongs to PR #9712 and a different file\n   (`check-engine-double-contract.mjs`). #9826's resolver *swept for it by name*\n   and reported `duplicate top-level bindings: (none)`. So the card's \"two\n   instances in one file, one fatal\" is one cosmetic instance plus `turbo.json`.\n\n2. **The unmarked region DID enter the resolver's view.** They tabulated all\n   three regions with a `marker?` column, ran `node --check`, swept duplicate\n   bindings, diffed `turbo.json` against both parents by key, and **filed the\n   stale clause as #9977 deliberately** under the PM's ruling not to fix\n   inherited text. The clause survived a **policy** decision, not a detection\n   failure.\n\n⇒ A `scripts/pm/` helper emitting the unmarked-region list would have reproduced\nthe table the resolver already wrote by hand, and changed nothing. With\n`node --check` covering the fatal half for free, the residual value is over a\ncosmetic half that was **already detected**. Recommending the card be closed\nwithout building it.\n\n## Finding 2 — the specific defect is already discharged; the discipline is not\n\nThe card's stale clause was fixed by PR #10018: site `:236` no longer cites\n`sync-template-versions.mjs`. Re-derived population on `main` (the card's\n`L141/238/327/393` all moved; the file grew 1398 → 2581 lines):\n\n| site | entry | cites as example | safe? |\n|---|---|---|---|\n| 236 | `@objectstack/spec` | `check-nul-bytes.mjs` / realtime page | yes |\n| 349 | `@objectstack/cli` | — (defines the trade) | n/a |\n| 373 | `@objectstack/cli` | `check-nul-bytes.mjs` | yes |\n| 395 | `@objectstack/cli` | `check-nul-bytes.mjs` | yes |\n| **549** | **`@objectstack/plugin-auth`** | **`serve.ts` + `realtime-protocol.mdx`** | **no** |\n| 606 | `@objectstack/dogfood` | `check-nul-bytes.mjs` | yes |\n| 692 | `create-objectstack` | `check-nul-bytes.mjs` | yes |\n\nThe card's thesis reproduces exactly — and **recurs**: five durable sites cite\n`check-nul-bytes.mjs`; the one site reaching elsewhere is the exposed one. Site\n549 is a *new* instance that post-dates the card. Both paths it cites are\ndeclared mention-only **in this same file**, so both can move exactly as\n`sync-template-versions.mjs` did. Co-location is demonstrably not protection —\nthe card's original two copies were also in this one file.\n\nThis PR records the discipline in the table's own JSDoc and re-points site 549\nat the invariant example, matching the `@objectstack/dogfood` form verbatim.\nPer the card, **no gate** — \"structurally unable to change status\" is a\njudgement.\n\nThe card's counter-example claim was checked: `template-version-stamps.test.ts:47`\nstill reads `path.join(repoRoot, 'scripts', 'sync-template-versions.mjs')`\nverbatim, and the file loads it at runtime. (`:97` has drifted into a doc\ncomment — itself another cross-reference rotting.)\n\n## Verification — union re-run on `079b17ed`\n\n```\ncross-package-selftest   exit=0  All 104 self-test cases passed.\ncross-package-verify     exit=0  OK: 14 package(s) read outside themselves, all declared,\n                                 and turbo.json hashes every declared glob.\nentry-guard-selftest     exit=0  ✓ 52 cases pass\nentry-guard              exit=0  ✓ 138 scripts/ file(s)\nparse-guard-selftest     exit=0  ✓ 46 cases pass\nparse-guard              exit=0\nnul-bytes-selftest       exit=0  ✓ 75 assertions\nnul-bytes                exit=0  scanned 6418 text file(s); no raw ASCII control bytes\n```\n\nEvery exit code captured before any pipe (`cmd > file 2>&1; ex=$?`). Families\nderived with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`\nagainst the real change set, not recalled.\n\n**Narrowing declared, and measured rather than asserted:** `check-ci-filter-parity`\ncould not run — it imports `yaml` and this container has no `node_modules`\nanywhere. It reads the exported `CROSS_PACKAGE_TEST_INPUTS`, so I proved its\ninput is untouched instead: the table imported from both revisions is\n**byte-identical** (`JSON.stringify` 4856 bytes both ways, deep-equal; 14\npackages, 89 globs), and all **23** changed lines are comment lines with **zero**\nnon-comment changes. Its verdict cannot move. CI runs it regardless.\n\nNo changeset: a CI gate script's comments publish nothing.\n\n_Generated by [Claude Code](https://claude.ai/code/session_015ahemw8RcTgqtxrj15PEZx)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015ahemw8RcTgqtxrj15PEZx)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 11625,
+  "kind": "pull_request",
+  "title": "fix(services,metadata): bind the row the ingress resolved, not the row the payload names",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T09:46:57Z",
+  "updated_at": "2026-08-24T10:11:50Z",
+  "closed_at": "2026-08-24T10:11:49Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": "2026-08-24T10:11:49Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11625",
+  "body": "Fixes #11231\n\nTwo ingresses resolved an authoritative row id and then folded it into the write\npayload with the **losing** spread order — `{ id, ...data }` — so a caller-supplied\n`data.id` spread over the id the ingress had just resolved and silently retargeted\nthe write. Both now spell it `{ ...data, id }`, the convention already documented at\nthe repo's other two ingresses: `rest-server.ts`'s batch arm (\"the operation's id\nAFTER the spread, so it wins\") and `protocol.updateData` (#6479).\n\n| site | id source | change |\n|---|---|---|\n| `packages/services/service-settings/src/settings-service-plugin.ts` | caller's `where.id` | `eng.update(objectName, { ...data, id }, driverOpts)` |\n| `packages/metadata/src/loaders/database-loader.ts` | the `id` parameter (`existing.id`) | `this.engine.update(table, { ...data, id })` |\n\nNeither site can be caught downstream: both pass **no `where`** to the engine, so the\npayload is the only id the engine ever sees, and the conflicting-id refusal\n(`UPDATE_ID_MISMATCH`, 400 — #11142/#11230) needs two disagreeing declarations before\nit can fire. The fold is the entire trust boundary at both sites.\n\n**No wrong write was reachable today** — both sites' callers build fresh field\nliterals and never put an `id` in `data`. This is hardening the fragile pattern the\ncard filed, one refactor (a caller handing back a row copy; rows carry `id`) from the\n#6479 shape.\n\n## Premise re-measured before writing code\n\nBoth sites still carried `{ id, ...data }` on `origin/main` at `2cf5a96cc7` —\nmatched **lines** read, not hit counts:\n\n```\npackages/services/service-settings/src/settings-service-plugin.ts:469:        return eng.update(objectName, { id, ...data }, driverOpts);\npackages/metadata/src/loaders/database-loader.ts:276:      return this.engine.update(table, { id, ...data });\n```\n\nSearches for `11231` across issues **and** PRs (title and body) returned 0 — no\nsplit-out or sibling card had already done this.\n\n## The pins assert a CONFLICT, and were measured failing first\n\nEach pin hands the ingress a payload whose `id` names a **different** row than the one\nthe ingress resolved, and asserts the resolved row is still the row bound. A pin\nexercising a payload *without* an `id` passes on both spellings and measures nothing —\nthat false green is the specific thing these are shaped to avoid.\n\nThe doubles do not re-derive which row a call binds: their `update` asks\n`assertEngineUpdateDispatch`, the predicate `ObjectQL.update` itself dispatches on, so\nthey cannot be kinder or stricter than a running server.\n\nAgainst the **unfixed** sources, both pins fail with the payload-named row:\n\n```\nFAIL src/settings-engine-id-fold-wins.test.ts > binds the row `where.id` resolved, not the row the payload claims\nAssertionError: expected { kind: 'by-id', …(1) } to deeply equal { kind: 'by-id', …(1) }\n-   \"id\": \"sys_setting_resolved\",\n+   \"id\": \"sys_setting_claimed\",\n   Tests  3 failed | 1 passed (4)      <- the 1 pass is the multi branch, untouched by this change\n\nFAIL src/loaders/database-loader-update-id-fold-wins.test.ts > binds the row named by the id parameter…\nAssertionError: expected { kind: 'by-id', id: 'meta_claimed' } to deeply equal { kind: 'by-id', id: 'meta_resolved' }\n   Tests  3 failed (3)\n```\n\nRe-confirmed as a trap-guarded ablation after the fix landed (both fix lines reverted\non disk, anchored `grep` in both directions proving the mutation reached disk):\n`SITE1_EXIT=1` (3 failed | 1 passed), `SITE2_EXIT=1` (3 failed). Both files restored\nbyte-identically — `git hash-object` equal to the `HEAD` blob, non-empty, `git status`\nclean. The pins resolve the SUT through relative imports from `src`, never `dist`, so\nno rebuild sits between the mutation and the result — proven by the mutation flipping\nthe outcome with no build step.\n\n## Verification — all at the pushed commit `8e8dab829c`\n\n- `@objectstack/service-settings` suite: **29 files, 514 tests passed**; `tsc --noEmit` clean.\n- `@objectstack/metadata` suite: **33 files, 618 tests passed**.\n- 18 gate families green (exit code captured before any pipe), including the two this\n  change kind moves: `check:engine-double-contract` (*OK — 397 pinned, 133 in the DEBT\n  ledger, 2 exempt*) and `check:where-matcher` (*292 matchers, 0 silently-wrong… none\n  new*), plus `check:type-check-coverage`, `check:test-source-alias`,\n  `check:cross-package-test-inputs`, `check:published-files`, `check:nul-bytes`, the\n  four changeset gates, and `check-ci-filter-parity`.\n\n### Two things this PR deliberately does not do\n\n1. **The new doubles sit outside `check:engine-double-contract`'s scan scope.**\n   Discovery needs the verb plus ≥2 engine siblings; these declare only `update`. The\n   gate is green but does not name them — measured, not assumed (379 pinned rows listed\n   exhaustively, neither file among them). They honour the contract by construction\n   anyway, calling `assertEngineUpdateDispatch` directly. Bringing them under the\n   ratchet was tried: adding `find`/`insert` siblings makes the gate discover and pin\n   both, and it then requires a row in `scripts/engine-double-contract.pinned.json`\n   (`--write`), which is outside this card's declared file surface. Reverted rather than\n   widened unilaterally — one command to redo if wanted.\n2. **`@objectstack/metadata` carries 89 pre-existing `tsc --noEmit` errors** (mostly\n   extensionless relative imports in existing test files). Nothing in CI invokes bare\n   `tsc` there — the package has no `typecheck` script and its build is `tsup`. My new\n   test contributes **0** of them: it was 90 with the neighbouring file's extensionless\n   spelling copied, and 89 once the import was corrected to `./database-loader.js`. Not\n   touched further; it is not this card's surface.\n\n`check:type-check-debt --re-measure` was **not** run locally — it needs the whole\nworkspace closure built, which does not fit the foreground budget. Declared narrowing;\nCI runs the farm regardless.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01APWX2AwT3a4xDcjPCe8bk4)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01APWX2AwT3a4xDcjPCe8bk4)_"
+}

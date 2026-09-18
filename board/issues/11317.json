@@ -1,0 +1,35 @@
+{
+  "number": 11317,
+  "kind": "issue",
+  "title": "packages/cli e2e tests that spawn `bin/run.js` as \"the SHIPPED entrypoint\" never reach `dist/` — oclif's ts-path reroutes them to `src/` under NODE_ENV=test|development",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T10:44:10Z",
+  "updated_at": "2026-08-24T13:31:48Z",
+  "closed_at": "2026-08-24T13:31:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11317",
+  "body": "Found while diagnosing the CI red on #11268 (issue #11113). Unassigned, filed for triage rather than fixed there — #11268's surface is ruled closed.\n\n## The claim three files make, and the measurement that contradicts it\n\n`packages/cli/test/serve-mcp-stdio-answers.e2e.test.ts:53`, `serve-mcp-capability-collision.e2e.test.ts:54` and `serve-stdio-stdout-purity.e2e.test.ts:50` each carry the identical comment:\n\n```ts\n/** `bin/run.js` — the SHIPPED entrypoint, i.e. the one the card's repro names. */\nconst CLI = resolve(HERE, '../bin/run.js');\n```\n\nThey do spawn that stub. They do not reach `packages/cli/dist`.\n\nTwo facts compose:\n\n1. **`packages/cli/dist` is never built for these tests.** `turbo.json` declares `\"@objectstack/cli#test\": { \"dependsOn\": [\"^build\"] }` — dependencies only, not the package's own build. Measured: `pnpm exec turbo run test --filter=@objectstack/cli --dry=json` yields 58 tasks, 57 of them `#build`, and `@objectstack/cli#test`'s resolved dependency list does **not** contain `@objectstack/cli#build`. `invocation-loudness.e2e.test.ts:34-35` already states this fact in prose.\n\n2. **All three spawns set `NODE_ENV: 'development'` in the child env** (`:115`, `:119`, `:109` respectively — for the `--dev` admin seed). `@oclif/core@4.13.3`'s `tsPath()` skips the TypeScript path lookup only when `isProd()`, and `lib/util/util.js:66` defines that as:\n\n```js\nfunction isProd() {\n    return ['development', 'test'].includes(process.env.NODE_ENV ?? '');\n}\n```\n\nSo under `development` (or vitest's inherited `test`) oclif rewrites the command target from the declared `./dist/commands` to `./src/commands` and auto-transpiles. The compiled artifact is never consulted.\n\nMeasured directly, `packages/cli/dist` absent:\n\n```\n$ env -u NODE_ENV node packages/cli/bin/run.js serve …\n ›   Error: command serve not found\n\n$ NODE_ENV=production node packages/cli/bin/run.js serve …\n ›   Error: command serve not found\n\n$ NODE_ENV=test node packages/cli/bin/run.js serve …\n(node:22544) [MODULE_NOT_FOUND] Warning: ModuleLoadError\ntask: findCommand (compile)\nmessage: … import() failed to load …/packages/cli/src/commands/compile.ts …\n\n$ NODE_ENV=development node packages/cli/bin/run.js serve …\n(same — resolution proceeds from src/)\n```\n\nThe `test`/`development` legs get past command resolution and into `src/`; unset and `production` do not.\n\n## Why it matters\n\nThree flavours of loss, none of them loud:\n\n- The stated intent — exercise the artifact users install — is not met, and the comment asserting it is currently false. A `tsc` output difference (emit, `exports` resolution, a `dist`-only path bug of the #10111 kind) is invisible to them.\n- `packages/cli/vitest.config.ts`'s cost header reasons about \"swapping the spawns to the built entry\" as an unrealised speed lever, and quotes `node bin/run.js --version 2.9-3.2s` against `tsx bin/run-dev.js --version 6.5-6.8s`. These files already spell `bin/run.js` and do not get that 2.9s path — they pay the transpile cost anyway. The header's measurement stands; its framing of these files does not.\n- Anyone reading these three as the pattern for \"test the built CLI\" copies a shape that silently does not.\n\n## Not the same thing as #11267\n\n#11267 is the inherited `TEST=true` making better-auth skip origin checks. This is oclif rerouting command *resolution* to source. Same family (a spawned child's env quietly changing what is under test), different mechanism, different remedy.\n\n## Shape of a fix, not prescribed\n\nEither the three files stop claiming the built entry (spawn `bin/run-dev.js` like the other ~20 e2e files here, and delete the comment), or they genuinely get one (declare the build dependency and stop forcing a ts-path-enabling `NODE_ENV` — which means finding another way to reach the `--dev` admin seed, since that is why they set `development`). The first is honest and cheap; the second is what the comment currently promises. Whoever takes it should also decide whether `packages/cli` wants a lint rule making \"spawns `bin/run.js`\" and \"sets a ts-path-enabling `NODE_ENV`\" mutually exclusive, since the combination is silently self-cancelling.\n\n## Related\n\n- #11268 / #11113 — where this was found. That PR's pin is currently the only file in `packages/cli` that genuinely consumes `dist/`, because it is the only one that spawns with `NODE_ENV` unset — which is exactly the value that disables the reroute.\n- #11267 — sibling env-leak false-green in the same suite.\n- #10111 — the card that added `invocation-loudness.e2e.test.ts` and the `dist/index.js` diagnosability work.\n\nEvery line and path above was re-derived in a dedicated worktree at `adb1b9ea8c`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019siH5jDmk5hrayvfyojUqR)_"
+}

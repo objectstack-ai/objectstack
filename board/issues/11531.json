@@ -1,0 +1,34 @@
+{
+  "number": 11531,
+  "kind": "pull_request",
+  "title": "docs(spec): front-door and branded-types examples compile against the real exports map (+os:check markers)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T02:29:35Z",
+  "updated_at": "2026-08-24T03:31:25Z",
+  "closed_at": "2026-08-24T03:31:23Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-24T03:31:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11531",
+  "body": "Fixes #11436\n\n**Status:** DRAFT — clause-② path limb (diff lives under `packages/spec/src/**`,\nsubstantively no accept/reject or export-surface change). `needs:contract-review`\nis on the card; this PR stays draft for the PM's review, per the dispatch\ncontract.\n\n## Two defect classes\n\n1. **`packages/spec/src/index.ts` — the front door's three import-style\n   blocks.** Style 1 taught a root namespace-import style\n   (`import { Data, UI, System, Auth, AI, API } from '@objectstack/spec'`) the\n   root has never exported — the file's own preamble already conceded as much.\n   Styles 2–3 both named `@objectstack/spec/auth`, a subpath the `exports` map\n   has never declared (the real one is `@objectstack/spec/identity`).\n2. **`packages/spec/src/shared/branded-types.zod.ts:14`** — named\n   `ObjectNameSchema` / `FieldNameSchema` from the package root. Both symbols\n   exist, but resolve from `@objectstack/spec/shared`, never the root.\n\n## What each block teaches now\n\nMeasured against the package's real `exports` map (`packages/spec/package.json`)\nand its built declarations — no new export, no widened surface, docblocks only:\n\n- **Style 1 — Root-Level Factory Imports** *(reframed, not dropped)*. The root\n  genuinely does export a curated set of authoring `defineX` factories\n  (`defineStack`, `defineView`, `defineApp`, `defineFlow`, `defineAgent`,\n  `defineTool`, `defineSkill`, …) for direct top-level use, even though it\n  exports no type namespaces. The block now imports `defineSkill` from the\n  root and calls it with a real, compiling config — teaching the true\n  root-level surface instead of a fabricated one.\n- **Style 2 — Namespace Imports via Subpath**: `import * as Identity from\n  '@objectstack/spec/identity'` replaces the `/auth` import; `Auth.User` →\n  `Identity.User`.\n- **Style 3 — Direct Subpath Imports**: `import { User } from\n  '@objectstack/spec/identity'` replaces `import { User, Session } from\n  '@objectstack/spec/auth'`. `Session` is dropped rather than mis-sourced —\n  the bare `Session` type is deliberately not declared in `identity` (see the\n  comment at `identity.zod.ts:164`); the wire shape lives in\n  `@objectstack/spec/api` and pulling in a third subpath for one name did not\n  earn its place in an already-two-subpath example.\n- Both `User` literals gained the schema's two required timestamp fields\n  (`createdAt`, `updatedAt`) — present in the type, silently never checked\n  before because the broken import made every downstream usage unreachable to\n  `tsc`.\n- **`branded-types.zod.ts`**: `@objectstack/spec` → `@objectstack/spec/shared`.\n  No other change.\n\n### Front-door docs-shape decision\n\nThe card flagged this as worth deciding rather than guessing: whether\n`index.ts`'s header should keep documenting a namespace-import style at all.\nWent with the measurement-driven default stated in the dispatch — but chose\n**\"truthfully reframe\" over \"drop\"** for Style 1, because the root really does\nexport something meaningful at that path (the `defineX` factories), and\ndropping it down to two styles would have made the header thinner without\nmaking it more honest. The header's opening prose was rewritten to state\nplainly what the root does and does not export, rather than leaving the old\n\"this package does NOT export types at the root level\" sentence to silently\ndisagree with a fixed Style 1 block the way it disagreed with the broken one.\n\nVerified at `41ea937bc7` (this PR's head commit).\n\n## Gate count\n\n`pnpm --filter @objectstack/spec check:skill-examples` — spec-source surface\n**6 → 10** marked blocks (4 new: 3 in `index.ts`, 1 in `branded-types.zod.ts`),\nmatching the card's acceptance count exactly (the reframed Style 1 counts as\nthe 4th new block, same as a literal one-for-one repair would have).\n\n## Verification\n\n- `pnpm --filter @objectstack/spec build`\n- `pnpm --filter @objectstack/spec check:skill-examples` — green, `10` marked\n  spec-source block(s) (was 6), `257 prose examples type-check across 3\n  surface(s)` overall.\n- **Reverse verification**: added the `os:check` marker to all four blocks\n  against the OLD (broken) text first. Gate went red with exactly the card's\n  diagnostics — TS2305 on `Data`/`UI`/`System`/`Auth`/`AI`/`API`, TS2307 on\n  `@objectstack/spec/auth` (×2), TS2305 on `ObjectNameSchema`/`FieldNameSchema`.\n  Rewrote to the real exports/declarations in place (still committed as the\n  repair, no separate revert needed since the final state is the marked+fixed\n  text) — gate went green.\n- `pnpm --filter @objectstack/spec typecheck` — green (`tsc --noEmit` +\n  `check:scripts-typecheck` + `check:test-typecheck`, test-layer debt ledger\n  unchanged).\n- `pnpm --filter @objectstack/spec test` — green: `Test Files 420 passed\n  (420)`, `Tests 11204 passed (11204)`.\n- `pnpm --filter @objectstack/spec check:generated` — 1 artifact proved stale\n  (`check:docs`, because the fixed `@example` in `branded-types.zod.ts` feeds\n  the generated reference page) → `pnpm --filter @objectstack/spec gen:docs`,\n  re-ran clean (14/14). Regen diff audited: exactly the one-line specifier fix\n  propagated into `content/docs/references/shared/branded-types.mdx`, nothing\n  else moved.\n- Targeted ESLint (`index.ts`, `branded-types.zod.ts`) — clean.\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` derived\n  27 matched local gate families (+5 changeset-triggered once the changeset was\n  added) for this diff; all ran green except `node scripts/check-dev-prereqs.mjs`,\n  which failed on unrelated packages' missing `dist/` (this worktree never ran a\n  full `pnpm build`) — an environment precondition, not a regression from this\n  diff (spec's own `dist` is fresh and green everywhere else).\n- Changeset added: `.changeset/front-door-examples-compile.md` (patch,\n  `@objectstack/spec`).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01T9cDbY2NBiVJWYx3BpWfH2)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 11580,
+  "kind": "issue",
+  "title": "MCP stdio transport pins its localization to the manifest defaults — the settings read happens in `start()`, inside the pre-bind window under every composition order",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T04:17:55Z",
+  "updated_at": "2026-08-24T12:52:24Z",
+  "closed_at": "2026-08-24T12:52:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11580",
+  "body": "Found by the step-1 measurement of #11045 (the settings bind-window gate). Filed per-plugin rather than fixed there, per that card's ruling.\n\nThis one is **not** the #10250 defect wearing a different hat: no dependency declaration can repair it.\n\n## What happens\n\n`packages/mcp/src/plugin.ts:301`, inside `MCPServerPlugin.start()` on the stdio auto-start path (`OS_MCP_STDIO_ENABLED` / `autoStart`):\n\n```ts\nlet settingsService: unknown;\ntry {\n  settingsService = ctx.getService('settings');\n} catch {\n  settingsService = undefined;\n}\nconst localization: EntryLocalization = await resolveLocalizationContext({\n  ql: scopedQl, settings: settingsService, tenantId: initial.tenantId, userId: initial.userId,\n});\n```\n\nThe handle is acquired **and consumed** during `start()`. `SettingsServicePlugin` binds its data engine from its own `start()`-registered `kernel:ready` hook (`settings-service-plugin.ts:153`), which is strictly after *every* plugin's `start()`. So this read is inside the pre-bind window under every composition order — being started after the settings plugin does not help, and `optionalDependencies: ['com.objectstack.service.settings']` would not move it.\n\n## Consequence\n\n`resolveLocalizationContext` calls `settings.getMany('localization', ['timezone','locale','currency'])` (`packages/core/src/security/resolve-authz-context.ts:757`). In the window that resolves from the empty in-memory fallback plus the manifest defaults with `source: 'default'` — it does **not** throw, so `failed` stays false and the direct `sys_setting` `$in` fallback below it never runs. The declared defaults are non-empty, so the function returns `{ timezone: 'UTC', locale: 'en-US' }` and reports success.\n\nThat value is then held for the life of the transport by design (#7279: \"resolved ONCE for the life of the transport … the key's tenant cannot change mid-session\"). A long-lived stdio MCP server therefore serves every call with `UTC` / `en-US` on a workspace whose persisted `localization` settings say otherwise, and never self-corrects. `SettingsService.reportPreBindRead` (#10250) does emit one warn line for the `localization` namespace at boot, which is the only symptom today.\n\n## Repair — one of\n\n1. Move the localization hoist out of `start()` into a `kernel:bootstrapped` hook. That is the earliest phase after the bind, and the one `reportPreBindRead`'s own remedy text names. The transport would need to either start from that hook too, or take the localization lazily.\n2. Make `localization` lazy: resolve it on first use and memoize, instead of eagerly at transport construction. This keeps #7279's property (not re-resolved per call) while moving the read out of the window.\n\nOption 2 looks smaller and keeps the fail-closed identity probe where it is; whoever owns `packages/mcp` should pick.\n\n⚠️ Do **not** repair this by adding `optionalDependencies: ['com.objectstack.service.settings']`. It would look like the #10250 fix and change nothing — `packages/mcp` is already ordered after the settings plugin in the `serve` composition (measured with the real `resolvePluginOrder`) and the read is still pre-bind.\n\nVerification: after the fix, `pnpm check:settings-bind-window` must go green with the `com.objectstack.mcp` entry **deleted** from `KNOWN_PRE_BIND_READS` in `scripts/check-settings-bind-window.mjs` — that ledger is shrink-only and errors on a stale entry, so the deletion is part of the fix.\n\nSuggested lane: whoever owns `packages/mcp`.\n"
+}

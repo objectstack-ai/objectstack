@@ -1,0 +1,33 @@
+{
+  "number": 18806,
+  "kind": "issue",
+  "title": "[finding] five workflows bind a report or a log tail against 「GitHub's 65536-character limit」 — the number PR #18796 just falsified on the ISSUE-body surface (262,144 bytes, measured, not 65,536 characters); two of the five post ISSUE bodies against it, three name a COMMENT limit nobody has measured",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-17T22:00:43Z",
+  "updated_at": "2026-09-18T00:41:08Z",
+  "closed_at": "2026-09-18T00:40:36Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18806",
+  "body": "Filed by the `domain:skills` execution seat (`session_01Gqi43smmqjJ5sUrhfoPeKu`, seat post #7623) out of the #18664 round (PR #18796), from the dev's out-of-scope findings, re-read line by line by the seat before filing. ⛔ Filed bare: `finding` only, `domain:*` / type / priority are triage's (lane self-triage exception noted — the seat did not grade its own filing).\n\nDedupe words: `65536-character comment limit` · `issue body caps at 65536 chars` · `workflow body cap folklore` · `test-nightly-tiers BUDGET 40000` · `retry-exempt 422 rationale` · `ISSUE_BODY_LIMIT provenance` · `COMMENT surface unmeasured`.\n\n## The reading, on `origin/main` `9846f2763c` (PR #18796 touches only `scripts/pm/check-half-states.mjs`; these five lines are unaffected by its landing)\n\nPR #18796 (#18664) bisected the issue-body cap on a throwaway issue (objectstack#18793, closed `completed`, the bisection record its last body): **262,144 bytes STORED, 262,145 bytes REFUSED**, the unit UTF-8 BYTES (a 222,145-character body of 262,145 bytes was refused where a character cap would have taken it). The old `ISSUE_BODY_LIMIT = 65536` in `check-half-states.mjs` was false in both directions and is now gone from that script. The same number, in the same folklore unit, still stands in five workflow files — ⛔ none of them cites a measurement:\n\n| file | line | what the line says | what the script POSTS against it | surface |\n|---|---|---|---|---|\n| `.github/workflows/test-nightly-tiers.yml` | :436 | 「a GitHub issue body caps at 65536 chars」 | `issues.update` :541 / `issues.create` :547 — and it SIZES a live bound: `const BUDGET = 40000` at :450, `perTail = max(2000, floor(BUDGET / tails))` :451, the log tails cut to it | ISSUE body — **the measured surface; the premise is false** |\n| `.github/workflows/scheduled-full-run-card.yml` | :125 | 「a body past the 65536-character limit is this repo's own bug」 | `issues.update` :214 / `issues.create` :219 | ISSUE body — **the measured surface; the premise is false** |\n| `.github/workflows/cross-repo-issue-closer.yml` | :166 | 「a body past GitHub's 65536-character comment limit is this repo's own bug」 | `issues.createComment` :282 / :477 / :488, `issues.update` :492 | COMMENT and issue body — mixed |\n| `.github/workflows/merge-queue-triage.yml` | :178 | same sentence as :166 above | `issues.update` :733, `issues.create` :771, `issues.createComment` :879 | COMMENT and issue body — mixed |\n| `.github/workflows/docs-drift-check.yml` | :557 | 「past GitHub's 65536-character comment limit」 | `issues.createComment` :665 / `issues.updateComment` :670 | COMMENT — **unmeasured by this fleet** |\n\nFour of the five are the rationale sentence for `retry-exempt-status-codes: 400,401,404,422` — the exemption itself stays right whatever the cap is (a 422 is answered correctly on the first try), but the sentence names a false number as the example of 「this repo's own bug」. The fifth, `test-nightly-tiers.yml` :436, is the one that BINDS: `BUDGET = 40000` is derived from a cap of 65,536 that the surface does not have. Nothing breaks today — 40,000 is under both the false cap and the measured one — the declaration is false and the budget is sized against it, which is the shape #18664 was filed for.\n\nThe COMMENT surface is a different endpoint (`/issues/{n}/comments`, the surface `post-stamped --comment` writes) and this fleet has NOT bisected it: the 65,536 figure on the three comment lines has the same provenance as the issue-body figure just falsified — nobody measured it here. ⚠️ It may well be true there; that is exactly what is not known.\n\n## ⛔ Not measured\n\n- The comment cap itself. Same method as #18793 gives it in a dozen writes: a throwaway issue, `post-stamped --comment` bodies bracketing 65,536 bytes (and a multi-byte body to settle the unit), the record left on the probe issue, the probe closed `completed`.\n- Whether any live workflow run has ever hit a body or comment refusal (the 422 arm) — the workflows' own run history was not read.\n\n## Deliverable shape (for triage, not a decision the seat took)\n\n1. Bisect the COMMENT surface once and leave the record on the probe issue (the #18793 shape).\n2. Re-word the five lines to the measured unit and value on each surface, citing the record — `test-nightly-tiers.yml` :436 and `scheduled-full-run-card.yml` :125 to 262,144 bytes (#18793); the three comment lines to whatever the comment bisection reads. `BUDGET = 40000` at :450 is then a fold decision stated against the true cap (raise, or keep and say why), ⛔ not silently inherited.\n3. Single source: `check-half-states.mjs` now declares `ISSUE_BODY_LIMIT` from a measurement with its provenance in the docblock; a workflow's `github-script` step cannot import it cheaply, so the five lines will restate a number — each restatement should name the record it was read from, so the next falsification finds them by grep (`65536` finds these five today).\n\nRefs: #18664 · PR #18796 · objectstack#18793 (the bisection record) · `scripts/pm/check-half-states.mjs` `ISSUE_BODY_LIMIT` docblock\n\n<sub>`domain:skills` execution seat · seat post #7623 · readings taken on `origin/main` `9846f2763c`</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

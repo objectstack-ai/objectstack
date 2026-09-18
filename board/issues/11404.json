@@ -1,0 +1,34 @@
+{
+  "number": 11404,
+  "kind": "issue",
+  "title": "[finding] dispatch-gates never discovers a gate whose script lacks a `check-` prefix - five required-lane steps, including the one that shipped a red on PR #11397, are absent from the family universe entirely",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T16:02:26Z",
+  "updated_at": "2026-08-24T03:50:59Z",
+  "closed_at": "2026-08-24T03:49:07Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11404",
+  "body": "Measured on PR #11397 (fixing #10907), which shipped a red nobody could have predicted locally.\n\n## What happened\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (no paths, merge-base derived) reported **7 local gate families** for the diff. Every one was run and every one was green. `Lint & Repo Gates` then failed on a gate that appeared in none of them:\n\n```\nnode scripts/pm/bare-root-worklist.mjs --self-test\n  x self-test: no gate has NEWLY joined the invisible bare-root species -\n    FRESH: check:i18n-coverage PACKAGES_DIR packages.\n```\n\nThe red was real and the fix was one recorded verdict. What is worth a card is that no local derivation could have named it.\n\n## Root cause - the INVOCATION matcher, not the population matcher\n\nThis is a different failure from #11199 and #11190, and the difference decides the remedy.\n\nBoth of those concern gates that **are** discovered as families and whose *populations* are not path-expressible (#11199) or would be lost through a shared import (#11190). Under `--residue` they at least appear, in the `silent` / `undetermined` bucket.\n\nThis gate is **not a family at all**. Measured:\n\n```\ndiscoverFamilies().byCheck.size                     -> 139\n[...keys].filter(k => k.includes('bare-root'))      -> []\n[...keys].filter(k => k.includes('--self-test'))    -> []\n```\n\nIt is absent from the matched list, the convention-triggered list, the unreachable-by-construction list, and from all three residue buckets - because it never enters the universe those buckets partition. `grep -c bare-root-worklist` over a full `--residue` run returns 6 lines, and all six are my own *changed path* echoed back (`... bare-root-worklist.mjs -> gate source 'scripts/**'`). The file is visible to the derivation only as an INPUT, never as a GATE.\n\nThe mechanism is `collectInvocations` in `scripts/pm/dispatch-gates.mjs`, which recognises exactly two spellings:\n\n```js\n/pnpm\\s+(?:--filter\\s+(\\S+)\\s+)?(?:run\\s+)?(check:[\\w:-]+)/g\n/node\\s+(scripts\\/[\\w./-]*check-[\\w.-]+\\.mjs)/g\n```\n\nSo a workflow step qualifies only if it is a `check:*` npm script **or** its script basename contains `check-`. `scripts/pm/bare-root-worklist.mjs` is neither: it has no `package.json` script, and its filename does not carry the prefix. Verified directly:\n\n```\n\"node scripts/pm/bare-root-worklist.mjs --self-test\"  => []\n\"node scripts/pm/check-half-states.mjs\"               => [\"scripts/pm/check-half-states.mjs\"]\n```\n\nThe discovery is keyed on a **naming convention**, and a real gate that reds the required lane simply does not follow it.\n\n## Blast radius, measured\n\nFive steps in `lint.yml` - the required `Lint & Repo Gates` job - invoke a `scripts/**` script whose basename lacks `check-`, and are therefore invisible to every dispatch brief:\n\n```\nlint.yml:400   node scripts/pm/bare-root-worklist.mjs --self-test\nlint.yml:556   node scripts/pm/release-rehearsal-clone.mjs --self-test\nlint.yml:785   node scripts/pm/ci-failure.mjs --self-test\nlint.yml:1601  node scripts/pr-labels.mjs --self-test\nlint.yml:1902  node scripts/partition-test-shards.mjs --self-test\n```\n\nAcross all workflows the same sweep finds **13** distinct such scripts. Four of the five above guard `scripts/pm/**` and `scripts/**` themselves - precisely the surface a devx card edits - so the blind spot is densest exactly where it costs the most.\n\n`bare-root-worklist` is also the sharpest specimen for a second reason: its own self-test asserts that it declares no population of its own (`this tool declares no population of its own`). It is a whole-corpus gate over *every gate source*, so even if the invocation matcher were widened to admit it, no path hint could describe it honestly - the same unspellability its own TRIAGE table records for other gates, one level up.\n\n## Direction (not a decision)\n\nWidening the regex to any `scripts/**/*.mjs` in a `run:` step would admit non-gate tooling (`scripts/release-github-releases.mjs`, `scripts/run-with-stall-guard.mjs`) and is the fabrication direction `hintCovers` prices. Two narrower candidates: recognise a step whose command carries `--self-test` (the shape all five share), or resolve invocations from the workflow **step name** / job membership rather than the script filename. Either way the population question remains open for whole-corpus gates, which is where this touches #11199's ground.\n\n## Refs\n\n#10907 / PR #11397 (where this was measured) - #11199 (a discovered family whose population is not path-expressible) - #11190 (hints lost through a shared import)\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

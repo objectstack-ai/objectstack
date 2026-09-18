@@ -1,0 +1,34 @@
+{
+  "number": 11216,
+  "kind": "issue",
+  "title": "`gen:openapi`'s artifact is ungated AND is deleted by `gen:schema`'s cleanup — the one combination where staleness is invisible",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T03:46:51Z",
+  "updated_at": "2026-08-24T07:38:49Z",
+  "closed_at": "2026-08-24T07:38:24Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11216",
+  "body": "Measured while verifying #10928 (PR #11213). Outside that card's declared file surface, so recorded rather than fixed. Filed unassigned per finding discipline.\n\n## What\n\n`check:generated` reports its own coverage gap on every run:\n\n```\nGenerated but ungated (2): gen:openapi, gen:sbom — nothing verifies these are current.\n```\n\nSeparately, AGENTS.md documents that `gen:schema`'s cleanup **wipes `gen:openapi`'s output**, with the recovery being `pnpm --filter @objectstack/spec gen:openapi`. Each half is known. The finding is that they compose badly: the one generated artifact that another generator silently deletes is also the one nothing checks.\n\n## Measured here, incidentally\n\nI hashed all generated JSON schemas twice while proving my diff changed none of them:\n\n- Baseline taken immediately after `pnpm --filter @objectstack/spec check:authorable-surface` (which runs `gen:schema`): **1584** files, `json-schema/openapi.json` **absent**.\n- After a full `turbo run build` (which runs `gen:openapi`): **1585** files, `openapi.json` present, and all 1584 originals byte-for-byte identical.\n\nSo the deletion is real and reproducible on a clean tree, by running a **green** check. No gate anywhere notices the file is gone, and the next `build` puts it back — which is exactly why it stays invisible.\n\n## Why it is worth recording rather than shrugging at\n\n`./openapi.json` is a **published entry point** (`packages/spec/package.json` `exports`), so this is not an internal scratch artifact. The failure mode is not \"the file goes missing\" — a build restores it. It is that nothing establishes the committed/published copy ever matched the schemas it is derived from, and the one operation that would make them diverge (running `gen:schema` alone, then publishing without a full build) leaves no trace. Compare `check:authorable-surface`, which does gate its artifact and is loud about the anchor.\n\n`gen:sbom` is named in the same line as ungated and is not analysed here — I only measured the openapi half.\n\n## Not proposing a shape\n\nWhether the answer is a `check:openapi` mirroring `check:authorable-surface`, making `gen:schema`'s cleanup narrower so it stops deleting a sibling's output, or a note that the artifact is build-only and should not be read from a partially-generated tree, is a call for whoever owns the generator set.\n\nBacklink: #10928 · PR #11213 · `packages/spec/scripts/check-generated.ts` (prints the gap) · AGENTS.md `packages/spec` clause (documents the deletion)\n"
+}

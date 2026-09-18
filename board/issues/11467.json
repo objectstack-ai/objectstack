@@ -1,0 +1,35 @@
+{
+  "number": 11467,
+  "kind": "pull_request",
+  "title": "fix(service-settings): say the AI runtime is cloud-only instead of telling operators to mount it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T21:02:53Z",
+  "updated_at": "2026-08-23T21:33:20Z",
+  "closed_at": "2026-08-23T21:33:19Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": "2026-08-23T21:33:19Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11467",
+  "body": "Fixes #11318\n\n## What was wrong\n\n`packages/services/service-settings/src/manifests/ai.manifest.ts`'s `ai/test`\nfallback handler told an operator, on all three real-provider branches, to\n\"Mount `@objectstack/service-ai` to exercise live calls.\" This platform's own\ncapability roster — `PLATFORM_CAPABILITY_PROVIDERS.ai` in\n`@objectstack/spec/kernel` (`packages/spec/src/kernel/platform-capabilities.ts:127-131`)\n— declares that capability `edition: 'cloud'`, which `CapabilityEdition`'s\ndocblock defines as \"realized only by a cloud runtime tier; there is **no\ninstallable version in the open edition**.\" The instruction was not merely\nunhelpful — it was impossible to follow.\n\nWorse than a 404: the package name still resolves on the public npm registry\n(`@objectstack/service-ai`, 57 versions, latest `10.3.0`), entirely below the\n`11.3.0` cut the roster's own `note` names. An operator following the old\ninstruction installs a seven-major-old runtime that pins a second\n`@objectstack/spec` beside this repo's.\n\n## The fix\n\nThe instruction is **kept** — an operator may genuinely have a cloud tier —\nand now carries the boundary the roster already records, read from the roster\n(`package` + `note`, verbatim) rather than hand-written a fourth time, matching\nhow `packages/cli`'s capability preflight already surfaces the same note\n(PR #11266 precedent). The three provider branches (Vercel AI Gateway,\nCloudflare AI Gateway, plain SDK provider) stay distinct; only the shared\ntrailing sentence changes.\n\nThe **embedder** hint at a separate site in the same file\n(`@objectstack/embedder-openai`) is deliberately untouched — that package *is*\nbuilt in this repo, so its mount instruction is followable as written. Pinned\nby a contrast test so a future edit cannot blanket-reword every hint in the\nfile.\n\n## Where the boundary was verified\n\nRead directly from the roster, not from the card's paraphrase:\n\n```ts\n// packages/spec/src/kernel/platform-capabilities.ts:127-131\nai: {\n  package: '@objectstack/service-ai',\n  edition: 'cloud',\n  note: 'cloud-only since 11.3.0 / ADR-0025',\n},\n```\n\n`CapabilityEdition`'s docblock: `'cloud' — realized only by a cloud runtime\ntier; there is **no installable version in the open edition**.`\n\nThe new message interpolates `ai.package` and `ai.note` verbatim and states\n\"no open-edition version to install\" — agreeing with the roster's own words\nrather than a hand-typed paraphrase.\n\n## Consumer check (Clause-②)\n\n`SettingsActionResult.message` (`packages/spec/src/system/settings-manifest.zod.ts`)\nis documented as a `Toast message` — free-form prose a human reads in the\nSettings → AI panel after pressing \"Test connection.\" `ok` and `severity` are\nthe fields any caller could switch on, and neither changes in this diff. No\ncaller in this repo (server or client) parses `message`'s content\nprogrammatically. **This is a message, not a consumed contract** — Clause-②\ngrades `no`.\n\n## Tests\n\n`packages/services/service-settings/src/manifests/ai.manifest.test.ts` — new\n`describe` block, 5 cases:\n\n- the roster still declares `ai` with `package`/`edition: 'cloud'`/`note` (the\n  premise the rest rests on)\n- each of the three real-provider branches (gateway, Cloudflare, plain SDK)\n  states the boundary: message contains `ai.package` and `ai.note` verbatim,\n  matches `/no open-edition version to install/`, and does **not** match the\n  old bare `Mount @objectstack/service-ai to exercise live calls.` string\n- **counter-direction, load-bearing**: the embedder hint (a capability that\n  *is* operator-mountable) still gets its plain mount line, unedited — pins\n  that this fix narrows to the cloud-only site and does not strip every mount\n  hint in the file\n\n## Checks run (this worktree, final commit `2e4f999b19`)\n\n- `pnpm --filter '@objectstack/service-settings^...' build` — dependency\n  closure (spec, metadata-protocol, objectql, …) — pass, `VERDICT command-exit 0`\n- `pnpm --filter @objectstack/service-settings test` — 27 test files / 488\n  tests pass (verbose run on `ai.manifest.test.ts` alone: 25/25, all 5 new\n  cases named and green — `VERDICT command-exit 0`)\n- `pnpm --filter @objectstack/service-settings typecheck` (`tsc --noEmit`) —\n  pass, `VERDICT command-exit 0`, 0 `error TS` lines in output\n- Gate union (`node scripts/pm/dispatch-gates.mjs`, no hand-supplied paths) —\n  16 of 18 named gates run and green: `check:changeset-gate-self-tests`,\n  `check:objectui-changeset`, `check:published-files`, `check:slot-lookup`,\n  `check:test-source-alias`, `check:type-source-resolution`,\n  `check:type-check-coverage`, `check:engine-double-contract`,\n  `check:cross-package-test-inputs`, `check:where-matcher`,\n  `check-adr-0087-registration`, `check-changeset-no-major`,\n  `check-ci-filter-parity`, `check-empty-changeset`,\n  `check-plugin-teardown-shape`, `docs-audit/check-affected-docs` (no drift —\n  `service-settings`/`ai.manifest` do not appear in its UNREACHABLE rows,\n  and this repo's own docs already state the cloud-only boundary correctly:\n  `content/docs/kernel/services-checklist.mdx`, `skills/objectstack-ai/SKILL.md`).\n  `check:query-options-erasure` and `check:type-check-debt` (its `--re-measure`\n  closure build) are **NOT MEASURED locally** — both are whole-`packages/**`\n  ESLint/tsc sweeps, and under this container's contention today (6+ parallel\n  agents queued on the shared verify lock, one holding a full-workspace\n  `turbo build`) the erasure gate's real pass was killed by SIGTERM twice —\n  once at a 5-minute foreground cap, once 69s after acquiring the shared lock.\n  Declared narrowing, not a skip: CI runs the full farm regardless.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01APWX2AwT3a4xDcjPCe8bk4)_"
+}

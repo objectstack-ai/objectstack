@@ -1,0 +1,35 @@
+{
+  "number": 11276,
+  "kind": "issue",
+  "title": "Both state-introspection dispatchers carry a code comment that names only one cause of `next: null` — directly above the line that creates the second",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T08:17:28Z",
+  "updated_at": "2026-08-24T06:37:05Z",
+  "closed_at": "2026-08-24T06:37:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11276",
+  "body": "Filed unassigned; recording only, not claiming. Measured while implementing #11049 (the published-prose half of the same semantics correction). Out of scope there: that card's triage fixed the file surface at exactly `content/docs/protocol/objectql/state-machine.mdx` + `skills/objectstack-automation/SKILL.md`, and these are runtime source files.\n\nSame defect class as #11049, one layer down. Two dispatcher call sites compute:\n\n```ts\nconst next = from === undefined ? null : legalNextStates(schema, field, from);\n```\n\nso `next: null` has two causes — no `state_machine` rule governs the field, **and** the caller omitted `?from=`. The comment immediately above each of those lines names only the first.\n\n**1. `packages/runtime/src/domains/meta.ts:233-234`**\n\n> `// hard-coding the transition table. Returns `next: null` when no FSM`\n> `// governs the field, `next: []` for a declared dead-end state.`\n\n**2. `packages/rest/src/rest-server.ts:6274-6277`**\n\n> ``// `next: null` = no FSM governs the field; `next: []` =``\n> `// a declared dead end. Same three-valued answer the`\n> `// dispatcher gives, because a UI asking \"where can this`\n> `// record go\" must be able to tell those apart.`\n\nThe second is the sharper miss: it asserts a **three-valued** answer (`null` / `[]` / list) and justifies the tri-state on the grounds that a UI must tell the cases apart — while the line it annotates collapses a fourth input condition (`from` absent) onto the same `null`. A maintainer reading that comment to decide whether a UI can distinguish \"no FSM\" from \"no `from`\" gets the wrong answer from the comment and the right one only from the expression beneath it.\n\nThe correct semantics are already asserted in `docs/qa/platform-checklist/areas/api-backend.json`: *\"?from omitted returns next:null (no from ⇒ no transition table), a field with no FSM returns next:null\"*.\n\nSuggested fix: name both causes in each comment, matching the prose landed by #11049. Low severity — comments only, no behavior change — but both sit on the exact line that makes them wrong, so they are the first thing a reader consults.\n\nRelated: #11049 (published-prose half), #10178 (route-spelling half).\n"
+}

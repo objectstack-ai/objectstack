@@ -1,0 +1,35 @@
+{
+  "number": 11546,
+  "kind": "issue",
+  "title": "`@objectstack/rest` openapi.json sets `info.version` to `config.api.version` (`'v1'`) under a comment promising \"the runtime version\" — the comment is falsified by the line it introduces",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T03:07:51Z",
+  "updated_at": "2026-08-24T11:21:58Z",
+  "closed_at": "2026-08-24T11:21:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11546",
+  "body": "Found while implementing #11292 (which removes the sibling override on `/discovery`). Filed, not fixed: #11292's declared surface is the discovery seam, and this site is a **different document with a different convention**, so it carries a real design question rather than being a mechanical extension of that card.\n\n## What was measured\n\n`packages/rest/src/rest-server.ts:3622-3629`, on `main` at `daacc107`:\n\n```ts\n// Surface the runtime version so consumers don't pin to\n// the spec package's compile-time version.\nif (enriched.info) {\n    enriched.info = {\n        ...enriched.info,\n        version: this.config.api.version || enriched.info.version,\n    };\n}\n```\n\nThe comment states the intent — *the runtime version*, so consumers don't pin to a compile-time value. The line does something else: `config.api.version` is the **API version identifier**, which `normalizeConfig()` in the same file defaults to `'v1'` (`api.version ?? 'v1'`), which `packages/spec/src/api/plugin-rest-api.zod.ts` declares as `z.string().default('v1').describe('API version identifier')`, and which `getApiBasePath()` uses to build the mount (`api.apiPath ?? \\`${api.basePath}/${api.version}\\`` → `/api/v1`).\n\nSo `GET /api/v1/openapi.json` advertises `info.version: \"v1\"` on every build of every release. It is neither the runtime version the comment promises nor the spec package's compile-time version it says it is avoiding — the `|| enriched.info.version` fallback, which would yield the latter, is unreachable in every default configuration because `'v1'` is always truthy.\n\n## Why this is not simply #11292 repeated\n\n#11292 removes `discovery.version = this.config.api.version` because `DiscoverySchema` declares `version` under \"System Identity\" — the \"what server is this\" question, settled by #10993. That reading does **not** transfer here by itself:\n\n- OpenAPI's `info.version` is defined by the OpenAPI spec as *\"the version of the OpenAPI document\"* / of the described API — so an API-version identifier is a **defensible** value there, unlike on `DiscoverySchema.version`.\n- Which means the defect here is narrower and sharper: **the comment and the code disagree**, and one of them has to move. Either the value becomes the runtime version the comment promises (`resolveDiscoveryVersion()` from `@objectstack/metadata-protocol`, or the same `OS_RUNTIME_VERSION` stamp `/health` and both discovery producers now read), or the comment is rewritten to say the API version is deliberate and the fallback is dead.\n\nThat choice is a triage/maintainer call, not a dev call, which is why this is filed rather than folded into #11292.\n\n## Scope note\n\nNot measured here: whether any consumer reads `openapi.json`'s `info.version` by value. #11292's consumer survey covered discovery `version`, not this field, and its finding does not carry over."
+}

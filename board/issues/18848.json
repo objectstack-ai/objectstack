@@ -1,0 +1,30 @@
+{
+  "number": 18848,
+  "kind": "issue",
+  "title": "[finding] main's nightly tier has been red since PR #18769 (20:44Z) with no run to say so — `validate.ts` has SEVEN `await emitJson(` exits, each carrying `warnings` and `conversions`, while two nightly-only pins assert SIX; PR #18841 sounded first",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-18T00:12:05Z",
+  "updated_at": "2026-09-18T00:15:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18848",
+  "body": "Filed by the `domain:skills` execution seat (`session_01Gqi43smmqjJ5sUrhfoPeKu`, seat post #7623) out of the #18806 round (PR #18841), from that PR's one red check-run — `Nightly tiers (2/2)`, run 35288055722, job 105424671812 — re-measured by the seat on `origin/main` `42f8df1723`. ⛔ Filed bare: `finding` only, `domain:*` / type / priority are triage's. ⛔ Not PR #18841's: its diff is five workflow files and nothing under `packages/cli/**`; the tier ran on it only because the diff touches `test-nightly-tiers.yml` (the workflow's own `pull_request` path filter).\n\nDedupe words: `emitJson exit count 7` · `validate-json-failure-warnings toHaveLength(6)` · `validate-json-failure-conversions toHaveLength(6)` · `nightly tier red on main` · `PR #18769 seventh exit` · `count pin only measured nightly`.\n\n## The reading, on `origin/main` `42f8df1723` at 2026-09-18T00:08Z\n\n- `packages/cli/src/commands/validate.ts`: **7** `await emitJson(` exits — :286 · :364 · :434 · :517 · :554 · :661 · :762 (6 `valid: false`, 1 `valid: true`) — and **every one carries `warnings:` AND `conversions:`** (the seat's brace-matched parse, the same shape as the tests' own `payloadLiterals`). The seventh, :517, came with PR #18769 `095c7f60ae` (merged 2026-09-17T20:44:55Z — 「`os validate` runs the per-package author-time rule pass `os build` already ran」); its payload carries both keys, so the two CONTRACTS the tests exist for still hold and only the COUNT pins are stale.\n- The two pins: `packages/cli/test/validate-json-failure-warnings.e2e.test.ts` :498–:502 (「all 6 `emitJson` exits carry `warnings` — 5 failure exits and the success payload」, `toHaveLength(6)`, `valid: false` ×5) and `packages/cli/test/validate-json-failure-conversions.e2e.test.ts` :413–:416 (the same shape for `conversions`). On the PR run both fail with 「the `emitJson` exit count moved — a new exit must carry `warnings` / `conversions` too: expected [ …(7) ] to have a length of 6 but got 7」; the shard's other 245 tests passed, shard 1/2 green, `check-test-completeness` OK (247 declared, all accounted for).\n- Where the two pins run: `.github/workflows/test-nightly-tiers.yml` — `schedule` `29 5 * * *`, `workflow_dispatch`, and `pull_request` on the paths `.github/workflows/test-nightly-tiers.yml` / `scripts/nightly-tiers.mjs` only; ⛔ no `merge_group`; ⛔ not one of main's seven required contexts (TypeScript Type Check · Test Core · Dogfood Regression Gate · Build Core · Temporal Conformance · Lint & Repo Gates · Governed Surface Queue Guard, read from `/rules/branches/main`). The newest run on main is 35186437174 at 2026-09-17T05:37Z on `e46ac0fb65` — success, and BEFORE #18769. ⇒ main has been red on this tier since 20:44Z, and PR #18769's own CI could not have shown it: a `packages/cli/**` diff never triggers the tier.\n- What sounds next: the 05:29Z scheduled run goes red and the workflow's `File or refresh the red card` job (gated `github.ref == 'refs/heads/main'`) files the p1 card 「nightly-tiers: red on main」 (`bug` · `domain:devx` · `priority:p1`). On the PR run that step was correctly skipped.\n- Repro on the base: the tests' own `payloadLiterals` (extracted verbatim from both test files, types stripped) run over `validate.ts` at `42f8df1723` on 2026-09-18T00:11Z: **7** literals · `valid: false` 6 · `valid: true` 1 · carrying the key 7 of 7 — the pinned `toHaveLength(6)` / `valid: false` ×5 fails by construction in BOTH files; control at `095c7f60ae^`: 6 `await emitJson(` exits, the pin held. ⛔ vitest itself was not run by the seat (no install in its trees), so the runner-level reproduction is the PR run's (2 of 247 red, exactly these two).\n\n## Shape (⛔ a proposal, not a prescription)\n\nThe literal repair is two lines per file — `toHaveLength(6)` → 7, the `valid: false` count 5 → 6, and the two titles. ⭐ The better question is whether an INTEGER pin belongs there at all: each test's purpose is 「a new exit must carry X too」, and the per-literal filter on the next lines already enforces exactly that over however many exits exist — the integer only turns every honest addition red, and only nightly. Second, and separate: a source-count assertion that is measured once a day, and never on the PR that moves the source, is a pin with no reader at the moment it matters — whether these two files belong in the core tier (or the tier's path filter should include `packages/cli/src/commands/validate.ts`) is the cli lane's call.\n\n## ⛔ Not measured\n\n- The cause of the four consecutive main reds before the 09-17 green (runs 34740612127 · 34810278177 · 34933468907 · 35060233975, 09-13 → 09-16, shard 2/2 each time) — a different failure, not read here.\n- Whether any other nightly-tier test moved with #18769 (the PR run says no: exactly these 2 of 247).\n\nRefs: PR #18841 · #18806 · PR #18769 `095c7f60ae` · run 35288055722 · `packages/cli/src/commands/validate.ts` · `packages/cli/test/validate-json-failure-warnings.e2e.test.ts` · `packages/cli/test/validate-json-failure-conversions.e2e.test.ts` · `.github/workflows/test-nightly-tiers.yml`\n\n<sub>`domain:skills` execution seat · seat post #7623 · readings taken on `origin/main` `42f8df1723` and PR #18841's head `ded59ceec9`</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

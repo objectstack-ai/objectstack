@@ -1,0 +1,33 @@
+{
+  "number": 11587,
+  "kind": "issue",
+  "title": "feat(auth,platform-objects): org join link V1 — sys_join_link + create/rotate/revoke/info/join, membership via governed addMember",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T05:01:40Z",
+  "updated_at": "2026-08-24T14:38:46Z",
+  "closed_at": "2026-08-24T14:38:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11587",
+  "body": "Part of objectstack-ai/objectstack#11586 (epic — ruling and V1 scope live there; read it first).\n\n## Deliverable\n\nThe backend half of the universal org join link, V1:\n\n**Data** — new platform object (suggested name `sys_join_link`; naming per sibling conventions in `packages/platform-objects/src/identity/`): `organization_id` (lookup sys_organization), `token` (opaque, ≥128-bit random, URL-safe), role semantics PINNED to `member` (not authorable in V1 — a constant, not a field, unless the schema layer makes a fixed field cheaper to audit), `expires_at` (default: creation +7d), `revoked_at` (nullable), `max_uses` (nullable), `use_count`, `created_by`. Exactly ONE active (non-revoked, non-expired) link per org — enforce at the write endpoint AND with a partial unique index if the driver supports it. Generic CRUD suppressed (managed via endpoints only, like `sys_invitation`).\n\n**Endpoints** (mounted beside the better-auth organization surface; exact mount point is implementation detail):\n- create / rotate — org owner/admin only (same permission predicate family as invite-member); rotate = revoke current + mint new, atomic.\n- revoke — org owner/admin only.\n- token info (GET by token) — unauthenticated-safe: returns org display name + validity state ONLY; tokens must not be enumerable; rate-limit this and join (a join link is a bearer credential — probing resistance matters).\n- join (POST, by token) — requires an authenticated session **with verified email** (posture per better-auth GHSA-fmh4-wcc4-5jm3 / PR #9877; the epic records this as ruled). Validates live: not expired, not revoked, uses remaining. **Membership write goes through better-auth's server-side addMember API** (`auth.api.addMember` — the server-only endpoint measured in the #9941 thread) so org hooks, audit, and limits fire — NEVER hand-insert `sys_member` rows. Already-a-member ⇒ idempotent success. Distinct error codes for expired / revoked / exhausted / invalid.\n\n**Contract bookkeeping** — Clause-② YES (this widens the public API surface): book any new feature-gated inputs in `PUBLIC_AUTH_FEATURES` (`packages/spec/src/kernel/public-auth-features.ts`, `organization` entry) per the bidirectional feature-gate guard; new error codes go wherever the error-code ledger requires. Expect the `needs:contract-review` chain regardless of dispatch tier (subagent tier is not self-provable).\n\n**Tests** — authz matrix (stranger / plain member / admin / owner) on all mutating endpoints; expiry / revocation / rotation / exhaustion; verified-email gate on join; an assertion that join goes through the addMember path (not a raw insert); idempotent re-join; token-info leak surface (no org internals for invalid tokens).\n\n**Token storage note (PM suggestion, dev judges):** retrievable-by-admin plaintext in the org-scoped row is acceptable for V1 (member-grade, expiring, revocable — unlike an OAuth client_secret); if hashed-at-rest with show-once is trivially compatible with the console's \"copy link anytime\" UX, flag the option in the report rather than deciding silently.\n\n## Non-goals (V1, ruled on the epic)\nDomain allowlists, approval queue, per-link roles, multiple concurrent links, SCIM interplay.\n\n## Consumers to unblock\nobjectui (console dialog + `/join/:token` route) and cloud (control-plane org-scoping + E2E) sub-issues carry `Blocked-by:` pointing here — their cards state what they need: stable endpoint paths + error codes in this card's PR body.\n"
+}

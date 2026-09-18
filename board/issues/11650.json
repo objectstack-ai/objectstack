@@ -1,0 +1,33 @@
+{
+  "number": 11650,
+  "kind": "pull_request",
+  "title": "fix(scripts): anchor the shared CLI-build probe at the repo root",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T10:34:16Z",
+  "updated_at": "2026-08-24T11:09:38Z",
+  "closed_at": "2026-08-24T11:09:36Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-24T11:09:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11650",
+  "body": "Fixes #11394\n\n`scripts/cli-build-prerequisite.mjs` is the one shared answer to \"is the workspace CLI built?\", used by `check-i18n-coverage` and `check-i18n-bundles`. It read `packages/cli/package.json` against the **cwd**, so from any cwd but the repo root the probe ENOENTed and deferred — not because the declaration was unreadable, but because it had been looked for in the wrong place.\n\nThe read is now anchored to a root derived from `import.meta.url`, behind one exported seam (`atRepoRoot`) — the shape #10907 put on `check-i18n-coverage.mjs` one file over.\n\n## The vocabulary is untouched\n\n`CLI`, `CLI_PKG`, and the path `oclifCommandFileFor` returns all stay **repo-relative**. They are the baseline keys, the text in every error message, the rerun commands, and — for `CLI` — an argv path spawned against a cwd of the repo root. Only the **reads** are anchored. Pinned by a self-test assertion (`#11394 …spelled repo-relative`).\n\n## Non-vacuity, both directions, on one fully built tree\n\n`check-i18n-coverage` run from the repo root and from `/tmp`:\n\n| | root | `/tmp` |\n|---|---|---|\n| **before** (`origin/main` 3637731e2, unbuilt) | verdict | `could not read packages/cli/package.json (ENOENT …) — build prerequisite not pre-checked`, then 12 CLI spawns |\n| **after** (this branch, fully built) | `OK (12 config(s), 657 baselined untranslated string(s), none new).` exit 0 | **byte-identical**, exit 0, no deferral line |\n\nThe two runs were diffed, not eyeballed: `diff -q` reports them identical. The card's residue is gone in the direction it was measured, and the root run is unchanged.\n\nReverting only the anchor (`atRepoRoot = (rel) => join(rel)`) on that same built tree brings the deferral line back verbatim, so the \"after\" column is not measuring an unrelated tree. Both ablation legs ran under `trap … EXIT INT TERM`, the mutation was confirmed on disk by marker counts **and** a sha change, and the restore was verified byte-identical by sha (`077e3349d942abe9…`), not merely by \"it looked fine\".\n\n## A second line changed, and why it is not scope creep\n\n`check-i18n-bundles.mjs` asked `existsSync(resolved.file)` on that repo-relative answer **unanchored**. Anchoring only the read would have been strictly worse than the defect it fixes: the probe now resolves off-root, so the bare `existsSync` would return false and the gate would report\n\n```\ncheck-i18n-bundles: PREREQUISITE NOT MET — the workspace CLI is not built\n    packages/cli/dist/commands/i18n/extract.js\n```\n\n…about a file that exists. That is measured, not predicted — LEG B of a simulated-built-tree experiment produced exactly that output. It is also the #5862 defect (a confident diagnosis pointing somewhere innocent), and the correct shape was already declared in the sibling: `check-i18n-coverage.mjs` carries `existsSync(at(resolved.file))` with a comment naming this precise failure. So the two lines are one change.\n\n## The instrument question\n\n#11395's dev deliberately left this defect in place, because the deferring probe was the state that made the twelve-way cause split observable. That reason has discharged, verified on this base rather than assumed: `groupFailuresByCause` keys on `[reason, fix]` where `fix` is drawn from a **closed set of constants** (`SHARED_REMEDIES`), and `rerunCommand(configPath)` is rendered per config by `reportUnmeasuredConfigs`. The `origin/main` off-root run above confirms it live — 12 failing configs report **`1 distinct cause`**, not twelve.\n\nNothing else depends on the deferral: `resolveCliCommandFile` has exactly two callers, and both consumers' `--self-test` reach the `unknown` branch through the pure `oclifCommandFileFor({ oclif: {} }, …)`, which this change does not touch.\n\n## #11557 — an unmet prerequisite says so in words\n\nThis change does not add a new silent `exit 1`; it makes the **worded** path reachable off-root. Where an off-root reader previously got a deferral line and a pile of downstream noise, they now get the prerequisite verdict up front, which already states `Nothing was measured: … so this result says NOTHING about whether any declared label went untranslated` and warns that piping the gate hides its status. Zero CLI spawns instead of twelve.\n\n## Gates\n\nDerived with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (which reads the change set from git itself), and the union was run at **`7a390dfb0`** — the final commit — with every exit code captured before any pipe.\n\n| gate | result |\n|---|---|\n| `check:i18n-coverage` | self-test 0 · corpus `OK (12 config(s), 657 …)` exit 0 |\n| `check:i18n` | self-test 0 · corpus `OK (9 package(s) — all bundles in sync…)` exit 0 |\n| `check:entry-guard` | self-test 0 · run 0 (`142 scripts/ file(s)`; the new export is inert on import) |\n| `check:parse-guard` | self-test 0 · run 0 |\n| `check:cross-package-test-inputs` | self-test 0 · run 0 |\n| `check:pnpm-filter-targets` | all three legs 0 |\n| `check-ci-filter-parity.mjs` | 0 |\n| `check-cross-package-test-inputs.mjs` | 0 |\n| `check:nul-bytes` | 0 (`scanned 6506 text file(s)`), plus a manual control-byte sweep of the three edited files |\n\nNo narrowing was declared — the full derived union ran.\n\nAblation of the anchor reds the new assertions in both gates (coverage 1 failure, bundles 2), each naming the cwd-relative read.\n\n## No changeset\n\n`scripts/` only — repo tooling, nothing published. `skip-changeset`.\n\n## Out of scope, filed\n\n#11647 — `check-i18n-bundles` resolves its own **population** CWD-relatively (`findExtractConfigs('packages', 'packages')`) and dies with an uncaught ENOENT stack from any foreign cwd. Verified pre-existing at `origin/main` `3637731e2`, so this PR neither introduces nor fixes it; it is the last unanchored half of the pair. Filed unassigned, no `pm:queue`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015ahemw8RcTgqtxrj15PEZx)_"
+}

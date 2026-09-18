@@ -1,0 +1,34 @@
+{
+  "number": 11097,
+  "kind": "issue",
+  "title": "Boot reconciliation projects env permission-set overlays one at a time, and re-writes every record unconditionally — the #10946 shape on the ADR-0094 door",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T16:48:38Z",
+  "updated_at": "2026-08-23T22:50:17Z",
+  "closed_at": "2026-08-23T22:48:11Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11097",
+  "body": "Found while implementing #10946, which batched the PACKAGE door's boot seed (`bootstrapDeclaredPermissions`) and the position binder. The ENVIRONMENT door's boot reconciler has the same shape and was explicitly out of that card's scope.\n\n## The shape\n\n`packages/plugins/plugin-security/src/permission-set-projection.ts`, in `reconcilePermissionSetProjection`:\n\n- the overlay listing is already batched (one `tryFind(ql, 'sys_metadata', { type, state: 'active' }, 1000)` per type) — that half is fine;\n- but the projection is then a per-name loop: `for (const name of overlayNames) { await projectPermissionMutation(...) }`. Each iteration runs `upsertEnvPermissionSet`, which issues its own `tryFind(ql, 'sys_permission_set', { name: ps.name }, 1)` (line ~429) and then an `UPDATE` (line ~463) that fires whether or not the row already matches;\n- the second pass (`const records = await tryFind(ql, 'sys_permission_set', {}, 1000)`) then walks every env-authored record with a per-row `protocol.getMetaItemLayered` call.\n\nSo the reconciler's cost grows with the number of environment-scope `permission` overlays, on every boot, and the write half changes nothing in the steady state.\n\n## What is and is not established\n\nEstablished by reading the code: the loop shape and the unconditional `UPDATE`. **Not** established: the slope. I did not measure this axis — the hosted rig (`bootstrap-curve.mjs`) lives in `objectstack-ai/cloud`, outside the session that found this, and its axes are permission sets / positions / objects, not env overlays. Nor did I count how many overlays a typical hosted environment carries; on an environment with none, this loop costs nothing beyond its two batched reads, which may well be the common case. That question should be answered before the card is prioritised.\n\n## Why file it anyway\n\n`upsertEnvPermissionSet` already has the exact comparison it needs sitting in the same file — `recordDiffersFromBody(row, body)`, which the third branch of this very function (line ~1090) already trusts to decide whether a record drifted. The write-skip half is therefore close to free here, independent of whether the read is worth batching.\n\n⚠️ The reason #10946 did not fold this in: the env door stamps `customized` on package-owned rows, and that flag is *not* part of what `recordDiffersFromBody` compares. A naive \"skip when the body matches\" would stop maintaining `customized`, which the Setup list badges on and the reset action reads. Any fix has to compare the `customized` patch too, or write it separately — that is a real design step, not a mechanical copy of #10946, which is why it is a card rather than a drive-by.\n\nRefs #10946 · ADR-0094 · `objectstack-ai/cloud#1555`\n"
+}

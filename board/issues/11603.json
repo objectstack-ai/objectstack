@@ -1,0 +1,32 @@
+{
+  "number": 11603,
+  "kind": "issue",
+  "title": "[Decision] Should the contract guarantee the ambient UI-predicate roots (`app`, `features`, `os.user`, `data`) — or do they stay renderer-provided-but-unpromised?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-24T07:51:51Z",
+  "updated_at": "2026-08-24T09:49:28Z",
+  "closed_at": "2026-08-24T09:48:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11603",
+  "body": "Filed by the spec-lane PM (`session_01T9cDbY2NBiVJWYx3BpWfH2`) at #11256's ACCEPT, per its dev's recommendation. **Decision-class — maintainer ruling required; NOT buildable as dispatched work in its current form.** Do not promote to `pm:queue` without a ruling: every option below either amends an ADR or changes a shipping renderer.\n\n## The question\n\nPR #11600 (#11256) landed the honest middle: `visibleWhen`'s describe now states `record` + `current_user` (ADR-0068 aliases `user`/`ctx.user`) + `page.<var>` as **contract**, and records `app`, `features`, `os.user`, `data` as **renderer behaviour, not guaranteed** (ADR-0068's Non-goals fence its ruling to the user object; ADR-0058 rules dialects/backends/fail-policy, not the UI root set — nothing rules the ambient four today).\n\nBut the platform itself already relies on the ambient set: action-param `visible` gates on `features.*`, and `action.zod.ts:377` documents `current_user`/`app`/`data`/`features` as its scope. \"Unpromised but universally relied on\" is the current de-facto state — a permanent declared-vs-delivered gap unless ruled.\n\n## Options (from #11600's measurement)\n\n- **A — status quo (what landed):** contract stays user-object + record + page state; ambient roots documented as measured behaviour. Zero risk, honest, gap persists. This is the answer of record for #11256 only — it deliberately did not settle this card.\n- **B — widen the contract** via a new ADR (or ADR-0068 amendment): `app`/`features`/`data` become guaranteed roots on UI predicate surfaces. Closes the gap, but promises a surface with **no conformance test and no server-side counterpart** — the ADR-0049 class — so B should only land WITH a conformance test. Precondition either way: `data`'s two meanings (data-source ADAPTER on component nodes vs record ROW on `page:tabs` items, measured at objectui pin `190fbd01d061` and identical at their `origin/main` `f2732afe`) must be reconciled or explicitly blessed as surface-dependent first.\n- **C — narrow the renderer** to the declared roots (objectui behaviour change). Measured as breaking: the platform's own `sys_user` `ctx.user` alert gate survives (contract), but every `features.*` action gate and the ambient consumers do not. Effectively rejected by measurement unless the ambient consumers migrate first.\n\n## Constraints a ruling should respect\n\n- AI-authoring safety currently points the right way under A: an author reading \"not contract-guaranteed\" avoids the ambient roots.\n- If B: conformance test in the same stroke, and the `data` double-meaning settled BEFORE the widening (guaranteeing a root that means two things would bake the ambiguity into the contract).\n- `os.user` is not a fourth user alias: ADR-0068 names it only as the legacy FORMULA namespace; objectui's conformance clause lists exactly three spellings.\n\nRefs: #11256 · PR #11600 (measurement map + root table) · #11601 (nested describe text never reaches the MDX — relevant to where any future promise would be visible) · ADR-0068 · ADR-0058."
+}

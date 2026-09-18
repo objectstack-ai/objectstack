@@ -1,0 +1,35 @@
+{
+  "number": 10792,
+  "kind": "issue",
+  "title": "/admin/remove-user refuses a signed-in caller 401 UNAUTHENTICATED on a transaction-capable engine — the session lookup does not survive the #7724 erasure transaction",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T11:38:41Z",
+  "updated_at": "2026-08-23T20:19:30Z",
+  "closed_at": "2026-08-23T20:18:35Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 19,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10792",
+  "body": "Found while implementing #10349 (the ADR-0112 envelope for the better-auth-native `/admin/` refusals). Filed unassigned. **Not fixed there** — different defect class, and #10349's change cannot cause it (it rewrites an empty body, never a status).\n\nThis was invisible until #10349. The `better-auth-gate` bucket of `admin-route-nonadmin-refusal.dogfood.test.ts` asserts that a refused member's `code` is the vendor's denial vocabulary, **guarded by `if (member.code !== undefined)`** — and the code was `undefined` here precisely because the refusal was bodyless. Supplying the envelope made the branch executable and it went red immediately, on the first run.\n\n## Measured, on the booted showcase stack (`OS_SCIM_ENABLED=true`, same boot the dogfood sweep uses)\n\nOne signed-in plain member, one bearer, three sibling `/admin/` routes fired back to back:\n\n```text\nPOST /auth/admin/remove-user  member -> 401 {\"success\":false,\"error\":{\"code\":\"UNAUTHENTICATED\",\"message\":\"Sign in first\"}}\nPOST /auth/admin/set-role     member -> 403 {\"message\":\"You are not allowed to change users role\",\"code\":\"YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE\"}\nPOST /auth/admin/update-user  member -> 403 {\"message\":\"You are not allowed to update users\",\"code\":\"YOU_ARE_NOT_ALLOWED_TO_UPDATE_USERS\"}\nPOST /auth/admin/remove-user  member -> 401 (repeated — not a one-off)\n```\n\nSame caller, same bearer, same vendor `adminMiddleware`. The session resolves on two routes and does not resolve on the third, so this is not an expired or revoked session: **only `remove-user` fails to see it.**\n\nAn anonymous caller gets the identical `401 UNAUTHENTICATED`, so `remove-user` cannot distinguish \"no session\" from \"a session that is not entitled\" — it answers everyone the authentication refusal.\n\n## What makes `remove-user` different at that seam\n\n`AuthManager.handleRequest` wraps exactly the `SESSION_ERASURE_PATHS` members in `runSubjectErasureAtomically`, which runs the whole better-auth handler inside `engine.transaction(...)` (#7724, so a refused erasure cannot leave the session/account deletes committed). `set-role` and `update-user` are not in that set and run unwrapped. `adminMiddleware`'s `getAuthoritativeSessionFromCtx(ctx)` deliberately nulls `ctx.context.session` and **re-reads the session from the database** — inside the transaction, on this path — and comes back empty.\n\nControlled hermetically: the same three fires against the in-memory engine give `403 YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS` for the member, both with **no** `transaction` method on the engine and with a **pass-through** `transaction` that just invokes its callback. So it is not the wrapper's presence and not the break-glass before-hook (which also runs on this path in the hermetic fixture and falls through) — it is what a **real** transaction does to that session read.\n\n## Why this is worse than a wrong status code\n\nThe mechanism is caller-independent: the failing read happens in `adminMiddleware`, before any authorization, so it must refuse **every** caller — which would make `/admin/remove-user` dead on any transaction-capable engine, i.e. every real deployment. That is the shape #7724 was filed about, re-entered through its own fix.\n\n⚠️ **Not measured, and it should be before acting:** the platform-admin arm. On the showcase stack there is no caller who could pass this route anyway — the vendor's admin plugin authorizes on the legacy `user.role === 'admin'` scalar that ADR-0068 D2 stopped synthesizing — so \"the admin is also refused\" here is inferred from the mechanism, not observed. Fire it against a caller the vendor's gate does admit (a fixture user with the legacy scalar) on a real SQL driver before writing down how bad this is. The hermetic no-op-transaction fixture DOES let such a caller through with `200 {\"success\":true}`, which is the other half of the comparison.\n\nAlso worth checking in the same pass: `/delete-user`, the other member of `SESSION_ERASURE_PATHS`, whose session lookup is even more load-bearing — it resolves the caller's own identity from the session when the body carries no `userId`.\n\n## Where it is recorded meanwhile\n\n`packages/qa/dogfood/test/admin-route-nonadmin-refusal.dogfood.test.ts` names this route as the single exception to the member-arm vocabulary check, as an **additional** accepted code rather than a pin — so the fix does not turn it red, and no other route may drift into the same state without failing. Removing that exception is part of closing this issue."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 11609,
+  "kind": "pull_request",
+  "title": "test(cli): pin the conversions-only exit-code cell of `os validate --json --strict`",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T08:25:57Z",
+  "updated_at": "2026-08-24T09:30:11Z",
+  "closed_at": "2026-08-24T09:30:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-24T09:30:09Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11609",
+  "body": "Fixes #11301\n\nTest-only. Pins the one documented exit-code cell of `os validate --json --strict` that no fixture exercised.\n\n## The unpinned cell\n\n`--strict` gates on the **text** face's warning list, which folds in the ADR-0087 D2 load-time conversion notices. The JSON payload carries those notices separately, under `conversions`, and its own `warnings` field is the five-way spread *without* them. So a config whose only advisories are conversion notices exits **1** carrying `{ valid: true, warnings: [], conversions: [...] }`.\n\nThat is deliberate, and `commands/validate.ts` states the reasoning at the `emitJson` call. It was also the one cell where the exit code is decided by a collection absent from the payload field a reader reaches for first — and every existing fixture raises **zero** conversions, so a regression narrowing the gate back to `payload.warnings` would have restored the original divergence with the whole suite green.\n\nThe behaviour was not on trial here and was not touched: no production file is in this diff.\n\n## The fixture is a minimal pair, not a single input\n\nBoth members come from one template, `headerPageSource(key)`, and differ in a single key on one `page:header` component:\n\n| fixture | `--json` | `--json --strict` | `--strict` (text) | `valid` | `warnings` | `conversions` |\n|---|---|---|---|---|---|---|\n| `description` (the live `page-header-subtitle-alias` window) | 0 | **1** | 1 | `true` | `[]` | 1 notice |\n| `subtitle` (canonical spelling) | 0 | **0** | 0 | `true` | `[]` | `[]` |\n\nSo the pin discriminates on the **conversion**, not on \"a page is present\". Both rows were measured before the test was written.\n\nThe issue's suggested candidate, `object-compactLayout-to-highlightFields`, turned out to be unusable and the test comment records why: it is already `retiredFromLoadPath`, so the schema tombstones the key and it raises a validation **error**, not a notice. `page-header-subtitle-alias` was selected from the 17 entries that are still live on the load path, and measured to raise no other advisory.\n\n## Anti-vacuity\n\n`conversions` is asserted **non-empty**. `page-header-subtitle-alias` retires from the load path at protocol 18; on that day the fixture raises nothing, and without that assertion the file would keep passing while pinning an empty cell — exactly the failure this card exists to remove. It goes red instead, with a message naming the remedy.\n\n**Discrimination ablation** (trap-restored, mutation proven on disk by grepping both the injected and the removed text, prediction recorded before the run):\n\n- mutation: `headerPageSource('description')` → `headerPageSource('subtitle')` in `beforeAll`, making the fixture byte-identical to its canonical twin. Removed-text hits 1 → 0, injected-text hits 0 → 1, sha `7cde9871…` → `391ebbd5…`.\n- predicted: 1 failed / 5 passed, failing on the **floor** assertion (`expect(text.code).not.toBe(0)`) rather than on the `conversions` guard, since the floor is asserted first in the body.\n- observed, as predicted: `Tests  1 failed | 5 passed (6)`, `AssertionError: text --strict must fail on the conversions-only config: expected +0 not to be +0`. The canonical control stayed green.\n- restore leg: sha back to `7cde9871…`, grep counts back to 1/0, `git status` clean.\n\n## Verification — all at `32ecb986`\n\n- `pnpm --filter @objectstack/cli exec vitest run src/commands/validate-json-strict-exit.e2e.test.ts` → `Test Files  1 passed (1)` / `Tests  6 passed (6)`\n- `pnpm --filter @objectstack/cli typecheck` → `tsc --noEmit`, exit 0\n- Gate set derived with `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack`, not a hand-built list. All 11 matched + convention-triggered families green, including `check-i18n-bundles: OK (9 package(s) — all bundles in sync…)`, `check-i18n-coverage: OK (12 config(s), 602 baselined untranslated string(s), none new).` and `check-type-check-coverage --re-measure: OK — 32 ledger entr(ies) re-measured…, none above its recorded number.`\n- `check:i18n` and `check:i18n-coverage` first **refused** (`PREREQUISITE NOT MET — the workspace CLI is not built`, \"Nothing was checked\"). Recorded as not measured, then measured for real after `turbo run build`.\n\n## No changeset\n\nNothing user-visible ships: the diff is one `packages/cli/src/**/*.test.ts` file, which `tsconfig.build.json` excludes from the published output. `skip-changeset` applied.\n\n## Note on #11599\n\n`check:cli-test-child-env` is not in this branch's base and does not reach this diff either way — the file lives in `packages/cli/src/commands/`, not `packages/cli/test/**`. No baseline entry was added and no existing violating file was touched.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019siH5jDmk5hrayvfyojUqR)_"
+}

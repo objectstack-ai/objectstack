@@ -1,0 +1,36 @@
+{
+  "number": 11343,
+  "kind": "issue",
+  "title": "[security] 围墙提权只按未验证邮箱匹配 —— #11184 落地后仍存在一条更窄的同形路径:抢在 owner 之前用其邮箱注册即可被提权",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T12:44:20Z",
+  "updated_at": "2026-08-24T13:09:10Z",
+  "closed_at": "2026-08-24T13:09:10Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11343",
+  "body": "Filed unassigned by the `domain:services` execution seat (session `session_01APWX2AwT3a4xDcjPCe8bk4`) 作为 **#11184 / PR #11211 的后续卡**,在其入队之前立卡。⛔ 不认领,triage 定级。\n\n## 为什么现在立,而不是等\n\nPR #11211 带 `Fixes #11184`,**合入即关闭那张 p0**。它的契约复审已 PASS 并清标,我据此落地——但复审裁决的第 (1) 条写的是:\n\n> walled elevation is keyed solely to the env-declared owner — found by email query regardless of arrival order\n\n⚠️ **这句话为真的前提,是「the env-declared owner」可以被可靠识别。而它是用一个未验证的邮箱字符串识别的。** 该残留在复审裁决文本中未被处理(裁决处理了大小写变体那条,未处理本条)。\n\n⇒ 若不单独立卡,#11184 关闭后,cloud#1509 的验收腿会把 p0 读成「框架侧已完全关闭」,而下述路径仍然存在。**本卡的存在本身就是那个误读的解药。**\n\n## 观察(measured on PR head `076bf67589`,原始测量来自一个未达档位、因而拒绝出裁决的复审 agent;每条带 file:line,判断权仍属 triage/档位内席位)\n\n围墙姿态下的提权**只按邮箱匹配**:`plugin-security/src/bootstrap-platform-admin.ts` 的提权块筛选 `isHumanUser(u) && email.toLowerCase() === wanted`,**没有 `email_verified` 条件**;而 `requireEmailVerification` 默认为 **`false`**(`packages/plugins/plugin-auth/src/auth-manager.ts:4190`)。\n\nbootstrap 在**每次 `sys_user` 插入后重跑**(`security-plugin.ts:3231-3241`),且 walled 拒绝时 `bootstrapRanOnce` 仍置位,重跑保持武装。\n\n⇒ **在真正的 owner 注册之前的窗口内**,任何人只要用声明的 owner 邮箱注册,就会被该重跑提升为平台管理员;因邮箱验证默认关闭,可直接登录;`claimSeedOwnership` 随后把种子记录交给它。\n\n## 与 #11184 的关系:同形,更窄,不是同一张卡\n\n| | 修复前(#11184 测得) | #11211 落地后(本卡) |\n|---|---|---|\n| 谁被提权 | **第一个注册的人** | 用 owner 邮箱抢先注册的人 |\n| 攻击前提 | 抢在任何人之前注册 | **知道 owner 邮箱** + 抢在 owner 之前注册 |\n| 攻击手法 | curl 注册 | curl 注册 |\n\n**攻击形状完全相同**,门槛从「抢时间」变成「知道一个邮箱字符串 + 抢时间」。运维邮箱通常可猜或可从公开渠道获得。\n\n⚠️ 所以 #11211 是**真实且大幅的收窄,不是虚假修复**——这一点必须说清楚,免得本卡被读成「那个 PR 没用」。它把洞从「敞开」缩到「需要一个可猜的字符串」。但**它没有关闭这条路径**。\n\n## 可能的方向(未裁,不推荐由执行席自选)\n\n1. **提权时要求 `email_verified`** —— 最直接。⚠️ 但重跑目前只挂在 `sys_user` **insert** 上;邮箱验证发生在注册**之后**,是一次 **update**。所以这条方向**同时需要把重跑接到 update**,否则 owner 验证邮箱后永远不会被提权 —— 会把缺陷从「误提权」换成「永不提权」。\n2. **owner 账号不由自助注册产生** —— 改为预置/邀请。最强,但改变部署流程。\n3. **按更强的标识符匹配** —— 邮箱之外再要求一个带外确认。面更大。\n\n⛔ 三条都改变围墙姿态下的接受/拒绝行为,均为 `Clause-②` 且属安全边界,**不是执行席能自选的**。\n\n## 出处\n\n原始观察产生于一个被派去做契约复审、但因 `mode:subagent` **无法自证服役档位**而按规则整轮停手的 agent(见 #11335)。它没有渲染裁决,只留下了带 file:line 的事实。本席实测 `claude-opus-5`,同样无权裁定,故登记为 finding 而非结论。\n\nRefs:#11184(p0 母卡)· PR #11211 · cloud#1509(验收腿)· #11335(档位测量的流程缺口)"
+}

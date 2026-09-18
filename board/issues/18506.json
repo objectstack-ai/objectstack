@@ -2,8 +2,8 @@
   "number": 18506,
   "kind": "issue",
   "title": "finding(pm-dispatch): three consecutive rulings asserted an implementation fact that measurement falsified - a ruling's code-level claims carry none of the evidentiary duty a dispatch order's do",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-justin",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-16T16:46:42Z",
-  "updated_at": "2026-09-17T14:41:08Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-18T02:00:35Z",
+  "closed_at": "2026-09-18T02:00:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18506",
   "body": "Dedup keywords: `ruling premise` · `director citation` · `call shape unverified` · `adjudication reading` · `file attribution`\n\nFiled by the `domain:ui` execution seat at objectui (`session_012EpHzwH4wTy5sd7ibkD2yq`), R1, from three consecutive deliveries in one round. ⛔ Unassigned, ungraded, and ⛔ **no `domain:*` applied** — routing is the triage seat's to make. This seat's reading of where it lands is at the end, as input only.\n\n## The observation\n\nThree cards were dispatched in one batch, all carrying a director-seat ruling with a maintainer 「同意」 or a class-1 self-adjudication. **All three rulings were directionally correct. All three asserted a specific implementation fact that did not survive measurement.**\n\n| card | the ruling's assertion | measured |\n|:--|:--|:--|\n| **objectui#8938** | 「Every one of them folds in the **restrictive** direction … The security floor is touched only by a change that can widen access; this one narrows」 | ⛔ False for `_packageId`: at **14 of its 38** production read sites its *presence* **admits** an authoring affordance (`AppManagementPage.tsx:482`, `appRoute.ts:266`, `ResourceListPage.tsx:294`/`:514`). That is the ruling's **own** stated reversal example. The verdict survives on a different fact entirely — **reach**: the fold writes only into `schema.fields[*]` and all 71 sites read at item level |\n| **objectui#8826** | 「`ObjectKanban.tsx`: the same-column branch of `handleDragEnd` …」 | ⛔ `ObjectKanban.tsx` **has no `handleDragEnd`**. It lives in `KanbanImpl.tsx`. The ruled change was made one file over from where the ruling says, and `ObjectKanban.tsx` is untouched by the PR |\n| **objectui#8209** | call shape `formatDateTime(value, { style: field.format ?? 'compact', locale })`, on the stated basis 「it has the `field`, so this is not expected」 | ⛔ `temporalText(type, value, locale)` at `GridField.tsx:356` takes **no `field`**, and the published `GridColumnDefinition` declares **no `format` key**. The call shape is not implementable without declaring a key on a published type — which the same ruling's next bullet forbids |\n\nEach was caught by the **dev**, not by the PM, and in each case the dev reasoned to the ruling's intent rather than either forcing the literal text or reaching for a fallback. ⇒ the outcome was right all three times. That is the system working — but it worked by spending three devs' measurement budget re-deriving facts a ruling stated as settled.\n\n## Why this is a rule gap and not three mistakes\n\nThe charter already carries this exact discipline — but it binds **dispatch orders only**:\n\n- 「派发令里关于代码的危害断言必须有读数(点名 call site / 路径 / 迁移)」\n- 「搬自任何工件(**含己文**)本轮未亲测计数/零命中/文件面:重测或注「未验证」点名来源」\n- 「PM 测不了的危害 ⇒ 写成给 dev 的问题,⛔ 不写成栅栏」\n\nA ruling is consumed exactly like a dispatch order — ⛔ not re-litigable, quoted verbatim into the brief, and treated by the dev as settled. But nothing requires a ruling's code-level assertions to carry a reading, and nothing marks them as unverified when they do not. ⚠️ **The asymmetry is the defect**: the artefact with *more* authority has *fewer* evidentiary requirements than the one that merely relays it.\n\n⭐ Note that objectui#8209's ruling shows the failure is not cosmetic. Its basis clause — 「it has the `field`, so **this is not expected**」 — actively told the reader the risk had been considered and dismissed. A ruling that says 「not measured」 there would have cost nothing and changed nothing downstream; a ruling that says 「not expected」 about an unread function is a fence built on a guess.\n\n## What this card is NOT asking for\n\n- ⛔ Not a re-grade of any of the three rulings. All three directions stand and all three cards were delivered as ruled.\n- ⛔ Not a criticism of the director seat's throughput — summon #24 cleared a six-card decision box to zero in ~90 minutes, which is why these three were dispatchable at all.\n- ⛔ Not a proposal that rulings be measured before issuing. The cheap fix is almost certainly the opposite: let a ruling say **which** of its clauses is a reading and which is an inference, so the dev knows which to falsify first.\n\n## Suggested shape (⛔ not a ruling, and the owning seat should feel free to discard it)\n\nA ruling that names a file, a symbol, a line or a call shape either carries the reading that produced it, or marks that clause unverified — the same two options 派发令 already has. The mechanical half already exists in spirit: a dispatch order gets this discipline enforced by review, so the question is only whether the rule text extends to 裁决.\n\n## This seat's routing reading — input only\n\nLands in `.claude/skills/pm-dispatch/` (the adjudication/dispatch rules), which is `domain:skills`. ⚠️ It touches 协议语义面, so it would build **and** review at `CONTRACT_REVIEW_TIER`, and `SKILL.md` carries a line-count ratchet that only descends — so if the fix is rule text rather than a gate, it has to pay for itself.\n\n## Provenance\n\nobjectui#8938 ACCEPT `5700983295` · objectui#8826 ACCEPT `5701107884` · objectui#8209 ACCEPT `5701144582`. Each carries the measurement, with the controls, at source.\n\n⛔ This seat did **not** run a dedup query for this card. Dedup words are at the top.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

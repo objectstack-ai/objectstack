@@ -1,0 +1,35 @@
+{
+  "number": 11542,
+  "kind": "issue",
+  "title": "docs-audit: `subroute:` / `myclient:` mints a silent PHANTOM ROW — only `declarationsIn` anchors the key with `\\b`, the other seven scans do not",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T02:55:44Z",
+  "updated_at": "2026-08-24T10:34:08Z",
+  "closed_at": "2026-08-24T10:32:03Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11542",
+  "body": "Filed unassigned by the `os-dev` seat implementing #11494 (session `session_015ahemw8RcTgqtxrj15PEZx`). Recording, not fixing — it moves a MEASURED POPULATION, which the header of `--bridge-coverage` attaches a before/after standard to, so it is not #11494's to fold in. **No live instance on today's tree.**\n\n## What\n\n`scripts/docs-audit/affected-docs.mjs` has eight scans that ask \"is a `route:` / `client:` declaration written here?\". #11494 is closing the one spelling difference the card named (`[ \\t]*` vs `\\s*` after the colon). There is a **second** one, in the same family, one spelling further out — the **word boundary on the key**:\n\n- `declarationsIn` matches `` /\\b(route|client)\\s*:…/ `` — anchored.\n- The other seven all match `route`/`client` **unanchored**: `declinedIn`, the row recognizer `routeRe`, its `nextRoute` window delimiter, its in-window `client` match, the `routesDeclared` first term, `codeLeads`, `outsideCode`.\n\nSo `subroute:` and `myclient:` are a declaration to seven of the eight scans and **not** to the anchored one.\n\n## Measured (`cd932772`, `parseLedgerSource` + `bridgeCoverageFrom` driven directly)\n\n```ts\nexport const L = [\n  { subroute: 'GET /api/v1/gone', family: 'metadata', disposition: 'sdk' },\n  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },\n];\n```\n\n⇒ `rows 2 · routesDeclared 2 · clientsDeclared 1 · declined 0 · outsideCode 0 · brokenScan 0`\n\n```\nrows = [\n  { route: 'GET /api/v1/gone', client: null },   // ← declared by NO `route:` key in this file\n  { route: 'GET /api/v1/meta', client: 'meta.getTypes' },\n]\n```\n\nA file declaring **one** `route:` produces **two** rows. The phantom carries a path nobody mounts, so it joins the UNREACHABLE population and drags the reach ratio down.\n\n## Why it is silent\n\nThe same reason #10683 and #10793 were: the partial-read verdict is keyed on the gap between `rows` and `routesDeclared`, and **both terms read the unanchored spelling**, so both moved together and no verdict fired — `brokenScan 0`, exit 0. `outsideCode` cannot see it either: the lead genuinely IS in code position. `declarationsIn` is the one scan that gets it right, and it is on the side of the ledger that would only have shown up as a *shortfall*, which is precisely what the arithmetic hides.\n\nThis is the identical silent shape #10683 / #10793 / #10901 each closed one instance of, arriving through a third discriminator.\n\n## Why #11494 did not fold it in\n\n#11494's fix gives the *between-colon-and-value* class one home (`declLead`). The key part is deliberately left as each call site's own argument, because unifying it is **not** free the way the class was:\n\n- Anchoring the other seven with `\\b` **removes** rows from the measured population. `rows`, `routesDeclared`, `clientsDeclared` and the 177 UNREACHABLE rows are the numbers the `--bridge-coverage` header requires a priced before/after for.\n- It is priced free on today's tree only because no ledger writes such a key — the same \"provably free tree\" argument #10683 and #10793 each made explicitly, and it should be made explicitly here too rather than smuggled in under another card.\n\n## Direction, not a prescription\n\n1. **Anchor all eight** — `\\b` is the correct answer on the merits (`subroute` is not `route`), and the move is free on today's tree. Needs the delta measured and stated, the way #10683 / #10793 stated theirs.\n2. **Un-anchor `declarationsIn`** — makes the eight agree at the cost of being agreed-and-wrong; rejected on sight unless someone can name a key this is meant to catch.\n3. **Leave it.** No live instance. Costs the same as #11494's route 1 did: the counting contract is violated the moment one lands, and it lands silently.\n\nRefs: #11494, #10901, #10793, #10794, #10683, #10500, #9896."
+}

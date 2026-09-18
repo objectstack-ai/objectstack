@@ -1,0 +1,35 @@
+{
+  "number": 11529,
+  "kind": "issue",
+  "title": "`objectstack build` / `validate` print at most 50 author-time warnings and drop the rest with no notice",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T02:27:46Z",
+  "updated_at": "2026-08-24T10:51:35Z",
+  "closed_at": "2026-08-24T10:51:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11529",
+  "body": "The author-time warning printer in `@objectstack/cli` 17.1.0 emits a **fixed 50 detailed entries** and then stops. The summary line still counts every warning, so the two numbers disagree — and nothing in the output says the list was cut. A repo past 50 warnings therefore carries diagnostics that are counted but never shown, and an author who reads the output and sees their file is clean has read a truncated list.\n\n## Measured\n\nTwo `objectstack build` runs on `objectstack-ai/hotcrm`, before and after a five-warning fix (hotcrm#1248), same tree otherwise:\n\n```\nrun          detailed entries printed     summary line\nbefore       50                           ⚠ 80 author-time warning(s) — see above\nafter        50                           ⚠ 75 author-time warning(s) — see above\n```\n\nBoth runs produced output of exactly 184 lines and exactly 52 `⚠` lines. Removing five warnings did not shorten the printed list — it made room, and **five warnings that had never been printed before appeared in the second run**:\n\n```\n⚠ view \"views[12]\" · form: … absolute colSpan 2 …\n    rule: absolute-colspan-discouraged\nℹ flow \"opportunity_approval_on_create\" · node \"manager_review\": …\n    approval-approvers-may-resolve-empty          (×4)\n```\n\nThose five were present in the tree on both runs. They were simply past the cut on the first one. `objectstack validate` prints the same truncated set.\n\n## Why it matters\n\nThe truncation is silent — there is no `…and 30 more` line — so the output is not merely incomplete, it is **indistinguishable from complete**. Three consequences, in order of cost:\n\n1. A defect below the cut has no symptom at all. The one that prompted this issue was found by reading the props schema, not by reading the build output.\n2. The visible set is ordered by surface (pages, then views, then flows), so an entire surface can sit permanently below the cut on a repo whose page warnings alone exceed 50. On hotcrm today, every `view` and `flow` warning was invisible until a page warning was fixed.\n3. Fixing warnings makes new ones *appear*, which reads as a regression introduced by the fix.\n\nNeither the exit code nor the artifact is affected: both runs exit 0 and write `dist/objectstack.json`, as designed for advisory rules.\n\n## What would resolve it\n\nAnything that keeps the printed set honest about its own truncation, in rough order of preference:\n\n- print all of them (the count is already known — the summary computes it);\n- keep a cap and print `…and N more author-time warning(s) — rerun with --all` naming the exact remainder;\n- keep a cap but make it per-surface, so no surface can be starved by another.\n\nA silent cap is the one behaviour that should not survive, whatever the limit ends up being.\n\nFound while fixing hotcrm#1248 (three `record:related_list` filters authored in shapes the component drops). Not fixed there: that repo consumes the CLI, it does not ship it.\n"
+}

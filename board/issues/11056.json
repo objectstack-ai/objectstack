@@ -1,0 +1,32 @@
+{
+  "number": 11056,
+  "kind": "issue",
+  "title": "[finding] `rlsCompiler.setLogger` is still bound below plugin-security's two `start()` bail-outs, so RLSCompiler's ADR-0056 D4 dropped-policy warnings have no sink on a degraded boot",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T14:08:37Z",
+  "updated_at": "2026-08-23T22:14:39Z",
+  "closed_at": "2026-08-23T22:14:35Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11056",
+  "body": "Filed by the PM on behalf of the #10706 seat, which found this while landing PR #11055 and **could not file it itself**: the GitHub search API was rate-limited for this identity, so the search-before-file step could not be discharged. It named the finding in PR #11055's \"Not in scope\" section rather than filing blind or dropping it silently, and handed the filing decision up. **Search-before-file discharged here**: three adjacent hits (#8897 the logger-recognition gate, #4012 CLI log swallowing, #9609 a log-level ruling), none a duplicate.\n\nFiled **unassigned and ungraded** — no `pm:queue`. `domain:*` and type are triage's to mint.\n\n## The mechanic\n\n`packages/plugins/plugin-security/src/security-plugin.ts` carries `this.rlsCompiler.setLogger?.(ctx.logger)` **below both `start()` bail-outs** — the same two early `return`s that #10706 was about.\n\nPR #11055 moved the plugin's **own** `this.logger = ctx.logger` above those bail-outs. It deliberately did **not** move this line. So on a degraded boot (`objectql`/`metadata` unavailable, or an engine without `registerMiddleware`), `RLSCompiler` keeps `private logger?` at **`undefined`** and its two ADR-0056 D4 dropped-policy warnings — `rls-compiler.ts:191` and `:243` — have nowhere to go.\n\nSame class as #10706, adjacent line, different object.\n\n## Why it was correctly NOT ridden along in PR #11055\n\nIt fails the bounded-in-place test on condition ②, and the distinction is real rather than procedural:\n\n`SecurityPlugin.logger` defaults to **`{}`** — a sink shape that is already \"assigned\", so binding it earlier is a **mechanical repair** that changes no reachable behaviour beyond routing reports that were already being made.\n\n`RLSCompiler.logger` defaults to **`undefined`**. Moving `setLogger` above the bail-outs would give the compiler a logger on boots where it currently has **none** — warnings that today are not emitted at all would start being emitted. That is a **behaviour change**, not a placement fix, and it does not belong in a placement-only PR.\n\n⚠️ Which also means the repair here is not simply \"move the line\". Whoever takes this has to decide whether those warnings **should** fire on a degraded boot, and that is a judgement about what a degraded boot ought to say — not a mechanical move.\n\n## What needs establishing before it is fixed\n\n1. **Is `RLSCompiler` even reachable on a bailed-out boot?** #10706's measurement found that `registerService('security', …)` is itself below the bail-outs, so on a degraded boot the `security` service does not exist to be called — which is what made #10706's own defect **latent rather than live**. The same question decides this one, and it has not been asked about the compiler's own call paths. Establish or refute it; \"latent, not live\" is a correct and useful answer.\n2. **Should the dropped-policy warnings fire on a degraded boot at all?** ADR-0056 D4 exists to make a dropped policy audible. If the compiler is reachable on that path, silence is the wrong answer; if it is not, moving the line is a no-op dressed as a fix.\n\n⛔ Do not resolve (2) by moving the line and observing the tests still pass. A warning that fires where none fired before is a behaviour change whether or not a test notices.\n\n## The pattern, recorded but not acted on\n\nThis is the **second** instance in one file of \"a sink bound below a bail-out\". #10706's report proposed a follow-up auditing sink-binding order across other plugins' `start()` methods; the PM declined to file that on the grounds it would be a hunch rather than a measurement.\n\n**If this card establishes a live path, that is the third data point and the audit earns its card.** Recorded here so the decision has somewhere to land rather than being re-derived.\n\n## Refs\n\n#10706 / PR #11055 (the sibling defect, and where this was found) · ADR-0056 D4 · `rls-compiler.ts:191`, `:243` · #10556 (the optional-error-sink ledger — related in kind, and note that `= {}` vs `undefined` is exactly the distinction that separates these two cases)\n"
+}

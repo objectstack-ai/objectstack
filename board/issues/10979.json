@@ -1,0 +1,32 @@
+{
+  "number": 10979,
+  "kind": "issue",
+  "title": "[finding] AppPlugin's inline boot seed costs 3 sequential round trips per seed record, on every boot that reaches it",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T01:54:17Z",
+  "updated_at": "2026-08-24T09:22:10Z",
+  "closed_at": "2026-08-24T09:22:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10979",
+  "body": "Measured while establishing the seed-replay cost for objectstack-ai/cloud#1560 (fix: objectstack-ai/cloud#1561). The cloud side is closed; this is the framework half of the same cost, and it comes with an open question I could not settle from outside the container.\n\n## The measurement\n\nRig: `scripts/dev-local/bootstrap-curve.mjs` in the cloud repo — the real `ArtifactKernelFactory.create()` over the real `TursoDriver` in `mode: 'remote'`, with an instrumented `@libsql/client` counting every round trip and attributing it to a build step.\n\nSynthetic artifact: 10 objects, N seed records spread across them, each record carrying one `cel` time value so the loader's `isNoOpReplay` skip cannot fire (`--seed-dynamic`). Every point is a **rebuild** — tables present, rows already seeded.\n\n| seed records | 0 | 100 | 200 | 400 | 800 |\n|---|---|---|---|---|---|\n| `bootstrap` step round trips | 239 | 552 | 852 | 1452 | 2652 |\n\n**3.02 round trips per seed record, inside `bootstrap`.** Same 3 legs the seed loader's update path always pays — a pre-read, the `UPDATE`, and a read-back — and they are sequential: charging a synthetic per-call RTT scales the step proportionally.\n\nThe source is `AppPlugin`'s inline boot seed (`packages/runtime/src/app-plugin.ts`, the `else` branch after the `multiTenant` check), running `SeedLoaderService.load()` over `normalizedDatasets` at plugin start, on every boot.\n\n## Why this is a finding and not a bug report\n\nThe inline seed is already gated:\n\n```ts\nconst multiTenant = this.organizationWallActive(ctx);\nif (this.skipSeedData) { … } else if (multiTenant) {\n    seedSource.suppress('multi-tenant-replay');\n    // \"per-org replay will run on sys_organization insert\"\n} else { /* inline seed — the 3 legs/record path */ }\n```\n\nIn the rig's kernel the gate reads **false** and the inline seed runs. I could not establish whether it also reads false in the production container — that needs a reading from a live tenant kernel, and cloud#1560's ruling forbids touching the reproduction environment. So the honest statement is:\n\n- The cost is **real and measured** on a kernel built by the production factory with the production capability slate.\n- Whether production reaches this branch is **unverified**. If it does, every hosted environment pays ~3 sequential legs per seed record inside `bootstrap` on top of what cloud#1561 just removed from `seed-replay` — and `bootstrap` is the step objectstack-ai/cloud#1555 measured at 134 s against a 20 s request waiter.\n\n## What would close it\n\nTwo separable questions, and the first is cheap:\n\n1. **Does a hosted tenant kernel take this branch?** One log line, or one assertion in an existing multi-tenant harness, settles it. If it does not, this reduces to a single-tenant `os dev` cost and can be closed as such.\n2. **If it does** — the same shape as objectstack-ai/cloud#1561: a boot that re-applies a seed union it has already applied has nothing to gain from the round trips, and the fix is to know that rather than to make each leg cheaper. Batching the update path would also help every genuine first seed, which the ledger approach does not.\n\nRelated, same family: #10946 (4 sequential round trips per permission set / position at boot), #10945 (registry rescan, quadratic in stored metadata).\n"
+}

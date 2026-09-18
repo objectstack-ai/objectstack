@@ -1,0 +1,34 @@
+{
+  "number": 11436,
+  "kind": "issue",
+  "title": "[finding] Four self-contained `packages/spec/src` TSDoc examples do not compile — the root `index.ts` teaches an `@objectstack/spec/auth` subpath that does not exist",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T18:30:41Z",
+  "updated_at": "2026-08-24T03:56:06Z",
+  "closed_at": "2026-08-24T03:31:24Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11436",
+  "body": "Found by the sweep #10924's triage put in scope (\"the suggested co-check is in-scope as a sweep, **findings filed not folded**\"). Filed, not folded: repairing these is not #10924's scope — that card builds the gate. PR #11433 adds the surface and marks the six blocks that compile; these four are left unmarked and unrepaired.\n\n## How they were found\n\nWith the new `packages/spec/src` surface active, every one of the 146 fenced ts blocks in that tree was extracted. 128 carry no import of their own and three more are ellipsis-placeholder prose, so 15 self-contained blocks were type-checked against the built `@objectstack/spec` declarations, the same way the gate does (`paths` map derived from the package's own `exports`).\n\nNote the first run proved nothing and was discarded — the three ellipsis fragments' TS1109 syntax errors suppress `tsc`'s semantic pass for the whole program, exactly the trap `check-skill-examples.ts`'s header documents. The diagnostics below come from the re-run with those excluded.\n\n## The four\n\n### 1. `packages/spec/src/index.ts` — three blocks, the package's front door\n\nThe file's own header documents three import styles. All three name things that do not exist:\n\n```\nindex.ts:15  TS2305: Module '\"@objectstack/spec\"' has no exported member 'Data'.\nindex.ts:15  TS2305: Module '\"@objectstack/spec\"' has no exported member 'UI'.\nindex.ts:15  TS2305: Module '\"@objectstack/spec\"' has no exported member 'System'.\nindex.ts:15  TS2305: Module '\"@objectstack/spec\"' has no exported member 'Auth'.\nindex.ts:15  TS2305: Module '\"@objectstack/spec\"' has no exported member 'AI'.\nindex.ts:15  TS2305: Module '\"@objectstack/spec\"' has no exported member 'API'.\nindex.ts:26  TS2307: Cannot find module '@objectstack/spec/auth' or its corresponding type declarations.\nindex.ts:35  TS2307: Cannot find module '@objectstack/spec/auth' or its corresponding type declarations.\n```\n\nTwo distinct defects here:\n\n- **`@objectstack/spec/auth` is not an exported subpath.** The package's `exports` declares `./identity` (User, Organization, Profile), not `./auth`. Styles 2 and 3 both instruct the reader to import `Auth.User` / `{ User, Session }` from a specifier that cannot resolve.\n- **Style 1's root namespace imports do not exist either** — which the prose two lines above arguably already concedes (\"This package does NOT export types at the root level\"), making the block and its own preamble disagree.\n\nThis is the highest-value instance in the sweep: it is the first docblock in the package's entry point, i.e. the first thing an AI author reads.\n\n### 2. `packages/spec/src/shared/branded-types.zod.ts:14`\n\n```\nbranded-types.zod.ts:15  TS2305: Module '\"@objectstack/spec\"' has no exported member 'ObjectNameSchema'.\nbranded-types.zod.ts:15  TS2305: Module '\"@objectstack/spec\"' has no exported member 'FieldNameSchema'.\n```\n\nBoth symbols exist — `export const ObjectNameSchema` / `FieldNameSchema` are declared in this very file and re-exported through `shared/index.ts`. The example simply names the wrong specifier: they resolve from `@objectstack/spec/shared`, not the root.\n\n## Suggested repair\n\nRewrite each block against the current `exports` map and built declarations, then **add the `<!-- os:check -->` marker** so the gate keeps them honest — that marker is what makes the repair permanent rather than a point fix. Acceptance is mechanical: `pnpm --filter @objectstack/spec check:skill-examples` stays green with four more marked blocks (10 on the spec-source surface instead of 6).\n\nWorth deciding during the work, and the reason this is filed rather than guessed: whether the root `index.ts` header should document the namespace-import style at all, or be rewritten around the subpath styles that do resolve. That is a docs-shape question about the package's front door, not a mechanical rename, and it is why these were not folded into #11433.\n\nSplittable if preferred — `index.ts` and `branded-types.zod.ts` share a defect class and an acceptance test but no code.\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 11532,
+  "kind": "issue",
+  "title": "A FRESH walled deployment still mints 8 org-less `sys_permission_set` rows, and the per-organization pass then reports them as \"pre-fix\" leftovers with a remedy that recreates them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T02:32:27Z",
+  "updated_at": "2026-08-24T10:37:40Z",
+  "closed_at": "2026-08-24T10:37:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11532",
+  "body": "Measured while re-verifying cloud#1406 (the downstream acceptance leg for the ruled Option C landing, objectstack#11121). The acceptance itself **passes** — this is a separate, smaller thing noticed in the same run, filed rather than folded in.\n\n## What was measured\n\nFresh boot of the walled HotCRM SaaS rig (`scripts/dev-local/run-hotcrm-saas.sh --seed`, `OS_TENANCY_POSTURE=isolated`, three organizations, one SQLite file), framework at cloud's pin `41ae8d68` — which contains objectstack#11121 (REST compare against merge commit `504c8d55`: `status: ahead`, `behind_by: 0`).\n\nCatalog storage after the boot:\n\n```\nsys_position                 total 54   org-less  0   (18 x 3 orgs)\nsys_sharing_rule             total 30   org-less  0   (10 x 3 orgs)\nsys_position_permission_set  total  3   org-less  0   ( 1 x 3 orgs)\nsys_permission_set           total 50   org-less  8   (14 x 3 orgs + 8)\n```\n\nThe 8 org-less rows all carry `managed_by = 'platform'`, `package_id = NULL`:\n\n```\nadmin_full_access · organization_admin · organization_admin_no_bypass · member_default\nviewer_readonly · mcp_agent_data_read · mcp_agent_data_write · mcp_agent_restricted\n```\n\nThey are written **before any organization exists** — the same clock argument cloud#1406 was filed on:\n\n```\norg-less sys_permission_set  created_at   02:15:51.702Z … 02:15:51.717Z\nsys_organization             min(created_at)          02:15:53.020Z    (+1.3s)\nstamped  sys_permission_set  created_at   02:15:53.125Z … 02:17:20.468Z\n```\n\nThe writer is the platform-admin bootstrap, not one of the four seeders objectstack#11121 converted — `bootstrap-platform-admin.ts` seeds a `sys_permission_set` row per `defaultPermissionSets`, and it was not in that PR's file surface. Its own log line names the count:\n\n```\n02:15:51.749Z INFO [security] platform bootstrap complete {\"seeded\":8,\"adminPromoted\":false,\"reason\":\"no_users\",\"resynced\":0,\"resyncSkipped\":0}\n```\n\n## Why this is worth a card\n\nNothing is broken for a reader: the per-organization pass independently materializes all 8 of those names into every organization (under `package_id = com.objectstack.plugin-security`), so every principal reads its own complete catalog. The 8 org-less rows are unreadable through the wall and are the ruled Q1 outcome (kept, warned, not reaped). **This card is not asking for them to be reaped.**\n\nTwo smaller things do not hold up:\n\n1. **The warning misdescribes them.** `warnPreFixOrganizationLessRows` fires once per organization (confirmed — 3 times on this boot) and says *\"pre-fix organization-less … rows are still present\"*. On a fresh deployment there are no pre-fix rows; these were minted 1.3 s earlier by the code that is warning about them. An operator reading it is told they are carrying legacy state they never had.\n\n2. **Its remedy cannot work here.** The message offers *\"re-initialize the deployment, or adopt each row by hand\"*. Re-initializing a fresh walled deployment recreates exactly these 8 rows on the next boot, so the first branch is a loop. Only the hand-adoption branch terminates, and it is the one an operator is least likely to pick.\n\nRelated, and the reason this reads as a gap rather than a wording nit: `per-organization-catalog.ts`'s own header states that *\"a fresh walled deployment never mints an organization-less catalog row once these seeders run per organization, so there is nothing to migrate.\"* On the measured boot it mints 8, from a fifth seeder outside the four that were converted.\n\n## Possible shapes (not a recommendation — severity is triage's call)\n\n- Route `bootstrapPlatformAdmin`'s permission-set seeding through the same per-organization pass as the other four, so the platform bucket stops being minted org-less on walled postures; or\n- Leave the rows (as ruled) and make the warning distinguish *freshly minted by this boot* from *pre-fix leftover*, with a remedy that matches which one it found.\n\nThe first changes behaviour under a ruling that deliberately kept these rows, so it should not be taken as obvious.\n\nRefs: cloud#1406 (the acceptance this came out of), objectstack#10103 (the Option C ruling), objectstack#11121 (the landing)."
+}

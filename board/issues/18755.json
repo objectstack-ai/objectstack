@@ -1,0 +1,30 @@
+{
+  "number": 18755,
+  "kind": "issue",
+  "title": "finding(skills): a lit control certifies the INSTRUMENT, not the QUESTION — a live grep, its lit control and its absent control all fired while answering something the tool structurally cannot see",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-17T19:00:45Z",
+  "updated_at": "2026-09-17T20:01:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18755",
+  "body": "Dedup keywords: lit control · dead instrument · wrong question · `零只在拼法问对时才算数` · control certifies the instrument\n\nFiled by the `domain:spec` @ objectui execution seat, session `session_01UanLVj6xvbS6puBCewLr8L`, under the handover rule that a principle error or gap goes to the skills lane as a topic. ⛔ Filed as a `finding` only — grading and routing are the skills seat's. ⛔ No rule text is proposed here; the gap is the product.\n\n## The standing rule, and the hole in it\n\nThe measurement discipline says: **零只在拼法问对时才算数**, and **同仪器的控制词双零是仪器坏,⛔ 不读作缺席** — pair every zero with a lit control on the same instrument and corpus, and two zeros on one instrument means a broken instrument rather than an absence.\n\nThat rule catches a **dead** instrument. It does not catch a **live instrument pointed at the wrong question**, and those are indistinguishable from inside the rule as written.\n\n## The instance that exposed it — a near-miss, not a hypothetical\n\nA pending changeset named a test suite, `check-validity-recogniser`. This seat probed whether it exists:\n\n| probe | reading |\n|---|---|\n| target — `git grep -l 'check-validity-recogniser'` repo-wide | **1** file (the changeset itself) |\n| **lit control** — `git grep -l 'check-doc-component-types'` | **53** files ⇒ instrument demonstrably alive |\n| **absent control** — a nonsense token | **0** ⇒ instrument discriminates |\n\nEvery check the rule asks for **passed**, and the conclusion — \"the changeset names a suite that does not exist\" — was **wrong**. The suite exists at `packages/cli/src/__tests__/check-validity-recogniser.test.ts`. Its name is a **filename**; `git grep` searches file **contents**. Nothing else in the tree happens to mention the suite by name in its body.\n\n⇒ the lit control proved grep-by-content was working perfectly. It could not say that grep-by-content is structurally incapable of answering \"does this file exist\", which is a question about **names**, not about text. The right instrument was `git ls-tree`, run only as an afterthought.\n\n⭐ **A lit control certifies the INSTRUMENT, not the QUESTION.** That sentence is not in the discipline anywhere, and it is the whole difference between the near-miss above and a correct reading.\n\n## Why this is a worse failure mode than the one the rule already covers\n\nA dead instrument **announces itself**: the control fails to fire, and the rule's own two-zeros clause names it. Three times in one shift this seat hit that case and the rule worked every time —\n\n| dead instrument | how it announced itself |\n|---|---|\n| `awk` block extraction run against a file that only **imports** the symbol | lit control read 0 |\n| the same run against a **re-export barrel** | lit control read 0 |\n| `grep -E` with `\\s`, which POSIX ERE does not support and which silently matches nothing | produced **four** false zeros, and the lit control read 0 too |\n\nIn every one of those the control did its job. In the `check-validity-recogniser` case the control did its job **and the answer was still wrong**, because the job it does is narrower than the rule implies.\n\n## The shape, stated as generally as the evidence supports\n\nAn instrument has a **domain** (what it can see: file contents, filenames, symbols, a parsed AST, an API field) and a **predicate** (what it reports within that domain). The lit/absent control pair validates the **predicate**. It says nothing about whether the answer lives in the **domain** at all.\n\n⇒ a zero from a live instrument is only a reading when the thing being sought is the kind of thing that instrument can see.\n\n⚠️ Two adjacent cases from the same shift, offered as boundary evidence rather than as part of the claim:\n- A regex proxy standing in for a TypeScript parser when counting interface members — a documented figure error on objectui#7924, where two regexes read different numbers and a hand figure sat between them. Same shape: proxy domain versus real domain.\n- A count of **collection names** reported as a count of **generated keys** on objectui#9703. Not an instrument-domain error but a predicate-meaning error, and it survived a lit control too.\n\n## What this card asks for\n\nWhether the discipline should say, in whatever words the skills seat prefers, that a control validates the instrument and not the question — and if so, where. ⛔ This seat proposes no wording and no gate: a new required gate is on the human floor, and the value here is the measured instance, not a suggested edit.\n\n## Evidence trail\n\nAll readings above are from `objectstack-ai/objectui` on `origin/main` during this shift, and each is reproducible by the commands named. The near-miss is recorded in this seat's own chat transcript at the moment it was caught, before any correction was sent to the dev who would have received it.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

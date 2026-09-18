@@ -1,0 +1,35 @@
+{
+  "number": 11607,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth): an organization stops capping members at 100 — state the limit the platform actually has",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T08:05:46Z",
+  "updated_at": "2026-08-24T08:34:48Z",
+  "closed_at": "2026-08-24T08:34:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-24T08:34:47Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11607",
+  "body": "## The report\n\nA customer adding users was refused with `Organization membership limit reached`.\n\n## The cause\n\nbetter-auth's organization plugin reads\n`count >= (membershipLimit || 100)` (`plugins/organization/routes/crud-members`),\nso leaving `membershipLimit` unset caps every organization at 100 members.\n`auth-manager` passes `organizationLimit` — how many organizations one *user may\ncreate* — and never passed `membershipLimit`. The two read almost identically in\na config block and mean nothing alike, which is why the gap survived.\n\nThe refusal is worse than merely wrong in the field: it arrives while an\noperator is looking at licences and seat counts, so it reads as an entitlement\nproblem on an axis that carries no entitlement. Seats are metered on AI usage;\nplain membership has never been billed.\n\n## The change\n\n- `membershipLimit` passed explicitly, unbounded by default.\n- `OS_ORG_MEMBERSHIP_LIMIT` opts a deployment into a real ceiling (pilot, trial\n  tenant). Unusable values (empty / non-numeric / zero / negative) read as\n  **unset**, never as a cap — a typo must not be the thing that locks an\n  organization, which is the failure mode being fixed.\n- The decision sits in `resolveMembershipLimitOption()` rather than inside the\n  plugin-construction expression, so it is testable rather than a comment.\n\n`Number.MAX_SAFE_INTEGER` rather than `Infinity`: the value is compared\nnumerically but also travels through option plumbing that may assume finite.\n\n## Tests\n\n- `packages/types` — `resolveOrgMembershipLimit`: unset, explicit, unusable\n  values, and independence from `OS_ORG_LIMIT` (38 passed in that file).\n- `packages/plugins/plugin-auth` — `resolveMembershipLimitOption`: unbounded\n  default, clears 100 by a wide margin, stays finite, honours an explicit\n  ceiling, unusable→unset; plus a construction check so a rename upstream cannot\n  silently orphan the option.\n- Neighbouring membership suites re-run green (`adopt-membership`,\n  `accept-invitation-adopt-membership`, `last-admin-guard` — 144 passed).\n\n## Note for consumers\n\nUntil this reaches a deployment, an operator can add the member by writing the\n`sys_member` row directly — better-auth's `member` model IS `sys_member`, and\nthe vendor count guards only its own routes."
+}

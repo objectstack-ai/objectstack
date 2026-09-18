@@ -1,0 +1,34 @@
+{
+  "number": 11379,
+  "kind": "issue",
+  "title": "[observation] driver-sql (MySQL): introspectForeignKeys returns a composite key's columns in UNSPECIFIED row order — no `ORDER BY ORDINAL_POSITION`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T14:59:59Z",
+  "updated_at": "2026-08-24T14:35:06Z",
+  "closed_at": "2026-08-24T14:26:05Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11379",
+  "body": "Found while implementing #11324 (the Postgres arm of the same method). Filed rather than fixed because it is a different dialect arm with a different mechanism, and — stated up front — **it did not reproduce**. #11324 is a separate subject and is not addressed by this issue.\n\n## What\n\n`packages/drivers/driver-sql/src/sql-driver.ts`, `SqlDriver.introspectForeignKeys`, MySQL arm:\n\n```sql\nSELECT COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME, CONSTRAINT_NAME\nFROM information_schema.KEY_COLUMN_USAGE\nWHERE TABLE_SCHEMA = DATABASE()\n  AND TABLE_NAME = ?\n  AND REFERENCED_TABLE_NAME IS NOT NULL\n```\n\nThere is no `ORDER BY`. `KEY_COLUMN_USAGE.ORDINAL_POSITION` is the key ordinal and is selected by neither the projection nor an order clause, so the row order of a composite foreign key's columns is whatever the plan yields.\n\nThis arm has no correlation defect — `COLUMN_NAME` and `REFERENCED_COLUMN_NAME` sit on **one row**, so child and parent columns are paired by construction and there is no cartesian product to produce. What is unpinned is only the **order** of those correctly-paired rows.\n\n## Why the order is load-bearing at all\n\n#11324 establishes the contract that a composite foreign key is expressed as ordered sibling rows in a flat per-column record — `(x, y) references p (a, b)` is `x -> p.a` then `y -> p.b`, in that order, with no ordinal field to recover the position from. The Postgres arm now pins it with `ORDER BY … k.ord`. The MySQL arm relies on the server.\n\n## What was measured, and what it showed\n\nLive MySQL 8.0.46, a key declared out of column sequence so key order and column order are different answers:\n\n```sql\ncreate table ooo_parent (pa varchar(64), pb varchar(64), primary key (pa, pb));\ncreate table ooo_child (\n  id varchar(64) primary key, first_col varchar(64), second_col varchar(64),\n  constraint fk_ooo foreign key (second_col, first_col) references ooo_parent (pa, pb));\n```\n\nThe arm's query, verbatim, returned **key order** — `second_col -> pa` then `first_col -> pb`. So on this server, this version and this shape, the answer was correct.\n\nThat is why this is filed as an observation rather than a bug: there is no wrong answer to point at.\n\n## Why it is still worth recording\n\nThe sibling `introspectPrimaryKeys` MySQL arm carries a measured comment saying the *same view*, queried the same way without `ORDER BY`, returned **column order rather than ordinal order** on an out-of-sequence key — which is what #11101 fixed there, and it explicitly notes that the InnoDB folklore about \"tending to\" return ordinal order does not hold on that shape. So the identical gap exists here, one arm over, and the only thing standing between it and a wrong answer is a plan choice nobody declared.\n\nThe fix, if triage wants it, is one line — `ORDER BY ORDINAL_POSITION` — matching what `introspectPrimaryKeys` already spells. The cost of leaving it is that the contract above is pinned on one dialect and left to the optimizer on another.\n\n## Not measured here\n\nWhether any plan shape on any supported MySQL version actually returns this view out of ordinal order for a foreign key. Establishing that would need a fixture large enough to change the plan, which is beyond what an observation should spend.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 11260,
+  "kind": "issue",
+  "title": "docs(references): the generated `security` category index omits `misc`, the one page with no `.zod.ts` behind it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T07:00:14Z",
+  "updated_at": "2026-08-23T23:44:56Z",
+  "closed_at": "2026-08-23T23:14:47Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11260",
+  "body": "Found while implementing #10738 (a gate holding hand-kept section landing indexes to their `meta.json`). Out of scope there: that gate only holds pages carrying a `## What's in this module` heading, and the generated `content/docs/references/*/index.mdx` pages carry none. Filing rather than fixing — `packages/**` is claimed this round by #10921.\n\n## Measured on `origin/main` @ `98ea3443f`\n\n`content/docs/references/security/` ships five pages. Its `meta.json` declares all five. Its `index.mdx` grid cards four:\n\n```\n$ cat content/docs/references/security/meta.json\n{ \"title\": \"Security Protocol\", \"pages\": [\"explain\", \"misc\", \"permission\", \"rls\", \"sharing\"] }\n\n$ grep -o 'href=\"/docs/references/security/[a-z-]*\"' content/docs/references/security/index.mdx\nhref=\"/docs/references/security/explain\"\nhref=\"/docs/references/security/permission\"\nhref=\"/docs/references/security/rls\"\nhref=\"/docs/references/security/sharing\"\n\n$ ls content/docs/references/security/misc.mdx\ncontent/docs/references/security/misc.mdx\n```\n\nSo `/docs/references/security/misc` exists, is generated, and is routed in the sidebar — but a reader on the category overview cannot reach it.\n\nSwept across all 14 `references/*` categories: `security` is the **only** one whose `meta.json` carries a `misc` entry, and the only one affected. Every other category's grid matches its `meta.json` exactly.\n\n## Mechanism\n\nBoth files come out of the same generator run, `packages/spec/scripts/build-docs.ts` (`gen:docs`), from two different code paths that disagree about the `misc` catch-all.\n\nThe card emitter (~line 806) iterates `zodFiles` — page names derived from `.zod.ts` modules:\n\n```ts\nArray.from(zodFiles).sort().forEach(zodFile => {\n    // ... \"This aligns the index with `meta.json`, which already lists only generated pages.\"\n    if (!wasEmitted(path.join(DOCS_ROOT, category, `${zodFile}.mdx`))) return;\n```\n\n`misc` is the catch-all bucket, and the file itself says twice that it has no module behind it (~line 233, *\"no file behind it (the `misc` catch-all bucket)\"*; ~line 409, *\"the `misc` catch-all has no file behind it\"*). So `misc` is never in `zodFiles`, the loop never considers it, and the `wasEmitted` guard — which is what the comment leans on — never runs for it. The `meta.json` builder (~line 790, via `SECTION_GROUPS` / the flat list at ~line 569) takes a different route and does include it.\n\nThe comment's claim *\"This aligns the index with `meta.json`\"* is therefore false for exactly this bucket, and it is the kind of false that reads as verified.\n\n## Suggested shape (not a decision)\n\nCard the pages **`meta.json` actually declares** rather than re-deriving from `zodFiles`, keeping the `wasEmitted` guard so an undelivered page still cannot be carded. That makes the comment's stated invariant true by construction instead of by coincidence, and closes the whole class rather than special-casing `misc`.\n\nWorth checking in the same pass whether a category that is *all* `misc` would emit an empty grid.\n\n## Refs\n\n#10738 (where this was found) · #10834 (open `finding` on a different defect in the same generated index) · `packages/spec/scripts/build-docs.ts`"
+}

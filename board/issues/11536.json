@@ -1,0 +1,35 @@
+{
+  "number": 11536,
+  "kind": "pull_request",
+  "title": "feat(service-messaging): plugin-facing listInboxAsCaller scoped to the authenticated caller",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T02:43:05Z",
+  "updated_at": "2026-08-24T03:13:06Z",
+  "closed_at": "2026-08-24T03:13:05Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": "2026-08-24T03:13:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11536",
+  "body": "Fixes #11452\n\n## What\n\n`MessagingService` gains the plugin-facing inbox **read** door scoped to the authenticated caller — `listInboxAsCaller(caller, opts)` — mirroring the merged write-side counterpart PR #11450 (card #10753):\n\n- The recipient is derived from `caller.userId` via the **same** `resolveInboxRecipient` (`packages/services/service-messaging/src/inbox-caller.ts`) the write door uses — one refusal vocabulary, not two.\n- No authenticated user ⇒ `InboxCallerError` carrying the ADR-0112 envelope pair a boundary reads — `status: 401`, registered `code: 'UNAUTHENTICATED'`. `attributedUserId` (attribution only, ADR-0118 D2), `actor` (a service-principal label) and `isSystem` are refused rather than promoted.\n- The refusal is evaluated **before** `listInbox`'s no-data-engine / no-user short-circuit, which answers a well-formed empty `{ notifications: [], unreadCount: 0 }` — the read-side analog of the silent success the write door replaced.\n- `resolveInboxRecipient` gains an optional third parameter naming the target-user door its refusal prescribes (`listInbox(userId, opts)` for this verb). It **defaults to the write door's existing text**, so the #10753 call sites keep their refusal bytes unchanged.\n\nAdditive only: `listInbox(userId, opts)` stays byte-for-byte as the published `INotificationService` contract the REST door (`runtime/src/domains/notifications.ts`) binds to. No `packages/spec/**` edits were needed — the new method lives on the service class, exactly as the write door does.\n\n## What it is, honestly\n\nSame caveat as the write door, deliberately carried forward: this is a **discipline** boundary, not a security boundary — an in-process plugin already holds the data engine and can read `sys_inbox_message` rows directly; nothing at this layer stops trusted code that means to. What changes is that the correct pattern is the only one the plugin-facing surface expresses, and the incorrect one now fails loudly at the call site.\n\n## Tests\n\nNew `#11452` block in `messaging-service.test.ts` (7 tests): own-inbox-only scoping (the other user's rendered content absent from the answer in any field), options (`read`/`type`/`limit`) forwarded unchanged (answer-equality against `listInbox` on the same engine), and the refusal matrix — absent/empty/blank context, `attributedUserId`-only, `actor` label, `isSystem`, refusal-before-short-circuit, and the refusal prescribing the read contract door rather than `markRead(userId, ids)`.\n\n**Ablation** (fix reverted to a naive `caller?.userId ?? ''` delegation, mutation confirmed on disk by anchored grep in both directions): exactly the 5 refusal tests go red, every failure being the predicted `expected InboxCallerError, but the call resolved`; restore verified byte-identical via `git hash-object`. The suite resolves the subject through relative src imports, so no dist rebuild leg applies.\n\n## Verification (all at `90b3528079`, this PR's head)\n\n- `@objectstack/service-messaging`: `pnpm test` — `Test Files 26 passed (26) / Tests 274 passed (274)`; `pnpm typecheck` clean.\n- Derived gate union (`node scripts/pm/dispatch-gates.mjs`, derivation stamped at `90b3528079`): `check:changeset-gate-self-tests`, `check:objectui-changeset`, `check:published-files`, `check:slot-lookup`, `check:test-source-alias`, `check:type-source-resolution`, `check-adr-0087-registration`, `check-changeset-no-major`, `check-ci-filter-parity`, `check-empty-changeset`, `check-plugin-teardown-shape`, `docs-audit/check-affected-docs`, `check:query-options-erasure`, `check:type-check-coverage`, `check:engine-double-contract`, `check:cross-package-test-inputs`, `check:where-matcher` — all exit 0 (exits captured before any pipe).\n- `check:type-check-debt` (full closure built first): `check-type-check-coverage --re-measure: OK — 32 ledger entr(ies) re-measured in 293.3s, 1897 raw tsc error(s) total, none above its recorded number.`\n- `check:i18n`: `check-i18n-bundles: OK (9 package(s) — all bundles in sync, no undeclared authoring keys).`\n- `check:nul-bytes`: `OK (scanned 6456 text file(s) …)`.\n- Targeted `eslint --no-inline-config` on the three touched TS files: exit 0 (early signal only; the repo-wide sweep is CI's run).\n\nChangeset: `.changeset/messaging-inbox-read-authenticated-caller.md` (minor, `@objectstack/service-messaging`; additive, not breaking, so no ADR-0087 disposition marker is required).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01APWX2AwT3a4xDcjPCe8bk4)_"
+}

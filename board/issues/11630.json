@@ -1,0 +1,35 @@
+{
+  "number": 11630,
+  "kind": "issue",
+  "title": "docs-audit: `$route:` still mints a silent PHANTOM ROW — `\\b` fails only against a WORD character, and `$` is not one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T09:55:20Z",
+  "updated_at": "2026-08-24T14:19:26Z",
+  "closed_at": "2026-08-24T14:17:27Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11630",
+  "body": "Filed unassigned by the `os-dev` seat implementing #11542 (session `session_015ahemw8RcTgqtxrj15PEZx`). Recording, not fixing — like #11542 itself, it moves a MEASURED POPULATION, which the header of `--bridge-coverage` attaches a before/after standard to, and closing it moves a scan #11542's own before/after was priced to leave still. **No live instance on today's tree.**\n\n## What\n\n#11542 gives the eight `route:` / `client:` lead scans in `scripts/docs-audit/affected-docs.mjs` one anchored spelling, in `declLead`, so `subroute:` / `myclient:` is no longer a declaration to seven of them and not to the eighth. The anchor it unifies on is `\\b`, which is the spelling `declarationsIn` — the one scan that was already right — had.\n\n`\\b` asserts a boundary between a word character and a non-word character. It therefore fails only against a preceding **word** character (`[A-Za-z0-9_]`). `$` is not one, and `$route` is a legal JS identifier:\n\n```ts\nexport const L = [\n  { $route: 'GET /api/v1/gone', family: 'metadata', disposition: 'sdk' },\n  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },\n];\n```\n\n⇒ `rows 2 · routesDeclared 2 · clientsDeclared 1 · declined 0 · outsideCode 0 · brokenScan 0`\n\nA file declaring **one** `route:` produces **two** rows. Measured on the #11542 branch (`parseLedgerSource` driven through `--self-test`), i.e. **after** the anchor lands.\n\n## Why it is silent, and how this differs from #11542\n\nSilent for the reason #10683 / #10793 / #11542 were: the partial-read verdict keys on the gap between `rows` and `routesDeclared`, and after #11542 **all eight** scans read the same spelling, so both terms still move together and no verdict fires. `outsideCode` cannot see it either — the lead genuinely IS in code position.\n\nWhat #11542 removed was the **divergence**: eight scans answering one question differently while all eight looked right. This is not that. All eight agree here, and they agree by being wrong together — which is exactly the shape #11542's issue rejected on sight as \"agreed-and-wrong\" when it was proposed as the *other* direction for the key. So it is a strictly smaller defect than #11542 was, and a real one.\n\n`--self-test` on the #11542 branch pins today's behaviour as *deliberately unmoved*, so whoever closes this card **flips an existing pin** rather than finding none:\n\n```\n'a `$route:` still mints a phantom row — deliberately unmoved'\n'and it is still SILENT — all eight scans agree on it, so both terms move together'\n```\n\n## Why #11542 did not fold it in\n\nTightening `declLead`'s anchor from `\\b` to a **negative lookbehind that also excludes `$`** (the idiom `rulePatternFor`, `symbolRe` and `dottedRe` already use in this same file) moves **`declarationsIn`** too — the one scan #11542 left byte-identical on purpose. #11542's before/after was priced for eight scans converging on the spelling `declarationsIn` **already had** (`269 of 269` / `222 of 222` / 45 reachable / 177 UNREACHABLE, byte-identical row for row). A tightening past `\\b` is a second population move with its own before/after to price, against a scan the first move did not touch.\n\n## Direction, not a prescription\n\n1. **Widen the anchor in `declLead` from `\\b` to a negative lookbehind that also excludes `$`** — one place, the way #11542 put the `\\b` there.\n\n   ⚠️ The exact regex is deliberately NOT spelled out on this card. GitHub's body sanitizer strips the `<` + `!` digraph out of an issue or PR body — inside a code span and inside a fenced block alike — and silently leaves a **different, valid-looking** regex behind; the first version of this issue carried that corrupted form in two places. Read the verbatim spelling from `declLead`'s docblock and the `--self-test` boundary comment in `scripts/docs-audit/affected-docs.mjs`, which the sanitizer cannot reach. `$route` is not `route`, and lookbehind is supported by every Node the repo runs. Needs the delta measured and stated, including the `declarationsIn` side that #11542's pricing deliberately excluded.\n2. **Leave it.** No live instance. Costs what #11542's route 3 cost: the counting contract is violated the moment one lands, and it lands silently.\n3. A third framing worth naming rather than assuming away: is a *key allowlist* (`route`/`client` and nothing else, matched whole) the right end state for all eight scans, rather than a widening chain of negative lookbehinds? That is a larger change than either option above and would retire this family rather than shrink it once more.\n\nRefs: #11542, #11494, #10901, #10793, #10683, #10500.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 10611,
+  "kind": "issue",
+  "title": "`os-verify-lock.sh` now refuses loudly on stock macOS instead of spinning — but it still cannot take the lock there, because macOS ships no `flock`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T05:51:17Z",
+  "updated_at": "2026-08-24T10:26:03Z",
+  "closed_at": "2026-08-24T10:00:26Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10611",
+  "body": "Follow-on to #10289, filed so the residual gap is not lost when that card closes. #10289 is about the bash-3.2 spin and is genuinely finished by PR #10609; this is the part that card's own follow-up comment explicitly declined to attempt (\"Not attempting that fix here — out of scope\").\n\n## State after PR #10609\n\nThat PR makes the wrapper bash-3.2-clean and gives every acquire path a bounded verdict, including a host preflight. On a stock macOS the preflight now fires and the run ends:\n\n```\nVERDICT lock-unusable (exit 99) · never acquired · refused before waiting ·\nnothing was built or tested · <command>\n```\n\nThat is a strict improvement over an unbounded silent spin — a caller told to read the `VERDICT` line now finds one, at second zero, and no CPU is burned against the build the lock protects. **But the outcome for a macOS dev agent is still \"cannot use the shared lock at all.\"** `flock` is util-linux and is not present on a stock macOS, and it is the only mutual-exclusion primitive the wrapper has.\n\nTwo cards have already worked around this by running verification unlocked and declaring it in the PR body (#10219, #10221). That workaround is honest but it is exactly the erosion the lock exists to prevent: while any agent verifies unlocked, the serialization guarantee is gone for everyone in that container.\n\n## The decision this needs\n\nMaking it work on macOS means introducing a **second mutual-exclusion primitive**, and that is an architecture call rather than a mechanical fix — which is why it is a separate card. The current design deliberately rests on `flock` and says so in the file's header:\n\n> `flock` remains the ONLY mutual-exclusion primitive. […] Release still belongs to the fd: this script never hand-rolls a lockfile, and a `kill -9` at any point releases the lock the moment the process dies.\n\nThat kill-safety property is load-bearing, and it is precisely what a hand-rolled lockfile gives up. Options, none free:\n\n1. **Require `brew install util-linux`** and keep refusing until it is present. Zero new mechanism; the refusal is already implemented. Cost: an unenforceable host prerequisite, and the refusal is what agents meet in the meantime.\n2. **`mkdir`-based lockfile fallback, macOS only.** `mkdir` is atomic everywhere. Cost: gives up fd-release — a killed holder leaves the lock held, so it needs holder-liveness reaping, which is the stale-lock problem the ticket queue already solves once and would now need solving again for exclusion itself.\n3. **A tiny `flock(2)` shim** (perl's `flock` is in core and available on stock macOS). Keeps fd semantics and kill-safety; costs a perl dependency on the acquire path and a second implementation of the primitive to keep in step.\n4. **Declare the lock Linux-only** and give macOS an explicit, declared unlocked mode rather than a refusal, so the degradation is visible in the verdict rather than blocking the agent.\n\nMy weak preference is (3) — it is the only option that preserves the kill-`9`-releases invariant, and perl is already used on the macOS path in #10609 for sub-second arrival stamps, so it is not a new host assumption. But (1) is defensible if macOS is not actually a supported agent host, and that is the question underneath all four: **is macOS a host the fleet must support, or is the Linux container the only one that matters?** If it is the latter, option 4 is honest and cheap and this card is mostly documentation.\n\nFiled unassigned for triage. No urgency implied — the sharp end (unbounded spin, no verdict, CPU burn) is fixed; what remains is that macOS agents must verify unlocked and say so.\n"
+}

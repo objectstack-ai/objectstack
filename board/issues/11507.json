@@ -1,0 +1,35 @@
+{
+  "number": 11507,
+  "kind": "issue",
+  "title": "[Decision] Is `sys_activity.type` a closed platform vocabulary or an author-extensible one? Both readings are true of the code today",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T01:35:43Z",
+  "updated_at": "2026-08-24T11:52:01Z",
+  "closed_at": "2026-08-24T11:52:01Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11507",
+  "body": "Split out of **#11424** by the `domain:services` execution seat so the ruling survives that card's closure. #11424 is being worked at **direction-1 scope only** — declare the one value a shipped producer measurably writes — because that step changes no accept/reject behaviour and is compatible with three of the four end states. **The ruling below is not made there, and must not be inferred from that PR landing.**\n\nFiled unassigned: this is a ruling request, not work in progress.\n\n## The question\n\nIs `sys_activity.type` a **closed platform vocabulary** (the declared select options are the contract, and anything else is a bug at the writer) or an **author-extensible** one (metadata authors legitimately contribute values, and downstream closed maps are the bug)?\n\nToday **both readings are simultaneously true of the code**, which is the actual defect — not the one missing enum member.\n\n## Why both are true\n\n**Reading it as closed:** `packages/plugins/plugin-audit/src/objects/sys-activity.object.ts` declares `type` as a select over a fixed eleven values. A select field's declared options are normally enforced by objectql's `invalid_option` check.\n\n**Reading it as open — two independent doors:**\n\n1. **Nothing can enforce it.** Every field on `sys_activity` is `readonly: true`, and `validateRecord` skips readonly fields on both the insert and the update branch, so the `invalid_option` check **never runs** for one. An undeclared value is stored silently. This is not \"an app broke the rules and got caught\" — nothing can catch it. (This mechanism was already measured and written into the vocabulary pin's own docblock; it is not a new finding.)\n\n2. **The platform itself forwards author-declared values into the column.** ADR-0052 §5b.2 `activityMilestones[].type`, applied verbatim by `audit-writers.ts` (`if (milestone.type) activityType = milestone.type`). Any metadata author can put any string there and it lands. `scheduled` (objectstack-ai/hotcrm) is simply the first one someone measured downstream.\n\nDoor 2 matters more than door 1. Door 1 is an enforcement gap that could be closed. Door 2 is a **shipped, documented feature** that hands the column to authors — so \"closed vocabulary\" is not merely unenforced, it is contradicted by a sanctioned write path.\n\n## The options, as #11424 framed them\n\n| | Direction | Effect |\n|---|---|---|\n| **1** | Declare the measured value | ✅ in flight under #11424 — reversible, makes shipped state honest, **decides nothing here** |\n| **2** | Rule the producer non-conformant | Keeps the vocabulary closed. But nothing enforces it, so it is a convention that will be broken again silently — and it does not address door 2 at all |\n| **3** | Enforce the vocabulary on system-owned writes | The only option that closes the class. Largest. Would make ADR-0052 `activityMilestones[].type` a rejection path, so it is really \"close door 1 **and** retire door 2\" |\n| **4** | Declare it author-extensible and say so | Cheapest coherent end state. Makes every downstream closed map the bug, including objectui's |\n\n⚠️ **2 and 3 are not additive on top of 1.** If either is chosen, `scheduled`'s declaration is revisited — under 2 it should arguably come back out. That is fine and reversible; it is stated here so the ruling is not narrowed by the fact that #11424 landed first.\n\n## What is downstream of the answer\n\n`objectui`'s `packages/plugin-detail/src/renderers/recordActivityFeed.ts` keys its feed-kind map on this vocabulary. Its test **used to** pin the key set as set-equal to the eleven declared options; **objectstack-ai/objectui#5840 deliberately broke that set-equality**, because pinning to the declaration means dropping stored rows that are already in the database.\n\nSo there is currently no pin asserting the relationship between the declaration and the renderer, in either direction. **Whichever way this is ruled, that pin should follow it** — and it cannot be written until the ruling exists. That is the concrete cost of leaving this open.\n\n## Not measured\n\n- Whether producers other than HotCRM write undeclared values. Only `scheduled` was measured, and it was measured from the objectui side. A corpus sweep across shipped apps has **not** been run, and this repo cannot see those apps.\n- How many stored `sys_activity` rows already carry undeclared values in any deployment. Unknowable from here.\n\n## Seat note\n\nNot adjudicated in the `domain:services` seat. Directions 2, 3 and 4 each change what the platform *means* by this column, and 3 additionally turns a shipped ADR-0052 write path into a rejection path — a security-adjacent tightening with author-visible fallout. All of that sits above seat discretion, and the originating card says so in its own words: *\"this is a vocabulary ruling and a maintainer call.\"*\n\nRefs: #11424 (the measurement and the four directions) · objectstack-ai/objectui#5840 (the renderer half, already landed) · ADR-0052 §5b.2 (door 2)"
+}

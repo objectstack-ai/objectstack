@@ -1,0 +1,35 @@
+{
+  "number": 11190,
+  "kind": "issue",
+  "title": "[finding] The shared workspace-enumerator consolidation is blocked on dispatch-gates following first-party imports — today it would DELETE the population declarations it is meant to centralise",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T01:57:50Z",
+  "updated_at": "2026-08-24T03:25:47Z",
+  "closed_at": "2026-08-24T02:36:40Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11190",
+  "body": "Measured while fixing #10542 (PR #11189), which landed the per-gate half and deliberately deferred this one. Filed unassigned; not fixed there.\n\n## What #10542 proposed\n\nThat card's closing section observed that twelve scripts each carry their own `pnpm-workspace.yaml` parser, several admitting it in a comment (\"Minimal pnpm-workspace.yaml block parsers (same approach as …)\"), and that two of them once carried byte-identical 11-entry `WORKSPACE_PARENT_DIRS` arrays with the same blind spot in both. It concluded that a shared enumerator — the shape `scripts/i18n-bundle-surface.mjs` already sets — \"would make the population declarable in one place instead of twelve, which is the same refactor as the fix rather than a separate one\".\n\n## Why it is not the same refactor, measured\n\nUnder the current derivation it is the **opposite** of a fix, and the mechanism is two functions in `scripts/pm/dispatch-gates.mjs`:\n\n- `resolveCheckToFiles` extracts script paths from the npm script's **command string** (`/(scripts\\/[\\w./-]+\\.(?:mjs|cjs|js|sh))/g` over `scriptsMap[checkName]`);\n- `discoverFamilies` then scans exactly those files for watch hints.\n\nA module a gate `import`s is never opened. So a population declaration moved out of a gate and into a shared enumerator **stops contributing hints to every gate that imports it**. Concretely, that would silently undo:\n\n- `check:test-source-alias` and `check:type-source-resolution`, whose `WORKSPACE_PARENT_GLOBS` arrays (#9955 / PR #10540) are the reason they name all four of #10542's layout specimens today;\n- `check:published-files`, whose declaration PR #11189 just added on exactly the same pattern.\n\nAll three would go back to naming no card in the tree, with every gate still green and nothing in the output saying so — the same invisible failure #10542 exists to retire, reintroduced by the tidy-up meant to prevent it.\n\nPR #11189 pins this as an assertion rather than leaving it as prose: dispatch-gates' self-test now asserts that a family's hints are exactly those of the scripts its command names, so a later author measures the constraint instead of trusting a paragraph.\n\n## What the work actually is, in order\n\n1. **Teach the derivation to follow first-party imports** (one level, `scripts/`-relative, no `node_modules`). This is the enabling change and it is the one with a fabrication budget to measure: `hintCovers`' docblock prices bare-top-level-word admission at +139084 (gate, file) pairs, and following imports is a different and probably far smaller widening — but it has never been measured, and the measurement is the deliverable, not the guess. Sweep the (gate, file) pair count and the per-family matched counts before and after, the way #9626 and #10540 did.\n2. **Only then** consolidate the twelve parsers, moving each gate's population declaration into the shared module, and confirm on the same sweep that no family loses coverage.\n\nDoing 2 without 1 is a regression with no red gate.\n\n## The duplication itself, for whoever picks this up\n\nFifteen discovered families read `pnpm-workspace.yaml` at runtime (re-measured on `main` at 137 discovered families — #10542's figure of twelve was taken when the farm was 119). `scripts/i18n-bundle-surface.mjs` is the shape the consolidation should take.\n\n## Adjacent, noticed in the same sweep and NOT part of the above\n\n`check:cross-package-test-inputs` is discovered as **two** families — `check:cross-package-test-inputs` from `lint.yml` and the direct `scripts/check-cross-package-test-inputs.mjs` from `ci.yml` — because `extractCheckInvocations` keys a `pnpm check:x` invocation and a `node scripts/check-x.mjs` invocation separately. Anything keyed by family name therefore reaches only one of the pair: PR #11189's `CHANGE_KIND_GATES` entry rescues the `check:` spelling and leaves the direct one unrescued. This is a discovery-keying question, not a population one, and is recorded here rather than folded into either card above.\n\n## Related\n\n#10542 (the parent finding, closed by PR #11189), #10540 / #9955 (the declarations this would delete), #9626 (why `hintCovers` refuses bare literals, with the +139084 measurement), #10114 (the merged precedent for declaring a population).\n"
+}

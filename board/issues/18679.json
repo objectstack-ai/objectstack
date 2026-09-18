@@ -2,9 +2,9 @@
   "number": 18679,
   "kind": "pull_request",
   "title": "skills(pm-dispatch): a ruling's file/symbol/line/call-shape clause carries its reading or is marked 未验证 — the 派发令 evidentiary duty extended to 裁决",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "os-justin",
     "id": 323634890,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs-user-decision",
     "size/xs",
     "skip-changeset"
   ],
@@ -20,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-17T14:19:56Z",
-  "updated_at": "2026-09-17T14:41:13Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-18T02:00:17Z",
+  "closed_at": "2026-09-18T02:00:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-18T02:00:15Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/18679",

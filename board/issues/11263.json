@@ -1,0 +1,34 @@
+{
+  "number": 11263,
+  "kind": "issue",
+  "title": "[finding] `@objectstack/organizations` is an out-of-repo enterprise runtime with no row in `PLATFORM_CAPABILITY_PROVIDERS` — the roster that already answers #10921's question for every other one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T07:04:44Z",
+  "updated_at": "2026-08-24T09:39:19Z",
+  "closed_at": "2026-08-24T09:26:54Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11263",
+  "body": "Found while fixing #10921. Filed as an observation, not a defect: nothing is broken today. It records where #10921's governance half actually landed, so the next person does not re-derive it.\n\n## The thing #10921 was told to look for already exists\n\n#10921 asked \"may a published README name an `@objectstack/` package this repo does not build, and **where is that declared?**\", and offered option **A: a declared roster with provenance** (`scripts/*.json`, one row per out-of-repo package).\n\nMeasured on `98ea344`: that roster exists, and it is **`PLATFORM_CAPABILITY_PROVIDERS`** in `packages/spec/src/kernel/platform-capabilities.ts`. Each row carries exactly the provenance option A described:\n\n```ts\nreadonly package: string | null;              // the npm package\nreadonly edition: 'open' | 'enterprise' | 'cloud';   // where it ships from\nreadonly note?: string;                       // the edition boundary, in prose\n```\n\nIt is machine-readable, drift-tested 1:1 against the capability vocabulary (`serve-capability-vocabulary.test.ts`), and read by **both** runtimes — the CLI preflight and cloud's objectos-runtime. Three out-of-repo packages already have rows: `@objectstack/security-enterprise` (`enterprise`), `@objectstack/service-ai` and `@objectstack/service-ai-studio` (`cloud`).\n\nSo building a second roster for #10921 would be precisely the divergence that file's own header warns against:\n\n> **more than one runtime mounts this slate** … A second description nobody checks is how that happens; one exported list is how it stops.\n\n## The gap\n\n`@objectstack/organizations` — a real, closed-source, cloud-private enterprise runtime (404 on the public registry; called \"cloud-private\" or \"closed-source\" in ~a dozen places in this tree, e.g. `serve.ts:229`, `serve.ts:2576`, `verify/src/harness.ts:44`) — has **no row**, and structurally cannot get one as the map is keyed today:\n\n- `PLATFORM_CAPABILITY_PROVIDERS` is keyed by **`requires` capability token**.\n- `@objectstack/organizations` is not resolved through `requires`. It is wired via `plugins[]` and loaded by `serve` from the host app, keyed off the resolved **tenancy posture** (`group` / `isolated`), not off a capability token.\n\nSo the roster's key space has nowhere to put it, and the one out-of-repo package whose install instruction `serve` prints at operators is the one the roster cannot describe. `@objectstack/security-enterprise` is also `plugins[]`-wired, but it *does* have a row because it happens to back the `hierarchy-security` token as well.\n\n## Why this was not fixed under #10921\n\n`packages/spec/**` was explicitly fenced out of that card (\"the spec seat's sole territory — read it freely, never edit; if a spec edit is genuinely required, stop and report for routing\"). This is that report. Any fix here is a spec change — either a second, posture-keyed provenance map, or a widening of this one's key space — and it belongs to the spec seat.\n\n## What it would buy\n\nToday the \"is this a real out-of-repo package or a fabricated one?\" question is answerable by grep-and-judgement, which is how `@objectstack/framework` (fabricated) sat next to `@objectstack/organizations` (real) in #10921's table for months looking identical. A declaration covering both `plugins[]`-wired enterprise runtimes would make the distinction machine-readable — and would be a population of **two**, not the population of one that made a fresh roster file look unearned.\n\nRefs: #10921 and its PR · #10920 (same prior fact on a runtime surface).\n"
+}

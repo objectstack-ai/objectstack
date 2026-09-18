@@ -1,0 +1,34 @@
+{
+  "number": 11425,
+  "kind": "pull_request",
+  "title": "docs(agents): show the targeted-vitest spelling and refuse the bare separator",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T17:22:50Z",
+  "updated_at": "2026-08-24T10:01:21Z",
+  "closed_at": "2026-08-24T10:01:19Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-24T10:01:19Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11425",
+  "body": "Part of #10166 — this lands triage's parts (1) and (2). It deliberately does **not** land the PreToolUse hook (A) or the `os-verify-lock.sh` refusal line (B) that the 2026-08-21 PM ruling adopted; triage's 2026-08-22 re-scope excluded tooling from this card, so those remain unimplemented and the card stays open for them.\n\n### ⚠️ Governed surface — do not queue\n\nBoth files are governed (`.claude/**`, `AGENTS.md`). This PR stays **draft** and waits for a human merge: no ready flip, no auto-merge, no merge queue.\n\n### The defect\n\n`os-dev.md` rule 3 named `pnpm --filter <pkg>`, vitest `--maxWorkers=2` and turbo `--concurrency=2` **without ever showing how they join**. A gap that forces an invention is worse than a wrong statement, because every reader invents the same wrong thing — and npm semantics supply `--`.\n\n### Measured, on `@objectstack/types` (13 test files, `test` script is exactly `vitest run`)\n\n| spelling | result |\n|---|---|\n| `pnpm --filter <pkg> test -- --maxWorkers=2 src/keyset-walk.test.ts` | banner echoes `vitest run -- --maxWorkers=2 …` · **13 files / 362 tests** · exit 0 |\n| whole suite, no pattern at all | **13 files / 362 tests** — byte-identical to the \"targeted\" run above |\n| `pnpm --filter <pkg> test --maxWorkers=2 src/keyset-walk.test.ts` | **1 file / 12 tests / 285ms** |\n| `pnpm --filter <pkg> exec vitest run --maxWorkers=2 src/keyset-walk.test.ts` | **1 file / 12 tests / 399ms** |\n| `pnpm exec vitest run src/keyset-walk.test.ts` from the package cwd | **1 file / 12 tests / 269ms** |\n| `pnpm exec vitest run -- src/keyset-walk.test.ts` (stray `--`, no package script) | **13 files / 362 tests** |\n\nThe last row matters: the `exec` route our own docs recommend is swallowed identically. Nothing about avoiding the package script protects you — the separator does.\n\n### The card's unverified half: `--maxWorkers=2` was swallowed too\n\nProbed against the exact parser (vitest 4.1.10 → **cac 7.0.0**, resolved from vitest's own tree; the earlier note on the card said 6.7.14):\n\n```\n[\"run\",\"--maxWorkers=2\",\"src/keyset-walk.test.ts\"]   options.maxWorkers = 2         args = [\"src/keyset-walk.test.ts\"]  options['--'] = []\n[\"run\",\"--\",\"--maxWorkers=2\",\"src/keyset-walk.test.ts\"]  options.maxWorkers = undefined  args = []  options['--'] = [\"--maxWorkers=2\",\"src/keyset-walk.test.ts\"]\n```\n\nBoth directions confirmed in vitest itself: an unknown flag **before** the separator throws ``CACError: Unknown option `--thisFlagDoesNotExist` `` (exit 1); the same flag **after** it exits 0 with no error, and a `--filesOnly` sitting after it is ignored as well (362 test lines listed instead of a file list).\n\n⇒ **Every run that used the `--` spelling had no worker cap.** The concurrency discipline was inert in the same breath as the file filter.\n\n### Net-zero, because both homes are at zero-headroom ratchets\n\n`check:pm-skill-ratchet` sets each ceiling at the landed line count: `os-dev.md` 405/405, `AGENTS.md` 961/961. **Raising a ceiling requires a maintainer ruling quoted in the PR, and this PR has none** — so the fix is a rewrite, not an addition (`os-dev.md` stays at exactly 405, `AGENTS.md` at 961). That also follows the ratchet header's own instruction: *\"provenance is one line, stories live on cards, not in operational text.\"* The measurements above therefore live here and on the card, not in the agent definition.\n\nA first draft added a full `Toolchain traps` entry with the mechanism (+13 lines) and was rejected by the ratchet. The landed rule carries the spelling and the refusal; the mechanism stays on the card.\n\n### Why this spelling and not the one triage named\n\nTriage named `pnpm exec vitest run <file>` \"from the right cwd\". Verified — it works (row 5). The rule documents `pnpm --filter <pkg> exec vitest run --maxWorkers=2 <file>` instead, because it is the strict superset: it needs no `cd`, and agent bash calls in this container reset cwd between invocations, so a cwd-dependent spelling would reintroduce exactly the form-scoping defect this card is about. Both were measured; the more robust one is documented.\n\n### Scope\n\n- ⛔ No wrapper script and no lint rule (triage ruling 3).\n- ⛔ #11419 (the unscoped `--workspace-concurrency` placement rule) is **not** addressed here and remains open — it is its own unassigned card. I did trip over it first-hand while setting up: `pnpm install --workspace-concurrency=2 --filter …` → `ERROR Unknown option: 'workspace-concurrency'`. One more datapoint for that card, fixed in neither file here.\n- No changeset: nothing publishable changes (`skip-changeset`).\n\n### Gates\n\nAll 12 families derived by `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` (no path arguments) green at `685883f`. Repo-wide `pnpm lint` is CI's: both changed files report `isPathIgnored: true` from eslint's own flat config (2 files submitted, 0 linted, 0 rule results), so no untouched file's verdict can move.\n\n_Generated by [Claude Code](https://claude.ai/code/session_015ahemw8RcTgqtxrj15PEZx)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

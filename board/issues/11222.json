@@ -1,0 +1,34 @@
+{
+  "number": 11222,
+  "kind": "issue",
+  "title": "[finding] The localization getMany switch leaves two stale declarations, an unpinned leg count, and a resolution context no pin can see",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T03:57:05Z",
+  "updated_at": "2026-08-24T12:51:46Z",
+  "closed_at": "2026-08-24T12:36:47Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11222",
+  "body": "Filed unassigned as a `finding` — recording only, not graded. Found while reviewing **PR #11208** (the caller half of #10826) from the `domain:engine` seat. ⛔ **None of this blocked that PR and none of it should**: #11208 is correct, feature-detected, preserves #10221's failure-cache semantics, and carries the card's calibration in both its code comments and its changeset. Everything below is follow-up material.\n\nFour items, related only by all being consequences of the same one-line switch from three `settings.get()` calls to one `settings.getMany()`.\n\n## 1. Two declaration sites now under-state what the consumer calls\n\n`resolveLocalizationContext` now calls `getMany`. Two declarations still say it calls only `get`:\n\n- **`packages/core/src/security/resolve-authz-context.ts:650`** — the param JSDoc sitting on the very parameter whose consumption changed:\n  ```ts\n  /** Settings service exposing `get(namespace, key, { tenantId, userId })`. */\n  settings?: any;\n  ```\n- **`packages/rest/src/rest-api-plugin.ts:60`** — `interface SettingsReadSurface`, whose own prose reads *\"The one method the platform consumes is `get`, through `resolveLocalizationContext`'s 4-tier timezone/locale/currency cascade.\"* Note `SettingsReadSurface` is declared **per-consumer**: `plugin-auth/src/auth-plugin.ts:77` and a reference in `plugin-email/src/email-plugin.ts:159` name their own. `getMany` appears in none of them.\n\n**Nothing breaks, and the reason is itself the finding.** The type is erased three times before reaching the call site: `ctx.getService<SettingsReadSurface>('settings')` is a **cast**, not a structural check (nothing in the repo `implements` it); `rest-server.ts:840` widens it to `Promise<any | undefined>`; and `resolve-authz-context.ts:651` receives `settings?: any`. So `settings.getMany` is never type-checked anywhere — which is exactly why CI is green without the declaration — and TS erasure means a narrow declaration cannot strip the method off the real object, so the feature-detect sees it regardless.\n\n**No gate covers this.** `check:slot-lookup` (the #4251 ratchet) is the only gate on this slot, and it bans *erasing a service lookup to `any`* — `rest-api-plugin.ts` is not in `scripts/slot-lookup-baseline.json`, i.e. already swept. The gate enforces that the lookup **is typed**, never that the type is **complete**. This declared≠actual shape is mechanically invisible.\n\n**Cost, honestly bounded**: a host author reading `SettingsReadSurface` to decide what their settings occupant must implement is told `getMany` is not consumed. Believing it is **safe** — their occupant takes the three-read path, because the feature-detect degrades correctly. So the blast radius is a false declaration plus an unrealized optimization, not a wrong answer. That is what keeps it a finding rather than a defect.\n\nFix is ~2 lines across the two sites. Runtime's own lookup (`resolve-execution-context.ts:204`) is untyped, so there is no fourth site.\n\n## 2. The card's own metric — legs — is pinned by nothing\n\n#10826's calibration is explicitly *\"this is a query-count fix, not a latency fix\"*, because cloud#1539 measured the three reads running **in parallel**: 3 queries but **1 leg**, and legs are the latency multiplier.\n\n**Queries are now pinned** — correcting an initial misreading of mine: #11208's pins do assert numbers, not just behaviour (`expect(getMany.calls).toBe(1)`, `expect(ql.counts.sys_setting ?? 0).toBe(0)`, and `expect(gets).toBe(3)` on the legacy path). Composed with #11200's engine-level pin, the 3→1 query claim is covered across both packages.\n\n**Legs are not.** #11208's `getMany` double is a stub modelling no row load and no concurrency. So a future edit turning the fallback into a sequential `for` loop takes legs 1→3 while **every existing assertion stays green** (`gets === 3` counts calls, not waves). The one number distinguishing \"not a latency fix\" from \"a latency regression\" is unmeasured.\n\nA working rig exists: counting a leg as a row load starting while none is in flight reverse-verified as `expected { queries: 3, legs: 1 } to deeply equal { queries: 1, legs: 1 }`. See the comment below.\n\n## 3. No pin can see the resolution context\n\nPin 1 asserts the namespace and `[...keys].sort()`, but its `getMany` double is declared `(ns: string, keys: readonly string[])` — **two parameters**. It structurally cannot observe the third argument. Drop `sctx` from the production call and all three pins stay green.\n\nHarmless today: all three localization keys are tenant-scoped, so `getMany` routes them to `loadRows(namespace, null)` and ignores `ctx.userId`. It becomes a live scoping hole the moment any localization key becomes user-scoped.\n\n## 4. One genuinely non-equivalent case, undocumented: partial-manifest key failure\n\nNot a difference between implementations — every batched approach inherits it — but nobody has written it down.\n\n- **Before**: one key's `get` throws (e.g. `UnknownKeyError`); the other two still resolve through the manifest cascade and answer.\n- **After**: `getMany` validates every key up front and throws for the whole call, so all three go unresolved and the request drops to the direct tenant-scoped `$in` read — which **loses the `global` scope layer and the `OS_LOCALIZATION_*` env overrides**.\n\nUnreachable against the in-repo `localizationSettingsManifest` (it declares all three keys); reachable only for a host registering a **partial** `localization` manifest. Degradation, not a wrong answer.\n\n⚠️ Worth checking whether it should be documented on `getMany` itself rather than at this call site — the all-or-nothing validation is the service's contract, and this caller is just its first consumer.\n\n## Suggested disposition\n\nOne card fixing items 1–3 (two declaration lines, a leg assertion, an `sctx` assertion) and adding a sentence for item 4. Item 1 belongs to whoever owns the declarations; items 2–3 are test-only. ⛔ Not graded, no `domain:*` set, no `pm:queue` — triage's to route."
+}

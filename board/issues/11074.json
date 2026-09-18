@@ -1,0 +1,36 @@
+{
+  "number": 11074,
+  "kind": "issue",
+  "title": "[finding] break-glass guard still answers a per-record probe for ANY authenticated caller via /delete-user body.userId — residual of the #10776 fix, no longer anonymous but not gone",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "security"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-22T15:22:15Z",
+  "updated_at": "2026-08-24T01:20:08Z",
+  "closed_at": "2026-08-24T00:45:42Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11074",
+  "body": "Found during the clause-② contract review of PR #11038 (skills seat, session `session_01MsbKEG4LtERSLaDrbehM3e`, 2026-08-22). Filed unassigned as a `finding` — recording only, first-touch grading is triage's.\n\n## Observation\n\nPR #11038 correctly closes the **anonymous** disclosure per the maintainer's Option-A ruling: the break-glass guard now runs only after `resolveActor(ctx)` establishes an identity. But inside the guard, target resolution is unchanged:\n\n```ts\nlet targetId: string | undefined = ctx?.body?.userId ?? ctx?.body?.user_id;\nif (!targetId && ctx.path === '/delete-user') targetId = breakGlassActor.userId;\n```\n\nOn `/delete-user` — a **self-service** path whose vendor contract names no target (the subject IS the caller) — the guard still prefers `body.userId` when present. So any **authenticated** caller (no admin role required; `/delete-user` sits outside the `/admin/` lane) can POST `{\"userId\": \"<target>\"}` and read the answer off the refusal: 409 `LAST_LOCAL_CREDENTIAL` ⇒ the named user is the environment's break-glass holder; the vendor's ordinary response ⇒ not.\n\nThe guard queries and refuses on a target the endpoint itself would never act on — the lookup answers a question the caller was never authorized to ask, merely authenticated to ask.\n\n## Severity framing\n\nStrictly narrower than #10776 (attacker needs any account in the org, e.g. self-signup deployments or any compromised low-privilege user) — which is why this is a residual finding, not a defect in PR #11038: the ruling was \"authentication before the guard\", implemented faithfully, and the pre-fix code had the same body-first preference with no authentication at all.\n\n## Shape of a fix, not a prescription\n\nOn `/delete-user`, ignore `body.userId` entirely and key the guard on the resolved actor (`targetId = breakGlassActor.userId` unconditionally for that path) — the endpoint's subject is the caller, so the guard should ask about no one else. The `/admin/*` paths are unaffected (target-naming is their contract, and `adminMiddleware` authorizes the caller before anything is served... though note the guard's 409 may still precede the admin-authorization refusal for an authenticated non-admin — worth measuring in the same pass).\n\nRefs: #10776 (the anonymous half, fixed) · PR #11038 (the fix under review when this was found)."
+}

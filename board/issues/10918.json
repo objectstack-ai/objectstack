@@ -1,0 +1,35 @@
+{
+  "number": 10918,
+  "kind": "issue",
+  "title": "[finding] the dispatcher gate's resolver anchors on `const`, so a `let`-held error code is reduced by nobody even when every branch is a literal",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T17:15:10Z",
+  "updated_at": "2026-08-23T20:12:40Z",
+  "closed_at": "2026-08-23T20:11:07Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10918",
+  "body": "Found while closing #10897 (teaching `check-error-code-casing` to read the\nour-default slot in a `code` local's initializer). Filed rather than absorbed:\nit is the OTHER gate's resolver, it is a behaviour change to a deliberate bound,\nand #10897 was explicitly scoped to the recognizer.\n\n## The shape\n\n`declaredInitializers` in `scripts/check-dispatcher-error-vocabulary.mjs`\nanchors its head regex on `const` alone:\n\n```js\nconst head = new RegExp(\n  `\\\\b${exported ? 'export\\\\s+' : '(?:export\\\\s+)?'}const\\\\s+${name}\\\\s*(?::[^=;\\\\n]+)?=\\\\s*`,\n  'g',\n);\n```\n\nSo a code held in a `let` reduces to nothing. `resolveConstant` answers `null`,\nthe `codehelper` branch reads that as \"unreducible\" and takes the documented\nruntime-value bound — **no site and no unresolved** — even when the value is a\nplain string literal sitting right there in the source.\n\nThat is not the bound #9568 wrote. Its words: *\"a value a source scan cannot\nevaluate is out of reach; a value spelled out in every branch is not, whichever\nshape it arrives through.\"* A `let` initialized to a literal is spelled out. It\nis out of reach only because of how the anchor is spelled.\n\n## Measured, with a positive control on each side\n\nDriving `deriveSites` and `findViolations` on `origin/main` at `58563be069`,\none fixture per row, each a complete `export function` that stamps `err.code =\ncode` and throws:\n\n| shape | `check:dispatcher-error-vocabulary` | `check:error-code-casing` |\n| --- | --- | --- |\n| `let code = 'REASSIGN_FALLBACK'; if (x) code = 'REASSIGN_OTHER';` | **no site, no unresolved** | 0 |\n| `let code = 'REASSIGN_FALLBACK'; if (x) code = p?.code \\|\\| 'reassigned_lower_failed';` | **no site, no unresolved** | 0 |\n| control: `const code = 'local_direct_failed'` | **1 site** (`assignconst`) | 0 |\n| control: `const code = flag ? 'tern_lower_a' : 'tern_lower_b'` | **2 sites** (`assignconst`) | 0 |\n| control: `const code = p?.code \\|\\| 'reassigned_lower_failed'` | no site | **1** (`local-fallback`, after #10897) |\n\nRows 3 and 4 are the control that makes rows 1 and 2 readable rather than a\nbroken probe: the identical shape spelled `const` does reduce, lowercase\nincluded, and does produce sites. Row 5 is the casing-gate control on the other\nside. Row 1 is the sharpest one — **both** of its values are literals, both\nunregistered, and no gate says a word.\n\n## Two separable halves\n\n1. **`let` / `var` declarations.** The cheap half, and the one that matches\n   #9568's stated intent: widen the `declaredInitializers` anchor. The reason to\n   be careful rather than quick is that a `let` can be *reassigned*, so the set\n   of values a `let` holds is not simply its initializer — reducing it to the\n   initializer alone would report a value the program may not stamp, which is\n   the same wrongness the ALL-OR-NOTHING rule (#9568) exists to refuse. The\n   honest widening probably reduces a `let` only when the file contains no\n   reassignment of it, and reports it as **unresolved** when it does — never\n   silently, which is the bound this gate holds itself to everywhere else.\n\n2. **Bare reassignment** (`code = p?.code || 'lit'`, no declarator) — row 2.\n   Harder: no declaration to anchor on, and a textual scan has no scopes. Worth\n   recording, not necessarily worth closing. Note #10897's new `local-fallback`\n   recognizer deliberately requires a declarator, so the casing gate does not\n   reach this one either.\n\n## Extent today: not swept\n\nI did not sweep the tree for live victims — that measurement belongs with\nwhoever takes this, since the right population depends on which half is being\nclosed. What is known: 47 `code`-named local declarations exist under\n`packages/**` (measured for #10897's blast radius), and at least one of them is\na `let` (`packages/metadata-protocol/src/protocol.ts:6551`,\n`let code: unknown | null =`). Whether any holds an unregistered literal is the\nopen question.\n\n## Search note\n\nThe issue-search endpoint is unavailable from an agent seat here (\"sessions are\nbound to their configured repositories\"), so the duplicate check behind this\ncard is a title grep over the 100 most recently created open issues, not a full\nsearch. Worth a second look before anyone starts.\n\n## Refs\n\n#10897 / PR #10914 (where this was found) - #9568 (the ALL-OR-NOTHING reduction\nand the bound this contradicts) - #9460 (the local-variable bound it refines) -\nADR-0112 D1\n\n_Generated by [Claude Code](https://claude.ai/code/session_c970724d-303c-5614-9d20-a3f92205cfad)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

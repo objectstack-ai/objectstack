@@ -1,0 +1,35 @@
+{
+  "number": 10841,
+  "kind": "issue",
+  "title": "dispatch-gates will read PR #10801's module-scope self-test fixtures as a declared population — `packages/**` and `scripts/**` become fabricated MATCHED leads",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T13:14:41Z",
+  "updated_at": "2026-08-24T10:33:45Z",
+  "closed_at": "2026-08-24T10:32:03Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10841",
+  "body": "Measured while implementing #10705. Filed unassigned. **Nothing is red today** — the gate in\nquestion has not merged yet. ⛔ I did not edit that branch and this is not a request to block it.\n\n## What was measured\n\n`scripts/check-ci-filter-parity.mjs` (new gate on PR #10801, wired into `lint.yml`) was read\nat that PR's head `806c4f0f52` and run through `extractWatchHints` from\n`scripts/pm/dispatch-gates.mjs`. Four hints survive comment- and self-test-masking:\n\n```\n.github/workflows/ci.yml, packages/**, scripts/**, @objectstack/probe\n```\n\nApplying `hintCovers` to each, the derivation would name this gate for:\n\n```\nMATCHED   .github/workflows/ci.yml            <- its real population\nMATCHED   packages/core/src/index.ts          <- fabricated\nMATCHED   scripts/check-nul-bytes.mjs         <- fabricated\nsilent    .github/workflows/lint.yml\nsilent    content/docs/deployment/cli.mdx\nsilent    apps/console/src/main.tsx\nsilent    docker/README.md\n```\n\nSo once it merges, **every card under `packages/**` and `scripts/**`** — two of the largest\ndirectories in the tree — derives `check:ci-filter-parity` as a high-signal local gate it does\nnot need to run.\n\n## Where the two literals come from, and why masking misses them\n\nThey are default arguments of a module-scope fixture builder, not source inside `selfTest()`:\n\n```js\n    list(core ?? ['packages/**', '.github/workflows/ci.yml']),\n    list(crosspkg ?? ['scripts/**']),\n```\n\nThat is exactly the documented residue in `extractWatchHints`' own docblock:\n\n> What this does NOT remove: a fixture constant defined at module scope and used only by the\n> self-test still reads as a hint. That residue is bounded (measured below) and it is the same\n> shape the scan has always had.\n\nThe asymmetry confirms the mechanism rather than assuming it: that gate's other fixture globs\n(`content/**`, `tools/**`, `docker/**`, `packages/a/**`, `content/b.mdx`, `scripts/x.mjs`) sit\n*inside* its `selfTest()` and are correctly blanked — only the two at module scope survive.\n\n## Why this matters more than the residue note implies\n\nThe residue is documented as \"bounded\", and for a fixture naming one file it is. Here the\nmodule-scope fixtures are **top-level subtree globs**, so the leak is not one path but two of\nthe biggest populations in the repo. This is the currency of `hintCovers`' +139084 measurement\narriving through the door the `:920` refusal does not guard: the refusal filters bare *words*,\nand these are well-formed globs that the covering rule is right to honour — they are simply not\nthis gate's population.\n\nThe failure direction is the expensive one the tool's header names: a fabricated lead is pasted\ninto every dispatch prompt whose surface brushes it, and the dev running it cannot tell it from\na real one.\n\n## Not asserted\n\nNo claim about which remedy is right, and it is deliberately not a change to `:920`. Three\nshapes exist and the choice is a judgement:\n\n- move the two defaults inside the gate's `selfTest()` (smallest, gate-local, matches how that\n  file already treats its other fixtures);\n- build them at runtime from unslashed halves, the way `DEFAULT_BASE_REF` in `dispatch-gates.mjs`\n  already avoids entering its own hint set;\n- teach `maskSelfTests` to reach module-scope constants used only by the self-test — the widest,\n  and the one that would need its own measurement first.\n\nThe first two are the gate author's call; the third is a `dispatch-gates` card.\n\n⚠️ Also checked and **not** a finding: PR #10802's `scripts/check-release-section-coverage.mjs`\nwas flagged to me as a suspected instance on the strength of its bare `v17.mdx` literal. It is\nnot one — measured at that PR's head, the gate carries `content/docs/releases` as a real hint\nand the derivation MATCHES it for `content/docs/releases/v17.mdx`. The bare `v17.mdx` is\nincidental and is not extractable as a hint at all (no separator), and the tree has no root file\nby that name, so it would be the genuinely-dead species rather than the escapable one on two\nindependent grounds. Recording it so the same suspicion is not re-raised.\n\n## Refs\n\n#10705 / PR #10839 (where this was measured) · PR #10801 (the gate; not blocked on this) ·\n`extractWatchHints` and `maskSelfTests` docblocks in `scripts/pm/dispatch-gates.mjs`\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DdCnBGcHeufjrq7drTD3wt)_\n"
+}

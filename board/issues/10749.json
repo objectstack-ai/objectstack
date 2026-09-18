@@ -1,0 +1,34 @@
+{
+  "number": 10749,
+  "kind": "issue",
+  "title": "[finding] approvals: `sys_approval_request.payload_json` snapshots the full raw row and serves it to approvers unfiltered — object-level `hidden: true` and FLS declarations cannot reach inside the JSON blob",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-21T10:23:59Z",
+  "updated_at": "2026-08-24T09:50:16Z",
+  "closed_at": "2026-08-24T09:48:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10749",
+  "body": "Split out of #10734 (MEMBER-filed console defect, moved to objectstack-ai/objectui#5553 for its UI half) during triage. This card is the **server-side residual**: even after the UI stops rendering its \"Raw data (JSON)\" panel, the data itself still crosses the wire.\n\n## Observation\n\n`@objectstack/plugin-approvals` writes the submitted record's complete raw row into `sys_approval_request.payload_json` unconditionally at request-creation time (per the #10734 locator). That snapshot includes internal columns (`id`, `created_by`, `updated_by`, `owner_id`, `organization_id`, bare lookup ids) and **fields the source object's metadata declares `hidden: true`**.\n\nAny approver who can read the approval request receives the whole blob — the field-visibility machinery (object metadata `hidden`, FLS) governs *columns of objects*, and cannot see inside a JSON column of `sys_approval_request`. So the app author's \"these fields are not for users\" declaration is structurally unenforceable on the approval path, for every app, today (measured on 17.1.0 by the #10734 reporter's deployment).\n\n## Why filed as a finding rather than queued\n\nThe right treatment has real design weight and at least three shapes with different audit consequences:\n\n1. **Trim at write time** (snapshot only non-hidden, business-relevant fields) — cheapest, but the approval record then no longer proves what was actually submitted (audit/replay cost);\n2. **Trim at serve time by requester** (full snapshot at rest, metadata-driven redaction when a non-admin reads it) — preserves audit, needs a serve-path seam;\n3. **Snapshot an explicit projection** declared by the approval process shape — contract-first, but touches `ApprovalNodeConfigSchema` (`$strict`, currently has no such field), i.e. spec surface.\n\nGrading should also answer the standing triage question \"who is the producer?\" — the producer is `plugin-approvals`' request-creation path, so the domain is `services`; option 3 would pull `domain:spec` in.\n\nNot queued pending first-touch grading; no user-visible fix should ride the objectui#5553 UI card."
+}

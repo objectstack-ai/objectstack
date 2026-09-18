@@ -1,0 +1,34 @@
+{
+  "number": 11437,
+  "kind": "issue",
+  "title": "spec: refuse an authored `radio` + `multiple: true` at the schema/publish layer (maintainer ruling 2026-08-22, Option C)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T18:55:32Z",
+  "updated_at": "2026-08-24T06:47:36Z",
+  "closed_at": "2026-08-24T06:31:30Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11437",
+  "body": "## What was ruled\n\nMaintainer ruling recorded **2026-08-22** on objectstack-ai/objectui#4015 (decision-inbox\ndigest with the skills seat; the 46-card batch was accepted verbatim: 「接受所有」):\n\n> **Ruled:** Option C — reject at the entrance: refuse `radio + multiple: true` at the\n> schema/publish layer with a diagnostic prescribing the correctly-named multi-choice\n> types (`checkboxes`/`multiselect`/`tags`), while leaving `MULTI_CAPABLE_TYPES` and\n> `isMultiValueField` untouched so at-rest data keeps its read path and no stored-shape\n> migration is paid. Option A (rendering the combination as checkboxes) is explicitly not\n> taken. […] The implementation lands on the spec side (objectstack, `domain:spec` lane).\n\nThis card carries that implementation. It is filed unassigned, by an `os-dev` seat that was\ndispatched on the objectui card and stopped rather than implementing a renderer-side\nvariant the ruling does not authorize.\n\n## The defect being ruled on\n\nAn author may declare `{ type: 'radio', multiple: true }`. The **data layer honours it**\n(stores an array, validates as multi, splits on import, infers action-param arity), while\nthe **widget renders a single-value radio group** with zero diagnostics — declared multi,\nrendered single.\n\nThe producer contradicts itself about `radio`, all on `origin/main` `5d163792c`:\n\n| Site | Says |\n|---|---|\n| `packages/spec/src/data/field-value.zod.ts:79-81` | `SINGLE_OPTION_TYPES = ['select','radio']` — *\"Single-choice option types.\"* |\n| `packages/spec/src/data/field-value.zod.ts:198-206` | `MULTI_CAPABLE_TYPES` includes `radio`, its own comment conceding `radio` is there because it *\"shares the select branch\"* |\n| `packages/spec/src/data/field-value.zod.ts:226` | `isMultiValueField` = `MULTI_CAPABLE_TYPES.has(type) && multiple === true` (ADR-0104 D1) |\n| `packages/spec/src/data/field.zod.ts:818` | `multiple`'s **published** description: *\"Applicable for select, lookup, file, image\"* — `radio` absent |\n| `packages/spec/src/ui/action.zod.ts:453` | param arity inferred from `MULTI_CAPABLE_TYPES` |\n\nConsumer side, objectui `origin/main` `515f171f3`:\n\n- `packages/fields/src/widgets/RadioField.tsx` — **0** occurrences of `multiple`\n  (control probe: 23 for `RadioGroup|value`, so the file really was read).\n- `packages/app-shell/src/utils/paramValueShape.ts:142` —\n  `radio: { base: 'string', cardinality: 'scalar', note: 'Single option value string.' }`,\n  where `'scalar'` is defined as *\"always a single `base` value\"*. This is a landed,\n  drift-tested declaration (`paramValueShape.test.ts:93` pins `radio -> string`) that\n  `radio` does **not** promote on `multiple` — which is why Option A (render as checkboxes)\n  would have contradicted a pinned contract in that repo, independently of the ruling.\n\n## Scope of the ruled change (Option C)\n\n1. Refuse `radio` + `multiple: true` at the **schema/publish layer**, with a diagnostic\n   naming the field and prescribing `checkboxes` / `multiselect` / `tags`.\n2. ⛔ Do **not** touch `MULTI_CAPABLE_TYPES` or `isMultiValueField` — at-rest data keeps its\n   read path, and no stored-shape migration is paid. That is the whole reason C was\n   preferred over B.\n3. `packages/objectql/src/validation/record-validator.ts`'s `(t === 'select' || t === 'radio')`\n   branch stays as a **data-safety fallback** for stock, not as a capability.\n\n## Flip condition to B, attached by the ruling\n\nIf deployed **tenant** metadata carrying `{ type: 'radio', multiple: true }` **with stored\ndata** is found, entrance rejection alone strands those tenants and Option B (narrow the\nspec sets themselves, with a migration path) becomes required rather than optional. The\nruling's own stated blind spot is that only the two code repositories were measured.\n\n## Occurrence measurement, re-measured 2026-08-23\n\nBoth repos at objectui `515f171f3` / objectstack `5d163792c`: **10,977 files scanned, 21\n`type: 'radio'` declarations found** (control probe — the scanner reads real declarations),\n**0** of them carrying `multiple: true`. Examples, showcase, dogfood matrix, docs, fixtures\nand tests are all clean. The single window match was `select + multiple` on a line adjacent\nto a `radio` entry in objectui `paramValueShape.test.ts`.\n\n## Owed by the landing fork, named by the ruling\n\nobjectui `packages/fields/src/field-type-alias.ts:28-37` states that *\"every other member\nrenders both arities INSIDE one widget: `LookupField`, `FileField` and `ImageField`\"* —\nsilently omitting `radio`, the one member with no renderer for its multi arity. That\nsentence is what made this gap invisible; the ruling assigns its correction to whichever\nfork lands.\n\n---\n\nDecision anchor: objectstack-ai/objectui#4015 — it stays **open** as the decision record\nuntil this ships. ⛔ Do not put a closing keyword next to that number from here.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01EuPCi56cnGyykygi3z9w4m)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

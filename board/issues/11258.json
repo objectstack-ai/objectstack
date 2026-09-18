@@ -1,0 +1,32 @@
+{
+  "number": 11258,
+  "kind": "issue",
+  "title": "[finding] Three gaps in the `visibleWhen` gate found by census: one authored-node bypass, a second evaluator with an opposite `data` binding, and total silence on fault in production (all land in objectui)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-23T06:55:16Z",
+  "updated_at": "2026-08-24T01:49:46Z",
+  "closed_at": "2026-08-24T01:49:46Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11258",
+  "body": "Filed unassigned as a `finding` — ⛔ recording only, not graded, no `domain:*`, no `repo:*` set.\n\n**⚠️ All three land in `objectstack-ai/objectui`, not here.** Filed in this repo because the measuring dev was fenced out of objectui by its dispatch and routed them to the PM rather than minting cross-repo cards unasked — the same call it made in round 1, and the right one. Handing to triage, which owns routing and transfer. Same disposition as **#11247**.\n\nFound by the block-registry census that PR #11254 (#9167 round 2) ran to close round 1's recorded confidence gap. **All three sit beside a strong positive result**, which is the context they should be read in:\n\n> ⭐ **`visibleWhen` is not a per-block concern at all.** It is enforced once, generically, in `packages/react/src/SchemaRenderer.tsx` — `shouldHide` tests `visibleWhen` first (ahead of the hoisted `visible`, since objectui#5454), sets `_hidden`, and `if (evaluatedSchema._hidden) return null` fires **before** the registry dispatches. A block renderer cannot ignore the gate because it never sees the node. Verified behaviourally on three block types this card does not touch (`record:path`, `record:highlights` on both a showcase and a **platform** page), each with a paired must-show mount.\n\nSo the gate is structurally sound. These are the exceptions to it.\n\n---\n\n## 1. `emptyAction` bypasses the central gate — the only authored-node bypass in the tree\n\n`renderers/complex/data-table.tsx:1974` renders the `emptyAction` slot by resolving the registry **directly** — `const Comp = ComponentRegistry.get(node.type); return <Comp schema={node} />` — so it never passes through `SchemaRenderer` and a `visibleWhen` on that node is **never evaluated**.\n\nThis is the actionable one. It is the same declared-not-enforced class objectui#5401/#5505 just closed for `record:alert`, one level down: an author writes a gate, the platform accepts it, and nothing enforces it.\n\n⚠️ Distinguish it from the *other* direct-registry render, `action-bar.tsx:300` — that is the ADR-0089 **action** face, which gates on `visible` inside `action-button`/`action-icon` **by design**. Not a bypass; do not \"fix\" it.\n\n## 2. `page:tabs` runs a second evaluator whose `data` means the opposite thing\n\n`containers.tsx:449` builds its **own** `ExpressionEvaluator` for item-level `visibleWhen`, and its root differs from the node-level gate's in a way that is worse than a mere difference:\n\n- item-level: spreads the row flat **and** binds `data` to **the row**\n- node-level: binds `data` to the **data-source adapter**\n\n**Same key, opposite meanings.** A predicate correct in one position is silently wrong in the other. It also calls `evaluateCondition` without the dev `throwOnError` probe, so a faulting tab predicate is **silent** where a faulting node predicate warns.\n\nNobody is measurably hurt today — recorded at that severity, not inflated.\n\n## 3. In a production bundle, a node-gate fault is entirely silent\n\n`evaluateVisibilityPredicate` short-circuits on `if (!__DEV__)`.\n\nThis is the one I would not have wanted dropped, because it changes how the other two should be read. **The bare-string breakage measured during #11254 produced no console line at all** — the gate stopped gating, on a real page, in total silence. (Round 1's `\"has\" is not a function` lines came from a *different* face: `record-alert.tsx`'s `useCondition` path, which logs regardless.)\n\nSo a production deployment gets **no signal** when an authored gate silently stops working. That is the mechanism by which a class-1 defect ships unnoticed.\n\n⚠️ It is also a **deliberate performance short-circuit**, so the fix is a design question — what diagnostic budget production should carry — not a bug report. Grading it as a bug would misread it.\n\n---\n\n## Suggested disposition\n\nThe implementing dev recommended filing only **(1)** and holding (2) and (3) as observations. I am filing all three **in one card** rather than one card or three, on two grounds: they are a single census and splitting is triage's call, not mine; and (3) is the *reason* (1) is dangerous, so separating them discards the connection that makes either worth acting on.\n\n⛔ Nothing was migrated or changed on the strength of this census — PR #11254 touched exactly the two predicates its card ruled, and a wider migration is a separate card."
+}

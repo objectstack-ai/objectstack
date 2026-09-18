@@ -1,0 +1,34 @@
+{
+  "number": 11210,
+  "kind": "issue",
+  "title": "[finding] check:liveness validates an evidence citation's FILE but never its line, so a moved consumer rots silently — permission.tabPermissions cites hono-plugin.ts:1200 in a 718-line file that no longer mentions the key",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T03:32:48Z",
+  "updated_at": "2026-08-23T22:08:22Z",
+  "closed_at": "2026-08-23T22:08:22Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11210",
+  "body": "Found while executing #10959 (the proof→ledger binding adoption, PR #11209). That card\nrequired re-verifying one entry's note; doing so exposed a **gate gap** that the entry's\nstaleness was only a symptom of. Filed unassigned, not fixed in that PR — repairing a\nsecond entry's evidence is outside its declared file surface, and picking the correct\nreplacement citation is its own measurement, not a mechanical edit.\n\n## The gap\n\n`check:liveness` resolves an `evidence` pointer with **`existsSync` on the file path\nonly** — `packages/spec/scripts/liveness/check-liveness.mts:442`:\n\n```js\nconst ev = checkEvidence(led.evidence, (p) => existsSync(join(repoRoot, p)));\n```\n\nTwo things it therefore never checks, for a citation written as `path/to/file.ts:NNN`:\n\n1. whether line `NNN` is inside the file at all, and\n2. whether the cited file mentions the property it is offered as evidence for.\n\nSo when a consumer **moves out of a file that still exists**, the citation keeps passing.\nThe summary line reports it under \"resolved\" and the entry reads as freshly verified. This\nis the residue left by #5623 (which made a *missing file* red) and by the #7133/#7142\ncitation-repair sweep (which fixed *objectui* readers): the in-repo, file-still-exists,\nline-and-content-are-wrong case has no gate.\n\n## Measured extent — small, which is the useful part\n\nWalked every `live` entry in `packages/spec/liveness/*.json`, extracted each in-repo\nevidence citation carrying a line number, and compared the line against the file's length:\n\n- **252** in-repo evidence citations carry a line number\n- **1** points past the end of its file (after PR #11209 fixes the other one it found)\n\nSo this is a two-instance class, not a sweep — but both instances share one cause, and\nneither was catchable by any gate.\n\n## The standing instance\n\n`permission.tabPermissions` (`packages/spec/liveness/permission.json`), a **bound**\nhigh-risk entry carrying the `me-apps-and-everyone-baseline` proof:\n\n```\n\"evidence\": \"packages/plugins/plugin-hono-server/src/hono-plugin.ts:1200 (tabRank merges\n             all four values — hidden/default_off/default_on/visible — across resolved\n             sets, most-visible wins; app hidden ⇒ dropped from /me/apps) + ...\"\n```\n\n- `hono-plugin.ts` is **718 lines** — there is no line 1200.\n- `grep -c tabPermissions` on that file returns **0**. The described `tabRank` merge is not\n  there at all.\n- The `/me/apps` machinery moved to\n  `packages/plugins/plugin-hono-server/src/current-user-endpoints.ts`, whose filters are\n  documented at ~line 897 as `AppSchema.requiredPermissions ⊆ ctx.systemPermissions` and\n  `ctx.tabPermissions[app.name] !== 'hidden'`.\n\nThe **verdict** is not in question — the entry is `live`, it carries a real dogfood proof,\nand the behaviour still ships. What is dead is the citation, and the note's confident\n\"Re-verified 2026-07-30\" makes it read as measured.\n\nThis is the same file and the same code movement that made\n`permission.systemPermissions`' pointer (`hono-plugin.ts:1222`) dead; that one is corrected\nin PR #11209 because that entry was in #10959's scope. This one was not.\n\n## Why it is worth a gate, not just a repair\n\nA dead line-citation is worse than a missing one: it survives review because it *looks*\nprecise, and the next agent re-verifying the entry follows it, finds nothing, and has to\nreconstruct where the consumer went — which is exactly the cost #10959 paid. The check is\ncheap and mechanical for the `path:NNN` form:\n\n- fail when `NNN` exceeds the file's line count (unambiguous, zero judgment, catches both\n  known instances);\n- optionally warn when the cited file contains no occurrence of the property's own key\n  (catches the move-within-bounds case that a line check cannot, at the cost of some false\n  positives where the consumer reads a renamed local).\n\nRatcheting it shrink-only over the current 252 citations would let it land without a\nrepair sweep blocking it.\n\n## Suggested shape\n\n1. Extend `checkEvidence` so a `path:NNN` citation also asserts `NNN` is within the file.\n2. Repair `permission.tabPermissions`' evidence to the real consumer in\n   `current-user-endpoints.ts`, measured rather than assumed, and stamp `verifiedAt` — the\n   gate's own prescribed remedy for a moved consumer (\"the consumer MOVED inside this repo\n   → repoint the path, and stamp `verifiedAt`\", `check-liveness.mts:728`).\n\nBack-links: #10959, PR #11209, #5623 (made a missing evidence FILE red), #7133 / #7142\n(the objectui citation-repair bundle).\n"
+}

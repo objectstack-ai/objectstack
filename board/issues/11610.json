@@ -1,0 +1,35 @@
+{
+  "number": 11610,
+  "kind": "pull_request",
+  "title": "fix(security): an organization-less permission-set row grants again — #11121 revoked standing access silently",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T08:32:52Z",
+  "updated_at": "2026-08-24T09:06:57Z",
+  "closed_at": "2026-08-24T09:06:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-24T09:06:56Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11610",
+  "body": "## What broke\n\n#11121 tenant-scoped the request-time permission-set loader so two organizations\nholding a row for the same name stop answering each other's requests. It shipped\nthe other half as a COMMENT:\n\n```js\n// One row per NAME: this organization's own where it has one, an\n// organization-less leftover only where it does not.\nconst own = resolveOwnOrganizationRow(...).own;   // ← never a residue\nif (own) byName.set(name, own);\n```\n\n`resolveOwnOrganizationRow` is written for SEEDERS, and its docstring says so\nplainly: an organization-less row \"is reported separately and **never returned\nas the organization's own row**\" — because reading it as \"already seeded\" is the\nsilent no-op the per-organization catalog exists to prevent. Enforcement needs\nthe opposite reading. The loader took the seeder's answer.\n\n## What it cost\n\nEvery walled deployment carrying pre-#11121 `sys_permission_set` rows — or any\nrow authored without a tenant, which includes admin-UI-authored sets — silently\nlost those grants on upgrade. The asymmetry is observable on a single row:\n\n| plane | read path | after #11121 |\n|---|---|---|\n| `system_permissions`, `tab_permissions` | `resolve-authz-context`, unscoped, by id | still applied |\n| `object_permissions`, `admin_scope` | this loader | silently stopped |\n\nOne row, two enforcement planes, opposite verdicts, and the only signal was a\nboot WARN about \"leftovers\" whose text states the organization's catalog is\ncomplete.\n\nThe same commit states the no-silent-revocation rule twice — in\n`per-organization-catalog.ts`'s header (\"grant TARGETS … deleting them revokes\nstanding access with no signal at the moment of loss\") and at\n`resolve-authz-context.ts:537-540`, where the `sys_position` read deliberately\nkeeps org-less rows for exactly this reason. This restores it in the third\nplace.\n\n## Found by\n\ncloud's `apps/ee-group-showcase` dogfood suites, which had been failing four\nADR-0111 / ADR-0105 assertions on cloud **main** while turbo replayed them from\ncache (cloud#1636). The suites hand-seed their catalog rows as system with no\ntenant, so those rows land as residue the moment they are written — an exact\nmodel of the customer case.\n\n## The change\n\nOne line of behaviour: `own ?? organizationLessResidue`. Preference order is\nunchanged, so #11121's cross-tenant fix is intact — this organization's own row\nstill WINS wherever it exists; a leftover is consulted only in its absence.\n\nThree cases added to `resolve-permission-sets-for-context.pin.test.ts`, which\n#11121's own suite did not cover (it covers seeding and the `sys_position`\nsweep):\n- an organization-less row resolves for a caller who has an organization, and\n  resolves WHOLE (the dropped columns are asserted, not just presence);\n- when both exist, this organization's own row wins and the residue's broader\n  grant does not leak in behind it;\n- the single-posture carve-out is untouched.\n\nReverting the one-line fix reddens exactly the first case, with the message\n\"the grant vanished for a caller in an organization — this is the silent\nrevocation\". Verified both directions locally (8 passed with the fix; 1 failed /\n7 passed without)."
+}

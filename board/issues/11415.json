@@ -1,0 +1,35 @@
+{
+  "number": 11415,
+  "kind": "issue",
+  "title": "cli: `serve-defaults.test.ts` still pins the always-on slate as a literal `slice(0, 6)`, under the same \"the list may grow beyond them\" instruction #11046 retires",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T16:32:59Z",
+  "updated_at": "2026-08-24T08:18:45Z",
+  "closed_at": "2026-08-24T08:18:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11415",
+  "body": "Found while implementing #11046 (which replaced the `packages/spec` literal pin with the derived rule). Filed **unassigned and ungraded** — `domain:*` and type are triage's to mint. Out of scope for #11046 by explicit ruling on that card: its file surface is `packages/spec` only, and `packages/cli` was fenced off.\n\n## What is there\n\n`packages/cli/test/serve-defaults.test.ts:4-14`:\n\n```ts\ndescribe('serve: ALWAYS_ON_CAPABILITIES default slate', () => {\n  // ALWAYS_ON_CAPABILITIES is the fail-closed allowlist of platform services\n  // that are injected into every app's `requires` at runtime. The six\n  // foundational capabilities must always lead the slate in this precedence\n  // order; the list may grow beyond them (e.g. `sharing`) without churning\n  // this assertion, so we pin the prefix rather than the whole array.\n  it('leads with the six foundational capabilities in stable order', () => {\n    expect(Serve.ALWAYS_ON_CAPABILITIES.slice(0, 6)).toEqual([\n      'queue', 'job', 'cache', 'settings', 'email', 'storage',\n    ]);\n  });\n```\n\n`Serve.ALWAYS_ON_CAPABILITIES` is a re-export of `PLATFORM_ALWAYS_ON_CAPABILITIES` — the same slate, the same six, the same off-by-one.\n\n## Why it is the same defect, not a copy of a fixed one\n\nThis is a **third** home of the literal pin, and its comment states the retired instruction more explicitly than either of the two #11046 addressed: *\"the list may grow beyond them ... without churning this assertion, so we pin the prefix rather than the whole array.\"* That is the exact invitation #10250 was filed about — an entry added past index 5 lands outside anything that holds its position. `sms` at index 6 is the entry that already did it.\n\nMeasured on the #11046 branch: with a new bind target appended to the slate, `slice(0, 6)` is unchanged and this assertion **passes**, while the derived rule reds and names all six readers now mounted ahead of it.\n\n## Scope note — this is NOT the `@objectstack/cli` derived pin\n\n`packages/cli/src/commands/serve-settings-ordering.pin.test.ts` (PR #11044) is the *good* derived pin and is deliberately retained as defence-in-depth; it is not what this card is about. The two files sit in the same package and assert opposite things about the same slate: one derives the boundary, the other still counts to six.\n\n## Also stale, same family\n\n`packages/services/service-sms/src/sms-plugin.ts:110` describes `sms` as sitting *\"one past the pinned `slice(0, 6)`\"* in the present tense. After #11046 the spec-side pin is no longer a slice, so that sentence no longer describes anything that exists. Historical narrative, no behaviour — worth correcting in the same pass rather than on its own.\n\n## Suggested work\n\nReplace the literal assertion with the derived rule (or delete it as subsumed by `serve-settings-ordering.pin.test.ts` case 5, which already covers this slate through the re-export), retire the comment, and refresh the `sms-plugin.ts` sentence.\n\n## Refs\n\n#11046 (the spec-side repair; this was found from it) · #10250 (the defect and the ruling) · PR #11044 (the derived pin that stays)\n"
+}

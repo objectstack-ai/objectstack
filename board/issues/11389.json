@@ -1,0 +1,35 @@
+{
+  "number": 11389,
+  "kind": "issue",
+  "title": "driver-sql: every Field.date read from PostgreSQL is one day early when the process TZ is east of UTC — toDateOnly() reads UTC components off a local-midnight Date",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T15:15:47Z",
+  "updated_at": "2026-08-24T04:04:33Z",
+  "closed_at": "2026-08-24T04:04:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11389",
+  "body": "## Summary\n\nOn PostgreSQL, every `Field.date` value read back through `SqlDriver` is shifted **one calendar day earlier** whenever the Node process runs in a timezone east of UTC (e.g. `TZ=Asia/Shanghai`). The value stored in the database is correct; the *read* path corrupts it.\n\nWe hit this in production (an MES app whose app container runs `TZ=Asia/Shanghai`, per the usual \"container clock = business clock\" deployment): users create a record today and every date field on it renders as yesterday, on both the Console and a custom H5 client. It is not a rendering bug — the REST payload already carries the wrong day.\n\nVersion: `@objectstack/driver-sql@17.2.0` (current latest), `pg@8.16.3`, PostgreSQL 16.\n\n## Root cause\n\n`node-postgres` materialises a `date` column (OID 1082) as a JS `Date` at **local** midnight. `SqlDriver#toDateOnly()` then formats that `Date` using **UTC** components:\n\n```js\ntoDateOnly(value) {\n  if (value instanceof Date) {\n    const y = value.getUTCFullYear();\n    const m = String(value.getUTCMonth() + 1).padStart(2, \"0\");\n    const d = String(value.getUTCDate()).padStart(2, \"0\");\n    return `${y}-${m}-${d}`;\n  }\n  ...\n}\n```\n\nLocal midnight in UTC+8 is `T-8h` in UTC, i.e. the previous calendar day, so the UTC components name the wrong day. `toDateOnly` is the shared definition used by `formatOutput` (read), `formatInput` (write) and `coerceFilterValue` (filter), so the same skew reaches list payloads, single-record reads, and date filter comparands.\n\nOn SQLite the value round-trips as TEXT and never becomes a `Date`, which is why the bug is Postgres-only, and why it is invisible in dev.\n\n## Minimal reproduction\n\n```js\n// TZ=Asia/Shanghai node repro.js\nconst { Client } = require('pg');\n(async () => {\n  const c = new Client({ connectionString: process.env.PG_URL });\n  await c.connect();\n  await c.query('drop table if exists t_date_repro');\n  await c.query('create table t_date_repro (id int, d date)');\n  await c.query(\"insert into t_date_repro values (1, '2026-08-24')\");\n  const v = (await c.query('select d from t_date_repro')).rows[0].d;\n  // exactly what SqlDriver#toDateOnly() does for a Date instance:\n  const out = `${v.getUTCFullYear()}-${String(v.getUTCMonth() + 1).padStart(2, '0')}-${String(v.getUTCDate()).padStart(2, '0')}`;\n  console.log('pg returns      :', v.toISOString());\n  console.log('toDateOnly() => :', out);\n  await c.end();\n})();\n```\n\n```\n--- TZ=Asia/Shanghai ---\npg returns      : 2026-08-23T16:00:00.000Z\ntoDateOnly() => : 2026-08-23      <-- stored value was 2026-08-24\n\n--- TZ=UTC ---\npg returns      : 2026-08-24T00:00:00.000Z\ntoDateOnly() => : 2026-08-24      <-- correct\n```\n\nEnd-to-end on a real app, same rows, same browser, only the app process `TZ` changed:\n\n| | DB (`psql`) | REST `GET /api/v1/data/:object/:id` |\n|---|---|---|\n| `TZ=Asia/Shanghai` | `apply_date = 2026-08-24` | `\"apply_date\": \"2026-08-23\"` |\n| `TZ=UTC` | `apply_date = 2026-08-24` | `\"apply_date\": \"2026-08-24\"` |\n\n## Why this is worse than a display bug\n\nThe skewed read feeds writes. An `afterUpdate` hook that copies `record.required_date` into a child record persists the *shifted* value, so the wrong day is written back into the database and survives any later fix to the read path. We have production rows where the parent's `required_date` is `2026-08-26` and the child's copied `plan_end_date` is `2026-08-25`.\n\n## Suggested fix\n\nRead the calendar day from a `Date` the same way it was produced — with local components (`getFullYear` / `getMonth` / `getDate`) — or, more robustly, register a `pg` type parser for OID 1082 (and 1182, `date[]`) that returns the raw `YYYY-MM-DD` string so a `date` never becomes a `Date` in the first place. The latter also removes the DST/edge-case surface entirely and matches what the SQLite path already does.\n\nWhichever direction is chosen, `toDateOnly` should be unambiguous about which clock a `Date` argument is expected to be on, since it is shared by the read, write and filter paths.\n\n## Workaround for app teams\n\nRun the app process with `TZ=UTC` and keep the business timezone in `OS_LOCALIZATION_TIMEZONE`. Verified: the same rows then read back correctly, and autonumber date segments (which follow `OS_LOCALIZATION_TIMEZONE`, not the process clock) are unaffected. It does change any app code that formats timestamps from process-local `Date` components, so it is a mitigation rather than a fix.\n"
+}

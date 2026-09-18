@@ -1,0 +1,35 @@
+{
+  "number": 11544,
+  "kind": "issue",
+  "title": "console: org record page's default Members tab hides the email-invite entry — invite_user lives only on the Invitations tab",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T02:56:15Z",
+  "updated_at": "2026-08-24T04:08:39Z",
+  "closed_at": "2026-08-24T04:08:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11544",
+  "body": "## Symptom\n\nThe in-shell Team surface (`sys_organization` record page, ADR-0081) defaults to tab-0 **Members**. Its related-list toolbar carries exactly one action, **Add Member** (`add_member` — attach an EXISTING user by userId). The email-invite entry (`invite_user`) lives only on tab-1 **Invitations** (`sys_invitation` related list). Both buttons render as `variant: primary` with the same `user-plus` icon.\n\nMeasured effect: the maintainer, looking to \"invite a teammate by email\", landed on Members and concluded the product has no invite entry. If the author cannot find it, users will not.\n\n## Mechanism / file surface\n\n- `packages/platform-objects/src/pages/sys-organization.page.ts` — tab order: Members (`sys_member`) / Invitations (`sys_invitation`) / Teams.\n- `packages/platform-objects/src/identity/sys-member.object.ts` — `list_toolbar`: `add_member` only (primary, `user-plus`).\n- `packages/platform-objects/src/identity/sys-invitation.object.ts` — `list_toolbar`: `invite_user` (primary, `user-plus`) → `POST /api/v1/auth/organization/invite-member`. The delivery half works once found: `sendInvitationEmail` is wired (template `auth.invitation`, accept URL `/_console/accept-invitation/<id>`).\n\nPremise verified against `origin/main` @ 4c9780c7a (2026-08-24): `invite_user` appears only on `sys_invitation` and `sys_user`; `sys_member`'s toolbar has only `add_member`.\n\n## Requested outcome\n\nMake the email-invite flow discoverable from the default Members tab. Suggested route (PM suggestion, not a ruling — implementer verifies):\n\n- Mirror `invite_user` onto `sys_member`'s `list_toolbar` (same target / params / `requiresFeature: 'organization'` gate as the `sys_invitation` copy), and\n- differentiate `add_member` (icon and/or label) so the two toolbar actions do not render as identical primary `user-plus` buttons.\n\nMechanism to verify before writing metadata: the objectui related-list toolbar bridge must render BOTH declared toolbar actions on the record page's related list.\n\n## Notes\n\n- Related, adjacent-only history: #9941 / #10050 (`add_member` endpoint mounting — resolved).\n- cloud consumes this package via SHA pin; the accepting seat files the consumer bump card at landing (multi-repo rule 3).\n- Origin: maintainer direct-dispatch (2026-08-24, chat): 「使用 ../objectstack 项目经理技能派发这个任务」 — referring to the invite-discoverability gap surfaced while answering \"邮件链接邀请注册,界面上没看到入口\".\n"
+}

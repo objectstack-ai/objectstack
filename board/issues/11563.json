@@ -1,0 +1,34 @@
+{
+  "number": 11563,
+  "kind": "pull_request",
+  "title": "chore(spec): ListView map liveness verdict planned → live (objectui#5908 landed the reader)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T03:34:50Z",
+  "updated_at": "2026-08-24T04:28:43Z",
+  "closed_at": "2026-08-24T04:28:41Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-24T04:28:41Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11563",
+  "body": "Fixes #11442\n\n## Flip\n\n`packages/spec/liveness/view.json`'s `view.list.map` entry: `status` `planned` → `live`. The blocker named in the entry's own note — objectui's `ListView.tsx` `case 'map'` forwarding only `schema.options?.map` and never the view-level `map` block — is discharged: **objectui#5908 merged 2026-08-23T19:52:08Z** (squash commit `e2e8e68` on objectui `main`).\n\n## Cross-repo measurement (re-run, not copied)\n\n```\n$ cd objectui && git fetch origin main\n   70bd558..08ca73f  main -> origin/main\n$ git rev-parse origin/main\n08ca73f8ec6c0d619095d816db51a15b5798c9df\n\n$ git merge-base --is-ancestor e2e8e68 origin/main && echo ancestor\nancestor\n$ git log --oneline e2e8e68 -1\ne2e8e68 feat(plugin-list): read the spec's view-level `map` block on list views (#5908)\n```\n\nReader first, per the ledger's own reader-first convention (modeled on the `sharing` entry's 2026-08-10 re-citation note):\n\n```\n$ git show origin/main:packages/plugin-list/src/ListView.tsx | grep -n \"resolveListMapConfig\\|case 'map'\"\n113:function resolveListMapConfig(schema: { map?: unknown; options?: { map?: unknown } }): ...\n1857:    const mapConfig = resolveListMapConfig(schema);   # visualization-switcher capability gate\n2181:      case 'map': {\n2201:        const mapConfig = resolveListMapConfig(schema);   # renderer forward\n```\n\n`resolveListMapConfig` (:113) merges the view-level `map` block over the legacy `options.map` bag; `case 'map'` (:2181-2205) forwards the merge into the `object-map` schema; the visualization-switcher gate (:1849-1858) asks the **same** merged config — not `options.map` alone — before offering `'map'` in `allowedVisualizations`, closing a second hole (objectui#5042) the prior PLANNED note didn't need to describe. The ADR-0047 `InterfaceListPage` path (`packages/app-shell/src/views/InterfaceListPage.tsx:406-409`) forwards the authored `map` block verbatim onto the schema it hands to `ListView`, so it reaches the same resolver rather than dead-ending.\n\nPins second:\n\n```\n$ git cat-file -e origin/main:packages/plugin-list/src/__tests__/ListView.mapViewLevelConfig.test.tsx && echo EXISTS\nEXISTS\n$ git cat-file -e origin/main:packages/plugin-map/src/ObjectMap.listViewMapConfigReach.test.tsx && echo EXISTS\nEXISTS\n```\n\n`ListView.mapViewLevelConfig.test.tsx` pins the forward against a spy; `ObjectMap.listViewMapConfigReach.test.tsx` pins the end-to-end read through a real `ObjectMap` (markers, titles, camera).\n\n## Note rewrite\n\nThe old `planned` note's flip instruction (\"Flip to `live` citing that ListView.tsx read when it lands\") is consumed — replaced with a note stating what reads the key today (`resolveListMapConfig` + `case 'map'` + the switcher gate + the `InterfaceListPage` forward) and since when (objectui#5908, re-measured 2026-08-24). The entry never carried `authorWarn`, so there's nothing to drop there. The `view` row's Notes cell in `packages/spec/liveness/README.md` (the `#9340` sentence describing the PLANNED condition) is updated to match, and the generated `packages/spec/liveness/state-counts.md` is regenerated (`view`: planned 1→0, live 77→78).\n\n## Verification\n\nLocal gates run under the shared verify lock, against commit `9044e986f2` (this PR's head):\n\n- `pnpm --filter @objectstack/spec run check:liveness` → `✓ every governed-type property … every 'live' entry's repo-local evidence path resolves and every 'path:NNN' citation names a line that file actually has … the README state table carries a row for each of the 31 governed type(s) it claims to index.` / `✓ packages/spec/liveness/state-counts.md is current`\n- `pnpm --filter @objectstack/spec run check:empty-state` → `✓ all classified (1 closed, 2 open, 4 output, 9 scope)`\n- `pnpm --filter @objectstack/spec run check:strictness-ledger` → `✓ strictness ledger … remaining-strip map … counts.md is current`\n- `pnpm --filter @objectstack/spec run check:variant-docs` → `✓ variant/doc gate: 18 discriminated union(s) — 8 governed …`\n- `pnpm check:merge-driver`, `pnpm check:published-files`, `pnpm check:slot-lookup`, `pnpm check:test-source-alias`, `pnpm check:type-source-resolution`, `node scripts/check-ci-filter-parity.mjs`, `node scripts/check-dev-prereqs.mjs --self-test`, `node scripts/check-plugin-teardown-shape.mjs`, `node scripts/docs-audit/check-affected-docs.mjs` → all green\n- Once the changeset landed: `pnpm check:changeset-gate-self-tests`, `pnpm check:objectui-changeset`, `node scripts/check-adr-0087-registration.mjs`, `node scripts/check-changeset-no-major.mjs`, `node scripts/check-empty-changeset.mjs` → all green (`1 non-breaking changeset(s) seen`, `1 declaring changeset(s) added`)\n- `node scripts/check-nul-bytes.mjs` → `✓ OK (scanned 6463 text file(s) …)`\n\nDerived via `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` against this diff (`packages/spec/liveness/view.json`, `README.md`, `state-counts.md`, `.changeset/listview-map-liveness-live.md`) — every family it named for this diff is listed above and green. Full CI (`Lint & Repo Gates`, `TypeScript Type Check`, etc.) is left to the platform per the \"report at draft PR time\" convention; PM reviews CI convergence.\n\n## Changeset\n\n`.changeset/listview-map-liveness-live.md` — `@objectstack/spec` patch, mirroring #11449's pattern for a liveness-ledger verdict change.\n\n## Scope\n\nLedger data only (`packages/spec/liveness/{view.json,README.md,state-counts.md}` + changeset) — no `packages/spec/src/**` touched (Clause-② no). The showcase declaration (#11443) is out of scope here and untouched.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01T9cDbY2NBiVJWYx3BpWfH2)_"
+}

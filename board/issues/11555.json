@@ -1,0 +1,34 @@
+{
+  "number": 11555,
+  "kind": "pull_request",
+  "title": "chore(spec): every skill-examples surface build dir is gitignored (and asserted)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T03:18:43Z",
+  "updated_at": "2026-08-24T04:11:48Z",
+  "closed_at": "2026-08-24T04:11:46Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": "2026-08-24T04:11:46Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11555",
+  "body": "Fixes #11440\n\n`check:skill-examples` writes each surface's extracted blocks to a throwaway build dir under that surface's `resolutionDir`, wiping and deleting it on every run — so a gap in `.gitignore` is invisible on a clean pass and only surfaces via `--keep` (a documented debug flag) or a run interrupted before cleanup, at which point a routine `git add -A` commits the extracted blocks into someone's PR.\n\n## Per-surface coverage\n\n| Surface | `resolutionDir` | build dir | `.gitignore` before | after |\n|---|---|---|---|---|\n| skills + docs (`@objectstack/spec`) | `packages/spec` | `.examples-build` | covered | covered |\n| spec source TSDoc (`@objectstack/spec`, #11433) | `packages/spec` | `.examples-build-src` | covered | covered |\n| client SDK (`@objectstack/client-react`, `@objectstack/client`, #10969) | `packages/client-react` | `.examples-build` | **not covered** | covered |\n\nOne line added beside the existing pair, and the comment above generalised to \"one per surface\" (already generalised by #11433; unchanged here).\n\n## Assert: `assertGitignoredBuildDirs()`\n\nA sibling of #11433's `assertDistinctBuildDirs()`, in the same file, wired into `main()` right after it. It walks `SURFACES`, and for each declared build dir runs `git check-ignore -q` (via a small `isGitIgnored()` helper) asserting the dir is covered — `fail()`s with the surface name and the exact `.gitignore` line to add if not.\n\nOne mechanical wrinkle worth noting: `git check-ignore` only matches a directory-only pattern (every entry here ends in `/`) against a path it can tell IS a directory — either because the path exists on disk, or because the query itself carries a trailing separator. Since this gate deletes the build dir on exit, the directory is normally absent, so `isGitIgnored()` always queries with a trailing `path.sep` appended.\n\n`--self-test` adds a fixture (sibling to the build-dir-distinctness one) that inits a throwaway git repo, gives it a `.gitignore` covering one stub surface's build dir but not another's, and asserts `isGitIgnored()` / `findUnignoredBuildDir()` catch the gap in both directions — plus a check that the REAL `SURFACES` are fully covered (this is what pre-fix reverse verification failed).\n\n### Caught by the real test suite: a non-git sandbox false-positive\n\n`dist-freshness-adoption.test.ts` runs this same script against a \"repo-shaped\" temp tree that is deliberately **not** a real git checkout (its own header explains why — making the real `packages/spec/dist` stale to drive a refusal would corrupt whatever else is running in the container). `git check-ignore` there exits `128` (\"fatal: not a git repository\"), and a first version of `isGitIgnored()` read any non-zero status as \"not ignored\" — which made the new assert fire *first* in every one of that file's cases, ahead of the dist-freshness refusal they exist to probe (3 failing tests, caught by `pnpm --filter @objectstack/spec test`, not by `--self-test`, whose own throwaway repo IS a real `git init`). Fixed by having `isGitIgnored()` return `boolean | null` (`null` = indeterminate, not a git working tree) and having `findUnignoredBuildDir()` treat only an authoritative `false` as a gap. Pinned with a new non-git self-test fixture; re-confirmed against the real suite: `vitest run scripts/dist-freshness-adoption.test.ts` — `10 passed (10)`.\n\n## Reverse verification\n\nAt the committed fix, temporarily reverted just the new `.gitignore` line and re-ran:\n\n```\n$ pnpm --filter @objectstack/spec exec tsx scripts/check-skill-examples.ts\n\n✗ Surface \"client SDK (@objectstack/client-react, @objectstack/client)\"'s build dir packages/client-react/.examples-build is not covered by .gitignore.\n\n  This gate deletes the dir on a clean run, so the gap is invisible until `--keep`\n  or an interrupted run leaves it behind — at which point a routine `git add -A`\n  commits the extracted blocks into someone's PR. Add `packages/client-react/.examples-build/` to .gitignore.\n```\n\nExit 1, naming exactly the surface the issue describes. Restored via `git checkout HEAD -- .gitignore` (the fix was already committed) and re-ran green.\n\n## Verification\n\nAll at final commit `6b5de1105c`, tree clean vs HEAD:\n\n- `git check-ignore -q packages/client-react/.examples-build/` — red pre-fix (measured on `origin/main` at merge base), green post-fix; both spec surfaces stay green throughout.\n- `pnpm --filter @objectstack/spec exec tsx scripts/check-skill-examples.ts --self-test` — green, including the new gitignore + non-git fixtures.\n- `pnpm --filter @objectstack/spec check:skill-examples` (self-test + real gate) — green: `253 marked example(s) across 97 file(s), 3 surface(s)`.\n- `pnpm --filter @objectstack/spec test` — green: `420 Test Files passed (420)`, `11204 Tests passed (11204)`.\n- `pnpm --filter @objectstack/spec typecheck` (`tsc --noEmit` + `check:scripts-typecheck` + `check:test-typecheck`) — green.\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack` — derived 13 local gate families for this diff, all run and green: `check:empty-state`, `check:liveness`, `check:merge-driver`, `check:published-files`, `check:slot-lookup`, `check:strictness-ledger`, `check:test-source-alias`, `check:type-source-resolution`, `check:variant-docs`, `check-ci-filter-parity.mjs`, `check-dev-prereqs.mjs --self-test` (its only CI-invoked form), `check-plugin-teardown-shape.mjs`, `docs-audit/check-affected-docs.mjs`.\n\n## Scope\n\nDiff is `.gitignore` + `packages/spec/scripts/check-skill-examples.ts` only — no `packages/spec/src/**` touched (clause-② out of scope for this card). `packages/spec/scripts/` is not in the package's published `files` — this ships no consumer-visible bytes, so `skip-changeset` rather than a changeset.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01T9cDbY2NBiVJWYx3BpWfH2)_"
+}

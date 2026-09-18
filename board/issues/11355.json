@@ -1,0 +1,34 @@
+{
+  "number": 11355,
+  "kind": "issue",
+  "title": "[finding] check:skill-examples's marked-block EXTRACTION (not just the orphan scan) is not fence-aware — a fully worked nested example could misfire",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T13:40:39Z",
+  "updated_at": "2026-08-24T14:23:12Z",
+  "closed_at": "2026-08-24T13:48:28Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11355",
+  "body": "Found while implementing #10791's fence-aware orphan scan\n(`packages/spec/scripts/check-skill-examples.ts`).\n\n## The gap\n\n#10791 fixed the **orphan scan** to be fence-aware (`fenceSpans()`, lifted from\n`scripts/check-role-word.mjs`'s #10533 shape): a marker shown as example text inside a\nwrapping fence (e.g. a ```` ```md ```` illustration) is no longer flagged as a misplaced\nmarker. That fix deliberately left the **marked-block extraction loop** untouched — it\nstill recognizes a bare ` ```ts `/` ```tsx `/` ```typescript ` fence-open line with no\nnotion of being inside some other (non-ts) fence, because #10791's card scoped the fix to\nthe orphan-scan defect only.\n\nThat means a *fully worked* nested illustration — the marker **and** a real\n` ```ts ` fence-open, both written as literal text inside an outer wrapping fence (e.g. a\n`````` fence wrapping a ```ts example, the same shape #10533's self-test covers for\n`check-role-word.mjs`) — would still misfire: the extraction loop would treat the nested\nmarker+fence as a genuine top-level block, extract its body, and hand it to `tsc` as if it\nwere a real example. Depending on what the illustration's placeholder code looks like,\nthat either compiles by luck or fails the whole gate with a diagnostic that points at\ndocumentation prose, not a real example.\n\n## Status\n\n**Latent, unconfirmed by a run.** Source-derived from reading `extractFromFile`'s two\nloops side by side; #10791's own reproduction only exercised the \"marker alone, no nested\nfence\" case (which #10791 fixes correctly and completely). Today's corpus has no\noccurrence of a marker *and* a full nested ts-fence pair inside a wrapping fence, so\nnothing currently trips this.\n\n## Suggested shape\n\nTwo options, un-adjudicated here:\n1. Make the extraction loop share `fenceSpans()` too — skip a `ts`/`tsx`/`typescript`\n   fence-open line that falls inside some larger non-ts fence's span, the same way the\n   orphan scan now does.\n2. Leave extraction as-is and instead document (in the file's header comment) that a\n   *worked* nested example is unsupported — only a bare marker illustration is safe to\n   nest — so a future doc author knows the boundary.\n\nNot fixed in #10791's PR: different failure mode (mis-extraction vs. false orphan) from a\ndifferent card, and #10791's triage ruling scoped that PR to the orphan-scan defect only.\n"
+}

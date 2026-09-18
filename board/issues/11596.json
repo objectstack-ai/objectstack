@@ -1,0 +1,36 @@
+{
+  "number": 11596,
+  "kind": "issue",
+  "title": "burn down the `cli-test-child-env` baseline: 18 spawned children in 17 `packages/cli/test` files still built from the whole of `process.env`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T07:25:05Z",
+  "updated_at": "2026-08-24T12:49:45Z",
+  "closed_at": "2026-08-24T12:49:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11596",
+  "body": "#11341 landed `check:cli-test-child-env`, which refuses a bulk `process.env` copy in a spawner file under `packages/cli/test/**`. The leaks that predate the gate are recorded in `scripts/cli-test-child-env.baseline.json` as a shrink-only ratchet. This card is the burn-down.\n\nThe gate deliberately did **not** repair them: sweeping without the mechanism leaves the next file free to reintroduce the shape (#11341's own argument), and two of the files below were held by #11071 in a parallel seat the round the gate landed.\n\n## The ledger, as it stands\n\n18 bulk references across 17 files:\n\n| file | count |\n|---|---|\n| `cloud-login-json-ndjson.e2e.test.ts` | 1 |\n| `generate-agent-retired.e2e.test.ts` | 1 |\n| `generate-skill.e2e.test.ts` | 1 |\n| `hook-body-build-reach.e2e.test.ts` | 1 |\n| `init-created-files-summary.e2e.test.ts` | 1 |\n| `invocation-loudness.e2e.test.ts` | 1 |\n| `json-stdout-purity.e2e.test.ts` | 1 |\n| `login-json-ndjson.e2e.test.ts` | 1 |\n| `login-json-noninteractive.e2e.test.ts` | 1 |\n| `migrate-exit-code.e2e.test.ts` | 1 |\n| `migrate-meta.e2e.test.ts` | 2 |\n| `qa-empty-glob-exit-code.e2e.test.ts` | 1 |\n| `serve-app-anchored-optional-import.e2e.test.ts` | 1 |\n| `serve-app-runtime-hooks.e2e.test.ts` | 1 |\n| `serve-host-fallback-base.e2e.test.ts` | 1 |\n| `validate-json-warning-parity.e2e.test.ts` | 1 |\n| `validate-top-level-strict.e2e.test.ts` | 1 |\n\n`node scripts/check-cli-test-child-env.mjs --list` prints this live, with line numbers and the enclosing function, so no worklist has to be maintained by hand — the enumeration in this body is a snapshot and the command is the source of truth.\n\n## One card per neighbourhood, not one sweep\n\nThe repair is mechanical (`env: childEnv({ ... })` in place of the spread) but it is **not** uniformly risk-free, which is why it is split rather than batched:\n\n- `serve-app-anchored-optional-import.e2e.test.ts` is the one that matters most. Its hand-rolled `runServeFrom()` boots a real `os serve` with the full stack — better-auth included — so it is the single file in the directory that has the leak *and* mounts something that reads `TEST`. It asserts optional-service resolution today, so nothing it checks can currently be softened into a pass, but its assertions are one edit away from being security-relevant. #11441 is the card that measured it.\n- The `serve-*` files each need the child re-checked after the strip: the crypto provider persists a minted key to `$HOME/.objectstack/dev-crypto-key` in development mode, which is why `runServe()` passes an explicit `OS_SECRET_KEY`. A file that stops claiming to be a vitest worker may need the same. `helpers/serve-process.ts`'s header carries the measurement, and `serve-node-env-production-default` going red the moment the leak stopped is the recorded precedent for a pin whose \"production posture\" was genuine for auth and fake for crypto.\n- `generate-skill.e2e.test.ts` and `generate-agent-retired.e2e.test.ts` sit in #11071's neighbourhood — check it has landed before touching them.\n- The remaining `login` / `migrate` / `validate` / `init` / `qa` / `hook` / `json-stdout` files spawn commands that mount nothing reading the runner family. Those are the cheap batch.\n\n## Ratchet mechanics for whoever takes a slice\n\nLower the count in `scripts/cli-test-child-env.baseline.json` in the same PR, and delete the key when it reaches 0 — the gate fails on a stale ceiling, in that direction too, deliberately: a ceiling left above reality silently licenses that many new leaks.\n\n## Related\n\n- #11341 — the gate, its rule, and the two `DELIBERATE` sites that are not in this ledger.\n- #11441 — the measurement correction that named two of the files above.\n- #11595 — the sibling gap: 8 spawners that pass no `env` at all. Not in this ledger; a different remedy.\n- #11267 — where `childEnv()` came from, and the measurement that says why it matters."
+}

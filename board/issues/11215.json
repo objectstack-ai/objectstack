@@ -1,0 +1,34 @@
+{
+  "number": 11215,
+  "kind": "issue",
+  "title": "`NoSQLIndexSchema.unique` is a bare boolean while both other `unique` surfaces carry the ADR-0120 scope vocabulary — is the omission deliberate?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T03:46:28Z",
+  "updated_at": "2026-08-24T08:13:38Z",
+  "closed_at": "2026-08-24T07:57:02Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11215",
+  "body": "Observed while splitting `UniqueScopeSchema`'s rejection message per surface (#10928, PR #11213). Outside that card's declared file surface, so recorded rather than acted on. Filed unassigned per finding discipline. **This is an observation, not an asserted defect** — I did not measure whether NoSQL declared indexes are tenant-aware, and that measurement is what decides whether anything here is wrong.\n\n## What\n\n`packages/spec` declares `unique` on three shapes. Two of them share the ADR-0120 D1 scope vocabulary and its prescriptive rejection:\n\n- `FieldSchema.unique` — `UniqueScopeSchema` (`boolean | 'global' | 'organization'`), `packages/spec/src/data/field.zod.ts`\n- `IndexSchema.unique` — the same vocabulary, `packages/spec/src/data/object.zod.ts`\n\nThe third does not:\n\n```ts\n// packages/spec/src/data/driver-nosql.zod.ts:403\nunique: z.boolean().default(false).describe('Enforce uniqueness'),\n```\n\n`NoSQLIndexSchema.unique` accepts only `true`/`false`. There is no `'organization'` spelling, no `'global'` spelling, and no rejection text — an author writing `unique: 'organization'` on a NoSQL index gets Zod's generic boolean type error, not the ADR-0120 vocabulary. The generated surface roster records all three (`authorable-surface.base.json` carries `data/Field:unique`, `data/Index:unique`, `data/NoSQLIndex:unique`).\n\n## Why it might be nothing\n\n`driver-nosql.zod.ts` may be a raw driver-configuration descriptor rather than an authorable-metadata surface, in which case a bare boolean is correct and the scope question simply does not arise at that layer — the tenant key part is prepended (or not) by whatever consumes the descriptor, well before this shape is parsed. If so, the right outcome is a `describe()` that says which layer this is, so the next reader does not mistake the asymmetry for drift the way I initially did.\n\n## Why it might be something\n\nIf NoSQL declared indexes *are* materialized against tenant-aware collections, then this surface has the exact shape the #4986 trap describes: a bare `true` whose scope is decided positionally, with no way to say the scope and no rejection naming the vocabulary. That is the condition ADR-0120 D1 exists to remove, and it would be the one `unique` surface still carrying it.\n\n## What would settle it\n\nWhether any consumer of `NoSQLIndexSchema` injects an organization key part. `isGlobalUnique` / `isOrganizationUnique` (the driver-facing single source of truth) are the helpers to grep for from the NoSQL side; `packages/drivers/driver-mongodb/src/mongodb-schema.ts:18` already cites `UniqueScopeSchema` in a comment, which is the one place the two vocabularies are mentioned together.\n\nBacklink: #10928 · PR #11213 · vocabulary ADR-0120 D1 · trap #4986 · sequencing #5082\n"
+}

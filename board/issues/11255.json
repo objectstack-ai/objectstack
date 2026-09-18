@@ -1,0 +1,35 @@
+{
+  "number": 11255,
+  "kind": "issue",
+  "title": "A page authored as a raw `Page` object literal serves every `ExpressionInputSchema` key BARE, and the console silently routes bare predicates to its legacy evaluator",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "tests"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T06:50:29Z",
+  "updated_at": "2026-08-23T23:44:57Z",
+  "closed_at": "2026-08-23T23:14:48Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11255",
+  "body": "Filed unassigned by the `domain:engine` seat while implementing #9167 round 2 (session `session_01RfyXxZ2WPjcjhuXpiQQc3y`, PR #11254). Recording the **class**; the one live instance is fixed in that PR. Not claimed, not queued.\n\n## The shape\n\n`PageComponentSchema.visibleWhen` is an `ExpressionInputSchema` (`packages/spec/src/ui/page.zod.ts:189`), whose transform normalizes a bare string into the canonical `{ dialect: 'cel', source }` envelope. **That transform only runs if something parses the page.** A page authored as\n\n```ts\nexport const SysUserDetailPage: Page = { … }\n```\n\nis a plain typed object literal — the type is checked, nothing is *parsed* — so whatever the author wrote reaches `/api/v1/meta/page` verbatim. A page authored through `definePage({ … })` is parsed and serves the envelope.\n\nMeasured on `origin/main` @ `824a996c0` with a real dev server, the two authored `record:alert` gates side by side after the #9167 migration text was applied literally to both:\n\n| page | authoring form | `visibleWhen` on the wire |\n|:--|:--|:--|\n| `showcase_task_detail` (`definePage`) | parsed | `{\"dialect\":\"cel\",\"source\":\"has(record.status) && …\"}` |\n| `sys_user_detail` (raw `Page` literal) | not parsed | `\"has(record.id) && …\"` — **bare** |\n\n## Why bare is not merely cosmetic\n\nobjectui's `ExpressionEvaluator.evaluateCondition` at the pinned SHA (`190fbd01d`) routes by shape, deliberately:\n\n> Bare strings and `${…}` templates stay on the legacy path (back-compat deprecation window); only an explicit `{ dialect: 'cel' }` envelope is rerouted.\n\nThe legacy JS evaluator has no `has()`, and the component-visibility surface is fail-**soft**, so a guarded predicate throws and resolves to SHOWN. Measured in the real console, on the bare form:\n\n| run | probe | verdict | expected |\n|:--|:--|:--|:--|\n| B2 | `sys_user` self, `email_verified` forced `true` | **VISIBLE** | hidden ❌ |\n| B3 | **another user's** profile (control: that page's own title) | **VISIBLE** | hidden ❌ |\n\nIsolated to the envelope alone — one page, one predicate source, one rewrite path:\n\n| run | probe | verdict |\n|:--|:--|:--|\n| P1 | node `visibleWhen` rewritten to the **bare string** | **VISIBLE** ❌ |\n| P2 | node `visibleWhen` rewritten to the **envelope**, same source | hidden ✅ |\n\nAnd in a production console bundle the fault is **completely silent**: `SchemaRenderer`'s `evaluateVisibilityPredicate` short-circuits on `if (!__DEV__)` before the diagnostic probe, so nothing is logged. The whole failure is \"a declared gate stops gating, with no output anywhere\".\n\n## Current blast radius — one live instance, already fixed; the rest is latent\n\nSwept over every `*.page.ts` in the repo (export form classified from code with comments stripped):\n\n| page | form | `visibleWhen` |\n|:--|:--|--:|\n| `packages/platform-objects/src/pages/sys-user.page.ts` | raw literal | 1 — **fixed in #11254** via `P` |\n| `packages/platform-objects/src/pages/sys-organization.page.ts` | raw literal | 0 |\n| `packages/platform-objects/src/pages/sys-position.page.ts` | raw literal | 0 |\n| `packages/qa/downstream-contract/src/welcome.page.ts` | raw literal | 0 |\n| every page under `examples/**` | `definePage()` | 7, all normalized |\n\nSo today nothing else is broken. What makes this worth a card is that the hazard is **invisible at authoring time**: the type accepts the bare string, `tsc` is green, every test is green, the gate farm is green, and the only symptom is a banner that stops gating in a shipped platform page. The next predicate added to a raw-literal platform page reproduces it exactly.\n\n## Options, not a recommendation to implement blind\n\n- **A. A gate.** Assert that every page reachable from a platform package serves canonical envelopes for its `ExpressionInputSchema` keys — e.g. parse each exported `Page` through `PageSchema` in a test and compare, which also closes the general \"raw literal was never parsed\" hole rather than the predicate half of it.\n- **B. Route platform pages through `definePage()`.** Removes the fork at the source, but it changes the export shape of shipped platform pages and a strict parse may reject unrelated pre-existing looseness — needs its own measurement before anyone commits to it.\n- **C. Author-side only** (what #11254 did): use `P` / an explicit envelope on raw-literal pages. Correct per instance, but nothing stops the next one.\n\nRelated, upstream and separate: the renderer's bare-string back-compat window is objectui's, and closing it there would change verdicts for every un-normalized predicate in the wild — not something to ask for from this side.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RfyXxZ2WPjcjhuXpiQQc3y)_"
+}

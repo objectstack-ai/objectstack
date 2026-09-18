@@ -1,0 +1,33 @@
+{
+  "number": 9968,
+  "kind": "issue",
+  "title": "`impersonate_user` and `set_user_role` still 403 every platform admin — neither route is safely raw-mountable, and each blocks for a different reason",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "needs:contract-review"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-19T10:45:19Z",
+  "updated_at": "2026-08-24T03:21:11Z",
+  "closed_at": "2026-08-24T03:21:11Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 15,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9968",
+  "body": "Split out of #9652 while implementing its Option-2 fallback. #9652's PR re-mounts `/admin/ban-user` and `/admin/unban-user` with the ADR-0068 gate; these two are the remaining `sys_user` actions whose targets are still served by better-auth and therefore still refuse platform admins. Filed unassigned — each needs a decision, not just code.\n\nMeasured at the installed better-auth **1.7.1** (post PR #9869), on a stock showcase boot with `OS_SCIM_ENABLED=true`.\n\n## Why these two were held back rather than done with their siblings\n\nThe vendor cannot be configured (that is #9652's measured branch answer), so the fallback is re-implementation as an ObjectStack raw mount. Ban/unban re-implement cleanly: two `internalAdapter` calls each. These two do not.\n\n### 1. `POST /api/v1/auth/admin/impersonate-user` — not safely re-implementable at the Hono layer\n\nThe vendor handler is not a data write. It mints a session and rewrites cookies using helpers that exist **only inside a better-auth endpoint context**:\n\n- `ctx.context.internalAdapter.createSession(targetId, true, { impersonatedBy, expiresAt }, true)`\n- `deleteSessionCookie(ctx)`\n- `ctx.getSignedCookie(authCookies.dontRememberToken.name, ctx.context.secret)`\n- `ctx.context.createAuthCookie('admin_session')` + `ctx.setSignedCookie(name, `${callerSessionToken}:${dontRememberMe}`, secret, attributes)`\n- `setSessionCookie(ctx, { session, user }, true)`\n\nA raw Hono mount has none of them. Re-implementing means hand-rolling better-auth's signed-cookie format against its secret — and the exact `admin_session` cookie payload is a **contract with `/admin/stop-impersonating`**, which parses `adminCookie.split(':')` and refuses with a 500 if the shape is off. A subtly wrong signature is either a broken exit path or a forgeable cookie.\n\n**Second, independent blocker:** shadowing a vendor path with a raw mount silently detaches every better-auth hook keyed on that path. `/admin/impersonate-user` carries one — `rotateCallerBearerOnImpersonation` in `auth-manager.ts`'s `after` hook, which exists because of #8243 (without it the bearer plugin converts the caller's token back into the *admin's* session on every later request and the impersonation is a 200 no-op). A raw mount would reintroduce #8243 with no test noticing.\n\n**User-visible residue:** `sys_user`'s `impersonate_user` action (`locations: ['list_item','record_header']`, `requiresFeature: 'admin'`) renders an \"Impersonate User\" button that returns `403 YOU_ARE_NOT_ALLOWED_TO_IMPERSONATE_USERS` for every platform admin. Fails closed.\n\nRecommended shape if this is taken forward: **not** a raw Hono mount. Register the replacement as a better-auth *plugin endpoint* instead, so the cookie helpers, the `$context`, and ObjectStack's own path-keyed hooks all still apply, and only the authorization predicate changes. Whether better-auth 1.7.1 permits an endpoint that overrides a path another plugin registers (`checkEndpointConflicts`) is **unmeasured** and should be measured before committing to it.\n\n### 2. `POST /api/v1/auth/admin/set-role` — mechanically easy, but its only effect is the vetoed scalar\n\nRe-implementation is one call: `internalAdapter.updateUser(userId, { role })`. The problem is what that writes. `sys_user.role` is the legacy scalar ADR-0068 D2 retired, and it is still folded into the derived identity — `auth-manager.ts`'s `customSession` seeds `positions[]` from `storedRole.split(',')`. So a working \"Set Platform Role\" action is a supported, gated, UI-driven way for an admin to type `admin` into a text box and resurrect exactly the dual identity representation the 2026-08-18 ruling permanently vetoed (Option 3), one user at a time.\n\nThat is a governance question, not an implementation one, which is why #9652's PR does not ship it.\n\nOptions, no recommendation made unilaterally:\n\n- **A.** Leave the route on the vendor gate (status quo): the action stays broken and the veto is not stressed. Cheapest; leaves a dead button.\n- **B.** Retire the `set_user_role` action from `sys_user` — platform-admin membership is granted through `sys_user_permission_set` / `admin_full_access` under ADR-0068, so the action arguably describes an identity model that no longer exists. Removes the dead button and the veto tension together.\n- **C.** Re-implement it, restricted to a vocabulary that excludes anything in the vendor's `adminRoles`. Keeps the capability, does not resurrect platform admin via the scalar — but keeps two identity representations alive on purpose.\n\n`unlock_user`, `create_user`, `set_user_password`, `ban_user`, `unban_user` are unaffected (all ObjectStack mounts).\n\n## Evidence\n\nBy-construction, at the #9652 branch point, with the ADR-0068 wiring ablated (i.e. today's `main` behaviour), seeded dev admin who is a platform admin with `sys_user.role = 'user'`:\n\n```text\n/auth/admin/ban-user   admin  -> 403 {\"code\":\"YOU_ARE_NOT_ALLOWED_TO_BAN_USERS\"}\n/auth/admin/ban-user   member -> 403 {\"code\":\"YOU_ARE_NOT_ALLOWED_TO_BAN_USERS\"}\n```\n\n— the admin and the plain member receive byte-identical refusals, which is the whole defect. `impersonate-user` and `set-role` answer the same way with their own `YOU_ARE_NOT_ALLOWED_TO_*` codes (recorded in #9652's body).\n\nParent: #9652. Not a duplicate of #9653 (SSO bridges) or #9654 (pre-auth shape probing)."
+}

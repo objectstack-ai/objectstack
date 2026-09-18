@@ -1,0 +1,32 @@
+{
+  "number": 10394,
+  "kind": "issue",
+  "title": "app-showcase declares `showcase_task_done_email` but no flow references it — wiring it means giving up the script-node demonstration",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-20T17:57:06Z",
+  "updated_at": "2026-08-24T10:38:47Z",
+  "closed_at": "2026-08-24T10:37:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10394",
+  "body": "Split out of #10267, which fixed the template's `locale` and wrapped it in `defineEmailTemplateDefinition`. That card scoped the wiring question as separate and left it to the executing seat; this is that seat filing it rather than deciding it, because the wiring is **not** an addition.\n\n## The state today\n\n`examples/app-showcase/src/system/emails/index.ts` declares `showcase_task_done_email` and `objectstack.config.ts` passes it through `emailTemplates:`, so it is materialized into `sys_email_template` at boot. Nothing sends it — `showcase_task_completed` (\"Notify on Task Completed\") is the flow its docblock names, and that flow's notify node uses the **inline** content path:\n\n```ts\n{\n  id: 'notify',\n  type: 'notify',\n  config: {\n    recipients: '{record.assignee}',\n    title: '✅ Task done: {record.title}',\n    message: '{summary}',\n    // …\n  },\n}\n```\n\n## Why this is a decision, not a mechanical edit\n\n`NotifyConfigSchema`'s `superRefine` (`packages/spec/src/automation/io-node-config.zod.ts`) refuses `template` combined with inline `title`/`message` outright:\n\n> `template` cannot be combined with inline `title`/`message` — pick ONE content path\n\nSo referencing the template there is a **substitution**: `title` and `message` have to go. And `message: '{summary}'` is the only consumer of the `summarize` script node's `outputVariable` — which is precisely what that flow exists to demonstrate. Its own docblock says so:\n\n> A flow function is PURE: it takes `inputs`, RETURNS a value, and a later declarative node uses or persists it (#4396).\n\nWiring the template therefore trades a live demonstration of the script-node contract for a demonstration of the template path. Both are worth showing; the showcase currently shows one of them and declares the other without showing it.\n\nTwo further costs worth pricing before anyone picks an option:\n\n- The template's declared variables are `title` and `project`. The flow record carries `project` as a scalar id, and the flow's own comment notes that reaching through it needs `expand: ['project']` on the start node — so a faithful `templateData` is a change to the start node too, not just the notify node.\n- Delivery through the template path needs `@objectstack/plugin-email` registered; without it the email channel returns `TEMPLATE_UNSUPPORTED`. The showcase does not install it as a runtime plugin (#10267 added it only as a test-time devDependency).\n\n## Options\n\n1. **Add a second flow** that demonstrates the `template` + `templateData` path, leaving `showcase_task_completed` as the script-node specimen. Costs one more flow in the corpus; keeps both demonstrations.\n2. **Convert the existing notify node** to the template path and move the summary text into the template bundle. Loses the script-node → later-node demonstration unless another node is added to consume `{summary}`.\n3. **Keep the template unwired** and say so in its docblock (what #10267 did as an interim), on the grounds that a materialized template is itself the thing being demonstrated — it is reachable from `services.email.sendTemplate` and from Studio, flow or no flow.\n\nNo preference recorded here; #10267's surface was the declaration only. Filed unassigned."
+}

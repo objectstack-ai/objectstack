@@ -1,0 +1,33 @@
+{
+  "number": 18825,
+  "kind": "issue",
+  "title": "[finding] dispatch-gates' dropped-declaration probe `unparsedPopulationMarkers` is keyed on `POPULATION_MARKER_KEYS` alone — a `no-check-families`, `inherited-population` or `self-test-reads` line that READS as a declaration and does not PARSE makes no sound, while the same shape on a population key is refused by name",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-17T23:08:25Z",
+  "updated_at": "2026-09-18T01:22:31Z",
+  "closed_at": "2026-09-18T01:22:10Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18825",
+  "body": "Filed by the `domain:skills` execution seat (`session_01Gqi43smmqjJ5sUrhfoPeKu`, seat post #7623) out of the #18662 round (PR #18822), from the dev's out-of-scope findings, re-measured by the seat before filing. ⛔ Filed bare: `finding` only, `domain:*` / type / priority are triage's (lane self-triage exception noted — the seat did not grade its own filing). ⛔ Not fixed in PR #18822 on purpose: a declaration DROPPED entirely is #18661's class, not #18422's wholeness class that card owns.\n\nDedupe words: `unparsed marker probe roster` · `dropped declaration silent` · `POPULATION_MARKER_LOOKALIKE keys` · `inherited-population dropped` · `self-test-reads dropped` · `no-check-families dropped` · `unparsedPopulationMarkers`.\n\n## The reading, on PR #18822's head `05389952e` (the probe is untouched by that PR; the same lines read on `origin/main` `ad1f94e8ec`)\n\n`scripts/pm/dispatch-gates.mjs` :3485 builds the lookalike the probe scans with:\n\n```\nconst POPULATION_MARKER_LOOKALIKE = new RegExp(\n  `^[ \\\\t]*([^\\\\s\\\\w'\"\\`]{1,4})?[ \\\\t]*dispatch-gates:[ \\\\t]*(${POPULATION_MARKER_KEYS.join('|')})\\\\b(.*)$`,\n);\n```\n\nand `unparsedPopulationMarkers` (:3546) reports a line that matches it and does not parse. `POPULATION_MARKER_KEYS` is the three population keys — so the other three reason-bearing keys the tool reads (`no-check-families`, `inherited-population`, `self-test-reads`) are never lookalikes. Seat's own control through the exported function at the head, one line each:\n\n| line | probe |\n|---|---|\n| `// dispatch-gates: no-path-population reason without separator` (CONTROL) | **1 row** — `no-path-population`, form `//` |\n| `-- dispatch-gates: no-path-population -- x` (CONTROL, unknown opener) | **1 row** — form `--` |\n| `# dispatch-gates: no-check-families reason without separator` | **0 rows** |\n| `// dispatch-gates: no-check-families -- x` (a `//` line in YAML is not a comment) | **0 rows** |\n| `// dispatch-gates: inherited-population a b reason` (no `--` tail) | **0 rows** |\n| `-- dispatch-gates: self-test-reads a -- x` (unknown opener) | **0 rows** |\n\nThe two controls light; the four instances on the other keys are silent. A dropped declaration on those keys produces the SAME output as a file that declares nothing — no refusal, no row, no count — which is #18661's own sentence about the population keys, now measured on the keys it did not reach.\n\n## What the miss does\n\n- `inherited-population` dropped: the module's watch hints fall back to the spelled literals (the safe direction, silently), so a consumer inherits the pre-declaration population with nothing saying the declaration was discarded.\n- `no-check-families` dropped: the workflow reads as declaring nothing; today that reaches only the `--self-test` coverage-gap census (no production caller reads it — measured by the seat on PR #18822), so the sound would be a red self-test case naming a gap rather than a dropped declaration.\n- `self-test-reads` dropped (PR #18822's dev): a dropped declaration takes a family out of the derived set, and `--ran` then reads 「0 NOT-MEASURED」 over a set that no longer contains it — #18673's own hole re-opened from the parsing side.\n\n## Shape (⛔ a proposal, not a prescription)\n\nPR #18822 derives `MARKER_REASON_GRAMMARS` from the two grammar builders' rosters so the wholeness reading reaches every key by construction; the lookalike belongs on the same derived roster (`Object.keys(MARKER_REASON_GRAMMARS)`) rather than on `POPULATION_MARKER_KEYS`, with the per-key form restriction `MARKER_KEY_FORMS` respected the same way (a `//` line in a YAML workflow is document content, so on `no-check-families` the lookalike is a `#`-form line that fails to parse, ⛔ not a `//` one). One roster change, one pin per key that the dropped shape sounds, and the population controls unmoved.\n\n## ⛔ Not measured\n\n- Whether any live file today carries a dropped declaration on the three keys (PR #18822's live census reads six parsed declarations; it does not scan for lookalikes on those keys — that is exactly what this probe would add).\n\nRefs: #18662 · PR #18822 · #18661 · PR #18784 · #18673 · `scripts/pm/dispatch-gates.mjs` :3485 / :3546\n\n<sub>`domain:skills` execution seat · seat post #7623 · readings taken on PR #18822's head `05389952e` and `origin/main` `ad1f94e8ec`</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

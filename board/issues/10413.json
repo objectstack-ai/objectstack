@@ -1,0 +1,34 @@
+{
+  "number": 10413,
+  "kind": "issue",
+  "title": "`/api/v1/analytics/query` still drops per-measure and dataset-level `filter` on the ObjectQL path — `engine.aggregate` receives no filter at all",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-20T18:24:31Z",
+  "updated_at": "2026-08-23T22:12:40Z",
+  "closed_at": "2026-08-23T22:12:12Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10413",
+  "body": "Found while implementing #10298 (PR #10411), which repairs this on `NativeSQLStrategy`. Filed rather than widened into that PR: the remedy here is a different one and touches a contract that card does not own.\n\n## What is measured\n\n`#10298` was reported and reproduced against the native-SQL path — the returned `sql` field is what made it visible. `AnalyticsService` has a second strategy, `ObjectQLStrategy`, which serves any deployment whose driver reports `objectqlAggregate` but not `nativeSql` (MongoDB, the memory driver, anything routed through `engine.aggregate` rather than raw SQL). That path drops the same declarations, and no `sql` echo makes it visible.\n\nMeasured on `origin/main` at `801296050`, with a dataset carrying both a definition-level `filter` and a per-measure `filter`, and a service whose capabilities are `{ nativeSql: false, objectqlAggregate: true }` so `NativeSQLStrategy` declines:\n\n```ts\nDatasetSchema.parse({\n  name: 'opportunity_metrics', object: 'crm_opportunity',\n  filter: { is_deleted: false },\n  measures: [\n    { name: 'opp_count',  label: 'Opportunities', aggregate: 'count' },\n    { name: 'won_count',  label: 'Won Deals',     aggregate: 'count', filter: { stage: 'closed_won' } },\n    { name: 'won_amount', label: 'Won Revenue',   aggregate: 'sum', field: 'amount',\n      filter: { stage: 'closed_won' } },\n  ],\n});\n```\n\n`svc.query({ cube: 'opportunity_metrics', measures: ['opp_count','won_count','won_amount'] })` reaches `engine.aggregate` as:\n\n```json\n{\n  \"obj\": \"crm_opportunity\",\n  \"options\": {\n    \"aggregations\": [\n      { \"field\": \"*\",      \"method\": \"count\", \"alias\": \"opp_count\"  },\n      { \"field\": \"*\",      \"method\": \"count\", \"alias\": \"won_count\"  },\n      { \"field\": \"amount\", \"method\": \"sum\",   \"alias\": \"won_amount\" }\n    ]\n  }\n}\n```\n\nNo `filter` key at all — neither the dataset's `is_deleted: false` scope nor either measure's `stage: 'closed_won'`. `won_count` is a plain row count and `won_amount` sums every row, exactly the arithmetic #10298 reported from the SQL door. The dashboard door on the same deployment still answers the filtered numbers, because `DatasetExecutor` fans out per filtered measure and applies them itself — so the two-door disagreement #10298 describes survives on this path with #10411 merged.\n\n## Why it was not fixed in #10411\n\nThe native-SQL repair emits one conditional aggregate per filtered measure (`COUNT(CASE WHEN … THEN … END)`) inside a single statement. `engine.aggregate`'s contract has no equivalent: an aggregation is `{ field, method, alias }` and the only `filter` is one predicate for the whole call, so per-measure scoping cannot be expressed there at all.\n\nThat leaves two shapes, and choosing between them is a decision rather than a mechanical fix:\n\n- **Widen the aggregate contract** with a per-aggregation filter (`@objectstack/objectql` + the `executeAggregate` bridge on `StrategyContext`, which lives in `packages/spec`), then lower each measure filter into it. Correct once, for every driver — and a public-surface change.\n- **Fan out inside `ObjectQLStrategy`**, one `engine.aggregate` call per filtered measure merged by dimension key — which is what `DatasetExecutor.runMeasurePass` already does one layer up. No contract change, N extra reads per query, and a second implementation of a rule that already exists.\n\nThe dataset-level `filter` is the easier half and may not need the same decision: it is one predicate for the whole call, which `engine.aggregate` already accepts, so it could be merged into the strategy's existing `filter` object with no contract movement.\n\n## Reproduction\n\nThe probe above, run against `packages/services/service-analytics/src/analytics-service.ts` with a stub `executeAggregate` that records its arguments. The behaviour is in `ObjectQLStrategy.execute`, which builds `aggregations` from `resolveMeasureAggregation(cube, measure)` and its `filter` from `normalizeAnalyticsFilterTree(query)` — the caller's `where` and the time windows only; nothing consults the dataset registry.\n\nRelated: #10298 · PR #10411."
+}

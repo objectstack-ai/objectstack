@@ -1,0 +1,34 @@
+{
+  "number": 11096,
+  "kind": "issue",
+  "title": "`bootstrapDeclaredCapabilities` seeds `sys_capability` one at a time too — the same per-item read + unconditional UPDATE #10946 removed from the two sibling loops",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-22T16:48:20Z",
+  "updated_at": "2026-08-23T22:50:16Z",
+  "closed_at": "2026-08-23T22:48:10Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11096",
+  "body": "Found while implementing #10946 (batching the permission-set and position boot seeds). The `sys_capability` seeder next door has the identical shape and was not in that card's scope.\n\n## The shape\n\n`packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts`:\n\n- line 210 — `const existing = (await tryFind(ql, 'sys_capability', { name: cap.name }, 1))[0];` — a per-item existence `SELECT`, issued inside the loops at lines 136/138 (curated: every `systemPermissions` entry of every declared set) and line 290 (the derived half);\n- line 241 — `if (await tryUpdate(ql, 'sys_capability', { id: existing.id, ...fields })) out.updated += 1;` — an `UPDATE` on the seeder's own row that fires whether or not `fields` differ from what is stored.\n\nSo each declared capability costs its own sequential round trip pair on every kernel boot, exactly as permission sets and positions did. On a local file database this is invisible; on a remote libsql/Turso database — every hosted environment — each leg is its own HTTP request, awaited one after another.\n\n## Why it is worth a card of its own\n\nCapability names come from `systemPermissions` on every declared permission set, so the count is not bounded by the number of sets — it is the union of every capability every package declares, which is typically larger than either axis #10946 measured. The cost competes for the same 20 s request budget (`objectstack-ai/cloud#1555`).\n\n## Not measured here\n\nI did not re-run the hosted `bootstrap-curve.mjs` rig for this axis — that lives in `objectstack-ai/cloud`, outside the session that found this. What is established is the code shape above, and that it is the same shape whose cost was measured at slope 4.0000 / R² = 1.000000 on the two sibling loops in #10946. The capability axis' own slope is **not** measured.\n\n## Direction\n\nThe same two halves #10946 applied, and the machinery is already in the package:\n\n1. hoist one `{ name: { $in: [...] } }` existence read out of each loop via `buildExistingByName` (`packages/plugins/plugin-security/src/seed-name-lookup.ts`, added by #10946) — it already carries the \"a read that CANNOT ANSWER is not the answer 'none exist'\" judgement that a batched read makes load-bearing;\n2. compare before writing, so an unchanged row costs nothing.\n\n⚠️ Whatever lands must keep the reconciliation leg pinned: a row whose stored value differs still needs its `UPDATE`. An implementation that skipped all writes would show a perfect round-trip curve while silently reconciling nothing. Note also that this seeder has provenance branches (`skippedUnowned`, `skippedForeign`) and a curated/derived split that #10946's two loops do not — the refusal messages at lines 215-219 depend on whether a row was found, so the batched read has to preserve that distinction, not just the row.\n\nRefs #10946 · `objectstack-ai/cloud#1555` · #10979 and #10945 are the same boot-cost campaign in other packages.\n"
+}

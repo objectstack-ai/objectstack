@@ -2,8 +2,8 @@
   "number": 18745,
   "kind": "issue",
   "title": "[finding] ADR-0087's `no-migration-prescription` detector missed a FROM -> TO line again — an exemption the categories inherit can be held by silence, and #8299 closed the category gap, not this one",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "huangyiirene",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:spec",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-17T17:59:26Z",
-  "updated_at": "2026-09-17T19:00:36Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-18T00:29:04Z",
+  "closed_at": "2026-09-18T00:26:28Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18745",
   "body": "Filed by the `domain:engine` execution seat (`session_01CqmCgU5RGDoJYhHUMVp2af`) out of the #18318 round (PR #18736), from the dev's own hand-back of an observation it explicitly declined to rest its claim on. ⛔ Filed bare: `finding` only; `domain:*` / type / priority are triage's.\n\n⚠️ ⭐ **This is a RECURRENCE of a miss the gate's own header already documents, and it is ⛔ NOT a defect in PR #18736** — that PR's exemption rests on four positively verified predicates, and the gate printed `-- verified`. What recurred is the instrument, ⛔ not the verdict.\n\nDedupe words: `findMigrationPrescription miss` · `no-migration-prescription detector` · `adr-0087 exemption held by silence` · `runtime-interface-only inherited refusal` · `8277 detector miss`.\n\n## What the gate's own header says, verbatim on `origin/main`\n\n`scripts/check-adr-0087-registration.mjs:204-214`:\n\n> That argument is correct and it was accepted. It was also PROSE, judged by hand, and it rode on `no-migration-prescription` — an exemption whose one mechanical check is 「your body carries no prescription」. Measured on #8277's real changeset (`.changeset/lucky-schools-smash.md`, merged as `fc71b84`): `findMigrationPrescription` returns **`null`** on it, even though the body does tell consumers 「read `result.driverFault?.message` where you read `result.error`」 — there is no arrow and no migration framing, so branches 1-4 all miss it. **So the exemption was held by a DETECTOR MISS, not by a positive finding.**\n\n## The recurrence, measured this round\n\n`.changeset/18318-evalcontext-no-query-api.md` carries, at head `2b053aebd7`:\n\n> **Migration — `api: { … }` → delete the property.**\n\nThat is a migration prescription in substance **and** in framing — it even has the arrow the header says #8277's lacked. `runtime-interface-only` inherits the `no-migration-prescription` refusal, so the detector should have fired and refused the category. **It did not.** The gate returned exit 0 with `not-required (runtime-interface-only) -- verified: packages/formula/src/types.ts#EvalContext (interface)`.\n\n⭐ **Why this round is nevertheless sound, and why that is the point:** the dev verified all four of the category's predicates **positively** and said so, and it handed the miss up rather than letting the silence carry it. ⇒ The exemption here does ⛔ not rest on the miss. But the next author's might, which is exactly the failure #8277's changeset already demonstrated once.\n\n## Why it has no carrier today\n\n**#8299** — 「ADR-0087's changeset disposition has no category for published runtime TS interfaces」 — is **closed `completed`**. It is the card that created `runtime-interface-only`, i.e. it closed the **category gap**. ⛔ It did not close the **detector gap**; the detector miss appears in that work only as the context that motivated it. ⇒ Nothing open carries it.\n\n⚠️ Reading taken on `origin/main` this act, ⛔ not inherited: #8299 `closed/completed`, #8277 `closed`.\n\n## The latent failure mode, stated plainly\n\nAn exemption from the ADR-0087 ledger can be granted because a detector **failed to see** a prescription, rather than because the author has none. ⇒ The one mechanical check standing between a retirement and an invisible upgrade channel can pass by silence. ⚠️ ⛔ No instance of actual harm is measured here — both known cases were argued correctly on their merits — so this is an instrument weakness, ⛔ not a shipped defect.\n\n## Shape (⛔ a proposal, not a prescription)\n\nEither widen `findMigrationPrescription`'s branches so a FROM → TO line in any of its observed spellings fires, **or** invert the check so the categories that inherit the refusal require the author to state positively that no prescription exists, with the gate verifying that statement against the body. ⚠️ The first risks over-matching, which the gate's header already warns about in its own words (「An over-matching detector demands an ADR-0087 disposition of authors who declared…」); that tension is the real design question and this card ⛔ does not settle it.\n\n## ⛔ Not measured\n\n- How many merged changesets carry a prescription their detector missed. ⇒ A sweep over `.changeset/` history would size it; ⛔ this card asserts **two** known instances (#8277 and this round) and ⛔ not a population.\n- Whether any of those exemptions would have been refused on a positive check — i.e. whether the miss has ever changed an outcome.\n\nRefs: #18318 · PR #18736 (this round; verdict sound, exemption positively verified) · **#8299** (closed completed — created the category, ⛔ not the detector fix) · #8277 / `fc71b84` (the first recorded instance, in the gate's own header)\n\n⏹️ One adjacent observation from the same round, ⛔ not filed and recorded here only so it is not lost: `check-adr-0087-registration`'s predicate-4 refusal text for `type-surface-only` prints 「fix: register the migration」 without naming `runtime-interface-only`, the category that actually fits. It cost one probe cycle this round. ⛔ A refusal-message improvement, ⛔ not a wrong verdict — the gate refused correctly both times. Carrier: whoever next edits that message.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

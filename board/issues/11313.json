@@ -1,0 +1,35 @@
+{
+  "number": 11313,
+  "kind": "issue",
+  "title": "packages/cli: auth-config.ts tells a stuck user to run `os auth login` — that command does not resolve",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-23T10:01:44Z",
+  "updated_at": "2026-08-24T01:07:43Z",
+  "closed_at": "2026-08-24T01:07:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11313",
+  "body": "Found while implementing #11221 (`register`/`whoami`/`logout` `examples` said `os auth <cmd>`). Same defect class — a documented CLI invocation that does not resolve — but a **different surface**, so filing separately rather than folding in. Not fixed in #11221's PR: out of that card's dispatched file surface (`commands/{register,whoami,logout}.ts`). No assignee.\n\n## What's wrong\n\n`packages/cli/src/utils/auth-config.ts:60`:\n\n```ts\nthrow new Error('No stored credentials found. Please run `os auth login` first.');\n```\n\n`os auth login` does not resolve. `login.ts` lives at the **root** of `packages/cli/src/commands/`, so oclif's pattern-strategy loader registers it as `login`, and no `auth` topic has ever existed.\n\nMeasured against the built CLI at `origin/main` @ `1fa05a69e2` (`packages/cli/bin/run.js`, after `pnpm --filter @objectstack/cli build`):\n\n```\n$ node packages/cli/bin/run.js auth login --help\n ›   Error: Command auth:login not found.        (exit 2)\n$ node packages/cli/bin/run.js login --help\nAuthenticate and store session credentials       (exit 0)\n```\n\nLoading the built CLI's own oclif `Config` enumerates 60 registered ids, **zero** of which contain `auth`, and there is no `auth` topic. Control, same enumeration: `login`, `logout`, `register`, `whoami`, `dev`, `serve` are all present — so the zero is a real absence, not a broken probe.\n\n## Why this is worth its own card rather than folding into the docs-nit family\n\n**This is error-path guidance, not an example.** #11221, #10967 and #10927 were all stale `examples` arrays and README prose — a user reading ahead. This string is what the CLI says at the moment the user is **already stuck**: they have no stored credentials, the command they wanted has just failed, and the one instruction the tool gives them for getting unstuck names a command that also fails. The second failure looks like the tool is broken rather than like a typo in a help string.\n\nThat distinction was explicit in #11221's dispatch, which scoped `auth-config.ts` in only \"if its hit is a user-facing example string; if it is internal, leave it.\" It is **neither** — it is a user-facing thrown `Error`, which is why it is being reported rather than silently swept, and why it should be graded on its own terms rather than as another cosmetic docs nit.\n\n## Suggested fix\n\nSpelling swap only: `os auth login` → `os login`, pinned by `login.ts`'s own `examples` (which already say `$ os login`) and by the registry enumeration above.\n\nWorth checking in the same pass whether other **thrown-error / printed-guidance** strings across `packages/cli/src/**` name commands that do not resolve. #11221's pin (`environments.test.ts`'s `#10967 pin: examples resolve to a real command id`) covers `static override examples` only — it reads `examples` arrays via AST and would never see this string, so this class has no gate at all today. If the sweep finds more than a couple, a gate over guidance strings is probably the real fix rather than N spelling swaps.\n\n## What is fine\n\n`login.ts`'s exported class is still named `AuthLogin` — the last member of the `Auth*` quartet after #11221 renamed `AuthRegister`/`AuthWhoami`/`AuthLogout` to match their file-path-derived ids. oclif derives ids from file paths, never from class names, so this has no runtime effect; it is the one remaining deviation from this package's otherwise-universal convention that a root command class is the PascalCase of its filename. Cosmetic, and deliberately left out of #11221 because `login.ts`'s `examples` were already correct, putting the file outside that card's surface.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 11530,
+  "kind": "pull_request",
+  "title": "fix(platform-objects): retire the set_user_role action from sys_user",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T02:29:19Z",
+  "updated_at": "2026-08-24T03:20:07Z",
+  "closed_at": "2026-08-24T03:20:05Z",
+  "closed_by": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "merged_at": "2026-08-24T03:20:05Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/11530",
+  "body": "Part of #9968\n\n## Summary\n\nThis PR ships **half 1 only** — the `set_user_role` retirement. **Half 2 (`impersonate_user`) is already fixed and merged on `main`**: PR #10352 (merged 2026-08-21) re-implemented `/admin/impersonate-user` as a better-auth plugin endpoint and admits ObjectStack platform admins today. That half's premise (\"still 403 every platform admin\") is **false** on current `main` — see the Measurements section below. No impersonate-side code changes are in this diff.\n\n### `set_user_role` — retired, not re-implemented\n\n`sys_user`'s `set_user_role` action (\"Set Platform Role\") is removed. Its only effect was `POST /api/v1/auth/admin/set-role`, which better-auth's `admin` plugin lowers to `internalAdapter.updateUser(userId, { role })` — a gated, UI-driven writer for the legacy `sys_user.role` scalar ADR-0068 D2 stopped synthesizing. Platform-admin membership is granted through `sys_user_permission_set` / `admin_full_access`; a working button was a supported, one-user-at-a-time channel for resurrecting the dual identity representation the 2026-08-18 ruling permanently vetoed (Option 3). Matches the maintainer's Option B ruling (2026-08-20, reaffirmed 2026-08-22).\n\n**What stays unchanged.** The vendor's `POST /api/v1/auth/admin/set-role` route itself stays mounted and vendor-gated exactly as before — only the `sys_user` console action pointing at it is gone. Every other `sys_user` admin action (`ban_user`, `unban_user`, `unlock_user`, `create_user`, `set_user_password`, `impersonate_user`) is unaffected.\n\n### Files changed\n\n- `packages/platform-objects/src/identity/sys-user.object.ts` — removes the `set_user_role` action block; leaves a retirement note in its place.\n- `packages/spec/src/kernel/public-auth-features.ts` — drops the now-nonexistent `'sys_user.actions.set_user_role'` entry from `PUBLIC_AUTH_FEATURES.admin.gatedInputs` (the completeness guard reads this bidirectionally; forcing the edit, not a discretionary spec change).\n- `packages/platform-objects/src/platform-objects.test.ts` — removes the two hard-coded references to the retired action, and adds a dedicated pin (`#9968 — set_user_role is retired from sys_user, every sibling admin action survives`) asserting the retired name is gone **by name** and every one of the 15 sibling actions survives **by name**, in one test so a retirement that removed the wrong entry (or several) cannot pass.\n- `packages/platform-objects/src/feature-gate-guard.test.ts` — the hand-maintained walker floor drops from 38 to 37 booked gated inputs (comment updated to say why).\n- `packages/platform-objects/src/pages/sys-user.page.ts` — two doc-comment mentions of the retired action removed for accuracy.\n- `packages/platform-objects/src/apps/translations/{en,es-ES,ja-JP,zh-CN}.objects.generated.ts` — regenerated via `node scripts/check-i18n-bundles.mjs --write` (never hand-edited); drops the `set_user_role` label/successMessage/param strings.\n- `.changeset/retire-set-user-role-action.md` — patch changeset on `@objectstack/platform-objects` + `@objectstack/spec`.\n\n### Out of scope, deliberately untouched\n\n- The vendor `POST /api/v1/auth/admin/set-role` route stays mounted (unaffected) — `auth-route-ledger.ts`'s `BETTER_AUTH_MOUNTED_SURFACE`, `vendor-admin-refusal-envelope.ts`/test, and the dogfood/checklist coverage that exercises that route directly (not via the `sys_user` action) are all still accurate and untouched.\n- `docs/adr/0092-sys-user-profile-field-delegation.md` mentions the retired action in a historical implementer note; `docs/adr/**` is a governed surface (Prime Directive #14) and this PR does not touch it.\n\n## Measurements\n\n### Half 1 premise — CONFIRMED valid before this PR\n`git grep -n \"set_user_role\" origin/main -- packages/platform-objects packages/spec` showed the action still declared on `sys_user` at `packages/platform-objects/src/identity/sys-user.object.ts:253` before this change.\n\n### Half 2 premise — FALSE on current `main` (measured, not assumed)\n- `git merge-base --is-ancestor 5b0af2b5d9 origin/main` (PR #10352's merge commit) → **true**: the fix is an ancestor of the branch point this PR was cut from.\n- `packages/plugins/plugin-auth/src/admin-impersonate-endpoint.ts` and `admin-impersonate-endpoint.test.ts` exist on `main` and cover exactly the pins the ruling required: platform admin admitted, plain member refused `403 YOU_ARE_NOT_ALLOWED_TO_IMPERSONATE_USERS`, anonymous refused `401`, org owner/admin (non-platform-admin) refused, admin-grade target refused `403 YOU_CANNOT_IMPERSONATE_ADMINS`, missing target `404`, and three dedicated `#8243` rotation-hook pins (bearer no longer resolves to the caller, `set-admin-session-token` returned + CORS-exposed, original admin session row replaced).\n- Contract review already PASSed this half on PR #10352 (`needs:contract-review` cleared there, not on this card — this card's label covers the retirement half only).\n\n## Tests\n\n- `pnpm --filter @objectstack/platform-objects test` — 452/452 passed (28 files).\n- `pnpm --filter @objectstack/platform-objects typecheck` — clean.\n- `pnpm --filter @objectstack/spec test` — 11204/11204 passed (420 files).\n- `pnpm --filter @objectstack/spec typecheck` — clean.\n- `node scripts/check-i18n-bundles.mjs` — in sync after `--write` regeneration (8 bundles).\n- `node scripts/pm/dispatch-gates.mjs` (no paths) — full derived gate list run; all green, including the repo-wide `check:type-check-debt` ratchet re-measure (32 ledger entries, none above their recorded ceiling).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01APWX2AwT3a4xDcjPCe8bk4)_"
+}
