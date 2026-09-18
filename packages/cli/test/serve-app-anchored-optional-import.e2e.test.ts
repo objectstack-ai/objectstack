@@ -168,6 +168,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { maskComments } from '../../../scripts/js-comment-mask.mjs';
 import { childEnv, portContentionError, portDriftError, randomPort } from './helpers/serve-process.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -574,35 +575,136 @@ describe('os serve → optional service resolution is anchored at the app (#1118
   );
 });
 
+/**
+ * The parameter list of a declaration, paren-matched from its own `(` so a
+ * default argument that itself takes parentheses cannot truncate it — which the
+ * obvious `\(([^)]*)\)` does, on the very declaration below.
+ */
+function paramsOf(code: string, declaration: RegExp): string | null {
+  const m = declaration.exec(code);
+  if (!m) return null;
+  const open = code.indexOf('(', m.index);
+  if (open === -1) return null;
+  let depth = 0;
+  for (let i = open; i < code.length; i++) {
+    if (code[i] === '(') depth++;
+    else if (code[i] === ')') {
+      depth--;
+      if (depth === 0) return code.slice(open + 1, i);
+    }
+  }
+  return null;
+}
+
+/** Top-level commas only — a default like `= f(a, b)` is one parameter, not two. */
+function splitParams(params: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < params.length; i++) {
+    const c = params[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+    else if (c === ',' && depth === 0) {
+      out.push(params.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  const last = params.slice(start).trim();
+  if (last) out.push(last);
+  return out;
+}
+
 describe('os serve → the anchor is wired where it cannot be forgotten', () => {
-  const SERVE_SOURCE = readFileSync(resolve(HERE, '../src/commands/serve.ts'), 'utf8');
+  // ⛔ MASKED, and read as structure rather than as spelling. Every case here
+  // used to be a `toContain` over a whole statement of `serve.ts` — destructuring
+  // aliases, parameter list, return type annotation and all — in a file the
+  // nightly tier alone collects. That pairing is the defect this card names: the
+  // per-PR run cannot redden a byte-exact pin, so the pull request that reflows
+  // the statement is never told, and the failure surfaces on `main` days later
+  // wearing an unrelated card's title. A raw read cannot tell a docblock quoting
+  // the statement from the statement either, and `serve.ts` carries `{@link
+  // anchorServedApp}` and `{@link servedAppRootOrCwd}` in the prose above both.
+  // So: comments masked, and each case binds the PROPERTY it was written for
+  // (#18520).
+  const SERVE_CODE = maskComments(readFileSync(resolve(HERE, '../src/commands/serve.ts'), 'utf8'));
 
   it('resolves the config path and the app root in ONE call', () => {
     // If `run()` ever computes the config path itself again, the anchor becomes
     // a separate statement someone can write too late — or not at all — and the
     // behavioural tests above would be the only thing standing between that and
-    // a silent return to CWD-based resolution.
-    expect(SERVE_SOURCE).toContain(
-      'const { configPath: absolutePath, configExists } = anchorServedApp(args.config!);',
+    // a silent return to CWD-based resolution. So the property is: exactly ONE
+    // site resolves it, and it is handed the raw config argument. The
+    // destructured local names are deliberately NOT bound — renaming
+    // `absolutePath` is not a defect, and pinning it is how a nightly-only pin
+    // goes red over a change that never touched the behaviour.
+    const sites = [...SERVE_CODE.matchAll(/\banchorServedApp\s*\(/g)].filter(
+      // The declaration is not a call site — same exclusion the per-PR sibling
+      // `src/commands/serve-cluster-host-resolution.test.ts` makes for
+      // `function importFromHost(`.
+      (m) => !/\bfunction\s+$/.test(SERVE_CODE.slice(Math.max(0, m.index - 16), m.index)),
     );
-    expect(SERVE_SOURCE).not.toMatch(
-      /const absolutePath = path\.resolve\(process\.cwd\(\), args\.config!\)/,
+    expect(
+      sites.map((m) => SERVE_CODE.slice(0, m.index).split('\n').length),
+      'the config path is resolved at a number of sites other than one',
+    ).toHaveLength(1);
+
+    const argument = paramsOf(SERVE_CODE, /(?<!function\s)\banchorServedApp\s*\(/);
+    expect(argument?.trim(), 'the anchor is handed something other than the config argument').toBe(
+      'args.config!',
     );
+
+    // The recompute this replaced, matched as a SHAPE rather than as the one
+    // spelling it had: whitespace and the local name are not the defect.
+    expect(SERVE_CODE).not.toMatch(/path\.resolve\(\s*process\.cwd\(\)\s*,\s*args\.config/);
   });
 
   it('defaults every host-anchored load to the served app, not the CWD', () => {
-    expect(SERVE_SOURCE).toContain(
-      'function importFromHost(specifier: string, hostRoot: string = servedAppRootOrCwd())',
-    );
-    expect(SERVE_SOURCE).toContain('const hostRoot = servedAppRootOrCwd();');
-    expect(SERVE_SOURCE).toContain('const root = hostRoot ?? servedAppRootOrCwd();');
+    // ⛔ The EXISTENCE and module scope of `importFromHost` are not re-pinned
+    // here: `src/commands/serve-cluster-host-resolution.test.ts` binds them
+    // per-PR — exactly one module-scope `function importFromHost(`, never a
+    // `const` — and that is the tier where a byte-exact spelling belongs,
+    // because the pull request that moves it is shown the red. What this case
+    // owns, and that file does not bind, is the DEFAULT.
+    const params = paramsOf(SERVE_CODE, /\bfunction importFromHost\s*\(/);
+    expect(params, 'serve.ts declares no `function importFromHost(`').not.toBeNull();
+    const hostRootParam = splitParams(params ?? '').find((x) => /^hostRoot\b/.test(x));
+    expect(
+      hostRootParam,
+      '`importFromHost` no longer takes a `hostRoot` parameter at all',
+    ).toBeDefined();
+    expect(
+      hostRootParam,
+      '`importFromHost`\'s `hostRoot` defaults to something other than the served app',
+    ).toMatch(/=\s*servedAppRootOrCwd\(\)\s*$/);
+
+    // And every place a host root is BOUND resolves through the same function.
+    // Derived, not listed: the two statements this replaced were pinned by their
+    // exact text, so a reflow read as a regression.
+    const bindings = [...SERVE_CODE.matchAll(/\b(?:const|let)\s+(hostRoot|root)\s*=\s*([^;\n]+)/g)]
+      .filter((m) => m[1] === 'hostRoot' || /\bhostRoot\b/.test(m[2]));
+    expect(
+      bindings.length,
+      'no host-root binding found at all — the partition below would be vacuous',
+    ).toBeGreaterThanOrEqual(2);
+    expect(
+      bindings
+        .filter((m) => !/\bservedAppRootOrCwd\(\)/.test(m[2]))
+        .map((m) => `${SERVE_CODE.slice(0, m.index).split('\n').length}: ${m[0].trim()}`),
+      'a host root is bound without resolving through servedAppRootOrCwd()',
+    ).toEqual([]);
   });
 
   it('reads the app root through a function, never a module-scope copy', () => {
     // A `const` captured at module-evaluation time would freeze the pre-boot
     // answer (`process.cwd()`) into every call site, which is the defect wearing
-    // a different hat.
-    expect(SERVE_SOURCE).toMatch(/^function servedAppRootOrCwd\(\): string \{$/m);
-    expect(SERVE_SOURCE).not.toMatch(/\b(?:const|let|var)\s+servedAppRootOrCwd\b/);
+    // a different hat. The return type annotation and the brace that used to be
+    // part of this pattern are not that defect, so they are no longer bound.
+    expect(
+      [...SERVE_CODE.matchAll(/^function servedAppRootOrCwd\s*\(/gm)],
+      'servedAppRootOrCwd is not declared exactly once at module scope',
+    ).toHaveLength(1);
+    expect(SERVE_CODE).not.toMatch(/^[ \t]+function servedAppRootOrCwd\s*\(/m);
+    expect(SERVE_CODE).not.toMatch(/\b(?:const|let|var)\s+servedAppRootOrCwd\b/);
   });
 });

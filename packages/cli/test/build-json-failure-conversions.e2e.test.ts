@@ -64,6 +64,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { maskComments } from '../../../scripts/js-comment-mask.mjs';
 import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
@@ -407,7 +408,14 @@ function payloadLiterals(src: string): string[] {
 }
 
 describe('#12125 — the contract is exhaustive over `compile.ts`, not just over the exits pinned above', () => {
-  const SRC = readFileSync(COMPILE_TS, 'utf8');
+  // Comments are masked before a single thing is read off this file. A raw
+  // read cannot tell CODE from PROSE, and this package has been bitten in both
+  // directions: a docblock quoting a shape has satisfied a pin with no code
+  // behind it, and a docblock quoting one 281 lines above the code has broken a
+  // pin whose code never moved. `maskComments` BLANKS comment spans in place —
+  // spaces for text, newlines kept — so every byte offset, every line number and
+  // every brace-matching walk below reads exactly as it did on raw text (#18520).
+  const SRC = maskComments(readFileSync(COMPILE_TS, 'utf8'));
 
   it('the extractor produces a POSITIVE before its negative is trusted', () => {
     const SYNTHETIC = [
