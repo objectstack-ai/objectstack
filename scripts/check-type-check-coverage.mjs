@@ -533,10 +533,14 @@ import {
   workspaceEnumeratorFloorFailures,
   workspacePackageDirs,
 } from './workspace-enumerator.mjs';
-// `typecheck`-script -> tsconfig program set. Shared with
-// `check-type-source-resolution.mjs` since #11490, which needs the identical
-// answer to decide its POPULATION: two copies of this predicate drift, and the
-// symptom of drift is a green gate on either side.
+// `typecheck`-script -> tsconfig program set. It moved into its own module in
+// #11490, when `check-type-source-resolution.mjs` needed the identical answer
+// to decide its POPULATION; that gate was retired under the maintainer ruling
+// of 2026-09-18 on #18373, so this file is the only consumer left. ⛔ Folding
+// the predicate back in here is a separate decision, not a consequence of that
+// retirement -- it floors its own cases in its own battery (PR #15327), which
+// this file deliberately does not re-pin. Two copies of this predicate drift,
+// and the symptom of drift is a green gate on either side.
 import {
   configsNamedByTypecheck,
   typecheckScriptChain,
@@ -4510,12 +4514,13 @@ function graduationRemedy({ ledger, isRoot = false }) {
       `    (a) The #5286 sibling route: add a \`tsconfig.test.json\` that reaches the ` +
       `tests and NAME it in the \`typecheck\` script. Always available -- it leaves \`tsconfig.json\` alone.\n` +
       `    (b) Drop the \`**/*.test.ts\` entry from \`exclude\` in \`tsconfig.json\` (or widen \`include\` to ` +
-      `reach the test tree). Available ONLY while \`pnpm check:type-source-resolution\` still passes with ` +
-      `the tests re-admitted: that gate reads \`tsconfig.json\` and nothing else, the re-admitted tests ` +
-      `import workspace packages this package's src program never held, and its registry is ⛔ SHRINK-ONLY ` +
-      `-- registering the new ones is not the way out. Measured red on 14 of the 18 entries that have an ` +
-      `exclusion to drop, so assume (b) is unavailable until that gate says otherwise. Run it before you ` +
-      `commit; nothing in this gate's own verdict will tell you.`
+      `reach the test tree). ⛔ The gate that DECIDED whether this route was available, ` +
+      `\`check:type-source-resolution\`, was RETIRED under the maintainer ruling of 2026-09-18 on #18373 ` +
+      `-- so nothing measures it for you any more, and ⛔ its silence is not a clearance. What it measured ` +
+      `has not changed: the re-admitted tests import workspace packages this package's src program never ` +
+      `held, its registry was ⛔ SHRINK-ONLY so registering the new ones was never the way out, and it read ` +
+      `red on 14 of the 18 entries that have an exclusion to drop. Treat (b) as the worse route and prefer ` +
+      `(a), which leaves \`tsconfig.json\` alone; nothing in this gate's own verdict will tell you.`
     );
   }
   if (ledger === 'DEBT') {
@@ -5620,9 +5625,11 @@ function selfTest() {
   // The observation half is where the :267 blind spot lived: `excludesTests`
   // read only `tsconfig.json`, so a sibling test config was invisible however
   // it was wired. `configsNamedByTypecheck` and `typecheckScriptChain` now
-  // decide it, and since #11490 they live in `scripts/typecheck-configs.mjs`
-  // because `check-type-source-resolution.mjs` needs the same answer for its
-  // population. Their cases moved WITH them -- one rule, one home, one battery
+  // decide it, and since #11490 they live in `scripts/typecheck-configs.mjs`,
+  // where they moved because `check-type-source-resolution.mjs` needed the same
+  // answer for its population -- that gate was retired on 2026-09-18 (#18373),
+  // leaving this file its only consumer. Their cases moved WITH them -- one
+  // rule, one home, one battery
   // -- and are folded in here so this gate still fails when the predicate it
   // depends on breaks.
   //
@@ -6398,13 +6405,15 @@ function selfTest() {
         + 'that remedy is a no-op on every one of them -- the misfire #11491 was filed on.',
     },
     {
-      label: 'TEST_DEBT graduation names the gate that DECIDES whether the exclusion route is available',
+      label: 'TEST_DEBT graduation still carries what the retired gate measured about the exclusion route',
       message: testDebtGrad,
       present: ['check:type-source-resolution', 'SHRINK-ONLY', 'tsconfig.test.json'],
       absent: [],
-      why: 'the exclusion route reds that gate on 14 of the 18 entries that have an exclusion, and this '
-        + 'gate never runs it. A message the author has to read a second gate\'s SOURCE to act on is the '
-        + 'half of #11491 that a correct-but-terse rewrite would leave unfixed.',
+      why: 'the exclusion route read red on 14 of the 18 entries that have an exclusion, and this gate '
+        + 'never ran it. A message the author has to read a second gate\'s SOURCE to act on is the half '
+        + 'of #11491 that a correct-but-terse rewrite would leave unfixed -- and once that gate was '
+        + 'retired (2026-09-18, #18373) the measurement is the ONLY thing left warning the author, so '
+        + 'these needles stay exactly as they were.',
     },
     {
       label: 'the workspace root graduates through `typecheck:root`, never through `typecheck`',

@@ -13,8 +13,8 @@
 // This gate enforces that DISJUNCTION. (b) is not a lesser form of (a): a gate
 // that refuses satisfies the convention MORE strongly than one that marks, and
 // this detector must never push a refusing gate onto the marking shape. The
-// precedents are check-type-source-resolution.mjs, check-test-source-alias.mjs,
-// check-adr-links.mjs and check-driver-memory-census.mjs.
+// precedents are check-test-source-alias.mjs, check-adr-links.mjs and
+// check-driver-memory-census.mjs.
 //
 // ── The ruled EXCEPTION: an authorised cross-file move (2026-09-03) ─────────
 //
@@ -205,7 +205,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '(9) Stage 2 reaches a real ratchet, by each limb, so (8) is not vacuous.': 2,
   '(10) NON-CIRCULARITY. The authority token must never be its own anchor: a': 1,
   '(11) Refusal, BOUND shape — check-adr-links.mjs / check-driver-memory-census.mjs.': 1,
-  '(12) Refusal, PREDICATION shape — check-type-source-resolution.mjs / check-test-source-alias.mjs.': 1,
+  '(12) Refusal, PREDICATION shape — check-test-source-alias.mjs.': 1,
   '(13) Refusal DISCRIMINATES. A marking gate\'s closing discouragement is not a': 1,
   '(14) End-to-end: an anchored, unrefused, unmarked offer is a VIOLATION. This': 1,
   '(15) …and the same text carrying the token classifies as MARKED. Paired with': 1,
@@ -897,24 +897,23 @@ const CONTROL = {
     expect: 'refused',
     why: 'Refuses by binding a negation to the verb, over a shrink-only registry.',
   },
-  // The two gates below refuse by PREDICATION (the act named as subject and
-  // denied) — self-test (12) pins that predicate on their exact sentence.
+  // The gate below refuses by PREDICATION (the act named as subject and
+  // denied) — self-test (12) pins that predicate on its exact sentence.
   //
-  // Until #8576 both were recorded here as `excluded`, and that was the honest
-  // reading: stage 2 declined them FIRST, because each named its target in a
+  // Until #8576 it was recorded here as `excluded`, and that was the honest
+  // reading: stage 2 declined it FIRST, because it named its target in a
   // message carrying no testimony about the registry's nature — the testimony
   // sat in a comment, where no author and no detector reads it. #8576 mirrored
-  // one clause of each gate's own shrink-only comment into that same message, so
+  // one clause of the gate's own shrink-only comment into that same message, so
   // the target is now established as a ratchet and the refusal limb is reached.
-  // Growing the refusal limb's sample from one gate to three was the point: a
-  // regression in that limb used to be measured against a sample of one.
+  // That card grew the refusal limb's sample from one gate to three, so a
+  // regression in that limb is no longer measured against a sample of one. It
+  // had a second PREDICATION entry, check-type-source-resolution.mjs, until that
+  // gate was retired under the maintainer ruling of 2026-09-18 on #18373; the
+  // entry went with the file, which is the remedy the STALE branch below names.
   'check-test-source-alias.mjs': {
     expect: 'refused',
     why: 'Refuses by predication. Its registry states its own nature in the same message since #8576, so stage 2 reaches it and the refusal limb is consulted.',
-  },
-  'check-type-source-resolution.mjs': {
-    expect: 'refused',
-    why: 'The other refusal precedent, refusing by the same predication shape. Its registry states its own nature in the same message since #8576, so stage 2 reaches it rather than declining on a path target.',
   },
   // The fourth refusal instance, and the second gate to join the convention as a
   // NEW gate rather than by retrofit (#10619). Refusal — not marking — is the
@@ -1218,7 +1217,7 @@ function main() {
       + `    remedy: …${r.live[0].window.slice(0, 140).trim()}…\n`
       + `    registry: ${r.live[0].target.name} (testimony: ${r.anchors[0]})\n`
       + '    Fix: say in the same message that this path belongs to a maintainer, or turn it down\n'
-      + '    outright the way check-type-source-resolution.mjs does. Turning it down is the stronger\n'
+      + '    outright the way check-test-source-alias.mjs does. Turning it down is the stronger\n'
       + '    shape and this gate treats it as fully compliant — it is not a lesser option.',
     );
   }
@@ -1427,10 +1426,10 @@ function selfTest() {
     + 'check-adr-links.mjs and check-driver-memory-census.mjs use',
     offerIsRefused({ context: 'fix the link; do not add it to KNOWN_DEAD_TARGETS to make this green.' }));
 
-  // (12) Refusal, PREDICATION shape — check-type-source-resolution.mjs / check-test-source-alias.mjs.
-  battery('(12) Refusal, PREDICATION shape — check-type-source-resolution.mjs / check-test-source-alias.mjs.');
+  // (12) Refusal, PREDICATION shape — check-test-source-alias.mjs.
+  battery('(12) Refusal, PREDICATION shape — check-test-source-alias.mjs.');
   expect('refusal — an act named as subject and denied is a refusal ("widening the registry entry '
-    + 'is not the fix"), the shape the two registry gates use',
+    + 'is not the fix"), the shape check-test-source-alias.mjs uses',
     offerIsRefused({ context: 'Add the rules to its tsconfig.json — widening the registry entry is not the fix.' }));
 
   // (13) Refusal DISCRIMINATES. A marking gate's closing discouragement is not a

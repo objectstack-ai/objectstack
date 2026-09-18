@@ -12,6 +12,10 @@ import {
 import { MetadataCacheRequestSchema, MetadataCacheResponseSchema } from './http-cache.zod';
 import { QUERY_DISTINCT_REMOVED } from '../data/query.zod';
 import { retiredKey } from '../shared/retired-key';
+// The closed list of refinements that reach the published JSON Schema (#18670
+// item 2) — `UpdateAiConversationRequest`'s at-least-one rule is declared
+// through it, so `api/UpdateAiConversationRequest.json` states it.
+import { requiredOneOf } from '../shared/refinement-projection';
 import { MetadataItemNameSchema } from '../shared/identifiers.zod';
 import { DroppedFieldsEventSchema, QueryWithTransportSchema } from '../data/data-engine.zod';
 import { 
@@ -2962,7 +2966,7 @@ export const AiStreamChunkSchema = lazySchema(() => z.object({
 export const UpdateAiConversationRequestSchema = lazySchema(() => z.object({
   title: z.string().optional().describe('New title'),
   metadata: z.record(z.string(), z.unknown()).optional().describe('New metadata'),
-}).refine((p) => p.title !== undefined || p.metadata !== undefined, {
+}).refine(requiredOneOf(['title', 'metadata']), {
   message: 'at least one of title or metadata is required',
 }));
 
