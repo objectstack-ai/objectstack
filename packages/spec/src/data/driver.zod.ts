@@ -309,9 +309,12 @@ export const DriverCapabilitiesSchema = lazySchema(() => z.object({
     + '(#3298), never from this record.')),
 
   transactions: retiredKey(capRemoved('transactions',
-    'Transaction use is gated on METHOD PRESENCE — `driver.beginTransaction` '
-    + '(`engine.transaction()`, ADR-0034 ambient transactions): a driver without the method '
-    + 'gets the non-transactional fallback, whatever this bit claimed. Discovery\'s '
+    'Transaction use is gated on the DRIVER\'S DECLARATION, no longer on METHOD PRESENCE '
+    + 'alone: `engine.transaction()` asks `driverSupportsTransactions(driver)` — '
+    + '`driver.beginTransaction` present AND `transactionsUnsupported` not set (ADR-0034 '
+    + 'ambient transactions, ADR-0119 D1). A driver without the method — or a transport '
+    + 'that declares that live bit — gets the non-transactional fallback, whatever this '
+    + 'bit claimed. Discovery\'s '
     + '`transactionalBatch` capability is likewise derived from `engine.transaction` plus the '
     + 'mounted batch route, never from this bit. The live `transactionsUnsupported` bit is NOT '
     + 'this key restored and is not its opposite spelled differently: this one CLAIMED support '
