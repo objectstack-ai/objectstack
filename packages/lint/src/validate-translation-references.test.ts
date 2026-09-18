@@ -22,10 +22,12 @@ import { SnapshotContact, SnapshotContactViews } from './showcase-shape.fixtures
  * ⭐ Severity, re-judged in place (#16310) — ⛔ not deleted.
  *
  * Eight assertions in this file pinned `severity: 'warning'` on
- * `translation-target-unknown`, and that silence was deliberate: the rule's own
- * Severity note argued an orphan key is inert — a few bytes and one untranslated
- * string, nothing crashes — so gating on it would be the over-statement
- * ADR-0072 D1 forbids.
+ * `translation-target-unknown`, and that silence was deliberate: the rule's
+ * Severity note AS IT THEN STOOD argued that an orphan key was inert — a few
+ * bytes and one untranslated string, nothing crashes — so gating on it would
+ * have been the over-statement ADR-0072 D1 forbids. ⛔ Do not go looking for
+ * that argument in the rule: the same change rewrote the note, which now says
+ * the opposite.
  *
  * The reading was measured wrong in the one direction that matters. An orphan
  * key is not inert; it is a confident-looking grep hit, in every locale, for a

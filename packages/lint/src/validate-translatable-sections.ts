@@ -39,12 +39,27 @@
  *
  * ── Severity: warning ────────────────────────────────────────────────────
  *
- * Same reading as its sibling rule (ADR-0072 D1): nothing crashes and nothing
- * is dead — one heading renders in the source locale. That is weaker than the
- * dead references `validate-object-references` reports as errors, and the
- * severity should say so. Requiring `name` outright is a SCHEMA change
- * (`FormSection.name` is optional today), which is a breaking authoring change
- * needing a maintainer decision and a migration — deliberately not taken here.
+ * On this rule's OWN reading, and deliberately not on its sibling's: that
+ * sibling stopped holding this reading at #16310, which promoted
+ * `translation-target-unknown` from `warning` to `error`
+ * (`TRANSLATION_TARGET_UNKNOWN_SEVERITY` in `validate-translation-references.ts`).
+ * The verdict here survives that; the borrowed argument for it did not, so the
+ * reading is spelled out rather than cited.
+ *
+ * A nameless section MISDESCRIBES NOTHING. The section is real and it renders;
+ * the whole cost is that its one heading stays in the source locale while its
+ * neighbours resolve — wrong-language and visible on the screen, not absent and
+ * disguised. It leaves behind no artefact for the next author to trust: there is
+ * no key, so there is nothing to grep, and nothing in the tree reads as
+ * translated that is not. That is the asymmetry with the orphan key the sibling
+ * now gates on — a confident-looking hit, in every locale, for a surface that
+ * was DELETED — and it is why that one earns `error` while this one does not.
+ *
+ * It is weaker than the dead references `validate-object-references` reports as
+ * errors too, and the severity should say so. Requiring `name` outright is a
+ * SCHEMA change (`FormSection.name` is optional today), which is a breaking
+ * authoring change needing a maintainer decision and a migration — deliberately
+ * not taken here.
  *
  * ── The opt-in gate: the object must actually be translated ──────────────
  *
