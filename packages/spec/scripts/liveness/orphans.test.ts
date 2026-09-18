@@ -10,7 +10,16 @@
 // schemas — this file owns the logic, including every case it must stay quiet on.
 
 import { describe, it, expect } from 'vitest';
-import { findOrphanEntries, ORPHAN_GUIDANCE } from './orphans.mts';
+import {
+  ORPHAN_GUIDANCE,
+  TOMBSTONE_FORBIDDEN_STATUSES,
+  TOMBSTONE_MARKER,
+  TOMBSTONE_STATUS_GUIDANCE,
+  findOrphanEntries,
+  scanTombstonedRows,
+} from './orphans.mts';
+// The real producer of the marker this scan matches on — read, never restated.
+import { retiredKey } from '../../src/shared/retired-key';
 
 /** No property is a container unless a test says so. */
 const noChildren = () => null;
@@ -175,5 +184,101 @@ describe('ORPHAN_GUIDANCE', () => {
     expect(text).toMatch(/retiredKey\(\).*KEEPS the key/);
     expect(text).toMatch(/UNCLASSIFIED/);
     expect(text).toMatch(/Fix the walk, not the row/);
+  });
+});
+
+// ── the tombstone join (#19062) ──
+//
+// Same standing as the block above, and for a sharper version of the same
+// reason: the population this scan fires on is ONE row at the commit it landed
+// on, and that row's repair is in flight as its own card. So `check:liveness`
+// going green proves nothing about whether the scan can fire at all — after
+// that repair lands it proves even less. The proof lives here, and the
+// real-gate red/green pair lives in check-liveness.test.ts.
+
+/** A graded property with a tombstoned description, spelled the way the producer does. */
+const tombstoned = (key: string, status: string) => ({
+  key,
+  description: `${TOMBSTONE_MARKER} \`x\` was removed in 18.0.0. Use \`y\`.`,
+  status,
+});
+
+describe('scanTombstonedRows — the claim a tombstoned key may not make', () => {
+  it('catches a tombstoned key whose row still says `live`', () => {
+    const scan = scanTombstonedRows([tombstoned('agent/tools', 'live')]);
+    expect(scan.findings).toEqual([{ key: 'agent/tools', status: 'live' }]);
+    expect(scan.scanned).toBe(1);
+  });
+
+  it('catches a tombstoned DRILLED CHILD, not only a top-level key', () => {
+    // The granularity half. A tombstone one level down is graded by the same
+    // walk and is just as unwritable, so a scan that only reached depth one
+    // would stop asking exactly where the forward pass keeps looking.
+    const scan = scanTombstonedRows([tombstoned('dashboard/widgets.aria', 'live')]);
+    expect(scan.findings).toEqual([{ key: 'dashboard/widgets.aria', status: 'live' }]);
+  });
+
+  it('names EVERY offender, not just the first', () => {
+    const scan = scanTombstonedRows([
+      tombstoned('agent/tools', 'live'),
+      tombstoned('hook/timeout', 'live'),
+    ]);
+    expect(scan.findings.map((f) => f.key)).toEqual(['agent/tools', 'hook/timeout']);
+    expect(scan.scanned).toBe(2);
+  });
+
+  it('is QUIET on a tombstoned key graded `dead` — the state the guidance prescribes', () => {
+    const scan = scanTombstonedRows([tombstoned('hook/timeout', 'dead')]);
+    expect(scan.findings).toEqual([]);
+    expect(scan.scanned).toBe(1); // …and it still counted it: quiet, not blind
+  });
+
+  it('is QUIET on an ordinary `live` property — the dark control', () => {
+    // The whole point of the description test. Without it this scan would
+    // redden 915 honest rows, which is a different gate, not a stricter one.
+    const scan = scanTombstonedRows([
+      { key: 'hook/timeoutMs', description: 'Per-hook wall-clock timeout in ms.', status: 'live' },
+    ]);
+    expect(scan.findings).toEqual([]);
+    expect(scan.scanned).toBe(0);
+  });
+
+  it('is QUIET on a `[planned` marker — the neighbouring marker it must not swallow', () => {
+    const scan = scanTombstonedRows([
+      { key: 'api/inputMapping.transform', description: '[planned] not wired yet.', status: 'planned' },
+    ]);
+    expect(scan.findings).toEqual([]);
+    expect(scan.scanned).toBe(0);
+  });
+
+  it('leaves the statuses outside the forbidden set alone — widening it is its own measurement', () => {
+    const others = ['dead', 'planned', 'experimental', 'live-elsewhere']
+      .map((status) => tombstoned(`t/${status}`, status));
+    const scan = scanTombstonedRows(others);
+    expect(scan.findings).toEqual([]);
+    expect(scan.scanned).toBe(4);
+    expect(TOMBSTONE_FORBIDDEN_STATUSES).toEqual(['live']);
+  });
+});
+
+describe('TOMBSTONE_MARKER — held equal to its producer, not to a memory of it', () => {
+  it('is the marker `retiredKey()` actually writes', () => {
+    // The vacuity guard. If `retiredKey()` ever stops writing this marker, the
+    // scan matches nothing and reports a clean tree — a silent degradation that
+    // no red run would announce. So the literal is asked of the producer here
+    // rather than copied and trusted.
+    const description = retiredKey('`x` was removed in 18.0.0. Use `y`.').description ?? '';
+    expect(description).toContain(TOMBSTONE_MARKER);
+    expect(scanTombstonedRows([{ key: 't/x', description, status: 'live' }]).findings).toHaveLength(1);
+  });
+});
+
+describe('TOMBSTONE_STATUS_GUIDANCE', () => {
+  it('prescribes the fix AND rules out the tempting wrong one', () => {
+    const text = TOMBSTONE_STATUS_GUIDANCE.join(' ');
+    expect(text).toMatch(/grade it `dead`/);
+    expect(text).toMatch(/Do NOT delete the row/);
+    expect(text).toMatch(/UNCLASSIFIED/);
+    expect(text).toMatch(/the SCHEMA is wrong/);
   });
 });

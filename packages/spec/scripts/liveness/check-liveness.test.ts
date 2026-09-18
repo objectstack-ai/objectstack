@@ -31,6 +31,12 @@ import {
   listMetadataTypeSchemaTypes,
   listUnregisteredKindSchemaTypes,
 } from '../../src/kernel/metadata-type-schemas';
+// The published status vocabulary, so the sample builder below moves counts
+// between the same columns the artifact publishes rather than a copied order.
+import { STATUS_COLUMNS } from './readme-table.mts';
+// The tombstoned key the #19062 block samples on — asserted to BE a tombstone
+// before anything is concluded from a run that assumes it is one.
+import { HookSchema } from '../../src/data/hook.zod';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SPEC = path.resolve(HERE, '../..');
@@ -1226,5 +1232,143 @@ describe('check:liveness — the governance denominator is the AUTHORABLE set (#
     }
     const src = readFileSync(GATE, 'utf8');
     expect(src).toContain('listUnregisteredKindSchemaTypes');
+  });
+});
+
+// ── THE TOMBSTONE JOIN (#19062) ──
+//
+// Same harness and the same #5623 reason as every block above: the grading
+// lives in check-liveness.mts, so only a real run can say whether a finding
+// class reaches `process.exit(1)`.
+//
+// This one needs the pair MORE than its neighbours, not less. The population it
+// fires on was ONE row at the commit it landed against — #18304's `agent/tools`
+// — and that row's repair is in flight on its own card, so a green
+// `check:liveness` on the shipped ledgers cannot distinguish "the rule holds"
+// from "the rule never ran". The RED leg and the GREEN leg are built from one
+// sample differing in exactly one status value, which is what makes the pair
+// an answer instead of two separate runs.
+//
+// Both legs neutralise `agent/tools` to `dead` first. Without it the green leg
+// could not be green for the reason it claims, and the red leg would not name
+// one cause. Every status edit is mirrored into the generated count artifact —
+// the type's row AND the totals row — because a stale count is its own red and
+// would mask the verdict this block is reading.
+
+/** The tombstone marker `retiredKey()` writes; asserted against the schema below. */
+const REMOVED_MARKER = '[REMOVED]';
+
+/**
+ * Set one property's `status` in a copied ledger and keep `state-counts.md`
+ * arithmetically consistent, so the run has exactly one cause for its verdict.
+ */
+function setStatus(root: string, type: string, prop: string, next: string): void {
+  const file = path.join(root, `${type}.json`);
+  const ledger = JSON.parse(readFileSync(file, 'utf8'));
+  const prev: string = ledger.props[prop].status;
+  expect(prev, `${type}/${prop} is already "${next}" — the sample would be a no-op`).not.toBe(next);
+  ledger.props[prop].status = next;
+  writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
+
+  const from = STATUS_COLUMNS.indexOf(prev as (typeof STATUS_COLUMNS)[number]);
+  const to = STATUS_COLUMNS.indexOf(next as (typeof STATUS_COLUMNS)[number]);
+  expect(from, `unknown status "${prev}"`).toBeGreaterThanOrEqual(0);
+  expect(to, `unknown status "${next}"`).toBeGreaterThanOrEqual(0);
+
+  const countsFile = path.join(root, 'state-counts.md');
+  let text = readFileSync(countsFile, 'utf8');
+  const move = (rowRe: RegExp, wrap: (n: number) => string): void => {
+    const m = rowRe.exec(text);
+    expect(m, `no state-counts row matching ${rowRe}`).not.toBeNull();
+    const nums = m![1].split('|').map((c) => Number(c.trim().replaceAll('*', '')));
+    expect(nums).toHaveLength(STATUS_COLUMNS.length + 1);
+    nums[from] -= 1;
+    nums[to] += 1;
+    const rebuilt = `${m![0].slice(0, m![0].indexOf('|', 1) + 1)} ${nums.map(wrap).join(' | ')} |`;
+    text = text.slice(0, m!.index) + rebuilt + text.slice(m!.index + m![0].length);
+  };
+  move(new RegExp(`^\\| \`${type}\` \\| (.+) \\|$`, 'm'), (n) => String(n));
+  move(/^\| \*\*total\*\* \| (.+) \|$/m, (n) => `**${n}**`);
+  writeFileSync(countsFile, text);
+}
+
+describe('check:liveness — a tombstoned key may not be graded `live` (#19062)', () => {
+  let tmp: string;
+
+  beforeAll(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), 'os-liveness-tombstone-'));
+  });
+  afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+  /** A ledger copy with #18304's row neutralised — the base both legs share. */
+  function sample(name: string): string {
+    const root = path.join(tmp, name);
+    cpSync(LEDGERS, root, { recursive: true });
+    setStatus(root, 'agent', 'tools', 'dead');
+    return root;
+  }
+
+  // THE PRECONDITION. Every assertion below reads a run that assumes
+  // `hook.timeout` is a `retiredKey()` tombstone. If the retirement is ever
+  // undone, that assumption goes quiet rather than wrong — the red leg would
+  // fail for a reason no message names — so it is asserted, loudly, here.
+  it('samples on a key the schema really has tombstoned', () => {
+    const shape = (HookSchema as unknown as { shape: Record<string, { description?: string }> }).shape;
+    expect(shape.timeout?.description ?? '').toContain(REMOVED_MARKER);
+  });
+
+  it('FAILS when a tombstoned key\'s ledger row claims `live`', () => {
+    const root = sample('tombstone-live');
+    setStatus(root, 'hook', 'timeout', 'live');
+
+    const { status, output } = runGate(root);
+    // The defect itself, caught. Before this rule the same sample exited 0:
+    // the forward pass was satisfied (the tombstone keeps the key in the walked
+    // shape), the orphan pass was satisfied (the property is still there), and
+    // nothing read the marker at all.
+    expect(status, output).toBe(1);
+    expect(output).toContain('✗ 1 TOMBSTONED key(s) whose ledger row still claims a forbidden status:');
+    expect(output).toContain('hook/timeout -> "live"');
+    // The prescription travels with the finding, and rules out deleting the row.
+    expect(output).toContain('Do NOT delete the row');
+  });
+
+  // THE LIT CONTROL. Without it, the exit 1 above is equally explained by the
+  // sample being unreadable, or by any other rule reddening on the same copy.
+  it('is GREEN on the same sample with a legal status — one value apart', () => {
+    const root = sample('tombstone-dead');
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(0);
+    expect(output).toContain('✓ every governed-type property');
+    expect(output).toContain("no tombstoned key's row claims a status the tombstone forbids");
+  });
+
+  // THE DARK CONTROL. A rule that reddens honest rows is a different gate, not
+  // a stricter one — so the ordinary, non-tombstoned `live` rows must keep the
+  // verdict they had. `hook` carries both: the tombstoned `timeout` and 19 live
+  // keys including `timeoutMs`, the key the retirement renamed it to.
+  it('leaves ordinary `live` rows alone — the per-type verdicts are unchanged', () => {
+    const root = sample('tombstone-dark');
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(0);
+    // 19 live / 3 dead is the shipped verdict for `hook` with `timeout` dead,
+    // which is what it already was. Nothing about this rule moved it.
+    expect(output).toMatch(/^ {2}hook {8}22 classified \(live 19, dead 3\)$/m);
+  });
+
+  // NON-VACUITY. "0 forbidden" reads identically whether every row is honest or
+  // the marker drifted and the scan reached no tombstones at all, so the gate
+  // prints how many it asked — every run, pass or fail.
+  it('reports how many tombstones it reached, not only how many were forbidden', () => {
+    const root = sample('tombstone-census');
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(0);
+    const line = output.split('\n').find((l) => l.startsWith('tombstoned keys:')) ?? '';
+    const reached = Number(/^tombstoned keys: (\d+) /.exec(line)?.[1] ?? 0);
+    expect(line, 'the gate must publish the population it scanned').not.toBe('');
+    expect(reached, 'a scan reaching zero tombstones is a degraded scan, not a clean tree').toBeGreaterThan(0);
+    expect(line).toContain(`${reached} graded with a status the tombstone allows`);
+    expect(line).not.toContain('FORBIDDEN');
   });
 });
