@@ -431,6 +431,16 @@ done
 # domain table carries the matching row (北极星「现在不做」).
 gh label create domain:cloud -R objectstack-ai/objectstack -c bfd4f2 -d "Cloud-service journey parked for the cloud PM to migrate — not dispatched in this repo (云服务旅程,本仓不派)" 2>/dev/null || true
 gh label create domain:cloud -R objectstack-ai/objectui    -c bfd4f2 -d "Cloud-service journey parked for the cloud PM to migrate — not dispatched from objectui (云服务旅程,本仓不派)" 2>/dev/null || true
+# status:parked is the other half of parking: the backlog sweep's disjunct ③
+# (有 domain:* 无 pm-state) and check-half-states.mjs's H13 read it as the
+# exemption (H13_EXEMPT_LABELS; SKILL.md 排除 `status:parked`), so a card that
+# carries domain:cloud WITHOUT it is listed and "cured" with a pm state every
+# fire, against the ruling above. The object exists in objectstack (auto-created)
+# and was absent in objectui; the roster makes both. Colour matches `tracking`,
+# the other sweep-exempt label. Descriptions differ per repo on purpose: the
+# check:pm-label-desc-cap dry run wants one distinct description per parsed line.
+gh label create status:parked -R objectstack-ai/objectstack -c cfd3d7 -d "Parked — exempt from the PM sweep and half-state patrol until its owner migrates it (e.g. cloud PM)" 2>/dev/null || true
+gh label create status:parked -R objectstack-ai/objectui    -c cfd3d7 -d "Parked in objectui — exempt from the PM sweep until the cloud PM migrates it (with domain:cloud)" 2>/dev/null || true
 
 # objectui workload streams — maintainer rulings 2026-08-21, quoted verbatim:
 # 「B:两车道」→「现在本身就有 domain:devx」→「不要搞出那么多车道名称」→「也有
