@@ -207,7 +207,7 @@ describe('scanTombstonedRows — the claim a tombstoned key may not make', () =>
   it('catches a tombstoned key whose row still says `live`', () => {
     const scan = scanTombstonedRows([tombstoned('agent/tools', 'live')]);
     expect(scan.findings).toEqual([{ key: 'agent/tools', status: 'live' }]);
-    expect(scan.scanned).toBe(1);
+    expect(scan.scanned).toEqual(['agent/tools']);
   });
 
   it('catches a tombstoned DRILLED CHILD, not only a top-level key', () => {
@@ -224,13 +224,15 @@ describe('scanTombstonedRows — the claim a tombstoned key may not make', () =>
       tombstoned('hook/timeout', 'live'),
     ]);
     expect(scan.findings.map((f) => f.key)).toEqual(['agent/tools', 'hook/timeout']);
-    expect(scan.scanned).toBe(2);
+    expect(scan.scanned).toEqual(['agent/tools', 'hook/timeout']);
   });
 
   it('is QUIET on a tombstoned key graded `dead` — the state the guidance prescribes', () => {
     const scan = scanTombstonedRows([tombstoned('hook/timeout', 'dead')]);
     expect(scan.findings).toEqual([]);
-    expect(scan.scanned).toBe(1); // …and it still counted it: quiet, not blind
+    // …and it still ENUMERATED it: quiet, not blind — and named, not totalled,
+    // so a caller can see WHICH rows the scan is standing behind.
+    expect(scan.scanned).toEqual(['hook/timeout']);
   });
 
   it('is QUIET on an ordinary `live` property — the dark control', () => {
@@ -240,7 +242,7 @@ describe('scanTombstonedRows — the claim a tombstoned key may not make', () =>
       { key: 'hook/timeoutMs', description: 'Per-hook wall-clock timeout in ms.', status: 'live' },
     ]);
     expect(scan.findings).toEqual([]);
-    expect(scan.scanned).toBe(0);
+    expect(scan.scanned).toEqual([]);
   });
 
   it('is QUIET on a `[planned` marker — the neighbouring marker it must not swallow', () => {
@@ -248,7 +250,7 @@ describe('scanTombstonedRows — the claim a tombstoned key may not make', () =>
       { key: 'api/inputMapping.transform', description: '[planned] not wired yet.', status: 'planned' },
     ]);
     expect(scan.findings).toEqual([]);
-    expect(scan.scanned).toBe(0);
+    expect(scan.scanned).toEqual([]);
   });
 
   it('leaves the statuses outside the forbidden set alone — widening it is its own measurement', () => {
@@ -256,7 +258,7 @@ describe('scanTombstonedRows — the claim a tombstoned key may not make', () =>
       .map((status) => tombstoned(`t/${status}`, status));
     const scan = scanTombstonedRows(others);
     expect(scan.findings).toEqual([]);
-    expect(scan.scanned).toBe(4);
+    expect(scan.scanned).toEqual(['t/dead', 't/planned', 't/experimental', 't/live-elsewhere']);
     expect(TOMBSTONE_FORBIDDEN_STATUSES).toEqual(['live']);
   });
 });

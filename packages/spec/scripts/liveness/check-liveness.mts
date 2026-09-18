@@ -686,7 +686,7 @@ const report: any = {
   orphanProofs: [] as string[], // a dogfood `@proof:` tag not registered in proof-registry.mts
   orphanEntries: [] as string[], // a ledger row whose property is gone from the schema (the reverse direction)
   tombstonedLive: [] as string[], // a `retiredKey()` tombstone whose row still claims a forbidden status (#19062)
-  tombstonesScanned: 0, // how many tombstones the walk reached — printed every run, so a drifted marker cannot read as a clean tree
+  tombstones: [] as string[], // every `[REMOVED]` tombstone the walk reached — enumerated, not totalled, so the population is checkable (#18133's reason)
   authorable: [] as string[], // the governance DENOMINATOR itself — printed and emitted so "never looked" cannot pass for "nothing to report" (#18133)
   authorableRegistered: 0, // how many of it are registered KINDS (listMetadataTypeSchemaTypes)
   authorableUnregisteredKinds: [] as string[], // …and which are unregistered-kind stack collections (#6245/#6931)
@@ -1118,7 +1118,7 @@ scanOrphanProofs();
 // coverage catches a row that silently covers a subtree nobody classified; this
 // catches a row that is present, classified, covered — and false.
 const tombstones = scanTombstonedRows(gradedProps);
-report.tombstonesScanned = tombstones.scanned;
+report.tombstones = tombstones.scanned;
 report.tombstonedLive = tombstones.findings.map((t) => `${t.key} -> "${t.status}"`);
 
 // ── container coverage: is every blanket verdict a DECLARED one? ──
@@ -1851,8 +1851,8 @@ if (asJson) {
   // "0 forbidden" alone reads identically whether every row is honest or the
   // marker drifted and the scan reached nothing at all.
   console.log(
-    `\ntombstoned keys: ${report.tombstonesScanned} \`[REMOVED]\` tombstone(s) reached by the walk, ` +
-    `${report.tombstonesScanned - report.tombstonedLive.length} graded with a status the tombstone allows` +
+    `\ntombstoned keys: ${report.tombstones.length} \`[REMOVED]\` tombstone(s) reached by the walk, ` +
+    `${report.tombstones.length - report.tombstonedLive.length} graded with a status the tombstone allows` +
     (report.tombstonedLive.length ? `, ${report.tombstonedLive.length} FORBIDDEN` : '') + '.',
   );
 

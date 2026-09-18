@@ -205,15 +205,22 @@ export interface TombstonedRow {
 }
 
 /**
- * Two numbers, because one cannot carry both facts — the same discipline the
+ * Two readings, because one cannot carry both facts — the same discipline the
  * gate's evidence and citation lines already print. `scanned` is the
  * extraction-health signal; `findings` is the verdict. Reporting only the
  * verdict would read as a pass on a run where the marker had drifted and the
  * scan saw no tombstones at all.
+ *
+ * `scanned` ENUMERATES rather than counts, for `report.authorable`'s reason
+ * (#18133): a population that is only totalled cannot be checked by anything
+ * downstream, and "never looked" then passes for "nothing to report". The
+ * enumeration is what lets the gate's own self-test derive a sample from the
+ * live tombstone set instead of naming one row and rotting when that row's
+ * verdict moves.
  */
 export interface TombstoneScan {
-  /** How many `[REMOVED]` tombstones the walk actually reached. */
-  scanned: number;
+  /** Every `[REMOVED]` tombstone the walk reached, by `<type>/<propPath>`. */
+  scanned: string[];
   /** The ones whose row claims a forbidden status. */
   findings: TombstonedRow[];
 }
@@ -228,10 +235,10 @@ export interface TombstoneScan {
 export function scanTombstonedRows(graded: readonly GradedProperty[]): TombstoneScan {
   const forbidden = new Set(TOMBSTONE_FORBIDDEN_STATUSES);
   const findings: TombstonedRow[] = [];
-  let scanned = 0;
+  const scanned: string[] = [];
   for (const prop of graded) {
     if (!prop.description.includes(TOMBSTONE_MARKER)) continue;
-    scanned++;
+    scanned.push(prop.key);
     if (forbidden.has(prop.status)) findings.push({ key: prop.key, status: prop.status });
   }
   return { scanned, findings };
