@@ -158,6 +158,7 @@
     "ui/BulkActionDef:variant",
     "ui/BulkActionDef:visible",
     "ui/BulkActionParam:default",
+    "ui/BulkActionParam:dependsOn",
     "ui/BulkActionParam:help",
     "ui/BulkActionParam:label",
     "ui/BulkActionParam:labelField",

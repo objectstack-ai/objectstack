@@ -10380,7 +10380,11 @@ declare const GetUiViewResponseSchema: z.ZodObject<{
                 labelField: z.ZodOptional<z.ZodString>;
                 multiple: z.ZodOptional<z.ZodBoolean>;
                 placeholder: z.ZodOptional<z.ZodString>;
-            }, z.core.$loose>>>;
+                dependsOn: z.ZodOptional<z.ZodArray<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+                    field: z.ZodString;
+                    param: z.ZodOptional<z.ZodString>;
+                }, z.core.$strict>]>>>;
+            }, z.core.$strict>>>;
             confirmText: z.ZodOptional<z.ZodString>;
             confirmLabel: z.ZodOptional<z.ZodString>;
             visible: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
@@ -11618,7 +11622,11 @@ declare const GetUiViewResponseSchema: z.ZodObject<{
                 labelField: z.ZodOptional<z.ZodString>;
                 multiple: z.ZodOptional<z.ZodBoolean>;
                 placeholder: z.ZodOptional<z.ZodString>;
-            }, z.core.$loose>>>;
+                dependsOn: z.ZodOptional<z.ZodArray<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+                    field: z.ZodString;
+                    param: z.ZodOptional<z.ZodString>;
+                }, z.core.$strict>]>>>;
+            }, z.core.$strict>>>;
             confirmText: z.ZodOptional<z.ZodString>;
             confirmLabel: z.ZodOptional<z.ZodString>;
             visible: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
@@ -18197,7 +18205,11 @@ declare const ObjectDefinitionResponseSchema: z.ZodObject<{
                     labelField: z.ZodOptional<z.ZodString>;
                     multiple: z.ZodOptional<z.ZodBoolean>;
                     placeholder: z.ZodOptional<z.ZodString>;
-                }, z.core.$loose>>>;
+                    dependsOn: z.ZodOptional<z.ZodArray<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+                        field: z.ZodString;
+                        param: z.ZodOptional<z.ZodString>;
+                    }, z.core.$strict>]>>>;
+                }, z.core.$strict>>>;
                 confirmText: z.ZodOptional<z.ZodString>;
                 confirmLabel: z.ZodOptional<z.ZodString>;
                 visible: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
@@ -20266,7 +20278,6 @@ declare const ObjectDefinitionResponseSchema: z.ZodObject<{
                     execution?: "aggregate" | "perRecord" | undefined;
                     patch?: Record<string, unknown> | undefined;
                     params?: {
-                        [x: string]: unknown;
                         name: string;
                         type: "number" | "boolean" | "date" | "record" | "file" | "code" | "email" | "url" | "datetime" | "time" | "formula" | "text" | "textarea" | "phone" | "password" | "secret" | "markdown" | "html" | "richtext" | "currency" | "percent" | "toggle" | "select" | "multiselect" | "radio" | "checkboxes" | "lookup" | "master_detail" | "tree" | "user" | "image" | "avatar" | "video" | "audio" | "summary" | "autonumber" | "composite" | "repeater" | "location" | "address" | "json" | "color" | "rating" | "slider" | "signature" | "qrcode" | "progress" | "tags" | "vector";
                         label?: string | undefined;
@@ -20282,6 +20293,10 @@ declare const ObjectDefinitionResponseSchema: z.ZodObject<{
                         labelField?: string | undefined;
                         multiple?: boolean | undefined;
                         placeholder?: string | undefined;
+                        dependsOn?: (string | {
+                            field: string;
+                            param?: string | undefined;
+                        })[] | undefined;
                     }[] | undefined;
                     confirmText?: string | undefined;
                     confirmLabel?: string | undefined;
@@ -21420,7 +21435,6 @@ declare const ObjectDefinitionResponseSchema: z.ZodObject<{
                     execution?: "aggregate" | "perRecord" | undefined;
                     patch?: Record<string, unknown> | undefined;
                     params?: {
-                        [x: string]: unknown;
                         name: string;
                         type: "number" | "boolean" | "date" | "record" | "file" | "code" | "email" | "url" | "datetime" | "time" | "formula" | "text" | "textarea" | "phone" | "password" | "secret" | "markdown" | "html" | "richtext" | "currency" | "percent" | "toggle" | "select" | "multiselect" | "radio" | "checkboxes" | "lookup" | "master_detail" | "tree" | "user" | "image" | "avatar" | "video" | "audio" | "summary" | "autonumber" | "composite" | "repeater" | "location" | "address" | "json" | "color" | "rating" | "slider" | "signature" | "qrcode" | "progress" | "tags" | "vector";
                         label?: string | undefined;
@@ -21436,6 +21450,10 @@ declare const ObjectDefinitionResponseSchema: z.ZodObject<{
                         labelField?: string | undefined;
                         multiple?: boolean | undefined;
                         placeholder?: string | undefined;
+                        dependsOn?: (string | {
+                            field: string;
+                            param?: string | undefined;
+                        })[] | undefined;
                     }[] | undefined;
                     confirmText?: string | undefined;
                     confirmLabel?: string | undefined;
@@ -22575,7 +22593,6 @@ declare const ObjectDefinitionResponseSchema: z.ZodObject<{
                     execution?: "aggregate" | "perRecord" | undefined;
                     patch?: Record<string, unknown> | undefined;
                     params?: {
-                        [x: string]: unknown;
                         name: string;
                         type: "number" | "boolean" | "date" | "record" | "file" | "code" | "email" | "url" | "datetime" | "time" | "formula" | "text" | "textarea" | "phone" | "password" | "secret" | "markdown" | "html" | "richtext" | "currency" | "percent" | "toggle" | "select" | "multiselect" | "radio" | "checkboxes" | "lookup" | "master_detail" | "tree" | "user" | "image" | "avatar" | "video" | "audio" | "summary" | "autonumber" | "composite" | "repeater" | "location" | "address" | "json" | "color" | "rating" | "slider" | "signature" | "qrcode" | "progress" | "tags" | "vector";
                         label?: string | undefined;
@@ -22591,6 +22608,10 @@ declare const ObjectDefinitionResponseSchema: z.ZodObject<{
                         labelField?: string | undefined;
                         multiple?: boolean | undefined;
                         placeholder?: string | undefined;
+                        dependsOn?: (string | {
+                            field: string;
+                            param?: string | undefined;
+                        })[] | undefined;
                     }[] | undefined;
                     confirmText?: string | undefined;
                     confirmLabel?: string | undefined;
@@ -23729,7 +23750,6 @@ declare const ObjectDefinitionResponseSchema: z.ZodObject<{
                     execution?: "aggregate" | "perRecord" | undefined;
                     patch?: Record<string, unknown> | undefined;
                     params?: {
-                        [x: string]: unknown;
                         name: string;
                         type: "number" | "boolean" | "date" | "record" | "file" | "code" | "email" | "url" | "datetime" | "time" | "formula" | "text" | "textarea" | "phone" | "password" | "secret" | "markdown" | "html" | "richtext" | "currency" | "percent" | "toggle" | "select" | "multiselect" | "radio" | "checkboxes" | "lookup" | "master_detail" | "tree" | "user" | "image" | "avatar" | "video" | "audio" | "summary" | "autonumber" | "composite" | "repeater" | "location" | "address" | "json" | "color" | "rating" | "slider" | "signature" | "qrcode" | "progress" | "tags" | "vector";
                         label?: string | undefined;
@@ -23745,6 +23765,10 @@ declare const ObjectDefinitionResponseSchema: z.ZodObject<{
                         labelField?: string | undefined;
                         multiple?: boolean | undefined;
                         placeholder?: string | undefined;
+                        dependsOn?: (string | {
+                            field: string;
+                            param?: string | undefined;
+                        })[] | undefined;
                     }[] | undefined;
                     confirmText?: string | undefined;
                     confirmLabel?: string | undefined;
@@ -25390,7 +25414,11 @@ declare const ObjectDefinitionResponseSchema: z.ZodObject<{
                         labelField: z.ZodOptional<z.ZodString>;
                         multiple: z.ZodOptional<z.ZodBoolean>;
                         placeholder: z.ZodOptional<z.ZodString>;
-                    }, z.core.$loose>>>;
+                        dependsOn: z.ZodOptional<z.ZodArray<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+                            field: z.ZodString;
+                            param: z.ZodOptional<z.ZodString>;
+                        }, z.core.$strict>]>>>;
+                    }, z.core.$strict>>>;
                     confirmText: z.ZodOptional<z.ZodString>;
                     confirmLabel: z.ZodOptional<z.ZodString>;
                     visible: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
@@ -26680,7 +26708,7 @@ declare const ObjectDefinitionResponseSchema: z.ZodObject<{
             actions: { [I in keyof As]: As[I] extends infer T_1 ? T_1 extends As[I] ? T_1 extends {
                 params: infer Ps extends readonly unknown[];
             } ? T_1 & {
-                params: { [I_1 in keyof Ps]: Ps[I_1] & Record<Exclude<keyof Ps[I_1], "name" | "type" | "options" | "field" | "required" | "reference" | "label" | "visible" | "multiple" | "accept" | "defaultValue" | "maxSize" | "placeholder" | "helpText" | "requiresFeature" | "carryOver" | "objectOverride" | "defaultFromRow">, never>; };
+                params: { [I_1 in keyof Ps]: Ps[I_1] & Record<Exclude<keyof Ps[I_1], "name" | "type" | "options" | "field" | "required" | "reference" | "label" | "visible" | "multiple" | "accept" | "defaultValue" | "maxSize" | "placeholder" | "helpText" | "objectOverride" | "carryOver" | "defaultFromRow" | "requiresFeature">, never>; };
             } : T_1 : never : never; };
         } : unknown)) => Omit<ServiceObject, "fields"> & Pick<T, "fields">;
     };
