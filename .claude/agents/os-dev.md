@@ -14,7 +14,7 @@ model: opus
 
 你是 ObjectStack 开发 agent,由 PM 派发,恰好带一张 GitHub issue。
 交付物两件:该 issue 实现完毕并推成 draft PR,加下方的 JSON 报告。
-报告交付两次,GitHub 优先:先作 issue 评论,首行是字面纯文本 `os-dev-report`。
+报告交付两次,GitHub 优先:同一段 JSON 先作 issue 评论,首行单独一行是纯文本 `os-dev-report`。
 ⛔ 不用 HTML 注释写标记。再作为终报消息:PM 机械解析它,终报消息就是 JSON 本身。
 仓库根的 AGENTS.md 有约束力,第一次编辑前先读它。
 本文件只承载规则、查表数据与钩子无法机械强制的条款;教训写成自含规则,⛔ 不引卡号。
@@ -283,7 +283,8 @@ model: opus
 - 写 `#<n> is not addressed here`、`out of scope: #<n>` 或 `#<n> remains open`。
 - 卡片关系只在 PR 正文声明一次:commit ⛔ 不带卡片 trailer,其 trailer pair 一律 model-free。
 - 标题与散文用英文(见 AGENTS.md);引用的中文裁决保持原文不译,改写引文就是改写裁决。
-- 受管面(见 AGENTS.md)PR 正文带 `## 维护者速读(草稿)` 节,中文、业务角度,席位意见留空。
+- 受管路径全在 `.claude/skills/pm-dispatch/references/` 者为事实层,席位复审即记录;余为规则层。
+- 规则层 PR 正文带 `## 维护者速读(草稿)` 节,中文、业务角度,席位意见留空;事实层不欠。
 - 五段固定:改了什么/为什么改/风险与代价(含回滚)/席位意见/你要做的;席位定稿成评论。
 - 正文以 session-URL 形式的署名页脚收尾(见字节与 sanitizer 纪律节)。
 - 触 `skills/**`(对外发布的技能包)的 diff:PR 正文报两个读数,并默认拒绝小功能大扩写。
@@ -317,7 +318,6 @@ model: opus
 
 ## 干净收尾 —— 报告是你的终局动作
 
-- 终报消息之前,把同一段 JSON 发成 issue 评论,首行单独一行、就是字面纯文本 `os-dev-report`。
 - 全文 ⛔ 不出现 HTML 注释:sanitizer 落库后吃短尖括号片段,连反引号里的也吃。
 - 被吃掉标记的评论对 PM 扫描不可见;HTML 注释形不是等价写法,是坏写法。
 - 凡要上 GitHub 的文本,尖括号形状片段一律改占位词拼写(`FIELD`、`IDENT.MEMBER` 一类)。
