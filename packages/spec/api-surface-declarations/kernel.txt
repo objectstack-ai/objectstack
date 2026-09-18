@@ -3460,7 +3460,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
                 value: z.ZodString;
                 visibleWhen: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -3472,12 +3472,12 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
                         cron: "cron";
                         template: "template";
                     }>;
-                    source: z.ZodOptional<z.ZodString>;
                     ast: z.ZodOptional<z.ZodUnknown>;
                     meta: z.ZodOptional<z.ZodObject<{
                         rationale: z.ZodOptional<z.ZodString>;
                         generatedBy: z.ZodOptional<z.ZodString>;
                     }, z.core.$strip>>;
+                    source: z.ZodString;
                 }, z.core.$strip>]>>;
             }, z.core.$strict>>>;
             placeholder: z.ZodOptional<z.ZodString>;
@@ -3491,7 +3491,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
             carryOver: z.ZodOptional<z.ZodBoolean>;
             visible: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -3503,12 +3503,12 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
             requiresFeature: z.ZodOptional<z.ZodEnum<{
                 organization: "organization";
@@ -3541,7 +3541,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
                 value: string;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -3549,7 +3549,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -3568,7 +3568,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
             carryOver?: boolean | undefined;
             visible?: {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -3576,7 +3576,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -3602,7 +3602,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
                 value: string;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -3610,7 +3610,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -3629,7 +3629,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
             carryOver?: boolean | undefined;
             visible?: {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -3637,7 +3637,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -3768,7 +3768,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
         }, z.core.$strict>>;
         visible: z.ZodOptional<z.ZodUnion<readonly [z.ZodBoolean, z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -3780,12 +3780,12 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
                 cron: "cron";
                 template: "template";
             }>;
-            source: z.ZodOptional<z.ZodString>;
             ast: z.ZodOptional<z.ZodUnknown>;
             meta: z.ZodOptional<z.ZodObject<{
                 rationale: z.ZodOptional<z.ZodString>;
                 generatedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
+            source: z.ZodString;
         }, z.core.$strip>]>]>>;
         requiresFeature: z.ZodOptional<z.ZodEnum<{
             organization: "organization";
@@ -3802,7 +3802,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
         }>>;
         disabled: z.ZodOptional<z.ZodUnion<readonly [z.ZodBoolean, z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -3814,12 +3814,12 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
                 cron: "cron";
                 template: "template";
             }>;
-            source: z.ZodOptional<z.ZodString>;
             ast: z.ZodOptional<z.ZodUnknown>;
             meta: z.ZodOptional<z.ZodObject<{
                 rationale: z.ZodOptional<z.ZodString>;
                 generatedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
+            source: z.ZodString;
         }, z.core.$strip>]>]>>;
         requiredPermissions: z.ZodOptional<z.ZodArray<z.ZodString>>;
         shortcut: z.ZodOptional<z.ZodNever>;
@@ -3945,7 +3945,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
                 value: string;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -3953,7 +3953,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -3972,7 +3972,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
             carryOver?: boolean | undefined;
             visible?: {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -3980,7 +3980,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -4029,7 +4029,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
         } | undefined;
         visible?: boolean | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -4037,7 +4037,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -4047,7 +4047,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
         requiresFeature?: "organization" | "twoFactor" | "multiOrgEnabled" | "degradedTenancy" | "oidcProvider" | "sso" | "ssoEnforced" | "deviceAuthorization" | "admin" | "phoneNumber" | "phoneNumberOtp" | undefined;
         disabled?: boolean | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -4055,7 +4055,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -4156,7 +4156,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
                 value: string;
                 visibleWhen?: {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -4164,7 +4164,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
                     } | undefined;
                 } | {
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -4183,7 +4183,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
             carryOver?: boolean | undefined;
             visible?: {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -4191,7 +4191,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
                 } | undefined;
             } | {
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -4240,7 +4240,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
         } | undefined;
         visible?: boolean | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -4248,7 +4248,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -4258,7 +4258,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
         requiresFeature?: "organization" | "twoFactor" | "multiOrgEnabled" | "degradedTenancy" | "oidcProvider" | "sso" | "ssoEnforced" | "deviceAuthorization" | "admin" | "phoneNumber" | "phoneNumberOtp" | undefined;
         disabled?: boolean | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -4266,7 +4266,7 @@ declare const MetadataTypeRegistryEntrySchema: z.ZodObject<{
             } | undefined;
         } | {
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -4382,7 +4382,7 @@ declare const MultiVersionSupportSchema: z.ZodObject<{
     routing: z.ZodOptional<z.ZodArray<z.ZodObject<{
         condition: z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -4394,12 +4394,12 @@ declare const MultiVersionSupportSchema: z.ZodObject<{
                 cron: "cron";
                 template: "template";
             }>;
-            source: z.ZodOptional<z.ZodString>;
             ast: z.ZodOptional<z.ZodUnknown>;
             meta: z.ZodOptional<z.ZodObject<{
                 rationale: z.ZodOptional<z.ZodString>;
                 generatedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
+            source: z.ZodString;
         }, z.core.$strip>]>;
         version: z.ZodString;
         priority: z.ZodDefault<z.ZodNumber>;
@@ -5483,7 +5483,7 @@ declare const PluginPermissionSchema: z.ZodObject<{
         resourceIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
         condition: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
             dialect: "cel" | "cron" | "template";
-            source?: string | undefined;
+            source: string;
             ast?: unknown;
             meta?: {
                 rationale?: string | undefined;
@@ -5495,12 +5495,12 @@ declare const PluginPermissionSchema: z.ZodObject<{
                 cron: "cron";
                 template: "template";
             }>;
-            source: z.ZodOptional<z.ZodString>;
             ast: z.ZodOptional<z.ZodUnknown>;
             meta: z.ZodOptional<z.ZodObject<{
                 rationale: z.ZodOptional<z.ZodString>;
                 generatedBy: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
+            source: z.ZodString;
         }, z.core.$strip>]>>;
         fields: z.ZodOptional<z.ZodArray<z.ZodString>>;
     }, z.core.$strip>>;
@@ -5561,7 +5561,7 @@ declare const PluginPermissionSetSchema: z.ZodObject<{
             resourceIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
             condition: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                 dialect: "cel" | "cron" | "template";
-                source?: string | undefined;
+                source: string;
                 ast?: unknown;
                 meta?: {
                     rationale?: string | undefined;
@@ -5573,12 +5573,12 @@ declare const PluginPermissionSetSchema: z.ZodObject<{
                     cron: "cron";
                     template: "template";
                 }>;
-                source: z.ZodOptional<z.ZodString>;
                 ast: z.ZodOptional<z.ZodUnknown>;
                 meta: z.ZodOptional<z.ZodObject<{
                     rationale: z.ZodOptional<z.ZodString>;
                     generatedBy: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>>;
+                source: z.ZodString;
             }, z.core.$strip>]>>;
             fields: z.ZodOptional<z.ZodArray<z.ZodString>>;
         }, z.core.$strip>>;
@@ -6064,7 +6064,7 @@ declare const PluginSecurityManifestSchema: z.ZodObject<{
                 resourceIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
                 condition: z.ZodOptional<z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
                     dialect: "cel" | "cron" | "template";
-                    source?: string | undefined;
+                    source: string;
                     ast?: unknown;
                     meta?: {
                         rationale?: string | undefined;
@@ -6076,12 +6076,12 @@ declare const PluginSecurityManifestSchema: z.ZodObject<{
                         cron: "cron";
                         template: "template";
                     }>;
-                    source: z.ZodOptional<z.ZodString>;
                     ast: z.ZodOptional<z.ZodUnknown>;
                     meta: z.ZodOptional<z.ZodObject<{
                         rationale: z.ZodOptional<z.ZodString>;
                         generatedBy: z.ZodOptional<z.ZodString>;
                     }, z.core.$strip>>;
+                    source: z.ZodString;
                 }, z.core.$strip>]>>;
                 fields: z.ZodOptional<z.ZodArray<z.ZodString>>;
             }, z.core.$strip>>;
