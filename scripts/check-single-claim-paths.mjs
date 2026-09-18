@@ -698,6 +698,14 @@ function rearmThroughProxy(args) {
 // and still exits 0 — a self-test that never finished, reported as one that
 // passed (#13798). The self-test's own exit code stays load-bearing, so the
 // handshake is a flag rather than a returned sentinel.
+//
+// ⛔ "After its verdict is printed" is positional and it is the whole contract.
+// This self-test runs its assertions inside an async block that `selfTest()`
+// RETURNS, and the assignment used to sit on the line above that `return`
+// (#18940): synchronously true before a single assertion had run, so every
+// early return and every throw inside the block still left it true and the
+// dispatch could never reach its own diagnostic. The flag belongs to the code
+// that PRINTED the verdict, never to the code that is about to start.
 let selfTestReachedVerdict = false;
 
 function selfTest() {
@@ -870,7 +878,6 @@ function selfTest() {
   };
 
   const ctxOf = (number) => ({ number: String(number), repo: 'o/r', token: 't' });
-  selfTestReachedVerdict = true;
   return (async () => {
     calls.length = 0;
     const quiet = await collect(ctxOf(200), fakeApi({ 200: ['fixture/tree/alpha.ts', 'fixture/tree/beta.ts'] }));
@@ -997,9 +1004,19 @@ function selfTest() {
     }
     if (failedCount) {
       console.error(`✗ check-single-claim-paths self-test: ${failedCount} of ${cases.length} case(s) failed.`);
+      // No handshake is owed on this arm: the process is gone on the next
+      // instruction, so nothing downstream can read the flag. The handshake
+      // exists for the SILENT ways out — a `return` or a throw that prints
+      // nothing — and those are exactly the ones the line below now catches.
       process.exit(1);
     }
     console.log(`✓ check-single-claim-paths self-test: ${cases.length} cases pass.`);
+    // LAST statement of the block, after the success line printed (#18940).
+    // Set before the block, it certified a run that had not happened yet: an
+    // early return or a throw anywhere inside left it true, and the dispatch
+    // below could never say the self-test had not reached its verdict — the
+    // one sentence the flag exists to make possible.
+    selfTestReachedVerdict = true;
   })();
 }
 
