@@ -44,13 +44,15 @@ import {
   NON_BLANK_PATTERN,
   NON_BLANK_STRING,
   PROJECTABLE_REFINEMENT_PATTERNS,
+  dependentRequired,
   projectableRefinementOf,
   requiredOneOf,
 } from '../src/shared/refinement-projection';
+import { SSLConfigSchema } from '../src/data/driver-sql.zod';
 import {
   emitProjectableRefinement,
+  projectPublishedJsonSchema,
   projectableRefinementsOf,
-  refinementProjectionOverride,
 } from './lib/refinement-projection';
 import { collectDroppedRefinements } from './lib/dropped-refinements';
 import {
@@ -58,13 +60,16 @@ import {
   ExpressionSchema,
 } from '../src/shared/expression.zod';
 
-/** Exactly the call shape `build-schemas.ts` publishes with. */
+/**
+ * Exactly the call `build-schemas.ts` publishes with — the shared helper
+ * itself, not a re-spelling of it. ⛔ Deliberately NOT a local
+ * `z.toJSONSchema(..., { override })`: that is the convention this change
+ * replaced, and a test that kept it would go on passing through the one edit
+ * that matters (the override dropped from the helper) while the published file
+ * went wide.
+ */
 const publish = (schema: z.ZodType, io: 'input' | 'output' = 'output'): Record<string, unknown> =>
-  z.toJSONSchema(schema, {
-    target: 'draft-2020-12',
-    io,
-    override: refinementProjectionOverride,
-  }) as Record<string, unknown>;
+  projectPublishedJsonSchema(schema, { io }) as Record<string, unknown>;
 
 /**
  * The node's `allOf[].anyOf[].required` rule — evaluated the way a validator
@@ -98,7 +103,11 @@ describe('the list of projectable patterns is CLOSED', () => {
     // published artifact. A new arm updates this line in the same PR, which is
     // what makes it a reviewed diff rather than a quiet widening of the
     // narrowing.
-    expect([...PROJECTABLE_REFINEMENT_PATTERNS]).toEqual(['required-one-of', 'non-blank-string']);
+    expect([...PROJECTABLE_REFINEMENT_PATTERNS]).toEqual([
+      'required-one-of',
+      'non-blank-string',
+      'dependent-required',
+    ]);
   });
 
   it('a refinement nobody declared gets NO keyword', () => {
@@ -333,5 +342,217 @@ describe('the ledger measures THIS projection', () => {
     expect(census.dropped).toEqual([]);
     expect(census.projected.map((s) => s.path)).toEqual(['slot']);
     expect(census.projected[0].declaredPatterns).toEqual(['non-blank-string']);
+  });
+});
+
+describe('dependent-required: one dependency map, read twice', () => {
+  /**
+   * The node's `dependentRequired`, evaluated the way a validator would, and
+   * refusing to report anything when the node carries no such keyword — so a
+   * projection that stopped emitting fails rather than passing vacuously.
+   */
+  const dependentRequiredSatisfied = (
+    node: Record<string, unknown>,
+    doc: Record<string, unknown>,
+  ): boolean => {
+    const map = node.dependentRequired as Record<string, string[]> | undefined;
+    if (!map || Object.keys(map).length === 0) {
+      throw new Error('the node carries no `dependentRequired` — nothing to evaluate');
+    }
+    const present = (key: string): boolean => Object.prototype.hasOwnProperty.call(doc, key);
+    return Object.entries(map).every(([key, required]) => !present(key) || required.every(present));
+  };
+
+  it('declares the dependency map it was given', () => {
+    const rule = dependentRequired({ cert: ['key'], key: ['cert'] });
+    expect(projectableRefinementOf(rule)).toEqual({
+      pattern: 'dependent-required',
+      dependencies: { cert: ['key'], key: ['cert'] },
+    });
+  });
+
+  it('emits JSON Schema`s own `dependentRequired`, and nothing else', () => {
+    const node: Record<string, unknown> = { type: 'object' };
+    emitProjectableRefinement(node, {
+      pattern: 'dependent-required',
+      dependencies: { a: ['b'] },
+    });
+    expect(node).toEqual({ type: 'object', dependentRequired: { a: ['b'] } });
+  });
+
+  it('⛔ never writes a TOP-LEVEL `anyOf` or replaces the node`s own shape', () => {
+    // Same absence the required-one-of arm pins: `format-type.ts` reads `anyOf`
+    // before `properties`, so a top-level one costs the reference table the
+    // object shape it used to state.
+    const node: Record<string, unknown> = { type: 'object', properties: { a: { type: 'string' } } };
+    emitProjectableRefinement(node, { pattern: 'dependent-required', dependencies: { a: ['b'] } });
+    expect(node.anyOf).toBeUndefined();
+    expect(node.properties).toEqual({ a: { type: 'string' } });
+  });
+
+  it('drops an entry that requires nothing rather than publishing an empty rule', () => {
+    const node: Record<string, unknown> = { type: 'object' };
+    emitProjectableRefinement(node, { pattern: 'dependent-required', dependencies: { a: [] } });
+    expect(node).toEqual({ type: 'object' });
+  });
+
+  it('conjoins through `allOf` rather than replacing a keyword the node already has', () => {
+    const node: Record<string, unknown> = { type: 'object', dependentRequired: { a: ['b'] } };
+    emitProjectableRefinement(node, { pattern: 'dependent-required', dependencies: { c: ['d'] } });
+    expect(node.dependentRequired).toEqual({ a: ['b'] });
+    expect(node.allOf).toEqual([{ dependentRequired: { c: ['d'] } }]);
+  });
+
+  it('the predicate and the keyword agree over the whole presence lattice', () => {
+    const rule = dependentRequired({ cert: ['key'], key: ['cert'] });
+    const node = publish(
+      z.object({
+        ca: z.string().optional(),
+        cert: z.string().optional(),
+        key: z.string().optional(),
+      }).refine(rule),
+    );
+    const keys = ['ca', 'cert', 'key'] as const;
+    for (let mask = 0; mask < 1 << keys.length; mask += 1) {
+      const doc: Record<string, unknown> = {};
+      keys.forEach((key, i) => {
+        if (mask & (1 << i)) doc[key] = '/path';
+      });
+      // The JSON round-trip is what makes "absent" and "undefined" one fact —
+      // the equality this arm rests on, exactly as required-one-of does.
+      const asJson = JSON.parse(JSON.stringify(doc)) as Record<string, unknown>;
+      expect(
+        rule(asJson as never),
+        `runtime vs keywords disagree for ${JSON.stringify(asJson)}`,
+      ).toBe(dependentRequiredSatisfied(node, asJson));
+    }
+  });
+
+  it('a key present with a `null` value ARMS its dependency on both sides', () => {
+    const rule = dependentRequired({ cert: ['key'], key: ['cert'] });
+    const node = publish(
+      z.object({ cert: z.unknown().optional(), key: z.unknown().optional() }).refine(rule),
+    );
+    const doc = { cert: null };
+    expect(rule(doc as never)).toBe(false);
+    expect(dependentRequiredSatisfied(node, doc)).toBe(false);
+  });
+
+  it('LIVE SEAM — `data/SSLConfig` states the rule, and both sides agree on a corpus', () => {
+    const node = publish(SSLConfigSchema);
+    expect(node.dependentRequired).toEqual({ cert: ['key'], key: ['cert'] });
+    const corpus: Array<Record<string, unknown>> = [
+      {},
+      { ca: '/ca.pem' },
+      { cert: '/c.pem' },
+      { key: '/k.pem' },
+      { cert: '/c.pem', key: '/k.pem' },
+      { ca: '/ca.pem', cert: '/c.pem', key: '/k.pem' },
+      { ca: '/ca.pem', cert: '/c.pem' },
+      { rejectUnauthorized: false, key: '/k.pem' },
+    ];
+    for (const doc of corpus) {
+      // Equality, not implication: the arm is exact, so a one-sided pin would
+      // pass a projection that had stopped narrowing at all.
+      expect(
+        dependentRequiredSatisfied(node, doc),
+        `disagreement on ${JSON.stringify(doc)}`,
+      ).toBe(SSLConfigSchema.safeParse(doc).success);
+    }
+  });
+});
+
+describe('the verdict is adjudicated per NODE over every check on it', () => {
+  const nonBlank = (): z.ZodString => z.string().refine(NON_BLANK_STRING, 'non-blank');
+
+  it('a DECLARED arm beside an UNDECLARED rule stays `dropped`, with the arm still named', () => {
+    // Before this was fixed the whole node read `projected` on the strength of
+    // the declared arm, so the undeclared rule reached neither the ledger nor
+    // `x-dropped-refinements` nor the generator's UNDECLARED line — a silent
+    // violation of 「A refinement that is not one of these named patterns stays
+    // dropped and annotated」.
+    const mixed = nonBlank().refine((s) => s.startsWith('x'), 'must start with x');
+    const census = collectDroppedRefinements('test/Mixed', mixed);
+    expect(census.projected).toEqual([]);
+    expect(census.dropped).toHaveLength(1);
+    expect(census.dropped[0].count).toBe(2);
+    expect(census.dropped[0].declaredPatterns).toEqual(['non-blank-string']);
+    // The RAW differential is kept, so the detector still measures rather than
+    // asserts: something about this node DID reach the file.
+    expect(census.dropped[0].projectionMoved).toBe(true);
+  });
+
+  it('LIT CONTROL — the declared arm ALONE on the same shape reads `projected`', () => {
+    const census = collectDroppedRefinements('test/DeclaredOnly', nonBlank());
+    expect(census.dropped).toEqual([]);
+    expect(census.projected).toHaveLength(1);
+    expect(census.projected[0].count).toBe(1);
+    expect(census.projected[0].projectionMoved).toBe(true);
+  });
+
+  it('LIT CONTROL — the undeclared rule ALONE reads `dropped` and moved NOTHING', () => {
+    const census = collectDroppedRefinements(
+      'test/UndeclaredOnly',
+      z.string().refine((s) => s.startsWith('x'), 'must start with x'),
+    );
+    expect(census.projected).toEqual([]);
+    expect(census.dropped).toHaveLength(1);
+    expect(census.dropped[0].declaredPatterns).toEqual([]);
+    expect(census.dropped[0].projectionMoved).toBe(false);
+  });
+
+  it('two DECLARED arms on one node read `projected` — the fix is not "more than one check"', () => {
+    const both = z.object({ a: z.string().optional(), b: z.string().optional() })
+      .refine(requiredOneOf(['a', 'b']), 'one of a or b')
+      .refine(dependentRequired({ a: ['b'] }), 'a needs b');
+    const census = collectDroppedRefinements('test/TwoArms', both);
+    expect(census.dropped).toEqual([]);
+    expect(census.projected).toHaveLength(1);
+    expect(census.projected[0].count).toBe(2);
+    expect(census.projected[0].declaredPatterns).toEqual(['required-one-of', 'dependent-required']);
+  });
+
+  it('⛔ `projected` with a differential that never moved cannot occur', () => {
+    for (const schema of [nonBlank(), z.string().refine((s) => s.length > 2)]) {
+      for (const site of collectDroppedRefinements('test/Invariant', schema).projected) {
+        expect(site.projectionMoved).toBe(true);
+      }
+    }
+  });
+});
+
+describe('generator and detector project through ONE call, not two conventions', () => {
+  it('the helper applies the refinement projection with NO override from the caller', () => {
+    // The coupling, asserted where it now lives. A caller passing nothing is
+    // the generator's own call shape; if the override were still the caller's
+    // to remember, this would come back byte-identical to a bare projection.
+    const declared = z.string().refine(NON_BLANK_STRING, 'non-blank');
+    expect(projectPublishedJsonSchema(declared)).toMatchObject({
+      minLength: 1,
+      pattern: NON_BLANK_PATTERN,
+    });
+  });
+
+  it('a caller`s OWN override runs first, and does not displace the refinement pass', () => {
+    const declared = z.string().refine(NON_BLANK_STRING, 'non-blank');
+    const marked = projectPublishedJsonSchema(declared, {
+      override: (ctx) => {
+        (ctx.jsonSchema as Record<string, unknown>)['x-marked'] = true;
+      },
+    }) as Record<string, unknown>;
+    expect(marked['x-marked']).toBe(true);
+    expect(marked.pattern).toBe(NON_BLANK_PATTERN);
+  });
+
+  it('the detector`s differential reads the SAME projection the helper publishes', () => {
+    // Both halves through one call: a site the helper emits for is `projected`
+    // here, and the ledger's "a row deletion is the proof a site closed" holds
+    // only while that is true.
+    const schema = z.object({ cert: z.string().optional(), key: z.string().optional() })
+      .refine(dependentRequired({ cert: ['key'], key: ['cert'] }), 'together');
+    expect(publish(schema).dependentRequired).toEqual({ cert: ['key'], key: ['cert'] });
+    const census = collectDroppedRefinements('test/Coupled', schema);
+    expect(census.dropped).toEqual([]);
+    expect(census.projected.map((s) => s.declaredPatterns)).toEqual([['dependent-required']]);
   });
 });
