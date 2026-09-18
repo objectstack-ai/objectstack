@@ -939,19 +939,21 @@ export const GOVERNED_TIERS = Object.freeze({
  * The governed surfaces, in report order — the 2026-08-18 unified definition
  * (see header), tiered by the 2026-09-18 ruling. `prefix` entries match path
  * prefixes; `exact` entries match one repo-relative path byte-for-byte (the
- * repo-ROOT instruction files and the North Star, not `examples/AGENTS.md`,
- * not template copies). One path hit governs a whole PR — 「混合 diff 一条命中
- * 即整 PR 分叉」; proportion is never a question, and `tier` decides only what
- * the landing waits for, never whether the path is governed. The register is
- * repo-agnostic: it applies in all of `GOVERNED_REPOS`.
+ * repo-ROOT instruction files, not `examples/AGENTS.md`, not template copies —
+ * and `docs/NORTH-STAR.md`, the maintainer's North Star, joined 2026-09-18 on
+ * his word as the law above `AGENTS.md`; the PM skill cites it by section). One
+ * path hit governs a whole PR — 「混合 diff 一条命中即整 PR 分叉」; proportion is
+ * never a question, and `tier` decides only what the landing waits for, never
+ * whether the path is governed. The register is repo-agnostic: it applies in
+ * all of `GOVERNED_REPOS`.
  */
 export const GOVERNED_SURFACES = Object.freeze([
   Object.freeze({ id: 'adr', prefix: 'docs/adr/', glob: 'docs/adr/**', tier: GOVERNED_TIER_H, what: 'architecture decision records' }),
-  Object.freeze({ id: 'north-star', exact: 'docs/NORTH-STAR.md', glob: 'docs/NORTH-STAR.md', tier: GOVERNED_TIER_H, what: "the North Star (the maintainer's own text, verbatim)" }),
   Object.freeze({ id: 'claude-tree', prefix: '.claude/', glob: '.claude/**', tier: GOVERNED_TIER_S, what: 'the agent instruction tree (skills, agents, hooks, settings)' }),
   Object.freeze({ id: 'skills-catalog', prefix: 'skills/', glob: 'skills/**', tier: GOVERNED_TIER_H, what: 'the published skills catalog' }),
   Object.freeze({ id: 'agents-md', exact: 'AGENTS.md', glob: 'AGENTS.md', tier: GOVERNED_TIER_H, what: 'the repo-root agent instruction file' }),
   Object.freeze({ id: 'claude-md', exact: 'CLAUDE.md', glob: 'CLAUDE.md', tier: GOVERNED_TIER_H, what: 'the repo-root Claude instruction file' }),
+  Object.freeze({ id: 'north-star', exact: 'docs/NORTH-STAR.md', glob: 'docs/NORTH-STAR.md', tier: GOVERNED_TIER_H, what: "the maintainer's North Star — the law above AGENTS.md" }),
 ]);
 
 /**
@@ -962,11 +964,12 @@ export const GOVERNED_SURFACES = Object.freeze([
  * own source, and "looks like a path" there means "carries a separator". The
  * three `prefix` rows above have one and reach dispatch-gates already — the
  * `skills/**` row is one of the three specimens that motivated reading a hint
- * AS WRITTEN, and the `docs/NORTH-STAR.md` exact row carries one too. The two
- * repo-ROOT `exact` rows do not: a repo-root FILE carries no
- * separator, so an `AGENTS.md` or `CLAUDE.md` card derived this gate not at all
- * while the same card is GOVERNED by it (draft-only PR, maintainer merge) —
- * the loudest possible thing to learn late.
+ * AS WRITTEN. The two repo-ROOT `exact` rows do not: a repo-root FILE carries
+ * no separator, so an `AGENTS.md` or `CLAUDE.md` card derived this gate not at
+ * all while the same card is GOVERNED by it (draft-only PR, maintainer merge)
+ * — the loudest possible thing to learn late. The `docs/NORTH-STAR.md` row is
+ * `exact` WITH a separator: it reaches dispatch-gates as written and declares
+ * no hint (the self-test pins that an exact row with a separator has none).
  *
  * `<file>/**` is the form that reaches one: the extractor accepts it, and
  * `collapseHint` reduces it back to that single path. `examples/AGENTS.md` and
@@ -3361,16 +3364,16 @@ async function selfTest() {
   // ── the governed predicate: the 2026-08-18 unified list, exactly ──────────
   battery('the governed predicate: the 2026-08-18 unified list, exactly');
   const ids = (paths) => governedPathsIn(paths).map((s) => s.id);
-  assert('all-six-surfaces-declared-in-order', GOVERNED_SURFACES.map((s) => s.id).join(',') === 'adr,north-star,claude-tree,skills-catalog,agents-md,claude-md', GOVERNED_SURFACES.map((s) => s.id).join(','));
+  assert('all-six-surfaces-declared-in-order', GOVERNED_SURFACES.map((s) => s.id).join(',') === 'adr,claude-tree,skills-catalog,agents-md,claude-md,north-star', GOVERNED_SURFACES.map((s) => s.id).join(','));
   assert('adr-prefix', ids(['docs/adr/0001-x.md']).join() === 'adr');
-  assert('north-star-exact', ids(['docs/NORTH-STAR.md']).join() === 'north-star');
   assert('whole-claude-tree-not-only-skills', ids(['.claude/hooks/guard-main-checkout.sh', '.claude/agents/os-dev.md', '.claude/settings.json']).join() === 'claude-tree');
   assert('published-skills-catalog-is-governed', ids(['skills/objectstack-ui/SKILL.md']).join() === 'skills-catalog');
   assert('root-agents-md-exact', ids(['AGENTS.md']).join() === 'agents-md');
   assert('root-claude-md-exact', ids(['CLAUDE.md']).join() === 'claude-md');
+  assert('north-star-exact', ids(['docs/NORTH-STAR.md']).join() === 'north-star');
   // Near misses, each load-bearing: prefixes need their trailing slash; the
   // exact entries are the repo-root files only (see header).
-  assert('near-misses-stay-out', ids(['docs/adrs/z.md', '.claude-x/y.md', 'skillsx/a.md', 'examples/AGENTS.md', 'packages/create-objectstack/src/templates/AGENTS.md', 'apps/CLAUDE.md.bak', 'docs/NORTH-STAR.mdx', 'docs/north-star.md', 'content/docs/concepts/north-star.mdx']).length === 0, JSON.stringify(ids(['examples/AGENTS.md'])));
+  assert('near-misses-stay-out', ids(['docs/adrs/z.md', '.claude-x/y.md', 'skillsx/a.md', 'examples/AGENTS.md', 'packages/create-objectstack/src/templates/AGENTS.md', 'apps/CLAUDE.md.bak', 'docs/north-star.md', 'docs/NORTH-STAR.md.bak', 'examples/docs/NORTH-STAR.md', 'docs/NORTH-STAR.mdx', 'content/docs/concepts/north-star.mdx']).length === 0, JSON.stringify(ids(['examples/AGENTS.md'])));
   assert('a-mixed-diff-groups-by-surface', ids(['docs/adr/0001.md', 'AGENTS.md', 'package.json']).join() === 'adr,agents-md');
 
   // ── the dispatch-gates declaration (#9979) ───────────────────────────────
@@ -3380,12 +3383,11 @@ async function selfTest() {
   // shows up only as a dev dispatched on a root-file card who is not told that
   // the card is GOVERNED.
   battery('the dispatch-gates declaration (#9979)');
-  // Root = separator-less. `docs/NORTH-STAR.md` is an `exact` row too, but it
-  // carries its own separator, so dispatch-gates reads it off the row itself
-  // and a hint for it would be a second spelling of the same path.
+  // Only the SEPARATOR-LESS exact rows need a hint; an exact row that carries a
+  // separator (`docs/NORTH-STAR.md`) reaches dispatch-gates as written.
   const rootExacts = GOVERNED_SURFACES.filter((s) => s.exact && !s.exact.includes('/')).map((s) => s.exact);
+  assert('an-exact-row-with-a-separator-declares-no-hint', GOVERNED_SURFACES.filter((s) => s.exact && s.exact.includes('/')).every((s) => !ROOT_FILE_WATCH_HINTS.includes(`${s.exact}/**`)) && GOVERNED_SURFACES.some((s) => s.exact === 'docs/NORTH-STAR.md'));
   assert('every-exact-root-row-declares-a-watch-hint', rootExacts.every((f) => ROOT_FILE_WATCH_HINTS.includes(`${f}/**`)), JSON.stringify(rootExacts));
-  assert('a-non-root-exact-row-carries-its-own-separator-and-declares-no-hint', GOVERNED_SURFACES.filter((s) => s.exact && s.exact.includes('/')).map((s) => s.exact).join() === 'docs/NORTH-STAR.md' && !ROOT_FILE_WATCH_HINTS.some((h) => h.startsWith('docs/')), JSON.stringify(ROOT_FILE_WATCH_HINTS));
   assert('the-declaration-names-no-file-this-register-does-not-govern', ROOT_FILE_WATCH_HINTS.every((h) => rootExacts.includes(h.replace(/\/\*+$/, ''))), JSON.stringify(ROOT_FILE_WATCH_HINTS));
   assert('both-root-instruction-files-are-declared', ROOT_FILE_WATCH_HINTS.join(',') === 'AGENTS.md/**,CLAUDE.md/**', ROOT_FILE_WATCH_HINTS.join(','));
   // Provenance, never a matcher: `governedSlice` compares against `exact` and
@@ -3411,7 +3413,7 @@ async function selfTest() {
   assert('every-row-carries-a-tier-and-it-is-H-or-S', GOVERNED_SURFACES.every((s) => s.tier === GOVERNED_TIER_H || s.tier === GOVERNED_TIER_S), JSON.stringify(GOVERNED_SURFACES.map((s) => [s.id, s.tier])));
   assert('the-tier-values-are-distinct-single-letters-a-reader-greps', GOVERNED_TIER_H === 'H' && GOVERNED_TIER_S === 'S' && Object.keys(GOVERNED_TIERS).join() === 'H,S');
   assert('Tier-S-is-exactly-the-whole-claude-tree-row', GOVERNED_SURFACES.filter((s) => s.tier === GOVERNED_TIER_S).map((s) => s.id).join() === 'claude-tree');
-  assert('Tier-H-is-the-law-adr-north-star-skills-catalog-agents-md-claude-md', GOVERNED_SURFACES.filter((s) => s.tier === GOVERNED_TIER_H).map((s) => s.id).join() === 'adr,north-star,skills-catalog,agents-md,claude-md');
+  assert('Tier-H-is-the-law-adr-north-star-skills-catalog-agents-md-claude-md', GOVERNED_SURFACES.filter((s) => s.tier === GOVERNED_TIER_H).map((s) => s.id).join() === 'adr,skills-catalog,agents-md,claude-md,north-star');
   assert('settings-and-hooks-are-Tier-S-by-the-amendment', governedTierFor(['.claude/settings.json', '.claude/hooks/guard-main-checkout.sh']) === GOVERNED_TIER_S);
   assert('skills-agents-and-the-fact-layer-are-Tier-S', governedTierFor(['.claude/skills/pm-dispatch/SKILL.md', '.claude/agents/os-dev.md', '.claude/skills/pm-dispatch/references/contract-review.md']) === GOVERNED_TIER_S);
   assert('each-Tier-H-surface-answers-H-alone', ['docs/adr/0001-x.md', 'docs/NORTH-STAR.md', 'skills/objectstack-ui/SKILL.md', 'AGENTS.md', 'CLAUDE.md'].every((p) => governedTierFor([p]) === GOVERNED_TIER_H));

@@ -1046,12 +1046,12 @@
     },
     "system/TraceSamplingConfig": {
       "sites": [
-        "composite.element.condition.options[0]"
+        "composite.element.condition"
       ]
     },
     "system/TracingConfig": {
       "sites": [
-        "sampling.composite.element.condition.options[0]"
+        "sampling.composite.element.condition"
       ]
     },
     "ui/Action": {

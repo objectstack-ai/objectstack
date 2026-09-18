@@ -4,6 +4,7 @@ Primary AI instruction file for this repo — and the human contributors' source
 Read natively by Claude Code, GitHub Copilot (coding agent + CLI), and other agents — no
 separate `.github/copilot-instructions.md` mirror needed. When any other instruction file
 in this repo (including `.claude/skills/**`) conflicts with this one, **AGENTS.md wins**.
+`docs/NORTH-STAR.md` (先做什么: goals, priority) outranks it; `content/docs/concepts/north-star.mdx` = architecture.
 
 > **v5.0 breaking rename: `project` → `environment`** everywhere (CLI `-e`, `/api/v1/environments/:id`, header `X-Environment-Id`, `OS_ENVIRONMENT_ID`, DB column `environment_id` [control-plane tables; on the metadata tables since deprecated in favour of `organization_id`, ADR-0006 v4]). No aliases. See ADR-0006. "Project" now only means the npm/monorepo sense.
 
@@ -19,7 +20,6 @@ script's own header is the authority on detail.
 ## Communication
 
 语言规则分两件事:**和维护者说话用什么语言**,与**留在 GitHub 上的产物用什么语言**。
-一条规则一个通道,互不重叠。
 
 - **在 Claude Code 中与维护者对话一律使用中文**(对话回复、轮次报告等聊天通道里的内容)。
 - **GitHub 产物一律使用英文**:issue 与 PR 的标题、正文、评论。
