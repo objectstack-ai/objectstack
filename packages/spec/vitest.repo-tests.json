@@ -15,6 +15,7 @@
   "scripts/liveness/proof-registry.test.ts",
   "scripts/publish-smoke-boot-failure.test.ts",
   "scripts/publish-smoke-port-collision.test.ts",
+  "scripts/published-projection-choke-point.test.ts",
   "scripts/query-pointer-row.test.ts",
   "scripts/references-banner.test.ts",
   "scripts/root-index.test.ts",
