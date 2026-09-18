@@ -703,13 +703,49 @@ jobs:
             # The full comparison goes to the job log — that is what an author
             # reading `gh run view --log-failed`, or expanding this step in the
             # UI, actually sees. The ::error:: annotation after it is the
-            # one-line version for the Checks tab. Both lead with the label.
+            # one-line version for the Checks tab. Both lead with the
+            # discriminator below and only then with the label (#18375): the
+            # one class that must NOT take the label reads as if route 2 fitted
+            # it, so it cannot be a trailing caveat in either rendering.
             # Terminator sits at this block's base indentation on purpose: YAML
             # strips that much from every line, so `MSG` lands in column 0 of
             # the generated script. Do not re-indent it.
             cat <<'MSG'
-          This PR adds no changeset. There are TWO ways forward -- route 3 used to be
-          a third and is now closed, see below. Pick by what the PR actually releases:
+          This PR adds no changeset. READ ROUTE 0 FIRST -- one class of PR takes
+          NEITHER of the ways forward below -- and then pick by what the PR actually
+          releases (route 3 used to be a third way and is now closed, see below).
+
+            0. DISCRIMINATOR -- does this PR CHANGE a changeset instead of adding one?
+                 git diff --name-status <the merge base above> HEAD -- '.changeset/*.md'
+               If every row is `M` or `D` and none is `A`, this PR adds no changeset
+               because it is CORRECTING somebody else's PENDING release note. That is
+               the DELIBERATE CORRECTION class check-empty-changeset.mjs names, and it
+               is a decision about a release rather than a missing declaration.
+               -> do NOT apply 'skip-changeset'. Write the confirmation on the PR --
+                  name the note and what changed under it, and get it confirmed there
+                  in writing -- and LEAVE THIS CHECK RED.
+
+               The red is the point, and it costs nothing: 'Check Changeset' is not one
+               of the required contexts, so its red blocks no merge and the approver
+               merges over it. Staying red is what puts the decision in front of a
+               person instead of routing around it. The label is refused here for two
+               reasons rather than one: it would be a FALSE DECLARATION -- it says this
+               PR releases nothing, while the note you rewrote is a release that is
+               still pending -- and it exempts the whole job, taking the refusal that
+               names this class with it. Ruled on #18375 (ruling D, maintainer
+               2026-09-18): the 'skip-changeset' label is never applied to a PR that
+               edits an existing changeset.
+
+               This is said HERE rather than in that refusal on purpose. The step below
+               prints the two-class remedy (COLLISION vs DELIBERATE CORRECTION), but on
+               this class it never speaks: a PR that only corrects somebody else's note
+               adds none of its own, so THIS step fails first and the steps after it
+               are skipped.
+
+               A PR that corrects a pending note AND releases something of its own does
+               both: route 1 for its own release, under a name that cannot collide
+               (.changeset/<issue>-<slug>.md), and the written confirmation above for
+               the correction. The check still stays red.
 
             1. It releases something
                -> run 'pnpm changeset' and name the packages it releases.
@@ -761,6 +797,10 @@ jobs:
                The label is a gate-level exemption. It produces NO input for
                changesets/action, so it cannot affect a release.
 
+               NOT this route if route 0 matched. A PR that corrects somebody else's
+               pending note releases nothing of its own either, so this line reads as
+               if it fitted -- and it is the one case where the label is refused.
+
                You do not have to race this run to apply it: the step above waits
                out a window measured from PR creation before this verdict is
                reached (#6378), so a label applied promptly after 'gh pr create'
@@ -793,10 +833,12 @@ jobs:
                changesets already on main are exempt and stay where they are; only
                newly introduced ones are rejected.
 
-          If you are unsure, take route 2. A wrong 'skip-changeset' label is caught by
-          review; a wrong empty changeset is caught by nobody.
+          If you are unsure between routes 1 and 2, take route 2. A wrong
+          'skip-changeset' label is caught by review; a wrong empty changeset is caught
+          by nobody. Route 0 is not part of that trade -- it is answered by the diff,
+          not by judgement, and the label is wrong there however unsure you are.
           MSG
-            echo "::error::This PR adds no changeset. If it releases nothing (including any 'skills/**' change -- see #5947), apply the 'skip-changeset' label; otherwise run 'pnpm changeset' and name the packages. An empty-frontmatter changeset is NOT a third option any more: the step below rejects newly added ones (#5471), because it is a real input to changesets/action and an all-empty set stalls the release silently and greenly (#4898). Full comparison in this step's log."
+            echo "::error::This PR adds no changeset. FIRST: if its only .changeset rows are CHANGED, not added, this PR corrects somebody else's pending release note -- do NOT apply 'skip-changeset'; write the confirmation on the PR, naming the note and what changed under it, and leave this check red (#18375). Otherwise, if it releases nothing (including any 'skills/**' change -- see #5947), apply the 'skip-changeset' label; otherwise run 'pnpm changeset' and name the packages. An empty-frontmatter changeset is NOT a third option any more: the step below rejects newly added ones (#5471), because it is a real input to changesets/action and an all-empty set stalls the release silently and greenly (#4898). Full comparison in this step's log."
             exit 1
           fi
           echo "This PR adds $ADDED changeset(s), so it declares a release of its own."
