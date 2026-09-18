@@ -428,15 +428,78 @@ describe('#12125 — the contract is exhaustive over `compile.ts`, not just over
     expect(found[1]).toContain('conversions: conversionNotices');
   });
 
-  it('all 11 `emitJson` exits carry `conversions` — 10 failure exits and the success payload', () => {
+  it('every `emitJson` exit carries `conversions` — the exit count is READ OFF the source, never an integer', () => {
     const literals = payloadLiterals(SRC);
-    // The tenth failure exit is ADR-0130 D4's per-package author-time rule leg
-    // (#14439): a multi-package artifact runs the same rule table once per
-    // package, and its refusal is an exit like any other — which is exactly
-    // what this count exists to notice.
-    expect(literals, 'the `emitJson` exit count moved — a new exit must carry `conversions` too').toHaveLength(11);
-    expect(literals.filter((p) => p.includes('success: false'))).toHaveLength(10);
+
+    // ⭐ #18894 — these three lines read `toHaveLength(11)` / `10` / `1`. All
+    // three were CORRECT on the day this card was filed, and that is the point:
+    // the defect is the SHAPE, not a stale number. The identical shape on the
+    // `validate.ts` pair put `main` in the red with no run to say so (#18848)
+    // the moment `validate.ts` gained a seventh, entirely legitimate exit
+    // (#18769) — the CONTRACT held throughout and only the COUNT was stale.
+    // Because this file is nightly-tier by NAME (`*.e2e.test.ts` —
+    // `scripts/nightly-tiers.mjs`), no pull request and no merge-queue run can
+    // collect it: measured on the branch that landed this, `OS_TEST_TIERS`
+    // unset collects 267 files in this package with ZERO of them this one, and
+    // `=nightly` collects 68 with this one in it. An integer that only a cron
+    // can read is a pin with no reader at the moment it matters — the honest
+    // new exit merges green and `main` is red from that moment until a cron
+    // says so.
+    //
+    // ⛔ So the count is not re-pinned to 12 — that just re-arms the same trap
+    // for exit thirteen. It is DERIVED: the extractor read every `emitJson`
+    // call site the file has, whatever today's number is. An honest new exit
+    // stays green here and is still held to the contract below and to the
+    // sink loop further down; a needle that stopped matching one reddens HERE
+    // instead of quietly turning that negative into a vacuous pass over fewer
+    // exits than the file has.
+    //
+    // Both sides read the MASKED source, which is what keeps them symmetric AND
+    // keeps prose out of both (#18520, applied to this file by #18924).
+    // Measured on the commit that landed this: `compile.ts` carries 13 raw
+    // occurrences of the identifier, of which 2 are prose the mask blanks and 1
+    // is the `import { … emitJson, … }` line — which carries no paren and so
+    // matches neither side — leaving raw and masked agreeing on the same 11
+    // payload literals and the same 11 call sites. ⚠️ That agreement is a
+    // reading, not a law: `emitJson` is IMPORTED here, never declared, so the
+    // looser `\bemitJson\s*\(` cannot match a `function emitJson(` definition
+    // and over-count. A future file that declares it would break the symmetry
+    // and reddens HERE, which is the correct place to find that out.
+    const callSites = SRC.match(/\bemitJson\s*\(/g) ?? [];
+    expect(
+      literals,
+      'an `emitJson(` call site the payload extractor could not read — the contract below would skip it',
+    ).toHaveLength(callSites.length);
+
+    // The one integer left, and it rots only in the direction that has to be
+    // reviewed anyway: exits being REMOVED. Ten is the population the ruling in
+    // this file's header was made over — nine failure exits plus the terminal
+    // success payload, the count `#12285` pinned on the day it landed — not a
+    // count of today. (Today is eleven: the tenth FAILURE exit is ADR-0130 D4's
+    // per-package author-time rule leg, #14439, a multi-package artifact
+    // running the same rule table once per package. It arrived after the ruling
+    // and is an exit like any other — which is exactly what a derived count
+    // exists to absorb and a frozen one exists to trip over.) It is also the
+    // floor under the one vacuum the derived pair shares — an `emitJson`
+    // renamed out of existence takes BOTH sides to zero and every assertion
+    // here with them.
+    expect(
+      literals.length,
+      '`os build --json` publishes fewer exits than the ruling above was made over',
+    ).toBeGreaterThanOrEqual(10);
+
+    // Exactly one success payload; every other exit is a failure exit. The
+    // second count is derived from the length, so the two together also assert
+    // the PARTITION — an exit carrying neither literal reddens.
+    //
+    // ⚠️ The verdict key here is `success:`, NOT the `valid:` the sibling pair
+    // over `validate.ts` reads — the two commands do not share it. Measured on
+    // the commit that landed this, over the 11 masked payload literals of
+    // `compile.ts`: `success: false` 10, `success: true` 1, `valid: false` 0,
+    // `valid: true` 0. A verbatim port of the sibling's two lines would assert
+    // over an empty population.
     expect(literals.filter((p) => p.includes('success: true'))).toHaveLength(1);
+    expect(literals.filter((p) => p.includes('success: false'))).toHaveLength(literals.length - 1);
 
     const bare = literals.filter((p) => !p.includes('conversions:'));
     expect(
