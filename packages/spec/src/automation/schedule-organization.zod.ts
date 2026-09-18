@@ -81,6 +81,22 @@ import { z } from 'zod';
  * organization's opinion about who it belonged to — which is the defect #16659
  * opened on, read from the other side.
  *
+ * ⚠️ With ONE stated exception, so the sentence above is not read as a promise
+ * it cannot keep. The two halves ask different questions and are answered by
+ * different faces of the shared resolver: the history row is STAMPED (`who is
+ * this row about` — `tenancy.organizationField` wins there, by the #8778 /
+ * cloud#1395 ruling), while the run's acting organization is a WALL reading
+ * (`what is this row scoped by`, which never consults that key). They give the
+ * same answer on every object where the two coincide — every ordinary object,
+ * because a declared stamp column is what makes them differ and one shipped
+ * object declares one (`sys_api_key`, deliberately unwalled, #8287). Sweeping
+ * THAT object under `group` stamps the history row from its stamp column while
+ * the run itself acts as nothing and its inbox writes are refused. That is the
+ * correct pair of answers rather than a residue of the old disagreement — a row
+ * nothing walls has no organization for a run to act as, however clearly it
+ * says who it is about — but it is a divergence, and it is recorded here rather
+ * than smoothed over.
+ *
  * ⛔ A record-less run under `group` that declared nothing still resolves NOTHING,
  * and takes the existing `walled-posture` refusal at the write
  * (`resolveSystemWriteOrganization`) — loud, by name, carrying the remedy. The
@@ -153,7 +169,7 @@ export const ScheduleOrganizationSchema = z
   .string()
   .min(1)
   .describe(
-    'Organization id (sys_organization.id) this scheduled/time-relative flow runs as. A time-triggered run has no session to inherit a tenant from. Required under the isolated tenancy posture: a flow that declares none is not armed. Optional under group, where an undeclared run acts as the swept record own organization. Not required under single, where the run carries no organization.',
+    'Organization id (sys_organization.id) this scheduled/time-relative flow runs as. A time-triggered run has no session to inherit a tenant from. Required under the isolated tenancy posture: a flow that declares none is not armed. Optional under group, where an undeclared run acts as the organization of the record it swept. Not required under single, where the run carries no organization.',
   );
 
 /**

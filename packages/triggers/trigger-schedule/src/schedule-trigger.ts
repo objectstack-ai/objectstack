@@ -341,13 +341,22 @@ export function refuseScheduledWorkDisabled(
  * Refuse to bind a time-triggered flow that declares no acting organization
  * (#16659): say why at `error`, then THROW so the engine records the refusal.
  *
- * ## When this fires, after #17396
+ * ## When this fires, after #17396 and #18378
  *
- * ⚠️ Under a WALLED posture (`group` / `isolated`) with scheduled work switched
- * on, and nowhere else. The 2026-09-08 ruling this implements is unchanged
- * where it applies — a flow declares its organization or it is not armed, no
- * fan-out, no organization is ever chosen for it — but it applies to the
- * postures that have a wall to be crossed. On a `single` deployment with the
+ * ⚠️ Under posture `isolated` with scheduled work switched on, and nowhere
+ * else. The 2026-09-08 ruling this implements is unchanged where it applies — a
+ * flow declares its organization or it is not armed, no fan-out, no
+ * organization is ever chosen for it — but [#18378, ruling A′] narrowed WHERE
+ * it applies from "any walled posture" to `isolated` alone. ⛔ `group` is not a
+ * near-miss of `isolated`: it enforces a wall AND reads group-wide, so an
+ * undeclared flow there binds and each run it launches acts as its own swept
+ * record's organization; a record-less one carries nothing and is refused at
+ * its first tenant-scoped write instead, loudly and by name. The single
+ * predicate is {@link ScheduledWorkPolicy.requiresActingOrganization}, which
+ * this function's caller gates on — ⛔ never `postureEnforcesWall`, which
+ * answers `true` for `group` and would re-arm this refusal there.
+ *
+ * On a `single` deployment with the
  * switch on there is exactly one organization — plugin-auth's ORG-CREATE
  * POSTURE GATE refuses a second: `auth-manager.ts`'s `beforeCreateOrganization`
  * answers 403 "Creating additional organizations is disabled on this

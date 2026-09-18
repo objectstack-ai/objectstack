@@ -3,6 +3,7 @@
 "@objectstack/spec": minor
 "@objectstack/trigger-schedule": minor
 "@objectstack/metadata-core": minor
+"@objectstack/cli": patch
 ---
 
 feat(spec,types,triggers)!: `group` runs package-authored scheduled work without a declaration, owning each run's writes per record (#18378)
@@ -53,6 +54,16 @@ context as the fallback and never the primary. Before this change those two
 halves disagreed under `group`: the history row was stamped from the record while
 the inbox and delivery rows followed an acting context that could not exist
 there, so they were refused while the tick summarised itself as healthy.
+
+⚠️ With one stated exception, because the two halves ask different questions:
+the history row is STAMPED (`tenancy.organizationField` wins there) while the
+run's acting organization is a WALL reading that never consults that key. They
+agree on every object where the two coincide — which is every ordinary object,
+since a declared stamp column is what makes them differ and one shipped object
+declares one (`sys_api_key`, deliberately unwalled). Sweeping that object under
+`group` stamps its history row while the run itself acts as nothing: the correct
+pair of answers, not a residue of the old disagreement, and recorded rather than
+smoothed over.
 
 ⛔ A record-less run under `group` that declared nothing still resolves
 **nothing** and is refused at its first tenant-scoped write (`walled-posture`,
