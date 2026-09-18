@@ -150,6 +150,16 @@ export * from './autonumber-format';
 export * from './validation.zod';
 export * from './hook.zod';
 export * from './hook-body.zod';
+// [#18163] The TYPED AUTHORING FACE of `HookContext.api` — `HookApi`,
+// `HookObjectApi` and the query / count / update / delete option shapes the
+// engine actually accepts. `contracts/scoped-context.ts` declares the CHECKED
+// IMPLEMENTATION contract the engine's `ScopedContext` carries an `implements`
+// clause against, with deliberately loose `Record<string, unknown>` bags; this
+// is the other half — the same seam with the engine's own option vocabulary,
+// derived from the `Engine*Options` schemas so the two cannot drift, and
+// carrying NO `filter` key, so the `where`/`filter` mixing the engine refuses
+// on a value disagreement is a compile error instead of a runtime throw.
+export * from './hook-api';
 // The bulk-write hook dispatch contract (ADR-0058 Addendum II) — what a
 // predicate (`multi: true`) write hands a lifecycle hook in BOTH phases: per-row
 // dispatch, per-row `previous`, a batch-scoped payload, and one budget ceiling

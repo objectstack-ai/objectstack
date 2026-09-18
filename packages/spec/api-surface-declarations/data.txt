@@ -12,8 +12,8 @@
 # excluded: documentation drift is `check:docs`'s axis, not this one.
 #
 # entry: ./data
-# exported names: 833
-# declarations: 846
+# exported names: 844
+# declarations: 857
 #
 # GENERATED — ⛔ never hand-edited. Regenerate after a real build:
 #   pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec gen:api-surface-declarations
@@ -6166,6 +6166,46 @@ declare const EngineQueryOptionsSchema: z.ZodObject<{
     expand: z.ZodOptional<z.ZodLazy<z.ZodRecord<z.ZodString, z.ZodType<QueryAST, QueryInput, z.core.$ZodTypeInternals<QueryAST, QueryInput>>>>>;
     distinct: z.ZodOptional<z.ZodNever>;
 }, z.core.$strip>;
+
+// ── EngineTransactionInfo (interface) ──
+interface EngineTransactionInfo {
+    /**
+     * `true` when THIS call opened the transaction and therefore owns its
+     * commit/rollback; `false` when it JOINED an already-open ambient one
+     * (ADR-0067 D2) and some outer caller owns the outcome.
+     *
+     * The join is correct and stays — a nested `begin` would take a second
+     * connection (deadlocking a single-connection SQLite pool) and would not be
+     * covered by the outer rollback. What was missing is that the callback
+     * could not TELL: a joined callback's `throw` unwinds work the outer owner
+     * may still commit or roll back on its own terms, and guarantees phrased
+     * as "this whole unit rolls back together" (`batchData`'s rollback
+     * response, ADR-0119 D4) hold only for the owner. A callback that must not
+     * promise what it does not control reads `owned` and says so.
+     */
+    owned: boolean;
+}
+
+// ── EngineTransactionOptions (interface) ──
+interface EngineTransactionOptions {
+    /**
+     * Fail CLOSED when the datasource cannot give a real transaction.
+     *
+     * Default (`undefined` / `false`) keeps ADR-0119 D1's declared degrade: a
+     * driver without `beginTransaction` runs the callback with no transaction
+     * and no rollback, warning once. That degrade is right for callers who can
+     * live without atomicity (test doubles, in-memory drivers) and wrong for
+     * callers whose whole reason to open a transaction is the rollback.
+     *
+     * With `require: true` the engine THROWS instead of degrading, before the
+     * callback runs — so a caller that cannot tolerate losing atomicity states
+     * it once, at the call site, instead of re-deriving `batchData`'s probe.
+     * That probe is the precedent being generalized here (ADR-0119 D4, cited in
+     * older text as ADR-0118 D4 — see that ADR's renumbering note): an `atomic`
+     * request refuses rather than silently running best-effort.
+     */
+    require?: boolean;
+}
 
 // ── EngineUpdateOptions (type) ──
 type EngineUpdateOptions = z.input<typeof EngineUpdateOptionsSchema>;
@@ -14276,6 +14316,26 @@ declare const GroupByNodeSchema: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
 // ── Hook (type) ──
 type Hook = z.input<typeof HookSchema>;
 
+// ── HookApi (interface) ──
+interface HookApi {
+    /** The repository for `name`, bound to this context. */
+    object(name: string): HookObjectApi;
+    /**
+     * Run `callback` inside one driver transaction: committed when it returns,
+     * rolled back when it throws.
+     *
+     * The callback receives a NEW `HookApi` whose operations share the
+     * transaction handle — reach objects through THAT context (`tx.object(…)`),
+     * not the outer one, or the writes land outside the transaction.
+     *
+     * The second parameter is declared because the PRODUCER hands it
+     * unconditionally (`ScopedContext.transaction`, #5696). Contravariance keeps
+     * the zero- and one-argument callbacks authors actually write assignable, so
+     * the truthful signature is also the more permissive one.
+     */
+    transaction<T>(callback: (trxCtx: HookApi, info: EngineTransactionInfo) => Promise<T>, opts?: EngineTransactionOptions): Promise<T>;
+}
+
 // ── HookBody (type) ──
 type HookBody = z.input<typeof HookBodySchema>;
 
@@ -14370,8 +14430,20 @@ declare const HookContextSchema: z.ZodObject<{
     }, z.core.$strip>>;
 }, z.core.$strip>;
 
+// ── HookCountQuery (type) ──
+type HookCountQuery = Omit<EngineCountOptions, 'context'>;
+
+// ── HookDeleteOptions (type) ──
+type HookDeleteOptions = Omit<EngineDeleteOptions, 'context'> & HookDriverPassthroughOptions;
+
 // ── HookDispatch (type) ──
 type HookDispatch = NonNullable<HookContext['dispatch']>;
+
+// ── HookDoc (type) ──
+type HookDoc = Record<string, unknown>;
+
+// ── HookDriverPassthroughOptions (type) ──
+type HookDriverPassthroughOptions = Pick<DriverOptions, 'transaction' | 'tenantId' | 'tenantIds' | 'timezone' | 'bypassTenantAudit' | 'preserveAudit'>;
 
 // ── HookEvent (const) ──
 declare const HookEvent: z.ZodEnum<{
@@ -14388,8 +14460,50 @@ declare const HookEvent: z.ZodEnum<{
 // ── HookEventType (type) ──
 type HookEventType = z.input<typeof HookEvent>;
 
+// ── HookObjectApi (interface) ──
+interface HookObjectApi {
+    /**
+     * Read every record the query selects.
+     *
+     * `Promise<any[]>` mirrors `IScopedObjectRepository.find` and
+     * `IDataEngine.find`; narrowing it here would make this face disagree with
+     * the two declarations it forwards through.
+     */
+    find(query?: HookQuery): Promise<any[]>;
+    /** Read the ONE record the query selects, or `null`. */
+    findOne(query?: HookQuery): Promise<Record<string, any> | null>;
+    /** Count the records the query selects. */
+    count(query?: HookCountQuery): Promise<number>;
+    /** Insert one record, or an array of records. */
+    insert(data: HookDoc | HookDoc[]): Promise<any>;
+    /**
+     * Update records: the record for the single-record form, the affected-row
+     * count for the predicate form (`{ where, multi: true }`), `null` when the
+     * write matched nothing.
+     */
+    update(data: HookUpdateDoc, options?: HookUpdateOptions): Promise<Record<string, any> | number | null>;
+    /**
+     * Update a single record by id — the id travels as the first argument.
+     *
+     * Answers the written record, or `null` when the id matched nothing. A falsy
+     * id is not a narrower answer but a REFUSAL: `0` and `''` identify no row, so
+     * the dispatch rejects and the call throws.
+     */
+    updateById(id: string | number, data: HookUpdateDoc): Promise<Record<string, any> | null>;
+    /**
+     * Delete records — `{ where, multi: true }` for the predicate form.
+     *
+     * `Promise<boolean | number>` is what `IDataEngine.delete` declares, one door
+     * down from this method.
+     */
+    delete(options?: HookDeleteOptions): Promise<boolean | number>;
+}
+
 // ── HookParsed (type) ──
 type HookParsed = z.infer<typeof HookSchema>;
+
+// ── HookQuery (type) ──
+type HookQuery = Omit<EngineQueryOptions, 'context' | 'top' | 'cursor' | 'distinct'> & HookDriverPassthroughOptions;
 
 // ── HookSchema (const) ──
 declare const HookSchema: z.ZodObject<{
@@ -14483,6 +14597,12 @@ declare const HookSchema: z.ZodObject<{
         inherit: "inherit";
     }>>;
 }, z.core.$strict>;
+
+// ── HookUpdateDoc (type) ──
+type HookUpdateDoc = HookDoc;
+
+// ── HookUpdateOptions (type) ──
+type HookUpdateOptions = Omit<EngineUpdateOptions, 'context' | 'upsert'> & WriteObservabilityOptions & HookDriverPassthroughOptions;
 
 // ── IMPORT_BOOLEAN_FALSE_TOKENS (const) ──
 declare const IMPORT_BOOLEAN_FALSE_TOKENS: ReadonlySet<string>;
