@@ -198,12 +198,12 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - objectui 卡按修复落点分流三流,`domain:ui` 是唯一新增标签。
 - `domain:devx`(工程面)与 `domain:spec`(契约面)跨仓归各自车道。
 - 其余(发布库与 apps)归 `domain:ui` 执行席;症状位置不改流向,docs 随所记录的面走。
-- 落点不明留分诊首触,⛔ 不猜。
 - 车道可分席(席号 `· seat N`,或域×仓):忙时一车道开多席,闲时收归一席;每席独立座位贴。
 - 认领评论带 `Seat: domain:X#N` 行申报席号(缺省席 1);同席认领互斥,他席认领不触发自退。
 - 拆分触发预登记:单轮逼近 fire 周期,或某仓在全序下持续断粮 ⇒ 按仓拆回多席。
 - seam 卡单一归属:归修复落地仓的席,双仓皆动 objectstack 侧主导。
 - `scripts/pm/**` 等住 objectstack 的全板工具链单写手恒为 objectstack 侧席,他侧上游立卡回链。
+- 工装只答被告知的仓,缺 `--repo`/`PM_SWEEP_REPO` 即答 objectstack;⛔ 不答手上那张卡的仓。
 - 规则 1:issue 住在修复落地的仓,分诊时按判据严格执行。
 - 判据:正文抽掉 objectstack 还成立 ⇒ 当场转仓(console/UI 缺陷即转 objectui);不成立才是缝卡。
 - transfer 不可用时重建:出处头 + 裸 `#N` 改全名 + 关源单为 moved。
@@ -536,7 +536,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 终报要求随派发词带一句:只收机器可核字段(gates / line_budget / deviations / files_changed)。
 - 派发令恒带 `Writes:` 行:只走 REST 代理、写预算(端点清单)、`mcp_calls` 计数,dev 两数都报。
 - 清单、路径、行号在派发那一刻从树上取,⛔ 不从卡片/上次派发/记忆抄。
-- 门禁清单取 `dispatch-gates.mjs --commands` 逐条跑,退出码先落盘,`--ran` 对账;⛔ 不抓人读输出。
+- 门禁清单取 `dispatch-gates --commands --repo 仓` 逐条跑,退出码先落盘,`--ran` 对账;被拒即手推。
 - 点名单是线索不是规格,dev 对实际改动重取补跑;行级断言转述前必须自己重验。
 - 派发令里关于代码的危害断言必须有读数(点名 call site / 路径 / 迁移)。
 - 搬自任何工件(含己文)本轮未亲测计数/零命中/文件面:重测或注「未验证」点名来源。
@@ -625,7 +625,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 受管面两层:事实层仅本技能 `references/`,其余为规则层(含发布 `skills/**` 与 SKILL.md)。
 - 规则层四件套等人批;事实层 PR(受管路径全在该目录)经席内达档复核后 ready → 入队。
 - 路径面干净的才转 ready → 入队;队列是唯一被认可的落地路径,⛔ 永不队列外合并。
-- 入队资格 = 每个 check 为 success 或预期 skip(名单:check-expected-skips.mjs),⛔ 不是 required 子集。
+- 入队资格:每 check 绿或预期 skip,⛔ 非必查子集;名单 check-expected-skips.mjs 只判 objectstack。
 - 非必查红是真缺陷或坏门,归 PM 入队前处置;第三种按设计而红,三条全立才可带红入队:
 - 源码自述 pushed 分支上按设计而红、不跑 `merge_group`、PR 评论记明门与因,缺一即否。
 - 本段只适用本循环派发的 dev PR;PM 自己的工具 PR 留维护者。
@@ -642,7 +642,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 真正设计分叉照旧进决策箱,席内复核 ⛔ 不替代维护者裁定。
 - 外部评审链降为可选事后审计,非放行前提。
 - `needs:contract-review`(恒英文)由席位同笔挂:PR 一现即挂 PR;报告先到则先挂卡。
-- `Clause-②: yes` 认领同笔卡上挂标;PR 开出读 `check-clause2-carriers --pair PR-NUMBER` 为 0 再请审。
+- `Clause-②: yes` 认领同笔卡上挂标;开 PR `PM_SWEEP_REPO=仓 check-clause2-carriers --pair N` 0 才请审。
 - 挂标后复核完成前短暂停靠;⛔ 不前瞻预挂。
 - 席内复核的适用面、载体纪律、资格与归属、降档保险丝见 `references/contract-review.md`。
 - 碰生成物的 PR 入队前先同步 + 整体重生成:四步序 `bash scripts/pm/os-regen-merge.sh`。
