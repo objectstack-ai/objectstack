@@ -56,15 +56,16 @@ const shapeKeys = (schema: unknown): string[] =>
  * assembled package body also declares. Derived, per the module header.
  *
  * The complement (the artifact-envelope keys `manifest`, `packages`, `api`,
- * `server`, `i18n`, `runtimeModule`, `onEnable`) is what an option-B artifact
- * keeps at the top level.
+ * `server`, `i18n`, `runtimeModule`, `onEnable`, `plugins`, `devPlugins`,
+ * `devHint`, `devLogins`) is what an option-B artifact keeps at the top
+ * level.
  */
 export const PACKAGE_OWNED_COLLECTION_KEYS: readonly string[] = (() => {
   const bodyKeys = new Set(shapeKeys(AssembledPackageBodySchema));
   return shapeKeys(ObjectStackDefinitionSchema).filter((k) => bodyKeys.has(k)).sort();
 })();
 
-/** The nine keys an option-B artifact still carries at its top level. */
+/** The eleven keys an option-B artifact still carries at its top level. */
 export const ARTIFACT_ENVELOPE_KEYS: readonly string[] = (() => {
   const owned = new Set(PACKAGE_OWNED_COLLECTION_KEYS);
   return shapeKeys(ObjectStackDefinitionSchema).filter((k) => !owned.has(k)).sort();

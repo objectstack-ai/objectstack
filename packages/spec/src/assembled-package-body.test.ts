@@ -77,6 +77,8 @@ const ARTIFACT_ENVELOPE_KEYS = [
   'onEnable',      // one bundle, one lifecycle hook (AppPlugin invokes a single one)
   'plugins',       // runtime assembly instructions a host hands to `kernel.use()` — not metadata (#15219 ruling A)
   'devPlugins',    // the `os dev` load list — the same class as `plugins` (#15219 ruling A)
+  'devHint',       // one sentence the development BOOT BANNER prints — a property of the boot, not of a package (#17556)
+  'devLogins',     // the first-run credentials that banner prints — read off the top level, never out of a body (#17556)
 ].sort();
 
 const shapeKeys = (schema: unknown): string[] =>
