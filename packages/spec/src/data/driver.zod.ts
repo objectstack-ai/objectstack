@@ -147,14 +147,24 @@ const capRemoved = (key: string, mechanism: string) =>
  *   autonumber generation to the driver when set.
  * - `batchSchemaSync` — opt-in for `syncSchemasBatch()` even where a base
  *   class inherits the method; the engine ANDs it with method presence.
+ * - `transactionsUnsupported` — opt-OUT of `beginTransaction()` for a
+ *   transport that inherits the method from a base class it cannot honour;
+ *   the engine ANDs its negation with method presence.
  *
- * Everything else IS the method: transactions gate on
- * `driver.beginTransaction`, aggregate pushdown on
+ * Everything else IS the method: aggregate pushdown gates on
  * `typeof driver.aggregate === 'function'`, schema sync on
  * `typeof driver.syncSchema === 'function'`, and the REQUIRED CRUD/bulk
  * methods are called unconditionally. Do not add a boolean here for behaviour
  * that a method's presence — or a caller that does not exist yet — already
  * decides; that is how thirty-one dead bits accumulated.
+ *
+ * ⭐ The reverse of that last sentence is the bar a NEW bit has to clear, and
+ * it is the bar `transactionsUnsupported` cleared: a bit arrives WITH the
+ * engine reader that dispatches on it, in the same change. Adding one to
+ * "document" a transport is the ADR-0078 false affordance this record was
+ * pruned for; adding one because method presence provably lies — a subclass
+ * inherits a door its own transport cannot open — is what the three survivors
+ * above already are.
  */
 export const DriverCapabilitiesSchema = lazySchema(() => z.object({
   // ============================================================================
@@ -223,6 +233,42 @@ export const DriverCapabilitiesSchema = lazySchema(() => z.object({
    */
   batchSchemaSync: z.boolean().optional().describe('Supports batched schema sync to reduce schema DDL round-trips (absence = false)'),
 
+  /**
+   * This transport has NO transactions — refuse rather than pretend.
+   *
+   * The mirror image of `batchSchemaSync`, and it exists for the same reason:
+   * a base class can publish `beginTransaction()` while the transport the
+   * subclass actually speaks cannot carry a transaction at all, so method
+   * presence lies. `batchSchemaSync` is the opt-IN for that shape; this is the
+   * opt-OUT. The engine reads it as `presence AND NOT this bit` — a driver
+   * with no `beginTransaction` is unaffected, and a driver that declares
+   * nothing is unaffected.
+   *
+   * Set it when handing back a handle would be a FALSE SUCCESS rather than a
+   * missing feature: the caller gets a handle, the writes execute and are
+   * already durable, `rollback()` resolves and undoes nothing. The libSQL
+   * remote transport is the measured instance — its data methods take no
+   * `options` argument at all, so a handle cannot reach the statement that
+   * would have to join it.
+   *
+   * What the engine does with it: `engine.transaction()` takes the DECLARED
+   * non-transactional path (ADR-0119 D1) instead of opening one — the
+   * degrade warns once per datasource, and a caller that passes
+   * `require: true` gets `TransactionUnsupportedError` BEFORE the callback
+   * writes anything. Both are the exact answers a driver with no
+   * `beginTransaction` already gets; this bit is only how a driver that
+   * INHERITED the method joins them.
+   *
+   * ⛔ Not a way to say "transactions are off right now". It describes the
+   * transport, is read at dispatch time, and a driver whose answer can change
+   * per call should not be answering here at all.
+   *
+   * Optional; absence means `false`, exactly like `batchSchemaSync` — the
+   * whole point is that a driver which declares nothing keeps the behaviour it
+   * has today.
+   */
+  transactionsUnsupported: z.boolean().optional().describe('Transport cannot honour transactions even though `beginTransaction` is inherited (absence = false)'),
+
   // ============================================================================
   // Retired capability bits (#4634, ADR-0049 enforce-or-remove) — 17.0.0
   // ============================================================================
@@ -263,11 +309,18 @@ export const DriverCapabilitiesSchema = lazySchema(() => z.object({
     + '(#3298), never from this record.')),
 
   transactions: retiredKey(capRemoved('transactions',
-    'Transaction use is gated on METHOD PRESENCE — `driver.beginTransaction` '
-    + '(`engine.transaction()`, ADR-0034 ambient transactions): a driver without the method '
-    + 'gets the non-transactional fallback, whatever this bit claimed. Discovery\'s '
+    'Transaction use is gated on the DRIVER\'S DECLARATION, no longer on METHOD PRESENCE '
+    + 'alone: `engine.transaction()` asks `driverSupportsTransactions(driver)` — '
+    + '`driver.beginTransaction` present AND `transactionsUnsupported` not set (ADR-0034 '
+    + 'ambient transactions, ADR-0119 D1). A driver without the method — or a transport '
+    + 'that declares that live bit — gets the non-transactional fallback, whatever this '
+    + 'bit claimed. Discovery\'s '
     + '`transactionalBatch` capability is likewise derived from `engine.transaction` plus the '
-    + 'mounted batch route, never from this bit.')),
+    + 'mounted batch route, never from this bit. The live `transactionsUnsupported` bit is NOT '
+    + 'this key restored and is not its opposite spelled differently: this one CLAIMED support '
+    + 'nothing checked, that one DENIES support the engine does check, and it is written only by '
+    + 'a transport that inherits `beginTransaction` from a base class it cannot honour. A driver '
+    + 'with real transactions declares nothing.')),
   savepoints: retiredKey(capRemoved('savepoints',
     'No savepoint code path exists in the engine — a capability bit for a feature the '
     + 'platform does not call is a false affordance, not documentation.')),
@@ -632,6 +685,12 @@ export const DriverInterfaceSchema = lazySchema(() => z.object({
 
   /**
    * Begin a new database transaction.
+   *
+   * ⛔ Declaring this member is not a claim that the transport honours a
+   * handle — a subclass inherits it. A transport whose data methods cannot
+   * receive `options.transaction` declares `transactionsUnsupported` above,
+   * and the engine never calls this on it.
+   *
    * @param options - Isolation level and other settings.
    * @returns A transaction handle to be passed to subsequent operations via `options.transaction`.
    */
@@ -758,3 +817,41 @@ export type DriverConfigParsed = z.infer<typeof DriverConfigSchema>;
 export type PoolConfig = z.input<typeof PoolConfigSchema>;
 /** Post-parse shape of {@link PoolConfig} — defaults applied, transforms run (ADR-0122). */
 export type PoolConfigParsed = z.infer<typeof PoolConfigSchema>;
+
+/**
+ * Can the engine open a transaction on this driver?
+ *
+ * ONE definition of the invariant, in the package that declares it, so the
+ * engine's three transaction entrances cannot drift apart — the same shape
+ * `isMultiValueField` holds for `FieldSchema.multiple`. Every caller that used
+ * to write `typeof driver.beginTransaction === 'function'` asks this instead.
+ *
+ * Two clauses, and they answer different questions:
+ *
+ *  1. **The method is there.** A driver with no `beginTransaction` (the
+ *     in-memory driver, a test double, a foreign engine) has nothing to open.
+ *     This clause is unchanged from the pre-`transactionsUnsupported` gate and
+ *     is why the bit's absence keeps every existing driver exactly as it was.
+ *  2. **The transport did not deny it.** `supports.transactionsUnsupported`
+ *     is how a subclass that INHERITED the method says its own transport
+ *     cannot honour it. Without this clause a class cannot opt out of a door
+ *     it did not open — which is the whole reason a declaration exists here
+ *     rather than a second method-presence test.
+ *
+ * ⛔ The answer is NOT a promise that a `beginTransaction()` call will
+ * succeed — a live transport can still fail. It is the dispatch question:
+ * should the engine take the transactional path at all, or the DECLARED
+ * non-transactional one (ADR-0119 D1)?
+ */
+export function driverSupportsTransactions(
+  driver:
+    | {
+        beginTransaction?: unknown;
+        supports?: { transactionsUnsupported?: boolean | undefined } | undefined;
+      }
+    | null
+    | undefined,
+): boolean {
+  if (typeof driver?.beginTransaction !== 'function') return false;
+  return driver.supports?.transactionsUnsupported !== true;
+}

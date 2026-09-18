@@ -107,6 +107,7 @@
     "ExecutionStepSkipReasonSchema": "src/automation/execution.zod.ts#ExecutionStepSkipReasonSchema (const)",
     "FLOW_BUILTIN_NODE_TYPES": "src/automation/flow.zod.ts#FLOW_BUILTIN_NODE_TYPES (const)",
     "FLOW_NODE_EXPRESSION_PATHS": "src/automation/flow-node-expression-paths.ts#FLOW_NODE_EXPRESSION_PATHS (const)",
+    "FLOW_PAUSE_CAPABLE_NODE_TYPES": "src/automation/flow.zod.ts#FLOW_PAUSE_CAPABLE_NODE_TYPES (const)",
     "FLOW_REGION_CONFIG_KEYS": "src/automation/region-slots.ts#FLOW_REGION_CONFIG_KEYS (const)",
     "FLOW_REGION_SLOTS": "src/automation/region-slots.ts#FLOW_REGION_SLOTS (const)",
     "FLOW_REGION_SLOTS_BY_TYPE": "src/automation/region-slots.ts#FLOW_REGION_SLOTS_BY_TYPE (const)",
