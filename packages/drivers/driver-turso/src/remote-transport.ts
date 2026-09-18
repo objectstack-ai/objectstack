@@ -1834,26 +1834,31 @@ export class RemoteTransport {
   }
 
   // ===================================
-  // Transactions
+  // Transactions — none. Deliberately.
   // ===================================
-
-  // [#17690] The contract's own type. It was `Promise<any>` — the one door of
-  // this family on `RemoteTransport`, whose `find`/`upsert`/`bulkUpdate` were
-  // already honest and are the counter-control showing the census that found
-  // this discriminates rather than flagging everything. Pinned both halves in
-  // `turso-driver-doors-declared-types.test.ts`.
-  async beginTransaction(): Promise<unknown> {
-    await this.ensureConnected();
-    return this.client!.transaction();
-  }
-
-  async commit(transaction: any): Promise<void> {
-    await transaction.commit();
-  }
-
-  async rollback(transaction: any): Promise<void> {
-    await transaction.rollback();
-  }
+  //
+  // ⛔ [#18063] This transport declares NO transaction members, and re-adding
+  // one is the defect, not the fix.
+  //
+  // It carried three — `beginTransaction()`, `commit(t)`, `rollback(t)` — and
+  // they were decorative from the day they were written: not one data method on
+  // this class takes an `options` argument (9 data methods present, 0 with
+  // `options`), so a handle this transport issued could never reach a statement
+  // built on it. A write between `beginTransaction()` and `rollback()` executed
+  // on the plain connection and was ALREADY DURABLE; the rollback resolved and
+  // undid nothing, reporting success at every step.
+  //
+  // [#18616] closed the paths into them — `TursoDriver` refuses
+  // `beginTransaction()` / `commit()` / `rollback()` and any `options.transaction`
+  // on the remote arm — which left these three unreachable from every caller in
+  // the repository. [#18063] removes them, and adds the declaration that keeps
+  // them unreachable by design rather than by audit:
+  // `TursoDriver.supports.transactionsUnsupported` is true on this arm, and the
+  // engine gates the transactional path on that declaration.
+  //
+  // Implementing transactions here is a separate piece of work and a much
+  // larger one: it needs every data method to accept and thread a handle, which
+  // means a libSQL transport that can carry one at all.
 
   // ===================================
   // Schema Management

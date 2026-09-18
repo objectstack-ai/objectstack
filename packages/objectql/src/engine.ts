@@ -26,7 +26,7 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 // engine is what `metadata-protocol.validateData` returns, so letting the two
 // drift would put a translation layer between a verdict and its contract.
 import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/api';
-import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken, isMultiValueField, driverSupportsTransactions } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
 import {
@@ -14831,7 +14831,10 @@ export class ObjectQL implements IObjectQLEngine {
    * `OperationContext.context.transaction` and the SQL driver's per-builder
    * `.transacting(trx)` call.
    *
-   * - If the default driver does not support `beginTransaction`, the callback
+   * - If the default driver does not support transactions — no
+   *   `beginTransaction` method, or `supports.transactionsUnsupported: true`
+   *   from a transport that inherited one it cannot honour (#18063) — the
+   *   callback
    *   runs directly with the supplied base context (no rollback). This keeps
    *   the API safe to call on drivers without ACID support (e.g. the
    *   in-memory driver in tests). It is DECLARED behaviour (ADR-0119 D1), not
@@ -14888,7 +14891,14 @@ export class ObjectQL implements IObjectQLEngine {
     }
     const driver = this.defaultDriver ? this.drivers.get(this.defaultDriver) : undefined;
     const drv = driver as any;
-    if (!drv?.beginTransaction) {
+    // [#18063] The gate is the DECLARATION, not bare method presence. A
+    // subclass inherits `beginTransaction` from a base whose transport has
+    // transactions while its own has none — it cannot opt out of a door it did
+    // not open, so presence alone routed it down the transactional path and the
+    // handle it produced covered nothing. `driverSupportsTransactions` is the
+    // one definition (`@objectstack/spec`), shared with the ScopedContext trio
+    // below so the engine's transaction entrances cannot drift apart.
+    if (!driverSupportsTransactions(drv)) {
       const datasource = this.defaultDriver ?? drv?.name;
       if (opts?.require === true) {
         // Fail CLOSED (#5696 point 1): the caller declared it cannot tolerate
@@ -14899,7 +14909,7 @@ export class ObjectQL implements IObjectQLEngine {
       }
       // Declared degrade (ADR-0119 D1) — behaviour unchanged, but no longer
       // mute: the caller asked for atomicity and is not getting it (#4619).
-      this.warnTransactionUnsupported(datasource);
+      this.warnTransactionUnsupported(datasource, drv?.supports?.transactionsUnsupported === true);
       // `owned: false` — honest: there is no transaction here to own, and no
       // rollback the callback may promise on the strength of it.
       return callback(baseContext, { owned: false });
@@ -14961,6 +14971,14 @@ export class ObjectQL implements IObjectQLEngine {
    * The behaviour is unchanged and DECLARED (ADR-0119 D1: "when that driver has
    * no `beginTransaction` the callback runs with NO transaction and NO
    * rollback"). What was missing is that a caller had no way to find out —
+   *
+   * [#18063] TWO reasons now reach this degrade and the message says which.
+   * The second is a transport that DECLARED it cannot honour a handle while
+   * inheriting `beginTransaction` from a base class that can. Before the
+   * declaration existed such a driver was indistinguishable from a working one
+   * here, so the engine opened a transaction against it and the degrade — the
+   * honest answer — was unreachable.
+   *
    * the same shape as `batchData`'s `atomic` flag being a lie for as long as it
    * was (ADR-0119 D4). Tightening this into a throw would change the declared
    * contract and is deliberately NOT done here.
@@ -14976,19 +14994,32 @@ export class ObjectQL implements IObjectQLEngine {
    * Once per engine instance per driver: the drivers that reach this path (test
    * doubles, foreign engines) reach it on EVERY call.
    */
-  private warnTransactionUnsupported(datasource: string | undefined): void {
+  private warnTransactionUnsupported(datasource: string | undefined, declaredUnsupported = false): void {
     const name = datasource ?? '<no default datasource>';
     if (this.transactionUnsupportedReported.has(name)) return;
     this.transactionUnsupportedReported.add(name);
+    // [#18063] The two reasons reach the same degrade and must not read the
+    // same. Telling an operator a Turso REMOTE datasource "has no
+    // beginTransaction" sends them looking for a missing method on a class that
+    // publishes one; the fix for that reason is a different transport, not a
+    // different driver.
+    const cause = declaredUnsupported
+      ? `driver '${name}' declares supports.transactionsUnsupported — its transport cannot carry a ` +
+        'transaction handle even though it inherits beginTransaction'
+      : `driver '${name}' has no beginTransaction`;
+    const remedy = declaredUnsupported
+      ? 'Point this datasource at a transport that honours transactions (for libSQL: the local or ' +
+        'embedded-replica mode rather than the remote one), or have the caller fail '
+      : 'Register a driver that implements beginTransaction for this datasource, or have the caller fail ';
     this.logger.warn(
-      `transaction() requested a transaction but driver '${name}' has no beginTransaction — ` +
+      `transaction() requested a transaction but ${cause} — ` +
         'running WITHOUT transaction or rollback. Every write the callback makes commits as it executes, ' +
         'so a later throw leaves the earlier ones PERSISTED even though the call rejects as if the whole ' +
         'unit of work had been undone; no caller is told, and the records stay behind. ' +
-        'Register a driver that implements beginTransaction for this datasource, or have the caller fail ' +
+        remedy +
         "closed itself when it cannot tolerate losing atomicity (batchData's atomic gate, ADR-0119 D4, is " +
         'the pattern). Reported once per driver per engine instance.',
-      { datasource: name },
+      { datasource: name, declaredUnsupported },
     );
   }
 
@@ -15755,7 +15786,9 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
       ? engine.drivers?.get(engine.defaultDriver)
       : undefined;
 
-    if (!driver?.beginTransaction) {
+    // [#18063] Declaration, not bare method presence — see the engine surface's
+    // gate; one predicate serves both so they cannot answer differently.
+    if (!driverSupportsTransactions(driver)) {
       const datasource = engine.defaultDriver ?? driver?.name;
       if (opts?.require === true) {
         // Same fail-closed refusal as the engine surface (#5696 point 1).
@@ -15764,7 +15797,7 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
       // No transaction support — execute directly. Declared (ADR-0119 D1), but
       // said out loud since #4619: the caller asked for atomicity and the
       // callback is about to run without any.
-      engine.warnTransactionUnsupported?.(datasource);
+      engine.warnTransactionUnsupported?.(datasource, driver?.supports?.transactionsUnsupported === true);
       return callback(this, { owned: false });
     }
 
@@ -15845,7 +15878,11 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
     const driver = engine.defaultDriver
       ? engine.drivers?.get(engine.defaultDriver)
       : undefined;
-    return driver?.beginTransaction ? driver : undefined;
+    // [#18063] Declaration, not bare method presence — the trio's `begin`
+    // returns `null` and `commit`/`rollback` abstain for a transport that
+    // declared it cannot honour a handle, which is the same graceful degrade a
+    // driver with no `beginTransaction` already gets.
+    return driverSupportsTransactions(driver) ? driver : undefined;
   }
 
   /**
