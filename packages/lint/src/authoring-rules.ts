@@ -632,8 +632,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason:
       'The declaring metadata type is `dataset`, which `runtime-gate.ts`\'s TYPE_TO_STACK_KEY does '
       + 'not map — a dataset write builds no per-write snapshot, so nothing can dispatch this rule '
-      + 'there; declaring any other type would only re-judge a stored dataset the #4463 D4 '
-      + 'differential cancels.',
+      + 'there; declaring any other type would only re-judge a stored dataset, which the publish '
+      + 'gate\'s differential cancels as somebody else\'s pre-existing condition.',
     run: (stack) => validateDatasetMeasureAggregates(stack),
   },
   // ADR-0049 / #3367 — a dashboard header action naming a dead target ships a
