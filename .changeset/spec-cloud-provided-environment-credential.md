@@ -15,12 +15,15 @@ an action parameter `reference`, a field `reference`, a dashboard
 `objects.<name>` subtree naming `sys_environment_credential` all stop being
 diagnosed.
 
-Why this name: `@objectstack/service-tenant` registers it in the cloud
-repository on exactly the path the list's existing `sys_package`,
-`sys_package_version` and `sys_package_installation` members take —
-`objects/sys-environment-credential.object.ts` exported through
+Why this name: as read in the cloud repository at `cb8ee7ff60`,
+`@objectstack/service-tenant` registers it on exactly the path the list's
+existing `sys_package`, `sys_package_version` and `sys_package_installation`
+members take — `objects/sys-environment-credential.object.ts` exported through
 `objects/index.ts`, listed in `tenantObjects`, spread into
-`manifestService.register({ objects })` by `tenant-plugin.ts`.
+`manifestService.register({ objects })` by `tenant-plugin.ts`. That reading is
+the cloud repository's and is carried here on its filer's name; per this list's
+header it cannot be conformance-tested from this repo, and this change does not
+claim to have re-taken it.
 
 Unlike the earlier additions, this one fixes no diagnostic that fires today: no
 `*.object.ts` in this repository references the name, so nothing shipped was

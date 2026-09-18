@@ -186,8 +186,12 @@ describe('platform-object predicates', () => {
   });
 
   it('resolves the tenant credential store the cloud runtime registers', () => {
-    // `sys_environment_credential` is registered by `@objectstack/service-tenant`
-    // on the same path as the `sys_package*` family above: declared in
+    // The cloud-side registration is a READING TAKEN IN THE CLOUD REPOSITORY,
+    // at `cb8ee7ff60`, and carried here on its filer's name — like every other
+    // member of this list, it is not re-checkable from this repo, which is what
+    // the list's own header means by "they cannot be conformance-tested from
+    // this repo". As read there, `@objectstack/service-tenant` registers the
+    // name on the same path as the `sys_package*` family above: declared in
     // `objects/sys-environment-credential.object.ts`, exported through
     // `objects/index.ts`, listed in `tenantObjects` in `manifest.ts`, and spread
     // into `manifestService.register({ objects })` by `tenant-plugin.ts`.
@@ -202,9 +206,9 @@ describe('platform-object predicates', () => {
     // So the first author to write the reference would have been told it looked
     // like a typo. Pinned by name, beside `sys_license` and the package family,
     // for the same reason: dropping it fails one readable assertion instead of
-    // nothing. The other half of the contract — that the cloud runtime really
-    // registers the table — is owned by the cloud repository per the list's
-    // header, and is not asserted here.
+    // nothing. What this test asserts is the objectstack half alone — that the
+    // list carries the name and the predicate resolves it. The cloud half is
+    // owned by the cloud repository and is not asserted here.
     expect(isPlatformProvidedObjectName('sys_environment_credential')).toBe(true);
     expect(CLOUD_PROVIDED_OBJECT_NAMES).toContain('sys_environment_credential');
   });
