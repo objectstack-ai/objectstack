@@ -454,7 +454,7 @@ type PredicateInput = z.input<typeof PredicateInputSchema>;
 // ── PredicateInputSchema (const) ──
 declare const PredicateInputSchema: z.ZodUnion<readonly [z.ZodPipe<z.ZodString, z.ZodTransform<{
     dialect: "cel" | "cron" | "template";
-    source: string;
+    source?: string | undefined;
     ast?: unknown;
     meta?: {
         rationale?: string | undefined;
@@ -466,12 +466,12 @@ declare const PredicateInputSchema: z.ZodUnion<readonly [z.ZodPipe<z.ZodString, 
         cron: "cron";
         template: "template";
     }>;
+    source: z.ZodOptional<z.ZodString>;
     ast: z.ZodOptional<z.ZodUnknown>;
     meta: z.ZodOptional<z.ZodObject<{
         rationale: z.ZodOptional<z.ZodString>;
         generatedBy: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>;
-    source: z.ZodString;
 }, z.core.$strip>]>;
 
 // ── PredicateSchema (const) ──
@@ -481,12 +481,12 @@ declare const PredicateSchema: z.ZodObject<{
         cron: "cron";
         template: "template";
     }>;
+    source: z.ZodOptional<z.ZodString>;
     ast: z.ZodOptional<z.ZodUnknown>;
     meta: z.ZodOptional<z.ZodObject<{
         rationale: z.ZodOptional<z.ZodString>;
         generatedBy: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>;
-    source: z.ZodString;
 }, z.core.$strip>;
 
 // ── Protection (type) ──

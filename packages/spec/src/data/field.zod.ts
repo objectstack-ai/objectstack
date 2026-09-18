@@ -11,7 +11,7 @@ import type { KeySetGuidance } from '../shared/suggestions.zod';
 import { SELECT_OPTION_EDITABILITY_GUIDANCE } from '../shared/editability-boundary';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { SystemIdentifierSchema } from '../shared/identifiers.zod';
-import { ExpressionInputSchema, PredicateInputSchema } from '../shared/expression.zod';
+import { ExpressionInputSchema } from '../shared/expression.zod';
 import { FilterConditionSchema } from './filter.zod';
 import { FIELD_KEY_GUIDANCE } from './authoring-key-lint';
 import { DEFAULT_AUTONUMBER_FORMAT } from './autonumber-format';
@@ -1639,25 +1639,10 @@ export const FieldSchema = lazySchema(() => {
    * state live as the record changes (UX), and the server enforces
    * `requiredWhen` and ignores writes to a field whose `readonlyWhen` is TRUE
    * (so the rule can't be bypassed). e.g. `P\`record.status == 'paid'\``.
-   *
-   * These three are THE field-rule triad, and they are EVALUATED slots: they
-   * compose `PredicateInputSchema` (ADR-0136 D1), not the persistence
-   * `ExpressionInputSchema`, so an envelope carrying only an `ast` and a
-   * `source` that is blank after trimming are refused HERE, at authoring,
-   * instead of faulting at evaluation. A blank predicate is the triad's third
-   * state — not "no rule" and not "engine fault" — and refusing it at
-   * authoring is what keeps those two apart at runtime.
-   *
-   * What happens when one of these DOES fault (a stored rule, a column renamed
-   * out from under it) is contract, not renderer choice: the submit is refused
-   * loudly and names the field and the rule (ADR-0136 D2), while visibility
-   * stays fail-OPEN at render so a rule that could not run never hides a
-   * control and writes `null` over a column the user never saw (D3). The two
-   * directions are a pair; neither is safe alone.
    */
-  visibleWhen: PredicateInputSchema.optional().describe("Predicate (CEL) — field is shown only when TRUE (else hidden). Needs a non-blank `source`: an evaluated slot is held to what the engine can run (ADR-0136 D1). A fault at RENDER is fail-open (the field shows) and refuses the SUBMIT, naming the field and this rule (D2/D3). e.g. P`record.type == 'invoice'`"),
-  readonlyWhen: PredicateInputSchema.optional().describe("Predicate (CEL) — field is read-only when TRUE. Needs a non-blank `source` (ADR-0136 D1); a fault refuses the submit and names the field and this rule (D2). e.g. P`record.status == 'paid'`"),
-  requiredWhen: PredicateInputSchema.optional().describe("Predicate (CEL) — field is required when TRUE. Needs a non-blank `source` (ADR-0136 D1); a fault refuses the submit and names the field and this rule (D2). A TRANSITION GATE, not an invariant: the write is refused only when the merged record violates the requirement AND the pre-write record complied — so the write that flips the predicate TRUE, an INSERT born inside the gate, and a write that clears the cell are all refused, while a row that was already missing the value keeps passing unrelated edits and state moves that stay inside the gate (ADR-0113 non-regression: adding the rule to a deployed object never bricks existing rows). Need an invariant every write must satisfy instead ('X may never exceed Y') — declare a `validations[]` `script` rule, which re-checks the merged record with no exemption. Enforced by `evaluateValidationRules`. The only slot; the `conditionalRequired` alias was removed in protocol 17."),
+  visibleWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — field is shown only when TRUE (else hidden). e.g. P`record.type == 'invoice'`"),
+  readonlyWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — field is read-only when TRUE. e.g. P`record.status == 'paid'`"),
+  requiredWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — field is required when TRUE. A TRANSITION GATE, not an invariant: the write is refused only when the merged record violates the requirement AND the pre-write record complied — so the write that flips the predicate TRUE, an INSERT born inside the gate, and a write that clears the cell are all refused, while a row that was already missing the value keeps passing unrelated edits and state moves that stay inside the gate (ADR-0113 non-regression: adding the rule to a deployed object never bricks existing rows). Need an invariant every write must satisfy instead ('X may never exceed Y') — declare a `validations[]` `script` rule, which re-checks the merged record with no exemption. Enforced by `evaluateValidationRules`. The only slot; the `conditionalRequired` alias was removed in protocol 17."),
 
   /**
    * [REMOVED in protocol 17 — #3855] The deprecated alias of `requiredWhen`.
