@@ -81,6 +81,11 @@ const NOT_A_WINDOW: ReadonlyArray<readonly [string, readonly unknown[]]> = [
   ['empty', []],
   ['three elements', ['2026-01-01', '2026-01-31', '2026-02-01']],
   ['two null bounds', [null, null]],
+  // [#18278] The residue the tuple arm CANNOT refuse: two bounds, both
+  // strings, both empty. It satisfies `z.tuple([z.string(), z.string()])` at
+  // every schema door and is refused here, by this package's own empty-bound
+  // check — so it belongs in the table every face is driven over.
+  ['two empty bounds — the residue past the schema door', ['', '']],
 ];
 
 /** The window an author writes when they mean that single day — all faces agree on it. */
@@ -267,6 +272,22 @@ describe('#17124 — an array arm that is not a two-bound window is REFUSED on e
     // ⑤ ⛔ and no package-private prefix: the second wording announced itself
     //   with one, so its absence is checkable.
     expect(msg).not.toContain('[service-analytics]');
+  });
+
+  it('⭐ tells the author of an EMPTY bound what is wrong with it (#18278)', async () => {
+    // ⚠️ `['', '']` reaches this door BECAUSE the schema arm accepts it, so
+    // this face's sentence is the only one its author ever reads — and until
+    // #18278 it read "received a two-element array", i.e. the shape they had
+    // just written, with the value never echoed on this path.
+    const msg = String((await refusalFrom(() => objectqlBounds(['', ''])))?.message);
+    expect(msg).toContain('received a two-element array whose bounds are both empty strings');
+    // ⛔ The DARK control: the description that said nothing is gone.
+    expect(msg).not.toContain('received a two-element array.');
+    // One empty bound is named AT the bound that is empty.
+    const startEmpty = String((await refusalFrom(() => objectqlBounds(['', '2026-01-31'])))?.message);
+    expect(startEmpty).toContain('whose start bound is an empty string');
+    const endEmpty = String((await refusalFrom(() => objectqlBounds(['2026-01-01', ''])))?.message);
+    expect(endEmpty).toContain('whose end bound is an empty string');
   });
 });
 

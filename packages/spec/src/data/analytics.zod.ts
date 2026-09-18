@@ -442,15 +442,38 @@ export type AnalyticsDateRangePreset = z.input<typeof AnalyticsDateRangePresetSc
  * carry for every array — is FALSE for `['2026-01-01']`, `[]` and
  * `[a, b, c]`. The arity and the bad bound are named separately, and neither is
  * claimed when it is not true.
+ *
+ * ⚠️ And the arm judges a bound's TYPE, never its VALUE (#18278), so the
+ * two-bound window with an EMPTY bound passes every schema door and is refused
+ * PAST it, by each face's own empty-bound check (`service-analytics`'
+ * `date-range-array-arm.ts`, `driver-memory`'s `memory-analytics.ts`) — the
+ * residue `analyticsDateRangeUnrecognizedError`'s header in `@objectstack/core`
+ * names as `['', '']`. Its author used to read "received a two-element array",
+ * the shape they had already written, with nothing said about what was wrong
+ * with it. So an empty bound is named here too, and named at the bound that is
+ * empty.
  */
 function describeRefusedDateRange(input: unknown): string {
   if (input === null) return 'null';
   if (!Array.isArray(input)) return typeof input;
   const hasNonStringBound = input.some((bound) => typeof bound !== 'string');
   if (input.length === 2) {
-    // Two bounds is the arity the contract asks for, so the only way such an
-    // array reaches a refusal is a bound that is not a string.
-    return hasNonStringBound ? 'an array with a non-string bound' : 'a two-element array';
+    // Two bounds is the arity the contract asks for, so what is left to be
+    // wrong with such an array is a BOUND — one that is not a string, or one
+    // that is the empty string every face refuses past the schema door
+    // (#18278). ⛔ Never "the only way such an array reaches a refusal is a
+    // bound that is not a string": this clause asserted that while `['', '']`
+    // was reaching it and being told only its own shape back.
+    if (hasNonStringBound) return 'an array with a non-string bound';
+    const [start, end] = input as [string, string];
+    if (start === '' && end === '') return 'a two-element array whose bounds are both empty strings';
+    if (start === '' || end === '') {
+      return `a two-element array whose ${start === '' ? 'start' : 'end'} bound is an empty string`;
+    }
+    // Two non-empty string bounds: the shape the contract asks for, refused for
+    // something this clause cannot see — an unparseable bound VALUE, say, which
+    // carries its own envelope. Describing the shape is all that is true here.
+    return 'a two-element array';
   }
   const arity = input.length === 0 ? 'an empty array' : `a ${input.length}-element array`;
   return hasNonStringBound
