@@ -11,6 +11,8 @@ import {
   AnalyticsQuerySchema,
 } from './analytics.zod';
 import { DateGranularity } from './query.zod';
+import { ObjectStackDefinitionSchema } from '../stack.zod';
+import { applyConversions, collectConversionNotices } from '../conversions/apply';
 
 describe('AggregationMetricType', () => {
   it('should accept all valid metric types', () => {
@@ -292,6 +294,94 @@ describe('CubeJoinSchema', () => {
 
   it('should reject join without required fields', () => {
     expect(() => CubeJoinSchema.parse({})).toThrow();
+  });
+});
+
+/**
+ * [#18612] The retirement is measured against METADATA AT REST, not only
+ * against sources.
+ *
+ * `sql` was REQUIRED and `relationship` carried `.default('many_to_one')`, so
+ * every cube artifact ever written from the old schema's own parse output
+ * carries BOTH keys — and the boot door re-parses stored metadata through
+ * `ObjectStackDefinitionSchema` (`analyticsCubes: z.array(CubeSchema)`). Without
+ * the ADR-0087 D2 conversion `cube-join-sql-and-relationship-removed` that
+ * artifact stops booting with no remedy short of hand-editing JSON (#12772's
+ * shape). The conversion is `retiredFromLoadPath`, so the AUTHORING funnel still
+ * teaches the tombstone; the data-at-rest seams pin `includeRetired: true`.
+ */
+describe('a persisted cube heals at the door (#18612, ADR-0087 D2)', () => {
+  /** What `CubeSchema.parse` itself emitted before this retirement. */
+  const persisted = () => ({
+    analyticsCubes: [{
+      name: 'showcase_delivery',
+      sql: 'showcase_task',
+      measures: { count: { name: 'count', label: 'Tasks', type: 'count', sql: '*' } },
+      dimensions: { status: { name: 'status', label: 'Status', type: 'string', sql: 'status' } },
+      joins: {
+        project: {
+          name: 'showcase_project',
+          relationship: 'many_to_one',
+          sql: '${showcase_task}.project = ${showcase_project}.id',
+        },
+      },
+    }],
+  });
+
+  it('is REFUSED at the boot door before the conversion and ACCEPTED after it', () => {
+    const before = ObjectStackDefinitionSchema.safeParse(persisted());
+    expect(before.success).toBe(false);
+    expect(JSON.stringify(before.error?.issues ?? [])).toContain('unrecognized_keys');
+
+    const healed = applyConversions(persisted(), { includeRetired: true });
+    const after = ObjectStackDefinitionSchema.safeParse(healed);
+    expect(
+      after.success,
+      `expected the converted artifact to parse; got ${JSON.stringify(after.error?.issues ?? [])}`,
+    ).toBe(true);
+    expect((healed as { analyticsCubes: Array<{ joins: unknown }> }).analyticsCubes[0]!.joins)
+      .toEqual({ project: { name: 'showcase_project' } });
+  });
+
+  it('LIT CONTROL — a shape that was always wrong is refused on BOTH sides', () => {
+    // `relationshipp` is the near-miss #4001 batch D closed. The conversion
+    // strips two NAMED keys, so this one survives it and the door still refuses
+    // — which is what makes the leg above a reading and not a tautology.
+    const bad = () => {
+      const s = persisted();
+      s.analyticsCubes[0]!.joins = { project: { name: 'showcase_project', relationshipp: 'many_to_one' } } as never;
+      return s;
+    };
+    expect(ObjectStackDefinitionSchema.safeParse(bad()).success).toBe(false);
+    const healed = applyConversions(bad(), { includeRetired: true });
+    expect(ObjectStackDefinitionSchema.safeParse(healed).success).toBe(false);
+  });
+
+  it('emits one notice per stripped site, and the notice NAMES the cube that lost the key', () => {
+    const twoCubes = {
+      analyticsCubes: [
+        persisted().analyticsCubes[0]!,
+        {
+          name: 'billing_revenue',
+          sql: 'showcase_invoice',
+          measures: { amount: { name: 'amount', label: 'Amount', type: 'sum', sql: 'amount' } },
+          dimensions: { issued_on: { name: 'issued_on', label: 'Issued', type: 'time', sql: 'issued_on' } },
+          joins: {
+            account: { name: 'showcase_account', relationship: 'many_to_one' },
+            // Already canonical: the control that produces NO notice.
+            owner: { name: 'sys_user' },
+          },
+        },
+      ],
+    };
+    const { notices } = collectConversionNotices(twoCubes, { includeRetired: true });
+    const mine = notices.filter((n) => n.conversionId === 'cube-join-sql-and-relationship-removed');
+    expect(mine.map((n) => n.path)).toEqual([
+      'analyticsCubes[0](showcase_delivery).joins.project.sql',
+      'analyticsCubes[0](showcase_delivery).joins.project.relationship',
+      'analyticsCubes[1](billing_revenue).joins.account.relationship',
+    ]);
+    expect(mine.every((n) => n.to === '(removed)')).toBe(true);
   });
 });
 
