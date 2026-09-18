@@ -2613,11 +2613,55 @@ describe('RowColorConfigSchema', () => {
       },
     };
 
+    // ⚠️ #18791 — this ASSERTION is correct and is deliberately left alone: the
+    // accept set really is `z.record(z.string(), z.string())`, and hexes really
+    // do parse. What is wrong is believing a parse means a colour. None of
+    // these three values resolves — objectui `useRowColor.ts`'s `colorToClass`
+    // returns `undefined` for every one of them — so this map parses,
+    // publishes, and paints nothing. The schema is not the enforcement point
+    // for that; the author-time diagnostic
+    // `view/row-color-unresolvable-value` (`kernel/functional-completeness.ts`)
+    // is, and it reports exactly this fixture.
     expect(() => RowColorConfigSchema.parse(rowColor)).not.toThrow();
   });
 
   it('should require field', () => {
     expect(() => RowColorConfigSchema.parse({})).toThrow();
+  });
+
+  // #18791 — the describe read `Map of field value to color (hex/token)`, and a
+  // hex is the one spelling the only renderer cannot resolve. The schema told
+  // an author to write the value that silently does nothing; the diagnostic
+  // that would have caught it checks presence only, so the hex map turned it
+  // GREEN. This pins the two properties that made the old sentence a trap,
+  // rather than the wording that replaced it.
+  it('⛔ the `colors` describe never offers a hex — it names what actually resolves (#18791)', () => {
+    const description = (RowColorConfigSchema as unknown as {
+      shape: { colors: { description?: string } };
+    }).shape.colors.description ?? '';
+
+    // ⛔ The trap literal, verbatim from the sentence this replaced.
+    expect(description).not.toContain('hex/token');
+    // ⚠️ `token` went with it. Read as the renderer's colour NAMES it was still
+    // standing beside hex as an equal alternative, and putting a bad option
+    // first is as harmful as offering only the bad option.
+    expect(description).not.toMatch(/\btokens?\b/i);
+
+    // ⭐ The property, not the wording: hex must still be NAMED — an author who
+    // comes here asking "can I paste the option colours in?" has to find the
+    // answer — but only ever in the same sentence as the consequence. Deleting
+    // the word would pass a bare `not.toMatch(/hex/)` and leave that reader
+    // with nothing, which is how the old sentence got written in the first
+    // place.
+    expect(description, 'the describe answers the hex question nowhere').toMatch(/hex/i);
+    for (const sentence of description.split('. ')) {
+      if (/hex/i.test(sentence)) expect(sentence).toContain('colours no row');
+    }
+
+    // And it names a spelling that DOES reach a class, plus the rule that
+    // reports the ones that do not.
+    expect(description).toContain('bg-red-200');
+    expect(description).toContain('view/row-color-unresolvable-value');
   });
 });
 
@@ -2747,13 +2791,18 @@ describe('Airtable-style ListView enhancements', () => {
   it('should accept list view with row color', () => {
     const listView: ListView = {
       columns: ['name', 'priority'],
+      // #18791 — colour NAMES, not hexes. The assertion below only says the
+      // shape parses, and a hex parses just as well; what changed is that a
+      // fixture is read as an example, and this corpus was demonstrating the
+      // one spelling `colorToClass` resolves to `undefined`. The deliberate
+      // "a hex does parse" pin is kept, once, in `RowColorConfigSchema` above.
       rowColor: {
         field: 'priority',
         colors: {
-          critical: '#ff0000',
-          high: '#ff8800',
-          medium: '#ffcc00',
-          low: '#00cc00',
+          critical: 'red',
+          high: 'orange',
+          medium: 'amber',
+          low: 'green',
         },
       },
     };
@@ -2839,12 +2888,14 @@ describe('Airtable-style ListView enhancements', () => {
         ],
       },
       rowHeight: 'medium',
+      // #18791 — colour NAMES: this is the "realistic, fully-loaded view"
+      // fixture, so it is the one most likely to be copied as a template.
       rowColor: {
         field: 'status',
         colors: {
-          on_track: '#22c55e',
-          at_risk: '#f59e0b',
-          blocked: '#ef4444',
+          on_track: 'emerald',
+          at_risk: 'amber',
+          blocked: 'red',
         },
       },
       hiddenFields: ['internal_id', 'sys_updated_at'],

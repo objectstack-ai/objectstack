@@ -55,6 +55,14 @@
  *   `useRowColor.ts` `if (!config?.field || !config.colors) return undefined;`
  *   — the row-className resolver bails before it reads a single row, so every
  *   row keeps the default colour. See {@link VIEW_ROW_COLOR_WITHOUT_COLORS}.
+ * - a grid view's `rowColor.colors` VALUE the resolver cannot resolve → the
+ *   same file, eleven lines further down: `colorToClass` returns `undefined`
+ *   for anything that is neither a `bg-`-prefixed literal nor a member of its
+ *   own closed vocabulary of colour names. The block clears the guard above,
+ *   silences that rule, and still colours nothing. See
+ *   {@link VIEW_ROW_COLOR_UNRESOLVABLE_VALUE} — and read the note on
+ *   {@link isUnresolvableRowColor} for why this rule judges the SHAPE a value
+ *   has rather than transcribing the other repo's 23-entry map.
  * - `webhook` w/o `triggers` → `auto-enqueuer.ts` `if (triggers.size === 0) …
  *   return null`. Note this one needed a SECOND source: that skip site's own
  *   comment blesses the empty case as "a manual-only webhook", which reads
@@ -88,6 +96,7 @@ export const FIELD_CHOICE_WITHOUT_OPTIONS = 'field/choice-without-options';
 export const VIEW_LAYOUT_WITHOUT_BINDING = 'view/layout-without-binding';
 export const VIEW_TREE_WITHOUT_PARENT_FIELD = 'view/tree-without-parent-field';
 export const VIEW_ROW_COLOR_WITHOUT_COLORS = 'view/row-color-without-colors';
+export const VIEW_ROW_COLOR_UNRESOLVABLE_VALUE = 'view/row-color-unresolvable-value';
 export const WEBHOOK_WITHOUT_TRIGGERS = 'webhook/without-triggers';
 
 /** Every rule id this module can emit — pinned by tests so ids cannot drift. */
@@ -99,6 +108,7 @@ export const FUNCTIONAL_COMPLETENESS_RULES = [
   VIEW_LAYOUT_WITHOUT_BINDING,
   VIEW_TREE_WITHOUT_PARENT_FIELD,
   VIEW_ROW_COLOR_WITHOUT_COLORS,
+  VIEW_ROW_COLOR_UNRESOLVABLE_VALUE,
   WEBHOOK_WITHOUT_TRIGGERS,
 ] as const;
 
@@ -391,6 +401,68 @@ const hasNoColorMap = (colors: unknown): boolean =>
   colors === undefined || colors === null || (isRec(colors) && Object.keys(colors).length === 0);
 
 /**
+ * Whether an authored `rowColor.colors` VALUE can never reach a class name.
+ *
+ * ## The trap this exists for
+ *
+ * `RowColorConfigSchema.colors` is `z.record(z.string(), z.string())`, so every
+ * string parses. The only renderer resolves far less than that — objectui
+ * `plugin-grid`'s `useRowColor.ts`, verbatim:
+ *
+ * ```
+ * if (color.startsWith('bg-')) return color;
+ * const lower = color.toLowerCase().trim();
+ * return Object.prototype.hasOwnProperty.call(COLOR_TO_CLASS, lower)
+ *   ? COLOR_TO_CLASS[lower]
+ *   : undefined;
+ * ```
+ *
+ * So a hex — the spelling a select field already uses for its own option
+ * colours, and therefore the obvious thing to copy — clears the
+ * `!config.colors` guard {@link VIEW_ROW_COLOR_WITHOUT_COLORS} watches,
+ * SILENCES that rule, and still colours no row. Presence-only cannot see it;
+ * this is the check that can.
+ *
+ * ## Why it judges SHAPE and not membership — and why that is sound
+ *
+ * The obvious implementation transcribes `COLOR_TO_CLASS` here. ⛔ It is not
+ * done, for the reason `examples/app-showcase`'s own arm already records: a
+ * hand-copy of another repo's map is a second opinion that drifts, silently, in
+ * BOTH directions — a name objectui adds becomes a false positive here, a name
+ * it drops becomes a false negative. The vocabulary lives in the renderer; only
+ * its SHAPE is a fact this side can hold without owning it.
+ *
+ * Two structural facts about that snippet are enough, and neither depends on
+ * what the map contains: the `bg-` branch tests the RAW value, and every key of
+ * `COLOR_TO_CLASS` is a bare lower-case word, matched after `toLowerCase()` and
+ * `trim()`. Therefore a value that is neither `bg-`-prefixed nor a bare
+ * alphabetic word once lower-cased and trimmed CANNOT be a key, whatever the
+ * map holds. That makes this predicate **sound** (it never accuses a value the
+ * renderer would have resolved) and deliberately **incomplete** (a misspelled
+ * or simply absent colour name — `chartreuse` — is shaped like a key and is
+ * passed). Soundness is the half a gate must have; an over-eager rule here
+ * would be the false prescription this module's discipline forbids.
+ *
+ * Three consequences worth stating, all measured against the snippet above:
+ *
+ * - `'RED'` and `' red '` ARE resolvable — the lookup lower-cases and trims —
+ *   so this predicate applies both before judging, rather than testing the raw
+ *   value the way an app-local pin can afford to.
+ * - `' bg-red-100'` is NOT resolvable: `startsWith` sees the leading space, and
+ *   the lower-cased form is not a bare word. Flagged, correctly.
+ * - `''` never colours (`if (!color) return undefined` one frame out) and is
+ *   not a bare word either. Flagged, correctly.
+ *
+ * ⛔ **Recorded NON-rule:** whether a `bg-…` literal names a class Tailwind
+ * actually compiled is NOT judged here. `colorToClass` returns it untouched, so
+ * the resolver resolved it; whether the compiled stylesheet carries a rule for
+ * it is a fact about another repo's build, and asserting it from here would be
+ * asserting what was not verified.
+ */
+const isUnresolvableRowColor = (value: string): boolean =>
+  !value.startsWith('bg-') && !/^[a-z]+$/.test(value.toLowerCase().trim());
+
+/**
  * Completeness of a single list-view definition (a container's `list` /
  * `listViews.*` entry).
  *
@@ -496,9 +568,43 @@ export function checkViewCompleteness(view: unknown, boundObject?: unknown): Com
           + '`useRowColor.ts` — `if (!config?.field || !config.colors) return undefined`), so every row keeps '
           + 'the default background while parsing and publishing report success. An empty `colors: {}` is the '
           + 'same dead shape spelled out — it passes that guard and then matches no value. The map is what '
-          + 'does the colouring; the field only says which value to look up.',
-        fix: `rowColor: { field: '${field}', colors: { '<field_value>': '<hex_or_token>' } }`,
+          + 'does the colouring; the field only says which value to look up. Each value is a colour NAME from '
+          + 'the resolver\'s own vocabulary (`red`, `blue`, `slate`, …) or a complete Tailwind background class '
+          + '(`bg-red-200`) — a hex parses, publishes and silences this very rule while still colouring '
+          + `nothing (\`${VIEW_ROW_COLOR_UNRESOLVABLE_VALUE}\`).`,
+        // ⛔ The prescription must name a spelling that RESOLVES. It used to
+        // read `'<hex_or_token>'`, which put the one spelling the renderer
+        // cannot resolve in first position: the gate fired, handed the author a
+        // hex, the hex parsed and published, and this rule went green over a
+        // grid that coloured nothing — a control whose own prescription
+        // switched it off. `functional-completeness.test.ts` pins this string
+        // by feeding the value back through `checkViewCompleteness`, so it can
+        // only ever suggest something the sibling rule below accepts.
+        fix: `rowColor: { field: '${field}', colors: { '<field_value>': 'red' } }`,
       });
+    }
+    if (field !== undefined && isRec(view.rowColor.colors)) {
+      const dead = Object.entries(view.rowColor.colors)
+        .filter(([, colour]) => typeof colour === 'string' && isUnresolvableRowColor(colour))
+        .map(([key, colour]) => `\`${key}\` = ${JSON.stringify(colour)}`);
+      if (dead.length > 0) {
+        out.push({
+          rule: VIEW_ROW_COLOR_UNRESOLVABLE_VALUE,
+          severity: 'warning',
+          path: 'rowColor.colors',
+          message:
+            `A \`${type}\` view whose \`rowColor\` binds \`${field}\` declares ${dead.length} colour `
+            + `value${dead.length === 1 ? '' : 's'} the renderer resolves to nothing: ${dead.join(', ')}. `
+            + 'objectui `useRowColor.ts` — `colorToClass` — hands a `bg-`-prefixed literal through untouched '
+            + 'and otherwise looks the lower-cased, trimmed value up in its own closed vocabulary of colour '
+            + 'NAMES, returning `undefined` for everything else; Tailwind v4 has no runtime, so no class can '
+            + 'be fabricated from a hex. A map like this CLEARS the `!config.colors` guard, so '
+            + `\`${VIEW_ROW_COLOR_WITHOUT_COLORS}\` goes quiet, and every row still keeps its default `
+            + 'background while parsing and publishing report success. Write a colour name (`red`, `blue`, '
+            + '`slate`, …) or a complete Tailwind background class (`bg-red-200`).',
+          fix: `rowColor: { field: '${field}', colors: { '<field_value>': 'red' } }`,
+        });
+      }
     }
   }
 
