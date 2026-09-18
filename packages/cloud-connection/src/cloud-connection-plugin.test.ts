@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * CloudConnectionPlugin — route mounting + mode behavior (ADR-0008 Phase 1).
+ * CloudConnectionPlugin — route mounting + mode behavior (cloud ADR-0008 Phase 1).
  *
  * Exercises the consolidated /api/v1/cloud-connection/* surface in both
  * resolution modes:
