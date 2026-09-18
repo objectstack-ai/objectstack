@@ -684,10 +684,19 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
   //
   // The second half of the run above, and the half THIS door ran without.
   // `os build` has run it since #16611 and `os validate` since #18677; `os
-  // lint` ran the union fold and stopped. `compile.ts` step 3b-ii says what
-  // survives the de-duplication is "exactly the set the union could not see" ⇒
-  // that whole set was findings `os build` reported and this command
-  // structurally could not.
+  // lint` ran the union fold and stopped. Every finding this pass yields is
+  // therefore one `os build` reported and this command structurally could not.
+  //
+  // ⚠️ [#18779] This paragraph used to size that gap by quoting `compile.ts`
+  // step 3b-ii — "exactly the set the union could not see" — and that sentence
+  // was FALSE when it was copied here: the de-duplication key carried the
+  // POSITIONAL `path`, so a package-local finding and its flattened twin got
+  // two keys and the ECHO survived. Part of every survivor set was therefore
+  // something this door's own union run ALREADY reported. The key was
+  // corrected in `utils/artifact-packages.ts`; the gap this door closed is
+  // real and its direction is unchanged, but ⛔ do not re-derive its size from
+  // that sentence — it was quoted, never measured, by the two cards that
+  // wired the second and third doors.
   //
   // ⚠️ The reading that hid it for two cards is the one the imports above
   // invite: this file DOES call `artifactPackages` and `packageBodyAsStack` —
@@ -727,8 +736,10 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
     // walks. ⛔ Not `stack` — that would judge un-lowered package bodies here
     // and lowered ones there, which is #16095 one layer in.
     parsed: lowered,
-    // De-duplicated against the run above, on the UNPREFIXED finding, so what
-    // reaches the list below is the set the union could not see.
+    // De-duplicated against the run above, on the UNPREFIXED finding — so what
+    // reaches the list below is what that run did not already carry under the
+    // same rule, `where`, message and non-top-level position (#18779; the key
+    // used to compare the top-level index too, and let the echo through).
     unionFindings,
     sduiManifest: opts.sduiManifest,
     loweredHookRefs,
