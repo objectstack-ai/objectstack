@@ -58,7 +58,7 @@ Future automation is **AI-generated, human-previewed** (ADR-0010 / ADR-0011). Th
 - The audience for the *name* is the **model**, not a non-technical admin. The right heuristic is **"meet the model where its priors are"**: use the term that is densest in training data for this concept.
 - "**state machine**" is that term — Rails `state_machine`, AWS Step Functions "State Machine", XState, Spring Statemachine. An AI given a field named `state_machine` with a `{ from: [to] }` transition table hits its priors and produces correct code. A coined term (e.g. `lifecycle`) forces the model off its priors onto local docs alone.
 - `state_machine` also reads as **maximally distinct from `flow`** — eliminating the `flow` / `workflow` near-synonym ambiguity that makes an AI pick the wrong type.
-- `lifecycle` is additionally **already overloaded** in this codebase (managed-by buckets and toolbar "lifecycle actions" in [`object.zod.ts`](../../packages/spec/src/data/object.zod.ts) at L354/L371/L410/L765), so reusing it would create a *new* ambiguity.
+- `lifecycle` is additionally **already overloaded** in this codebase (managed-by buckets and toolbar "lifecycle actions" in [`object.zod.ts`](../../packages/spec/src/data/object.zod.ts)), so reusing it would create a *new* ambiguity.
 
 Corollary (a trap to avoid): if we name it `state_machine`, the **shape must also match the well-known shape**. A conventional name on a bespoke structure is the worst case — the model's priors fire on the name and mislead on the structure. Keep the shape textbook FSM.
 
