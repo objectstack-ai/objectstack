@@ -577,8 +577,28 @@ export function collectDocsFromSrc(
 /**
  * Content + naming lint over the package's full doc set (collected files
  * plus any inline `defineStack({ docs })` items).
+ *
+ * `resolvableNames` is the set a same-prefix LINK resolves against, and it is
+ * deliberately separate from `docs` (#18431 contract review, finding C2). The
+ * naming rules below judge one OWNER — that is the per-package prefix rule the
+ * ruling asked for — but a link is not a judgment about an owner: it asks
+ * whether the target EXISTS, and ADR-0130 D1 exists so that N packages of one
+ * artifact may SHARE a namespace. Resolved against one package's own names, a
+ * link from package A to package B's doc under the namespace they share reads
+ * as broken and an artifact that built green stops building. So the caller
+ * hands in every name the artifact carries and links resolve artifact-wide —
+ * the same scope `lintMetadataEmbeds` already uses for the same docs, so the
+ * two halves of one lint are partitioned the same way rather than two ways.
+ *
+ * ⚠️ Omitted, it falls back to this set's own names: the pre-#18431 behaviour,
+ * and exactly right for the caller that omits it — a stack with no `packages[]`,
+ * where the one set IS the artifact.
  */
-export function lintDocs(docs: DocItem[], namespace: string | undefined): DocIssue[] {
+export function lintDocs(
+  docs: DocItem[],
+  namespace: string | undefined,
+  resolvableNames?: ReadonlySet<string>,
+): DocIssue[] {
   const issues: DocIssue[] = [];
   if (docs.length === 0) return issues;
 
@@ -672,10 +692,16 @@ export function lintDocs(docs: DocItem[], namespace: string | undefined): DocIss
     }
   }
 
-  // Same-package link resolution: `[text](./<name>.md#anchor)` where the
-  // target carries OUR namespace prefix must resolve to a doc in this
-  // package. Targets with a different prefix are cross-package links,
-  // verified at publish time against dependency docs.
+  // Same-prefix link resolution: `[text](./NAME.md#anchor)` where the target
+  // carries OUR namespace prefix must resolve to a doc THIS ARTIFACT carries.
+  // Targets with a different prefix are cross-package links, verified at
+  // publish time against dependency docs.
+  //
+  // [#18431] Resolved against `resolvableNames` — every name in the artifact —
+  // rather than against `names`, which is this owner's set alone. See the
+  // docblock: the two are the same set for a single-package stack, and they
+  // differ exactly where ADR-0130 D1 lets packages share one namespace.
+  const resolvable = resolvableNames ?? names;
   for (const doc of docs) {
     const linkRe = /\]\((?:\.\/)?([a-zA-Z0-9_.-]+\.md)(#[^)]*)?\)/g;
     const scannable = stripCode(doc.content);
@@ -684,7 +710,7 @@ export function lintDocs(docs: DocItem[], namespace: string | undefined): DocIss
       const target = m[1].slice(0, -3);
       if (m[1].includes('/')) continue; // path-shaped link; flatness rule already errs on real subdirs
       if (namespace && !target.startsWith(`${namespace}_`)) continue;
-      if (!names.has(target)) {
+      if (!resolvable.has(target)) {
         issues.push({
           severity: 'error',
           rule: 'docs/broken-link',
@@ -956,6 +982,21 @@ function underPackage(issues: readonly DocIssue[], index: number): DocIssue[] {
  * re-tried against the artifact's. `lintDocNamesAcrossOwners` is what replaces
  * the one thing the single global set used to give for free.
  *
+ * ## What the partition deliberately does NOT reach
+ *
+ * ⛔ The OWNERSHIP question and the EXISTENCE question are not the same
+ * question, and only the first one is partitioned. Same-prefix link resolution
+ * and metadata-embed reference liveness both resolve across the WHOLE artifact:
+ * a doc's namespace prefix says who judges its NAME, while a link asks whether
+ * the target is there, and ADR-0130 D1 exists precisely so that N packages of
+ * one artifact may share a namespace and cross-link inside it.
+ *
+ * Partitioning links too would have turned an ordinary cross-package link into
+ * `docs/broken-link` and stopped an artifact that built green from building —
+ * an unauthorised narrowing, caught by this card's contract review as C2 and
+ * pinned by `a link across two packages sharing one namespace` in
+ * `collect-docs.package-docs.test.ts`.
+ *
  * ⚠️ A stack with no `packages[]` — every single-package app — takes exactly
  * the old path: nothing is claimed, so the stack-level set IS the whole set and
  * the issue list is unchanged, item for item.
@@ -982,13 +1023,26 @@ export function collectAndLintDocs(
   const claimed = claimedDocs(owned.flatMap((entry) => entry.body));
   const stackScoped = docs.filter((doc) => !claimed.has(doc));
 
+  // [#18431 contract review, C2] Every name this artifact carries, whoever owns
+  // it — what a same-prefix LINK resolves against. The ownership split decides
+  // which namespace a doc is JUDGED by; it must not decide whether a sibling
+  // package's doc EXISTS, because ADR-0130 D1 is the case where two packages
+  // share the prefix and a cross-package link is ordinary. For a stack with no
+  // `packages[]` this set is exactly `docs`, so the single-package path is
+  // unmoved.
+  const artifactNames: ReadonlySet<string> = new Set(
+    [...docs, ...owned.flatMap((entry) => entry.all)]
+      .map((doc) => doc?.name)
+      .filter((name): name is string => typeof name === 'string'),
+  );
+
   const issues: DocIssue[] = [
     ...collected.issues,
-    ...lintDocs(stackScoped, namespace),
+    ...lintDocs(stackScoped, namespace, artifactNames),
     ...lintMetadataEmbeds(docs, stack),
   ];
   for (const entry of owned) {
-    issues.push(...underPackage(lintDocs(entry.all, entry.ref.namespace), entry.ref.index));
+    issues.push(...underPackage(lintDocs(entry.all, entry.ref.namespace, artifactNames), entry.ref.index));
     // Only the docs read off disk need an embed pass here: a doc already on the
     // body is also in `docs` above, where `lintMetadataEmbeds` has judged it.
     issues.push(...underPackage(lintMetadataEmbeds(entry.fromDisk, stack), entry.ref.index));

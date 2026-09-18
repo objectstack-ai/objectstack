@@ -293,6 +293,114 @@ describe('the doc lint reads the OWNING package namespace', () => {
   });
 });
 
+// ── C2 — the ownership split must not answer the EXISTENCE question ─────────
+//
+// Raised by this card's contract review and pinned HERE, in the unit tier, so
+// it runs on the pull request that would reintroduce it. The e2e file next door
+// carries the `.e2e.` filename tier, which is the NIGHTLY run — a pin that only
+// ever runs after the merge is not what catches this.
+//
+// The defect it holds shut: `lintDocs` resolves a same-prefix link against the
+// set it is handed. Partitioning the doc set per package (clause 2) silently
+// made that set ONE PACKAGE, so in the ADR-0130 D1 shape — N packages sharing
+// one namespace, the shape this card calls the common one — an ordinary link
+// from package A's doc to package B's doc became `docs/broken-link`, an ERROR,
+// and an artifact that built green stopped building. That is an unauthorised,
+// undisclosed narrowing of the accept set.
+//
+// ⚠️ Each direction is asserted with a TRUE-POSITIVE twin built from the same
+// fixture. A run of the "no broken link" side alone is indistinguishable from
+// deleting the rule, which is the one outcome that must not read as a pass.
+describe('same-prefix links resolve ARTIFACT-WIDE, not per package (C2)', () => {
+  /** Two packages sharing one namespace — ADR-0130 D1's whole point. */
+  const SHARED_NS = [
+    pkg({ ...CORE, namespace: 'crm', name: 'core' }),
+    pkg({ ...ORDERS, namespace: 'crm', name: 'orders' }),
+  ];
+  const sharedStack = (extra: Record<string, unknown> = {}) => ({
+    manifest: { ...CORE, namespace: 'crm' },
+    packages: SHARED_NS,
+    ...extra,
+  });
+  const brokenLinks = (issues: ReadonlyArray<{ rule: string }>) =>
+    issues.filter((i) => i.rule === 'docs/broken-link');
+
+  it('a link across two packages sharing one namespace resolves, in both directions', () => {
+    // `core` links to a doc `orders` owns, and `orders` links back.
+    writePackageDoc('core', 'crm_core_guide', 'See [orders](./crm_orders_guide.md).');
+    writePackageDoc('orders', 'crm_orders_guide', 'Back to [core](./crm_core_guide.md).');
+
+    const { issues, packageDocs } = collectAndLintDocs(configPath, sharedStack());
+
+    // Pedigree first: both directories really were read, so "no broken link"
+    // is not the silence of a pass that collected nothing.
+    expect(packageDocs.map((s) => [s.dir, s.docs.map((d) => d.name)])).toEqual([
+      ['src/core/docs', ['crm_core_guide']],
+      ['src/orders/docs', ['crm_orders_guide']],
+    ]);
+    expect(brokenLinks(issues)).toEqual([]);
+    expect(issues.filter((i) => i.severity === 'error')).toEqual([]);
+  });
+
+  it('...while a target NO package provides is still an error — the control that can fail', () => {
+    writePackageDoc('core', 'crm_core_guide', 'See [ghost](./crm_ghost.md).');
+    writePackageDoc('orders', 'crm_orders_guide', '# Orders');
+
+    const broken = brokenLinks(collectAndLintDocs(configPath, sharedStack()).issues);
+    expect(broken).toHaveLength(1);
+    expect(broken[0]).toMatchObject({ severity: 'error', path: 'packages[0].docs/crm_core_guide' });
+  });
+
+  it('a flat src/docs/ doc links to a package-carried doc under the stack prefix, and back', () => {
+    const inlineDoc: DocItem = { name: 'crm_inline', content: 'Up to [index](./crm_index.md).' };
+    writeFlatDoc('crm_index', '# Index\n\nDown to [inline](./crm_inline.md).');
+
+    const { issues } = collectAndLintDocs(configPath, sharedStack({
+      docs: [inlineDoc],
+      packages: [SHARED_NS[0], pkg({ ...ORDERS, namespace: 'crm', name: 'orders', docs: [inlineDoc] })],
+    }));
+
+    expect(brokenLinks(issues)).toEqual([]);
+  });
+
+  it('...and the same pair with the target removed is an error on both ends', () => {
+    // Same fixture, one half deleted: the flat doc's target is gone and the
+    // package doc's target is gone, so BOTH ends report.
+    writeFlatDoc('crm_index', '# Index\n\nDown to [inline](./crm_inline.md).');
+    writePackageDoc('orders', 'crm_orders_guide', 'Up to [missing](./crm_missing.md).');
+
+    const broken = brokenLinks(collectAndLintDocs(configPath, sharedStack()).issues);
+    expect(broken.map((i) => i.path).sort()).toEqual(['docs/crm_index', 'packages[1].docs/crm_orders_guide']);
+  });
+
+  it('a target under ANOTHER package\'s prefix is still skipped as a cross-package link', () => {
+    // Unchanged behaviour, asserted so the widening above is not read as
+    // "every link is now checked": a different prefix is resolved at publish
+    // time against dependency docs, not here.
+    writePackageDoc('orders', 'sales_playbook', 'See [foreign](./other_thing.md).');
+    const differentNs = [pkg({ ...CORE }), pkg({ ...ORDERS })]; // crm + sales
+
+    const { issues } = collectAndLintDocs(configPath, { manifest: { ...CORE }, packages: differentNs });
+    expect(brokenLinks(issues)).toEqual([]);
+  });
+
+  it('metadata embeds and links are partitioned the SAME way — artifact-wide', () => {
+    // The inconsistency the review named: embeds already resolved artifact-wide
+    // while links did not. One fixture, both halves, one verdict.
+    const FENCE = '```';
+    const embed = [`${FENCE}metadata`, 'type: flow\nname: crm_onboard', FENCE].join('\n');
+    writePackageDoc('core', 'crm_core_guide', `Link: [o](./crm_orders_guide.md)\n\n${embed}`);
+    writePackageDoc('orders', 'crm_orders_guide', '# Orders');
+
+    const { issues } = collectAndLintDocs(configPath, sharedStack({
+      // `crm_onboard` is owned by the artifact, not by `core` — an embed has
+      // always resolved against the whole stack, and now a link does too.
+      flows: [{ name: 'crm_onboard' }],
+    }));
+    expect(issues.filter((i) => i.severity === 'error')).toEqual([]);
+  });
+});
+
 // ── "Nothing existing moves" — the single-package shape, item for item ─────
 describe('a stack with no packages[] is on the path it was always on', () => {
   it('produces the same docs and the same issues whether or not `packages` is passed', () => {

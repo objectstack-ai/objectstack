@@ -11,7 +11,17 @@ A module can now ship its own docs. Before this, ADR-0046 collection was anchore
 - **Where they attach**: to `packages[i]`, ⛔ never the artifact top level. The runtime already merges a package-owned collection back up for readers (`resolveArtifactCollections`, ADR-0130 D4), so a flattened copy would buy nothing and destroy the ownership D1 is about.
 - **Whose namespace the lint uses**: the owning package's. A doc outside any package keeps `stack.manifest.namespace`. A multi-package artifact therefore has **one prefix rule per package** and ⛔ no single global prefix — and ⛔ no fallback between the two: a package doc that fails its own package's prefix is refused, never re-tried against the artifact's.
 
-What that costs, stated plainly: in a multi-package artifact whose packages declare namespaces different from the artifact manifest's, a doc owned by a package is now judged by the package's prefix. That shape could not ship docs at all before (the single global prefix refused it), which is why this lands as a widening; a doc that was named for the artifact's namespace while living inside a differently-namespaced package now asks to be renamed, and the refusal names the spelling.
+**What it costs, stated as the whole of it.** Exactly ONE class of input that `os build` accepted before is refused now, and it is the direct consequence of the ruled prefix rule: in a multi-package artifact (only `composeStacks(…, { manifest: 'preserve' })` produces one) whose packages declare namespaces DIFFERENT from the artifact manifest's, a doc owned by such a package used to be judged by the artifact's prefix and is now judged by its own package's.
+
+```
+FROM  packages[i] with namespace "sales" inside an artifact whose manifest.namespace is "crm"
+      shipping a doc named  crm_orders_guide     -> accepted before, REFUSED now
+TO    rename it to          sales_orders_guide   (and the file to sales_orders_guide.md)
+```
+
+The refusal is `docs/namespace-prefix`, an error, and it names that exact spelling. Nothing else that built green stops building: an artifact whose packages share one namespace — the ADR-0130 D1 shape, and the one `examples/app-multi-package` documents — sees no change at all, because the per-package rule and the artifact rule are then the same rule. In the other direction the same change is a widening, and the larger half: that package could not ship a doc under its OWN prefix at all before.
+
+⚠️ Same-prefix LINKS and metadata-embed references are deliberately NOT partitioned with the naming rule — both resolve across the whole artifact. A doc's prefix says who judges its NAME; a link asks whether the target EXISTS, and ADR-0130 D1 exists so that N packages may share a namespace and cross-link inside it. Partitioning links too would have turned an ordinary cross-package link into `docs/broken-link` and stopped an artifact that built green from building; that was caught by this card's contract review and is pinned in the unit tier.
 
 Also in this change:
 
