@@ -43,6 +43,30 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 102 |
 
+## Subtractions the census could NOT defend — enforced
+
+A same-named call on something that is not a data engine is subtracted, and the
+subtraction is DEFENSIBLE when this census can name why: the receiver is a `node:`
+builtin, a value it watched being constructed, a language global, a type THIS
+corpus declares and the door rule rejected, or an `UNTYPED_RECEIVERS` row.
+
+⚠️ Counted below are the subtractions it can name no such fact for — the
+receiver carries a declared type the engine type index does not hold, and that
+index is built from TRACKED sources only, deliberately. An untracked, generated
+or dependency-owned declaration is one this census never saw, and «never saw it»
+must not be spelled the same way as «read it, not an engine».
+
+| what | count |
+| :--- | ---: |
+| write calls subtracted with no defensible reason | **3** |
+| …whose declared type text states an engine door anyway | **2** |
+
+| file | receiver | verb | why | declared type | door | n |
+|---|---|---|---|---|---|---:|
+| `packages/plugins/plugin-auth/src/audience-gate-test-support.ts` | `engine` | `insert` | anonymous-type | `{ insert: (name: string, data: any, options?: any) => Promise<unknown> } \| null` | ⚠️ yes | 1 |
+| `packages/plugins/plugin-auth/src/sso-client-secret.ts` | `e` | `update` | anonymous-type | `{ find(object: string, query: unknown): Promise<Record<string, unknown>[]>; update(object: string, data: unknown, options?: unknown): Promise<unknown>; }` | ⚠️ yes | 1 |
+| `packages/plugins/plugin-hono-server/src/adapter.ts` | `this.app` | `delete` | type-not-in-corpus | `Hono` | no | 1 |
+
 ## Corpus scale — present and dated, ⛔ NOT enforced
 
 ⛔ These four describe the CORPUS this census walked, not the population it
@@ -52,11 +76,11 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-09-16 at `11daf7f69`.
+Measured on 2026-09-18 at `02bdeaaf2`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 570 |
+| tracked non-test sources scanned | 573 |
 | engine-shaped types recognised | 63 |
 | declared objects in the registry | 117 |
 | same-named calls subtracted as non-engine | 146 |
