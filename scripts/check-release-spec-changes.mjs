@@ -901,7 +901,10 @@ function main() {
 
   const verdict = verifyRelease(previous, published);
   if (!verdict.ok) {
-    console.error('✗ the per-release section of spec-changes.json disagrees with the two tarballs (ADR-0087 D4).');
+    console.error(
+      "✗ spec-changes.json's export claims disagree with the two tarballs (ADR-0087 D4) — the per-release " +
+        'section, the aggregate record, or both. Each line below names which.',
+    );
     console.error('  A wrong change file is worse than none — a consumer gates its upgrade on this data.\n');
     for (const line of verdict.problems) console.error(`  ${line}`);
     process.exit(1);
