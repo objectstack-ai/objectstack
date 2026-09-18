@@ -33,7 +33,9 @@ the wrong decision.
 already used elsewhere for the very same numbers — `cloud ADR-0008` in
 `connection-credential-store.ts`, `cloud ADR-0007 step ⑤` in
 `local-manifest-source.ts`, `cloud ADR-0009 P2a` in `marketplace-ui.ts`'s own
-header. Four files carried both spellings for one number; they no longer do.
+header. All three numbers already carried both spellings inside this one
+package, and `marketplace-ui.ts` carried both inside a single file — qualified in
+its header on line 4, bare on lines 16 and 43.
 
 What actually reaches a consumer of this package:
 
