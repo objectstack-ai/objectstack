@@ -240,6 +240,7 @@
     "src/**/*.zod.ts",
     "CHANGELOG.md",
     "api-surface",
+    "api-surface-declarations",
     "spec-changes.json"
   ],
   "scripts": {
@@ -262,6 +263,8 @@
     "gen:sbom": "tsx scripts/generate-sbom.ts",
     "gen:api-surface": "tsx scripts/build-api-surface.ts",
     "check:api-surface": "tsx scripts/build-api-surface.ts --check",
+    "gen:api-surface-declarations": "tsx scripts/build-api-surface-declarations.ts",
+    "check:api-surface-declarations": "tsx scripts/build-api-surface-declarations.ts --check",
     "gen:export-origins": "tsx scripts/build-export-origins.ts",
     "check:export-origins": "tsx scripts/build-export-origins.ts --self-test && tsx scripts/build-export-origins.ts --check",
     "gen:declaration-map": "tsx scripts/build-declaration-map.ts",
