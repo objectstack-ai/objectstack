@@ -482,6 +482,55 @@ const COLUMN_ENTRY_POSITIONS: Array<{ block: string; key: string; severity: Sev 
   { block: 'prefix', key: 'field', severity: 'warning' },
 ];
 
+/**
+ * [#18836] Every field-naming position the two declarative tables above make
+ * this rule walk, as `block.key` — a bare key for the list view's own top
+ * level, and `columns.<block>.<key>` for a position nested inside a `columns[]`
+ * entry.
+ *
+ * DERIVED, never hand-written: `validate-list-view-field-refs.test.ts` asserts
+ * that its own case tables cover exactly this set, so a position added to
+ * {@link POSITIONS} with no row over there fails that assertion on the commit
+ * that adds it. The floor it replaced counted the test table's own rows, which
+ * a position added HERE never moves — the direction #18565 came in through.
+ *
+ * Deliberately NOT re-exported from the package barrel, and deliberately a
+ * FUNCTION rather than a frozen const. Both halves were measured on this
+ * branch, `pnpm --filter @objectstack/lint build`, grepping `dist/` with
+ * `validateListViewFieldRefs` as the bright control:
+ *
+ *  - Barrel: `src/index.ts` re-exports this module by NAME (no `export *`), so
+ *    an export added here reaches no published entry — 0 occurrences in the
+ *    `export {}` clause of `dist/index.js`, in the `__export` map of
+ *    `dist/index.cjs`, and in all four `.d.ts`/`.d.cts` files, against 1, 1 and
+ *    2 for the control.
+ *  - Const vs function: as `const X = Object.freeze([...])` esbuild kept the
+ *    initializer as dead weight — 1 occurrence in each of `dist/index.js`,
+ *    `dist/runtime.js` and both `.cjs` siblings, and those four files' bytes
+ *    moved. As the function below it is tree-shaken: 0 occurrences in all
+ *    eight published files, and every one of the nine `dist/` artifacts is
+ *    byte-identical to the build that predates this export.
+ *
+ * It names positions only — no severity, no shape — so reading it can never
+ * stand in for reading the tables.
+ *
+ * The three filter walks further down (`listView.filter`, `tabs[].filter`,
+ * `userFilters.tabs[].filter`) are deliberately absent: they are hard-coded
+ * seams, not table rows, so nothing about them can drift out of a table.
+ */
+export function listViewWalkedPositions(): string[] {
+  return [
+    ...Object.entries(POSITIONS).flatMap(([block, spec]) =>
+      [
+        ...Object.keys(spec.scalars ?? {}),
+        ...Object.keys(spec.lists ?? {}),
+        ...Object.keys(spec.entries ?? {}),
+      ].map((key) => (block === '' ? key : `${block}.${key}`)),
+    ),
+    ...COLUMN_ENTRY_POSITIONS.map(({ block, key }) => `columns.${block}.${key}`),
+  ];
+}
+
 /** Filter positions on a list view, as `[key path from the view, where suffix]`. */
 const SILENT_EMPTY =
   'Nothing resolves the name at render time: the view renders successfully with a blank, ' +

@@ -16,6 +16,7 @@ import {
   validateListViewFieldRefs,
   LIST_VIEW_FIELD_UNKNOWN,
   LIST_VIEW_FIELD_DOTTED,
+  listViewWalkedPositions,
   type ListViewFieldRefFinding,
 } from './validate-list-view-field-refs.js';
 import { SORT_FIELD_UNKNOWN } from './validate-sortable-fields.js';
@@ -172,25 +173,32 @@ describe('#14107 — the clean surface reports nothing', () => {
  * The card's own measured table. Each of these five passed `os validate`
  * (`valid: true, warnings: []`) and `os build` (exit 0, `✓ Build complete`) on
  * `@objectstack/cli` 17.2.0 — the reason this card exists.
+ *
+ * [#18836] At module scope because it is the other half of the coverage the
+ * completeness assertion below judges: three positions (`grouping.fields`,
+ * `kanban.groupByField`, `gantt.startDateField`) are asserted HERE and nowhere
+ * else, so a criterion that read only the sibling table would have to carry a
+ * hand-written exemption for them — the kind of constant that rots into the
+ * very lie this card is about.
  */
-describe('#14107 — the card\'s five measured positions', () => {
-  const cases: Array<[string, AnyRec, string]> = [
-    ['columns[].field', { columns: [{ field: 'B2_no_such_field' }] }, 'views[0].list.columns[0].field'],
-    [
-      'filter[].field',
-      { filter: [{ field: 'A8_no_such_field', operator: 'equals', value: 'x' }] },
-      'views[0].list.filter[0].field',
-    ],
-    [
-      'grouping.fields[].field',
-      { grouping: { fields: [{ field: 'A7_no_such_field' }] } },
-      'views[0].list.grouping.fields[0].field',
-    ],
-    ['kanban.groupByField', { kanban: { groupByField: 'A9_no_such_field' } }, 'views[0].list.kanban.groupByField'],
-    ['gantt.startDateField', { gantt: { startDateField: 'B1_no_such_field' } }, 'views[0].list.gantt.startDateField'],
-  ];
+const MEASURED_CASES: Array<[string, AnyRec, string]> = [
+  ['columns[].field', { columns: [{ field: 'B2_no_such_field' }] }, 'views[0].list.columns[0].field'],
+  [
+    'filter[].field',
+    { filter: [{ field: 'A8_no_such_field', operator: 'equals', value: 'x' }] },
+    'views[0].list.filter[0].field',
+  ],
+  [
+    'grouping.fields[].field',
+    { grouping: { fields: [{ field: 'A7_no_such_field' }] } },
+    'views[0].list.grouping.fields[0].field',
+  ],
+  ['kanban.groupByField', { kanban: { groupByField: 'A9_no_such_field' } }, 'views[0].list.kanban.groupByField'],
+  ['gantt.startDateField', { gantt: { startDateField: 'B1_no_such_field' } }, 'views[0].list.gantt.startDateField'],
+];
 
-  for (const [label, patch, path] of cases) {
+describe('#14107 — the card\'s five measured positions', () => {
+  for (const [label, patch, path] of MEASURED_CASES) {
     it(`${label} is an error, at a path an author can look up`, () => {
       const findings = validateListViewFieldRefs(stackWith(mutate(patch)));
       expect(idsOf(findings)).toEqual([path]);
@@ -203,10 +211,32 @@ describe('#14107 — the card\'s five measured positions', () => {
 });
 
 /**
+ * [#18836] The `POSITIONS` position a case's asserted finding path names, or
+ * `undefined` when the path belongs to one of the rule's hard-coded filter
+ * walks (`filter`, `tabs[].filter`, `userFilters.tabs[].filter`), which no
+ * table declares and which therefore cannot drift out of one.
+ *
+ * Two arms, because an `entries` position reports at two different paths: at
+ * the entry itself when the author wrote a bare field name
+ * (`gantt.tooltipFields[0]`) and at its `field` key when they wrote a record
+ * (`gantt.tooltipFields[0].field`). The whole path is tried FIRST, so a
+ * position whose own key is `field` (`rowColor.field`, and both
+ * `columns[].summary.field` / `columns[].prefix.field`) matches itself instead
+ * of being truncated to its block.
+ */
+function positionAsserted(path: string, walked: ReadonlySet<string>): string | undefined {
+  const at = path.replace(/^views\[\d+\]\.list\./, '').replace(/\[\d+\]/g, '');
+  if (walked.has(at)) return at;
+  const entry = at.replace(/\.field$/, '');
+  return walked.has(entry) ? entry : undefined;
+}
+
+/**
  * Every remaining position, with the severity tier it earns. The table is the
  * readable half of the rule's own POSITIONS table: a position dropped from the
- * rule fails here, and a position added to the rule without a row here leaves
- * the count assertion below short.
+ * rule fails here, and a position added to the rule without a row in either
+ * table fails the completeness assertion below — which derives the set of
+ * positions from the rule's own tables instead of counting this one's rows.
  */
 describe('#14107 — every other walked position', () => {
   const BAD = 'nope_field';
@@ -305,14 +335,40 @@ describe('#14107 — every other walked position', () => {
     });
   }
 
-  // A floor, so a position quietly dropped from the rule's table cannot pass
-  // by simply never being asserted.
+  // [#18836] The completeness criterion, DERIVED from the rule's own tables.
   //
-  // [#18835] Raised by the four rows this card adds — `calendar.allDayField`
-  // and the three objectui-lifted `gantt` bindings. The number moves by what
-  // was added and nothing else; the floor's own semantics are untouched.
+  // It replaces a `toBeGreaterThanOrEqual` floor over `cases.length`. That
+  // floor counted the rows of THIS table, which a position added to the rule
+  // never moves — so the second direction the docblock above claimed, "a
+  // position added to the rule without a row here", reported nothing at all.
+  // That is the direction #18565 came in through: `kanban.titleField` was
+  // declared by the schema from #16894 and walked by no position row, and this
+  // file stayed green.
+  //
+  // What it asserts, exactly: every position the rule walks is asserted by a
+  // row in one of this file's two tables. A position added to the rule with no
+  // row in either is MISSING from the covered set, and the diff names it.
+  //
+  // ⛔ It does NOT carry the opposite direction, and saying so is the point
+  // of this card. `positionAsserted` answers only with positions the rule
+  // CURRENTLY walks, so a row here for a position the rule has dropped
+  // contributes to neither side and this assertion stays green. That direction
+  // belongs to the per-case assertions above — the dropped position stops
+  // producing a finding and its own `it` fails — which is the first half of
+  // the docblock above, and both halves were measured on this branch.
+  //
+  // It does take over the floor's own job: a row deleted from either table
+  // takes its position off the covered set, so the deletion is red. One seam
+  // it does not cover — the two positions asserted twice on purpose (`columns`
+  // and `gantt.tooltipFields`, once as a bare name and once as a `{ field }`
+  // record) keep their position covered when one of the pair is deleted.
   it('covers every position the rule walks', () => {
-    expect(cases.length).toBeGreaterThanOrEqual(51);
+    const walked = listViewWalkedPositions();
+    const walkedSet = new Set(walked);
+    const covered = [...MEASURED_CASES.map(([, , path]) => path), ...cases.map(([, path]) => path)]
+      .map((path) => positionAsserted(path, walkedSet))
+      .filter((position): position is string => position !== undefined);
+    expect([...new Set(covered)].sort()).toEqual([...walked].sort());
   });
 });
 
