@@ -409,7 +409,8 @@ const DURATION_ROOT_MODULE = 'src/shared/duration.zod.ts';
  * The `.meta()` key that declares exemption class (ii). A key carrying it
  * mirrors a name fixed by an external standard, so the RENAME is waived — never
  * the contradiction check, and never the requirement that the describe still
- * state the unit.
+ * state the unit. What marking a key owes the PUBLISHED surfaces is stated once
+ * for both markers, on {@link DIMENSIONLESS_META_KEY} below.
  */
 const EXTERNAL_VOCABULARY_META_KEY = 'externalVocabulary';
 
@@ -427,6 +428,23 @@ const EXTERNAL_VOCABULARY_META_KEY = 'externalVocabulary';
  * lying: a dimensionless key whose NAME carries a unit token still fails
  * `name-unit-contradicts-prose`, because "this number counts events" and "this
  * number is a span of milliseconds" cannot both be true of one key.
+ *
+ * ⚠️ MARKING A KEY EDITS A PUBLISHED ARTIFACT THAT HAS NO TRACKED BYTES, so a
+ * marking declares itself to TWO publishers rather than one. Either marker
+ * reaches `packages/spec/json-schema/` down the `z.toJSONSchema` channel
+ * exemption class 2 names above, and this package's `files[]` ships that
+ * directory — but it is a gitignored build artifact carrying ZERO tracked files
+ * (measured on this repo at `2767af8e83`: 0 tracked paths under `json-schema/`,
+ * against 17 under `api-surface/` by the same `git ls-tree`), so no diff can
+ * show that it moved. The gap is the ARTIFACT, not the edit: the marking line
+ * is visible, and this package's `files[]` ships its `.zod.ts` sources too, so
+ * on a spec key that line is a published file in its own right; the rendered
+ * note moves visibly as well, because `content/docs/references/**` is tracked.
+ * ⛔ Those visible halves are the trap — they make the publishing story read as
+ * fully told, while "nothing else published moved" is not a reading about
+ * `json-schema/` at all, which cannot move in a diff. So the first card that
+ * really marks a key declares BOTH publishers: the rendered reference page AND
+ * the published JSON Schema (#18687).
  */
 const DIMENSIONLESS_META_KEY = 'dimensionless';
 
