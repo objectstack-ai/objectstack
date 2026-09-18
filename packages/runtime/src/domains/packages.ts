@@ -798,29 +798,53 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 const disabled = registry.disablePackage(pkgId);
                 if (disabled) pkg = disabled;
             }
-            // ⭐ The DURABLE half, and it is written on BOTH arms — the defect
-            // this branch shipped with was writing only `true`. `POST /packages`
-            // is a CREATE that an already-installed id reaches through
-            // `overwrite`, and `DELETE /packages/:id` never clears this record
-            // either, so the id in front of us may already be listed as
-            // disabled from an earlier install. An install that ANSWERS
-            // `enabled: true` and leaves `disabled` on disk is the silent
-            // durability defect Prime Directive #10 and the degradation-log
-            // rules both name: correct on the wire, wrong after a restart,
-            // because `SchemaRegistry.installPackage` re-reads
-            // `initialDisabledPackageIds` at boot and installs it DISABLED.
+            // ⭐ The DURABLE half, and it follows THE ROW THIS DOOR RETURNED —
+            // never the request's intent. Written unconditionally rather than
+            // only on the overwrite path: "was this id installed a moment ago"
+            // is not the question — "does the durable record agree with the row
+            // this door just returned" is, and that is one call either way.
             //
-            // Written unconditionally rather than only on the overwrite path:
-            // "was this id installed a moment ago" is not the question —
-            // "does the durable record agree with the row this door just
-            // returned" is, and that is one call either way. It is the same
-            // `false` call `PATCH /packages/:id/enable` makes below, in the
-            // same best-effort try/catch: the in-memory install already
-            // succeeded, so a state-file failure must not turn a 201 into a 500.
+            // Both directions of that disagreement are silent durability
+            // defects of the kind Prime Directive #10 and the degradation-log
+            // rules name — correct on the wire, wrong after a restart — and
+            // persisting the REQUEST closes only the first:
+            //
+            //   ① answered `enabled: true`, disk still says disabled. `POST
+            //     /packages` is a CREATE an already-installed id reaches
+            //     through `overwrite`, and `DELETE /packages/:id` never clears
+            //     this record either, so the id may already be listed from an
+            //     earlier install. The next boot re-installs it DISABLED.
+            //   ② answered `enabled: false`, disk cleared. `installPackage`
+            //     lands an id that is in the boot-seeded
+            //     `initialDisabledPackageIds` DISABLED WHATEVER THE REQUEST
+            //     SAYS, so a flag-absent install of a package an operator
+            //     disabled before a restart returns `enabled: false` while the
+            //     request's own intent (`true`, the declared default) erases
+            //     the disable from disk. The next boot brings it back ENABLED.
+            //
+            // `pkg.enabled` is the one value that cannot be out of step with
+            // either, because it IS the row being served. It is read AFTER the
+            // flip above, and on both install arms it is the registry's own
+            // `InstalledPackage` (the protocol service returns `{ package }`
+            // straight out of `registry.installPackage`), so `=== false` is
+            // `!pkg.enabled` on every reachable row — the spelling only keeps a
+            // degenerate rowless return from writing a disable nobody asked for.
+            //
+            // ⛔ Deliberately NOT "enable first, so the declared default wins":
+            // that would make a flag-absent install RE-ENABLE a package an
+            // operator disabled in an earlier boot, which is a new behaviour no
+            // ruling authorises. What a seeded id does with `enableOnInstall:
+            // true` is therefore unchanged; what is fixed is that memory and
+            // disk no longer disagree about it.
+            //
+            // Same best-effort try/catch as `PATCH /packages/:id/enable` below:
+            // the in-memory install already succeeded, so a state-file failure
+            // must not turn a 201 into a 500.
+            const rowDisabled = pkg?.enabled === false;
             try {
-                setPackageDisabled(_context?.environmentId, pkgId, installDisabled);
+                setPackageDisabled(_context?.environmentId, pkgId, rowDisabled);
             } catch (err) {
-                console.warn('[handlePackages] failed to persist enableOnInstall', { id: pkgId, disabled: installDisabled, error: (err as Error)?.message });
+                console.warn('[handlePackages] failed to persist enableOnInstall', { id: pkgId, disabled: rowDisabled, error: (err as Error)?.message });
             }
             const res = deps.success(pkg);
             res.status = 201;

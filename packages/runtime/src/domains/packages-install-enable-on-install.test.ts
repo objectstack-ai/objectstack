@@ -282,3 +282,288 @@ describe('#18058 — a re-install persists the state it RETURNS, not just a disa
         expect(persistedDisabled().has(id)).toBe(true);
     });
 });
+
+/**
+ * [#18058 F1b] The MIRROR of F1 — an id an operator disabled in an EARLIER
+ * boot, seeded back into the registry at this boot's start.
+ *
+ * ## Why the four F1 cases above cannot see this
+ *
+ * Not one of them calls `setInitialDisabledPackageIds`. Their registries are
+ * born empty, so `SchemaRegistry.installPackage` always lands a package
+ * ENABLED and the only thing that can move it is this door's own
+ * `enableOnInstall: false` flip. That makes "the state the request asked for"
+ * and "the state the registry ended up in" the SAME value on every one of
+ * them — the two can only be told apart on a registry that was seeded, which
+ * is the same structural blind spot the earlier review named for the fresh-id
+ * cases. ⛔ A case that does not seed proves nothing here.
+ *
+ * ## The divergence these pin shut
+ *
+ * `SchemaRegistry.installPackage` lands an id that is in the boot-seeded
+ * `initialDisabledPackageIds` DISABLED **whatever the request says** — the
+ * seed is read at registration, not at the door. So with the flag ABSENT:
+ *
+ * ```text
+ * boot 1  POST {manifest, enableOnInstall:false}   → 201, enabled:false, disk lists the id
+ * restart setInitialDisabledPackageIds(loadDisabledPackageIds(undefined))
+ * boot 2  POST {manifest}            (flag absent) → 201, enabled:FALSE  (the seed won)
+ *                                                    …and the disk record was CLEARED
+ * boot 3                                           → the package comes back ENABLED
+ * ```
+ *
+ * Nothing is red at boot 2: the wire answer and the registry agree with each
+ * other and only the disk disagrees — an operator's disable, persisted before a
+ * restart, erased by an install that never asked for it. Reachable from the
+ * SDK's default `client.packages.install(manifest)` and from objectui's
+ * `{ manifest }` post.
+ *
+ * ## The remedy, and the one that was NOT taken
+ *
+ * The disk follows the ROW THIS DOOR RETURNED (`!pkg.enabled`), so memory and
+ * disk cannot disagree by construction. ⛔ Deliberately NOT "enable first so
+ * the declared default wins": that would make a flag-absent install RE-ENABLE a
+ * package an operator disabled in an earlier boot — a new behaviour this card
+ * does not authorise. Which state a seeded id should end in when the request
+ * asks for `enableOnInstall: true` is therefore left exactly as it was, and the
+ * last case here pins that it is at least SELF-CONSISTENT.
+ */
+describe('#18058 F1b — a boot-seeded disable survives an install that never asked to clear it', () => {
+    /**
+     * A restart, spelled exactly as `AppPlugin.seedPersistedDisabledPackages`
+     * spells it (`app-plugin.ts`): a registry born empty, then seeded from the
+     * durable file BEFORE any package registration.
+     */
+    const rebootFromDisk = () => {
+        const registry = freshRegistry();
+        registry.setInitialDisabledPackageIds(loadDisabledPackageIds(undefined));
+        return { registry, dispatcher: makeDoor(registry) };
+    };
+
+    /**
+     * Boot 1: an operator disables the package the ordinary way, and it reaches
+     * disk. Returns nothing — the durable file is the whole point, and the
+     * registry that wrote it is deliberately thrown away.
+     */
+    const persistDisableInAnEarlierBoot = async (id: string, namespace: string) => {
+        const { dispatcher } = rebootFromDisk();
+        const first = await install(dispatcher, {
+            manifest: manifest(id, namespace),
+            enableOnInstall: false,
+        });
+        expect(first.response?.status).toBe(201);
+        expect(first.response?.body?.data?.enabled, 'precondition: boot 1 really disabled it').toBe(false);
+        expect(loadDisabledPackageIds(undefined).has(id), 'precondition: boot 1 reached disk').toBe(true);
+    };
+
+    it('case F — flag ABSENT on a seeded id: wire, registry and disk all still say disabled', async () => {
+        const id = 'com.acme.seeded.absent';
+        await persistDisableInAnEarlierBoot(id, 'seededabsent');
+
+        // Boot 2 — the registry is seeded, the package is not installed yet.
+        const { registry, dispatcher } = rebootFromDisk();
+        const again = await install(dispatcher, { manifest: manifest(id, 'seededabsent') });
+
+        expect(again.response?.status).toBe(201);
+        // The seed decides, and the door reports it honestly.
+        expect(again.response?.body?.data?.enabled, 'the row this door RETURNED').toBe(false);
+        expect(registry.getPackage(id)?.enabled, 'the registry the next read serves from').toBe(false);
+        // ⭐ The line F1b exists for: the request's intent must not overwrite it.
+        expect(
+            loadDisabledPackageIds(undefined).has(id),
+            'the durable state — an install that ANSWERED `enabled:false` must not clear the disable on disk',
+        ).toBe(true);
+    });
+
+    it('case F — and boot 3 agrees: the package does not come back enabled', async () => {
+        const id = 'com.acme.seeded.restart';
+        await persistDisableInAnEarlierBoot(id, 'seededrestart');
+
+        const boot2 = rebootFromDisk();
+        const second = await install(boot2.dispatcher, { manifest: manifest(id, 'seededrestart') });
+        expect(second.response?.body?.data?.enabled).toBe(false);
+
+        // Boot 3 — re-seeded from whatever boot 2 left behind.
+        const boot3 = rebootFromDisk();
+        const third = await install(boot3.dispatcher, { manifest: manifest(id, 'seededrestart') });
+        expect(third.response?.body?.data?.enabled, 'a restart must replay the disable, not undo it').toBe(false);
+        expect(boot3.registry.getPackage(id)?.enabled).toBe(false);
+        expect(loadDisabledPackageIds(undefined).has(id)).toBe(true);
+    });
+
+    it('case G — `overwrite:true` with the flag absent, on an id already installed-disabled this boot', async () => {
+        const id = 'com.acme.seeded.overwrite';
+        await persistDisableInAnEarlierBoot(id, 'seededoverwrite');
+
+        const { registry, dispatcher } = rebootFromDisk();
+        // Install it once this boot: the seed lands it disabled with no flip.
+        const seeded = await install(dispatcher, { manifest: manifest(id, 'seededoverwrite') });
+        expect(seeded.response?.body?.data?.enabled, 'precondition: the seed landed it disabled').toBe(false);
+
+        // Now the re-install the review measured: overwrite, no flag.
+        const again = await install(dispatcher, {
+            manifest: manifest(id, 'seededoverwrite'),
+            overwrite: true,
+        });
+
+        expect(again.response?.status).toBe(201);
+        expect(again.response?.body?.data?.enabled, 'the row this door RETURNED').toBe(false);
+        expect(registry.getPackage(id)?.enabled, 'the registry the next read serves from').toBe(false);
+        expect(
+            loadDisabledPackageIds(undefined).has(id),
+            'the durable state — the overwrite path diverges the same way, and must not',
+        ).toBe(true);
+
+        // And the restart round-trip, from the state this install left.
+        const boot3 = rebootFromDisk();
+        const third = await install(boot3.dispatcher, { manifest: manifest(id, 'seededoverwrite') });
+        expect(third.response?.body?.data?.enabled, 'a re-seeded registry still agrees with that row').toBe(false);
+    });
+
+    it('a seeded id asked for `enableOnInstall: true` is at least SELF-CONSISTENT — the seed wins, and the disk says so', async () => {
+        // ⛔ NOT a claim that the flag is honoured here. The registry seed is
+        // read at registration and this door does not re-enable (that is remedy
+        // (b), which no ruling authorises). What IS required is that the three
+        // records do not disagree: whatever state the install lands in, the
+        // durable file records THAT state and a restart replays it.
+        const id = 'com.acme.seeded.true';
+        await persistDisableInAnEarlierBoot(id, 'seededtrue');
+
+        const { registry, dispatcher } = rebootFromDisk();
+        const again = await install(dispatcher, {
+            manifest: manifest(id, 'seededtrue'),
+            enableOnInstall: true,
+        });
+
+        expect(again.response?.status).toBe(201);
+        const returned = again.response?.body?.data?.enabled;
+        expect(registry.getPackage(id)?.enabled, 'the registry agrees with the row').toBe(returned);
+        expect(
+            loadDisabledPackageIds(undefined).has(id),
+            'the disk agrees with the row',
+        ).toBe(returned === false);
+    });
+
+    it('⛔ the seed is not a door that disables everything — an UNSEEDED id still installs enabled', async () => {
+        // The control leg. Without it every assertion above is satisfiable by a
+        // registry that simply refuses to enable anything.
+        const other = 'com.acme.seeded.control';
+        await persistDisableInAnEarlierBoot('com.acme.seeded.neighbour', 'seededneighbour');
+
+        const { registry, dispatcher } = rebootFromDisk();
+        const fresh = await install(dispatcher, { manifest: manifest(other, 'seededcontrol') });
+
+        expect(fresh.response?.status).toBe(201);
+        expect(fresh.response?.body?.data?.enabled, 'an id the seed never named').toBe(true);
+        expect(registry.getPackage(other)?.enabled).toBe(true);
+        expect(loadDisabledPackageIds(undefined).has(other)).toBe(false);
+    });
+});
+
+/**
+ * [#18058] The changeset's own sentence, MEASURED rather than presumed:
+ *
+ * > «Every install now persists the state it returned.»
+ *
+ * The cases above each pin a specific expected state. This block pins the
+ * WEAKER but universal claim that sentence actually makes — for every arm of
+ * this door that answers `201`, the durable record and the row served are the
+ * same fact:
+ *
+ * ```text
+ * loadDisabledPackageIds().has(id)  ===  (row.enabled === false)
+ * ```
+ *
+ * ⚠️ It asserts the invariant, deliberately NOT which value each arm lands on:
+ * a block that also pinned the values would pass for the wrong reason the day
+ * one arm's expected value changed. Held against the arms that can reach this
+ * door at all — both body forms, the flag in all three of its states, a
+ * registry with and without a boot seed, and the `overwrite` re-install path.
+ * `409` is a red here, not a skip: an arm that stopped reaching `201` would
+ * otherwise drop out of the measurement silently.
+ */
+describe('#18058 — MEASURED: every install persists the state it RETURNED', () => {
+    const rebootFromDisk = () => {
+        const registry = freshRegistry();
+        registry.setInitialDisabledPackageIds(loadDisabledPackageIds(undefined));
+        return { registry, dispatcher: makeDoor(registry) };
+    };
+
+    /** Put `id` on disk as disabled, using the door, and throw that boot away. */
+    const seedDiskWith = async (id: string, namespace: string) => {
+        const { dispatcher } = rebootFromDisk();
+        const first = await install(dispatcher, { manifest: manifest(id, namespace), enableOnInstall: false });
+        expect(first.response?.status, `setup: ${id}`).toBe(201);
+        expect(loadDisabledPackageIds(undefined).has(id), `setup: ${id} reached disk`).toBe(true);
+    };
+
+    interface Arm {
+        /** Reads as the test name — keep it a description of the ARM, not of an expected value. */
+        name: string;
+        /** Disk carries this id as disabled before the boot under measurement. */
+        seeded?: boolean;
+        /** Install once this boot before the measured call (reaches the `overwrite` path). */
+        preinstall?: 'default' | 'off';
+        /** The measured call's body, given the manifest. */
+        body: (m: Record<string, unknown>) => unknown;
+    }
+
+    const arms: Arm[] = [
+        { name: 'fresh id · wrapped · flag absent', body: (m) => ({ manifest: m }) },
+        { name: 'fresh id · wrapped · flag true', body: (m) => ({ manifest: m, enableOnInstall: true }) },
+        { name: 'fresh id · wrapped · flag false', body: (m) => ({ manifest: m, enableOnInstall: false }) },
+        { name: 'fresh id · bare manifest', body: (m) => m },
+        { name: 'seeded id · wrapped · flag absent', seeded: true, body: (m) => ({ manifest: m }) },
+        { name: 'seeded id · wrapped · flag true', seeded: true, body: (m) => ({ manifest: m, enableOnInstall: true }) },
+        { name: 'seeded id · wrapped · flag false', seeded: true, body: (m) => ({ manifest: m, enableOnInstall: false }) },
+        { name: 'seeded id · bare manifest', seeded: true, body: (m) => m },
+        {
+            name: 'seeded id · installed this boot · overwrite · flag absent',
+            seeded: true,
+            preinstall: 'default',
+            body: (m) => ({ manifest: m, overwrite: true }),
+        },
+        {
+            name: 'seeded id · installed this boot · overwrite · flag false',
+            seeded: true,
+            preinstall: 'default',
+            body: (m) => ({ manifest: m, overwrite: true, enableOnInstall: false }),
+        },
+        {
+            name: 'unseeded id · disabled this boot · overwrite · flag absent',
+            preinstall: 'off',
+            body: (m) => ({ manifest: m, overwrite: true }),
+        },
+    ];
+
+    arms.forEach((arm, index) => {
+        it(`${arm.name} — disk and row agree`, async () => {
+            const id = `com.acme.measured${index}`;
+            const namespace = `measured${index}`;
+            if (arm.seeded) await seedDiskWith(id, namespace);
+
+            const { registry, dispatcher } = rebootFromDisk();
+            if (arm.preinstall) {
+                const pre = await install(
+                    dispatcher,
+                    arm.preinstall === 'off'
+                        ? { manifest: manifest(id, namespace), enableOnInstall: false }
+                        : { manifest: manifest(id, namespace) },
+                );
+                expect(pre.response?.status, 'setup: the pre-install must land').toBe(201);
+            }
+
+            const result = await install(dispatcher, arm.body(manifest(id, namespace)));
+            expect(result.response?.status, 'this arm must still reach the door').toBe(201);
+
+            const row = result.response?.body?.data;
+            expect(typeof row?.enabled, 'the row must state its own enabled-ness').toBe('boolean');
+            expect(registry.getPackage(id)?.enabled, 'the registry agrees with the row').toBe(row?.enabled);
+            // ⭐ The sentence itself.
+            expect(
+                loadDisabledPackageIds(undefined).has(id),
+                'the durable record is the state this door RETURNED',
+            ).toBe(row?.enabled === false);
+        });
+    });
+});
