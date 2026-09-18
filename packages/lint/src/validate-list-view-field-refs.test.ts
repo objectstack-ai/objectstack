@@ -211,10 +211,19 @@ describe('#14107 — the card\'s five measured positions', () => {
 });
 
 /**
+ * [#18836] A case's asserted finding path, with the fixture's own `views[0].list`
+ * prefix and every array index dropped, so it can be compared with a position id.
+ */
+function casePath(path: string): string {
+  return path.replace(/^views\[\d+\]\.list\./, '').replace(/\[\d+\]/g, '');
+}
+
+/**
  * [#18836] The `POSITIONS` position a case's asserted finding path names, or
  * `undefined` when the path belongs to one of the rule's hard-coded filter
- * walks (`filter`, `tabs[].filter`, `userFilters.tabs[].filter`), which no
- * table declares and which therefore cannot drift out of one.
+ * walks — which no table declares, so {@link listViewWalkedPositions} has
+ * nothing to derive them from. Those are declared and asserted separately, in
+ * {@link HARD_CODED_FILTER_WALKS}.
  *
  * Two arms, because an `entries` position reports at two different paths: at
  * the entry itself when the author wrote a bare field name
@@ -225,11 +234,32 @@ describe('#14107 — the card\'s five measured positions', () => {
  * of being truncated to its block.
  */
 function positionAsserted(path: string, walked: ReadonlySet<string>): string | undefined {
-  const at = path.replace(/^views\[\d+\]\.list\./, '').replace(/\[\d+\]/g, '');
+  const at = casePath(path);
   if (walked.has(at)) return at;
   const entry = at.replace(/\.field$/, '');
   return walked.has(entry) ? entry : undefined;
 }
+
+/**
+ * [#18836] The rule's three hard-coded filter walks, spelled as
+ * {@link casePath} normalises the paths they report at.
+ *
+ * They are open code, not table rows — `checkListView` calls `checkFilter` on
+ * `listView.filter`, on `tabs[]` and on `userFilters.tabs[]` — so the position
+ * set derived from the rule cannot reach them, and the completeness assertion
+ * below would let their rows be deleted in silence. That is precisely the hole
+ * the floor this card replaced DID cover, by counting rows.
+ *
+ * So they are declared here and asserted EXACTLY: delete one of their rows and
+ * the list comes up short; give a fourth hard-coded walk a row without adding
+ * it here and the list comes up long. Together with the derived assertion, every
+ * row in both tables is then accounted for by one criterion or the other.
+ */
+const HARD_CODED_FILTER_WALKS = [
+  'filter.field',
+  'tabs.filter.field',
+  'userFilters.tabs.filter.field',
+];
 
 /**
  * Every remaining position, with the severity tier it earns. The table is the
@@ -349,26 +379,69 @@ describe('#14107 — every other walked position', () => {
   // row in one of this file's two tables. A position added to the rule with no
   // row in either is MISSING from the covered set, and the diff names it.
   //
-  // ⛔ It does NOT carry the opposite direction, and saying so is the point
-  // of this card. `positionAsserted` answers only with positions the rule
-  // CURRENTLY walks, so a row here for a position the rule has dropped
-  // contributes to neither side and this assertion stays green. That direction
-  // belongs to the per-case assertions above — the dropped position stops
-  // producing a finding and its own `it` fails — which is the first half of
-  // the docblock above, and both halves were measured on this branch.
+  // ⛔ THIS assertion does not carry the opposite direction on its own.
+  // `positionAsserted` answers only with positions the rule CURRENTLY walks, so
+  // a row left behind for a position the rule has DROPPED contributes to
+  // neither side here and this one stays green. Two other things catch it, both
+  // measured: that row's own per-case assertion above stops seeing a finding,
+  // which is the first half of the docblock; and the sibling assertion below,
+  // where the stale row matches nothing and comes up as an extra.
   //
-  // It does take over the floor's own job: a row deleted from either table
-  // takes its position off the covered set, so the deletion is red. One seam
-  // it does not cover — the two positions asserted twice on purpose (`columns`
-  // and `gantt.tooltipFields`, once as a bare name and once as a `{ field }`
-  // record) keep their position covered when one of the pair is deleted.
+  // The floor's OWN job — a row silently deleted from a table — is taken over
+  // by this assertion and its sibling TOGETHER. The residue is stated here per
+  // kind of row rather than left to be discovered, because a criterion that
+  // claims a direction it does not cover is the exact defect this card is
+  // about. Each one measured on this branch:
+  //
+  //  - a row for a position no other row covers: deleting it drops the position
+  //    from the covered set ⇒ RED here.
+  //  - a row for one of the rule's three hard-coded filter walks: outside this
+  //    assertion by construction, because those walks are open code and nothing
+  //    derives them ⇒ RED in the sibling assertion below, which is why that one
+  //    exists.
+  //  - one of the two positions asserted TWICE on purpose (`columns` and
+  //    `gantt.tooltipFields`: once as a bare name, once as a record with a
+  //    `field` key): the surviving row still covers the position, so deleting
+  //    either one is ⛔ SILENT — measured, deleting both leaves this file green.
+  //    That seam is disclosed, not closed. Closing it means deriving each
+  //    `entries` position's two legal forms and demanding a row for both, which
+  //    is three rows these tables do not have today.
+  const assertedPaths = (): string[] => [
+    ...MEASURED_CASES.map(([, , path]) => path),
+    ...cases.map(([, path]) => path),
+  ];
+
   it('covers every position the rule walks', () => {
     const walked = listViewWalkedPositions();
     const walkedSet = new Set(walked);
-    const covered = [...MEASURED_CASES.map(([, , path]) => path), ...cases.map(([, path]) => path)]
+    const covered = assertedPaths()
       .map((path) => positionAsserted(path, walkedSet))
       .filter((position): position is string => position !== undefined);
     expect([...new Set(covered)].sort()).toEqual([...walked].sort());
+  });
+
+  // [#18836] The other half of the same account, and the half the derived
+  // assertion above structurally cannot reach: every path the two tables assert
+  // names either a position the rule walks or one of its declared hard-coded
+  // filter walks — nothing else. A set, compared in both directions, which
+  // holds three things the completeness assertion does not:
+  //
+  //  - SHORT ⇒ RED. Delete a filter-walk row and the set loses a member. All
+  //    three rows measured, one by one. That is exactly the coverage the
+  //    row-counting floor had and the derived assertion cannot reach.
+  //  - LONG ⇒ RED, measured two ways. Remove one of the three declarations
+  //    below and the rows outnumber them. Leave a row behind for a position the
+  //    rule has DROPPED and it matches neither side, so it arrives here as an
+  //    extra — red here as well as in that row's own per-case assertion, which
+  //    is how this assertion ends up carrying the direction its sibling above
+  //    cannot. A fourth hard-coded walk given a row without being declared
+  //    below lands in the same place by the same comparison.
+  it('accounts for every asserted path, as a walked position or a declared filter walk', () => {
+    const walkedSet = new Set(listViewWalkedPositions());
+    const unaccounted = assertedPaths()
+      .filter((path) => positionAsserted(path, walkedSet) === undefined)
+      .map(casePath);
+    expect([...new Set(unaccounted)].sort()).toEqual([...HARD_CODED_FILTER_WALKS].sort());
   });
 });
 
