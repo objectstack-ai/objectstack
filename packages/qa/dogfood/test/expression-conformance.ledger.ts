@@ -45,11 +45,18 @@ import type { ConformanceRow } from '@objectstack/verify';
 //      Structural, not spent: no text scan can recognise a schema it has never
 //      been told about.
 //   2. Alias resolution is FILE-LOCAL. An EXPORTED alias of a roster member
-//      used in ANOTHER file is invisible — `shared/expression.zod.ts`
-//      `PredicateInputSchema` (`= ExpressionInputSchema`) is one today, latent
-//      rather than live: measured at `a26a114d7`, its only identity hits are
-//      its own definition, its `z.input` type and the barrel re-export, so it
-//      types no slot anywhere.
+//      used in ANOTHER file is invisible. `shared/expression.zod.ts`
+//      `PredicateInputSchema` was the standing example of this, latent rather
+//      than live: measured at `a26a114d7` it typed no slot anywhere. ⚠️ It is
+//      no longer latent and it is no longer an example of the blind spot.
+//      ADR-0136 D1 (#17778) made it `= EvaluatedExpressionInputSchema` and
+//      bound the `FieldSchema` field-rule triad to it from `data/field.zod.ts`
+//      — another file — so the trap sprang exactly as written here: three
+//      STALE covers and discovery 3 short of its `head` floor, on that commit's
+//      first CI run. It is ON the roster now, so those three positions are
+//      discovered by identity and the blind spot is closed FOR THIS ALIAS. The
+//      limitation itself stands for the next exported alias, which is why this
+//      paragraph keeps it rather than deleting it.
 //   3. Attribution is textual and positional, not syntactic. A roster schema
 //      reached through a call the scan cannot follow — passed as an argument to
 //      a generic factory, spread out of another object — has no `field:` above
