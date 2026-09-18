@@ -1305,8 +1305,55 @@ export function markerMatches(marker, text) {
  *   · `list-item` is the shape `markerMatches` refuses to undecorate through,
  *     named here so that refusal is a reading rather than a silence.
  *
+ * ## The two forms the #18831 measurement added, and the asymmetry inside them
+ *
+ * Measured over the WHOLE open board rather than the filing card's table:
+ * objectstack's 514 OPEN cards, the 459 of them carrying a comment, 131,587
+ * comment lines, read through the REST proxy 2026-09-18T04:26Z–04:31Z with the
+ * repo at `0b31d90fb`. Both readings are counts over that corpus, ⛔ not a
+ * judgement of what the shapes look like:
+ *
+ *   · `heading-bare` — a heading whose word carries NO canonical colon (a `+`,
+ *     a dash, or nothing at all): 10 line(s) on 10 card(s), every one of them a
+ *     real ownership record. It is SYMMETRIC — both directives, inflected
+ *     spellings included — because the heading prefix is already the strong
+ *     signal its `heading` sibling reads. The one prose casualty the measurement
+ *     turned up was `### release-aftercare.md`, a FILE NAME, and the required
+ *     whitespace-or-end after the word excludes it by construction.
+ *   · `bare-word` — the PARTICIPLE at line start with no separator at all: 13
+ *     line(s) on 13 card(s), every one a claim-shaped line. ⛔ CLAIM side only,
+ *     and ⛔ deliberately NOT the bare imperative `Claim ` — both omissions are
+ *     measured, and both counterfactuals are stated so the next editor extends
+ *     this roster from evidence rather than from symmetry:
+ *       — the bare imperative would have added 5 line(s) on 5 card(s), all real
+ *         records today, and would also read the PROTOCOL's own sentence
+ *         「Claim the issue BEFORE you write any code」 — which seats quote — as
+ *         a near miss. A participle cannot open an imperative; that is the
+ *         whole discriminator, and it is why the omission is the word and ⛔ not
+ *         a lookahead full of English determiners.
+ *       — the release participles would have added 19 line(s) on 12 card(s), of
+ *         which 7 are ordinary release-board PROSE (`Release timing, …`,
+ *         `Release checklist, …`, `Release board: …`, `Release condition:`,
+ *         `Release confirmed …`): the noun opens a sentence in this repo, the
+ *         claim participles do not.
+ *
+ * ⚠️ Two boundaries this pair does NOT cross, both stated with their reading:
+ *   · A heading that carries the word ALONE stays silent, because the census
+ *     skips a form whose remainder is empty — objectstack#15638's `## Claim`
+ *     heading is exactly that line, and the card is named through its PROSE
+ *     line (`Claimed by the …`) instead. ⛔ Do not trade the empty-remainder
+ *     rule for that one line: it is what keeps this clause from filling with
+ *     section headings.
+ *   · A heading carrying an INFLECTED word AND the canonical colon
+ *     (`## Released:`) is named by no form here. Measured ZERO occurrences over
+ *     the corpus above, so it is left unnamed rather than guessed at — add it
+ *     WITH its fixture when a live line appears.
+ *
  * Ordered MOST SPECIFIC FIRST: the form a line is named by is the first that
- * matches it, so `## __Release:__` is a heading rather than an emphasis.
+ * matches it, so `## __Release:__` is a heading rather than an emphasis, and
+ * `## Claim + dispatch` is `heading-bare` rather than `heading` only because
+ * `heading` holds out for the colon. The two additions sit LAST, so neither can
+ * rename a line an older form already read.
  *
  * `re` matches the OFFENDING OPENING only and never the remainder, so the
  * matched text IS the prefix a row prints and a seat greps for. No `g` flag,
@@ -1342,6 +1389,18 @@ export const OWNERSHIP_MARKER_NEAR_MISS_FORMS = Object.freeze([
     what: 'the canonical word with a separator that is not the canonical colon',
     example: 'Release — session `session_x` — 去向 `pm:queue`',
     re: /^[ \t]*>?[ \t]*[_*`]{0,3}(?:Claim(?:ed)?|Release)[_*`]{0,3}[ \t]*[：–—-]/iu,
+  }),
+  Object.freeze({
+    id: 'heading-bare',
+    what: 'the directive written as a markdown HEADING with NO colon after the word — a `+`, a dash, or nothing at all',
+    example: '## Claim + dispatch — **design only**, no implementation, no follow-up cards filed',
+    re: /^[ \t]*#{1,6}[ \t]*[_*`]{0,3}(?:Claim(?:ed|ing)?|Releas(?:e|ed|ing))[_*`]{0,3}(?=[ \t]|$)/iu,
+  }),
+  Object.freeze({
+    id: 'bare-word',
+    what: 'a claim written as PROSE — the participle at line start, with no separator at all',
+    example: 'Claimed by the `os-dev` seat. Session `01D47qPfEWVPmhguWgBZCi5N`.',
+    re: /^[ \t]*>?[ \t]*[_*`]{0,3}(?:Claimed|Claiming)[_*`]{0,3}[ \t]+/iu,
   }),
 ]);
 
@@ -24302,7 +24361,7 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // one or silently dropped. A widening whose controls can drift out of the
   // suite is how a repair becomes a silencer, and a vocabulary nobody asserts
   // on is how the next decoration replays this card.
-  'H2/H47/H66 decorated ownership marker': 94,
+  'H2/H47/H66 decorated ownership marker': 136,
   // Registered with the measured body cap (#18664); the pin sits just under
   // the count on its neighbours' grounds. What this battery floors is a
   // MEASUREMENT and its UNIT — `ISSUE_BODY_LIMIT` bisected to one byte on a
@@ -35042,7 +35101,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // fixture. ⭐ The counterfactual pin: the roster is asserted EQUAL to a frozen
   // list of ids, so a form added without a fixture reds and a form silently
   // dropped reds. That is the failure mode that produced this card.
-  b(BATTERY68, 'vocabulary ⭐ the roster is EXACTLY the declared forms — an addition without a fixture reds, a silent drop reds', OWNERSHIP_MARKER_NEAR_MISS_FORMS.map((f) => f.id).join(','), 'heading,list-item,underscore-emphasis,inflected-word,separator');
+  b(BATTERY68, 'vocabulary ⭐ the roster is EXACTLY the declared forms — an addition without a fixture reds, a silent drop reds', OWNERSHIP_MARKER_NEAR_MISS_FORMS.map((f) => f.id).join(','), 'heading,list-item,underscore-emphasis,inflected-word,separator,heading-bare,bare-word');
   b(BATTERY68, 'vocabulary: the roster is FROZEN', Object.isFrozen(OWNERSHIP_MARKER_NEAR_MISS_FORMS), true);
   b(BATTERY68, 'vocabulary: …and so is every member', OWNERSHIP_MARKER_NEAR_MISS_FORMS.every((f) => Object.isFrozen(f)), true);
   b(BATTERY68, 'vocabulary: every member carries an id, a printable name, a fixture and a pattern', OWNERSHIP_MARKER_NEAR_MISS_FORMS.every((f) => typeof f.id === 'string' && typeof f.what === 'string' && typeof f.example === 'string' && f.re instanceof RegExp), true);
@@ -35056,6 +35115,55 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
     b(BATTERY68, `vocabulary ${form.id}: …with the comment id a seat opens`, miss68(form.example).commentId, '5691473966');
     b(BATTERY68, `vocabulary ${form.id}: …and the OFFENDING PREFIX, ⛔ not the whole line`, String(miss68(form.example).prefix ?? '').length > 0 && form.example.startsWith(String(miss68(form.example).prefix ?? '\u0000')) && String(miss68(form.example).prefix ?? '').length < form.example.length, true);
   }
+
+  // ⭐ THE FOUR MEASURED ROWS (#18831) — each line PASTED from the REST read of
+  // its own comment, ⛔ never retyped from the filing card's table, and each
+  // re-read live at 2026-09-18T04:26Z (all four cards still OPEN, none of them
+  // carrying a readable `Claim:`/`Release:` anywhere in its thread). The remedy
+  // is the WRITERS' — a compliant `Claim:` by the holder, requested on #18886
+  // (cli) · #18887 (spec) · #18888 (services) — so what this half owes is that
+  // the sweep SOUNDS on them instead of reading absence.
+  const M18831_11633 = '## Claim + dispatch — **design only**, no implementation, no follow-up cards filed';
+  const M18831_11663 = '## Claim + dispatch — **design only**, no implementation, no product code';
+  const M18831_14512 = 'Claiming the producer half (ruling 5518059994, option B) — dev seat, session `session_01UHvF5hyiZjnCyExFnfQB8m`, branch `claude/issue-14512-multi-package-artifact-single-copy` (pushed, empty, at `7251bad7d`).';
+  const M18831_15638 = 'Claimed by the `os-dev` seat. Session `01D47qPfEWVPmhguWgBZCi5N`.';
+  const M18831_15638_HEADING = '## Claim';
+  const M18831_ALL = [M18831_11633, M18831_11663, M18831_14512, M18831_15638];
+  for (const [where, line, form, prefix] of [
+    ['#11633 comment 5394770585', M18831_11633, 'heading-bare', '## Claim'],
+    ['#11663 comment 5394306066', M18831_11663, 'heading-bare', '## Claim'],
+    ['#14512 comment 5523309738', M18831_14512, 'bare-word', 'Claiming'],
+    ['#15638 comment 5555005915', M18831_15638, 'bare-word', 'Claimed'],
+  ]) {
+    b(BATTERY68, `#18831 ${where}: ⛔ the measured line is read by NEITHER marker — the silence IS the defect`, markerMatches(CLAIM_COMMENT_MARKER, line) || markerMatches(RELEASE_COMMENT_MARKER, line), false);
+    b(BATTERY68, `#18831 ${where} ⭐ …and it REPORTS now, naming its own form`, miss68(line).form, form);
+    b(BATTERY68, `#18831 ${where}: …with the offending PREFIX a seat greps for`, miss68(line).prefix, prefix);
+    b(BATTERY68, `#18831 ${where}: …and the comment id a seat opens`, miss68(line).commentId, '5691473966');
+  }
+  b(BATTERY68, '#18831 ⭐ counterfactual: under the roster WITHOUT the two added forms, all four measured lines are silent — which is what the card measured', OWNERSHIP_MARKER_NEAR_MISS_FORMS.filter((f) => f.id !== 'heading-bare' && f.id !== 'bare-word').some((f) => M18831_ALL.some((line) => { const h = f.re.exec(line); return h !== null && line.slice(h[0].length).trim() !== ''; })), false);
+  b(BATTERY68, '#18831 ⭐ …and with them every one of the four is named', M18831_ALL.every((line) => ownershipMarkerNearMisses(rows68(line)).length === 1), true);
+  b(BATTERY68, '#18831: #15638\'s `## Claim` heading carries NO record after it, so the census stays silent on THAT line — the card is named through its prose line instead', [ownershipMarkerNearMisses(rows68(M18831_15638_HEADING)).length, miss68(`${M18831_15638_HEADING}\n${M18831_15638}`).form].join(','), '0,bare-word');
+  b(BATTERY68, '#18831: a heading carrying an INFLECTED word AND the canonical colon is named by NO form — measured zero, left unnamed rather than guessed', ownershipMarkerNearMisses(rows68('## Released: session `session_x`')).length, 0);
+
+  // ORDERING — the first form that matches names the line, so the two
+  // additions can only ever name what no older form read.
+  b(BATTERY68, '#18831 ordering: the two additions are LAST on the roster, in that order', OWNERSHIP_MARKER_NEAR_MISS_FORMS.slice(-2).map((f) => f.id).join(','), 'heading-bare,bare-word');
+  b(BATTERY68, '#18831 ordering: a heading WITH the canonical colon is still `heading`, ⛔ not `heading-bare`', miss68('## Claim: seat, session `session_x`').form, 'heading');
+  b(BATTERY68, '#18831 ordering: …an inflected word with a colon is still `inflected-word`', miss68('Claiming: seat, session `session_x`').form, 'inflected-word');
+  b(BATTERY68, '#18831 ordering: …and a dash-written claim is still `separator`, which is H34\'s row and ⛔ not this addition\'s', miss68('Claim — skills seat, session 019x').form, 'separator');
+  b(BATTERY68, '#18831 ordering: …a `-` bulleted claim with no colon is named by NEITHER addition — a list is not a heading and not a line start', ownershipMarkerNearMisses(rows68('- Claiming the producer half, seat `domain:spec`')).length, 0);
+
+  // SILENCE CONTROLS — a census that names prose is a census nobody reads, and
+  // every one of these is a line MEASURED on the open board.
+  b(BATTERY68, '#18831 control: ⛔ a heading naming a FILE is not a near miss — the word must END where the heading text does', ownershipMarkerNearMisses(rows68('### release-aftercare.md — rows RA1–RA6 (58 lines, ceiling 58, headroom 0)')).length, 0);
+  b(BATTERY68, '#18831 control ⭐ ⛔ the PROTOCOL\'s own imperative sentence is not a claim record — the reason `bare-word` carries the PARTICIPLES and ⛔ not the bare word', ownershipMarkerNearMisses(rows68('> **Claim the issue BEFORE you write any code.**')).length, 0);
+  b(BATTERY68, '#18831 control: ⛔ …nor a bare `Claim ` opening an ordinary sentence about claiming', ownershipMarkerNearMisses(rows68('Claim the card only after the ruling lands.')).length, 0);
+  b(BATTERY68, '#18831 control: ⛔ nor release-board PROSE, measured as the noisiest class on the board', ownershipMarkerNearMisses(rows68('**Release timing, for the maintainer.** This is the one input the release gate should see before the cut.')).length, 0);
+  b(BATTERY68, '#18831 control: ⛔ …nor the other three release-prose openings the corpus carries', ownershipMarkerNearMisses(rows68('**Release checklist, platform side:** #14599\n**Release board: 5 additions**, each against a named criterion\nRelease confirmed on two readings before acting')).length, 0);
+  b(BATTERY68, '#18831 control: the canonical spellings the reader DOES read are ⛔ never near misses, decorated or not', [ownershipMarkerNearMisses(rows68('Claim: seat, session `session_x`')).length, ownershipMarkerNearMisses(rows68('Claimed: seat, session `session_x`')).length, ownershipMarkerNearMisses(rows68('**Claim:** seat, session `session_x`')).length].join(','), '0,0,0');
+  b(BATTERY68, '#18831 control ⭐ the reading and this census are still COMPLEMENTS after the addition — the live #16529 record beside a canonical claim yields nothing', ownershipMarkerNearMisses(rows68(`${SPECIMEN_16529}\n**Claim:** seat, session \`session_x\``)).length, 0);
+  b(BATTERY68, '#18831: the release side of the HEADING form is named too, where the evidence is — a real release record written as a heading', miss68('## Released — **PR #17517 merged.** `pm:blocked` → `pm:queue`').form, 'heading-bare');
+  b(BATTERY68, '#18831: …and a `+`-suffixed CLAIMED heading, the fourth heading shape the corpus carries', miss68('## CLAIMED + dispatch order — #13457').form, 'heading-bare');
 
   // THE READER — complements by construction, and the conservative half.
   b(BATTERY68, 'near miss ⭐ a line the reading DOES read is ⛔ NEVER a near miss — the two are complements', ownershipMarkerNearMisses(rows68(SPECIMEN_16529)).length, 0);

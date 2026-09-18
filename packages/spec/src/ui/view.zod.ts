@@ -1745,7 +1745,19 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  *
  * Closed (strict) from the start: the map renderer's read set is itself closed
  * — it validates `schema.map` against a local zod schema with exactly these
- * keys, so an extra key here would be dropped there. The gantt / tree blocks
+ * keys, so an extra key here would be dropped there. That parity was one key
+ * SHORT until the `style` row below landed: the renderer's own
+ * `ObjectMapConfigSchema` declares `style` and `getMapConfig` reads it
+ * (`schema.map?.style`) while this block did not declare it, so strictness here
+ * refused a style URL the renderer honours — an author could not declare a map
+ * style through this face at all (#18406, director decision batch #153 item 4).
+ * The two key sets match again. Measured at the `.objectui-sha` pin `53ded82b`:
+ * `packages/types/src/zod/objectql.zod.ts:562` declares the eight keys,
+ * `packages/plugin-map/src/ObjectMap.tsx:365` reads
+ * `schema.mapStyle || schema.map?.style`, and objectui's own
+ * `content/docs/plugins/plugin-map.mdx:131` documents `style` in the block —
+ * so the divergence was against the documented surface this docblock cites, not
+ * merely against the code. The gantt / tree blocks
  * above used to be this file's two `.passthrough()` exceptions (renderer-ahead
  * knobs); #15469 closed both, so every view config block here now refuses an
  * unknown key the same way. Strict means a misspelling is a loud parse error
@@ -1762,6 +1774,7 @@ export const ListMapConfigSchema = lazySchema(() => strictObject({
   descriptionField: z.string().optional().describe('Field displayed as the marker description'),
   zoom: z.number().min(1).max(20).optional().describe('Initial zoom level (1-20). Omit to let the renderer fit the camera to the queried records'),
   center: z.tuple([z.number(), z.number()]).optional().describe('Initial camera center as [latitude, longitude]. Omit to let the renderer fit the camera to the queried records'),
+  style: z.string().optional().describe('Map style URL — the MapLibre style document the renderer loads in place of the public demo tiles. The component-level `mapStyle` is read FIRST and wins when both are present; this is NOT the inline CSS `style` record a component node carries'),
 }).describe('Map view configuration'));
 
 /**
