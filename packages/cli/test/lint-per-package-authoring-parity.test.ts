@@ -7,9 +7,16 @@
  *
  * `os build` has run the rule table a second time, once per
  * `artifactPackages(…)` entry, since #16611; `os validate` joined it in #18677.
- * `os lint` ran the union fold and stopped, so the survivors of that pass —
- * "exactly the set the union could not see", in `compile.ts`' own words — were
- * findings `os build` reported and `os lint` structurally could not.
+ * `os lint` ran the union fold and stopped, so every survivor of that pass was
+ * a finding `os build` reported and `os lint` structurally could not.
+ *
+ * ⚠️ [#18779] This header used to size that set by quoting `compile.ts` —
+ * "exactly the set the union could not see" — and the sentence was false when
+ * it was quoted: the de-duplication key carried the POSITIONAL `path`, so
+ * echoes of union findings survived it and part of every survivor set was
+ * already being reported by this door's own union run. The key was corrected
+ * there. The PARITY this file pins is unaffected in either direction, because
+ * both doors always ran the one pass with the one key.
  *
  * ## Why this file exists next to the in-process seam pin
  *
