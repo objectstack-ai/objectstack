@@ -10,10 +10,10 @@ import {
   DeleteManyRequestSchema,
 } from './batch.zod';
 import { MetadataCacheRequestSchema, MetadataCacheResponseSchema } from './http-cache.zod';
-import { QuerySchema, QUERY_DISTINCT_REMOVED } from '../data/query.zod';
+import { QUERY_DISTINCT_REMOVED } from '../data/query.zod';
 import { retiredKey } from '../shared/retired-key';
 import { MetadataItemNameSchema } from '../shared/identifiers.zod';
-import { DroppedFieldsEventSchema } from '../data/data-engine.zod';
+import { DroppedFieldsEventSchema, QueryWithTransportSchema } from '../data/data-engine.zod';
 import { 
   AnalyticsQueryRequestSchema,  
   AnalyticsResultResponseSchema, 
@@ -1851,7 +1851,37 @@ export const GetUiViewResponseSchema = lazySchema(() => ViewSchema);
  * Find Data Request
  * Defines a query to retrieve records from a specific object.
  * Supports filtering, sorting, pagination, and field selection.
- * 
+ *
+ * ## Two spellings, one semantics
+ *
+ * `query` declares its INPUT as the canonical QueryAST **or** its transport
+ * spelling ({@link QueryTransportParamsSchema} — `$filter` / `$top` / `$skip` /
+ * `$orderby` / `$select` / `$expand` and the plural `filters`), and its OUTPUT
+ * as the AST plus the `count` flag: the transport keys are folded onto their
+ * canonical slots by {@link QUERY_TRANSPORT_ALIAS_SLOTS} /
+ * {@link QUERY_TRANSPORT_DOLLAR_ALIASES} at parse, and the folded bag is then
+ * PARSED by the AST schema, so the output is constructed rather than asserted.
+ * The transport form is the FLATTENED SPELLING of the same AST with a 1:1 alias
+ * table — ⛔ never a second query semantics, and nothing is admitted into
+ * `QuerySchema` itself.
+ *
+ * One semantics is a claim about VALUES too: every spelling of a slot accepts
+ * one set of value shapes, each of which is lowered to the canonical member's
+ * declared shape (`'50'` to `50`, a comma list to an array, the `FilterArray`
+ * sugar through `parseFilterAST`) or REFUSED at the parse. A shape that would
+ * need a parser the spec must not run — a JSON-encoded `$filter` string, an
+ * OData sort expression, a non-numeric `$top` — fails rather than reaching a
+ * consumer under the AST type; `$top: 'abc'` used to pass validation here and
+ * reach the engine as `limit: null`, an unbounded read under a 200.
+ *
+ * This records what the door already accepted. `@objectstack/metadata-protocol`
+ * has folded these spellings since #3795 while the slot declared the AST alone,
+ * so every caller speaking them — objectui's published `QueryParams`, the
+ * `GET /data/:object` querystring — was unverifiable at build time and
+ * unrejected at runtime. A `$`-prefixed name the table does NOT carry is
+ * refused at the boundary with `400 UNSUPPORTED_QUERY_PARAM`
+ * ({@link QUERY_TRANSPORT_DOLLAR_PARAMS} is the quoted set).
+ *
  * @example
  * {
  *   "object": "customers",
@@ -1861,10 +1891,13 @@ export const GetUiViewResponseSchema = lazySchema(() => ViewSchema);
  *     "limit": 10
  *   }
  * }
+ * @example
+ * // the same query in the transport spelling
+ * { "object": "customers", "query": { "$filter": { "status": "active" }, "$top": 10 } }
  */
 export const FindDataRequestSchema = lazySchema(() => z.object({
   object: z.string().describe('The unique machine name of the object to query (e.g. "account").'),
-  query: QuerySchema.optional().describe('Structured query definition (filter, sort, select, pagination).'),
+  query: QueryWithTransportSchema.optional().describe('Structured query definition (filter, sort, select, pagination) — the canonical QueryAST or its transport spelling.'),
 }));
 
 /**

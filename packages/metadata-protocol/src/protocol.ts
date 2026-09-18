@@ -90,8 +90,9 @@ import {
     SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS,
     isVirtualSearchField,
     classifyDottedFilterHead,
-    RPC_QUERY_ALIAS_SLOTS, foldQueryAliasSlots,
-    type QueryAliasConflict, type QueryAliasSlot,
+    foldQueryAliasSlots,
+    QUERY_TRANSPORT_ALIAS_SLOTS, QUERY_TRANSPORT_DOLLAR_ALIASES, QUERY_TRANSPORT_DOLLAR_PARAMS,
+    type QueryAliasConflict,
     type DroppedFieldsEvent, type QueryAST, type EngineQueryOptionsParsed,
 } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSpellingRefusal, unrecognisedMetaTypeRefusal, METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
@@ -3028,45 +3029,16 @@ const ODATA_SPELLING: Readonly<Record<string, string>> = {
     filter: '$filter', select: '$select', expand: '$expand',
 };
 
-/**
- * [#3795] The spec's alias table ({@link RPC_QUERY_ALIAS_SLOTS}) extended with
- * the wire-only spellings no schema declares: `filters` (documented plural
- * alias of the `filter` transport param) and the OData `$filter` / `$expand`.
- * Every spelling of one QueryAST slot resolves through ONE fold — the four
- * slots that used to resolve backwards (canonical consulted last), each in its
- * own open-coded way, are the reason the table lives in the spec and not here.
- */
-const WIRE_QUERY_ALIAS_SLOTS: readonly QueryAliasSlot[] = (() => {
-    const extra: Record<string, readonly string[]> = {
-        where: ['filters', '$filter'],
-        expand: ['$expand'],
-    };
-    return RPC_QUERY_ALIAS_SLOTS.map((slot) => ({
-        canonical: slot.canonical,
-        aliases: [...slot.aliases, ...(extra[slot.canonical] ?? [])],
-    }));
-})();
-
-/**
- * The OData `$`-prefixed spelling of each bare wire parameter this normalizer
- * consumes, hoisted out of the loop in `findData` that used to own it so the
- * arity survey below and that loop read ONE table (#7321). Adding a `$` alias
- * in one place and not the other is exactly how a parameter ends up folded but
- * unchecked.
- *
- * `$filter` / `$expand` are deliberately absent: they are declared as slot
- * aliases on {@link WIRE_QUERY_ALIAS_SLOTS} instead, because they fold straight
- * to a canonical key rather than to a bare wire spelling.
- */
-const WIRE_DOLLAR_ALIASES: readonly (readonly [string, string])[] = [
-    ['$top', 'top'],
-    ['$skip', 'skip'],
-    ['$orderby', 'orderBy'],
-    ['$select', 'select'],
-    ['$count', 'count'],
-    ['$search', 'search'],
-    ['$searchFields', 'searchFields'],
-];
+// [#16066] The transport alias tables this normalizer folds by are DECLARED,
+// and they are declared in the spec — `QUERY_TRANSPORT_ALIAS_SLOTS` and
+// `QUERY_TRANSPORT_DOLLAR_ALIASES` (`@objectstack/spec/data`), imported above.
+//
+// They used to live here as module-private `WIRE_QUERY_ALIAS_SLOTS` /
+// `WIRE_DOLLAR_ALIASES`: the spec's own table extended, in this file, with
+// spellings no schema named. That extension is what made the `findData` door
+// accept a second vocabulary through a slot declaring only the first — two
+// dialects, one slot, one of them declared. Folding by the spec's export is
+// the single source that closes it; ⛔ do not re-extend a table here.
 
 /**
  * [#7321] The list-query slots whose DECLARED value type admits an array, by
@@ -3121,18 +3093,18 @@ const ARRAY_VALUED_QUERY_SLOTS: readonly string[] = [
 ];
 
 /**
- * [#7321] {@link ARRAY_VALUED_QUERY_SLOTS} expanded to every WIRE spelling that
+ * [#7321] {@link ARRAY_VALUED_QUERY_SLOTS} expanded to every TRANSPORT spelling that
  * reaches it, derived from the same two tables the fold uses so a new alias
  * cannot silently lose its array arm — the failure mode would be `?$select=a&
  * $select=b` starting to 400, i.e. the damage case this card exists to avoid.
  */
 const ARRAY_VALUED_LIST_QUERY_PARAMS: ReadonlySet<string> = (() => {
     const names = new Set<string>(ARRAY_VALUED_QUERY_SLOTS);
-    for (const slot of WIRE_QUERY_ALIAS_SLOTS) {
+    for (const slot of QUERY_TRANSPORT_ALIAS_SLOTS) {
         if (!names.has(slot.canonical)) continue;
         for (const alias of slot.aliases) names.add(alias);
     }
-    for (const [dollar, bare] of WIRE_DOLLAR_ALIASES) {
+    for (const [dollar, bare] of QUERY_TRANSPORT_DOLLAR_ALIASES) {
         if (names.has(bare)) names.add(dollar);
     }
     return names;
@@ -10609,10 +10581,10 @@ export class ObjectStackProtocolImplementation implements
         // "'orderBy' is invalid" names a parameter absent from their request.
         //
         // [#7321] The table itself now lives at module scope
-        // ({@link WIRE_DOLLAR_ALIASES}) so the arity survey above and this fold
+        // ({@link QUERY_TRANSPORT_DOLLAR_ALIASES}) so the arity survey above and this fold
         // cannot drift apart on which `$` spellings exist.
         const wireSpelling: Record<string, string> = {};
-        for (const [dollar, bare] of WIRE_DOLLAR_ALIASES) {
+        for (const [dollar, bare] of QUERY_TRANSPORT_DOLLAR_ALIASES) {
             if (options[dollar] != null && options[bare] == null) {
                 options[bare] = options[dollar];
                 wireSpelling[bare] = dollar;
@@ -10635,7 +10607,7 @@ export class ObjectStackProtocolImplementation implements
         // composed with `wireSpelling` it names the parameter the caller
         // actually wrote in every rejection below (#4226).
         const spellingFor = (name: string): string => wireSpelling[name] ?? name;
-        const arrivedAs = foldQueryAliasSlots(options, WIRE_QUERY_ALIAS_SLOTS, (conflict) => {
+        const arrivedAs = foldQueryAliasSlots(options, QUERY_TRANSPORT_ALIAS_SLOTS, (conflict) => {
             throw conflictingQueryParamsError(conflict, spellingFor);
         });
         const slotParam = (canonical: string): string => spellingFor(arrivedAs[canonical] ?? canonical);
@@ -10830,9 +10802,13 @@ export class ObjectStackProtocolImplementation implements
         // UNFILTERED page — a footgun for scripts resolving ids by name).
         const unsupportedDollarParams = Object.keys(options).filter((k) => k.startsWith('$'));
         if (unsupportedDollarParams.length > 0) {
+            // [#16066] The supported set is QUOTED from the declaration, never
+            // re-typed here: a spelling added to the spec table used to leave
+            // this sentence naming a set the door no longer had, so the caller
+            // was told to use a parameter list that was already wrong.
             const err: any = new Error(
                 `Unsupported query parameter(s): ${unsupportedDollarParams.join(', ')}. ` +
-                'Supported $-prefixed parameters: $top, $skip, $orderby, $select, $count, $search, $searchFields, $filter, $expand.',
+                `Supported $-prefixed parameters: ${QUERY_TRANSPORT_DOLLAR_PARAMS.join(', ')}.`,
             );
             err.status = 400;
             err.code = 'UNSUPPORTED_QUERY_PARAM';
@@ -10979,7 +10955,7 @@ export class ObjectStackProtocolImplementation implements
         // it, because the strip is what kept it from ever being honoured: the
         // parameter has been declared (`ODataQuerySchema.$count`,
         // `packages/spec/src/api/odata.zod.ts`), aliased (`$count` → `count`,
-        // {@link WIRE_DOLLAR_ALIASES}), reserved from the implicit-field-filter
+        // {@link QUERY_TRANSPORT_DOLLAR_ALIASES}), reserved from the implicit-field-filter
         // bucket ({@link RESERVED_LIST_QUERY_PARAMS}), arity-checked and boolean-
         // coerced — and then deleted unread, so every list request paid for the
         // COUNT query below whether or not the caller wanted a `total`.

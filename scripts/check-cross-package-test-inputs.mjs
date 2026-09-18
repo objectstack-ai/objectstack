@@ -415,14 +415,20 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the DOTTED NAMESPACE callee (#18643)': 15,
   'the WORKING-TREE blind spot (#18348)': 10,
   "the BARE SPECIFIER's PREMISE (#18236)": 20,
+  // Two of this battery's limbs are DERIVED -- one case per top-level directory
+  // turbo.json declares, one per recognised name -- so the pin moves when either
+  // set does. That is the point: a directory dropping out of turbo.json is a
+  // declaration disappearing, which is worth a red.
+  'the TOP-LEVEL WHITELIST, reconciled against turbo.json (#18342)': 26,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too. Raised 11 -> 12 with the
 // #18643 battery, keeping the same one-row slack the roster has always carried:
 // a floor left behind while the roster grows stops pinning the newest battery,
-// which is the one nothing else has learned to expect yet.
-const SELF_TEST_BATTERY_FLOOR = 12;
+// which is the one nothing else has learned to expect yet. Raised 12 -> 13 with
+// the #18342 battery, keeping that same one-row slack.
+const SELF_TEST_BATTERY_FLOOR = 13;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1361,15 +1367,125 @@ export function walkRootsOf(src, hereDepth, fileSegs = null, ownPackageName = nu
  * of #9763 and the only one that is a DATA defect rather than a collector one:
  * `skills/` was simply missing from the alternation, so `@objectstack/formula`'s
  * read of the published formula skill was invisible twice over — once here and
- * once in the reconstruction. The list below is every top-level directory a
- * declared glob can name; a new one added to the tree belongs here too.
+ * once in the reconstruction. `RECOGNISED_TOP_LEVEL_DIRECTORIES` is that list.
+ * It is no longer only a promise: `turboRootTopLevelNames()` reads back what
+ * `turbo.json` actually declares and the #18342 battery holds the two equal, so
+ * a top-level directory that enters the tree with a `$TURBO_ROOT$` input reds
+ * this gate until it is named here. `docs/` had been declared on three inputs
+ * and unrecognised here the whole time, which is what a promise buys.
+ *
+ * Scope, stated because that sentence has an edge. This is every top-level
+ * DIRECTORY, and deliberately NOT a repo-root FILE. A directory anchors the
+ * match on its own name followed by `/`, which is what separates `docs/x.md`
+ * from prose; a repo-root file's whole repo-relative path is a BARE FILENAME,
+ * which nothing distinguishes from any other quoted string. The cheapest rule
+ * that would reach `sdui.manifest.json` -- collect a quoted dotted word -- also
+ * collects `package.json`, and `statSync` then confirms the repo-root manifest
+ * as a real file, so the over-collection this collector calls harmless stops
+ * being harmless: it would force a declaration on a file nothing reads.
+ * `TURBO_ROOT_FILE_INPUTS` pins the repo-root files `turbo.json` declares today
+ * so a SECOND one reds here rather than arriving unnoticed.
  */
+const TURBO_ROOT_PREFIX = '$TURBO_ROOT$/';
+
+export const RECOGNISED_TOP_LEVEL_DIRECTORIES = Object.freeze([
+  'packages',
+  'apps',
+  'examples',
+  'content',
+  'scripts',
+  'skills',
+  // #18342. Three `docs/` inputs are declared on `test`, and
+  // `@objectstack/plugin-auth` names a checklist area file as one quoted whole
+  // -- rostered only once this entry landed.
+  'docs',
+  // #18342. `.claude/skills/spec-property-retirement/SKILL.md` is a declared
+  // input. No test names it flat today; the entry closes the hole the sentence
+  // above promises rather than waiting for one to be written.
+  '.claude',
+]);
+
+/**
+ * Top-level directories a `$TURBO_ROOT$` input declares that this collector does
+ * NOT recognise yet, each with the reason. An entry here is a MEASURED blocker,
+ * never a convenience: the #18342 battery pins this map's exact keys, so adding
+ * one and removing one are both edits a reviewer sees.
+ *
+ * `.github`: recognising it flat rosters two paths that are over-collection
+ * rather than reads. `packages/cli/test/scaffold-ci-script-parity.test.ts` names
+ * `.github/workflows/ci.yml` inside a BLOCK COMMENT, and
+ * `packages/create-objectstack/src/template-consistency.test.ts` asserts that the
+ * SCAFFOLDED project contains that path. Neither opens this repo's workflow;
+ * both literals collide with it because a scaffolded project's CI file has the
+ * same repo-relative spelling. The declaration this gate would then demand folds
+ * every edit of our CI workflow into two packages' test hashes, to hash a file
+ * neither one reads. Note the directory is NOT invisible meanwhile: the
+ * reconstruction half already rosters
+ * `.github/workflows/scaffold-e2e.yml` for `create-objectstack`, declared at
+ * `turbo.json`'s `test` task -- so what is deferred is the FLAT spelling alone.
+ */
+export const TOP_LEVEL_DIRECTORIES_PENDING = Object.freeze({
+  '.github': 'over-collection census (#18342): two literals, both non-reads; disposition reserved to the seat',
+});
+
+/** Repo-root FILES declared as `$TURBO_ROOT$` inputs -- the fourth shape, pinned, not collected. */
+export const TURBO_ROOT_FILE_INPUTS = Object.freeze(['sdui.manifest.json']);
+
+/** `.` is the only regex metacharacter these names carry today; escape the class anyway. */
+const TOP_LEVEL_ALTERNATION = RECOGNISED_TOP_LEVEL_DIRECTORIES
+  .map((d) => d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  .join('|');
+
+// Built from the list rather than written out, so the list is the single place a
+// directory is added. `matchAll` reads `lastIndex` off a COPY of the regex, so a
+// module-scope global carries no state between callers.
+const REPO_RELATIVE_LITERAL = new RegExp(
+  "(['\"`])((?:" + TOP_LEVEL_ALTERNATION + ')/[A-Za-z0-9._/-]+)\\1',
+  'g',
+);
+
 export function repoRelativeLiterals(src) {
   const out = new Set();
-  for (const m of src.matchAll(/(['"`])((?:packages|apps|examples|content|scripts|skills)\/[A-Za-z0-9._/-]+)\1/g)) {
+  for (const m of src.matchAll(REPO_RELATIVE_LITERAL)) {
     out.add(m[2]);
   }
   return out;
+}
+
+/**
+ * What `turbo.json` ACTUALLY declares, split the way this collector must treat
+ * it: `directories` are the names `repoRelativeLiterals` has to recognise, and
+ * `files` are repo-root files, which it deliberately does not.
+ *
+ * The split is judged against the INDEX through `trackedDirectories()`, the same
+ * authority the walk-root limb uses -- so `sdui.manifest.json` lands in `files`
+ * because git tracks it as a file, never because its name carries a dot. A name
+ * git tracks as neither is returned in `unknown`, where the battery fails on it
+ * instead of it being dropped quietly into one of the two buckets.
+ */
+export function turboRootTopLevelNames(turbo = null, rootDir = REPO_ROOT) {
+  const doc = turbo ?? JSON.parse(readFileSync(join(rootDir, 'turbo.json'), 'utf8'));
+  const tracked = trackedDirectories(rootDir);
+  const directories = new Set();
+  const files = new Set();
+  const unknown = new Set();
+  for (const task of Object.values(doc.tasks ?? {})) {
+    for (const input of task.inputs ?? []) {
+      if (typeof input !== 'string') continue;
+      if (!input.startsWith(TURBO_ROOT_PREFIX)) continue;
+      const rest = input.slice(TURBO_ROOT_PREFIX.length);
+      // A negated glob reaches turbo.json as `$TURBO_ROOT$/!...`; it still NAMES
+      // the directory it excludes, so strip the marker rather than the entry.
+      const bare = rest.startsWith('!') ? rest.slice(1) : rest;
+      const head = bare.split('/')[0];
+      // A leading wildcard segment names no directory to reconcile.
+      if (!head || head.includes('*')) continue;
+      if (tracked.has(head)) directories.add(head);
+      else if (existsSync(join(rootDir, head))) files.add(head);
+      else unknown.add(head);
+    }
+  }
+  return { directories, files, unknown };
 }
 
 /**
@@ -4215,6 +4331,60 @@ function selfTest() {
     declaredDependenciesOf(join(REPO_ROOT, 'packages', 'cli')).has('@objectstack/spec')
       && declaredDependenciesOf(join(REPO_ROOT, 'packages', 'cli')).has('vitest'),
   );
+
+  battery('the TOP-LEVEL WHITELIST, reconciled against turbo.json (#18342)');
+  {
+    // The header note promises the alternation names every top-level directory a
+    // declared glob can name. Until this battery that sentence was prose, and
+    // false: `docs/` sat declared on three inputs and unrecognised. So DERIVE
+    // the claim from turbo.json -- a transcribed list goes stale exactly the way
+    // the sentence did.
+    const live = turboRootTopLevelNames();
+    const recognised = new Set(RECOGNISED_TOP_LEVEL_DIRECTORIES);
+    const pending = new Set(Object.keys(TOP_LEVEL_DIRECTORIES_PENDING));
+
+    // Non-vacuity first: a reading of zero would green every per-directory case
+    // below by having none of them run.
+    ok('turbo.json still declares $TURBO_ROOT$ inputs at all', live.directories.size > 0);
+    ok('no declared top-level segment is tracked as neither file nor directory', live.unknown.size === 0);
+    for (const dir of [...live.directories].sort()) {
+      ok(
+        `turbo.json declares "${dir}/" and the collector accounts for it (recognised, or pending with a reason)`,
+        recognised.has(dir) || pending.has(dir),
+      );
+    }
+    // Accounted-for is a weaker claim than SEEN: assert the collector really
+    // collects under each recognised name, so an entry added to the list but
+    // mis-escaped into the alternation still fails here.
+    for (const dir of RECOGNISED_TOP_LEVEL_DIRECTORIES) {
+      ok(
+        `the flat collector sees a path under "${dir}/"`,
+        repoRelativeLiterals(`const P = '${dir}/probe-18342/x.md';`).has(`${dir}/probe-18342/x.md`),
+      );
+    }
+    // DARK. The alternation is anchored on the quote, so neither an unknown name
+    // nor one that merely CONTAINS a recognised one is collected.
+    ok('an unrecognised top-level directory is still not collected', !repoRelativeLiterals("const P = 'zzqq/nope.md';").size);
+    ok('an unrecognised DOT-directory is not collected', !repoRelativeLiterals("const P = '.zzqq/nope.md';").size);
+    ok('a name merely CONTAINING a recognised one is not collected', !repoRelativeLiterals("const P = 'notdocs/x.md';").size);
+    // The pending map is pinned by its exact keys, so relaxing the sentence above
+    // cannot happen quietly.
+    ok('the pending map holds exactly the measured blockers', [...pending].sort().join() === '.github');
+    ok(
+      'every pending entry carries a reason',
+      Object.values(TOP_LEVEL_DIRECTORIES_PENDING).every((r) => typeof r === 'string' && r.length > 0),
+    );
+    // The FOURTH shape -- a repo-root file, deliberately outside the alternation.
+    ok(
+      'the repo-root file inputs turbo.json declares are exactly the pinned set',
+      [...live.files].sort().join() === [...TURBO_ROOT_FILE_INPUTS].sort().join(),
+    );
+    ok('a bare repo-root filename is NOT collected', !repoRelativeLiterals("const P = 'sdui.manifest.json';").size);
+    ok(
+      'nor the repo-root manifest a bare-filename rule would have swept in with it',
+      !repoRelativeLiterals("const P = 'package.json';").size,
+    );
+  }
 
   // The floor runs BEFORE the verdict below, so a success line can only be
   // printed by a run in which every declared battery registered its cases.

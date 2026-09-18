@@ -8,18 +8,45 @@ description: Build Progress protocol schemas
 Build-progress PHASE vocabulary for the `data-build-progress` stream frame
 (cloud#2172 ruling A).
 
+## How to read the claims in this module
+
+This vocabulary is CLOSED, so whoever next asks whether a fifth member is
+warranted has to re-measure before moving the array — and can only do that
+if they can tell a reading from a ruling. Every producer claim below
+therefore carries exactly one of three labels, and none is left bare:
+
+- **measured on a named reachable source** — a repository and path the
+  reader can open and re-measure, cited with the tree it was read against.
+- **declared by ruling** — a maintainer decision. The authority is the
+  ruling; ⛔ it is not evidence the behaviour exists yet.
+- **inferred** — deduced from something reachable, or carried from a record
+  this repository cannot open. ⛔ Never re-cite it as a measurement.
+
 ## Producer
 
 The cloud AI-studio **agent loop** — deliberately not the tool it just ran.
+**Declared by ruling**: cloud#2172 ruling A owns WHERE in the loop a frame is
+emitted; this module declares only what such a frame may SAY.
+
 A build turn applies its change through `apply_blueprint` / `apply_edit` and
 then keeps working: the loop spends a further POST-APPLY VERIFICATION window
-re-reading and re-seeding what it wrote (measured on cloud#1838: 111 seconds
-and 9 tool calls *after* `apply_blueprint` returned, one of them the
-registered `verify_build` tool — see `PLATFORM_TOOLS_BY_PACKAGE` in
-`../system/constants/platform-tool-names`). A tool's own `ctx.onProgress`
-handle dies when the tool returns, so a frame emitted in that window can only
-come from the loop. WHERE in the loop it is emitted is cloud#2172's decision,
-not this module's; what such a frame may SAY is declared here.
+re-reading and re-seeding what it wrote. **Inferred.** The only record of
+that window is the cloud#1838 turn, reported there as 111 seconds and 9 tool
+calls *after* `apply_blueprint` returned — and `objectstack-ai/cloud` is
+outside the set of repositories a reader of this file can open, so the
+figure is carried here, not measured, and cannot be re-measured from this
+repo. WHICH tools those 9 calls were is recorded nowhere reachable either:
+neither objectstack#18451 nor objectui#7388 names them, so "one of them ran
+the registered `verify_build` tool" is **inferred** as well. What is
+**measured on a named reachable source** is narrower than that — only that
+`verify_build` is a registered platform tool, listed in
+`PLATFORM_TOOLS_BY_PACKAGE` in `../system/constants/platform-tool-names`.
+
+A tool's own `ctx.onProgress` handle dies when the tool returns, so a frame
+emitted in that window can only come from the loop. **Inferred** from a
+reachable contract: `AIToolContext.onProgress` in `../contracts/ai-service`
+declares the emit as happening WHILE the tool executes, before it returns;
+that the handle is gone afterwards is the deduction, not the declaration.
 
 ## Consumer
 
@@ -39,6 +66,26 @@ Unchanged: the `data-`-prefixed custom part described on
 `AIToolContext.onProgress` in `../contracts/ai-service`, reconciled in place
 under a stable part id. This module adds the vocabulary that prose has always
 assumed and never declared; it moves no transport and renames nothing.
+
+## Liveness watch — declared ahead, and ⛔ nothing gates it
+
+Three surfaces here are declared ahead of any code that uses them: the
+`verify` phase, and the frame's `hop` and `tool` fields. Across every
+repository reachable from here they have zero emitters and zero readers
+(**measured on named reachable sources** — each reading is recorded in the
+source beside its surface: on `BUILD_PROGRESS_PHASES` for the phase, and on
+the `hop` / `tool` field declarations). They stand on a ruling instead
+(**declared by ruling**): cloud#2172 ruled the vocabulary in, and
+objectui#7388 asked the panel to be able to name the phase. That is a good
+reason, and it is not a measurement.
+
+⛔ No gate watches this. The ADR-0049 liveness ledger is rooted in the
+metadata-type registry, and `BuildProgressFrame` is not a registered
+metadata type, so the liveness job stays green however long these three go
+unused. Two named carriers are meant to close it — cloud#2172 for the
+emitter, objectui#7388 block 2 for the consumer's strict parse. If neither
+lands, the three become enforce-or-remove candidates with nothing watching
+them, and the only thing that notices is a person reading this paragraph.
 
 <Callout type="info">
 **Source:** `packages/spec/src/ai/build-progress.zod.ts`

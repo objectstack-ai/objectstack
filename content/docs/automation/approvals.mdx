@@ -299,9 +299,12 @@ one that turns an empty slate into a request someone can actually decide:
 `fallbackApprovers` takes the same entries as `approvers` — same types, same
 `group` / `resolveAs` / `organization` keys — and is resolved by the same
 expansion, OOO delegation included. The pairing is enforced in both directions:
-`fallback` without a `fallbackApprovers` list is refused at authoring time, and
-a `fallbackApprovers` list under any other policy is refused too, because
-nothing would ever read it.
+`fallback` without a `fallbackApprovers` list is refused, and a
+`fallbackApprovers` list under any other policy is refused too, because nothing
+would ever read it. Both arms fire at **flow execution**, where the approval
+node parses its config on entry — **not** at authoring time, and `os lint` has
+no pairing arm for this one. The refusal is loud, names both keys, and lands
+before the node opens any approval request.
 
 Prefer a fallback target that cannot itself resolve empty (a literal `user`, or
 the `owner` membership tier). If it does resolve empty the node degrades to
