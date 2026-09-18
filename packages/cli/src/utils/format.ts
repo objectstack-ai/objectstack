@@ -9,6 +9,7 @@ import type { TenancyPosture } from '@objectstack/spec/security';
 // drift the day a suppression reason is added, and the whole point of asking
 // through the contract is that the two sides cannot disagree.
 import type { SeedSettlementSnapshot } from '@objectstack/spec/contracts';
+import type { DevLogin } from '@objectstack/spec';
 import { writeStdoutDirect } from './json-stdout.js';
 import { authoringRuleUnionStack } from './stack-collections.js';
 
@@ -785,6 +786,36 @@ export interface ServerReadyOptions {
    */
   seededAdmin?: { email: string; password: string };
   /**
+   * First-run credentials the BOOTED APPLICATION contributes (#17556) — the
+   * parsed `devLogins` of the stack definition `serve`/`dev` loaded.
+   *
+   * The platform cannot supply these. {@link seededAdmin} is the one credential
+   * a first-run operator is handed, and it holds every platform capability and
+   * no app-declared one — so in an application that gates navigation on
+   * `requiredPermissions` it is by construction the account that renders an
+   * empty menu (#17081). Which of an application's audiences shows something is
+   * a fact only the application has, and this is the channel it hands it over
+   * through.
+   *
+   * ADDITIVE: rendered BENEATH the seeded-admin block, never instead of it. An
+   * application-controlled key that could suppress a platform disclosure would
+   * be a posture regression, not a feature — the seeded account exists whether
+   * or not the application mentions it.
+   *
+   * Absent or empty → no block, and the banner is byte-identical to one that
+   * declares nothing. Printed only when {@link isDev}.
+   */
+  devLogins?: readonly DevLogin[];
+  /**
+   * One sentence the booted application contributes (#17556) — the parsed
+   * `devHint` of the stack definition.
+   *
+   * The free-form half of the same channel, for what a credential list cannot
+   * say: "run `pnpm seed:demo` first", "sign in through the local IdP". Absent
+   * → no row. Printed only when {@link isDev}.
+   */
+  devHint?: string;
+  /**
    * Automation wiring summary (2026-07-17 third-party eval). The engine's own
    * `info` narration while binding flows to triggers sits under the default
    * `warn` level and never prints, and a flow that armed logs nothing either
@@ -979,6 +1010,35 @@ export interface AutomationReadySummary {
  * (`printSuccess`, `printKV`, `printMetadataStats`, …) deliberately do NOT:
  * they serve every command, some of whose stdout IS the program's output.
  */
+/**
+ * Every C0 and C1 control byte — what a terminal reads as an INSTRUCTION
+ * rather than as text (#17556).
+ *
+ * Spelled as escapes, never as literal bytes: `pnpm check:nul-bytes` refuses
+ * the literal spelling in a source file, and a raw control byte would make this
+ * very line unsearchable in the tree that carries it.
+ */
+const BANNER_CONTROL_BYTES = /[\u0000-\u001F\u007F-\u009F]/g;
+
+/**
+ * Make AUTHOR-CONTROLLED text safe to print inside the boot banner (#17556).
+ *
+ * The banner used to print nothing an application author writes. `devHint` /
+ * `devLogins` change that, and a terminal obeys control bytes: an escape
+ * sequence in one of those strings can erase the rows above it, move the
+ * cursor, or repaint a forged `🔑 Dev admin` line — i.e. make the platform's
+ * own banner lie on the application's behalf. Newlines matter for the same
+ * reason at a lower volume: an entry that could open its own rows could push
+ * the platform's disclosure off the screen.
+ *
+ * So every control byte becomes U+FFFD: the text still shows, the shape of the
+ * banner stays the platform's, and an author who wrote one sees that they did.
+ * ⛔ Not a redaction — the visible characters are passed through unchanged.
+ */
+function bannerSafe(text: string): string {
+  return text.replace(BANNER_CONTROL_BYTES, '\uFFFD');
+}
+
 export function printServerReady(opts: ServerReadyOptions) {
   // #10646 — the address the OPERATOR can reach, never the one this process
   // binds. See ServerReadyOptions.externalBaseOrigin for the measured case
@@ -1068,6 +1128,58 @@ export function printServerReady(opts: ServerReadyOptions) {
     console.error(chalk.dim('      platform admin — Setup, Studio and every record, but NO app-declared capability, so'));
     console.error(chalk.dim('      an app that gates navigation on requiredPermissions may show it an empty menu; grant'));
     console.error(chalk.dim('      it a permission set under Setup → Users, or sign in as an account your app seeds'));
+  }
+  // [#17556] What the APPLICATION says about signing in — suggestion 1 of
+  // #17081, the half `packages/cli` structurally could not write for itself.
+  //
+  // The block above describes the account the PLATFORM seeded; it is complete
+  // about that account and silent about every other, because the platform does
+  // not know an application's audiences. `devLogins` / `devHint` are the
+  // application's own answer, and they are rendered here — AFTER the seeded
+  // credential, never in place of it. An application-controlled key that could
+  // suppress the platform's own disclosure would let an app hide a live
+  // credential the operator was just handed.
+  //
+  // ⚠️ Three restraints, each one a decision rather than a default:
+  //   • DEV ONLY. Gated on `opts.isDev` — `--dev` or
+  //     `NODE_ENV=development`, the same condition family that lets
+  //     `maybeSeedDevAdmin` fire at all. A production boot renders
+  //     byte-identically to one declaring nothing, so ADR-0115's
+  //     attention-budget rule is untouched on the path it was written about.
+  //   • SCRUBBED. These strings are author-controlled and land on a TTY. A
+  //     terminal reads control bytes as instructions, so a hint carrying an
+  //     escape sequence could erase the lines above it or repaint a forged
+  //     `🔑 Dev admin` row — the banner would then be lying on the
+  //     application's behalf. `bannerSafe` replaces every C0/C1 byte,
+  //     newlines included, so an entry can occupy exactly the rows it is
+  //     given.
+  //   • DECLARING IS NOT SEEDING. The wording says the application declared
+  //     these, because that is all a declaration does: nothing here creates an
+  //     account, and an entry naming an account no fixture seeds prints a
+  //     credential that will not work. Saying "declared by this app" keeps the
+  //     failure legible instead of making the platform look broken.
+  const appLogins = (opts.devLogins ?? []).filter((entry) => typeof entry?.email === 'string' && entry.email.length > 0);
+  if (opts.isDev && appLogins.length > 0) {
+    console.error('');
+    console.error(
+      chalk.green('  👥') + chalk.bold('  App logins: ') +
+      chalk.dim(`${appLogins.length} declared by this app`),
+    );
+    for (const entry of appLogins) {
+      const credential = entry.password
+        ? `${bannerSafe(entry.email)} / ${bannerSafe(entry.password)}`
+        : bannerSafe(entry.email);
+      const label = entry.label ? `${bannerSafe(entry.label)} — ` : '';
+      console.error(chalk.dim('      ' + label) + chalk.bold.green(credential));
+    }
+    console.error(chalk.dim('      declared in this app\'s `devLogins` · dev only — the platform seeded none of them'));
+  }
+  if (opts.isDev && typeof opts.devHint === 'string' && opts.devHint.trim().length > 0) {
+    console.error('');
+    console.error(
+      chalk.green('  💡') + chalk.bold('  App hint:   ') +
+      chalk.dim(bannerSafe(opts.devHint.trim())),
+    );
   }
   console.error('');
   // #8978 — name what actually booted, never a file that was not read.
