@@ -117,8 +117,8 @@
  * spelled out here rather than named because the retirement pin below asserts
  * that identifier is gone from this file — and that guard's reach was WIDER
  * than the bare list words: it admitted any key whose STEM was in the list,
- * unit suffix or not. So TWO shapes this branch used to refuse are
- * no longer refused here, and both are named rather than one:
+ * unit suffix or not. So ONE shape this branch used to refuse is no longer
+ * refused here, and it is named rather than left to be inferred:
  *
  *   (a) a bare list-shaped key that declares nothing (`timeout`, `window`,
  *       `interval`) whose unit lives only in a JSDoc. It is no longer admitted,
@@ -127,22 +127,23 @@
  *       `Duration*` type, at which point the schema declares the unit and the
  *       contradiction branch reaches the key again.
  *
- *   (b) a key whose stem was in the retired list AND whose name carries a unit
- *       token, whose JSDoc names the SAME unit and whose describe names none
- *       (`timeoutMs` + JSDoc "in milliseconds" + describe 'Maximum execution
- *       time'; `intervalSeconds` + JSDoc "in seconds" + no describe). This one
- *       is still ADMITTED — its NAME declares a unit — and it goes unrefused
- *       because of the agreement carve-out on the branch below, ⛔ not because
- *       the retirement removed it from the population. It is DEFERRED to
- *       #18075, ⛔ not decided correct here: refusing the agreement shape today
- *       reds `latencyMs` / `frequencyHours` on `main` (that card's ordering
- *       constraint — remediation before widening), and whether agreement is an
- *       offence at all is that card's open question.
+ * ⚠ A SECOND shape — (b), the AGREEMENT shape — was repealed alongside it for
+ * one release and is RESTORED here as a base refusal: a key whose name carries
+ * a unit token, whose JSDoc names the SAME unit and whose describe names none
+ * (`timeoutMs` + JSDoc "in milliseconds" + describe 'Maximum execution time';
+ * `intervalSeconds` + JSDoc "in seconds" + no describe). It was never removed
+ * from the population — its NAME declares a unit — it was spared by an
+ * agreement carve-out on the branch below while the question sat open. Ruled an
+ * OFFENCE (2026-09-18, decision batch #158 item 5, letter A): the two channels
+ * that agree are the key name and a source comment, and the one they agree
+ * about is not the one `content/docs/references/**` prints, so agreement
+ * between them discharges nothing. The two self-test cases that pinned the
+ * carve-out are POSITIVE controls now.
  *
- * What survives as a live refusal is the half resting on a declaration the
- * JSDoc CONTRADICTS — a key whose NAME carries a unit, whose describe names
- * none, and whose JSDoc names a DIFFERENT unit. Those two channels disagree and
- * the disagreement is still refused.
+ * What survives as a live refusal beside it is the half resting on a
+ * declaration the JSDoc CONTRADICTS — a key whose NAME carries a unit, whose
+ * describe names none, and whose JSDoc names a DIFFERENT unit. Those two
+ * channels disagree and the disagreement is still refused.
  *
  * Why the divergence is worth a refusal and the blindness was not: the card
  * that filed it measured the cost. #15678 recorded in its changeset that
@@ -193,8 +194,8 @@
  *
  * ⛔ No exemption is a pass on lying. A marked key still fails
  * `name-unit-contradicts-prose` (a marker waives the RENAME, never a
- * contradiction), an `EpochMs` key whose describe names a unit other than
- * milliseconds fails `instant-unit-contradicts-schema` — the schema says
+ * contradiction), an `EpochMs` key whose describe OR JSDoc names a unit other
+ * than milliseconds fails `instant-unit-contradicts-schema` — the schema says
  * milliseconds, so prose that says seconds is one of the two being wrong — and
  * a `DurationMs` key whose prose or name says seconds fails
  * `duration-unit-contradicts-schema` for the same reason. A declaration that
@@ -711,17 +712,34 @@ export function judge(site: DurationKey): Finding | undefined {
 
   // Exemption (i): the value IS the shared `EpochMs` schema, so the key is an
   // INSTANT and the duration rule does not reach it. The one thing still
-  // refused is a describe that contradicts the schema: `EpochMs` declares
-  // milliseconds, so prose naming another unit means the site and the schema
-  // disagree, and a silent exemption there would let the declaration launder a
-  // real unit bug.
+  // refused is a prose channel that contradicts the schema: `EpochMs` declares
+  // milliseconds, so a describe or a JSDoc naming another unit means the site
+  // and the schema disagree, and a silent exemption there would let the
+  // declaration launder a real unit bug.
+  //
+  // ⛔ BOTH prose channels are read here, for the same reason and in the same
+  // direction as the `durationType` branch below reads all of its own — ONLY to
+  // refuse, never to declare. Reading the describe alone made the two declared
+  // exemption classes asymmetric on one defect shape: an `EpochMs` key whose
+  // JSDoc said seconds went unrefused while a `DurationMs` key whose JSDoc said
+  // seconds was refused, same lie, two answers. Ruled to ride the agreement
+  // landing (2026-09-18, decision batch #158 item 5, letter A); no live row
+  // carried the shape, and the fixtures in the exemption battery are what keep
+  // the two branches from drifting apart again.
   if (site.instant) {
+    const disagreeing: string[] = [];
     if (site.proseUnits.length > 0 && !site.proseUnits.includes('ms')) {
+      disagreeing.push(`the describe says ${site.proseUnits.join('/')}`);
+    }
+    if (site.jsdocUnits.length > 0 && !site.jsdocUnits.includes('ms')) {
+      disagreeing.push(`the JSDoc says ${site.jsdocUnits.join('/')}`);
+    }
+    if (disagreeing.length > 0) {
       return {
         site,
         rule: 'instant-unit-contradicts-schema',
-        message: `${where} — typed \`${INSTANT_ROOT}\` (epoch MILLISECONDS) but the describe says `
-          + `${site.proseUnits.join('/')}. One of them is lying; either the describe is wrong or this is `
+        message: `${where} — typed \`${INSTANT_ROOT}\` (epoch MILLISECONDS) but ${disagreeing.join(' and ')}. `
+          + `One of them is lying; either the prose is wrong or this is `
           + `not an epoch-millisecond instant and must not be typed \`${INSTANT_ROOT}\`.`,
       };
     }
@@ -806,7 +824,7 @@ export function judge(site: DurationKey): Finding | undefined {
   // unit. So what is left here is a key admitted by its NAME alone, whose JSDoc
   // names a unit that name does not carry.
   //
-  // ⛔ Two halves of the guard, and each one is load-bearing:
+  // ⛔ ONE half of the guard, and it is load-bearing:
   //
   //   `keyUnits.length > 0` — the key must DECLARE something. The old guard was
   //   the retired name-shape flag, i.e. the key merely LOOKED like a duration, and that is
@@ -815,21 +833,23 @@ export function judge(site: DurationKey): Finding | undefined {
   //   a real narrowing of this class and it is recorded as such — see the
   //   header — not smuggled in as a guard that happens to be equivalent.
   //
-  //   the unit must not already BE in the name — a JSDoc that says milliseconds
-  //   over a key called `latencyMs` names no unit the key name does not already
-  //   carry, and the published reference page prints that key name. ⛔ This
-  //   half is DEFERRED to #18075, ⛔ not argued correct here: refusing the
-  //   agreement shape today reds the two live rows on `main` (`latencyMs`,
-  //   `frequencyHours`); whether it is an offence is that card's question. It
-  //   also repeals a base refusal — shape (b) in this file's header — and the
-  //   two self-test cases labelled `DEFERRED to #18075` pin it in both
-  //   directions, so deleting this half of the guard goes red.
+  // ⛔ THERE IS NO AGREEMENT CARVE-OUT HERE, and the absence is the decision,
+  // not an omission. A second half spelled `!jsdocUnits.some((u) =>
+  // keyUnits.includes(u))` sat on this guard for one release and spared the
+  // shape where the JSDoc names the SAME unit the key name already carries
+  // (`latencyMs` + "in milliseconds" + no describe at all). Ruled an OFFENCE
+  // 2026-09-18 (decision batch #158 item 5, letter A): the two channels that
+  // agree there are the key name and a source comment, and the reader this gate
+  // exists for reads neither — `content/docs/references/**` prints the describe,
+  // so agreement upstream of it discharges nothing, and a reader left to infer a
+  // duration's unit from `Backup frequency` guesses at 3600x stakes. ⛔ Re-add
+  // the half and the two agreement cases in the self-test go red; they are
+  // positive controls, not accommodations.
   //
   // The JSDoc is still NEVER read as a way to SATISFY the rule — that was
   // option 1 and it was not adopted. It is read in one direction only: to
   // refuse.
-  if (site.keyUnits.length > 0 && site.jsdocUnits.length > 0
-      && !site.jsdocUnits.some((u) => site.keyUnits.includes(u))) {
+  if (site.keyUnits.length > 0 && site.jsdocUnits.length > 0) {
     return {
       site,
       rule: 'unit-in-jsdoc-not-in-describe',
@@ -1143,6 +1163,16 @@ function selfTest(): number {
   expect('REFUSED (i): an `EpochMs` key whose describe names a unit other than ms → instant-unit-contradicts-schema',
     rulesOf(`const S = z.object({ startedAt: EpochMs.describe('Boot timestamp in seconds') });`)
       .join() === 'instant-unit-contradicts-schema');
+  // The JSDoc channel of the SAME exemption, pinned as a PAIR because reading
+  // one prose channel and not the other is exactly how the two declared
+  // exemptions came apart: `durationType` refused a JSDoc contradiction and
+  // `instant` did not, one lie with two answers.
+  expect('REFUSED (i): an `EpochMs` key whose JSDoc names a unit other than ms → instant-unit-contradicts-schema',
+    rulesOf(`const S = z.object({\n  /**\n   * Boot timestamp in seconds\n   */\n  startedAt: EpochMs });`)
+      .join() === 'instant-unit-contradicts-schema');
+  expect('exempt (i): an `EpochMs` key whose JSDoc names ms AGREES with the schema — the JSDoc refuses, it never declares',
+    rulesOf(`const S = z.object({\n  /**\n   * Boot timestamp in milliseconds\n   */\n  startedAt: EpochMs });`)
+      .join() === '');
   expect('the instant exemption is `EpochMs` ALONE — another identifier root stays outside the population',
     (() => {
       const sites = collectDurationKeys('fixture.ts', `const S = z.object({ startedAt: SomeOtherSchema.describe('Boot timestamp in seconds') });`);
@@ -1300,28 +1330,28 @@ function selfTest(): number {
     rulesOf(`const S = z.object({\n  /**\n   * Export interval in milliseconds\n   */\n  intervalSeconds: z.number().int().positive().optional().default(60) });`)
       .join() === 'unit-in-jsdoc-not-in-describe');
 
-  // ⚠️ THE AGREEMENT CARVE-OUT — DEFERRED to #18075, pinned here so it cannot
-  // move silently. These are the two fixtures directly above with ONE word
-  // changed: the JSDoc names the SAME unit the key name already carries. The
-  // base gate refused both as `unit-in-jsdoc-not-in-describe` — its guard was
-  // the retired name-shape predicate, whose reach was the STEM, so `timeoutMs`
-  // and `intervalSeconds` both satisfied it. They pass here, and they pass because
-  // of the `!jsdocUnits.some(...)` half of the guard below, ⛔ NOT because the
-  // retirement removed them from the population and ⛔ NOT because agreement
-  // has been ruled not to be an offence.
+  // ⚠️ THE AGREEMENT SHAPE — RULED AN OFFENCE (2026-09-18, decision batch
+  // #158 item 5, letter A), and these two are its POSITIVE controls. They are
+  // the two fixtures directly above with ONE word changed: the JSDoc names the
+  // SAME unit the key name already carries. The base gate refused both as
+  // `unit-in-jsdoc-not-in-describe`; a carve-out half spelled
+  // `!jsdocUnits.some(...)` then spared them for one release while whether
+  // agreement is an offence sat open as an undecided question. It is decided:
+  // the key name and a JSDoc agreeing with each other are two channels the
+  // published reference page does not print, and the describe — the one it does
+  // print — is still silent, so nothing about that agreement reaches the reader
+  // this rule exists for.
   //
-  // #18075 holds the opposite and asked for exactly the first fixture as a
-  // POSITIVE control. Refusing it today reds `latencyMs` / `frequencyHours` on
-  // `main` — that card's ordering constraint, remediation before widening — so
-  // this is a sequencing accommodation with a card attached, not a decision.
-  // ⛔ Delete the carve-out and BOTH of these go red: that is what they are
-  // for, and it is what was missing when this repeal first landed unnoticed.
-  expect('DEFERRED to #18075: `timeoutMs` + JSDoc naming the SAME unit (ms) + describe naming none — base REFUSED this, head does not',
+  // ⛔ These two are what fails if the carve-out is ever re-added, by that
+  // spelling or another: both fixtures are refused here, and any guard that lets
+  // agreement satisfy the JSDoc turns them green again. That is what they are
+  // for, and it is what was missing when the repeal first landed unnoticed.
+  expect('REFUSED (agreement): `timeoutMs` + JSDoc naming the SAME unit (ms) + describe naming none',
     rulesOf(`const S = z.object({\n  /**\n   * Execution timeout in milliseconds\n   */\n  timeoutMs: z.number().int().min(0).optional().describe('Maximum execution time') });`)
-      .join() === '');
-  expect('DEFERRED to #18075: `intervalSeconds` + JSDoc naming the SAME unit (seconds) + NO describe — base REFUSED this, head does not',
+      .join() === 'unit-in-jsdoc-not-in-describe');
+  expect('REFUSED (agreement): `intervalSeconds` + JSDoc naming the SAME unit (seconds) + NO describe',
     rulesOf(`const S = z.object({\n  /**\n   * Export interval in seconds\n   */\n  intervalSeconds: z.number().int().positive().optional().default(60) });`)
-      .join() === '');
+      .join() === 'unit-in-jsdoc-not-in-describe');
 
   // ⚠️ THE COST OF THE RETIREMENT, pinned rather than quietly dropped. These
   // three shapes were this class's original positive controls (#15939) and
