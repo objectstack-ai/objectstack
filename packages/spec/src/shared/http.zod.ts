@@ -34,6 +34,7 @@ import { z } from 'zod';
  * this shape.
  */
 import { lazySchema } from './lazy-schema';
+import { strictObject } from './strict-object';
 export const HttpMethod = z.enum([
   'GET',
   'POST',
@@ -153,16 +154,35 @@ export type CorsConfigParsed = z.infer<typeof CorsConfigSchema>;
 // ==========================================
 
 /**
- * Rate Limit Configuration Schema
- * 
+ * Rate Limit Configuration Schema — the one inbound budget shape, closed here.
+ *
  * Used by:
- * - api/endpoint.zod.ts (ApiEndpointSchema)
- * - system/stack-server.zod.ts (ServerRateLimitConfigSchema — this shape reused
- *   verbatim and closed against unknown keys; the LIVE inbound token bucket)
+ * - api/endpoint.zod.ts (ApiEndpointSchema — `apis[].rateLimit`, the per-endpoint
+ *   budget the policy chain meters in its own namespace)
+ * - system/stack-server.zod.ts (ServerRateLimitConfigSchema — `server.security
+ *   .rateLimit`, the LIVE inbound token bucket; it adds bounds checks and nothing
+ *   else, so this declaration is the door for both)
  *
  * (`system/http-server.zod.ts` embedded this as `HttpServerConfig.security
  * .rateLimit` until #4938 retired that shape; the budget itself was not lost —
  * #5006 activated it on the narrow `server:` block.)
+ *
+ * ## Why the door is HERE and not at the consumer
+ *
+ * The `shared/` ledger row's rationale is that strictness is decided at the
+ * consuming schema. It is false for this shape, the way it was false for
+ * `shared/protection.zod.ts`: of the two mounts only ONE re-postures
+ * (`ServerRateLimitConfigSchema`), and it re-postured by building `strictObject`
+ * **from this shape object** — so one declaration answered for two emitted defs
+ * with opposite doors. `system/ServerRateLimitConfig` refused an undeclared
+ * `keyBy` with its prescription; `shared/RateLimitConfig`, mounted bare on
+ * `apis[].rateLimit`, accepted the same key and dropped it in silence, and the
+ * two `guidance` entries prescribed to nobody there. A misspelled budget was the
+ * same story one key over: `windowSeconds: 60` parsed green and metered the
+ * 60000 ms default — a thousandfold miss, reported as success.
+ *
+ * Closing it here makes the two defs one door: the declaration below is matched
+ * by both, and now kept by both.
  *
  * @example
  * {
@@ -171,22 +191,46 @@ export type CorsConfigParsed = z.infer<typeof CorsConfigSchema>;
  *   "maxRequests": 100
  * }
  */
-export const RateLimitConfigSchema = lazySchema(() => z.object({
-  /**
-   * Enable rate limiting
-   */
-  enabled: z.boolean().default(false).describe('Enable rate limiting'),
-  
-  /**
-   * Time window in milliseconds
-   */
-  windowMs: z.number().int().default(60000).describe('Time window in milliseconds'),
-  
-  /**
-   * Max requests per window
-   */
-  maxRequests: z.number().int().default(100).describe('Max requests per window'),
-}));
+export const RateLimitConfigSchema = lazySchema(() => strictObject(
+  {
+    surface: "this rate-limit budget (`server.security.rateLimit`, or an endpoint's `rateLimit`)",
+    history:
+      'Until this shape was closed, an unknown key here was accepted and dropped wherever the '
+      + 'budget is mounted bare — an endpoint whose budget was misspelled metered at the defaults '
+      + 'and said nothing. On `server.security.rateLimit` an unknown key was never accepted.',
+    aliases: {
+      window: 'windowMs',
+      windowSeconds: 'windowMs',
+      max: 'maxRequests',
+      maxRequest: 'maxRequests',
+      limit: 'maxRequests',
+    },
+    guidance: {
+      keyBy:
+        'The rate-limit key is not authorable. It is the resolved principal, falling back to the caller IP for '
+        + 'anonymous traffic; whether the IP is read from forwarded headers is decided by `server.trustProxy`.',
+      store:
+        'The counter store is not authorable. Counters live in the kernel `cache` service when one is registered '
+        + '(ADR-0069 D2) and degrade to a per-process store otherwise, announced once at boot.',
+    },
+  },
+  {
+    /**
+     * Enable rate limiting
+     */
+    enabled: z.boolean().default(false).describe('Enable rate limiting'),
+
+    /**
+     * Time window in milliseconds
+     */
+    windowMs: z.number().int().default(60000).describe('Time window in milliseconds'),
+
+    /**
+     * Max requests per window
+     */
+    maxRequests: z.number().int().default(100).describe('Max requests per window'),
+  },
+));
 
 export type RateLimitConfig = z.input<typeof RateLimitConfigSchema>;
 /** Post-parse shape of {@link RateLimitConfig} — defaults applied, transforms run (ADR-0122). */
