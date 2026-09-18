@@ -83,10 +83,36 @@ export type ProjectableRefinement =
    * is redundant beside the pattern and is emitted anyway, because it is the
    * keyword a form generator and a reference table read.
    */
-  | { readonly pattern: 'non-blank-string' };
+  | { readonly pattern: 'non-blank-string' }
+  /**
+   * "whenever this key is present, those keys must be present too" — published
+   * as JSON Schema's own `dependentRequired`, which is that sentence and
+   * nothing else.
+   *
+   * Exact in the JSON domain, by the same equality {@link requiredOneOf} rests
+   * on read from the other end: a key absent from a JSON object is the only way
+   * for its value to read `undefined`, so "present" and "not undefined" name
+   * one fact. `dependentRequired` triggers on PRESENCE, so a key present with
+   * any JSON value — `null` included — arms its dependency exactly as the
+   * predicate's `!== undefined` does.
+   *
+   * ⛔ It is presence, never VALUE. A rule of the shape "`sslConfig` is
+   * required when `ssl` is **true**" is `if`/`then`, is not this arm, and stays
+   * dropped and annotated — `data/SQLDriverConfig`'s own refinement is that
+   * shape and keeps its ledger row.
+   */
+  | {
+      readonly pattern: 'dependent-required';
+      /** Key ⇒ the keys its presence requires. Read once here, and by the predicate. */
+      readonly dependencies: Readonly<Record<string, readonly string[]>>;
+    };
 
 /** Every arm's `pattern` tag, for a reader that needs the list itself. */
-export const PROJECTABLE_REFINEMENT_PATTERNS = ['required-one-of', 'non-blank-string'] as const;
+export const PROJECTABLE_REFINEMENT_PATTERNS = [
+  'required-one-of',
+  'non-blank-string',
+  'dependent-required',
+] as const;
 
 /**
  * The ECMA-262 pattern accepting exactly the strings {@link NON_BLANK_STRING}
@@ -157,3 +183,44 @@ export const NON_BLANK_STRING: (source: string) => boolean = declare(
   (source: string): boolean => source.trim().length > 0,
   { pattern: 'non-blank-string' },
 );
+
+/**
+ * "whenever a key is present, the keys it depends on are present too", as a
+ * `.refine()` predicate that also declares itself.
+ *
+ * The dependency map is read once into the declaration and the predicate reads
+ * it from there, so the published `dependentRequired` and the enforced rule
+ * cannot name different keys — the same construction {@link requiredOneOf}
+ * uses, and the reason neither arm needs a drift pin.
+ *
+ * A MUTUAL requirement ("both or neither") is spelled as the two one-way
+ * entries it is, which is also exactly how `dependentRequired` spells it:
+ *
+ * ```ts
+ * z.object({ cert: …, key: … }).refine(dependentRequired({ cert: ['key'], key: ['cert'] }), {
+ *   message: 'Client certificate (cert) and private key (key) must be provided together',
+ * })
+ * ```
+ */
+export function dependentRequired<K extends string, D extends string>(
+  dependencies: Readonly<Record<K, readonly [D, ...D[]]>>,
+): (value: Readonly<Partial<Record<K | D, unknown>>>) => boolean {
+  const declared: ProjectableRefinement = {
+    pattern: 'dependent-required',
+    dependencies: Object.freeze(
+      Object.fromEntries(
+        Object.entries(dependencies as Readonly<Record<string, readonly string[]>>).map(
+          ([key, required]) => [key, Object.freeze([...required])] as const,
+        ),
+      ),
+    ),
+  };
+  const rule = (value: Readonly<Partial<Record<K | D, unknown>>>): boolean => {
+    const record = value as Record<string, unknown>;
+    return Object.entries((declared as { dependencies: Readonly<Record<string, readonly string[]>> }).dependencies)
+      .every(([key, required]) =>
+        record[key] === undefined || required.every((dependency) => record[dependency] !== undefined),
+      );
+  };
+  return declare(rule, declared);
+}
