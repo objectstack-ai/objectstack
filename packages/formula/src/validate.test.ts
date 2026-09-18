@@ -94,14 +94,27 @@ describe('validateExpression (ADR-0032)', () => {
     });
 
     it('rejects an invented method on the canonical user root (#13594)', () => {
-      // The authored predicate that motivated the card (objectui#4421): a
-      // capability method on `current_user` that reads plausibly and does not
-      // exist. `current_user` is a declared SCOPE_ROOT, so this is NOT caught as
-      // an unbound root — only the unknown call catches it.
-      const r = validateExpression('predicate', 'current_user.can(record, "read")');
+      // RE-POINTED, not deleted (batch #147 item 5, letter A). The structural
+      // property is unchanged — `current_user` is a declared SCOPE_ROOT, so a
+      // method call hung off it is NOT caught as an unbound root and only the
+      // unknown call catches it — but the EXAMPLE had to move: `can` is a
+      // registered receiver method now, so it is no longer invented. A plausible
+      // neighbour that still is carries the case.
+      const r = validateExpression('predicate', 'current_user.canApprove(record, "read")');
       expect(r.ok).toBe(false);
       expect(r.errors[0].message).toContain('found no matching overload');
-      expect(r.errors[0].message).toContain('can');
+      expect(r.errors[0].message).toContain('canApprove');
+    });
+
+    it('ACCEPTS `current_user.can(object, verb)` — the objectui#4421 predicate, now registered', () => {
+      // The control that makes the re-pointing above a reading rather than a
+      // move: the exact authored shape the card came from validates clean.
+      // Until this landed the validator refused it while the publish gate for
+      // view predicates accepted it — a gate and a runtime disagreeing about one
+      // name (#13594). Both say the same thing about `can` now.
+      const r = validateExpression('predicate', 'current_user.can(record, "read")');
+      expect(r.ok).toBe(true);
+      expect(r.errors).toHaveLength(0);
     });
 
     it('the global form rejects and the stdlib control stays clean (#13594)', () => {
@@ -275,10 +288,26 @@ describe('validateExpression (ADR-0032)', () => {
         // three-character name, a jump from a permission verb to a numeric
         // function. Worse than silence: an author who takes it writes
         // `min(object, verb)`.
-        const message = validateExpression('predicate', 'current_user.can(object, verb)').errors[0].message;
+        //
+        // RE-POINTED from the receiver form to the BARE one (batch #147 item 5,
+        // letter A). `can` is registered RECEIVER-ONLY now, so
+        // `current_user.can(…)` type-checks and no longer reaches this arm —
+        // while `can(object, verb)` still faults and still lands here, which is
+        // precisely the case this hint's wording was written for: the name is
+        // not callable HERE (it is one of the receiver-only names the catalog
+        // does not advertise), and the catalog is still the wrong place to look
+        // for a neighbour. The hazard is identical and the sentence is now
+        // literally true instead of merely useful.
+        const message = validateExpression('predicate', 'can(object, verb)').errors[0].message;
         expect(message).toContain('`can` is not a callable name here');
         expect(message).not.toMatch(/Did you mean/);
         expect(message).not.toMatch(/`min`/);
+      });
+
+      it('…and the receiver form it moved OFF is clean — the control for that move', () => {
+        // Without this the case above would keep passing if `can` had never been
+        // registered at all, which is the whole thing the re-pointing asserts.
+        expect(validateExpression('predicate', 'current_user.can(object, verb)').ok).toBe(true);
       });
 
       it('leaves the shared `nearestName` budget alone — this class narrows locally', () => {

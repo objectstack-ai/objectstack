@@ -26,6 +26,7 @@
 - `needs:contract-review` 是合并闸:实测 `blocked` 而 `mergeable: true`,无标签同形兄弟回 `clean`。
 - ready 翻转实测两序列 `clean→blocked→clean` 与 `blocked→unstable→clean`;`unstable` 瞬态非失败。
 - `unstable` 可源自 check-runs 看不见的 commit STATUS(如 `Vercel`)⇒ ③ 另读 `/commits/{sha}/status`。
+- 零 legacy status 的仓恒答空集默认值 `pending`+`total_count: 0`,⛔ 非门禁读数,门禁读 check-runs。
 - 判头脏走零配额本地试合并:fetch PR ref 后 `git merge-tree --write-tree origin/main <ref>`。
 - 它直接列出冲突文件;读数随 fetch 老化,重跑先 fetch。
 - 它跑 `git merge` 的 merge-ort ⇒ 注册 `merge=os-regen` 的克隆照用驱动,未注册的退回文本合并。
@@ -340,17 +341,16 @@
 - 去掉横线只写页脚则原样存活;评论不受影响,两种拼法都活。
 - ⇒ 失效既依拼写又依载体:评论里验过页脚对 PR 正文什么都没证明。
 - ⇒ PR 正文页脚不带前置横线,且写后回读正文 —— 那是唯一检测手段;评论两形皆可。
-- 署名页脚的写侧变异按通道与输入双重定域,⛔ 不是一条定律。
 - MCP `update_pull_request` 包装器删掉 PR 正文的页脚块;该通道锁 1 已拒,读作历史。
 - 裸 REST `PATCH /pulls` 追加一个裸页脚并保留既有 session-URL 页脚,差恰 58 字节。
 - 同路送无页脚正文存回恰一条(平台裸形)⇒ 该格处方是不送页脚,⛔ 不是不重送正文。
 - 页脚两拼写:裸版与 session-URL 版都要剥,漏剥的卡在正文中段,而 58 字节差照常。
+- ⇒ 代价是归属:裸形无 session id,按此剥净的 PR 正文不载明哪个会话写的;另置见 AGENTS.md。
 - 第四形:建 PR 两通道同判 —— 送出体尾部不是 `---` 加页脚块时,追加一条同形页脚。
 - 该追加带前置横线、恰 90 字节,送出体是存储体的严格前缀。
 - 尾部已是该块则一字不追加,两通道各实测两向 ⇒ 建侧通道不是变量,判据是送出体尾部。
 - ⛔ 无受控对照(同通道只差该块两送)⇒ 是拟合不是定论,⛔ 不外推到别的动作。
 - 调用不带 `body` 参数则页脚状态不动:`draft` 或 `title` 单字段更新既不删也不合成。
-- 删页脚那条读数是唯一不合此判据的观察,通道已拒 ⇒ 活通道无反例,写后仍必回读。
 - 正文把 harness 两行块叠在页脚之上,存回是三条署名块;单块形态才复现成一条。
 - ⇒ 形态随动作与送出体尾部变,改侧还随通道变;⛔ 不由任一条推其余,写后必回读。
 - 平台在尾部 `---` 前后正反两向归一空行:比对正文只按首个差异偏移,⛔ 不按长度。
@@ -371,10 +371,11 @@
 - 有的现场 regen 一件没跑,推送前先跑生成物门禁别赌。
 - ③:死在源码编辑中途 ⇒ 先读 diff 判完整性:docblock 写全动机与判据的可代跑终验后提交。
 - 写一半意图不明的 ⛔ 不代提交,记交接;dev 临时目录(`.os-scratch/` 一类)清掉,⛔ 不进 PR。
-- 零提交的探针分支不是在飞工作:容器发不出分支删除 refspec。
-- `git push origin --delete <b>` 回 send-pack: unexpected disconnect,三次退避全败,同会话普通 push 正常。
-- ⇒ 测量型派发留下的探针分支永久堆在 origin 上。
+- 零提交的探针分支不是在飞工作:容器建得出远端分支却删不掉,两会话两分支实测。
+- 两道皆 403:`git push --delete` 回 RPC failed,`DELETE /git/refs/heads/…` 回 not permitted,⛔ 不重试。
+- ⇒ 探针分支永久堆在 origin 上,只有带删权的手(维护者)清得掉,本闭环内无人有该权。
 - 判据两读:`git rev-list --count origin/main..origin/<b>` 为 0,且分支名下无 open PR。
+- 「分支在」不是「卡已认领」:认领是 `Claim:` 评论,分支只是线索;291 个头里 257 个无 PR。
 - ⛔ 不据 `ls-remote | grep issue-` 正命中回避该卡:失效方向是活卡被读成已认领,无红信号。
 - 会话从上下文检测不到自己的静默降档:横幅只在 UI 侧渲染,上下文零信号。
 - 服役档的权威读数是 `get_session`(claude-code-remote MCP,无参)的 `external_metadata.last_served_model`。
@@ -428,7 +429,6 @@
 - `check:pm-dispatch-gates` 单机 430–450 秒贴容器上限 ⇒ detach 加 `tail --pid=$!`;超时非读数。
 - `check-half-states.mjs` 连 `--help` 都跑整仓 I/O ⇒ 早读到的输出文件是空的,不是干净的。
 - 后台工具调用里再 `nohup … &` 会让包装器报假 `exit 0`,而真活还在跑。
-- 分支删除被拒有第二形态:代理回 403,与既有 send-pack 断连同处置 ⇒ 不可删,⛔ 不重试。
 - harness 按内容拒写:同会话派发 PR 上 PASS 拒为 `[Self-Approval]`;同通道建卡、ACCEPT 照过。
 
 ## 闭合关键词解析(PR 正文写侧)

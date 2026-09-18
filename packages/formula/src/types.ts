@@ -13,6 +13,31 @@
  */
 
 import type { Expression } from '@objectstack/spec';
+import type { EffectiveObjectPermission } from '@objectstack/spec/security';
+
+/**
+ * The acting subject's effective object permissions, indexed by object name —
+ * the {@link EvalContext.permissions} payload, and the only input `can()` reads.
+ *
+ * **It is the published `/auth/me/permissions` shape, verbatim**: the `objects`
+ * map of `GetEffectivePermissionsResponse`, object name → the server-resolved
+ * `EffectiveObjectPermission` for this subject. One contract, both ends — the
+ * server already publishes it, a caller carries it in here unchanged, and
+ * nothing re-derives, re-keys or re-shapes it on the way.
+ *
+ * **A pure DATA map, never a resolver.** ⛔ Not a callback, not a lazy getter,
+ * not an object carrying methods: a function here would make evaluation depend
+ * on something outside the context — both the "declared, never bound" shape
+ * that cost `os.exists` / `os.count` / `os.lookup` their place on this
+ * interface, and a breach of the purity invariant `stdlib.ts` documents, the
+ * one that keeps `objectstack build` artifacts byte-stable across runs.
+ *
+ * **Completeness is the caller's promise.** `can()` reads an ABSENT object
+ * entry as "no grant" — which is what an all-`false` entry means anyway — so a
+ * partial map does not fault, it answers `false`. Pass the whole effective set
+ * the endpoint returned, never a hand-picked subset.
+ */
+export type EvalPermissions = Readonly<Record<string, EffectiveObjectPermission>>;
 
 /**
  * Runtime context for evaluating an expression.
@@ -74,6 +99,25 @@ export interface EvalContext {
   previous?: Record<string, unknown>;
   /** Action / flow input payload. */
   input?: Record<string, unknown>;
+  /**
+   * The acting subject's effective object permissions — see
+   * {@link EvalPermissions} for the shape and where it comes from.
+   *
+   * Read by exactly one binding, `current_user.can(object, verb)`, and bound
+   * only when {@link user} is also present: `can` is a question about the
+   * acting subject, and this map is that subject's answer sheet. ⛔ It is NOT
+   * mounted as a CEL variable — an authored predicate cannot read
+   * `os.permissions.crm_lead.allowEdit` and reach around the verb vocabulary,
+   * so the closed verb table stays the only door.
+   *
+   * **Absent ≠ empty.** With no map at all `can()` THROWS
+   * (`ok: false, kind: 'runtime'`) rather than answering: a context that was
+   * never given permission data cannot distinguish "denied" from "nobody
+   * passed the data", and answering either way — `true` fail-open, or a silent
+   * `false` — turns a wiring bug into a security verdict. An EMPTY map is a
+   * real answer (this subject holds nothing) and evaluates to `false`.
+   */
+  permissions?: EvalPermissions;
   /** Free-form bag for niche call sites; merged onto the variable scope. */
   extra?: Record<string, unknown>;
 }

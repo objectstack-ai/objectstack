@@ -295,6 +295,9 @@
  *     EVERY diff that adds a cross-field refusal raised a widening tell for the
  *     refusal itself: the instrument read the tightening direction as the
  *     widening one, which is the inverse of what clause ② exists to catch.
+ *     ⚠️ …and the decline written here did NOT reach a real diff of that shape
+ *     until #18721 below: it was abandoned on the hunk's LEADING CONTEXT, and
+ *     the synthetic hunk that pins it carries none.
  *   - PR #17638 — `+  strategy: z.enum(['eager', 'lazy'], {`, an in-shape key
  *     the same change block removed as `-  strategy: z.enum(['eager', 'lazy',
  *     'scheduled']).default('lazy')`. The same key, one member FEWER. This one
@@ -857,6 +860,55 @@
  * fact about where it is DECLARED; whether it belongs to EITHER is a fact about
  * what it RETURNS. Two questions, measured separately, ⛔ never one heuristic.
  *
+ * ## The eleventh accidental variable #18721 removed — a hunk's LEADING
+ * CONTEXT
+ *
+ * #17618 taught T1 that a typed PARAMETER is not a key on a shape, and this
+ * file's header names PR #17616's `+  ctx: z.RefinementCtx,` — the SECOND
+ * PARAMETER of an exported object-level refinement, this repo's own prescribed
+ * `#16489` signature — as the measured case that decline was written for. The
+ * decline was real and it was pinned. It still never fired on a real diff.
+ *
+ * ⭐ The variable is WHERE THE HUNK STARTS. `enclosingDelimiter` walks from the
+ * first line of the line's own hunk, and it abandoned the walk — answering
+ * `null`, which every caller reads as "keep the tell firing" — the first time a
+ * closer arrived with an empty stack. A real hunk opens on CONTEXT lines, and
+ * on this repo's spec files that context is the tail of the previous
+ * declaration: `  });`. Two closers, no opener above them, and the reading was
+ * over before the hunk reached the `export function …(` head it went on to show
+ * 108 lines later. The three-line synthetic the pin drives
+ * (`+export const refine = (\n+  ctx: z.RefinementCtx,\n+) => ctx;`) has no
+ * context line at all, so the pin stayed green through every diff it was
+ * written to protect.
+ *
+ * ⭐ RE-DERIVED here rather than inherited from the card: `git diff
+ * 72dd95fa5a..09e16a5745 -- packages/spec/src/ui/dashboard.zod.ts` (PR #18720's
+ * own hunk, 202 lines, ONE hunk) with `--declaration no` exited 4 on a T1 row
+ * against the `ctx` parameter of
+ * `packages/spec/src/ui/dashboard.zod.ts#checkDashboardWidgetMetricMeasureArity`
+ * — new-file line 628 — and the same file's true-positive control,
+ * `+  brandNewAuthorableKey: z.string().optional(),` added to
+ * `#DashboardWidgetSchema` as a real `git diff`, fired on line 701 of the same
+ * run of the same matcher. ⇒ a FALSE POSITIVE, ⛔ not a dead instrument. The
+ * proving line is the hunk's own first line, `  });`, a CONTEXT line.
+ *
+ * ⛔ The repair is at that branch and nowhere else — ⛔ NOT a `z.RefinementCtx`
+ * type-name exception, which one differently-named parameter type walks past.
+ * An underflow DROPS the closer and the walk continues. The argument is a stack
+ * one: everything the hunk opens is strictly INSIDE everything it did not show,
+ * so the shown stack is a SUFFIX of the real one and its top — whenever it has
+ * one — IS the innermost open delimiter, whatever sits below. An empty shown
+ * stack still answers `null`, so the reading remains positive evidence only.
+ *
+ * ⭐ The direction is provable both ways, and BOTH are pinned. On the added
+ * side the decline reaches diffs it never reached, which is the false positive
+ * this round removes. On the REMOVED side — where #17618 reads the same decline
+ * so a deleted parameter cannot buy an added key the right to go unreported —
+ * it makes a phantom #16943 budget disappear: a block that removes a parameter
+ * behind leading context and adds a genuine key now FIRES on that key, where it
+ * was silent before. One repair, one false positive closed and one false
+ * negative with it.
+ *
  * ## The remedy with no reader — #17848, and a pin the shape never had
  *
  * #17848 filed two halves against this family. Re-measuring both on the tree
@@ -1138,6 +1190,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18560 — the declaring vocabulary is a NAMED list, every form pinned by a counterfactual fixture': 32,
   '#18640 — an inline closed set RE-SPELLED at the same binding is not a set that gained a value': 20,
   '#18702 — a declaring factory PRIVATE to one file, resolved through its own DEFINITION': 54,
+  "#18721 — a hunk's LEADING CONTEXT is not a reason to abandon the parameter reading": 14,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1942,10 +1995,23 @@ function topLevelMembers(s, open, close) {
  *
  * ⭐ Positive evidence only, and `null` is the whole safety property. The scan
  * starts at the first line of the line's OWN hunk, so a construct opened before
- * the hunk is never guessed at: a closer arriving with an empty stack means the
- * hunk began inside something it was never shown, and a string literal that
- * does not close on its line means the state cannot be carried across it —
- * both answer `null`, and both callers read `null` as "keep the tell firing".
+ * the hunk is never guessed at, and a string literal that does not close on its
+ * line means the state cannot be carried across it — that answers `null`, and
+ * both callers read `null` as "keep the tell firing". The answer is ALWAYS an
+ * opener this hunk showed, never one inferred from a closer.
+ *
+ * ⭐ #18721 — a closer arriving with an EMPTY stack closes an opener the hunk
+ * never showed, and that is NOT a reason to abandon the reading. The openers
+ * the hunk DOES show are strictly INSIDE the ones it did not, so the shown
+ * stack is a SUFFIX of the real one: whenever it is non-empty its top IS the
+ * innermost open delimiter, whatever sits below it. So an underflow drops the
+ * closer and the walk continues, and the answer is still `null` for exactly the
+ * state that has no positive evidence — a shown stack that is empty where the
+ * line sits. ⛔ The reading this replaces abandoned the walk at the FIRST
+ * underflow, which a real hunk reaches on its LEADING CONTEXT LINES: a hunk
+ * whose context opens on the tail of the previous declaration (`  });`) said
+ * `null` for every line after it, however plainly the hunk went on to show the
+ * `(` the line sits in.
  *
  * ⛔ This is NOT the depth-aware `z.object({ … })` reader T1's own comment
  * refuses, and ⛔ it must never be grown into one. It answers exactly one
@@ -1982,7 +2048,12 @@ export function enclosingDelimiter(side, index) {
       }
       if (BRACKET_CLOSERS[ch] !== undefined) { stack.push({ opener: ch, head: s.slice(0, k) }); continue; }
       if (ch === ')' || ch === ']' || ch === '}') {
-        if (stack.length === 0) return null;
+        // #18721 — UNDERFLOW: this closes an opener the hunk never showed. Drop
+        // it and keep walking. The shown stack is a suffix of the real one, so
+        // nothing below it can ever be the innermost open delimiter; an empty
+        // shown stack still answers `null` at the end, which is the same "no
+        // positive evidence" this reader has always reported.
+        if (stack.length === 0) continue;
         stack.pop();
       }
     }
@@ -5213,6 +5284,104 @@ export function selfTest() {
   t('⛔ …a COMMENT carrying a local-factory key line is still not a key line', localRun(BLUEPRINT, "+  // snapshotObject: strictIdent('x'),", FACTORY_FIXTURES.strictIdent.definition).rows.length === 0);
   t('⛔ …and a file OFF the contract source surface reads no blob at all, whatever its lines say', localRun('README.md', FACTORY_FIXTURES.strictIdent.line, FACTORY_FIXTURES.strictIdent.definition).unresolved.length === 0);
 
+  // -- #18721: a hunk's LEADING CONTEXT is not a reason to abandon the walk ---
+  //
+  // The live pair is PR #18720 (card #17779): `git diff 72dd95fa5a..09e16a5745
+  // -- packages/spec/src/ui/dashboard.zod.ts` — 202 lines, ONE hunk — exited 4
+  // on `+  ctx: z.RefinementCtx,` at `dashboard.zod.ts:628`, the SECOND
+  // PARAMETER of an exported object-level refinement and the very line #17618's
+  // decline was written for. The decline did not fire because
+  // `enclosingDelimiter` abandoned its walk at the hunk's FIRST LINE: a real
+  // hunk opens on CONTEXT, and this one's context is the tail of the previous
+  // declaration — `  });` — whose closers underflow a stack that has seen no
+  // opener. The three-line synthetic the #18560 battery drives shows no context
+  // at all, so the pin held while every real diff of this shape told.
+  //
+  // ⭐ Read the FIRING half beside the decline, the way every battery above is
+  // ordered: the card's own TRUE-POSITIVE control on the SAME file, and the two
+  // shapes that prove the drop cannot silence a real key — a genuine new key
+  // behind the same underflowing context, and one added after the parameter
+  // list closes. ⚠️ The filing card's first control read 0 and was its own
+  // mis-build (a synthetic path off the declared surface is judged by nothing);
+  // both fixtures here sit on the real path the probe was taken from.
+  battery("#18721 — a hunk's LEADING CONTEXT is not a reason to abandon the parameter reading");
+  const DASHBOARD = 'packages/spec/src/ui/dashboard.zod.ts';
+  // PR #18720's own hunk, reduced to exactly what the failing branch needs: the
+  // leading CONTEXT that closes the previous declaration, the function head,
+  // the object-literal-typed FIRST parameter, and the `ctx` line — at the line
+  // the card reported. ⛔ Not the three-line synthetic: the context is the case.
+  const PROBE_18720 = {
+    filename: DASHBOARD,
+    status: 'modified',
+    patch: [
+      '@@ -623,3 +623,7 @@ export function checkDashboardWidgetStageOrder(',
+      '   });',
+      ' }',
+      ' ',
+      '+export function checkDashboardWidgetMetricMeasureArity(',
+      '+  widget: { id?: unknown; type?: unknown; values?: unknown },',
+      '+  ctx: z.RefinementCtx,',
+      '+): void {',
+    ].join('\n'),
+  };
+  t('⭐ THE FINDING — PR #18720\'s real hunk: `ctx: z.RefinementCtx,` behind three leading context lines reads NO tell', tells(PROBE_18720).length === 0);
+  t('…at the line the card reported, which is the line that told — the fixture is the probe, not a shape like it', patchLines(PROBE_18720.patch).find((r) => r.kind === 'added' && r.text.includes('z.RefinementCtx'))?.line === 628);
+  t('…and the whole verdict is CLEAN, which is the exit code the live pair could not reach', wideningRefusal({ declaration: 'no', files: [PROBE_18720] }).state === 'clean');
+  t('⛔ …and an object-literal TYPE on the first parameter is not what confused it: the `{` closes on its own line', enclosingDelimiter([{ text: 'export function check(', hunk: 0 }, { text: '  widget: { id?: unknown },', hunk: 0 }, { text: '  ctx: z.RefinementCtx,', hunk: 0 }], 2)?.opener === '(');
+  // ⭐ THE TRUE-POSITIVE CONTROL, on the SAME file the probe was taken from —
+  // the card's own, re-derived here as a real `git diff` in a worktree.
+  const NEW_KEY_ON_DASHBOARD = {
+    filename: DASHBOARD,
+    status: 'modified',
+    patch: [
+      '@@ -698,3 +698,4 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({',
+      ' ',
+      '   /** Widget Description (displayed below the title) */',
+      "   description: I18nLabelSchema.optional().describe('Widget description text below the header').meta({ title: 'Description' }),",
+      '+  brandNewAuthorableKey: z.string().optional(),',
+    ].join('\n'),
+  };
+  t('⛔ CONTROL — a genuinely new key on the SAME file still FIRES: the matcher was never dead, the reading was false', tells(NEW_KEY_ON_DASHBOARD)[0]?.tell === 'T1');
+  t('…with its own file:line, the one an author can open', at(NEW_KEY_ON_DASHBOARD)[0] === 'packages/spec/src/ui/dashboard.zod.ts:701');
+  t('⛔ CONTROL — a new key behind the SAME underflowing context still tells: the hunk shows no opener, so there is no positive evidence to read', tells({ filename: DASHBOARD, status: 'modified', patch: ['@@ -30,1 +30,2 @@', '   });', '+  brandNewAuthorableKey: z.string().optional(),'].join('\n') }).length === 1);
+  t('⛔ CONTROL — a real key added AFTER the parameter list closes still tells, underflowing context and all', tells({ filename: DASHBOARD, status: 'modified', patch: ['@@ -30,1 +30,7 @@', '   });', '+export function check(', '+  ctx: z.RefinementCtx,', '+): void {}', '+export const S = z.object({', '+  extra: z.string(),', '+});'].join('\n') }).map((r) => r.text).join('|') === 'extra: z.string(),');
+  // ⭐ The reading itself, at the branch: an underflow DROPS the closer and the
+  // walk goes on, because the openers a hunk shows are strictly inside the ones
+  // it did not — so a non-empty shown stack is the innermost open delimiter
+  // whatever sits below it, and an empty one is still `null`.
+  const AFTER_UNDERFLOW = [
+    { text: '  });', hunk: 0 },
+    { text: 'export function checkThing(', hunk: 0 },
+    { text: '  ctx: z.RefinementCtx,', hunk: 0 },
+  ];
+  t('⭐ an opener the hunk shows AFTER an underflow is the answer — the shown stack is a suffix of the real one', enclosingDelimiter(AFTER_UNDERFLOW, 2)?.opener === '(' && inParameterList(AFTER_UNDERFLOW, 2) === true);
+  t('⛔ …while an underflow with NO opener after it still answers `null` — positive evidence only, never a guess', enclosingDelimiter([{ text: '  });', hunk: 0 }, { text: '  extra: z.string(),', hunk: 0 }], 1) === null);
+  t('⛔ …and the drop does not leak past the parameter list\'s own close: the body\'s `{` is innermost there', inParameterList([{ text: '  });', hunk: 0 }, { text: 'export function check(', hunk: 0 }, { text: '  ctx: z.RefinementCtx,', hunk: 0 }, { text: '): void {', hunk: 0 }, { text: '  extra: z.string(),', hunk: 0 }], 4) === false);
+  t('⛔ …and no reading crosses a HUNK boundary, underflow or not', inParameterList([{ text: '  });', hunk: 0 }, { text: 'export function checkThing(', hunk: 0 }, { text: '  ctx: z.RefinementCtx,', hunk: 1 }], 2) === false);
+  // ⭐ The OLD side moves with it, and that direction is LOUD: #17618 reads the
+  // decline on the removed side too, so a removed parameter behind leading
+  // context now buys no #16943 budget — and the key added in the same block,
+  // which that phantom budget used to pay for, fires.
+  const REMOVED_PARAM_PAYS_NOTHING = {
+    filename: DASHBOARD,
+    status: 'modified',
+    patch: [
+      '@@ -40,7 +40,7 @@',
+      '   });',
+      ' }',
+      ' export function check(',
+      '-  ctx: z.RefinementCtx,',
+      '-): void {}',
+      '-const S = z.object({',
+      '+): void {}',
+      '+const S = z.object({',
+      '+  extra: z.string(),',
+      ' });',
+    ].join('\n'),
+  };
+  t('⭐ the OLD side moves too — a REMOVED parameter behind leading context is still not a key, so it buys no budget', inParameterList(AFTER_UNDERFLOW, 2) === true && tells(REMOVED_PARAM_PAYS_NOTHING).length === 1);
+  t('…and the row that fires is the genuine new key the phantom budget used to pay for', tells(REMOVED_PARAM_PAYS_NOTHING)[0]?.text === 'extra: z.string(),');
+
   // -- the floor -------------------------------------------------------------
   const floorFailures = [];
   const floorFailure = (text) => {
@@ -5268,6 +5437,7 @@ export function selfTest() {
       "#18234's key narrowed out of a universal acceptor — certified by the REMOVED value's own semantics rather than by the added value's spelling, with the dark, different-key, never-universal, narrowing-step and surplus controls that still fire, " +
       "#18640's inline closed set re-spelled at the same binding — bounded by the control set that IS the finding, the same edit spelled one member per line and at a keyed property, with the added-arm, different-binding, brand-new, widened-enum and new-key controls that still fire, " +
       "#18702's FILE-LOCAL declaring factory, resolved through its own definition at the head BLOB and classified by what its body returns — every factory the filing card names pinned against its own arm, the refusal arm read off a `z.never` definition rather than a name with its chained-arm control, the counterfactual bracketed by the same fixture with the resolver blind, and both boundaries (an imported factory, an unclassifiable body) pinned as a STATED silence the reader prints, " +
+      "#18721's hunk LEADING CONTEXT — an underflowing closer drops and the walk goes on, so #17618's parameter decline reaches a real diff: PR #18720's own hunk silent at its reported line, bracketed by the same file's true-positive control that fires, by a new key behind the same underflowing context, by a key added after the parameter list closes, and by the removed side where a phantom budget disappearing makes a genuine key fire, " +
       "#16448's four positive controls each with its file:line, its negative controls — " +
       'the same diffs with `yes`, and a removal-only diff with `no` — the local path composed end ' +
       'to end so a binary change to a tell surface cannot read as clean, #17112\'s split count with ' +

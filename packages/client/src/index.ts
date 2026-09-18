@@ -1523,11 +1523,13 @@ const SET_AUTH_TOKEN_HEADER = 'set-auth-token';
  * reads the row `internalAdapter.createSession` already committed, back by
  * the response's OWN token — the same seam `/get-session` uses — and attaches
  * it, rather than this lift inventing one. So `login` and `register` now
- * parse as the full declared `SessionResponse`, with one gap that is NOT
- * this: `data.user.image` served `null` against a declared
- * `string | undefined` (#17235, tracked separately). This does not touch the
- * `data.token` rule above: `session.token` is the SAME unsigned string the
- * body's own `token` already carried, not a second credential, and
+ * parse as the full declared `SessionResponse`. The one gap that remained
+ * when this was written — `data.user.image` served `null` against a declared
+ * `string | undefined` — closed with #17235, which widened that declaration
+ * to `z.string().nullish()`; the residue list those two routes are pinned
+ * against (`auth-login-register-envelope.test.ts` ②) is now empty. This does
+ * not touch the `data.token` rule above: `session.token` is the SAME unsigned
+ * string the body's own `token` already carried, not a second credential, and
  * `data.token` is still never synthesized FROM a session.
  *
  * The `!body` guard no longer carries the anonymous answer — since #17881 that
@@ -3829,11 +3831,18 @@ export class ObjectStackClient {
      * Two requests, because no single better-auth route answers this question:
      *
      *   1. `GET /get-session` — who is calling. The body is the bare
-     *      `{ user, session }` envelope for a signed-in caller and the literal
-     *      `null` for an anonymous one (measured).
+     *      `{ user, session }` envelope for a signed-in caller (measured).
      *   2. `GET /organization/list-members?organizationId=…&filterField=userId`
      *      `&filterValue=<the caller>&limit=1` — the row, unwrapped from the
      *      one-entry page.
+     *
+     * ⚠️ An ANONYMOUS caller never gets a second request. Since #17881
+     * (`374d9d3afa`) `plugin-auth`'s `refuseAnonymousSession` answers
+     * `/get-session` the declared ADR-0112 envelope at `401` —
+     * `code: 'UNAUTHENTICATED'` — instead of better-auth's `200` + the literal
+     * `null`, and the SDK's shared `fetch` wrapper throws on the non-2xx. So
+     * step 1 is TERMINAL for such a caller: this method rejects with that code
+     * and `httpStatus: 401`, and step 2 never reaches the wire (#17238).
      *
      * ⚠️ It is deliberately NOT `GET /organization/get-active-member`, which
      * this method used to call. That handler reads only the session's
@@ -3859,9 +3868,13 @@ export class ObjectStackClient {
      *   - a caller with no active organisation gets their row rather than
      *     `400 NO_ACTIVE_ORGANIZATION` — `setActive` is no longer a
      *     precondition, which is the point of naming the organisation;
-     *   - an anonymous caller still gets `401 UNAUTHORIZED`, thrown from the
-     *     `list-members` request by the same session middleware that guarded
-     *     `get-active-member`;
+     *   - an anonymous caller was unchanged BY THIS MOVE: both routes sat
+     *     behind the same better-auth session middleware, which answered
+     *     `401 UNAUTHORIZED` either way. ⚠️ That row is RE-ANCHORED rather
+     *     than restamped — it is no longer what such a caller reaches. Since
+     *     #17881 the refusal arrives one request EARLIER, from `/get-session`
+     *     as `401 UNAUTHENTICATED` (see above), so `list-members` is never
+     *     asked and its `UNAUTHORIZED` is unreachable through this method;
      *   - a FALSY `organizationId` is refused here, before the wire. It used to
      *     answer the ACTIVE organisation's row at 200: better-auth resolves
      *     `ctx.query.organizationId || session.activeOrganizationId`, so an
@@ -3892,9 +3905,13 @@ export class ObjectStackClient {
         headers: { Origin: this.baseUrl },
       });
       const session = (await sessionRes.json()) as { user?: { id?: string } } | null;
-      // Anonymous → `null`, and the request below is then refused 401 by the
-      // session middleware before the filter is ever read. The refusal stays
-      // the SERVER's; nothing is invented here to stand in for it.
+      // An anonymous caller never reaches this line: since #17881 the request
+      // above answers `401 UNAUTHENTICATED` and the shared `fetch` wrapper
+      // throws on that non-2xx, so the refusal is delivered before any filter
+      // is built. The `| null` above and the `?? ''` here stay as the
+      // defensive branch they always were — a 2xx body this SDK cannot read a
+      // user out of yields an EMPTY filter rather than a fabricated one. The
+      // refusal stays the SERVER's; nothing is invented here to stand in for it.
       const userId = session?.user?.id ?? '';
       const res = await this.fetch(
         `${this.baseUrl}${route}/organization/list-members`

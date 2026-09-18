@@ -454,12 +454,21 @@ export const ResumeFailureDetailsSchema = lazySchema(() => z.object({
   ),
   repairable: z.boolean().describe(
     'Whether the engine says this run can still be re-armed by an operator '
-    + 'verb - `true` exactly when `status` is `stranded`, derived from the '
-    + 'engine\'s discriminator and never from the message text. Always present '
-    + 'on this arm: `false` is the honest answer for every other exit, the ones '
-    + 'that report no status included, because an absent member would be '
-    + 'indistinguishable from a server that predates this field, and promising '
-    + 'a repair verb that will refuse is worse than promising nothing',
+    + 'verb. Answered from the engine, two ways, and never from the message '
+    + 'text: where the engine stamped a `status`, that word decides '
+    + '(`stranded` is the run whose OWN pause a resume consumed before a '
+    + 'downstream node threw); where it stamped none, the door asks the '
+    + 'engine\'s read-only inspection '
+    + '(`IAutomationService.inspectConsumedSuspension`) and relays its '
+    + 'verdict. The second half is not a fallback but the honest answer for a '
+    + 'real exit: a subflow DELEGATION failure carries no status, because '
+    + 'nothing re-arms an ancestor by resuming it, and yet the ancestor\'s '
+    + 'consumed pause is journalled and the restore verb re-arms that chain as '
+    + 'one unit. Always present on this arm: an absent member would be '
+    + 'indistinguishable from a server that predates this field. Every way of '
+    + 'not getting an answer is fail-closed - a service that declares no '
+    + 'inspection member, and a store the inspection could not read - because '
+    + 'promising a repair verb that will refuse is worse than promising nothing',
   ),
 }));
 export type ResumeFailureDetails = z.input<typeof ResumeFailureDetailsSchema>;

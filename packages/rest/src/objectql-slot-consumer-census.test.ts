@@ -32,29 +32,34 @@
  * ## What is asserted about the answers
  *
  * §2 drives the third consumer on the wiring where it decides anything, and
- * asserts the DISTINCTION — not a status code. Measured here, on
- * `POST /api/v1/batch`:
+ * asserts the DISTINCTION — not only a status code. Measured here, on
+ * `POST /api/v1/batch`, MULTI-KERNEL wiring:
  *
- *   | engine fact                                | wire answer                |
- *   |:-------------------------------------------|:---------------------------|
- *   | no provider wired at all                   | 501 NOT_IMPLEMENTED        |
- *   | provider RESOLVES `undefined` (absence)    | 501 NOT_IMPLEMENTED        |
- *   | provider REJECTS (wired, failed to build)  | 500 INTERNAL_ERROR         |
- *   | provider THROWS SYNCHRONOUSLY (#13280)     | 500 INTERNAL_ERROR         |
+ *   | engine fact                               | before #18559          | now                         |
+ *   |:------------------------------------------|:-----------------------|:----------------------------|
+ *   | no provider wired at all                  | 501 NOT_IMPLEMENTED    | 501 — unchanged             |
+ *   | provider RESOLVES `undefined` (absence)   | 501 NOT_IMPLEMENTED    | 501 — unchanged             |
+ *   | provider REJECTS (wired, failed to build) | **500 INTERNAL_ERROR** | **503 SERVICE_UNAVAILABLE** |
+ *   | provider THROWS SYNCHRONOUSLY (#13280)    | **500 INTERNAL_ERROR** | **503 SERVICE_UNAVAILABLE** |
  *
- * ⇒ this consumer does **not** re-collapse: a rejection and a resolved
- * `undefined` reach two different answers, which is the whole of the decidable
- * test. It reaches them through the handler's own outer `catch`
- * (`handleRouteError`) rather than through the `wiredEngineOrLoud` seam its two
- * siblings use.
+ * ⇒ this consumer never re-collapsed: a rejection and a resolved `undefined`
+ * always reached two different answers, which is the whole of the decidable
+ * test, and #18559 is therefore ⛔ not a regression repair. ⭐ What changed is
+ * HOW. It used to reach them through the handler's own outer `catch`
+ * (`handleRouteError`) — a catch-all that knows nothing about this seam — and
+ * now reaches them through the `wiredEngineOrLoud` seam its two siblings
+ * already use. `expect(rejecting).not.toEqual(absent)` stays the load-bearing
+ * assertion either way; the status pin is what says which mechanism answered.
  *
- * ⛔ **500 is RECORDED here, not ruled.** The other two consumers of this same
- * slot answer `503 SERVICE_UNAVAILABLE` for the identical fact. Whether this
- * door should join them is a public-door wire change and needs the per-consumer
- * ruling #14251 reserves for exactly this; ⛔ nothing here asserts that 500 is
- * correct, and ⛔ nothing here moves it. What is load-bearing is
- * `expect(rejecting).not.toEqual(absent)` — if a later edit collapses the two,
- * this file says so.
+ * ⚠️ §2b is why the 500 was a DIVERGENCE rather than this door's answer. On the
+ * SINGLE-KERNEL wiring — the composition the open core boots — this door already
+ * answered `503` before #18559, because `computeExecCtx` takes its PROVIDER
+ * branch there (`wiredEngineOrLoud`) and raises before the batch handler's own
+ * engine line runs. The 500 was reachable only on the MULTI-KERNEL wiring, where
+ * that gate's kernel branch absorbs by design (`wiredEngineOrLoud`'s RESIDUE
+ * note) and hands the engine question down. ⇒ the repair did not pick a NEW wire
+ * answer for this door; it removed a wiring-dependent divergence. §2b drives
+ * both wirings side by side so that sentence is a reading and not an argument.
  *
  * ## Controls
  *
@@ -62,8 +67,17 @@
  * symbol known to be present (it must find sites) and against one known to be
  * absent (it must find none), so "3 sites" is a reading rather than the only
  * sentence the instrument can produce. §2 serves a REAL answer — 200 on a
- * healthy engine, 400 on a declared refusal — so no 501/500 below comes from an
+ * healthy engine, 400 on a declared refusal — so no 501/503 below comes from an
  * instrument that can only report faults.
+ *
+ * ⚠️ The healthy control is deliberately driven with `{ operations: [] }` and
+ * not with a real op. On the MULTI-KERNEL wiring a real op continues past this
+ * door's engine line into `resolveProtocol`/`loadObjectItems`, which this
+ * harness's auth-only kernel cannot serve — measured, that answers 500
+ * INTERNAL_ERROR for a HEALTHY engine too, which would make a 500 read here
+ * ambiguous between "the seam answered" and "the harness ran out of kernel".
+ * The empty-operations body returns inside the door, after the engine line and
+ * before the protocol is touched, so the engine fact is the only variable.
  *
  * ## What this file deliberately does NOT re-assert
  *
@@ -80,7 +94,12 @@ import { describe, it, expect, vi } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { ObjectKernel } from '@objectstack/core';
+import {
+    AUTHZ_STORE_UNAVAILABLE_CODE,
+    AUTHZ_STORE_UNAVAILABLE_STATUS,
+    ObjectKernel,
+} from '@objectstack/core';
+import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 // `.js` on purpose — NodeNext resolution requires the extension.
 import { RestServer } from './rest-server.js';
 
@@ -141,22 +160,41 @@ describe('[#18546] §1 the `objectQLProvider` consumer census is mechanical', ()
         expect(sites).toHaveLength(3);
     });
 
-    it('two consumers reach the slot through `wiredEngineOrLoud`; the third does not', () => {
+    it('⭐ [#18559] ALL THREE consumers now reach the slot through `wiredEngineOrLoud` — none reads it directly', () => {
         const sites = invocationSites(SOURCE, 'objectQLProvider');
+        const lines = SOURCE.split('\n');
         const viaSeam = sites.filter((s) => {
-            const lines = SOURCE.split('\n');
             // The helper is named on the line that OPENS the call, two lines up
-            // from the invocation in both existing spellings.
+            // from the invocation in all three spellings.
             return lines.slice(Math.max(0, s.line - 4), s.line).join('\n').includes('wiredEngineOrLoud(');
         });
-        expect(viaSeam).toHaveLength(2);
-
         const direct = sites.filter((s) => !viaSeam.includes(s));
-        expect(direct).toHaveLength(1);
-        // …and the one that does not is the cross-object batch door, identified
-        // by the answer its `undefined` path produces twelve characters later.
-        const after = SOURCE.split('\n').slice(direct[0]!.line, direct[0]!.line + 6).join('\n');
-        expect(after).toContain('Transactional batch not supported by this runtime');
+        // The message carries the offenders, so a failure hands the next reader
+        // the site rather than a bare number.
+        expect(direct.map((s) => `L${s.line}: ${s.text}`).join('\n')).toBe('');
+        expect(direct).toHaveLength(0);
+        expect(viaSeam).toHaveLength(3);
+
+        // ⭐ CONTROL for the window predicate itself, on BOTH axes. It reads a
+        // WINDOW of source text, so "3 of 3" is only a reading if the same
+        // predicate can also say something else. `emailServiceProvider` is the
+        // sibling slot whose one call site #15405 routed through the SWALLOWING
+        // helper instead, so it is the natural negative:
+        const wrappedIn = (field: string, helper: string) =>
+            invocationSites(SOURCE, field).filter((s) =>
+                lines.slice(Math.max(0, s.line - 4), s.line).join('\n').includes(helper));
+        //   - the predicate must NOT claim that slot for `wiredEngineOrLoud`…
+        expect(wrappedIn('emailServiceProvider', 'wiredEngineOrLoud(')).toHaveLength(0);
+        //   - …and it must still FIRE for the helper that slot really uses, so
+        //     the zero above is a discrimination and not a dead predicate.
+        expect(wrappedIn('emailServiceProvider', 'seamOrUndefined(')).toHaveLength(1);
+
+        // …and the batch door is one of the three, identified by the answer its
+        // `undefined` path produces a few lines later — so "3 via the seam" is
+        // pinned to include the consumer #18559 moved, not just its two siblings.
+        const batch = viaSeam.filter((s) =>
+            lines.slice(s.line, s.line + 6).join('\n').includes('Transactional batch not supported by this runtime'));
+        expect(batch).toHaveLength(1);
     });
 
     it('⛔ the field is read only as `this.objectQLProvider` — no alias keeps a consumer out of this census', () => {
@@ -299,7 +337,12 @@ const engineHealthy = async () => ({ transaction: async (fn: any) => fn({}) });
 // ---------------------------------------------------------------------------
 
 describe('[#18546] §2 `POST /batch` — the slot\'s third consumer does not re-collapse', () => {
-    it('CONTROL: a healthy engine is SERVED, so 501/500 is not all this instrument can say', async () => {
+    it('CONTROL: a healthy engine is SERVED, so 501/503 is not all this instrument can say', async () => {
+        // ⚠️ `{ operations: [] }` on purpose — see the file docblock's control
+        // note. A real op continues past this door's engine line into
+        // `resolveProtocol`, which this harness's auth-only kernel cannot serve,
+        // and a HEALTHY engine then answers 500 too. The empty body returns
+        // inside the door, so the engine fact stays the only variable.
         const served = await driveBatch({ ...kernelHost(), objectQLProvider: engineHealthy }, { operations: [] });
         expect(served.status).toBe(200);
         expect(served.body).toEqual({ results: [] });
@@ -332,11 +375,21 @@ describe('[#18546] §2 `POST /batch` — the slot\'s third consumer does not re-
         // value the `undefined` path produces. Side by side, and unequal.
         expect(rejecting.status).not.toBe(absent.status);
         expect(rejecting.body?.code).not.toBe(absent.body?.code);
-        // Today's answer, RECORDED so a change is legible — ⛔ not ruled correct.
-        // Its two sibling consumers answer 503 for this same fact; whether this
-        // door joins them is the per-consumer ruling #14251 reserves.
-        expect(rejecting.status).toBe(500);
-        expect(rejecting.body?.code).toBe('INTERNAL_ERROR');
+        // ⭐ [#18559] THE PIN THAT MOVED. This read `500` / `INTERNAL_ERROR`
+        // before the repair — the answer the handler's generic outer catch
+        // produced — and reads the branded outage its two sibling consumers
+        // already answer now that this door reaches the slot through
+        // `wiredEngineOrLoud`. The two constants are `@objectstack/core`'s, so
+        // the pin cannot drift from the helper that raises them.
+        expect(rejecting.status).toBe(AUTHZ_STORE_UNAVAILABLE_STATUS);
+        expect(rejecting.status).toBe(503);
+        expect(rejecting.body?.code).toBe(AUTHZ_STORE_UNAVAILABLE_CODE);
+        expect(rejecting.body?.code).toBe('SERVICE_UNAVAILABLE');
+        // ⛔ And the fault MESSAGE is still withheld: what moved is the status
+        // and the code, ⛔ never the prose. The driver's own sentence
+        // ("driver handshake failed") must not appear on the wire.
+        expect(rejecting.body?.error).toBe(INTERNAL_ERROR_MESSAGE);
+        expect(JSON.stringify(rejecting.body)).not.toContain('driver handshake failed');
     });
 
     it('a NON-`async` provider throwing synchronously reaches that same answer, not the `undefined` path', async () => {
@@ -348,6 +401,64 @@ describe('[#18546] §2 `POST /batch` — the slot\'s third consumer does not re-
         expect(syncThrowing.status).toBe(rejecting.status);
         expect(syncThrowing.body?.code).toBe(rejecting.body?.code);
         expect(syncThrowing.body?.code).not.toBe('NOT_IMPLEMENTED');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// §2b — [#18559] the SAME door on BOTH wirings. This is the section that says
+// what the repair actually was: not a new wire answer for this door, but the
+// removal of a divergence between two compositions of the same server.
+// ---------------------------------------------------------------------------
+
+/**
+ * The SINGLE-KERNEL host — no `kernelManager`, auth reached through the
+ * provider seam. This is the composition `pnpm dev:crm` and the open core boot,
+ * and on it `computeExecCtx` resolves the engine through its PROVIDER branch,
+ * which is `wiredEngineOrLoud`. A wired-and-failing engine therefore raises at
+ * the GATE, before this door's own engine line is reached.
+ */
+function singleKernelHost(): Wiring {
+    return { authServiceProvider: authService, defaultEnvironmentIdProvider: () => 'env_1' };
+}
+
+describe('[#18559] §2b the batch door answers ONE thing for one fact, on both wirings', () => {
+    it('CONTROL: the single-kernel harness SERVES a real operation, so its 5xx below is a discrimination', async () => {
+        // ⭐ This is the control the multi-kernel harness cannot give: here a
+        // HEALTHY engine and a REAL op answer 200, so the 503 in the next case
+        // is the engine fact and ⛔ not the harness running out of kernel.
+        const served = await driveBatch({ ...singleKernelHost(), objectQLProvider: engineHealthy }, ONE_OP);
+        expect(served.status).toBe(200);
+        expect(served.body).toEqual({ results: [{ id: '1' }] });
+    });
+
+    it('⭐ single-kernel: a wired-and-failing engine answered 503 BEFORE this card too — the gate raises first', async () => {
+        // ⛔ Not a claim this repair introduced: it is the reading that makes the
+        // repair a de-divergence rather than a new ruling on a public door. The
+        // gate's `wiredEngineOrLoud` raises `AuthzStoreUnavailableError` and the
+        // handler's outer catch serves it with the branded status.
+        const rejecting = await driveBatch({ ...singleKernelHost(), objectQLProvider: providerRejecting }, ONE_OP);
+        expect(rejecting.status).toBe(AUTHZ_STORE_UNAVAILABLE_STATUS);
+        expect(rejecting.body?.code).toBe(AUTHZ_STORE_UNAVAILABLE_CODE);
+    });
+
+    it('⭐ the two wirings now AGREE for the identical engine fact', async () => {
+        const single = await driveBatch({ ...singleKernelHost(), objectQLProvider: providerRejecting }, ONE_OP);
+        const multi = await driveBatch({ ...kernelHost(), objectQLProvider: providerRejecting }, ONE_OP);
+        // The whole of #18559, in one line: before the repair these two were
+        // 503 and 500 for one fact, decided by which composition the operator
+        // happened to be running.
+        expect(multi.status).toBe(single.status);
+        expect(multi.body?.code).toBe(single.body?.code);
+    });
+
+    it('⛔ and BOTH absence shapes still answer 501 on both wirings — no accept set moved', async () => {
+        for (const host of [singleKernelHost(), kernelHost()]) {
+            for (const provider of [undefined, providerAbsent]) {
+                const answer = await driveBatch({ ...host, objectQLProvider: provider }, ONE_OP);
+                expect(answer.status).toBe(501);
+                expect(answer.body?.code).toBe('NOT_IMPLEMENTED');
+            }
+        }
     });
 });
 

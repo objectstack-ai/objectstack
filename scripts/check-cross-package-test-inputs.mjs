@@ -412,16 +412,17 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the SPLIT test:repo task (#16466)': 16,
   'the node_modules REACH rule (#16555)': 18,
   'the TREE-SCOPED WALK (#15565)': 24,
+  'the DOTTED NAMESPACE callee (#18643)': 15,
   'the WORKING-TREE blind spot (#18348)': 10,
   "the BARE SPECIFIER's PREMISE (#18236)": 20,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
-// zeroing it, so the roster's own size is pinned too. Raised 10 -> 11 with the
-// #18236 battery, keeping the same one-row slack the roster has always carried:
+// zeroing it, so the roster's own size is pinned too. Raised 11 -> 12 with the
+// #18643 battery, keeping the same one-row slack the roster has always carried:
 // a floor left behind while the roster grows stops pinning the newest battery,
 // which is the one nothing else has learned to expect yet.
-const SELF_TEST_BATTERY_FLOOR = 11;
+const SELF_TEST_BATTERY_FLOOR = 12;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2100,6 +2101,10 @@ function expandLiteralSets(expr, sets) {
  * ⚠️ An unlisted callee is TREATED AS A DESCENT, which is the safe direction
  * here for the same reason the flat literal collector takes quoted paths without
  * parsing: it can only force a declaration nobody needed, never withdraw one.
+ *
+ * ⚠️ This roster is matched against the callee's LAST dotted segment, so it holds
+ * METHOD names only. An OBJECT name needs the receiver roster below it — see
+ * `NON_DESCENT_NAMESPACES` for why the two questions are both asked.
  */
 const NON_DESCENT_CALLEES = new Set([
   ...PATH_ARG_READS,
@@ -2110,6 +2115,41 @@ const NON_DESCENT_CALLEES = new Set([
   'if', 'for', 'while', 'switch', 'catch', 'return', 'function', 'typeof', 'await', 'new', 'do', 'else',
   'describe', 'it', 'test', 'expect', 'vi', 'beforeAll', 'afterAll', 'beforeEach', 'afterEach',
   'String', 'Number', 'Boolean', 'Set', 'Map', 'Array', 'Object', 'JSON', 'require', 'import',
+]);
+
+/**
+ * Receivers whose MEMBERS cannot be a descent entry either — the other half of
+ * the roster above, asked of the callee's FIRST dotted segment.
+ *
+ * One roster matched one way was blind in a shape it looked like it covered. The
+ * match takes the callee's LAST dotted segment, which is the right question for a
+ * method name — `path.join(...)` pops to `join`, `fs.readdirSync(...)` to
+ * `readdirSync` — and the wrong one for an object name: `JSON.stringify(<path>)`
+ * pops to `stringify`, so the `'JSON'` row could only ever match a bare `JSON(...)`
+ * call. Measured over the 3733 test files this gate scans (this repo at
+ * 8904880601): `JSON` was reached 8 times, every one of them the word inside a
+ * comment or a message, while 3220 `JSON.<member>(` call sites passed the guard and
+ * entered as descents; `Object` 4 (all prose) against 4451, `vi` 0 against 10835.
+ * Those rows were not narrow, they were DEAD, and the first argument of every
+ * missed call became a candidate walk root — which is how a `JSON.stringify(...)`
+ * of a path inside a generated shell script came to propose `packages/spec/dist`
+ * as a tree this gate walks.
+ *
+ * So a dotted callee is asked both questions: its last segment against
+ * NON_DESCENT_CALLEES, its receiver against this set. Every name here is already a
+ * row above, and the receiver leg is asked of DOTTED callees only, so a bare call
+ * keeps exactly the verdict it had.
+ *
+ * ⚠️ The safe direction is unchanged — an unlisted name is still TREATED AS A
+ * DESCENT — so a row here has to earn it: no member of these namespaces can hand a
+ * directory to a walker. The built-in globals' statics are data operations, and
+ * the vitest namespaces' members take mock factories, matchers and case tables.
+ * ⛔ A namespace any member of which reads the filesystem does not belong here;
+ * `fs` and `path` are deliberately absent, and their methods are rows above.
+ */
+const NON_DESCENT_NAMESPACES = new Set([
+  'String', 'Number', 'Boolean', 'Set', 'Map', 'Array', 'Object', 'JSON', 'URL', 'require', 'import',
+  'describe', 'it', 'test', 'expect', 'vi',
 ]);
 
 /**
@@ -2145,7 +2185,14 @@ export function descentRoots(src, hereDepth, fileSegs, known) {
   };
   const sets = literalStringSets(src);
   for (const m of src.matchAll(/\b([A-Za-z_$][\w$.]*)\s*\(/g)) {
-    if (NON_DESCENT_CALLEES.has(m[1].split('.').pop())) continue;
+    const segs = m[1].split('.');
+    // Two questions, one per kind of name the roster holds: a METHOD is
+    // recognised wherever it sits, a NAMESPACE only in the one position it can
+    // occupy. The receiver leg reads `segs[0]` and not any middle segment, so the
+    // roster's reach is exactly one receiver deep and `x.JSON.stringify(dir)`
+    // stays a descent.
+    if (NON_DESCENT_CALLEES.has(segs[segs.length - 1])) continue;
+    if (segs.length > 1 && NON_DESCENT_NAMESPACES.has(segs[0])) continue;
     const args = balancedArgs(src, m.index + m[0].length);
     if (args === null) continue;
     // The entry argument, by position: a walker takes the directory first.
@@ -3733,6 +3780,61 @@ function selfTest() {
     ok(
       'LIVE POSITIVE CONTROL: and every one of them is reached by a declared glob',
       PIN_ROOTS.every((r) => uncoveredWalkRadius(r, liveGlobs).length === 0),
+    );
+  }
+
+  // ── the DOTTED NAMESPACE callee (#18643) ─────────────────────────────────
+  //
+  // The roster is matched against the callee's LAST dotted segment, so an
+  // OBJECT-named row only ever matched a BARE call: `JSON.stringify(<path>)`
+  // popped to `stringify`, entered as a descent, and its first argument became a
+  // candidate walk root -- which is how a path inside a generated shell script
+  // came to name `packages/spec/dist` as a tree this gate walks.
+  //
+  // Both halves are pinned, because either alone is satisfiable by a scan that
+  // simply stopped answering: the LIT legs assert a namespace member is no longer
+  // a descent, and the two controls above them assert that an unrostered callee
+  // handed the SAME argument in the SAME position still is. The DARK legs hold
+  // the rows that were live -- a bare `String(...)` or `require(...)` -- to the
+  // verdict they already had.
+  battery('the DOTTED NAMESPACE callee (#18643)');
+  {
+    const SEGS = ['packages', 'pkg', 'src', 'x.test.ts'];
+    const SEED =
+      'const HERE = dirname(fileURLToPath(import.meta.url));\n' + "const REPO = resolve(HERE, '../../..');\n";
+    // The anonymous descent the walk limb needs before it engages at all: without
+    // it every sample below yields nothing and every leg is green for the wrong
+    // reason. The positive controls are what prove it is engaged.
+    const WALKER = 'const walk = (dir) => { for (const e of readdirSync(dir)) walk(join(dir, e)); };\n';
+    const ARG = "join(REPO, 'content')";
+    const isRoot = (src) => walkRootsOf(SEED + WALKER + src, 1, SEGS).includes('content');
+
+    ok(
+      'POSITIVE CONTROL: an unrostered BARE callee handed the argument is a descent',
+      isRoot(`const s = stringify(${ARG});`),
+    );
+    ok(
+      'POSITIVE CONTROL: an unrostered DOTTED callee is one too -- the receiver leg suppresses by ROSTER, not by the dot',
+      isRoot(`helper.crawl(${ARG});`),
+    );
+    ok('LIT: `JSON.stringify(<path>)` is not a descent -- the reported shape', !isRoot(`const s = JSON.stringify(${ARG});`));
+    ok('LIT: `Object.keys(<path>)` is not a descent', !isRoot(`const k = Object.keys(${ARG});`));
+    ok('LIT: `Array.from(<path>)` is not a descent', !isRoot(`const a = Array.from(${ARG});`));
+    ok('LIT: `vi.mock(<path>)` is not a descent -- the `vi` row reached nothing at all before', !isRoot(`vi.mock(${ARG});`));
+    ok('LIT: `expect.any(<path>)` is not a descent', !isRoot(`expect.any(${ARG});`));
+    ok('DARK: bare `String(<path>)` keeps its verdict', !isRoot(`const s = String(${ARG});`));
+    ok('DARK: bare `require(<path>)` keeps its verdict', !isRoot(`const m = require(${ARG});`));
+    ok('DARK: bare `Number(<path>)` keeps its verdict', !isRoot(`const n = Number(${ARG});`));
+    ok('DARK: `new Set(<path>)` keeps its verdict', !isRoot(`const s = new Set(${ARG});`));
+    ok('a rostered METHOD still suppresses when dotted: `fs.readdirSync(<path>)`', !isRoot(`fs.readdirSync(${ARG});`));
+    ok('and when bare: `readdirSync(<path>)` -- what the last-segment match buys', !isRoot(`readdirSync(${ARG});`));
+    ok(
+      'REACH: the receiver leg reads the FIRST segment only, so `x.JSON.stringify(<path>)` is still a descent',
+      isRoot(`x.JSON.stringify(${ARG});`),
+    );
+    ok(
+      'every namespace row is also a callee row, so no BARE call changed hands with this limb',
+      [...NON_DESCENT_NAMESPACES].every((n) => NON_DESCENT_CALLEES.has(n)),
     );
   }
 

@@ -1385,15 +1385,39 @@ function isTerminalFailureStatus(status: AutomationResult['status']): status is 
  *    is neither forwarded under a schema that refuses it nor turned into
  *    anything else. `TERMINAL_FAILURE_STATUSES` is `satisfies`-bound to the
  *    schema's enum, so a member the spec drops reds this file.
- *  - `repairable` — `status === 'stranded'`, and ALWAYS present on this arm.
- *    Present-and-false on the plain terminal exit is a deliberate contract,
- *    not an implementation detail: an ABSENT member would be
- *    indistinguishable from a server that predates this field, and
- *    `StrandedDecisionDetails.repairable` (`@objectstack/types`, the approvals
- *    door's carrier) already fixed the vocabulary — `false` is the honest
- *    answer for every other exit, including the ones that report no status
- *    at all, because promising a repair verb that will refuse is worse than
- *    promising nothing.
+ *  - `repairable` — whether an operator verb can still re-arm this run, and
+ *    ALWAYS present on this arm. It is answered from TWO sources, chosen by
+ *    what the engine stamped, and neither of them is this door's opinion:
+ *    when the engine stamped a `status`, that word decides (`'stranded'` is
+ *    the run whose own pause was consumed and which the restore verb takes);
+ *    when it stamped NONE, the door ASKS the engine
+ *    (`IAutomationService.inspectConsumedSuspension`, #15358) and relays its
+ *    `repairable`. [#17541] The status-less exit is the subflow DELEGATION
+ *    one — a caller resumes the PARENT, the signal is forwarded down, the
+ *    child strands, and the parent frame answers with no `status` because
+ *    nothing re-arms an ancestor by resuming it. Since #15222 that parent's
+ *    consumed pause IS journalled and `restoreConsumedSuspension` re-arms the
+ *    whole chain as one unit, so `status === 'stranded'` answered `false`
+ *    about a run the operator verb WILL repair, and a client written exactly
+ *    as the docs instruct closed it as terminal. ⛔ The fence #15222 was
+ *    dispatched with is untouched: the ancestor is still never STAMPED
+ *    `'stranded'`, because that word names an exit it did not take — its
+ *    repairability is carried by the journal and reported by the inspection.
+ *    Present-and-false is a deliberate contract, not an implementation
+ *    detail: an ABSENT member would be indistinguishable from a server that
+ *    predates this field, and `StrandedDecisionDetails.repairable`
+ *    (`@objectstack/types`, the approvals door's carrier) already fixed the
+ *    vocabulary. So every way of not getting an answer is FAIL-CLOSED here —
+ *    a service that declares no `inspectConsumedSuspension`, and a store the
+ *    inspection could not read — because promising a repair verb that will
+ *    refuse is worse than promising nothing.
+ *
+ * ⛔ The door asks a member the CONTRACT declares, never one it merely hopes
+ * the host has: `inspectConsumedSuspension` is optional on
+ * `IAutomationService` exactly as `resume` and `restoreConsumedSuspension`
+ * are, and this arm reads it through that optionality. Reaching for an
+ * undeclared member is the fail-open shape the `501` arm below exists to
+ * prevent.
  *
  * ⛔ Not reused from `@objectstack/types`: `strandedDecisionDetails` /
  * `strandedDecisionFailure` are an all-four-or-nothing envelope whose
@@ -1409,13 +1433,64 @@ function isTerminalFailureStatus(status: AutomationResult['status']): status is 
  * both doors: the trigger door in `automation-resume-stranded-details.test.ts`,
  * `/actions` in `actions-flow-dispatch-status.test.ts` (#9585's artefacts pin).
  */
-function resumeFailureDetails(runId: string, result: AutomationResult): ResumeFailureDetails {
+async function resumeFailureDetails(
+    deps: DomainHandlerDeps,
+    automationService: IAutomationService,
+    runId: string,
+    result: AutomationResult,
+): Promise<ResumeFailureDetails> {
     const status = isTerminalFailureStatus(result.status) ? result.status : undefined;
     return {
         runId,
-        repairable: status === 'stranded',
+        repairable: status === undefined
+            ? await consumedSuspensionSurvives(deps, automationService, runId)
+            : status === 'stranded',
         ...(status !== undefined ? { status } : {}),
     };
+}
+
+/**
+ * [#17541] The engine's answer to "can an operator verb still re-arm this
+ * run?", for the resume exits that stamp no `status` — read through the
+ * declared optional member `IAutomationService.inspectConsumedSuspension`
+ * (#15358), which re-arms nothing and reads the same witnesses
+ * `restoreConsumedSuspension` reads, so what it calls repairable IS what that
+ * verb restores.
+ *
+ * Both ways of failing to get an answer are FAIL-CLOSED, and they are
+ * different facts kept apart on purpose:
+ *
+ *  - the service declares no such member — an automation capability with no
+ *    inspection half, which is the shape this door has answered `false` for
+ *    since #15221 and goes on answering `false` for, silently: there is
+ *    nothing to report about a host that simply does not have the member;
+ *  - the inspection REJECTED — a store it could not read. That is UNKNOWN,
+ *    ⛔ not "nothing to restore", so it is said once at `warn` naming what
+ *    the caller is not being told. Functional, not durability: the caller
+ *    gets a visibly smaller answer about a run that did fail, and nothing
+ *    that claimed to persist failed to land.
+ *
+ * ⛔ The rejection is never allowed to REPLACE the answer. What reaches this
+ * helper is a run that consumed its pause and ran, and the `400` describing
+ * it is the thing the caller asked for; turning a store outage into a `500`
+ * would withhold that in order to report a detail.
+ */
+async function consumedSuspensionSurvives(
+    deps: DomainHandlerDeps,
+    automationService: IAutomationService,
+    runId: string,
+): Promise<boolean> {
+    try {
+        return (await automationService.inspectConsumedSuspension?.(runId))?.repairable === true;
+    } catch (e) {
+        (deps.logger ?? console).warn(
+            `[Automation] resume door: inspectConsumedSuspension('${runId}') could not be read `
+            + `(${e instanceof Error ? e.message : String(e)}), so this 400 reports `
+            + '`repairable: false` for a run whose consumed suspension may well survive — '
+            + 'ask the operator restore verb itself before treating the run as terminal.',
+        );
+        return false;
+    }
 }
 
 /**
@@ -2248,8 +2323,9 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // "repair waiting" as one and the same 400. The #16472
                 // ruling (option A) carries it here, in the details of the
                 // EXISTING code: `runId`, `status` (verbatim, when stamped)
-                // and `repairable` (`status === 'stranded'`, always present —
-                // false on the plain terminal exit, deliberately, see
+                // and `repairable` (always present; [#17541] the stamped
+                // exits are answered by the stamp and the status-LESS ones by
+                // asking the engine's `inspectConsumedSuspension`, see
                 // `resumeFailureDetails`), declared once as
                 // `ResumeFailureDetailsSchema` in `@objectstack/spec/api`.
                 // ⛔ No `FLOW_STRANDED` sibling code: the console treats
@@ -2257,13 +2333,14 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // wants to branch reads `details.repairable`, never a regex
                 // over the message.
                 if (result?.success === false) {
+                    const verdict = await resumeFailureDetails(deps, automationService, parts[2], result);
                     return {
                         handled: true,
                         response: deps.error(result.error ?? 'Flow run failed', 400, {
                             code: 'FLOW_FAILED',
                             ...(result.errorMessage !== undefined ? { errorMessage: result.errorMessage } : {}),
                             ...(result.summary !== undefined ? { summary: result.summary } : {}),
-                            ...resumeFailureDetails(parts[2], result),
+                            ...verdict,
                         }),
                     };
                 }

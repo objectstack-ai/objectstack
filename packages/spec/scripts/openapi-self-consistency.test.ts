@@ -375,6 +375,14 @@ describe('build-openapi.ts end to end', () => {
       ),
     );
     expect(run.status).not.toBe(0);
+    // A non-zero status and a missing artifact are BOTH satisfied by a subprocess
+    // that never started, so on their own they cannot tell "the gate refused the
+    // write" apart from "the spawn failed to launch" — which is how this case
+    // stayed green while the gate it pins never ran once. The generator's own
+    // diagnostic is what pins the refusal to the gate, and it is the assertion
+    // the three siblings above already carry.
+    expect(run.output).toMatch(/unresolvable \$ref/);
+    expect(run.output).toContain('#/components/schemas/ApiErrorTypo');
     // The gate runs before the write, so no half-broken document is published.
     expect(fs.existsSync(run.artifact)).toBe(false);
   });

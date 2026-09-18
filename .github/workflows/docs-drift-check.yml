@@ -554,9 +554,17 @@ jobs:
             //        separates it from a genuine permission denial.
             // Everything else stays fatal on purpose: 401 / plain 403 (the `permissions:`
             // block above is wrong), 404 (wrong target), 422 (the body this workflow built
-            // is not postable — e.g. past GitHub's 65536-character comment limit), and any
-            // non-HTTP error such as a TypeError in the code above. Those are this repo's
-            // own bugs and must keep failing the job.
+            // is not postable — e.g. past the COMMENT cap), and any non-HTTP error such as
+            // a TypeError in the code above. Those are this repo's own bugs and must keep
+            // failing the job.
+            //
+            // That cap is MEASURED, in UTF-8 BYTES, ⛔ not the 65,536 characters this
+            // comment used to name: a comment stores 262,144 bytes and refuses 262,145
+            // with a real 422, on BOTH `issues.createComment` and `issues.updateComment`
+            // below — objectstack#18826, bisected to one byte on each endpoint. ⛔ Do not
+            // re-derive 65,536 from the refusal itself: GitHub's own 422 text still reads
+            // "maximum is 65536 characters" and #18826 falsified it in both unit and
+            // value, storing a 262,144-CHARACTER comment.
             const TRANSIENT_NETWORK_CODES = new Set([
               'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND', 'EPIPE',
               'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT',
