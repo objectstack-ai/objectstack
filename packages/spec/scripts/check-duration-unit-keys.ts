@@ -856,9 +856,11 @@ export function judge(site: DurationKey): Finding | undefined {
       message: `${where} — the JSDoc above the key names ${site.jsdocUnits.join('/')}, the key name says `
         + `${site.keyUnits.join('/')} and the describe names no unit`
         + `${site.describe === undefined ? ' (there is no describe at all)' : ` (${JSON.stringify(site.describe)})`}. `
-        + 'The JSDoc is developer commentary; the describe and the key name are what '
-        + '`content/docs/references/**` publishes, so the only unit the reader can see is the one the JSDoc '
-        + 'disagrees with. One of them is wrong — fix whichever it is, and state the unit in the describe.',
+        + 'The JSDoc is developer commentary and stops at the source file; the describe is what '
+        + '`content/docs/references/**` publishes, and it is silent — so the unit is written down twice where '
+        + 'the reader of the published page never looks and nowhere they do. State the unit in the describe. '
+        + 'Where the JSDoc and the key name name DIFFERENT units, one of those two is also wrong; where they '
+        + 'agree, the agreement is between two channels that page does not print and it settles nothing.',
     };
   }
   return undefined;
